@@ -5,11 +5,15 @@ import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { dialog } from '../../lib/dialog';
 import { Provenance } from '../../lib/provenance';
+import { trimStop } from '../../lib/provenanceText';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 import OwnerEarningsModal from './portfolios/OwnerEarningsModal';
 import { type Basket } from './portfolios/PerformanceModal';
 import { allocColor, bucketLabel, BUCKET_ORDER } from './portfolios/allocationColors';
-import { groupStats, startBasis, type GroupStats } from './portfolios/startWeights';
+import {
+  aggregateGroups, combineWeighted, groupStats, holdingTotalReturn, startBasis, weightedReturn,
+  WEIGHT_BASES, type GroupStats, type WeightBasis, type WeightedReturn,
+} from './portfolios/startWeights';
 
 /** What an Analyse/Fundamental modal is opened for: one instrument (isin), a group (basket), or a
  *  whole portfolio (portfolioId, resolved to a basket server-side). */
@@ -255,9 +259,13 @@ export default function PortfolioOverviewPanel() {
       )}
 
       {rows && (
-        <div className="overflow-auto rounded-lg border border-neutral-800/40 max-h-[70vh]">
+        <div className="overflow-x-auto rounded-lg border border-neutral-800/40">
+          {/* ⚠ `overflow-x-auto`, NOT `overflow-auto`, and no max-height: the table grows to its
+              content and the PAGE scrolls it. The horizontal container has to stay — 17 columns
+              are wider than a phone, and the repo rule is that a dense table scrolls inside its
+              own box so the page never scrolls sideways. */}
           <table className="w-full text-xs whitespace-nowrap">
-            <thead className="bg-card sticky top-0 z-10 [&_th]:bg-card">
+            <thead className="bg-card z-10 [&_th]:bg-card">
               <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
                 <th className="px-3 py-1.5 font-medium text-left" />{/* Analyse */}
                 <th className="px-3 py-1.5 font-medium text-left">Name</th>
@@ -345,8 +353,8 @@ export default function PortfolioOverviewPanel() {
                           how={r.fixed_name
                             ? `${r.dynamic_portefeuille} paired with ${r.fixed_name}${
                               r.link_source === 'guess'
-                                ? ` by a name match nobody has approved (${r.link_reason ?? 'name match'}) — ⚠ the risk variants of a strategy hold the same instruments, so no other column would reveal a wrong pairing.`
-                                : ' by a confirmed link.'}`
+                                ? ` by a name match nobody has approved (${trimStop(r.link_reason ?? 'name match')}) — ⚠ the risk variants of a strategy hold the same instruments, so no other column would reveal a wrong pairing`
+                                : ' by a confirmed link'}`
                             : undefined} />
                       </td>
                       <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
@@ -454,84 +462,71 @@ function BucketBadge({ bucket, isin, overridden, onOverride }: {
 /** HOW an ISIN came to be on this row — the name match that proposed it AND the price check that
  *  did or did not confirm it. `verdict` is the field that matters; `name_score` alone is not a pass
  *  (a fund's Acc/Inc share classes have near-identical names and different ISINs). */
+/** HOW an ISIN came to be on this row. Two sources only since the fixed↔dynamic pairing was
+ *  deleted (2026-07-23): AIRS states it, or a human supplied it for a row AIRS gives none for. */
 function isinHow(r: NonNullable<AirsAccountIsins['rows']>[number]): string {
-  // The book states its own ISIN (AIRS's `ISIN-code`, since 2026-07-23) — nothing is inferred, so
-  // the card says so plainly. The price check here is no longer testing a pairing; it tests OUR
-  // price series for that instrument, which is a check we could not make before.
-  if (r.isin_source === 'book') {
-    const checked = r.verdict === 'ok'
-      ? `Our own price series agrees: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} (ratio ${r.price_ratio}).`
-      : r.verdict === 'price_mismatch'
-        ? `⚠ Our own price series DISAGREES: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} for ${r.our_instrument ?? 'our instrument'} (ratio ${r.price_ratio}). The identity is AIRS's, so this points at OUR listing for it, not at the match.`
-        : 'We hold no price series for it, so nothing cross-checks our side.';
-    return `read straight off the holding — AIRS's own ISIN-code column. No name matching was involved. ${checked}`;
+  // ⚠ The price check no longer tests a name match — there is none. It tests OUR price series for
+  // the instrument AIRS names, so a mismatch points at our listing, not at the identity.
+  if (r.verdict === 'cross_listed') {
+    return `read straight off the holding — AIRS's own ISIN-code column. It is priced from ${r.served_by}, which its execution row is linked to on purpose, so the two prices are NOT the same number: €${r.implied_price_eur}/unit implied here against €${r.our_price_eur} (ratio ${r.price_ratio}). For an ADR that gap is the share ratio and the premium, and it confirms nothing either way about the identity.`;
   }
+  const checked = r.verdict === 'ok'
+    ? `Our own price series agrees: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} (ratio ${r.price_ratio}).`
+    : r.verdict === 'price_mismatch'
+      ? `⚠ Our own price series DISAGREES: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} for ${r.our_instrument ?? 'our instrument'} (ratio ${r.price_ratio}). The identity is AIRS's, so this points at OUR listing for it.`
+      : 'We hold no price series for it, so nothing cross-checks our side.';
   if (r.isin_overridden) {
-    // ⚠ A pin is an IDENTITY, not a verification — so the card leads with who decided it and
-    // still reports what the price said, exactly as on a matched row.
-    const checked = r.verdict === 'ok'
-      ? `The price then CONFIRMED it independently: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} for that ISIN (ratio ${r.price_ratio}).`
-      : r.verdict === 'price_mismatch'
-        ? `⚠ The price CONTRADICTS it: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} (ratio ${r.price_ratio}). Check the ISIN.`
-        : 'We hold no price series for it, so nothing confirms it.';
-    return `set by hand${r.isin_override_note ? ` — ${r.isin_override_note}` : ''}. The Fixed portfolio has no position for this holding, so no match could produce an ISIN. ${checked}`;
+    return `set by hand${r.isin_override_note ? ` — ${trimStop(r.isin_override_note)}` : ''}. AIRS gives this holding no ISIN, so one was supplied. ${checked}`;
   }
-  if (r.verdict === 'unmatched') {
-    return `the Fixed portfolio has no position for this holding. The only one left was “${
-      r.rejected_fonds ?? '—'}” (${r.rejected_isin ?? '—'}), and both the name (score ${
-      r.name_score}) and the price say that is a different instrument, so it was refused. The stored model is out of date: re-scan the Fixed portfolio.`;
-  }
-  const matched = `matched to the Fixed portfolio's “${r.model_fonds ?? '—'}” by name${
-    r.name_score != null ? ` (score ${r.name_score})` : ''}`;
-  if (r.verdict === 'ok') {
-    return `${matched}, then confirmed on price: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} for that ISIN (ratio ${r.price_ratio}).`;
-  }
-  if (r.verdict === 'price_mismatch') {
-    return `${matched}, then CONTRADICTED on price: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} for ${r.our_instrument ?? 'that ISIN'} (ratio ${r.price_ratio}).`;
-  }
-  return `${matched}. We hold no price series for it, so NOTHING confirms the match — not the same as a pass.`;
+  return `read straight off the holding — AIRS's own ISIN-code column. ${checked}`;
 }
 
 function IsinCell({ r, onPin }: {
   r: NonNullable<AirsAccountIsins['rows']>[number] | undefined;
-  /** Supply/clear this holding's ISIN by hand. Absent = read-only (a cash line has nothing to pin). */
+  /** Supply/clear this holding's ISIN by hand. Absent = read-only. */
   onPin?: (holdingName: string, current?: string | null) => void | Promise<void>;
 }) {
-  // ⚠ NOT a bare dash. A blank in this column reads as "this line has no ISIN", i.e. cash — and
-  // this is the opposite: a real instrument the model has no position for. Say which, and make it
-  // the affordance for fixing it, since no re-match can ever find an ISIN that is not in the data.
-  if (r?.verdict === 'unmatched') {
+  // ⚠ NOT a dead dash. AIRS gives no ISIN for its cash line, and none for a snapshot taken before
+  // `ISIN-code` existed — so a blank is the entry point for supplying one, not a full stop.
+  if (!r?.isin) {
+    if (!r || !onPin) return <span className="text-fg-faint">—</span>;
     return (
-      <button type="button" disabled={!onPin}
-        onClick={(e) => { e.stopPropagation(); void onPin?.(r.holding_name, null); }}
-        title={`The Fixed portfolio has no position for this holding. The only one left was “${r.rejected_fonds ?? '—'}” (${r.rejected_isin ?? '—'}), which the name and the price both say is a different instrument, so it was refused rather than published as this holding's ISIN. Re-scan the Fixed portfolio, or click to set the ISIN by hand.`}
-        className="text-warn-500 whitespace-nowrap underline decoration-dotted underline-offset-2 hover:text-warn-400 disabled:no-underline">
-        no model position
+      <button type="button"
+        onClick={(e) => { e.stopPropagation(); void onPin(r.holding_name, null); }}
+        title="AIRS gives this holding no ISIN. Click to supply one by hand; it is price-checked afterwards and applies to every book holding this instrument."
+        className="text-fg-faint hover:text-accent-400 underline decoration-dotted underline-offset-2">
+        —
       </button>
     );
   }
-  if (!r?.isin) return <span className="text-fg-faint">—</span>;
   const mismatch = r.verdict === 'price_mismatch';
   const unpriced = r.verdict === 'unpriced';
+  // ⚠ NOT A WARNING. This ISIN's execution row is deliberately served by another instrument, so
+  // the prices differ BY DESIGN (an ADR against the main company's listing — TSMC is 1 ADR = 5
+  // ordinary shares). A red ⚠ here trains a reader to ignore the ones that mean something.
+  const crossListed = r.verdict === 'cross_listed';
   return (
     <span className="font-mono whitespace-nowrap">
       <span className={mismatch ? 'text-neg-400' : unpriced ? 'text-fg-muted' : 'text-fg-soft'}>
         {r.isin}
       </span>
-      {/* A pinned identity must never read as a match. Same ✎ the Class override wears. */}
+      {/* A hand-supplied identity must never read like one AIRS stated. */}
       {r.isin_overridden && (
         <button type="button" disabled={!onPin}
           onClick={(e) => { e.stopPropagation(); void onPin?.(r.holding_name, r.isin); }}
-          title="ISIN set by hand — the Fixed portfolio has no position for this holding. Click to change it, or clear it to go back to matching."
+          title="ISIN set by hand — AIRS gives this holding none. Click to change or clear it."
           className="text-accent-400 text-[9px] leading-none ml-1 align-middle hover:text-accent-300">
           ✎
         </button>
       )}
+      {crossListed && (
+        <span className="text-fg-muted ml-1" title={`Priced from ${r.served_by} — this execution row is linked to another instrument on purpose, so the two prices are not the same number. This holding implies €${r.implied_price_eur}/unit against €${r.our_price_eur} for ${r.our_instrument ?? 'the linked instrument'} (ratio ${r.price_ratio}); for an ADR that difference is the share ratio and the ADR premium, not an error.`}>↗</span>
+      )}
       {mismatch && (
-        <span className="text-neg-400 ml-1" title={`⚠ The price says this is NOT the same instrument. This holding implies €${r.implied_price_eur}/unit; ${r.isin} last closed at €${r.our_price_eur} (${r.our_instrument ?? 'our instrument'}) — a ratio of ${r.price_ratio}. Either the Fixed portfolio carries the wrong ISIN, or the book holds a different share class than it specifies.`}>⚠</span>
+        <span className="text-neg-400 ml-1" title={`⚠ OUR price series disagrees with this instrument. This holding implies €${r.implied_price_eur}/unit; ${r.isin} last closed at €${r.our_price_eur} (${r.our_instrument ?? 'our instrument'}) — a ratio of ${r.price_ratio}. The ISIN is AIRS's own, so this points at OUR listing for it, not at the identity.`}>⚠</span>
       )}
       {unpriced && (
-        <span className="text-fg-faint ml-1" title="Matched on the name only — we hold no price series for this instrument, so nothing confirms it. Not the same as a pass.">?</span>
+        <span className="text-fg-faint ml-1" title="We hold no price series for this instrument, so nothing cross-checks our side of it.">?</span>
       )}
     </span>
   );
@@ -549,7 +544,7 @@ function IsinCell({ r, onPin }: {
  *   AIRS's classification and it is the right one: 10 of the 11 bond ISINs are ETFs, so an "ETF"
  *   bucket would empty Bonds and make a defensive book read as holding almost none.
  */
-function SegmentHeader({ s, asOf, holdings, stats, onAnalyse, onFundamental }: {
+function SegmentHeader({ s, asOf, holdings, stats, altReturnPct, onFundamental }: {
   s: AirsHoldingSegment; asOf?: string | null;
   holdings: { isin: string; weight: number }[];
   /** ⚠ EVERY FIGURE ON THIS ROW COMES FROM THE HOLDINGS UNDER IT (`groupStats`), not from the
@@ -557,10 +552,14 @@ function SegmentHeader({ s, asOf, holdings, stats, onAnalyse, onFundamental }: {
    *  that disagrees with the lines beneath it is a second source of truth with no way to tell
    *  which is right. `s` is used only for the label. */
   stats: GroupStats;
-  onAnalyse: (v: ModalTarget) => void;
+  /** Return on the chosen weight basis, when that is not the start basis. Null = show the real one. */
+  altReturnPct?: number | null;
   onFundamental: (v: ModalTarget) => void;
 }) {
   const { etfPct, partial } = stats;
+  // The figure this row actually prints: the chosen weight basis, falling back to the row's own
+  // start-weighted return when the basis is "start" (where the two are the same by construction).
+  const shown = altReturnPct ?? stats.returnPct;
   const label = bucketLabel(s.asset_class) || 'Group';
   const target: ModalTarget = { name: label, basket: { holdings, label } };
   const cls = 'text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap';
@@ -569,8 +568,6 @@ function SegmentHeader({ s, asOf, holdings, stats, onAnalyse, onFundamental }: {
       <td className="px-2 py-1">
         {holdings.length > 0 && (
           <div className="flex items-center gap-1">
-            <button type="button" onClick={() => onAnalyse(target)} className={cls}
-              title={`Analyse the ${label} sleeve — composition, return vs benchmark, returns/risk`}>Analyse</button>
             <button type="button" onClick={() => onFundamental(target)} className={cls}
               title={`Fundamentals of the ${label} sleeve — blended owner earnings & price steadiness`}>Fundamental</button>
           </div>
@@ -581,18 +578,19 @@ function SegmentHeader({ s, asOf, holdings, stats, onAnalyse, onFundamental }: {
         <span className="text-fg-faint font-normal ml-2">
           {stats.holdings} holding{stats.holdings === 1 ? '' : 's'}
           <Provenance source="airs_volk" asOf={asOf} kind="formula" note="holdings in this segment"
-            how="a count of the rows listed below this header — not a separate figure." />
+            how="a count of the rows below" />
           {etfPct >= 0.5 && (
             <span title={`${eur(stats.valueEur * (etfPct / 100))} of this segment is held via ETFs. An equity ETF is Equity and a bond ETF is Bonds — the wrapper does not change the exposure.`}>
               {' · '}{etfPct.toFixed(0)}% via ETFs
               <Provenance source="airs_volk" asOf={asOf} kind="formula" note="ETF share of the segment"
-                how="the value of the fund-wrapped rows below ÷ this segment's total value (both EUR)." />
+                how="the value of the fund rows below, divided by this segment's total value" />
             </span>
           )}
         </span>
       </td>
       {/* ⚠ ONE CELL PER COLUMN. The table is [Fundamental] · Fund · ISIN · Class · Sector · Country
-          · Region · Ccy · Start wt · Weight · Return — eleven (the leading Fundamental cell is
+          · Region · Ccy · Beginwaarde · Huidige waarde · Direct result · Div tax · Start wt · Weight ·
+          Model wt · Werkelijk · Return — SEVENTEEN (the leading Fundamental cell is
           emitted above). An extra blank here shifts every figure one column right, which is
           silent: a weight renders perfectly well under "Ccy". */}
       <td />{/* ISIN */}
@@ -601,35 +599,75 @@ function SegmentHeader({ s, asOf, holdings, stats, onAnalyse, onFundamental }: {
       <td />{/* Country */}
       <td />{/* Region */}
       <td />{/* Ccy */}
+      <td className="px-3 py-1 text-right font-mono text-fg-muted">
+        {eur(stats.startEurAll)}
+        <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment opening value"
+          how="a sum of the Beginwaarde column of the rows below" />
+      </td>
+      <td className="px-3 py-1 text-right font-mono text-fg-soft">
+        {eur(stats.valueEur)}
+        <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment value now"
+          how="a sum of the Huidige waarde column of the rows below" />
+      </td>
+      <td className="px-3 py-1 text-right font-mono text-fg-soft">
+        {stats.dividendEur == null ? '—' : eur(stats.dividendEur)}
+        {stats.dividendEur != null && (
+          <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment direct result"
+            how="a sum of the Direct result column of the rows below" />
+        )}
+      </td>
+      <td className="px-3 py-1 text-right font-mono text-neg-400">
+        {stats.dividendTaxEur == null ? '—' : eur(stats.dividendTaxEur)}
+        {stats.dividendTaxEur != null && (
+          <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment dividend tax"
+            how="a sum of the Div tax column of the rows below" />
+        )}
+      </td>
       <td className="px-3 py-1 text-right font-mono text-fg-subtle">
         {stats.startWeightPct == null ? '—' : `${stats.startWeightPct.toFixed(2)}%`}
         {stats.startWeightPct != null && (
           <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment start weight"
-            how={`the Start wt column of the ${stats.holdings} row${stats.holdings === 1 ? '' : 's'} below, added up. Equivalently this segment's opening value ÷ the book's. Weighting each segment's return by it gives the book's return.`} />
+            how={`a sum of the Start wt column of the ${stats.holdings} row${stats.holdings === 1 ? '' : 's'} below`} />
         )}
       </td>
       <td className="px-3 py-1 text-right font-mono text-fg-subtle">
         {stats.weightPct == null ? '—' : `${stats.weightPct.toFixed(2)}%`}
         {stats.weightPct != null && (
           <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment weight, as of today"
-            how={`the Weight column of the ${stats.holdings} row${stats.holdings === 1 ? '' : 's'} below, added up (AIRS's own Weging per position).`} />
+            how={`a sum of the Weight column of the ${stats.holdings} row${stats.holdings === 1 ? '' : 's'} below`} />
+        )}
+      </td>
+      <td className="px-3 py-1 text-right font-mono text-fg-subtle">
+        {stats.modelPct == null ? '—' : `${stats.modelPct.toFixed(2)}%`}
+        {stats.modelPct != null && (
+          <Provenance source="airs_model" asOf={asOf} kind="formula" note="segment model weight"
+            how="a sum of the Model wt column of the rows below" />
+        )}
+      </td>
+      <td className="px-3 py-1 text-right font-mono text-fg-muted">
+        {stats.actualPct == null ? '—' : `${stats.actualPct.toFixed(2)}%`}
+        {stats.actualPct != null && (
+          <Provenance source="airs_model" asOf={asOf} kind="formula" note="segment actual weight"
+            how="a sum of the Werkelijk column of the rows below" />
         )}
       </td>
       <td className={`px-3 py-1 text-right font-mono font-semibold ${tone(stats.returnPct)}`}
         title={partial
           ? `Start-weighted value change of this segment's priced holdings (${eur(stats.pricedValueEur)} of ${eur(stats.valueEur)}). The rest has no opening value — not held when the year opened — so its return is undefined, not zero.`
           : 'The start-weighted value change — Σ current ÷ Σ start − 1, each holding weighted by its OPENING value. Price return only — no income, not flow-aware.'}>
-        {stats.returnPct == null ? '—' : pct(stats.returnPct)}
-        {partial && stats.returnPct != null && <span className="text-warn-400 ml-1">*</span>}
+        {shown == null ? '—' : pct(shown)}
+        {partial && shown != null && <span className="text-warn-400 ml-1">*</span>}
         {/* ONE formula, in the two columns the reader can see. `contributionPct` is Σ(Start wt ×
             Return) over the rows below; dividing by the segment's own Start wt turns that
             book-level figure into the segment's own return. */}
         <Provenance source="airs_volk" asOf={asOf} kind="formula" note="segment return"
           how={stats.returnPct == null || stats.contributionPct == null || !stats.startWeightPct
-            ? 'no holding here has an opening value, so this segment has no return to state.'
+            ? 'no holding here has an opening value, so this segment has no return to state'
             // ⚠ pp, not %. The contribution is a share OF THE BOOK's return; printing it "+5.46%"
             // beside the segment's own "+6.60%" reads as two rival returns.
-            : `Σ (each row's Start wt × its Return) = ${stats.contributionPct >= 0 ? '+' : ''}${stats.contributionPct.toFixed(2)}pp, which is what this segment added to the book's return. As the segment's OWN return that is ÷ its ${stats.startWeightPct.toFixed(2)}% Start wt = ${pct(stats.returnPct)}.${partial ? ' Priced rows only — the rest had no opening value, so their return is undefined, not zero.' : ''}`} />
+            : altReturnPct != null
+              ? `Σ (the chosen weight × Return) ÷ Σ those weights, over this segment's rows that carry both. ⚠ A hypothetical: the segment's real return is ${pct(stats.returnPct)}`
+              : `Σ (Start wt × Return) of the rows below = ${stats.contributionPct >= 0 ? '+' : ''}${stats.contributionPct.toFixed(2)}pp, ÷ this segment's ${stats.startWeightPct.toFixed(2)}% Start wt${partial ? ', priced rows only' : ''}`} />
       </td>
     </tr>
   );
@@ -638,24 +676,16 @@ function SegmentHeader({ s, asOf, holdings, stats, onAnalyse, onFundamental }: {
 /** Leading-cell triggers for the per-instrument fundamentals + risk views. Only an instrument with
  *  an ISIN can be looked up — cash and unresolved lines have none, so they get a blank cell rather
  *  than dead buttons. */
-function FundamentalCell({ isin, name, onAnalyse, onFundamental }: {
+function FundamentalCell({ isin, name, onFundamental }: {
   isin?: string | null; name?: string | null;
-  onAnalyse: (v: ModalTarget) => void;
   onFundamental: (v: ModalTarget) => void;
 }) {
   if (!isin) return <td className="px-2 py-1.5" />;
   const nm = name ?? isin;
-  // A single stock is a portfolio-of-one — the same Analyse view (composition, return, risk) as a
-  // group, just concentrated 100% in one name.
-  const analyseTarget: ModalTarget = { name: nm, basket: { holdings: [{ isin, weight: 1, name: nm }], label: nm } };
   const cls = 'text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap';
   return (
     <td className="px-2 py-1.5">
       <div className="flex items-center gap-1">
-        <button type="button" onClick={() => onAnalyse(analyseTarget)} className={cls}
-          title="Analyse — composition, return vs benchmark, and returns/risk over 2/4/8 years">
-          Analyse
-        </button>
         <button type="button" onClick={() => onFundamental({ name: nm, isin })} className={cls}
           title="Fundamental — is this company fundamentally good? (owner earnings + price steadiness)">
           Fundamental
@@ -670,7 +700,9 @@ function Holdings({ d, i, portefeuille, onOverride }: {
   portefeuille?: string; onOverride?: (p: string) => void | Promise<void>;
 }) {
   const [fund, setFund] = useState<ModalTarget | null>(null);
-  const [perf, setPerf] = useState<ModalTarget | null>(null);
+  // Which column's weights the segment/Total returns are weighted by. "start" is the book’s own
+  // return; everything else is a HYPOTHETICAL and the UI says so.
+  const [basisKey, setBasisKey] = useState<WeightBasis>('start');
   // Persist a manual Class pin (or clear it → Auto), then re-fetch this account so the row
   // re-groups under its new bucket.
   const setBucket = useCallback(async (isin: string, bucket: string | null) => {
@@ -706,7 +738,6 @@ function Holdings({ d, i, portefeuille, onOverride }: {
   // How many identities are AIRS's OWN (exact) vs recovered by matching a fund name. Stated once
   // per table rather than badged on every row: during the changeover it is the whole table that
   // is one or the other, and it is what says whether a book still needs re-scanning.
-  const named = (i?.rows ?? []).filter((r) => r.isin_source === 'model').length;
   const exact = (i?.rows ?? []).filter((r) => r.isin_source === 'book').length;
 
   // Grouped by the CALCULATED Class (the `bucket`, incl. manual overrides), in the backend's order
@@ -742,48 +773,97 @@ function Holdings({ d, i, portefeuille, onOverride }: {
   const grouped = new Set(ordered.flatMap(([, g]) => g.map((r) => r.holding_name)));
   const rest = all.filter((r) => !grouped.has(r.holding_name));
   if (rest.length) ordered.push([null, rest]);
-  // The top TOTAL row: all weights summed (≈100%), and the portfolio's START-WEIGHTED value change
-  // — Σcurrent ÷ Σstart − 1, equivalently each position's return weighted by its OPENING value.
-  // ⚠ NOT Σ(displayed-weight × return): the Weight column is today's value share, and weighting by
-  // it lets a big winner (up +148%, now 3× its share) dominate — that read +56.11% on a book whose
-  // true return was +41.98% (≈ the +43.08% flow-aware book figure). Start-weighting is the honest
-  // number and the one that lines up with `cumulatief_rendement`. Undefined-return rows drop out.
-  const totalWeight = all.reduce((s, r) => s + (r.weight ?? 0), 0);
-  // The Total AND the Start-wt column come from ONE call: Σ(start weight × return) is
-  // Σ(current−start) ÷ Σstart identically, and computing the two separately is exactly how a
-  // column and the figure it is supposed to explain drift apart. See `startWeights.ts`.
+  // ONE aggregation rule, applied twice. A segment row sums the columns of the holdings under it
+  // (start-weighted for the return); the TOTAL row does exactly the same over the segment rows.
+  //
+  // ⚠ THE TOTAL USED TO RE-DERIVE ITSELF FROM THE HOLDINGS. That is a second code path that only
+  // HAPPENED to agree with the headers above it — and a figure that agrees by coincidence starts
+  // disagreeing the day either side changes. Now it can only be the sum of what is on screen.
+  //
+  // ⚠ NOT Σ(displayed-weight × return) at either level: the Weight column is today's value share,
+  // and weighting by it lets a big winner (up +148%, now 3× its share) dominate — that read
+  // +56.11% on a book whose true return was +41.98%. Start-weighting is the honest number and the
+  // one that lines up with `cumulatief_rendement`.
   const basis = startBasis(all);
-  const { priced: pricedRows, startSum, nowSum, totalReturn, weightOf: startWeight } = basis;
+  const { priced: pricedRows, startSum, weightOf: startWeight } = basis;
+  const statsFor = (group: typeof all) => groupStats(group, basis, {
+    weightOfRow: (r) => r.weight,
+    isEtf: (r) => !!byName.get(r.holding_name)?.is_etf,
+    dividendOf: (r) => r.dividend_eur,
+    dividendTaxOf: (r) => r.dividend_tax_eur,
+    modelOf: (r) => r.model_pct,
+    actualOf: (r) => r.model_actual_pct,
+  });
+  // ⚠ EVERY group, including the trailing ungrouped block (which draws no header). Aggregating
+  // only the groups that rendered a header would drop those holdings from the book's totals.
+  const groupStatsOf = new Map(ordered.map(([seg, g]) => [seg?.asset_class ?? ' rest', statsFor(g)]));
+  const total = aggregateGroups([...groupStatsOf.values()]);
+  // The chosen basis. "start" reuses the identity above verbatim; the others are renormalised
+  // over the rows that carry both a weight and a return (see weightedReturn).
+  const weightForBasis = (r: typeof all[number]) => (
+    basisKey === 'start' ? startWeight(r)
+      : basisKey === 'now' ? r.weight
+        : basisKey === 'model' ? r.model_pct
+          : r.model_actual_pct);
+  const wrOf = (group: typeof all) =>
+    weightedReturn(group, weightForBasis, (r) => holdingTotalReturn(r));
+  const wrByGroup = new Map([...groupStatsOf.keys()].map((k, idx) =>
+    [k, wrOf(ordered[idx][1])] as [string, WeightedReturn]));
+  const wrTotal = combineWeighted([...wrByGroup.values()]);
+  const isHypothetical = basisKey !== 'start';
+  const totalReturn = total.returnPct == null ? null : total.returnPct / 100;
   return (
     <div className="space-y-2">
       {/* ⚠ Stated BEFORE the numbers — a reader coming from a weights table will try to add
           these up and conclude something is broken. One line; the reasoning is on hover. */}
       <p className="text-[10px] text-fg-faint leading-relaxed"
         title="Price returns: AIRS restates each opening value to the current quantity, so a purchase is not a gain. The portfolio's own figure is flow-aware and includes income, which no price return carries, so these do not sum to it.">
-        {exact > 0 && named === 0
-          ? 'ISINs are AIRS’s own, per holding. '
-          : exact > 0
-            ? `${exact} ISIN${exact === 1 ? '' : 's'} from AIRS, ${named} matched by name. `
-            : 'ISIN and fund name from the Fixed portfolio. '}
+        {exact > 0 ? 'ISINs are AIRS’s own, per holding. ' : ''}
         Other columns from AIRS. Weight the Return column by{' '}
-        <strong>Start wt</strong>, not Weight, to reach the Total. Price returns do not sum to the
-        portfolio&apos;s{' '}
+        <strong>Start wt</strong>, not Weight, to reach the Total. Returns are total returns:{' '}
+        (value + net dividend) ÷ Beginwaarde. They still do not equal the portfolio&apos;s{' '}
         <span className={`font-mono ${tone(d.ytd_pct)}`}>{pct(d.ytd_pct)}</span>, which is
-        flow-aware and includes <span className="font-mono">{eur(d.income_eur)}</span>{' '}of income.
+        flow-aware and counts <span className="font-mono">{eur(d.income_eur)}</span>{' '}of income
+        including{' '}
+        <span className="font-mono">{eur(d.dividend_sold_eur)}</span>{' '}from positions since sold.
         {mismatches > 0 && (
           <span className="text-neg-400">{' '}{mismatches} ISIN{mismatches === 1 ? '' : 's'}{' '}
             {mismatches === 1 ? 'disagrees' : 'disagree'} with the price.</span>
         )}
         {i?.unmatched_model_positions && i.unmatched_model_positions.length > 0 && (
           <span className="text-fg-muted"
-            title="Held by the Fixed portfolio but not by this book: implementation drift.">
+            title="Named by this book's own model and not held by it: implementation drift.">
             {' '}Not held:{' '}
             {i.unmatched_model_positions.map((u) => u.fonds).join(', ')}.
           </span>
         )}
       </p>
+      {/* Which weights the segment + Total returns use. Four discrete, named options, so this is
+          a segmented control rather than a literal slider — a slider would put "Model wt" at an
+          unlabelled 3/4 position and make the default indistinguishable from a nudge.
+          ⚠ ONLY "Start wt" is the book's own return; the rest are clearly-marked hypotheticals. */}
+      <div className="flex items-center gap-2 flex-wrap text-[10px]">
+        <span className="text-fg-faint">Weight returns by</span>
+        <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden">
+          {WEIGHT_BASES.map((b) => (
+            <button key={b.key} type="button" onClick={() => setBasisKey(b.key)}
+              title={b.note}
+              className={`px-2 py-1 transition-colors ${basisKey === b.key
+                ? 'bg-accent-600 text-white'
+                : 'text-fg-subtle hover:bg-overlay/5'}`}>
+              {b.label}
+            </button>
+          ))}
+        </div>
+        {isHypothetical && (
+          <span className="text-warn-500"
+            title="Weighted by a column that is not the year's opening share, so this is what the book WOULD have returned held that way — not what it did. Only Start wt reproduces the real return.">
+            ⚠ hypothetical — the real return is on Start wt
+          </span>
+        )}
+      </div>
       <div className="overflow-auto rounded-lg border border-neutral-800/40 max-h-[50vh]">
-        <table className="w-full text-xs">
+        <table className="w-auto text-xs whitespace-nowrap">
           <thead className="bg-card sticky top-0 z-20 [&_th]:bg-card">
             <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
               <th className="px-2 py-1.5 font-medium text-left" />{/* Fundamental */}
@@ -801,12 +881,36 @@ function Holdings({ d, i, portefeuille, onOverride }: {
               <th className="px-3 py-1.5 font-medium text-left" title="MSCI region from the instrument's yfinance geo. ⚠ For an ETF this describes its listing, not what it holds.">Region</th>
               <th className="px-3 py-1.5 font-medium text-left">Ccy</th>
               <th className="px-3 py-1.5 font-medium text-right"
+                title="Beginwaarde lopend jaar EUR — what this holding was worth when the year opened, restated by AIRS to the CURRENT quantity so a purchase does not read as a gain. EUR 0 means it was not held then.">
+                Beginwaarde
+              </th>
+              <th className="px-3 py-1.5 font-medium text-right"
+                title="Huidige waarde EUR — what the holding is worth now, at the snapshot date. The Return is (this + net dividend) over Beginwaarde.">
+                Huidige waarde
+              </th>
+              <th className="px-3 py-1.5 font-medium text-right"
+                title="Dividend received on this holding this year, GROSS, in EUR — from the AIRS Mutaties journal. A price return cannot see it: the money leaves the position's value and arrives as cash. Blank = no journal line for it (which is not the same as “paid nothing”).">
+                Direct result
+              </th>
+              <th className="px-3 py-1.5 font-medium text-right"
+                title="Withholding tax on that dividend, as AIRS books it (NEGATIVE). Kept in its own column because a US name losing 15% and a Dutch one losing nothing is a fact about the holding. Net income is the two added.">
+                Div tax
+              </th>
+              <th className="px-3 py-1.5 font-medium text-right"
                 title="Share of the book at the START of the year (Beginwaarde ÷ total Beginwaarde). This is the weight the Return column belongs to: weighting each return by it reproduces the Total exactly. “—” = no opening value, so the holding was not there when the year began.">
                 Start wt
               </th>
               <th className="px-3 py-1.5 font-medium text-right"
                 title="AIRS's own Weging — today's share of the book. It answers what you hold NOW; it is NOT the weight behind the Return column, because a holding that rose carries a bigger share today than it held while it was rising.">
                 Weight
+              </th>
+              <th className="px-3 py-1.5 font-medium text-right"
+                title="Model percentage — what this book's own strategy says it should hold, from the AIRS Model report. Blank = the model does not name this holding, which is drift, not 0%.">
+                Model wt
+              </th>
+              <th className="px-3 py-1.5 font-medium text-right"
+                title="Werkelijk percentage — what the Model report says the book actually holds. ⚠ A different report from the Weight column beside it (Vermogensoverzicht), computed on its own date, so the two can legitimately differ.">
+                Werkelijk
               </th>
               <th className="px-3 py-1.5 font-medium text-right">Return</th>
             </tr>
@@ -818,27 +922,77 @@ function Holdings({ d, i, portefeuille, onOverride }: {
               <td className="px-3 py-1.5 text-fg-strong" colSpan={7}>
                 Total · {all.length} holding{all.length === 1 ? '' : 's'}
                 <Provenance source="airs_volk" asOf={d.as_of} kind="formula" note="holdings in the book"
-                  how="a count of the AIRS positions, merged where AIRS bills one instrument on several lines." />
+                  how="a count of the AIRS positions, merged where one instrument is billed on several lines" />
+              </td>
+              {/* ⚠ Over ALL rows, not just the priced ones — the column is what a reader adds up,
+                  and the Return's denominator (`startSum`) deliberately spans fewer rows. */}
+              <td className="px-3 py-1.5 text-right font-mono text-fg-muted">
+                {eur(total.startEurAll)}
+                <Provenance source="airs_volk" asOf={d.as_of} kind="formula" note="the book's opening value"
+                  how={`a sum of the Beginwaarde column of the segment rows. The Return is computed over the ${pricedRows.length} holding${pricedRows.length === 1 ? '' : 's'} with a non-zero one, i.e. ${eur(startSum)}`} />
               </td>
               <td className="px-3 py-1.5 text-right font-mono text-fg-strong">
-                {startSum === 0 ? '—' : '100.00%'}
+                {eur(total.valueEur)}
+                <Provenance source="airs_volk" asOf={d.as_of} kind="formula" note="the book's value now"
+                  how="a sum of the Huidige waarde column of the segment rows" />
+              </td>
+              {/* ⚠ The book's income is NOT this column's sum. A position sold during the year
+                  paid real dividends and has no row left to carry them, so the total states the
+                  held part and its card names the difference. */}
+              <td className="px-3 py-1.5 text-right font-mono text-fg-strong">
+                {total.dividendEur == null ? '—' : eur(total.dividendEur)}
+                {total.dividendEur != null && (
+                  <Provenance source="airs_volk" asOf={d.as_of} kind="formula"
+                    note="Direct result of the holdings still held"
+                    how={d.dividend_sold_eur
+                      ? `a sum of the Direct result column of the segment rows. ⚠ It is NOT the book's income: ${eur(d.dividend_sold_eur)} more was paid by ${d.dividend_sold_funds?.join(', ')}, sold during the year and no longer in the table`
+                      : "a sum of the Direct result column of the segment rows. Every fund that paid this year is still held, so it is also the book's dividend income"} />
+                )}
+              </td>
+              <td className="px-3 py-1.5 text-right font-mono text-neg-400">
+                {total.dividendTaxEur == null ? '—' : eur(total.dividendTaxEur)}
+                {total.dividendTaxEur != null && (
+                  <Provenance source="airs_volk" asOf={d.as_of} kind="formula"
+                    note="Dividend tax on the holdings still held"
+                    how="a sum of the Div tax column of the segment rows" />
+                )}
+              </td>
+              <td className="px-3 py-1.5 text-right font-mono text-fg-strong">
+                {total.startWeightPct == null ? '—' : `${total.startWeightPct.toFixed(2)}%`}
                 <Provenance source="airs_volk" asOf={d.as_of} kind="formula" note="total start weight"
-                  how="100% by construction — it is each priced holding's opening value over their sum. The point is the column below it: those shares times the Return column give the Total return exactly." />
+                  how="a sum of the Start wt column of the segment rows, which is 100% by construction" />
               </td>
               <td className="px-3 py-1.5 text-right font-mono text-fg-strong">
-                {(totalWeight * 100).toFixed(2)}%
+                {total.weightPct == null ? '—' : `${total.weightPct.toFixed(2)}%`}
                 <Provenance source="airs_volk" asOf={d.as_of} kind="formula" note="total weight"
-                  how="Σ of the positions' own AIRS weights (Weging)." />
+                  how="a sum of the Weight column of the segment rows" />
+              </td>
+              <td className="px-3 py-1.5 text-right font-mono text-fg-strong">
+                {total.modelPct == null ? '—' : `${total.modelPct.toFixed(2)}%`}
+                {total.modelPct != null && (
+                  <Provenance source="airs_model" asOf={d.as_of} kind="formula" note="the model's total"
+                    how="a sum of the Model wt column of the segment rows. ⚠ Short of 100% by whatever the model names and the book does not hold — see “Not held” above" />
+                )}
+              </td>
+              <td className="px-3 py-1.5 text-right font-mono text-fg-muted">
+                {total.actualPct == null ? '—' : `${total.actualPct.toFixed(2)}%`}
+                {total.actualPct != null && (
+                  <Provenance source="airs_model" asOf={d.as_of} kind="formula" note="the actual total"
+                    how="a sum of the Werkelijk column of the segment rows" />
+                )}
               </td>
               <td className={`px-3 py-1.5 text-right font-mono ${totalReturn == null ? 'text-fg-faint' : tone(totalReturn)}`}
                 title="Start-weighted value change — Σ current ÷ Σ start − 1 over holdings with an opening value (each position's return weighted by its OPENING value, the same basis each bucket uses). Price return only — not flow-aware, so it is close to but not exactly the book's cumulatief_rendement.">
-                {totalReturn == null ? '—' : pct(totalReturn * 100)}
+                {(isHypothetical ? wrTotal.pct : totalReturn == null ? null : totalReturn * 100) == null
+                  ? '—' : pct(isHypothetical ? wrTotal.pct! : totalReturn! * 100)}
                 {/* Same formula as a segment row, minus the renormalising step: the Start wt
                     column already sums to 100% here, so there is nothing to divide by. */}
                 <Provenance source="airs_volk" asOf={d.as_of} kind="formula" note="start-weighted price return"
                   how={totalReturn == null
-                    ? 'no holding has an opening value, so the book has no price return to compute.'
-                    : `Σ (each row's Start wt × its Return) over the ${pricedRows.length} holding${pricedRows.length === 1 ? '' : 's'} with an opening value — the Start wt column sums to 100%, so nothing is renormalised. Equivalently ${eur(nowSum)} ÷ ${eur(startSum)} − 1 = ${pct(totalReturn * 100)}. Price return only — not flow-aware, so it is close to but NOT the book's cumulatief_rendement.`} />
+                    ? 'no holding has an opening value, so the book has no price return to compute'
+                    : isHypothetical
+                      ? `Σ (${WEIGHT_BASES.find((x) => x.key === basisKey)!.label} × Return) ÷ Σ those weights, over the rows carrying both. ⚠ NOT the book's return — that is on Start wt (${pct(totalReturn! * 100)}). Renormalised, because these weights sum to ${wrTotal.weightSum < 2 ? (100 * wrTotal.weightSum).toFixed(2) : wrTotal.weightSum.toFixed(2)}%, not 100`
+                      : `Σ (Start wt × Return) of the segment rows above = ${total.contributionPct! >= 0 ? '+' : ''}${total.contributionPct!.toFixed(2)}pp, ÷ their ${total.startWeightPct!.toFixed(2)}% Start wt. Price + income, not flow-aware`} />
               </td>
             </tr>
             {ordered.map(([seg, group]) => {
@@ -848,18 +1002,17 @@ function Holdings({ d, i, portefeuille, onOverride }: {
               return (
               <Fragment key={seg?.asset_class ?? 'x'}>
                 {seg && <SegmentHeader s={seg} asOf={d.as_of} holdings={groupHoldings}
-                  stats={groupStats(group, basis, {
-                    weightOfRow: (r) => r.weight,
-                    isEtf: (r) => !!byName.get(r.holding_name)?.is_etf,
-                  })}
-                  onAnalyse={setPerf} onFundamental={setFund} />}
+                  stats={groupStatsOf.get(seg.asset_class ?? ' rest')!}
+                  altReturnPct={isHypothetical ? wrByGroup.get(seg.asset_class ?? ' rest')?.pct : null}
+                  onFundamental={setFund} />}
                 {group.map((r, n) => {
                   const g = byName.get(r.holding_name);
                   return (
               <tr key={`${r.holding_name}-${n}`} className="hover:bg-overlay/[0.02]">
-                <FundamentalCell isin={g?.isin} name={r.holding_name} onAnalyse={setPerf} onFundamental={setFund} />
+                <FundamentalCell isin={g?.isin} name={r.holding_name} onFundamental={setFund} />
                 <td className="px-3 py-1.5 text-fg-soft pl-6">
-                  {r.holding_name}
+                  <span className="inline-block max-w-[24ch] truncate align-bottom"
+                    title={r.holding_name}>{r.holding_name}</span>
                   <Provenance source="airs_volk" asOf={d.as_of} kind="copied"
                     note="Fonds — the position's own name in the AIRS book" />
                 </td>
@@ -867,19 +1020,15 @@ function Holdings({ d, i, portefeuille, onOverride }: {
                   <IsinCell r={g} onPin={pinIsin} />
                   {/* ⚠ The ISIN is the one column NOT read off a source — it is INFERRED (a name
                       match, then a price check), so its card carries both steps. */}
-                  {g && (g.isin || g.verdict === 'unmatched') && (
+                  {g?.isin && (
                     <Provenance
                       source={g.isin_source === 'book' ? 'airs_volk'
                         : g.isin_overridden ? 'derived' : 'airs_model'}
                       asOf={g.isin_source === 'book' ? d.as_of : undefined}
                       kind={g.isin_source === 'book' ? 'copied' : 'formula'}
-                      note={g.isin_source === 'book'
-                        ? "ISIN-code — the holding's own ISIN in the AIRS book"
-                        : g.isin_overridden
-                          ? 'ISIN — pinned by hand, then price-checked'
-                          : g.verdict === 'unmatched'
-                            ? 'ISIN — refused; no Fixed portfolio position matches this holding'
-                            : 'ISIN — matched by NAME to a Fixed portfolio position'}
+                      note={g.isin_overridden
+                        ? 'ISIN — supplied by hand, then price-checked'
+                        : "ISIN-code — the holding's own ISIN in the AIRS book"}
                       how={isinHow(g)} />
                   )}
                 </td>
@@ -892,8 +1041,8 @@ function Holdings({ d, i, portefeuille, onOverride }: {
                     <Provenance source="derived" kind="formula"
                       note={g.bucket_overridden ? 'Class — manually pinned' : 'Class — the smart asset-class label'}
                       how={g.bucket_overridden
-                        ? 'a manual override pinned to this ISIN, which beats the calculated class for good.'
-                        : `AIRS's own Beleggingscategorie${g.categorie ? ` (“${g.categorie}”)` : ''}, then refined by the instrument's grid data (fund/ETF, asset class, name).`} />
+                        ? 'a manual override pinned to this ISIN, which beats the calculated class for good'
+                        : "the instrument's own grid data (asset class, sector, fund wrapper) and its name. AIRS's Beleggingscategorie is no longer used: it came from a paired model portfolio, and the pairing is gone"} />
                   )}
                 </td>
                 <td className="px-3 py-1.5 text-fg-subtle">
@@ -909,14 +1058,14 @@ function Holdings({ d, i, portefeuille, onOverride }: {
                   {g?.country || '—'}
                   {g?.country && (
                     <Provenance source="yfinance" kind="formula" note="country — where the issuer is domiciled"
-                      how="Yahoo's assetProfile.country, falling back to the LISTING's country when Yahoo reports no domicile — for a thin foreign line that fallback names the venue, not the issuer." />
+                      how="Yahoo's assetProfile.country, falling back to the LISTING's country when Yahoo reports no domicile — for a thin foreign line that fallback names the venue, not the issuer" />
                   )}
                 </td>
                 <td className="px-3 py-1.5 text-fg-subtle">
                   {g?.region || '—'}
                   {g?.region && (
                     <Provenance source="yfinance" kind="formula" note="region — the MSCI ACWI region"
-                      how="derived from the resolved country above. ⚠ For an ETF it describes the fund's own listing, not what the fund holds." />
+                      how="derived from the resolved country above. ⚠ For an ETF it describes the fund's own listing, not what the fund holds" />
                   )}
                 </td>
                 <td className="px-3 py-1.5 font-mono text-fg-muted">
@@ -924,6 +1073,40 @@ function Holdings({ d, i, portefeuille, onOverride }: {
                   {r.currency && (
                     <Provenance source="airs_volk" asOf={d.as_of} kind="copied"
                       note="Valuta — the currency AIRS books this position in" />
+                  )}
+                </td>
+                {/* ⚠ €0 here IS a value, not a gap: AIRS reports Beginwaarde 0 for a holding that
+                    was not there when the year opened, which is why its Return is blank. */}
+                <td className="px-3 py-1.5 text-right font-mono text-fg-muted">
+                  {eur(r.start_value_eur)}
+                  {r.start_value_eur != null && (
+                    <Provenance source="airs_volk" asOf={d.as_of} kind="copied"
+                      note="Beginwaarde lopend jaar EUR — restated to the current quantity" />
+                  )}
+                </td>
+                <td className="px-3 py-1.5 text-right font-mono text-fg-soft">
+                  {eur(r.current_value_eur)}
+                  {r.current_value_eur != null && (
+                    <Provenance source="airs_volk" asOf={d.as_of} kind="copied"
+                      note="Huidige waarde EUR — the position's value at the snapshot date" />
+                  )}
+                </td>
+                {/* ⚠ Blank, never €0. "Paid nothing" and "this book's journal has no line for it"
+                    are different claims, and a 0.00 in a money column reads as the first. */}
+                <td className="px-3 py-1.5 text-right font-mono text-fg-soft">
+                  {r.dividend_eur == null ? '—' : eur(r.dividend_eur)}
+                  {r.dividend_eur != null && (
+                    <Provenance source="airs_volk" asOf={d.as_of} kind="formula"
+                      note="Direct result — dividend received this year, gross"
+                      how={`a sum of this holding's ${r.dividend_payments ?? 0} Dividend line${r.dividend_payments === 1 ? '' : 's'} in the AIRS Mutaties journal, in AIRS's own EUR`} />
+                  )}
+                </td>
+                <td className={`px-3 py-1.5 text-right font-mono ${(r.dividend_tax_eur ?? 0) < 0 ? 'text-neg-400' : 'text-fg-muted'}`}>
+                  {r.dividend_tax_eur == null ? '—' : eur(r.dividend_tax_eur)}
+                  {r.dividend_tax_eur != null && (
+                    <Provenance source="airs_volk" asOf={d.as_of} kind="formula"
+                      note="Dividendbelasting — withholding tax, as AIRS books it"
+                      how="a sum of this holding's Dividendbelasting lines in the AIRS Mutaties journal; negative, so net income is this plus the Direct result" />
                   )}
                 </td>
                 {/* ⚠ A dash, never 0.00%. No opening value means the holding was NOT THERE when
@@ -934,7 +1117,7 @@ function Holdings({ d, i, portefeuille, onOverride }: {
                   {startWeight(r) != null && (
                     <Provenance source="airs_volk" asOf={d.as_of} kind="formula"
                       note="start weight — the share of the book this holding was at the year's open"
-                      how={`Beginwaarde ÷ the book's total Beginwaarde = ${eur(r.start_value_eur)} ÷ ${eur(startSum)}. This is the weight the Return beside it belongs to.`} />
+                      how={`Beginwaarde ÷ the book's total Beginwaarde = ${eur(r.start_value_eur)} ÷ ${eur(startSum)}`} />
                   )}
                 </td>
                 <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
@@ -944,17 +1127,44 @@ function Holdings({ d, i, portefeuille, onOverride }: {
                       note="Weging — AIRS's own position weight, as of today" />
                   )}
                 </td>
-                {/* ⚠ A dash, never 0%. No opening value = the return is UNDEFINED, not flat. */}
-                <td className={`px-3 py-1.5 text-right font-mono ${tone(r.ytd_return_pct)}`}
-                  title={r.ytd_return_pct == null
-                    ? 'No opening value — not held when the year opened (or a cash line). Its return is undefined, not zero.'
-                    : undefined}>
-                  {r.ytd_return_pct == null ? '—' : pct(r.ytd_return_pct * 100)}
-                  {r.ytd_return_pct != null && (
-                    <Provenance source="airs_volk" asOf={d.as_of} kind="formula" note="Resultaat (price return)"
-                      how={`Now ÷ Start − 1 = ${eur(r.current_value_eur)} ÷ ${eur(r.start_value_eur)} − 1 = ${pct(r.ytd_return_pct * 100)}`} />
+                {/* ⚠ Blank, never 0%. A model that does not name this holding is DRIFT — the book
+                    bought something the strategy never asked for — and a 0% would read as the
+                    strategy deliberately wanting none of it. */}
+                <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
+                  {r.model_pct == null ? '—' : `${r.model_pct.toFixed(2)}%`}
+                  {r.model_pct != null && (
+                    <Provenance source="airs_model" asOf={d.as_of} kind="copied"
+                      note="Model percentage — from this book's own MODEL report, no pairing involved" />
                   )}
                 </td>
+                <td className="px-3 py-1.5 text-right font-mono text-fg-muted">
+                  {r.model_actual_pct == null ? '—' : `${r.model_actual_pct.toFixed(2)}%`}
+                  {r.model_actual_pct != null && (
+                    <Provenance source="airs_model" asOf={d.as_of} kind="copied"
+                      note="Werkelijk percentage — the same report's view of what is actually held" />
+                  )}
+                </td>
+                {/* ⚠ A dash, never 0%. No opening value = the return is UNDEFINED, not flat.
+                    This is now a TOTAL return: the income sits in the numerator, so a high-yield
+                    holding stops reading as a laggard beside one that pays nothing. */}
+                {(() => { const tr = holdingTotalReturn(r); return (
+                <td className={`px-3 py-1.5 text-right font-mono ${tone(tr)}`}
+                  title={tr == null
+                    ? 'No opening value — not held when the year opened (or a cash line). Its return is undefined, not zero.'
+                    : undefined}>
+                  {tr == null ? '—' : pct(tr * 100)}
+                  {/* ⚠ EVERY TERM IS A COLUMN ON SCREEN, INCLUDING THE TAX. Printing the netted
+                      dividend as one number hides the tax term entirely, and a reader checking the
+                      row against the Div tax column cannot find it. Both are rendered with their
+                      own signs, so the tax reads negative here exactly as it does there. */}
+                  {tr != null && (
+                    <Provenance source="airs_volk" asOf={d.as_of} kind="formula" note="total return: price + income"
+                      how={r.dividend_eur == null
+                        ? `Now ÷ Start − 1 = ${eur(r.current_value_eur)} ÷ ${eur(r.start_value_eur)} − 1`
+                        : `(Now ${eur(r.current_value_eur)} + Direct result ${eur(r.dividend_eur)} + Div tax ${eur(r.dividend_tax_eur)}) ÷ Start ${eur(r.start_value_eur)} − 1`} />
+                  )}
+                </td>
+                ); })()}
               </tr>
                   );
                 })}
@@ -967,9 +1177,6 @@ function Holdings({ d, i, portefeuille, onOverride }: {
       {fund && (
         <OwnerEarningsModal isin={fund.isin} basket={fund.basket} portfolioId={fund.portfolioId}
           name={fund.name} onClose={() => setFund(null)} />
-      )}
-      {perf?.basket && (
-        <PortfolioAnalysisModal name={perf.name} basket={perf.basket} onClose={() => setPerf(null)} />
       )}
     </div>
   );

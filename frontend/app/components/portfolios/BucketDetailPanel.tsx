@@ -28,6 +28,8 @@ function Num({ v, pp }: { v?: number | null; pp?: boolean }) {
 function HoldingsCols() {
   return (
     <colgroup>
+      {/* Rank — narrow and fixed, so a 2-digit number never steals width from the name. */}
+      <col className="w-[1.75rem]" />
       <col />
       <col className="w-[4rem]" />
       <col className="w-[4.25rem]" />
@@ -79,6 +81,9 @@ function Holdings({ rows }: { rows: Name[] }) {
       <HoldingsCols />
       <thead>
         <tr className="text-fg-faint text-[10px] uppercase tracking-wide">
+          {/* Not sortable: the rank IS the position under the ACTIVE sort, so clicking it could
+              only mean "sort by the current sort". It renumbers whenever the sort changes. */}
+          <th className="pr-1 text-right font-normal">#</th>
           <th className={`${th} pr-2 text-left`} onClick={() => click('name')}>Name{caret('name')}</th>
           <th className={`${th} px-1 text-right`} onClick={() => click('weight')}>Weight{caret('weight')}</th>
           <th className={`${th} px-1 text-right`} onClick={() => click('return')}>Return{caret('return')}</th>
@@ -92,6 +97,7 @@ function Holdings({ rows }: { rows: Name[] }) {
           // index — is faded so the shared holdings read at a glance without hiding the full lists.
           <tr key={h.isin ?? `${h.name}-${i}`}
             className={`border-t border-neutral-800/20 ${h.in_both ? 'bg-accent-500/15' : 'opacity-45'}`}>
+            <td className="py-1 pr-1 text-right font-mono text-fg-faint tabular-nums">{i + 1}</td>
             <td className="py-1 pr-2" title={h.name ?? ''}>
               <span className="flex items-center gap-1.5 min-w-0">
                 {/* Held on BOTH sides — a ringed dot so the overlap between your book and the index
@@ -128,8 +134,14 @@ function Holdings({ rows }: { rows: Name[] }) {
  * buckets the panel shows the holdings alone (weight, and a return where we have one) and says so
  * — decomposing a world tracker as a sector call is exactly the false finding attribution avoids.
  */
-export default function BucketDetailPanel({ id, benchmark, axis, bucket, onClose }: {
-  id: number; benchmark: string; axis: string; bucket: string; onClose: () => void;
+export default function BucketDetailPanel({ id, benchmark, axis, bucket, source = 'model', onClose }: {
+  id: number; benchmark: string; axis: string; bucket: string;
+  /** ⚠ MUST MATCH THE MODAL — the same value the Attribution panel gets. Omit it and the backend
+   *  defaults to `model` (the design percentages, a flat 5.00% each) while the Attribution panel
+   *  above is decomposing BEGINWAARDE start weights. Two panels in one modal, same portfolio, same
+   *  window, different weights — and neither says so. */
+  source?: 'model' | 'book';
+  onClose: () => void;
 }) {
   const [attr, setAttr] = useState<Attr | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -151,7 +163,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, onClose
       try {
         const r = await apiFetch(
           `${API_URL}/api/airs/model-portfolios/${id}/attribution`
-          + `?benchmark=${benchmark}&window=ytd&axis=${axis}`);
+          + `?benchmark=${benchmark}&window=ytd&axis=${axis}&source=${source}`);
         const b = await r.json().catch(() => null);
         if (cancelled) return;
         if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
@@ -163,7 +175,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, onClose
       }
     })();
     return () => { cancelled = true; };
-  }, [id, benchmark, axis]);
+  }, [id, benchmark, axis, source]);
 
   const row = attr?.rows?.find((r) => r.bucket === bucket);
   const excluded = (attr?.excluded ?? []).filter((e) => e.bucket === bucket);

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { INFO_ICON } from '../../lib/infoIcon';
 
 /**
  * Small "i" icon that reveals a tooltip on hover. Tooltip is positioned
@@ -129,7 +130,7 @@ export default function InfoTip({ text, content, children }: {
         }}
         className={children
           ? undefined
-          : 'inline-flex items-center justify-center w-4 h-4 rounded-full border border-neutral-600 text-fg-subtle text-[10px] leading-none hover:border-accent-400 hover:text-accent-400 transition-colors'}
+          : INFO_ICON}
       >
         {children ?? 'i'}
       </span>

@@ -216,6 +216,42 @@
             ],
             "title": "As Of"
           },
+          "dividend_sold_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividend Sold Eur"
+          },
+          "dividend_sold_funds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividend Sold Funds"
+          },
+          "dividend_sold_tax_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividend Sold Tax Eur"
+          },
           "income_eur": {
             "anyOf": [
               {
@@ -336,6 +372,39 @@
             ],
             "title": "Current Value Eur"
           },
+          "dividend_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividend Eur"
+          },
+          "dividend_payments": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividend Payments"
+          },
+          "dividend_tax_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividend Tax Eur"
+          },
           "fund_result_eur": {
             "anyOf": [
               {
@@ -361,6 +430,39 @@
           "holding_name": {
             "title": "Holding Name",
             "type": "string"
+          },
+          "model_actual_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Actual Pct"
+          },
+          "model_drift_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Drift Pct"
+          },
+          "model_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Pct"
           },
           "quantity": {
             "anyOf": [
@@ -654,19 +756,8 @@
         "type": "object"
       },
       "AirsHoldingIsin": {
-        "description": "One account holding, with the ISIN we believe it is \u2014 and how much to believe it.\n\n\u26a0 `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.\n  ok             the implied price agrees with that ISIN's own close (FX-converted)\n  price_mismatch it does NOT \u2014 the ISIN is not what the book holds, or the book drifted\n  unpriced       we have no series for it, so there is NOTHING confirming the name match\n  unmatched      NO ISIN: the model has no position for this holding at all\n\n`unpriced` is not a pass. The name matched and nothing checked it \u2014 which for a fund is\nexactly where the Acc/Inc share-class trap lives.\n\n\u26a0 `unmatched` AND `price_mismatch` ARE OPPOSITE FINDINGS, NOT DEGREES OF ONE. A mismatch means\nthe row pairing is RIGHT and the ISIN on it is wrong (a share class, a venue) \u2014 a finding\nabout the model. `unmatched` means the pairing itself was refused: the name says a different\ninstrument and the price independently agrees, which is what a STALE model snapshot looks like\nwhen the book has since swapped a position. `rejected_isin`/`rejected_fonds` name the leftover\nwe declined; re-scan the model portfolio to fix it.",
+        "description": "One account holding, with the ISIN we believe it is \u2014 and how much to believe it.\n\n\u26a0 `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.\n  ok             the implied price agrees with that ISIN's own close (FX-converted)\n  price_mismatch it does NOT \u2014 the ISIN is not what the book holds, or the book drifted\n  unpriced       we have no series for it, so there is NOTHING confirming the name match\n  unmatched      NO ISIN: the model has no position for this holding\n  cross_listed   the prices differ, and they are SUPPOSED to \u2014 this ISIN's execution row is\n                 deliberately served by another instrument (`asset_isin_alias`), e.g. an ADR\n                 priced from the main company's listing. Not a fault, and not a pass either. at all\n\n`unpriced` is not a pass. The name matched and nothing checked it \u2014 which for a fund is\nexactly where the Acc/Inc share-class trap lives.\n\n\u26a0 `unmatched` AND `price_mismatch` ARE OPPOSITE FINDINGS, NOT DEGREES OF ONE. A mismatch means\nthe row pairing is RIGHT and the ISIN on it is wrong (a share class, a venue) \u2014 a finding\nabout the model. `unmatched` means the pairing itself was refused: the name says a different\ninstrument and the price independently agrees, which is what a STALE model snapshot looks like\nwhen the book has since swapped a position. `rejected_isin`/`rejected_fonds` name the leftover\nwe declined; re-scan the model portfolio to fix it.",
         "properties": {
-          "asset_class": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Asset Class"
-          },
           "bucket": {
             "anyOf": [
               {
@@ -688,17 +779,6 @@
               }
             ],
             "title": "Bucket Overridden"
-          },
-          "categorie": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Categorie"
           },
           "continent": {
             "anyOf": [
@@ -819,39 +899,6 @@
             "title": "Lines",
             "type": "integer"
           },
-          "model_fonds": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Fonds"
-          },
-          "model_pct": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Pct"
-          },
-          "name_score": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name Score"
-          },
           "our_instrument": {
             "anyOf": [
               {
@@ -907,28 +954,6 @@
             ],
             "title": "Region"
           },
-          "rejected_fonds": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rejected Fonds"
-          },
-          "rejected_isin": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rejected Isin"
-          },
           "sector": {
             "anyOf": [
               {
@@ -939,6 +964,17 @@
               }
             ],
             "title": "Sector"
+          },
+          "served_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Served By"
           },
           "start_value_eur": {
             "anyOf": [
@@ -954,17 +990,6 @@
           "verdict": {
             "title": "Verdict",
             "type": "string"
-          },
-          "weak_name": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Weak Name"
           },
           "weight": {
             "anyOf": [
@@ -4020,6 +4045,84 @@
           "quarterly"
         ],
         "title": "FinancialSeriesResponse",
+        "type": "object"
+      },
+      "FundamentalBreakdownRequest": {
+        "description": "One blended point to take apart: which metric, which fiscal year.",
+        "properties": {
+          "holdings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings"
+          },
+          "metric_code": {
+            "title": "Metric Code",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "portfolio_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Id"
+          }
+        },
+        "required": [
+          "metric_code",
+          "period"
+        ],
+        "title": "FundamentalBreakdownRequest",
+        "type": "object"
+      },
+      "FundamentalCoverageRequest": {
+        "description": "Either a model portfolio's id, or an explicit basket of (isin, weight).",
+        "properties": {
+          "holdings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings"
+          },
+          "portfolio_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Id"
+          }
+        },
+        "title": "FundamentalCoverageRequest",
         "type": "object"
       },
       "FundamentalPoint": {
@@ -10733,7 +10836,7 @@
     },
     "/api/airs/model-portfolios/{portfolio_id}/attribution": {
       "get": {
-        "description": "Brinson-Fachler attribution of one model against a benchmark, over one window.\n\n`source=book` decomposes the paired AIRS book's actual holdings + returns instead of the\nyfinance model reconstruction (calendar-year window; benchmark stays yfinance).",
+        "description": "Brinson-Fachler attribution of one model against a benchmark, over one window.\n\n\u26a0 THE DEFAULT IS `book` \u2014 THE BEGINWAARDE START WEIGHTS, NOT THE MODEL'S DESIGN PERCENTAGES.\nAn attribution weighted by the design % (a flat 5.00% per name) decomposes a portfolio nobody\nheld: it assumes every position opened the year at its target weight and never drifted. Only\nthe start weights reproduce the book's realised return, because\n`\u03a3 start_i\u00b7ret_i / \u03a3 start_i == (\u03a3 cur \u2212 \u03a3 start) / \u03a3 start` is an identity \u2014 so with any\nother weighting the \"excess\" being decomposed is not the excess the book earned.\n\n`source=model` still gives the yfinance reconstruction of the model's nominal composition,\nwhich is the right question for an unlinked model \u2014 it is just not what the book did.",
         "operationId": "airs_model_portfolio_attribution_api_airs_model_portfolios__portfolio_id__attribution_get",
         "parameters": [
           {
@@ -10780,7 +10883,7 @@
             "name": "source",
             "required": false,
             "schema": {
-              "default": "model",
+              "default": "book",
               "title": "Source",
               "type": "string"
             }
@@ -15472,6 +15575,166 @@
           }
         },
         "summary": "Get Earnings Metrics By Isin",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/fundamental-blend": {
+      "post": {
+        "description": "A portfolio's fundamentals, blended \u2014 with the rule that each metric actually requires.\n\n\u26a0 THREE RULES, NOT ONE. A multiple aggregates HARMONICALLY (a portfolio's P/E is aggregate\nprice over aggregate earnings; the arithmetic mean of 10 and 100 is 55 against a true 18.2),\na yield/margin arithmetically, and a level only after rebasing to an index. See\n`_fundamental_blend` for why each alternative is wrong.\n\nCoverage rides along and is a FLOOR: a date under it carries no honest value and is omitted\nrather than drawn as a dip.",
+        "operationId": "fundamental_blend_api_earnings_fundamental_blend_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fundamental Blend",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/fundamental-blend-breakdown": {
+      "post": {
+        "description": "The holdings behind ONE point of a blended chart, and the ones missing from it.\n\n\u26a0 IT LOADS ONE METRIC, NOT THE SUITE. The blend endpoint reads every charted code for every\nholding; a drill-down needs one code (plus, for a forecast, the actual it is anchored on), so\nit is a small read on click rather than a large one on open.\n\n\u26a0 IT DECOMPOSES THROUGH `blend_breakdown`, WHICH SHARES `_prepare` WITH THE LINE ITSELF. The\nalternative \u2014 recomputing the members \"the same way\" here \u2014 is a second copy of the\nharmonic/ratio/level rules, and a drill-down that quietly disagrees with the chart above it\nis worse than none: it is checked once and trusted from then on.",
+        "operationId": "fundamental_blend_breakdown_api_earnings_fundamental_blend_breakdown_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalBreakdownRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fundamental Blend Breakdown",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/fundamental-blend-metrics": {
+      "post": {
+        "description": "The portfolio as ONE pseudo-company, in the exact shape `/by-isin/{isin}/metrics` returns.\n\nSame payload, so the whole /earnings chart suite renders for a portfolio with no changes \u2014\n`{company_id, company_name, currency, metrics}` where `metrics` are blended across the covered\nholdings, weighted by their portfolio weight.\n\n\u26a0 EVERY METRIC IS BLENDED BY THE RULE ITS OWN KIND REQUIRES (see `_fundamental_blend`): a\nmultiple harmonically, a ratio/margin arithmetically, and a LEVEL only after rebasing to an\nindex. Weighting Apple's revenue by 5% and ASML's by 3% is not a portfolio's revenue.\n\n\u26a0 `currency` IS NULL, DELIBERATELY. Members report in their own currencies, and a level series\nhas been rebased to an index anyway \u2014 there is no currency such a number could be in. The\ncharts' EUR conversion is driven off this field, so a currency here would relabel an index as\nmoney. A null says \"not a currency amount\", which is the truth.",
+        "operationId": "fundamental_blend_metrics_api_earnings_fundamental_blend_metrics_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fundamental Blend Metrics",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/fundamental-coverage": {
+      "post": {
+        "description": "Which of a portfolio's holdings a fundamentals view can reach, BY WEIGHT, and why not.\n\n\u26a0 COVERAGE IS THE FIRST ANSWER, NOT A FOOTNOTE. Every holding that cannot be reached is weight\nthat drops out of any blend, and a blended figure over 61% of a book presented as the book's is\nthe same fabrication `MIN_COVERAGE_PCT` already guards against on the AIRS returns.",
+        "operationId": "fundamental_coverage_api_earnings_fundamental_coverage_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fundamental Coverage",
         "tags": [
           "earnings"
         ]

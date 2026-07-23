@@ -1,169 +1,116 @@
-"""Attaching ISINs to an AIRS account's holdings.
+"""One AIRS account's holdings: identity, Class, and the price check.
 
-Every fixture is real, from BUS_Defensief_Dyn <-> BUS_Defensief_FX on 2026-07-16. Each test
-below corresponds to a mechanism that was measured FAILING before it was added — none of these
-are hypothetical.
+⚠ THIS FILE USED TO PIN A FUZZY NAME MATCHER — ~200 lines of scoring, 1:1 assignment and refusal
+logic that recovered each holding's ISIN from a PAIRED model portfolio. All of it was deleted
+2026-07-23, when the Vermogensoverzicht started carrying `ISIN-code`, and its tests went with it.
+The four mechanisms and their measured failures are recorded in the module docstring rather than
+here, because a test for code that no longer exists is a test nobody can run.
+
+What remains is what the pairing never provided: deduping the account, classifying the instrument
+from the asset grid, and checking OUR price against AIRS's implied one.
 """
 from __future__ import annotations
 
+import pytest
+
 from routers._airs_holding_isin import (
-    _WEAK_NAME, _assign, _dedupe, _norm, _score, pairing_refused,
+    BUCKET_ALTS,
+    BUCKET_BONDS,
+    BUCKET_CASH,
+    BUCKET_EQUITY,
+    BUCKET_EQUITY_ETF,
+    _dedupe,
+    classify_bucket,
 )
 
 
-def P(fonds, isin=None):
-    return {"fonds": fonds, "isin": isin}
-
-
-class TestTheNameMatchNeedsEveryNameWeHave:
-    """The model's `Fonds` is a hand-typed short label. Alone, it cannot find these at all."""
-
-    def test_a_renamed_fund_range_resolves_only_via_the_isins_own_name(self):
-        """`Xtrackers World Utilities EUR` vs the model's `db x-track MSCI W Utilit` share NOT
-        ONE WORD — DWS renamed db x-trackers to Xtrackers. Only Yahoo's name bridges it."""
-        pos = P("db x-track MSCI W Utilit", "IE00BM67HQ30")
-        bare = _score("Xtrackers World Utilities EUR", pos, {})
-        rich = _score("Xtrackers World Utilities EUR", pos,
-                      {"IE00BM67HQ30": {"name": "Xtrackers MSCI World Utilities UCITS ETF"}})
-        # Measured: 45.3 off the model's label alone (it shares only "utilit"/"eur" — the brand
-        # word is absent), against 78 through Yahoo's. 45 is deep in the zone where an unrelated
-        # instrument scores just as well.
-        assert bare < 50, f"the model's own label cannot identify this fund (got {bare})"
-        assert rich > 70
-        assert rich - bare > 25
-
-    def test_the_isin_side_name_can_contradict_the_models_label(self):
-        """The model calls IE000A0RC215 `Invesco BulletShares 29`; the instrument's own name
-        says 2028, and so does the account. The model's label is the wrong one — which is
-        exactly why the ISIN's name has to be in the pool."""
-        pos = P("Invesco BulletShares 29", "IE000A0RC215")
-        grid = {"IE000A0RC215": {"leonteq_name": "IVZ BULLETSHARES 2028 USD D"}}
-        assert _score("Invesco BulletShares 2028 USD Corporate Bond ETF", pos, grid) > \
-            _score("Invesco BulletShares 2028 USD Corporate Bond ETF", pos, {})
-
-
-class TestNormalisationKeepsTokens:
-    def test_spaces_are_kept_so_token_sort_still_has_tokens(self):
-        """⚠ Stripping spaces silently degrades `token_sort_ratio` to a character ratio. That is
-        not a style point: it is what let `Vanguard ESG Global Corp Bond` outscore the truth
-        against the iShares row."""
-        assert _norm("iShares Global Corp Bond ETF EUR H Dist") == "ishares global corp bond etf eur h dist"
-        assert " " in _norm("Berkshire Hathaway - B")
-
-
-class TestTheAssignmentIsGlobalNotPerRow:
-    """⚠ THE failure this module exists to prevent."""
-
-    def test_two_holdings_cannot_take_the_same_model_row(self):
-        """Real scores. Per-row greedy sends BOTH corporate-bond ETFs to column 0 — the
-        Vanguard one wins its own best at 74 there, beating its true row by 5. A global
-        assignment cannot double-book, so both land right."""
-        #                     iShares row   Vanguard row
-        scores = [[80.0, 60.0],    # iShares Global Corp Bond (account)
-                  [74.0, 69.0]]    # Vanguard ESG Global Corp Bond (account)
-        out = _assign(scores)
-        assert out[0] == 0
-        assert out[1] == 1, "the Vanguard holding must not be given the iShares row"
-
-    def test_a_low_score_still_wins_by_elimination(self):
-        """`Effectenrekening` -> `Liquiditeiten` scores 28 — cash under two unrelated Dutch
-        words — and is CORRECT, because everything else is taken. A score floor would drop it."""
-        scores = [[90.0, 20.0],
-                  [30.0, 28.0]]
-        out = _assign(scores)
-        assert out[1] == 1
-
-    def test_every_holding_gets_at_most_one_row_and_vice_versa(self):
-        scores = [[50.0, 50.0, 50.0], [50.0, 50.0, 50.0]]
-        out = _assign(scores)
-        assert len(out) == 2
-        assert len(set(out.values())) == 2
-
-
 class TestTheAccountBillsOneInstrumentOnSeveralLines:
-    def test_duplicate_lines_are_one_instrument(self):
-        """BUS_Defensief_Dyn lists `6,5% Rabobank Certificaten 14-perp.` at 2.60% AND 0.01%:
-        41 rows, 40 instruments. Left alone, the 1:1 assignment must place the spare, and it
-        put it on an unrelated orphan at score 33."""
-        rows = [
-            {"holding_name": "6,5% Rabobank Certificaten 14-perp.", "quantity": 26900,
-             "current_value_eur": 30354.0, "weight": 0.026},
-            {"holding_name": "6,5% Rabobank Certificaten 14-perp.", "quantity": 26900,
-             "current_value_eur": 83.0, "weight": 0.0001},
-            {"holding_name": "ASML Holding", "quantity": 27, "current_value_eur": 41834.0,
-             "weight": 0.0359},
-        ]
-        out = _dedupe(rows)
-        assert len(out) == 2
-        rabo = next(r for r in out if "Rabobank" in r["holding_name"])
-        assert rabo["lines"] == 2
-        assert rabo["current_value_eur"] == 30437.0      # summed, not dropped
-        assert rabo["quantity"] == 53800
-        assert next(r for r in out if r["holding_name"] == "ASML Holding")["lines"] == 1
+    """⚠ AIRS lists one instrument on several rows — `6,5% Rabobank Certificaten 14-perp.` at
+    2.60% AND 0.01%. Two rows for one instrument is two a reader has to reconcile, and every
+    per-holding figure (weight, value, income) would be split across them."""
 
-    def test_a_single_line_holding_is_untouched(self):
-        out = _dedupe([{"holding_name": "Nvidia", "quantity": 148, "current_value_eur": 27573.0,
-                        "weight": 0.0237}])
-        assert out[0]["lines"] == 1
-        assert out[0]["quantity"] == 148
+    def test_lines_are_merged_and_counted(self):
+        rows = _dedupe([
+            {"holding_name": "Rabobank", "quantity": 100, "weight": 0.026,
+             "current_value_eur": 2600.0, "start_value_eur": 2500.0},
+            {"holding_name": "Rabobank", "quantity": 1, "weight": 0.0001,
+             "current_value_eur": 10.0, "start_value_eur": 9.0},
+        ])
+        assert len(rows) == 1
+        assert rows[0]["lines"] == 2
+        assert rows[0]["quantity"] == 101
+        assert rows[0]["current_value_eur"] == 2610.0
+        assert rows[0]["weight"] == pytest.approx(0.0261)   # float sum, not a fixed-point one
+
+    def test_a_single_line_is_untouched_and_still_says_so(self):
+        rows = _dedupe([{"holding_name": "ASML Holding", "quantity": 27,
+                         "current_value_eur": 41834.0}])
+        assert len(rows) == 1 and rows[0]["lines"] == 1
+
+    def test_a_nameless_row_is_dropped(self):
+        assert _dedupe([{"holding_name": "  ", "quantity": 1}]) == []
 
 
-class TestAPairingTheModelCannotSupportIsRefused:
-    """⚠ A 1:1 ASSIGNMENT MUST PLACE EVERY HOLDING, EVEN ONE THE MODEL DOES NOT CONTAIN.
-
-    When the stored model snapshot predates a swap in AIRS, the book holds an instrument with no
-    position to pair with — and the assignment cannot say "none". It hands the holding whatever
-    orphan is left, at any score, and we published that ISIN as the answer.
-
-    Measured 2026-07-23. AIRS's Fixed portfolios now hold `Invesco Wld EW ETF Acc`
-    (IE000OEF25S1); our snapshots (positions_datum 2025-04-28) still hold `Ish DJS GSD 100`
-    (DE000A0F5UH1) — and all four BUS_* books reported the Invesco holding AS DE000A0F5UH1.
-    BUS_WTS_Duurzaam_Dyn (snapshot 2025-02-14) scattered six more.
+class TestTheClassComesFromTheGridAndTheName:
+    """⚠ AIRS's `categorie` WAS DROPPED with the pairing (2026-07-23), so the asset grid and the
+    holding's name are all that is left. Measured across all 668 holdings, removing it moved 58
+    rows; two whole groups were real regressions and are recovered here from yfinance — the same
+    source the Sector column already shows.
     """
 
-    # (holding, declined position, score) — every one a DIFFERENT instrument. Real rows.
-    WRONG = [
-        ("Invesco World Equal Weight ETF Acc", "Ish DJS GSD 100", 34.5),
-        ("Merck & Co", "Amazon.com", 36.4),
-        ("Chipotle Mexican Grill", "Apple", 38.7),
-        ("Eli Lilly & Co.", "Netflix", 43.5),
-        ("Novo Nordisk", "Nvidia", 43.5),
-        ("Lululemon Athletica", "Alphabet - C", 44.4),
-        ("Adobe Systems", "Zoetis - A", 47.6),
-    ]
-    # The genuine findings: the row pairing is RIGHT and the ISIN on it is wrong (share class,
-    # venue). Refusing these would throw away what the price check is FOR.
-    FINDINGS = [
-        ("iShares Global Corp Bond ETF EUR H Dist", "iShs Glb Crp Bond ETF EU", 80.5),
-        ("Samsung Electronics", "Samsung Electron", 91.4),
-        ("Taiwan Semiconductor Manufact.", "Taiwan Semicond Manuf", 98.2),
-        ("SK Hynix Inc", "SK Hynic", 100.0),
-        ("Indutrade AB", "Indutrade AB", 100.0),
-        ("3i Group", "3i Group", 100.0),
-    ]
+    def _grid(self, **kw):
+        return {"asset_class": kw.get("asset_class"), "sector": kw.get("sector"),
+                "name": kw.get("name"), "leonteq_name": None, "leonteq_product_type": None}
 
-    def test_a_wrong_instrument_is_refused_rather_than_published(self):
-        for holding, declined, score in self.WRONG:
-            assert pairing_refused("price_mismatch", score), \
-                f"{holding} was published as {declined} (score {score})"
+    def test_a_reit_is_alternatives_not_an_ordinary_equity(self):
+        """40 holdings — Simon Property, Prologis, Welltower, Aedifica, Vonovia… AIRS called them
+        `VAS`; yfinance calls the sector `Real Estate`, which is the same fact."""
+        g = self._grid(asset_class="equity", sector="Real Estate", name="Simon Property Group")
+        assert classify_bucket(None, False, "US8288061091", "Simon Property Group", g) == BUCKET_ALTS
 
-    def test_a_real_share_class_finding_survives(self):
-        """⚠ `unmatched` and `price_mismatch` are OPPOSITE findings, not degrees of one."""
-        for holding, pos, score in self.FINDINGS:
-            assert not pairing_refused("price_mismatch", score), \
-                f"{holding} -> {pos} is a real finding, not a bad pairing (score {score})"
+    def test_the_real_estate_test_runs_BEFORE_the_equity_test(self):
+        """⚠ Order decides it: a REIT's grid asset_class IS `equity`, so an equity-first branch
+        returns Equity and the sector is never consulted."""
+        g = self._grid(asset_class="equity", sector="Real Estate", name="Prologis")
+        assert classify_bucket(None, False, "US74340W1036", "Prologis", g) != BUCKET_EQUITY
 
-    def test_the_two_populations_do_not_overlap(self):
-        """The rule is only safe because the measured gap is wide and empty — 47.6 to 80.5, with
-        the threshold inside it. If a future account lands in that gap, this rule needs evidence
-        before it is widened, not a nudged constant."""
-        assert max(s for _, _, s in self.WRONG) < _WEAK_NAME < min(s for _, _, s in self.FINDINGS)
+    def test_a_bond_etf_missing_from_the_grid_is_still_bonds(self):
+        """⚠ `iShares iBonds 2032 Term Corp UCITS ETF USD` is not in asset_grid at all, and
+        `\\bbond` does NOT match "iBonds" — there is no word boundary before the b. It classified
+        as an equity ETF until `ibond` was added."""
+        assert classify_bucket(None, True, "IE000XYZ12345",
+                               "iShares iBonds 2032 Term Corp UCITS ETF USD", {}) == BUCKET_BONDS
 
-    def test_neither_signal_alone_may_refuse(self):
-        """⚠ THE CONJUNCTION IS THE WHOLE RULE."""
-        # A weak name that the price did not contradict. `Effectenrekening` -> `Liquiditeiten`
-        # scores 27.6 and is RIGHT — cash, by elimination.
-        assert not pairing_refused("unpriced", 27.6)
-        assert not pairing_refused("ok", 27.6)
-        # And a contradicted price with a name that agrees is the finding above, not a bad pair.
-        assert not pairing_refused("price_mismatch", 100.0)
+    def test_a_bond_etf_the_grid_calls_equity_is_still_bonds(self):
+        """⚠ `iShares Euro HY Corp Bd ETF EUR` sits in the grid as asset_class 'equity',
+        sector 'equity' — simply wrong for a bond fund. "Bd" is the only bond tell on the row."""
+        g = self._grid(asset_class="equity", sector="equity", name="iShares Euro HY Corp Bd ETF")
+        assert classify_bucket(None, True, "IE00B66F4759",
+                               "iShares Euro HY Corp Bd ETF EUR", g) == BUCKET_BONDS
+
+    def test_fixed_income_in_the_name_is_a_bond_tell(self):
+        assert classify_bucket(None, False, "NL000FRESH01",
+                               "Fresh Fixed Income Fund", {}) == BUCKET_BONDS
+
+    def test_bd_is_word_bounded_so_it_cannot_fire_inside_a_word(self):
+        g = self._grid(asset_class="equity", sector="Healthcare", name="Abbott Laboratories")
+        assert classify_bucket(None, False, "US0028241000", "Abbott Laboratories", g) == BUCKET_EQUITY
+
+    def test_an_ordinary_equity_is_untouched(self):
+        g = self._grid(asset_class="equity", sector="Technology", name="ASML Holding NV")
+        assert classify_bucket(None, False, "NL0010273215", "ASML Holding", g) == BUCKET_EQUITY
+
+    def test_a_fund_with_no_bond_tell_is_an_equity_etf(self):
+        g = self._grid(asset_class="etf", sector="etf", name="iShares Core MSCI World UCITS ETF")
+        assert classify_bucket(None, True, "IE00B4L5Y983",
+                               "iShares Core MSCI World", g) == BUCKET_EQUITY_ETF
+
+    def test_cash_resolves_with_no_isin_and_no_grid_row(self):
+        """The cash line has no ISIN at all, so its name is the only thing that can identify it."""
+        assert classify_bucket(None, False, None, "Effectenrekening", {}) == BUCKET_CASH
+        assert classify_bucket(None, False, None, "Liquiditeiten", {}) == BUCKET_CASH
+
+    def test_nothing_decides_means_unclassified_not_a_guess(self):
+        """⚠ An honest "unsure". Folding it into Equity — the bucket a reader would least
+        question — is how an unknown instrument becomes a confident wrong answer."""
+        assert classify_bucket(None, False, "XX0000000000", "House Product", {}) == "Unclassified"

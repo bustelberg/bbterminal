@@ -5,14 +5,14 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { useFxToEur } from '../../../lib/hooks/useFxToEur';
 import InfoTip from '../InfoTip';
-import type { ChartCadence, MetricRow } from '../earnings/types';
+import { MC, type ChartCadence, type MetricRow } from '../earnings/types';
 import { SNAPSHOT_BAND_CHARTS } from '../earnings/snapshotBandCharts';
 import BandScorecard from '../earnings/BandScorecard';
 import ForwardPEChart from '../earnings/ForwardPEChart';
 import RelativeGrowthChart from '../earnings/RelativeGrowthChart';
 import FCFShareChart from '../earnings/FCFShareChart';
 import MetricBandChart from '../earnings/MetricBandChart';
-import SnapshotStats from '../earnings/SnapshotStats';
+import BlendDrilldownModal from './BlendDrilldownModal';
 
 /** The full /earnings chart suite, reused inside the /portfolios Fundamental
  * modal for a SINGLE company. Data comes from the company-keyed earnings
@@ -55,11 +55,19 @@ function ChartCard({ title, info, children }: { title: string; info?: string; ch
   );
 }
 
-export default function FundamentalCharts({ isin, name }: { isin: string; name?: string | null }) {
+export default function FundamentalCharts({ isin, name, blend }: {
+  isin?: string;
+  name?: string | null;
+  /** A PORTFOLIO instead of one company. The blend endpoint returns the identical payload shape,
+   *  so every chart below renders unchanged — see the module docstring. */
+  blend?: { basket?: { holdings: { isin: string; weight: number; name?: string }[] }; portfolioId?: number };
+}) {
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [cadence, setCadence] = useState<ChartCadence>('annual');
   const [hideOutliers, setHideOutliers] = useState(false);
-  const [snapshotOpen, setSnapshotOpen] = useState(false);
+  /** The clicked point, or null. Portfolio-only — see `drill` below. */
+  const [drilled, setDrill] = useState<
+    { code: string; period: string; title: string; format?: (v: number) => string } | null>(null);
   const deferredCadence = useDeferredValue(cadence);
 
   useEffect(() => {
@@ -68,7 +76,17 @@ export default function FundamentalCharts({ isin, name }: { isin: string; name?:
     (async () => {
       setState({ kind: 'loading' });
       try {
-        const r = await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin)}/metrics`, { signal: ctrl.signal });
+        // ⚠ ONE payload shape, two sources. A portfolio is fetched as a blended pseudo-company so
+        // nothing downstream has to know which it is.
+        const r = blend
+          ? await apiFetch(`${API_URL}/api/earnings/fundamental-blend-metrics`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(blend.basket
+              ? { holdings: blend.basket.holdings.map((h) => ({ isin: h.isin, name: h.name, weight: h.weight })) }
+              : { portfolio_id: blend.portfolioId }),
+            signal: ctrl.signal,
+          })
+          : await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin ?? '')}/metrics`, { signal: ctrl.signal });
         if (cancelled) return;
         if (r.status === 404) { setState({ kind: 'none' }); return; }
         const b = await r.json().catch(() => null);
@@ -80,7 +98,7 @@ export default function FundamentalCharts({ isin, name }: { isin: string; name?:
       }
     })();
     return () => { cancelled = true; ctrl.abort(); };
-  }, [isin]);
+  }, [isin, blend]);
 
   const currency = state.kind === 'ready' ? state.data.currency : null;
   const fx = useFxToEur(currency);
@@ -108,11 +126,19 @@ export default function FundamentalCharts({ isin, name }: { isin: string; name?:
 
   const nameA = name ?? undefined;
 
+  /** ⚠ Only a PORTFOLIO can be drilled into, and only on a chart whose line is one stored metric.
+   *  A single company has nothing to decompose (it IS the holding), and a derived chart —
+   *  interest coverage, FCF/NI, PEG — has no stored code the backend could take apart, so
+   *  clicking it would open a panel explaining a different number than the one on screen.
+   *  Returning `undefined` also removes the pointer cursor, so the affordance matches. */
+  const drill = (code: string | undefined, title: string, format?: (v: number) => string) =>
+    (blend && code ? (period: string) => setDrill({ code, period, title, format }) : undefined);
+
   return (
     <div className="space-y-4">
       {/* Cadence + outlier toggles — mirror the /earnings chart controls. */}
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5" title="Quarterly matches the Snapshot Stats values; Annual uses fiscal-year figures.">
+        <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5" title="Quarterly reads quarterly observations; Annual uses fiscal-year figures.">
           {(['quarterly', 'annual'] as ChartCadence[]).map((c) => (
             <button
               key={c}
@@ -145,7 +171,8 @@ export default function FundamentalCharts({ isin, name }: { isin: string; name?:
 
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
         <ChartCard title="Forward P/E" info={PE_INFO}>
-          <ForwardPEChart metrics={metrics} nameA={nameA} hideOutliers={hideOutliers} />
+          <ForwardPEChart metrics={metrics} nameA={nameA} hideOutliers={hideOutliers}
+            onPointClick={drill(MC.FWD_PE, 'Forward P/E', (v) => `${v.toFixed(1)}x`)} />
         </ChartCard>
 
         <ChartCard title="Share Price vs. Owners Earnings" info={RG_INFO}>
@@ -153,7 +180,8 @@ export default function FundamentalCharts({ isin, name }: { isin: string; name?:
         </ChartCard>
 
         <ChartCard title="FCF / share" info={FCF_INFO}>
-          <FCFShareChart metrics={metrics} nameA={nameA} toEurA={fx.toEur} />
+          <FCFShareChart metrics={metrics} nameA={nameA} toEurA={fx.toEur}
+            onPointClick={drill(MC.FCF_PS, 'FCF / share')} />
         </ChartCard>
 
         {SNAPSHOT_BAND_CHARTS.map((cfg) => (
@@ -171,28 +199,23 @@ export default function FundamentalCharts({ isin, name }: { isin: string; name?:
               cadenceLabel={cfg.cadenceLabel}
               infoText={cfg.chartInfo}
               emptyText={cfg.emptyText}
+              onPointClick={drill(cfg.drilldownCode, cfg.title, cfg.format)}
             />
           </ChartCard>
         ))}
       </div>
 
-      {/* Snapshot Stats — collapsed by default, like the dashboard. */}
-      <div className="rounded-lg border border-neutral-800/40">
-        <button
-          type="button"
-          onClick={() => setSnapshotOpen((v) => !v)}
-          className="flex items-center gap-2 text-left w-full px-4 py-3"
-          aria-expanded={snapshotOpen}
-        >
-          <span className="text-fg-faint text-sm w-3">{snapshotOpen ? '▾' : '▸'}</span>
-          <h3 className="text-fg-strong text-sm font-medium">Snapshot Stats</h3>
-        </button>
-        {snapshotOpen && (
-          <div className="px-4 pb-4">
-            <SnapshotStats metrics={metrics} labelA={nameA} />
-          </div>
-        )}
-      </div>
+      {drilled && (
+        <BlendDrilldownModal
+          title={drilled.title}
+          metricCode={drilled.code}
+          period={drilled.period}
+          portfolioId={blend?.portfolioId}
+          basket={blend?.basket}
+          format={drilled.format}
+          onClose={() => setDrill(null)}
+        />
+      )}
     </div>
   );
 }

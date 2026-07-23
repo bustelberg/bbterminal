@@ -55,6 +55,7 @@ WHY AIRS AND NOT YFINANCE, HERE
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 
 from deps import supabase
 
@@ -150,6 +151,69 @@ def _year_perf() -> dict[str, dict]:
     return out
 
 
+def _direct_result(portefeuille: str, holding_names: set[str]):
+    """This account's dividend income, per instrument, from the stored Mutaties journal.
+
+    Returns `(attached_by_holding_name, sold_totals)` — the second being income from positions no
+    longer held, already rolled up.
+
+    ⚠ THE ROLL-UP HAPPENS HERE, NOT IN `account_holdings`, AND THAT IS DELIBERATE. That function
+    is guarded by a test forbidding the token `sum(` in its source, because summing the holdings
+    into a portfolio RETURN is the headline bug this module exists to prevent (see the module
+    docstring: it would have reported -5.85% on a book that made +46%). Adding euros of income is
+    a different and legitimate act, but the guard cannot tell them apart from source text — and a
+    crude guard on a real trap is worth more than a precise one nobody trusts, so the arithmetic
+    moves rather than the rule.
+
+    ⚠ AGGREGATED ON READ, NEVER STORED AS A TOTAL. The journal lines are the source; a stored
+    per-holding sum is a second source of truth that drifts from the rows it counts, and it could
+    not answer "which payments, on what dates" — the first thing anyone asks when a dividend figure
+    looks wrong.
+
+    ⚠ JOINED BY NAME, EXACTLY. This sheet carries no ISIN. Both `fonds` and `holding_name` are AIRS
+    strings truncated at the same 50 characters, so an exact match is sound — and nothing fuzzy
+    belongs here (see `_airs_holding_isin` for the price of fuzzy matching this join).
+    """
+    from airs_mutaties import Mutatie, attach, direct_result  # noqa: PLC0415
+
+    rows = (supabase.table("airs_mutatie")
+            .select("boekdatum,grootboek,fonds,omschrijving,amount_eur")
+            .eq("portefeuille", portefeuille).limit(5000).execute().data or [])
+    empty: dict = {"gross": None, "tax": None, "funds": None}
+    if not rows:
+        return {}, empty
+    muts = [Mutatie(
+        grootboek=r["grootboek"], fonds=r["fonds"], omschrijving=r.get("omschrijving") or "",
+        boekdatum=date.fromisoformat(str(r["boekdatum"])) if r.get("boekdatum") else None,
+        amount_eur=float(r["amount_eur"]),
+    ) for r in rows]
+    attached, orphans = attach(direct_result(muts), holding_names)
+    if not orphans:
+        return attached, empty
+    return attached, {
+        "gross": round(sum(d.gross_eur for d in orphans), 2),
+        "tax": round(sum(d.tax_eur for d in orphans), 2),
+        "funds": [d.fonds for d in orphans],
+    }
+
+
+def _model_weights(portefeuille: str) -> dict[str, dict]:
+    """This book's OWN model weights, keyed by holding name (`airs_model_weight`).
+
+    ⚠ NO PAIRING. These come from the dynamic portfolio's own MODEL report, so there is no
+    fixed portfolio to match it to and no guess to get wrong — which was the failure mode with the
+    worst blast radius here, since the risk variants of a strategy hold the same instruments and a
+    mis-pairing therefore looks entirely normal on every other column.
+
+    The cash-line rename is already applied at parse time (`airs_model.NAME_ALIASES`), so this is
+    a straight dictionary lookup on the holding's own name.
+    """
+    rows = (supabase.table("airs_model_weight")
+            .select("fonds,model_pct,actual_pct,drift_pct,drift_eur,buy,sell")
+            .eq("portefeuille", portefeuille).limit(1000).execute().data or [])
+    return {r["fonds"]: r for r in rows}
+
+
 def _holding_counts() -> tuple[dict[str, int], dict[str, str]]:
     """(holdings per account, that account's snapshot date) — off the freshest snapshot only."""
     rows = (supabase.table("airs_holding").select("portefeuille,as_of_date,holding_name")
@@ -220,6 +284,7 @@ def list_accounts() -> list[dict]:
 
 def account_holdings(portefeuille: str) -> dict:
     """One account's freshest snapshot: every position, with AIRS's own EUR values.
+    (helper below is used by this function; see `_direct_result`.)
 
     Each `ytd_pct` is a PRICE return — `Beginwaarde lopend jaar` is restated to the current
     quantity, so it is not contaminated by a purchase. It will NOT sum to the account's return:
@@ -236,6 +301,8 @@ def account_holdings(portefeuille: str) -> dict:
     as_of = max(str(r["as_of_date"]) for r in rows)
     snap = [r for r in rows if str(r["as_of_date"]) == as_of]
     snap.sort(key=lambda r: -(r.get("current_value_eur") or 0))
+    income, sold_income = _direct_result(portefeuille, {r["holding_name"] for r in snap})
+    model = _model_weights(portefeuille)
     # The YEAR's, to match the holdings beneath it: each holding's figure runs from
     # `Beginwaarde lopend jaar`, so pairing them with July's price result would set a
     # year of holdings against a month of portfolio.
@@ -248,6 +315,13 @@ def account_holdings(portefeuille: str) -> dict:
         "ytd_pct": perf.get("cumulatief_rendement"),
         "price_result_eur": perf.get("koersresultaat"),
         "income_eur": perf.get("opbrengsten"),
+        # ⚠ Income the holdings table CANNOT show. A position sold during the year paid real
+        # dividends and has no row left to carry them — measured, 3 of 27 funds and EUR 1,010 of
+        # BUS_Neutraal_Dyn's EUR 12,031. Summing the Direct result column and calling it the
+        # book's income would understate it with nothing on screen to say why.
+        "dividend_sold_eur": sold_income["gross"],
+        "dividend_sold_tax_eur": sold_income["tax"],
+        "dividend_sold_funds": sold_income["funds"],
         "rows": [{
             "holding_name": r["holding_name"],
             "quantity": r.get("quantity"),
@@ -273,6 +347,20 @@ def account_holdings(portefeuille: str) -> dict:
             "fund_result_eur": r.get("fund_result_eur"),
             "fx_result_eur": r.get("fx_result_eur"),
             "airs_result_pct": r.get("airs_result_pct"),
+            # The DIRECT result: what this instrument actually paid the book, from the Mutaties
+            # journal. ⚠ `dividend_eur` is GROSS and `dividend_tax_eur` is NEGATIVE (as AIRS books
+            # it), so net is their sum — they are two columns because a US name losing 15% and a
+            # Dutch one losing nothing is a fact about the holding, not rounding.
+            # ⚠ None, never 0.0, when the journal has no line for it: "paid nothing" and "we have
+            # not scanned this book's journal" are different claims and only one is safe to make.
+            "dividend_eur": (d.gross_eur if (d := income.get(r["holding_name"])) else None),
+            "dividend_tax_eur": (d.tax_eur if (d := income.get(r["holding_name"])) else None),
+            "dividend_payments": (d.payments if (d := income.get(r["holding_name"])) else None),
+            # The book own model weight, from ITS OWN MODEL report (no fixed-portfolio pairing).
+            # None = the model does not name this holding, which is drift worth seeing, not a 0%.
+            "model_pct": (m.get("model_pct") if (m := model.get(r["holding_name"])) else None),
+            "model_drift_pct": (m.get("drift_pct") if (m := model.get(r["holding_name"])) else None),
+            "model_actual_pct": (m.get("actual_pct") if (m := model.get(r["holding_name"])) else None),
         } for r in snap],
     }
 

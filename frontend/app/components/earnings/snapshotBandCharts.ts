@@ -28,6 +28,15 @@ export type SnapshotChartConfig = {
   format: (v: number) => string;
   axisFormat?: (v: number) => string;
   buildSeries: (m: MetricRow[], cadence: ChartCadence) => { date: string; value: number }[];
+  /** The single stored metric code this chart plots, when there IS one.
+   *
+   * ⚠ SET IT ONLY WHEN buildSeries READS ONE CODE. It is the key a portfolio drill-down asks the
+   * backend to decompose, and the backend can only decompose a code it stores. Three charts here
+   * are DERIVED — interest coverage (operating income / interest expense), FCF/NI (a ratio of two
+   * lines) and PEG (recomputed daily) — so no stored code explains their line. Naming one anyway
+   * would open a panel that decomposes a DIFFERENT number than the chart shows, which is the one
+   * failure a drill-down must not have. Absent = not clickable, which is the honest affordance. */
+  drilldownCode?: string;
 };
 
 const num2 = (v: number) => fmtNum(v, 2);
@@ -59,6 +68,7 @@ export const SNAPSHOT_BAND_CHARTS: SnapshotChartConfig[] = [
     band: { kind: 'lower', goodAtOrBelow: 0.5, poorAbove: 2 },
     format: num2,
     buildSeries: (m, cadence) => quarterlyPreferredSeries(m, MC.DEBT_TO_EQUITY, cadence),
+    drilldownCode: MC.DEBT_TO_EQUITY,
   },
 
   // ── Capital Intensity (lower is better) ──────────────────────────────────
@@ -73,6 +83,7 @@ export const SNAPSHOT_BAND_CHARTS: SnapshotChartConfig[] = [
     band: { kind: 'lower', goodAtOrBelow: 5, poorAbove: 15 },
     format: num2,
     buildSeries: (m, cadence) => quarterlyPreferredSeries(m, MC.CAPEX_TO_REV, cadence),
+    drilldownCode: MC.CAPEX_TO_REV,
   },
   {
     key: 'capex_ocf',
@@ -85,6 +96,7 @@ export const SNAPSHOT_BAND_CHARTS: SnapshotChartConfig[] = [
     band: { kind: 'lower', goodAtOrBelow: 30, poorAbove: 60 },
     format: num2,
     buildSeries: (m, cadence) => quarterlyPreferredSeries(m, MC.CAPEX_TO_OCF, cadence),
+    drilldownCode: MC.CAPEX_TO_OCF,
   },
 
   // ── Capital Allocation (higher is better, % points) ──────────────────────
@@ -100,6 +112,7 @@ export const SNAPSHOT_BAND_CHARTS: SnapshotChartConfig[] = [
     format: fmtPctPoints,
     axisFormat: axisPct,
     buildSeries: (m, cadence) => quarterlyPreferredSeries(m, MC.ROE, cadence),
+    drilldownCode: MC.ROE,
   },
   {
     key: 'roic',
@@ -113,6 +126,7 @@ export const SNAPSHOT_BAND_CHARTS: SnapshotChartConfig[] = [
     format: fmtPctPoints,
     axisFormat: axisPct,
     buildSeries: (m, cadence) => quarterlyPreferredSeries(m, MC.ROIC, cadence),
+    drilldownCode: MC.ROIC,
   },
 
   // ── Profitability ────────────────────────────────────────────────────────
@@ -128,6 +142,7 @@ export const SNAPSHOT_BAND_CHARTS: SnapshotChartConfig[] = [
     format: fmtPctPoints,
     axisFormat: axisPct,
     buildSeries: (m, cadence) => quarterlyPreferredSeries(m, MC.GROSS_MARGIN, cadence),
+    drilldownCode: MC.GROSS_MARGIN,
   },
   {
     key: 'net_margin',
@@ -141,6 +156,7 @@ export const SNAPSHOT_BAND_CHARTS: SnapshotChartConfig[] = [
     format: fmtPctPoints,
     axisFormat: axisPct,
     buildSeries: (m, cadence) => quarterlyPreferredSeries(m, MC.NET_MARGIN, cadence),
+    drilldownCode: MC.NET_MARGIN,
   },
   {
     key: 'fcf_ni',
@@ -171,6 +187,7 @@ export const SNAPSHOT_BAND_CHARTS: SnapshotChartConfig[] = [
     // Estimate code isn't an `annuals__` twin — quarterlyPreferredSeries falls
     // straight through to its annual-style series at either cadence.
     buildSeries: (m, cadence) => quarterlyPreferredSeries(m, MC.EPS_EST, cadence),
+    drilldownCode: MC.EPS_EST,
   },
 
   // ── Valuation (lower is better) ──────────────────────────────────────────

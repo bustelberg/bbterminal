@@ -375,6 +375,33 @@ def download_vermogensoverzicht_sync(
     return _download_report_sync(portfolio_name, datum_van, datum_tot, code)
 
 
+def download_mutaties_sync(portfolio_name: str, datum_van: str, datum_tot: str) -> bytes:
+    """Download the Mutaties (journal) Excel report — the book's dividend + withholding-tax lines.
+
+    ⚠ AN UNKNOWN `rapport_types` RETURNS ZERO BYTES, NOT AN ERROR. Probed 2026-07-23: `MUT` and
+    `TRANS` return an XLS; `MUTA`, `MUTATIES`, `MUTATIE`, `GRB`, `BOEK`, `JOURNAAL` all return an
+    EMPTY body. `_download_report_sync`'s length check is what turns that into a real failure
+    instead of a zero-row parse that reads as "this book earned no income".
+    """
+    from airs_mutaties import MUTATIES_RAPPORT_TYPE  # noqa: PLC0415  (avoid an import cycle)
+
+    code = os.environ.get("AIRS_MUTATIES_RAPPORT_TYPE", "").strip() or MUTATIES_RAPPORT_TYPE
+    return _download_report_sync(portfolio_name, datum_van, datum_tot, code)
+
+
+def download_model_sync(portfolio_name: str, datum_van: str, datum_tot: str) -> bytes:
+    """Download the MODEL report — a DYNAMIC portfolio's own model weights.
+
+    This is what retires the fixed<->dynamic pairing: the weights are scoped to the book itself,
+    so there is no second portfolio to guess a partner for. Same zero-bytes-on-a-wrong-code trap
+    as MUT; `_download_report_sync`'s length check is what makes that loud.
+    """
+    from airs_model import MODEL_RAPPORT_TYPE  # noqa: PLC0415  (avoid an import cycle)
+
+    code = os.environ.get("AIRS_MODEL_RAPPORT_TYPE", "").strip() or MODEL_RAPPORT_TYPE
+    return _download_report_sync(portfolio_name, datum_van, datum_tot, code)
+
+
 # CRM → Relaties → Alle relaties Excel export. There is NO direct export URL —
 # the "Naar XLS" button runs an onclick that sets a hidden `toXls=1` field on the
 # `editForm` and submits it (a POST). So we open the list page and click that

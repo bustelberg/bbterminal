@@ -20,7 +20,7 @@ export default function AssetChartModal({ row, onClose }: { row: AssetGridRow; o
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/60"
       onClick={onClose} role="dialog" aria-modal="true">
-      <div className="bg-card border border-neutral-800/40 rounded-xl shadow-xl w-[98vw] max-w-[1900px] max-h-[94vh] overflow-auto p-4"
+      <div className="bg-card border border-neutral-800/40 rounded-xl shadow-xl w-[80vw] h-[80vh] overflow-auto p-4"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0">

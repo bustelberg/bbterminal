@@ -182,13 +182,13 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
   const bandDropped = fair.reduce((n, s) => n + (s.dropped ?? 0), 0);
 
   return (
-    <div className="fixed inset-0 z-50 bg-scrim/60 flex items-start justify-center overflow-auto p-6"
+    <div className="fixed inset-0 z-50 bg-scrim/60 flex items-center justify-center p-6"
       onClick={onClose}>
       {/* A real dialog role: it is what a screen reader needs, and it is the only stable handle on
           this thing from the outside — `locator('div').filter({hasText})` resolves to the
           innermost match, which is the header, not the modal. */}
       <div role="dialog" aria-modal="true" aria-label={`Fundamentals for ${fonds}`}
-        className="bg-page rounded-xl border border-neutral-800/40 w-full max-w-6xl my-4"
+        className="bg-page rounded-xl border border-neutral-800/40 w-[80vw] h-[80vh] overflow-auto"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-neutral-800/40">
           <div className="min-w-0">

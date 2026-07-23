@@ -5,6 +5,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
+import { formatPct, visibleBuckets } from './composition';
 import { allocColor, bucketLabel } from './allocationColors';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
@@ -40,17 +41,18 @@ const AXIS_LABEL: Record<string, string> = {
 };
 
 const AXIS_NOTE: Record<string, string> = {
-  sector: 'Equity holdings by sector — bonds, cash and funds are left out (they have no equity sector).',
-  region: "Where the issuer IS — domicile, else its ISIN's country. Never the venue we price it on.",
-  currency: "The company's own reporting currency — NOT the venue we happen to price it on.",
+  sector: 'Equity holdings only. Bonds, cash and funds have no sector.',
+  region: "The issuer's domicile, else its ISIN country. Not the listing venue.",
+  currency: 'The reporting currency of the company. Not the listing currency.',
 };
 
-/** A bar's own value, direct-labelled. Empty for a zero — a "0%" label on an absent bucket is
- *  ink spent saying nothing, and it crowds the ones that matter. */
-const pct = (v: unknown) => {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? `${n.toFixed(0)}%` : '';
-};
+/** A bar's own value, direct-labelled.
+ *
+ * ⚠ IT COMES FROM `composition.ts`, WHICH ALSO DECIDES WHICH BUCKETS ARE SHOWN. A local formatter
+ * is how the filter broke once already: this rendered at `toFixed(0)` while the filter assumed one
+ * decimal, so a 0.2% bucket printed "0%" and survived a rule written to remove it. Same constant,
+ * both jobs. */
+const pct = formatPct;
 
 type Axis = NonNullable<ModelPortfolioAnalysis['axes']>[number];
 type Row = Axis['rows'][number];
@@ -200,8 +202,11 @@ function Chart({ axis, rows, benchmark, onBucket, selected }: {
   // so rather than draw the benchmark's sectors beside an empty portfolio.
   const sectorEmpty = axis === 'sector' && rows.every((r) => (r.portfolio_pct ?? 0) === 0);
   // Largest share first — a reader scans a ranked list, not the server's order.
-  const sorted = [...rows].sort((a, b) =>
-    (b.portfolio_pct ?? 0) - (a.portfolio_pct ?? 0) || (b.benchmark_pct ?? 0) - (a.benchmark_pct ?? 0));
+  // ⚠ Filtered to buckets with weight on AT LEAST ONE side, never "where the portfolio holds
+  // something": a bucket the book does not own but the benchmark does is an unowned region/sector,
+  // which is a finding, not an empty row. See `composition.ts`.
+  const sorted = visibleBuckets([...rows].sort((a, b) =>
+    (b.portfolio_pct ?? 0) - (a.portfolio_pct ?? 0) || (b.benchmark_pct ?? 0) - (a.benchmark_pct ?? 0)));
 
   return (
     <section className={`bg-card border rounded-xl p-4 ${
@@ -594,7 +599,8 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                         onClose={() => setWhy(null)} />
                     ) : bucket ? (
                       <BucketDetailPanel id={id ?? 0} benchmark={data.benchmark ?? 'SP500'}
-                        axis={bucket.axis} bucket={bucket.bucket} onClose={() => setBucket(null)} />
+                        axis={bucket.axis} bucket={bucket.bucket} source={source}
+                        onClose={() => setBucket(null)} />
                     ) : null}
                   </div>
                 )}

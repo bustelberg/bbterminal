@@ -109,6 +109,76 @@ def _save_holdings(portefeuille: str, as_of: str, holdings) -> int:
     return len(rows)
 
 
+def _save_mutaties(portefeuille: str, van: str, tot: str) -> int:
+    """Download and store this account's Mutaties journal for [van, tot] — its dividend income.
+
+    Delete-then-insert over the WHOLE account, not the window: the window is always "this year so
+    far", so a narrower re-scan that only deleted its own range would leave last run's rows for the
+    days it no longer covers and double-count them. One account, one current journal.
+
+    ⚠ A book with no dividends yet is an EMPTY journal, which is an answer, not a failure. The
+    caller treats a raised error as a failure, so a legitimately empty download must return 0.
+    """
+    from airs_mutaties import parse_mutaties  # noqa: PLC0415
+    from airs_scanner import download_mutaties_sync  # noqa: PLC0415
+
+    try:
+        raw = download_mutaties_sync(portefeuille, van, tot)
+    except RuntimeError as e:
+        # `_download_report_sync` raises "Response too small" for BOTH an unvalued/empty report
+        # and a dead session. The fleet loop logs it; we do not invent an empty journal, because
+        # "no dividends" and "we could not ask" must not look alike.
+        raise RuntimeError(f"Mutaties: {e}") from e
+    rows = [{
+        "portefeuille": portefeuille,
+        "boekdatum": m.boekdatum.isoformat() if m.boekdatum else None,
+        "grootboek": m.grootboek,
+        "fonds": m.fonds,
+        "omschrijving": m.omschrijving or None,
+        "amount_eur": m.amount_eur,
+        "amount_local": m.amount_local,
+        "currency": m.currency,
+        "fx_rate": m.fx_rate,
+    } for m in parse_mutaties(raw) if m.fonds and m.grootboek]
+    supabase.table("airs_mutatie").delete().eq("portefeuille", portefeuille).execute()
+    for i in range(0, len(rows), 200):
+        supabase.table("airs_mutatie").insert(rows[i:i + 200]).execute()
+    return len(rows)
+
+
+def _save_model_weights(portefeuille: str, van: str, tot: str) -> int:
+    """Download and store this book's OWN model weights (`rapport_types=MODEL`).
+
+    ⚠ THIS IS WHAT REPLACES THE FIXED↔DYNAMIC PAIRING. The weights are scoped to the dynamic
+    portfolio, so there is no second AirSPMS portfolio to guess a partner for — and no
+    mis-pairing that files a book's money under another strategy's name.
+
+    Delete-then-insert per account, so a position dropped from the model disappears instead of
+    lingering as a weight nothing holds.
+    """
+    from airs_model import model_total_pct, parse_model  # noqa: PLC0415
+    from airs_scanner import download_model_sync  # noqa: PLC0415
+
+    weights = parse_model(download_model_sync(portefeuille, van, tot))
+    if not weights:
+        return 0
+    total = model_total_pct(weights)
+    # ⚠ Measured at EXACTLY 100.000 on every book. A partial sheet understates every weight and
+    # looks entirely normal, so it is refused rather than stored.
+    if not (95.0 <= total <= 105.0):
+        raise RuntimeError(
+            f"MODEL percentages sum to {total}, not ~100 — refusing to store a partial model")
+    rows = [{
+        "portefeuille": portefeuille, "fonds": w.fonds, "model_pct": w.model_pct,
+        "actual_pct": w.actual_pct, "drift_pct": w.drift_pct, "drift_eur": w.drift_eur,
+        "buy": w.buy, "sell": w.sell, "model_value_eur": w.model_value_eur,
+    } for w in weights]
+    supabase.table("airs_model_weight").delete().eq("portefeuille", portefeuille).execute()
+    for i in range(0, len(rows), 200):
+        supabase.table("airs_model_weight").insert(rows[i:i + 200]).execute()
+    return len(rows)
+
+
 def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
     """Discover → download → parse → store, for every live portfolio. Serialized
     via `_LOCK` (a second trigger while one runs returns busy). Returns the final
@@ -151,7 +221,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             return dict(_STATUS)
 
         _STATUS["portfolios_found"] = len(names)
-        rendement_ok = vermogen_ok = holdings_total = 0
+        rendement_ok = vermogen_ok = holdings_total = mutaties_total = model_total = 0
         for i, name in enumerate(names, 1):
             _STATUS["message"] = f"{i}/{len(names)}: {name}…"
             # Rendement (ATT) → airs_performance. Independent of the holdings
@@ -172,6 +242,20 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             except Exception as e:
                 _STATUS["errors"].append(f"{name} (Vermogensoverzicht): {type(e).__name__}: {e}")
                 _log.warning("[airs_vermogen] %s Vermogensoverzicht failed: %s: %s", name, type(e).__name__, e)
+            # Mutaties (MUT) → airs_mutatie. Independent of the other two: a book's dividends are
+            # worth having even when its valuation is unavailable, and a shared try would lose them.
+            try:
+                mutaties_total += _save_mutaties(name, van, tot)
+            except Exception as e:
+                _STATUS["errors"].append(f"{name} (Mutaties): {type(e).__name__}: {e}")
+                _log.warning("[airs_vermogen] %s Mutaties failed: %s: %s", name, type(e).__name__, e)
+            # MODEL → airs_model_weight. The book's own strategy weights — this is what replaces
+            # the fixed↔dynamic pairing, so it runs for every account, paired or not.
+            try:
+                model_total += _save_model_weights(name, van, tot)
+            except Exception as e:
+                _STATUS["errors"].append(f"{name} (Model): {type(e).__name__}: {e}")
+                _log.warning("[airs_vermogen] %s Model failed: %s: %s", name, type(e).__name__, e)
 
         # CRM → Relaties → Alle relaties: one global export, OVERWRITING
         # airs_crm_relatie with the latest snapshot (shared with the dedicated
@@ -197,6 +281,8 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             "rendement_stored": rendement_ok,
             "vermogen_stored": vermogen_ok,
             "holdings_rows": holdings_total,
+            "mutatie_rows": mutaties_total,
+            "model_weight_rows": model_total,
             "crm_stored": crm_ok,
             "crm_bytes": crm_bytes,
             "crm_rows": crm_rows,
@@ -259,7 +345,7 @@ def refresh_one_portfolio(portefeuille: str) -> dict:
         today = date.today()
         van, tot = f"{today.year}-01-01", today.isoformat()
         errors: list[str] = []
-        rendement_ok = vermogen_ok = holdings = 0
+        rendement_ok = vermogen_ok = holdings = mutaties = model_weights = 0
         vermogen_as_of = tot
         # Independent — one report failing must not lose the other (same as the fleet loop).
         try:
@@ -277,11 +363,25 @@ def refresh_one_portfolio(portefeuille: str) -> dict:
         except Exception as e:  # noqa: BLE001
             errors.append(f"Vermogensoverzicht: {type(e).__name__}: {e}")
             _log.warning("[airs_vermogen] %s single Vermogensoverzicht failed: %s", portefeuille, e)
+        # Independent of the other two: a book's dividends are worth having even if its valuation
+        # failed, and losing them because the price report was unvalued would be silent.
+        try:
+            mutaties = _save_mutaties(portefeuille, van, tot)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"Mutaties: {type(e).__name__}: {e}")
+            _log.warning("[airs_vermogen] %s single Mutaties failed: %s", portefeuille, e)
+        try:
+            model_weights = _save_model_weights(portefeuille, van, tot)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"Model: {type(e).__name__}: {e}")
+            _log.warning("[airs_vermogen] %s single Model failed: %s", portefeuille, e)
         return {
             "status": "ok" if (rendement_ok or vermogen_ok) else "error",
             "portefeuille": portefeuille,
             "as_of": vermogen_as_of if vermogen_ok else tot,
             "holdings_rows": holdings,
+            "mutatie_rows": mutaties,
+            "model_weight_rows": model_weights,
             "rendement_stored": bool(rendement_ok),
             "vermogen_stored": bool(vermogen_ok),
             "errors": errors,

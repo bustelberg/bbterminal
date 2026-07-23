@@ -78,6 +78,7 @@ function ForwardPEChartInner({
   loadingB,
   breakdownA,
   breakdownB,
+  onPointClick,
 }: {
   metrics: MetricRow[];
   metricsB?: MetricRow[];
@@ -93,6 +94,11 @@ function ForwardPEChartInner({
    * silently rendering only A's line. */
   loadingB?: boolean;
   /** Per-member metrics when a side is a portfolio — ranked holdings in tooltip. */
+  /** Portfolio drill-down: click a point to decompose it into holdings. The chart reports the
+   * clicked period and nothing more — it does not know what a portfolio is. Omitted => not
+   * clickable, and no pointer cursor, so a chart that cannot be decomposed does not look like
+   * one that can. */
+  onPointClick?: (period: string) => void;
   breakdownA?: PortfolioMemberMetrics[];
   breakdownB?: PortfolioMemberMetrics[];
 }) {
@@ -243,7 +249,15 @@ function ForwardPEChartInner({
         <InfoTip text="Forward P/E = Price / Next-year EPS estimate. Lower = cheaper relative to expected earnings. 'Period avg' is the average Forward P/E across the period. When comparing two companies, 'Current' and 'Period avg' are measured over the date range common to both series, so the values stay directly comparable even if one company has a longer history (the lines still show each company's full history)." />
       </div>
       <ResponsiveContainer width="100%" height={280}>
-        <LineChart data={merged} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
+        <LineChart data={merged} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}
+          style={onPointClick ? { cursor: 'pointer' } : undefined}
+          onClick={onPointClick
+            ? (e: { activeLabel?: string | number }) => {
+              // recharts hands back the x-axis label; the blend is keyed on the fiscal YEAR.
+              const l = String(e?.activeLabel ?? '');
+              if (l.length >= 4) onPointClick(l.slice(0, 4));
+            }
+            : undefined}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
           <XAxis dataKey="date" tick={{ fontSize: 10, fill: chartTheme.axisTick }} tickFormatter={(v: string) => v.slice(0, 7)} />
           <YAxis tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: number) => `${v.toFixed(0)}x`} />

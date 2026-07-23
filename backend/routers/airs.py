@@ -630,7 +630,7 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
     )
 
     basis = weight_by if weight_by in ("model", "book") else "model"
-    src = source if source in ("model", "book") else "model"
+    src = source if source in ("model", "book") else "book"
     bucket_filter = bucket if bucket in BUCKET_ORDER else None
     return await compute_portfolio_analysis_async(portfolio_id, benchmark, basis, src, bucket_filter)
 
@@ -796,12 +796,19 @@ class ModelPortfolioAttribution(BaseModel):
             response_model=ModelPortfolioAttribution)
 async def airs_model_portfolio_attribution(
     portfolio_id: int, benchmark: str = "SP500", window: str = "ytd", axis: str = "sector",
-    source: str = "model",
+    source: str = "book",
 ):
     """Brinson-Fachler attribution of one model against a benchmark, over one window.
 
-    `source=book` decomposes the paired AIRS book's actual holdings + returns instead of the
-    yfinance model reconstruction (calendar-year window; benchmark stays yfinance).
+    ⚠ THE DEFAULT IS `book` — THE BEGINWAARDE START WEIGHTS, NOT THE MODEL'S DESIGN PERCENTAGES.
+    An attribution weighted by the design % (a flat 5.00% per name) decomposes a portfolio nobody
+    held: it assumes every position opened the year at its target weight and never drifted. Only
+    the start weights reproduce the book's realised return, because
+    `Σ start_i·ret_i / Σ start_i == (Σ cur − Σ start) / Σ start` is an identity — so with any
+    other weighting the "excess" being decomposed is not the excess the book earned.
+
+    `source=model` still gives the yfinance reconstruction of the model's nominal composition,
+    which is the right question for an unlinked model — it is just not what the book did.
     """
     from routers._airs_portfolio_attribution import (  # noqa: PLC0415
         compute_attribution_async,
@@ -1514,6 +1521,24 @@ class AirsAccountHolding(BaseModel):
     fund_result_eur: float | None = None       # Fondsresultaat — the performance leg (EUR)
     fx_result_eur: float | None = None         # Valutaresultaat — the FX leg (EUR)
     airs_result_pct: float | None = None       # Resultaat in % (a PERCENT, not a fraction)
+    # ── The DIRECT result: what the instrument PAID, from the Mutaties journal (`MUT`) ──────────
+    # ⚠ TWO COLUMNS, NOT A NET. `dividend_eur` is GROSS; `dividend_tax_eur` is the withholding,
+    # NEGATIVE as AIRS books it, so net is their sum. They are separate because "this US name lost
+    # 15% and this Dutch one lost nothing" is a fact about the holding, not a rounding detail.
+    # ⚠ None, never 0.0 — "paid nothing" and "this book's journal has not been scanned" are
+    # different claims and only one of them is safe to make.
+    dividend_eur: float | None = None
+    dividend_tax_eur: float | None = None
+    dividend_payments: int | None = None
+    # This book own model weight, from its OWN MODEL report — no fixed<->dynamic pairing, so
+    # no name guess that could file a book money under another strategy. None = the model does
+    # not name this holding (drift), never 0%.
+    model_pct: float | None = None
+    # AIRS's own `Werkelijk percentage` from the same sheet — what the book ACTUALLY holds, as the
+    # model report computes it. ⚠ Not the same field as `weight`/`airs_weight`, which come from the
+    # Vermogensoverzicht: two reports, two dates, so they can legitimately differ.
+    model_actual_pct: float | None = None
+    model_drift_pct: float | None = None
 
 
 class AirsAccountDetail(BaseModel):
@@ -1531,6 +1556,13 @@ class AirsAccountDetail(BaseModel):
     ytd_pct: float | None = None
     price_result_eur: float | None = None
     income_eur: float | None = None
+    # ⚠ INCOME THE TABLE CANNOT SHOW. A position sold during the year paid real dividends and has
+    # no holding row left to carry them — measured, 3 of 27 funds and EUR 1,010 of
+    # BUS_Neutraal_Dyn's EUR 12,031. Summing the Direct result column and calling it the book's
+    # income understates it, so the difference is stated instead of hidden.
+    dividend_sold_eur: float | None = None
+    dividend_sold_tax_eur: float | None = None
+    dividend_sold_funds: list[str] | None = None
     rows: list[AirsAccountHolding] = []
 
 
@@ -1649,7 +1681,10 @@ class AirsHoldingIsin(BaseModel):
       ok             the implied price agrees with that ISIN's own close (FX-converted)
       price_mismatch it does NOT — the ISIN is not what the book holds, or the book drifted
       unpriced       we have no series for it, so there is NOTHING confirming the name match
-      unmatched      NO ISIN: the model has no position for this holding at all
+      unmatched      NO ISIN: the model has no position for this holding
+      cross_listed   the prices differ, and they are SUPPOSED to — this ISIN's execution row is
+                     deliberately served by another instrument (`asset_isin_alias`), e.g. an ADR
+                     priced from the main company's listing. Not a fault, and not a pass either. at all
 
     `unpriced` is not a pass. The name matched and nothing checked it — which for a fund is
     exactly where the Acc/Inc share-class trap lives.
@@ -1664,16 +1699,13 @@ class AirsHoldingIsin(BaseModel):
 
     holding_name: str
     lines: int = 1                 # >1 = AIRS billed this instrument on several rows
-    # AIRS's own Beleggingscategorie, mapped. ⚠ It classifies what a holding INVESTS IN, not its
-    # wrapper — an equity ETF is Equity, a bond ETF is Bonds. `is_etf` is the second axis.
-    asset_class: str | None = None
-    # The smart asset-class label — Equity | Equity ETF | Bonds | Alternatives | Cash | Unclassified
-    # (Unclassified = genuinely unsure). AIRS's categorie first, then the asset grid + the name.
+    # The asset-class label — Equity | Equity ETF | Bonds | Alternatives | Cash | Unclassified
+    # (Unclassified = genuinely unsure). ⚠ From the ASSET GRID and the name only: AIRS's own
+    # `categorie` came from the paired model position and went with the pairing (2026-07-23).
     bucket: str | None = None
     # True when the bucket above came from a MANUAL override (asset_bucket_override), not the
     # calculated class — so the UI can badge it and offer "revert to Auto".
     bucket_overridden: bool | None = None
-    categorie: str | None = None
     # Geography straight from the execution instrument's yfinance fields (asset_grid), joined by
     # ISIN. `region` is the MSCI ACWI region. ⚠ For an ETF these describe its LISTING, not what it
     # holds — the grid cannot look inside a fund.
@@ -1690,30 +1722,24 @@ class AirsHoldingIsin(BaseModel):
     ytd_return_eur: float | None = None
     isin: str | None = None
     # WHERE the identity came from. The three are not equally strong and the digits look the same:
-    #   book     AIRS's own `ISIN-code` on the holding (since 2026-07-23) — exact, nothing inferred
-    #   override supplied BY HAND, because the model has no position for this holding
-    #   model    the fuzzy name match against the Fixed portfolio — a guess, hence `verdict`
-    # None when the row has no ISIN at all.
+    #   book     AIRS's own `ISIN-code` on the holding — exact, nothing inferred
+    #   override supplied BY HAND, for a row AIRS gives no ISIN for
+    # None when the row has no ISIN at all. There is no third source: the name match is gone.
     isin_source: str | None = None
     # True = the ISIN was supplied BY HAND (airs_holding_isin_override) because the model has no
     # position for this holding. A pinned identity is not a match and must not read as one — but it
     # is still price-checked, so `verdict` means exactly what it means on every other row.
     isin_overridden: bool | None = None
     isin_override_note: str | None = None
-    model_fonds: str | None = None
-    model_pct: float | None = None
-    # None on a pinned row: nothing was scored, and a 0.0 would read as "matched at no confidence".
-    name_score: float | None = None
-    weak_name: bool | None = None
     implied_price_eur: float | None = None
     our_price_eur: float | None = None
     price_ratio: float | None = None
     verdict: str
     our_instrument: str | None = None
-    # Only on `unmatched`: the leftover model position we DECLINED to pair this holding with, so
-    # the row can name its dead end instead of showing a blank (which reads as "cash").
-    rejected_isin: str | None = None
-    rejected_fonds: str | None = None
+    # Set when this ISIN is deliberately served by ANOTHER ISIN's instrument (an ADR priced from
+    # the main company's listing). ⚠ The two do not trade at the same number — TSMC is 1 ADR = 5
+    # ordinary shares — so a price difference on such a row is expected, not a finding.
+    served_by: str | None = None
 
 
 class AirsHoldingSegment(BaseModel):

@@ -1124,8 +1124,15 @@ export interface paths {
          * Airs Model Portfolio Attribution
          * @description Brinson-Fachler attribution of one model against a benchmark, over one window.
          *
-         *     `source=book` decomposes the paired AIRS book's actual holdings + returns instead of the
-         *     yfinance model reconstruction (calendar-year window; benchmark stays yfinance).
+         *     ⚠ THE DEFAULT IS `book` — THE BEGINWAARDE START WEIGHTS, NOT THE MODEL'S DESIGN PERCENTAGES.
+         *     An attribution weighted by the design % (a flat 5.00% per name) decomposes a portfolio nobody
+         *     held: it assumes every position opened the year at its target weight and never drifted. Only
+         *     the start weights reproduce the book's realised return, because
+         *     `Σ start_i·ret_i / Σ start_i == (Σ cur − Σ start) / Σ start` is an identity — so with any
+         *     other weighting the "excess" being decomposed is not the excess the book earned.
+         *
+         *     `source=model` still gives the yfinance reconstruction of the model's nominal composition,
+         *     which is the right question for an unlinked model — it is just not what the book did.
          */
         get: operations["airs_model_portfolio_attribution_api_airs_model_portfolios__portfolio_id__attribution_get"];
         put?: never;
@@ -3476,6 +3483,120 @@ export interface paths {
         get: operations["get_earnings_metrics_by_isin_api_earnings_by_isin__isin__metrics_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fundamental-blend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fundamental Blend
+         * @description A portfolio's fundamentals, blended — with the rule that each metric actually requires.
+         *
+         *     ⚠ THREE RULES, NOT ONE. A multiple aggregates HARMONICALLY (a portfolio's P/E is aggregate
+         *     price over aggregate earnings; the arithmetic mean of 10 and 100 is 55 against a true 18.2),
+         *     a yield/margin arithmetically, and a level only after rebasing to an index. See
+         *     `_fundamental_blend` for why each alternative is wrong.
+         *
+         *     Coverage rides along and is a FLOOR: a date under it carries no honest value and is omitted
+         *     rather than drawn as a dip.
+         */
+        post: operations["fundamental_blend_api_earnings_fundamental_blend_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fundamental-blend-breakdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fundamental Blend Breakdown
+         * @description The holdings behind ONE point of a blended chart, and the ones missing from it.
+         *
+         *     ⚠ IT LOADS ONE METRIC, NOT THE SUITE. The blend endpoint reads every charted code for every
+         *     holding; a drill-down needs one code (plus, for a forecast, the actual it is anchored on), so
+         *     it is a small read on click rather than a large one on open.
+         *
+         *     ⚠ IT DECOMPOSES THROUGH `blend_breakdown`, WHICH SHARES `_prepare` WITH THE LINE ITSELF. The
+         *     alternative — recomputing the members "the same way" here — is a second copy of the
+         *     harmonic/ratio/level rules, and a drill-down that quietly disagrees with the chart above it
+         *     is worse than none: it is checked once and trusted from then on.
+         */
+        post: operations["fundamental_blend_breakdown_api_earnings_fundamental_blend_breakdown_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fundamental-blend-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fundamental Blend Metrics
+         * @description The portfolio as ONE pseudo-company, in the exact shape `/by-isin/{isin}/metrics` returns.
+         *
+         *     Same payload, so the whole /earnings chart suite renders for a portfolio with no changes —
+         *     `{company_id, company_name, currency, metrics}` where `metrics` are blended across the covered
+         *     holdings, weighted by their portfolio weight.
+         *
+         *     ⚠ EVERY METRIC IS BLENDED BY THE RULE ITS OWN KIND REQUIRES (see `_fundamental_blend`): a
+         *     multiple harmonically, a ratio/margin arithmetically, and a LEVEL only after rebasing to an
+         *     index. Weighting Apple's revenue by 5% and ASML's by 3% is not a portfolio's revenue.
+         *
+         *     ⚠ `currency` IS NULL, DELIBERATELY. Members report in their own currencies, and a level series
+         *     has been rebased to an index anyway — there is no currency such a number could be in. The
+         *     charts' EUR conversion is driven off this field, so a currency here would relabel an index as
+         *     money. A null says "not a currency amount", which is the truth.
+         */
+        post: operations["fundamental_blend_metrics_api_earnings_fundamental_blend_metrics_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fundamental-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fundamental Coverage
+         * @description Which of a portfolio's holdings a fundamentals view can reach, BY WEIGHT, and why not.
+         *
+         *     ⚠ COVERAGE IS THE FIRST ANSWER, NOT A FOOTNOTE. Every holding that cannot be reached is weight
+         *     that drops out of any blend, and a blended figure over 61% of a book presented as the book's is
+         *     the same fabrication `MIN_COVERAGE_PCT` already guards against on the AIRS returns.
+         */
+        post: operations["fundamental_coverage_api_earnings_fundamental_coverage_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6171,6 +6292,12 @@ export interface components {
         AirsAccountDetail: {
             /** As Of */
             as_of?: string | null;
+            /** Dividend Sold Eur */
+            dividend_sold_eur?: number | null;
+            /** Dividend Sold Funds */
+            dividend_sold_funds?: string[] | null;
+            /** Dividend Sold Tax Eur */
+            dividend_sold_tax_eur?: number | null;
             /** Income Eur */
             income_eur?: number | null;
             /** Portefeuille */
@@ -6199,12 +6326,24 @@ export interface components {
             current_price_local?: number | null;
             /** Current Value Eur */
             current_value_eur?: number | null;
+            /** Dividend Eur */
+            dividend_eur?: number | null;
+            /** Dividend Payments */
+            dividend_payments?: number | null;
+            /** Dividend Tax Eur */
+            dividend_tax_eur?: number | null;
             /** Fund Result Eur */
             fund_result_eur?: number | null;
             /** Fx Result Eur */
             fx_result_eur?: number | null;
             /** Holding Name */
             holding_name: string;
+            /** Model Actual Pct */
+            model_actual_pct?: number | null;
+            /** Model Drift Pct */
+            model_drift_pct?: number | null;
+            /** Model Pct */
+            model_pct?: number | null;
             /** Quantity */
             quantity?: number | null;
             /** Start Value Eur */
@@ -6295,7 +6434,10 @@ export interface components {
          *       ok             the implied price agrees with that ISIN's own close (FX-converted)
          *       price_mismatch it does NOT — the ISIN is not what the book holds, or the book drifted
          *       unpriced       we have no series for it, so there is NOTHING confirming the name match
-         *       unmatched      NO ISIN: the model has no position for this holding at all
+         *       unmatched      NO ISIN: the model has no position for this holding
+         *       cross_listed   the prices differ, and they are SUPPOSED to — this ISIN's execution row is
+         *                      deliberately served by another instrument (`asset_isin_alias`), e.g. an ADR
+         *                      priced from the main company's listing. Not a fault, and not a pass either. at all
          *
          *     `unpriced` is not a pass. The name matched and nothing checked it — which for a fund is
          *     exactly where the Acc/Inc share-class trap lives.
@@ -6308,14 +6450,10 @@ export interface components {
          *     we declined; re-scan the model portfolio to fix it.
          */
         AirsHoldingIsin: {
-            /** Asset Class */
-            asset_class?: string | null;
             /** Bucket */
             bucket?: string | null;
             /** Bucket Overridden */
             bucket_overridden?: boolean | null;
-            /** Categorie */
-            categorie?: string | null;
             /** Continent */
             continent?: string | null;
             /** Country */
@@ -6343,12 +6481,6 @@ export interface components {
              * @default 1
              */
             lines?: number;
-            /** Model Fonds */
-            model_fonds?: string | null;
-            /** Model Pct */
-            model_pct?: number | null;
-            /** Name Score */
-            name_score?: number | null;
             /** Our Instrument */
             our_instrument?: string | null;
             /** Our Price Eur */
@@ -6359,18 +6491,14 @@ export interface components {
             quantity?: number | null;
             /** Region */
             region?: string | null;
-            /** Rejected Fonds */
-            rejected_fonds?: string | null;
-            /** Rejected Isin */
-            rejected_isin?: string | null;
             /** Sector */
             sector?: string | null;
+            /** Served By */
+            served_by?: string | null;
             /** Start Value Eur */
             start_value_eur?: number | null;
             /** Verdict */
             verdict: string;
-            /** Weak Name */
-            weak_name?: boolean | null;
             /** Weight */
             weight?: number | null;
             /** Ytd Return Eur */
@@ -7403,6 +7531,34 @@ export interface components {
              * @default millions
              */
             unit?: string;
+        };
+        /**
+         * FundamentalBreakdownRequest
+         * @description One blended point to take apart: which metric, which fiscal year.
+         */
+        FundamentalBreakdownRequest: {
+            /** Holdings */
+            holdings?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Metric Code */
+            metric_code: string;
+            /** Period */
+            period: string;
+            /** Portfolio Id */
+            portfolio_id?: number | null;
+        };
+        /**
+         * FundamentalCoverageRequest
+         * @description Either a model portfolio's id, or an explicit basket of (isin, weight).
+         */
+        FundamentalCoverageRequest: {
+            /** Holdings */
+            holdings?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Portfolio Id */
+            portfolio_id?: number | null;
         };
         /** FundamentalPoint */
         FundamentalPoint: {
@@ -13483,6 +13639,138 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fundamental_blend_api_earnings_fundamental_blend_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fundamental_blend_breakdown_api_earnings_fundamental_blend_breakdown_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalBreakdownRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fundamental_blend_metrics_api_earnings_fundamental_blend_metrics_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fundamental_coverage_api_earnings_fundamental_coverage_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

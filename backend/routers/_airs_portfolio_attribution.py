@@ -199,7 +199,7 @@ def _overlaps(h: dict, other_isins: set[str], other_names: list[str]) -> bool:
 
 def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                         window: str = "ytd", axis: str = "sector",
-                        source: str = "model") -> dict:
+                        source: str = "book") -> dict:
     """Brinson-Fachler over one window, plus the names that drove it.
 
     `source="book"` decomposes the paired AIRS BOOK's actual holdings + returns instead of the
@@ -475,6 +475,6 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
 
 async def compute_attribution_async(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                                     window: str = "ytd", axis: str = "sector",
-                                    source: str = "model") -> dict:
+                                    source: str = "book") -> dict:
     return await asyncio.to_thread(
         compute_attribution, portfolio_id, benchmark_label, window, axis, source)

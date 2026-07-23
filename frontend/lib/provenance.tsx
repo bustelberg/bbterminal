@@ -13,6 +13,8 @@
  * `title=` sits for ~1-2s) and can't be clipped by an overflow ancestor.
  */
 import InfoTip from '../app/components/InfoTip';
+import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
+import { trimStop } from './provenanceText';
 import { snapshotFreshness, type SnapshotTone } from './snapshotAge';
 
 export type SourceKey =
@@ -102,7 +104,7 @@ function ProvenanceCard({ source, asOf, note, how, kind }: {
               {kind === 'copied'
                 ? <>Copied straight from {s.label}{asOf ? ` (${asOf})` : ''}, as reported — not computed here.</>
                 : kind === 'formula'
-                  ? <>A formula on the data{how ? <>: <span className="text-fg">{how}</span></> : <> we compute here</>}.</>
+                  ? <>A formula on the data{how ? <>: <span className="text-fg">{trimStop(how)}</span></> : <> we compute here</>}.</>
                   : how}
             </span>
           </Field>
@@ -126,11 +128,7 @@ export function Provenance({ source, asOf, note, how, kind }: {
   return (
     <InfoTip content={<ProvenanceCard source={source} asOf={asOf} note={note} how={how} kind={kind} />}>
       <span
-        className={`ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full align-middle
-          text-[9px] font-semibold leading-none cursor-help transition-colors ${
-          stale
-            ? 'bg-warn-500/20 text-warn-600 hover:bg-warn-500/30'
-            : 'bg-accent-500/10 text-accent-500 hover:bg-accent-500/20'}`}
+        className={`ml-1 ${stale ? INFO_ICON_WARN : INFO_ICON}`}
         aria-label="data source and formula"
       >
         {stale ? '!' : 'i'}
