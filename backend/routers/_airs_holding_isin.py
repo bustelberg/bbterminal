@@ -56,6 +56,7 @@ from deps import supabase
 
 from timeseries import load_series
 
+from ._airs_portfolio_links import link_key, resolve_links
 from ._benchmark_index import _fx_to_eur, _rate
 
 # The cash line, which carries no ISIN and no category. Named explicitly: a blank category is NOT
@@ -250,6 +251,41 @@ def _last_closes(isins: list[str], as_of: str) -> dict[str, dict]:
     return out
 
 
+def _account_owner_model_id(portefeuille: str) -> int:
+    """The model an ACCOUNT runs — the account's analogue of "self" for the link gates.
+
+    Returns 0 when the account is unpaired: `resolve_links`/`linkable_context` compare it with
+    `p["id"]`, so a value no portfolio can have simply excludes nothing, which is the correct
+    behaviour for an account whose strategy we do not know.
+    """
+    try:
+        rows = (supabase.table("airs_account_model_link")
+                .select("portefeuille,model_portfolio_id").limit(500).execute().data or [])
+    except Exception:  # noqa: BLE001 — an unpaired account must still list its holdings
+        return 0
+    want = (portefeuille or "").strip().lower()
+    for r in rows:
+        if (r.get("portefeuille") or "").strip().lower() == want:
+            return int(r.get("model_portfolio_id") or 0)
+    return 0
+
+
+def _link_fields(lk, pf_names: dict[int, str]) -> dict:
+    """The four link columns a row carries, from a `ResolvedLink` (or nothing)."""
+    if lk is None:
+        return {"linked_portfolio_id": None, "linked_portfolio_name": None,
+                "link_source": None, "link_confidence": None, "link_reason": None}
+    return {
+        "linked_portfolio_id": lk.linked_portfolio_id,
+        "linked_portfolio_name": pf_names.get(lk.linked_portfolio_id) if lk.linked_portfolio_id else None,
+        "link_source": lk.source,
+        # ⚠ NULL for a manual link. A human choice is not a guess, and rendering it at "100%
+        # confidence" would put a decision and an estimate in the same visual language.
+        "link_confidence": lk.confidence,
+        "link_reason": lk.reason,
+    }
+
+
 def _load_isin_overrides() -> dict[str, dict]:
     """{normalised holding name: row} — the identities a human supplied by hand.
 
@@ -416,6 +452,26 @@ def resolve_account_isins(portefeuille: str) -> dict:
     ccys = {c["currency"] for c in closes.values() if c.get("currency")}
     fx = _fx_to_eur(ccys, (date.fromisoformat(as_of) - timedelta(days=21)).isoformat(), as_of) if ccys else {}
 
+    # A holding that IS another model portfolio, wrapped as a Leonteq certificate. Same fact, same
+    # store and same guesser as the model-portfolio positions table — `airs_model_portfolio_link`
+    # is keyed on the HOLDING, not on (parent, holding), so a link decided on either screen is the
+    # same decision and neither can disagree with the other.
+    #
+    # ⚠ THE SELF-EXCLUSION GATE NEEDS AN OWNER, AND AN ACCOUNT IS NOT A MODEL. `resolve_links`
+    # takes the id of the portfolio whose rows these are, so it can refuse a self-reference. Here
+    # the rows belong to an ACCOUNT, whose analogue is the model that account RUNS: a certificate
+    # of its own strategy is precisely the wrapper cycle the gate exists to stop (TOPS_STS_L holds
+    # 'Star Selection Index' at 100%). Unpaired account -> no self to exclude, and `guess_link`
+    # already treats an owner it cannot match as "exclude nothing".
+    owner_id = _account_owner_model_id(portefeuille)
+    link_rows = [{"isin": (h.get("isin") or (pin_of[i] or {}).get("isin")),
+                  "fonds": h.get("holding_name") or ""}
+                 for i, h in enumerate(holdings)]
+    links = resolve_links(supabase, owner_id, link_rows)
+    # ⚠ The PRETTY name, falling back to AIRS's `Portefeuille` code — see `linkable_context`.
+    pf_names = {p["id"]: (p.get("display_name") or p["name"]) for p in (
+        supabase.table("airs_model_portfolio").select("id,name,display_name").execute().data or [])}
+
     rows = []
     for i, h in enumerate(holdings):
         pin, mine = pin_of[i], h.get("isin") or None
@@ -480,6 +536,11 @@ def resolve_account_isins(portefeuille: str) -> dict:
             "price_ratio": round(ratio, 4) if ratio else None,
             "verdict": verdict,
             "our_instrument": (c or {}).get("name"),
+            # The model portfolio this holding IS, when it is one. `manual` is a human decision
+            # and always wins; `auto` is a guess recomputed on every read, so it can never rot
+            # against a renamed portfolio. A stored NULL is meaningful — "explicitly not a
+            # portfolio" — which is why a dismissed guess does not come back.
+            **_link_fields(links.get(link_key(isin, h.get("holding_name") or "")), pf_names),
             # Set when this ISIN is deliberately served by another's instrument. The UI needs it to
             # explain a price difference that is by design rather than flag it as a fault.
             "served_by": served_by,

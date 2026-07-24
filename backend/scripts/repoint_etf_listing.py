@@ -52,7 +52,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import deps  # noqa: E402, F401  — loads SUPABASE_* / OPENFIGI_API_KEY before anything else
 from asset_pipeline import openfigi, store  # noqa: E402
 from asset_pipeline.fast_resolve import _score_retry, build_candidates  # noqa: E402
-from asset_pipeline.resolve import resolve_analysis_instrument, same_company  # noqa: E402
+from asset_pipeline.resolve import (  # noqa: E402
+    resolve_analysis_instrument, same_company, sector_for,
+)
 
 # Below this a listing is not a market — it is a quote. (The thinnest we found: an iShares
 # multifactor ETF at EUR 4,787/day, against the same fund's primary line.)
@@ -122,7 +124,7 @@ def _consensus_anchor(names: list[str]) -> str | None:
 
 
 def _thin_etfs(sb, isin: str | None) -> list[dict]:
-    cols = ("isin,name,analysis_symbol,med_adv_eur,asset_class,status,wrapper,"
+    cols = ("isin,name,analysis_symbol,med_adv_eur,asset_class,sector,status,wrapper,"
             + ",".join(_FIGI_COLS))
     rows, off = [], 0
     while True:
@@ -302,7 +304,9 @@ def main() -> int:
                 "chosen": ai["analysis"], "underlying": None,
                 "reason": (f"{'Repointed' if old else 'Resolved'} to {new} — most liquid "
                            f"listing of this ISIN (OpenFIGI-anchored)."),
-                "analysis_note": ai["analysis_note"], "sector": ai["analysis_asset_class"],
+                "analysis_note": ai["analysis_note"],
+                # ⚠ NOT `analysis_asset_class` — see `sector_for`.
+                "sector": sector_for(new, ai["analysis_asset_class"], r.get("sector")),
                 "candles": None, "ibkr": None,
             }
             ids = store.upsert_asset(res, figi=fig)

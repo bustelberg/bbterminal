@@ -99,9 +99,9 @@ def _repoint(isin: str, symbol: str) -> bool:
     """Point one ISIN at one symbol. False when the symbol proves not to be a listing."""
     from . import openfigi, store  # noqa: PLC0415
     from .fast_resolve import _score_retry  # noqa: PLC0415
-    from .resolve import resolve_analysis_instrument  # noqa: PLC0415
+    from .resolve import resolve_analysis_instrument, sector_for  # noqa: PLC0415
 
-    row = (supabase.table("asset_grid").select("isin,asset_class")
+    row = (supabase.table("asset_grid").select("isin,asset_class,sector")
            .eq("isin", isin).limit(1).execute().data or [])
     if not row:
         _log.warning("[symbol_override] %s is not in the grid; skipped", isin)
@@ -129,7 +129,9 @@ def _repoint(isin: str, symbol: str) -> bool:
         "execution": ai["execution"], "analysis": ai["analysis"],
         "chosen": ai["analysis"], "underlying": None,
         "reason": f"asset_symbol_override: pinned to {symbol} by hand, not a ranked pick.",
-        "analysis_note": ai["analysis_note"], "sector": ai["analysis_asset_class"],
+        "analysis_note": ai["analysis_note"],
+        # ⚠ NOT `analysis_asset_class` — see `sector_for`.
+        "sector": sector_for(symbol, ai["analysis_asset_class"], row[0].get("sector")),
         "candles": None, "ibkr": None,
     }
     ids = store.upsert_asset(res, figi=fig)

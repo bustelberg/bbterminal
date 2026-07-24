@@ -929,8 +929,9 @@ def _shape_positions(raw: dict) -> ModelPortfolioPositions:
     _lrows = [{"isin": (str(r["ISINCode"]).strip() if r.get("ISINCode") else None),
                "fonds": (str(r["Fonds"]).strip() if r.get("Fonds") else "")} for r in rows]
     links = resolve_links(supabase, raw["portfolio_id"], _lrows)
-    _pf_names = {p["id"]: p["name"] for p in (
-        supabase.table("airs_model_portfolio").select("id,name").execute().data or [])}
+    # ⚠ The PRETTY name, falling back to AIRS's `Portefeuille` code — see `linkable_context`.
+    _pf_names = {p["id"]: (p.get("display_name") or p["name"]) for p in (
+        supabase.table("airs_model_portfolio").select("id,name,display_name").execute().data or [])}
 
     # Anchored on the composition BEING SHOWN — for the default (newest) snapshot that is the
     # portfolio's `positions_datum`, so these marks are the ones the table's YTD was computed
@@ -1131,7 +1132,13 @@ async def airs_model_portfolio_positions(
 
 class LinkablePortfolio(BaseModel):
     id: int
+    # ⚠ THE NAME WE GAVE IT, not AIRS's. `display_name` is the readable strategy name
+    # ("MerkenTopSelectie Beperkt Offensief"); `code` below is AIRS's own `Portefeuille`, capped
+    # at 24 characters ("BUS_MTS_BEPOFF_AFS"). The code is what you search AirSPMS for and the
+    # wrong thing to pick from a list. Only 42 of 95 portfolios have a display name, so `name`
+    # falls back to the code rather than going blank.
     name: str
+    code: str | None = None     # AIRS's own Portefeuille, kept so the row stays findable there
     omschrijving: str | None = None
     positions: int          # how many holdings it has — a 0 has nothing to look through to
 
@@ -1740,6 +1747,22 @@ class AirsHoldingIsin(BaseModel):
     # the main company's listing). ⚠ The two do not trade at the same number — TSMC is 1 ADR = 5
     # ordinary shares — so a price difference on such a row is expected, not a finding.
     served_by: str | None = None
+    # ── The model portfolio this holding IS, when it is one ────────────────────────────────
+    # Some holdings are not instruments: they are other model portfolios wrapped as a Leonteq
+    # certificate so they can be held like a security. They are CH ISINs Yahoo can never price
+    # (`verdict='unpriced'`, correctly — there is no listing for a structured product), so they
+    # sit here as dead rows whose weight leaves the coverage denominator. The link is what lets a
+    # reader see through the wrapper to the strategy behind it.
+    #
+    # ⚠ SAME STORE AS THE MODEL-PORTFOLIO POSITIONS TABLE (`airs_model_portfolio_link`), which is
+    # keyed on the HOLDING and not on (parent, holding). One certificate is the same portfolio
+    # whichever account or model holds it, so a link decided on either screen is the same
+    # decision — and the two screens cannot come to disagree.
+    linked_portfolio_id: int | None = None
+    linked_portfolio_name: str | None = None
+    link_source: str | None = None         # 'manual' (a decision) | 'auto' (a guess)
+    link_confidence: float | None = None   # 0-1; NULL for manual — a choice is not a guess
+    link_reason: str | None = None
 
 
 class AirsHoldingSegment(BaseModel):
@@ -1802,6 +1825,53 @@ async def airs_account_isins(portefeuille: str):
     from routers._airs_holding_isin import resolve_account_isins_async  # noqa: PLC0415
 
     return await resolve_account_isins_async(portefeuille)
+
+
+@router.get("/api/airs/accounts/{portefeuille}/linkable", response_model=LinkableContext)
+async def airs_account_linkable_portfolios(portefeuille: str):
+    """What an ACCOUNT's holdings may be linked to — the same dropdown the model-portfolio
+    positions table uses, and the same gates.
+
+    ⚠ "SELF" FOR AN ACCOUNT IS THE MODEL IT RUNS. `linkable_context` excludes the owner so a
+    portfolio cannot be its own holding; an account is not a model, so its analogue is the model
+    it is paired with on `/account-model-links`. A certificate of the account's own strategy is
+    exactly the wrapper cycle the gate exists to stop. An unpaired account excludes nothing,
+    which is right: we do not know its strategy, so we cannot say which link would be circular.
+
+    ONE call for the whole table — per row it would be a request per holding.
+    """
+    from routers._airs_holding_isin import _account_owner_model_id  # noqa: PLC0415
+    from routers._airs_portfolio_links import linkable_context  # noqa: PLC0415
+
+    owner = await asyncio.to_thread(_account_owner_model_id, portefeuille)
+    return await asyncio.to_thread(linkable_context, supabase, owner)
+
+
+@router.put("/api/airs/accounts/{portefeuille}/link")
+async def airs_set_account_holding_link(portefeuille: str, body: SetLinkRequest):
+    """Point one of an ACCOUNT's holdings at the model portfolio it IS (or, with a null target,
+    record that it is not one).
+
+    ⚠ THE SAME ROW THE MODEL-PORTFOLIO SCREEN WRITES. `airs_model_portfolio_link` is keyed on the
+    holding, not on (parent, holding) — one certificate is the same portfolio wherever it is held
+    — so this is not a second store for the same fact, and the two screens cannot disagree.
+    """
+    from routers._airs_holding_isin import _account_owner_model_id  # noqa: PLC0415
+
+    owner = await asyncio.to_thread(_account_owner_model_id, portefeuille)
+    return await asyncio.to_thread(_save_link, owner, body)
+
+
+@router.delete("/api/airs/accounts/{portefeuille}/link")
+async def airs_clear_account_holding_link(portefeuille: str, isin: str | None = None,
+                                          fonds: str = ""):
+    """Forget the human decision for this holding and fall back to the automatic guess. NOT the
+    same as linking it to nothing — that is a decision too, and is stored as a null.
+
+    `portefeuille` names which table the request came from; the row it clears is the same one the
+    model-portfolio screen writes, because the link is keyed on the holding.
+    """
+    return await airs_clear_portfolio_link(0, isin=isin, fonds=fonds)
 
 
 class HoldingIsinOverride(BaseModel):

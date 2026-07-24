@@ -230,6 +230,43 @@ def _holding_counts() -> tuple[dict[str, int], dict[str, str]]:
     return counts, newest
 
 
+
+def _hidden_accounts() -> set[str]:
+    """Accounts a human has removed from the list (`airs_account_hidden`), lower-cased.
+
+    ⚠ AN EMPTY SET ON FAILURE, NEVER AN EXCEPTION. This gates a read of the whole portfolios
+    page; a missing table or a transient error must show one row too many, not zero rows.
+    """
+    try:
+        rows = (supabase.table("airs_account_hidden").select("portefeuille")
+                .limit(500).execute().data or [])
+    except Exception:  # noqa: BLE001 — see above
+        return set()
+    return {(r["portefeuille"] or "").strip().lower() for r in rows if r.get("portefeuille")}
+
+
+
+def _live_accounts() -> set[str] | None:
+    """The accounts AIRS listed on the most recent discovery, lower-cased — or None.
+
+    ⚠ `None` MEANS "DO NOT FILTER", AND IS NOT THE SAME AS AN EMPTY SET. Before the first
+    discovery has run (a fresh database, or right after this table was added) the roster is empty.
+    Treating that as "no account exists" would blank the entire portfolios page; treating it as
+    "we do not know yet" shows what we have, which is the honest state. An empty set would mean
+    AIRS genuinely returned nothing, and `_record_roster` refuses to write that.
+    """
+    try:
+        rows = (supabase.table("airs_account_roster").select("portefeuille,last_seen_at")
+                .order("last_seen_at", desc=True).limit(2000).execute().data or [])
+    except Exception:  # noqa: BLE001 — a missing table must not blank the page
+        return None
+    if not rows:
+        return None
+    newest = rows[0]["last_seen_at"]
+    return {(r["portefeuille"] or "").strip().lower()
+            for r in rows if r.get("last_seen_at") == newest and r.get("portefeuille")}
+
+
 def list_accounts() -> list[dict]:
     """Every AIRS account with a reported return, freshest first.
 
@@ -238,8 +275,23 @@ def list_accounts() -> list[dict]:
     """
     perf = _year_perf()
     counts, newest = _holding_counts()
+    hidden = _hidden_accounts()
+    live = _live_accounts()
     out: list[dict] = []
     for name, r in perf.items():
+        # ⚠ Filtered HERE, at the one place the list is built, so every surface that reads it
+        # agrees. Hiding in the UI instead would leave the account in the API, in the
+        # account-model link picker and in anything else that enumerates accounts.
+        key = (name or "").strip().lower()
+        if key in hidden:
+            continue
+        # ⚠ AND THE SCRAPE DECIDES WHAT EXISTS. `perf` comes from `airs_performance`, which is
+        # append-only, so an account AIRS deactivated stays here for ever with a frozen snapshot
+        # (measured: 44 live, 50 listed — TOPS_AZTS_L, TOPS_MOTS_L and WTS test 1-4). The
+        # performance table answers "what did it make", which stays true after the book is gone;
+        # only the discovery pass answers "does AIRS still list it".
+        if live is not None and key not in live:
+            continue
         begin, end = r.get("beginvermogen"), r.get("eindvermogen")
         out.append({
             "portefeuille": name,

@@ -1123,8 +1123,12 @@ function SoundnessCell({ p, onOpen }: {
   );
 }
 
-type LinkOption = { id: number; name: string; omschrijving?: string | null; positions: number };
-type LinkCtx = { options: LinkOption[]; excluded_by_isin: Record<string, number[]> };
+/** ⚠ `name` IS THE PRETTY NAME, `code` IS AIRS'S. The backend already resolves
+ *  `display_name || Portefeuille`, so the dropdown shows the strategy a reader recognises while
+ *  the code stays available for looking the row up in AirSPMS. */
+type LinkOption = { id: number; name: string; code?: string | null;
+                    omschrijving?: string | null; positions: number };
+export type LinkCtx = { options: LinkOption[]; excluded_by_isin: Record<string, number[]> };
 
 /** The model portfolio a holding IS.
  *
@@ -1140,10 +1144,30 @@ type LinkCtx = { options: LinkOption[]; excluded_by_isin: Record<string, number[
  *
  * ⚠ The edit applies to the HOLDING, not to this row: the same certificate in the other ten
  * portfolios that hold it gets the same link. One fact, stored once. */
-function LinkCell({ p, ctx, ownerId, onSaved }: {
-  p: Position;
+/** Just the fields the link cell reads. Deliberately NOT `Position`: the ACCOUNT holdings table
+ *  carries the same five facts under one different name (`holding_name` rather than `fonds`), and
+ *  a cell tied to one table's row type can only be reused by faking the other table's shape. */
+export type LinkRow = {
+  isin?: string | null;
+  fonds?: string | null;
+  linked_portfolio_id?: number | null;
+  link_source?: string | null;
+  link_confidence?: number | null;
+  link_reason?: string | null;
+};
+
+export function LinkCell({ p, ctx, ownerId, linkBase, onSaved }: {
+  p: LinkRow;
   ctx: LinkCtx | null;
+  /** Excluded from the dropdown — a portfolio is not its own holding. For an ACCOUNT this is the
+   *  model it runs (0 when unpaired, which excludes nothing). */
   ownerId: number;
+  /** ⚠ WHICH TABLE IS ASKING, not which row is written. The two screens post to different URLs
+   *  — `/model-portfolios/{id}` and `/accounts/{portefeuille}` — but both land on the SAME
+   *  `airs_model_portfolio_link` row, because the link is keyed on the holding and not on
+   *  (parent, holding). One certificate is the same portfolio wherever it is held, so this is a
+   *  routing detail, never a second copy of the fact. */
+  linkBase: string;
   onSaved: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -1180,7 +1204,7 @@ function LinkCell({ p, ctx, ownerId, onSaved }: {
   const save = async (raw: string) => {
     setBusy(true);
     try {
-      await apiFetch(`${API_URL}/api/airs/model-portfolios/${ownerId}/link`, {
+      await apiFetch(`${API_URL}${linkBase}/link`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1201,7 +1225,7 @@ function LinkCell({ p, ctx, ownerId, onSaved }: {
     setBusy(true);
     try {
       await apiFetch(
-        `${API_URL}/api/airs/model-portfolios/${ownerId}/link` +
+        `${API_URL}${linkBase}/link` +
         `?isin=${encodeURIComponent(p.isin ?? '')}&fonds=${encodeURIComponent(p.fonds ?? '')}`,
         { method: 'DELETE' },
       );
@@ -1227,7 +1251,8 @@ function LinkCell({ p, ctx, ownerId, onSaved }: {
         >
           <option value="">— not a portfolio —</option>
           {shown.map((o) => (
-            <option key={o.id} value={o.id}>
+            <option key={o.id} value={o.id}
+              title={o.code && o.code !== o.name ? `${o.name} — AIRS: ${o.code}` : undefined}>
               {o.name}{o.positions ? ` (${o.positions})` : ''}
             </option>
           ))}
@@ -1482,7 +1507,9 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, onLinkSaved
                 <td className="px-3 py-1.5">
                   <SoundnessCell p={p} onOpen={setFundamentals} />
                 </td>
-                <LinkCell p={p} ctx={linkCtx} ownerId={d.portfolio_id} onSaved={onLinkSaved} />
+                <LinkCell p={p} ctx={linkCtx} ownerId={d.portfolio_id}
+                  linkBase={`/api/airs/model-portfolios/${d.portfolio_id}`}
+                  onSaved={onLinkSaved} />
                 <td className="px-3 py-1.5 text-right font-mono text-fg">
                   {p.percentage != null ? `${p.percentage.toFixed(2)}%` : '—'}
                   {p.percentage != null && (

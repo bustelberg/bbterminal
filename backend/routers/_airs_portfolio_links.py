@@ -225,7 +225,7 @@ class ResolvedLink:
 
 def _load_context(supabase) -> tuple[list[dict], dict[int, list[dict]], dict[str, dict]]:
     portfolios = (supabase.table("airs_model_portfolio")
-                  .select("id,name,omschrijving").execute().data or [])
+                  .select("id,name,display_name,omschrijving").execute().data or [])
     comp: dict[int, list[dict]] = {}
     for r in (supabase.table("airs_model_portfolio_position")
               .select("portfolio_id,isin,fonds").execute().data or []):
@@ -284,10 +284,26 @@ def linkable_context(supabase, owner_id: int) -> dict:
                 excluded.setdefault(r["isin"], []).append(pid)
     return {
         "options": [
-            {"id": p["id"], "name": p["name"], "omschrijving": p.get("omschrijving"),
+            # ⚠ `display_name` FIRST — that is the name we gave the portfolio, and it is what a
+            # reader recognises. `name` is AIRS's own `Portefeuille` code, capped at 24 chars
+            # (`BUS_MTS_BEPOFF_AFS`), which is the right thing to search AirSPMS for and the wrong
+            # thing to choose from. Only 42 of 95 have one, so the code remains the fallback.
+            {"id": p["id"], "name": p.get("display_name") or p["name"],
+             "code": p["name"], "omschrijving": p.get("omschrijving"),
              "positions": len(comp.get(p["id"], []))}
-            for p in sorted(portfolios, key=lambda p: (p["name"] or "").lower())
-            if p["id"] != owner_id
+            for p in sorted(portfolios, key=lambda p: ((p.get("display_name") or p["name"] or "").lower()))
+            # ⚠ SAME >1 RULE THE GUESSER USES (gate 3). A portfolio with no composition is a
+            # link to nothing, and a SINGLE-position one is another wrapper — `TOPS_STS_L` holds
+            # only the certificate, so linking there walks back to the row you started from. The
+            # offer and the guess must agree: a dropdown that lets a human pick what the guesser
+            # is forbidden to suggest is a trap with a mouse attached.
+            #
+            # It is also why the list finally reads in OUR names rather than AIRS's. The entries
+            # with no `display_name` are overwhelmingly the `_DYN` twins and `TOPS_*_L` wrappers,
+            # i.e. exactly the ones this rule removes: 95 options -> 43, of which one still shows
+            # an AIRS code. Not a cosmetic filter that happens to tidy the names — the names were
+            # ugly because the entries were never linkable.
+            if p["id"] != owner_id and len(comp.get(p["id"], [])) > 1
         ],
         "excluded_by_isin": excluded,
     }
@@ -308,8 +324,13 @@ def linkable_portfolios(supabase, owner_id: int, isin: str | None) -> list[dict]
         if isin and any((r.get("isin") or "") == isin for r in rows)
     }
     return [
-        {"id": p["id"], "name": p["name"], "omschrijving": p.get("omschrijving"),
+        # Same shape as `linkable_context` — this one only gates the WRITE, but a caller that
+        # renders it would otherwise show the AIRS code where the dropdown shows the real name.
+        {"id": p["id"], "name": p.get("display_name") or p["name"],
+         "code": p["name"], "omschrijving": p.get("omschrijving"),
          "positions": len(comp.get(p["id"], []))}
-        for p in sorted(portfolios, key=lambda p: (p["name"] or "").lower())
-        if p["id"] != owner_id and p["id"] not in holders
+        for p in sorted(portfolios, key=lambda p: ((p.get("display_name") or p["name"] or "").lower()))
+        # Same >1 rule as `linkable_context` and `guess_link` gate 3 — this one gates the WRITE,
+        # so a target the dropdown no longer offers must not be postable through the API either.
+        if p["id"] != owner_id and p["id"] not in holders and len(comp.get(p["id"], [])) > 1
     ]

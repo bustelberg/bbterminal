@@ -566,3 +566,32 @@ def resolve(identifier: str, id_type: str | None = None, with_candles: bool = Tr
         "candles": candles,                    # candles OF THE ANALYSIS instrument
         "ibkr": ibkr_res,
     }
+
+
+def sector_for(symbol: str, asset_class: str, current: str | None = None) -> str:
+    """The sector to store for `symbol` — Yahoo's, else what the row already had, else the class.
+
+    ⚠ THE ASSET CLASS IS THE LAST RESORT, NOT THE ANSWER. A repoint used to write it
+    unconditionally, which turned 3i Group from "Financials" into "equity" and Samsung from
+    "Technology" into "equity". `asset_grid.sector` is what the portfolio sector breakdown and the
+    Brinson attribution bucket a holding by, so that is not a label change — it moves the holding
+    into a bucket of its own and invents an allocation decision the model never made.
+
+    `current` is the row's existing sector, kept when Yahoo has none to offer (an ETF, or a
+    throttled profile call): losing a good classification because a lookup failed is the same bug
+    in a quieter form.
+    """
+    from . import yahoo  # noqa: PLC0415
+
+    try:
+        prof = (yahoo.asset_profile([symbol]) or {}).get(symbol) or {}
+        found = prof.get("sector")
+    except Exception:  # noqa: BLE001 — a failed lookup must not erase what we already knew
+        found = None
+    if found:
+        return found
+    # ⚠ Do not carry a previously-clobbered value forward: "equity"/"etf" IS the class, so treating
+    # it as a sector would make the old bug self-perpetuating through every future repoint.
+    if current and current.lower() not in {asset_class.lower(), "equity", "etf", "fund"}:
+        return current
+    return asset_class

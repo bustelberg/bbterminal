@@ -160,3 +160,57 @@ class TestItIsWiredIntoTheResolutionPaths:
         # ⚠ And it must TELL the operator the repoint is otherwise unrecorded, or the durable
         # store stays empty precisely because the manual path appears to have worked.
         assert "asset_symbol_override" in src
+
+
+class TestARepointMustNotEraseTheSector:
+    """⚠ THE ASSET CLASS IS A FALLBACK, NOT THE SECTOR.
+
+    All three repointers wrote `"sector": ai["analysis_asset_class"]` — the CLASS ("equity") —
+    while the real resolver writes `sector or analysis_asset_class`, i.e. the class only when
+    there is no sector. Measured: repointing turned 3i Group from "Financials" into "equity" and
+    Samsung from "Technology" into "equity".
+
+    That is not a label change. `asset_grid.sector` is what the portfolio sector breakdown and the
+    Brinson attribution bucket a holding by, so a holding reading "equity" leaves the sector it
+    belongs to (understating that weight) and forms one of its own — and the attribution then
+    prices an allocation decision nobody made.
+    """
+
+    def test_no_repointer_writes_the_asset_class_as_the_sector(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent.parent
+        for rel in ('scripts/repoint_to_symbol.py', 'scripts/repoint_etf_listing.py',
+                    'asset_pipeline/symbol_override.py'):
+            src = (root / rel).read_text(encoding='utf-8')
+            assert '"sector": ai["analysis_asset_class"]' not in src, rel
+            assert 'sector_for(' in src, f'{rel} must resolve a real sector'
+
+    def test_sector_for_prefers_yahoo_then_the_existing_value(self, monkeypatch):
+        from asset_pipeline import resolve, yahoo
+
+        monkeypatch.setattr(yahoo, 'asset_profile',
+                            lambda syms: {syms[0]: {'sector': 'Financial Services'}})
+        assert resolve.sector_for('III.L', 'equity', 'equity') == 'Financial Services'
+
+        # Yahoo has none (an ETF, or a throttled profile): keep what the row already knew.
+        monkeypatch.setattr(yahoo, 'asset_profile', lambda syms: {syms[0]: {'sector': None}})
+        assert resolve.sector_for('X.L', 'equity', 'Technology') == 'Technology'
+
+    def test_it_does_not_carry_a_clobbered_value_forward(self, monkeypatch):
+        """⚠ Treating a previously-written "equity" as if it were a sector would make the old bug
+        self-perpetuating: every future repoint would faithfully preserve the damage."""
+        from asset_pipeline import resolve, yahoo
+
+        monkeypatch.setattr(yahoo, 'asset_profile', lambda syms: {syms[0]: {'sector': None}})
+        assert resolve.sector_for('X.L', 'equity', 'equity') == 'equity'
+        assert resolve.sector_for('X.DE', 'etf', 'etf') == 'etf'
+
+    def test_a_failed_lookup_never_erases_what_we_knew(self, monkeypatch):
+        from asset_pipeline import resolve, yahoo
+
+        def _boom(_syms):
+            raise RuntimeError('Yahoo throttled')
+
+        monkeypatch.setattr(yahoo, 'asset_profile', _boom)
+        assert resolve.sector_for('III.L', 'equity', 'Financials') == 'Financials'

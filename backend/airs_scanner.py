@@ -481,6 +481,21 @@ def download_crm_relaties_sync() -> bytes:
     return content
 
 
+# ── The Front-Office client selection, and the three filters that define WHICH portfolios ──────
+FRONT_OFFICE_SELECTIE_PATH = "rapportFrontofficeClientSelectie.php"
+
+# ⚠ ALL THREE, EXPLICITLY. Only `portefeuilleIntern` used to be sent; the other two happened to
+# match the page's defaults, so the scan returned the right 44 by luck rather than by instruction.
+# A default is not a guarantee — one AIRS UI change and this silently starts scraping a different
+# population, with no error and no obvious symptom beyond a row count nobody is watching.
+#
+# Measured 2026-07-24 by reading the page's own radio controls:
+#   actief             actief | eActief | inactief          -> `actief`  (Actieve, not alle)
+#   portefeuilleIntern 0 | 1 | 10                            -> `1`       (Interne, not externe)
+#   metConsolidatie    0 | 1 | 10                            -> `0`       (Zonder consolidatie)
+# Together: exactly 44 portfolios across 2 pages.
+FRONT_OFFICE_FILTERS = "actief=actief&portefeuilleIntern=1&metConsolidatie=0"
+
 # ─── Scanner (uses its own browser for DOM scraping) ──────────────────────────
 
 def scan_portfolios_sync(send_event):
@@ -508,7 +523,7 @@ def scan_portfolios_sync(send_event):
                 return
 
             send_event("progress", step="navigate", status="in_progress", message="Selecting internal portfolios...")
-            content.goto(f"{BASE_URL}/rapportFrontofficeClientSelectie.php?portefeuilleIntern=1")
+            content.goto(f"{BASE_URL}/{FRONT_OFFICE_SELECTIE_PATH}?{FRONT_OFFICE_FILTERS}")
             page.wait_for_timeout(3000)
             send_event("progress", step="navigate", status="done", message="Navigated to internal portfolio selection")
 

@@ -899,6 +899,61 @@
             "title": "Lines",
             "type": "integer"
           },
+          "link_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Confidence"
+          },
+          "link_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Reason"
+          },
+          "link_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Source"
+          },
+          "linked_portfolio_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked Portfolio Id"
+          },
+          "linked_portfolio_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked Portfolio Name"
+          },
           "our_instrument": {
             "anyOf": [
               {
@@ -4730,6 +4785,17 @@
       },
       "LinkablePortfolio": {
         "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -10436,6 +10502,165 @@
           }
         },
         "summary": "Airs Account Isins",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/link": {
+      "delete": {
+        "description": "Forget the human decision for this holding and fall back to the automatic guess. NOT the\nsame as linking it to nothing \u2014 that is a decision too, and is stored as a null.\n\n`portefeuille` names which table the request came from; the row it clears is the same one the\nmodel-portfolio screen writes, because the link is keyed on the holding.",
+        "operationId": "airs_clear_account_holding_link_api_airs_accounts__portefeuille__link_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "isin",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Isin"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fonds",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Fonds",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Clear Account Holding Link",
+        "tags": [
+          "airs"
+        ]
+      },
+      "put": {
+        "description": "Point one of an ACCOUNT's holdings at the model portfolio it IS (or, with a null target,\nrecord that it is not one).\n\n\u26a0 THE SAME ROW THE MODEL-PORTFOLIO SCREEN WRITES. `airs_model_portfolio_link` is keyed on the\nholding, not on (parent, holding) \u2014 one certificate is the same portfolio wherever it is held\n\u2014 so this is not a second store for the same fact, and the two screens cannot disagree.",
+        "operationId": "airs_set_account_holding_link_api_airs_accounts__portefeuille__link_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Set Account Holding Link",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/linkable": {
+      "get": {
+        "description": "What an ACCOUNT's holdings may be linked to \u2014 the same dropdown the model-portfolio\npositions table uses, and the same gates.\n\n\u26a0 \"SELF\" FOR AN ACCOUNT IS THE MODEL IT RUNS. `linkable_context` excludes the owner so a\nportfolio cannot be its own holding; an account is not a model, so its analogue is the model\nit is paired with on `/account-model-links`. A certificate of the account's own strategy is\nexactly the wrapper cycle the gate exists to stop. An unpaired account excludes nothing,\nwhich is right: we do not know its strategy, so we cannot say which link would be circular.\n\nONE call for the whole table \u2014 per row it would be a request per holding.",
+        "operationId": "airs_account_linkable_portfolios_api_airs_accounts__portefeuille__linkable_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkableContext"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Account Linkable Portfolios",
         "tags": [
           "airs"
         ]

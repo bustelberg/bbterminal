@@ -910,6 +910,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Airs Set Account Holding Link
+         * @description Point one of an ACCOUNT's holdings at the model portfolio it IS (or, with a null target,
+         *     record that it is not one).
+         *
+         *     ⚠ THE SAME ROW THE MODEL-PORTFOLIO SCREEN WRITES. `airs_model_portfolio_link` is keyed on the
+         *     holding, not on (parent, holding) — one certificate is the same portfolio wherever it is held
+         *     — so this is not a second store for the same fact, and the two screens cannot disagree.
+         */
+        put: operations["airs_set_account_holding_link_api_airs_accounts__portefeuille__link_put"];
+        post?: never;
+        /**
+         * Airs Clear Account Holding Link
+         * @description Forget the human decision for this holding and fall back to the automatic guess. NOT the
+         *     same as linking it to nothing — that is a decision too, and is stored as a null.
+         *
+         *     `portefeuille` names which table the request came from; the row it clears is the same one the
+         *     model-portfolio screen writes, because the link is keyed on the holding.
+         */
+        delete: operations["airs_clear_account_holding_link_api_airs_accounts__portefeuille__link_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/linkable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Linkable Portfolios
+         * @description What an ACCOUNT's holdings may be linked to — the same dropdown the model-portfolio
+         *     positions table uses, and the same gates.
+         *
+         *     ⚠ "SELF" FOR AN ACCOUNT IS THE MODEL IT RUNS. `linkable_context` excludes the owner so a
+         *     portfolio cannot be its own holding; an account is not a model, so its analogue is the model
+         *     it is paired with on `/account-model-links`. A certificate of the account's own strategy is
+         *     exactly the wrapper cycle the gate exists to stop. An unpaired account excludes nothing,
+         *     which is right: we do not know its strategy, so we cannot say which link would be circular.
+         *
+         *     ONE call for the whole table — per row it would be a request per holding.
+         */
+        get: operations["airs_account_linkable_portfolios_api_airs_accounts__portefeuille__linkable_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/asset-bucket-override": {
         parameters: {
             query?: never;
@@ -6481,6 +6543,16 @@ export interface components {
              * @default 1
              */
             lines?: number;
+            /** Link Confidence */
+            link_confidence?: number | null;
+            /** Link Reason */
+            link_reason?: string | null;
+            /** Link Source */
+            link_source?: string | null;
+            /** Linked Portfolio Id */
+            linked_portfolio_id?: number | null;
+            /** Linked Portfolio Name */
+            linked_portfolio_name?: string | null;
             /** Our Instrument */
             our_instrument?: string | null;
             /** Our Price Eur */
@@ -7806,6 +7878,8 @@ export interface components {
         };
         /** LinkablePortfolio */
         LinkablePortfolio: {
+            /** Code */
+            code?: string | null;
             /** Id */
             id: number;
             /** Name */
@@ -10330,6 +10404,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AirsAccountIsins"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_set_account_holding_link_api_airs_accounts__portefeuille__link_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_clear_account_holding_link_api_airs_accounts__portefeuille__link_delete: {
+        parameters: {
+            query?: {
+                isin?: string | null;
+                fonds?: string;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_account_linkable_portfolios_api_airs_accounts__portefeuille__linkable_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkableContext"];
                 };
             };
             /** @description Validation Error */

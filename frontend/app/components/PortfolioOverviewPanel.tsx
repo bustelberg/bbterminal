@@ -6,6 +6,7 @@ import { API_URL } from '../../lib/apiUrl';
 import { dialog } from '../../lib/dialog';
 import { Provenance } from '../../lib/provenance';
 import { trimStop } from '../../lib/provenanceText';
+import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 import OwnerEarningsModal from './portfolios/OwnerEarningsModal';
 import { type Basket } from './portfolios/PerformanceModal';
@@ -267,6 +268,10 @@ export default function PortfolioOverviewPanel() {
           <table className="w-full text-xs whitespace-nowrap">
             <thead className="bg-card z-10 [&_th]:bg-card">
               <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                {/* ⚠ A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
+                    or re-sorted, which is the point — it is there to say "the 14th row", so two
+                    people can talk about the same line. `text-right` so the digits align. */}
+                <th className="px-3 py-1.5 font-medium text-right w-8">#</th>
                 <th className="px-3 py-1.5 font-medium text-left" />{/* Analyse */}
                 <th className="px-3 py-1.5 font-medium text-left">Name</th>
                 <th className="px-3 py-1.5 font-medium text-right"
@@ -284,12 +289,15 @@ export default function PortfolioOverviewPanel() {
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
-              {view.map((r) => {
+              {view.map((r, rowNo) => {
                 const isOpen = open === r.dynamic_portefeuille;
                 return (
                   <Fragment key={r.dynamic_portefeuille}>
                     <tr onClick={() => void expand(r.dynamic_portefeuille)}
                       className="hover:bg-accent-500/10 transition-colors cursor-pointer">
+                      <td className="px-3 py-1.5 text-right font-mono text-fg-faint tabular-nums">
+                        {rowNo + 1}
+                      </td>
                       {/* Analyse, leftmost. Describes the FIXED portfolio (composition +
                           attribution), which is why it needs `fixed_portfolio_id` and an unlinked
                           row cannot offer it. stopPropagation so it does not also toggle the row. */}
@@ -334,18 +342,23 @@ export default function PortfolioOverviewPanel() {
                       </td>
                       <td className="px-3 py-1.5 text-fg whitespace-nowrap">
                         <span className="text-fg-faint mr-1.5">{isOpen ? '▾' : '▸'}</span>
-                        {r.name}
+                        {/* ⚠ AIRS NAMES ONE PORTFOLIO THREE WAYS — our readable name, the Fixed
+                            code and the Dynamic code — and printing all three ran them together
+                            ("ToppenbergBeheer DefensiefTOPS_DEF_BEH_DYN · TOPS_DEF_BEH"), so the
+                            one name a reader wants was the hardest thing on the line to find.
+                            The codes are what you search AirSPMS for, which is a deliberate act
+                            and can afford a hover — but it has to hang off something hoverable,
+                            so it hangs off the name rather than an empty span nobody can reach. */}
+                        <span className="cursor-help"
+                          title={`AIRS: ${r.dynamic_portefeuille}${r.fixed_name ? ` · ${r.fixed_name}` : ''}`}>
+                          {r.name}
+                        </span>
                         {r.link_source === 'guess' && (
                           <span className="text-warn-400 ml-1"
                             title={`Unconfirmed: this book is paired with ${r.fixed_name} by a name match nobody has approved (${r.link_reason ?? ''}). The name above is that pairing's.`}>
                             ⚠
                           </span>
                         )}
-                        {/* AIRS's own codes, kept visible but quiet: the nickname is what you
-                            read, the codes are what you search AirSPMS for. */}
-                        <span className="text-fg-faint font-mono text-[10px] ml-2">
-                          {r.dynamic_portefeuille}{r.fixed_name ? ` · ${r.fixed_name}` : ''}
-                        </span>
                         {/* The name is the FIXED side's, reached through a pairing — so its card
                             states the pairing, which for 27 of 28 rows is an unapproved guess. */}
                         <Provenance source="airs_model" kind={r.fixed_name ? 'formula' : 'copied'}
@@ -383,7 +396,7 @@ export default function PortfolioOverviewPanel() {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={5} className="px-3 py-3 bg-inset">
+                        <td colSpan={6} className="px-3 py-3 bg-inset">
                           <Holdings d={detail[r.dynamic_portefeuille]} i={isins[r.dynamic_portefeuille]}
                             portefeuille={r.dynamic_portefeuille} onOverride={refreshIsins} />
                         </td>
@@ -600,7 +613,7 @@ function SegmentHeader({ s, asOf, holdings, stats, altReturnPct, basisKey, onFun
           )}
         </span>
       </td>
-      {/* ⚠ ONE CELL PER COLUMN. The table is [Fundamental] · Fund · ISIN · Class · Sector · Country
+      {/* ⚠ ONE CELL PER COLUMN. The table is [Fundamental] · Fund · ISIN · Class · Link · Sector
           · Region · Ccy · Beginwaarde · Huidige waarde · Direct result · Div tax · <one weight> ·
           Return — FOURTEEN (the leading Fundamental cell is emitted above). An extra blank here
           shifts every figure one column right, which is silent: a weight renders perfectly well
@@ -611,8 +624,8 @@ function SegmentHeader({ s, asOf, holdings, stats, altReturnPct, basisKey, onFun
           under a heading that belongs to a different weight. */}
       <td />{/* ISIN */}
       <td />{/* Class */}
+      <td />{/* Link */}
       <td />{/* Sector */}
-      <td />{/* Country */}
       <td />{/* Region */}
       <td />{/* Ccy */}
       <td className="px-3 py-1 text-right font-mono text-fg-muted">
@@ -736,6 +749,22 @@ function Holdings({ d, i, portefeuille, onOverride }: {
   // Which column's weights the segment/Total returns are weighted by. "start" is the book’s own
   // return; everything else is a HYPOTHETICAL and the UI says so.
   const [basisKey, setBasisKey] = useState<WeightBasis>('start');
+  // Everything the Link dropdowns need, in ONE call for the whole table — per row it would be a
+  // request per holding. Null until it lands, which the cell renders as "…" rather than an empty
+  // select that looks like "no options".
+  const [linkCtx, setLinkCtx] = useState<LinkCtx | null>(null);
+  useEffect(() => {
+    if (!portefeuille) return;
+    let live = true;
+    void (async () => {
+      try {
+        const r = await apiFetch(
+          `${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/linkable`);
+        if (live && r.ok) setLinkCtx(await r.json());
+      } catch { /* the table is still usable without the dropdown */ }
+    })();
+    return () => { live = false; };
+  }, [portefeuille]);
   // Persist a manual Class pin (or clear it → Auto), then re-fetch this account so the row
   // re-groups under its new bucket.
   const setBucket = useCallback(async (isin: string, bucket: string | null) => {
@@ -892,8 +921,18 @@ function Holdings({ d, i, portefeuille, onOverride }: {
                 title="Smart asset-class label — Stocks · Stock ETF · Bonds · Alternatives · Cash · Unclassified (genuinely unsure). AIRS's own class first, then the instrument's grid data and name.">
                 Class
               </th>
+              {/* ⚠ Some holdings are not instruments — they are other model portfolios, wrapped as
+                  a Leonteq certificate so they can be held like a security. Those are CH ISINs
+                  Yahoo can never price, so they sit here as dead rows (`?`) whose weight leaves
+                  the coverage denominator. The link is what lets a reader see through the wrapper
+                  to the strategy behind it. Same store as the /portfolios positions table — the
+                  link is keyed on the HOLDING, so a decision made on either screen is the same
+                  decision and the two cannot disagree. */}
+              <th className="px-3 py-1.5 font-medium text-left"
+                title="The model portfolio this holding IS, for the few positions that are certificates wrapping another strategy rather than instruments. The badge is the confidence of our automatic guess; pick from the dropdown to overrule it, and the choice applies to this holding everywhere it is held.">
+                Link
+              </th>
               <th className="px-3 py-1.5 font-medium text-left" title="The instrument's own yfinance sector. A fund is opaque, so it reads “—”.">Sector</th>
-              <th className="px-3 py-1.5 font-medium text-left">Country</th>
               <th className="px-3 py-1.5 font-medium text-left" title="MSCI region from the instrument's yfinance geo. ⚠ For an ETF this describes its listing, not what it holds.">Region</th>
               <th className="px-3 py-1.5 font-medium text-left">Ccy</th>
               <th className="px-3 py-1.5 font-medium text-right"
@@ -1100,22 +1139,21 @@ function Holdings({ d, i, portefeuille, onOverride }: {
                         : "the instrument's own grid data (asset class, sector, fund wrapper) and its name. AIRS's Beleggingscategorie is no longer used: it came from a paired model portfolio, and the pairing is gone"} />
                   )}
                 </td>
+                <LinkCell
+                  p={{ isin: g?.isin, fonds: r.holding_name,
+                       linked_portfolio_id: g?.linked_portfolio_id,
+                       link_source: g?.link_source,
+                       link_confidence: g?.link_confidence,
+                       link_reason: g?.link_reason }}
+                  ctx={linkCtx} ownerId={0}
+                  linkBase={`/api/airs/accounts/${encodeURIComponent(portefeuille ?? '')}`}
+                  onSaved={() => { if (portefeuille && onOverride) void onOverride(portefeuille); }} />
                 <td className="px-3 py-1.5 text-fg-subtle">
                   {g?.sector || '—'}
                   {g?.sector && (
                     <Provenance source="yfinance" kind="copied"
                       what="The industry the issuer operates in."
                       note="sector — the instrument's own sector in asset_grid, joined by ISIN" />
-                  )}
-                </td>
-                {/* ⚠ `country` coalesces domicile over LISTING, so a US name priced on a thin German
-                    line can read "Germany". The card says so rather than the column lying quietly. */}
-                <td className="px-3 py-1.5 text-fg-subtle">
-                  {g?.country || '—'}
-                  {g?.country && (
-                    <Provenance source="yfinance" kind="formula" what="Where the issuer is based — its home country, not the exchange we price it on."
-                      note="country — where the issuer is domiciled"
-                      how="Yahoo's assetProfile.country, falling back to the LISTING's country when Yahoo reports no domicile — for a thin foreign line that fallback names the venue, not the issuer" />
                   )}
                 </td>
                 <td className="px-3 py-1.5 text-fg-subtle">

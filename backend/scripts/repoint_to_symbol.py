@@ -45,7 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import deps  # noqa: E402, F401  — loads SUPABASE_* / OPENFIGI_API_KEY before anything else
 from deps import supabase  # noqa: E402
 from asset_pipeline import openfigi, store  # noqa: E402
-from asset_pipeline.resolve import resolve_analysis_instrument  # noqa: E402
+from asset_pipeline.resolve import resolve_analysis_instrument, sector_for  # noqa: E402
 from asset_pipeline.fast_resolve import _score_retry  # noqa: E402
 
 
@@ -59,7 +59,7 @@ def main() -> int:
     isin, target = a.isin.strip().upper(), a.symbol.strip()
 
     row = (supabase.table("asset_grid").select("isin,name,analysis_symbol,currency,med_adv_eur,"
-                                               "asset_class,bars,price_from,price_to")
+                                               "asset_class,sector,bars,price_from,price_to")
            .eq("isin", isin).limit(1).execute().data or [])
     if not row:
         print(f"!! {isin} is not in the grid.")
@@ -103,7 +103,11 @@ def main() -> int:
         "execution": ai["execution"], "analysis": ai["analysis"],
         "chosen": ai["analysis"], "underlying": None,
         "reason": f"Repointed to {target} by hand — named target, not a ranked pick.",
-        "analysis_note": ai["analysis_note"], "sector": ai["analysis_asset_class"],
+        "analysis_note": ai["analysis_note"],
+        # ⚠ NOT `analysis_asset_class` — that is the CLASS, and writing it here reclassified
+        # 3i Group from Financials to "equity", which moves it to a different bucket in every
+        # sector breakdown and attribution.
+        "sector": sector_for(target, ai["analysis_asset_class"], r.get("sector")),
         "candles": None, "ibkr": None,
     }
     ids = store.upsert_asset(res, figi=fig)

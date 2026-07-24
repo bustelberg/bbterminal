@@ -38,11 +38,15 @@ _STATUS: dict = {
     "rendement_stored": 0,     # portfolios whose Rendement (ATT) was stored
     "vermogen_stored": 0,      # portfolios whose Vermogensoverzicht (VOLK) was stored
     "holdings_rows": 0,        # total holding rows stored
-    "crm_stored": None,        # True/False — CRM "Alle relaties" export stored this run
-    "crm_bytes": 0,            # size of the stored raw CRM export
-    "crm_rows": 0,             # relations parsed into airs_crm_relatie this run
     "errors": [],
 }
+
+
+# Below this, a discovery is treated as FAILED rather than as "AIRS has very few accounts".
+# Measured: the live filtered Front-Office list is 44. A login failure or a changed selector
+# returns a handful of rows and no exception, and writing that roster would retire the whole
+# table in one pass.
+_MIN_ROSTER = 10
 
 
 def _discover_portfolios() -> list[str]:
@@ -64,7 +68,38 @@ def _discover_portfolios() -> list[str]:
         n = (r.get("portefeuille") or "").strip()
         if n:
             names.append(n)
+    _record_roster(names)
     return names
+
+
+def _record_roster(names: list[str]) -> None:
+    """Persist WHICH accounts AIRS listed on this pass — the roster `list_accounts` reads.
+
+    ⚠ WITHOUT THIS THE ANSWER IS THROWN AWAY. The discovery already knows the live set; it just
+    used it to drive the scrape and forgot it. `airs_performance` cannot recover it: it says what
+    a book made, which stays true long after AIRS stops listing the book.
+
+    ⚠ ONE TIMESTAMP FOR THE WHOLE BATCH, so "the live set" is exactly `last_seen_at = max(...)`.
+    Stamping each row with its own now() would make that comparison a race against the write.
+
+    ⚠ AN EMPTY OR SUSPICIOUSLY SMALL DISCOVERY IS NOT WRITTEN. A login failure or a changed
+    selector returns few rows, not an error, and recording that would retire the entire table on
+    the strength of a failed scrape. Better to keep yesterday's roster than to publish a wrong one.
+    """
+    if len(names) < _MIN_ROSTER:
+        _log.warning("[airs_vermogen] discovery returned %d portfolios (< %d) — roster NOT "
+                     "updated; keeping the previous one rather than retiring accounts on a "
+                     "possibly-failed scrape", len(names), _MIN_ROSTER)
+        return
+    stamp = datetime.now(timezone.utc).isoformat()
+    rows = [{"portefeuille": n, "last_seen_at": stamp} for n in sorted(set(names))]
+    try:
+        for i in range(0, len(rows), 200):
+            supabase.table("airs_account_roster").upsert(
+                rows[i:i + 200], on_conflict="portefeuille").execute()
+    except Exception as e:  # noqa: BLE001 — the scrape itself must not fail on bookkeeping
+        _log.warning("[airs_vermogen] could not record the account roster: %s: %s",
+                     type(e).__name__, e)
 
 
 def _save_holdings(portefeuille: str, as_of: str, holdings) -> int:
@@ -203,9 +238,6 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             "rendement_stored": 0,
             "vermogen_stored": 0,
             "holdings_rows": 0,
-            "crm_stored": None,
-            "crm_bytes": 0,
-            "crm_rows": 0,
             "errors": [],
         })
 
@@ -257,24 +289,16 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
                 _STATUS["errors"].append(f"{name} (Model): {type(e).__name__}: {e}")
                 _log.warning("[airs_vermogen] %s Model failed: %s: %s", name, type(e).__name__, e)
 
-        # CRM → Relaties → Alle relaties: one global export, OVERWRITING
-        # airs_crm_relatie with the latest snapshot (shared with the dedicated
-        # 11:00 daily CRM job — see airs_crm.run_crm_relaties_refresh_sync).
-        _STATUS["message"] = "Downloading CRM Alle relaties…"
-        crm_bytes = 0
-        crm_rows = 0
-        crm_ok = False
-        try:
-            from airs_crm import run_crm_relaties_refresh_sync  # noqa: PLC0415
-
-            res = run_crm_relaties_refresh_sync()
-            crm_rows, crm_bytes, crm_ok = res["rows"], res["bytes"], True
-        except Exception as e:
-            _STATUS["errors"].append(f"CRM relaties: {type(e).__name__}: {e}")
-            _log.warning("[airs_vermogen] CRM relaties failed: %s: %s", type(e).__name__, e)
-
+        # ⚠ THIS JOB DOES NOT TOUCH CRM. It used to also download CRM → Relaties → Alle
+        # relaties inline, which is a different report about different objects (relations, not
+        # portfolios) and already has its own daily job at 11:00
+        # (`airs_crm.run_crm_relaties_refresh_sync`, wired in `scheduler._fire_crm_relaties`).
+        # Running it here meant a second scrape of the same export every time anyone refreshed
+        # the holdings, and — worse — a CRM failure was appended to THIS job's `errors` and
+        # counted in its "N report(s) failed", so a portfolio refresh reported a fault in a
+        # report it was never asked to fetch.
         total = len(names)
-        any_stored = rendement_ok or vermogen_ok or crm_ok
+        any_stored = rendement_ok or vermogen_ok
         _STATUS.update({
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "status": "ok" if any_stored else "error",
@@ -283,13 +307,9 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             "holdings_rows": holdings_total,
             "mutatie_rows": mutaties_total,
             "model_weight_rows": model_total,
-            "crm_stored": crm_ok,
-            "crm_bytes": crm_bytes,
-            "crm_rows": crm_rows,
             "message": (
                 f"Rendement {rendement_ok}/{total}, Vermogensoverzicht {vermogen_ok}/{total} "
-                f"({holdings_total} holdings); CRM relaties "
-                + (f"{crm_rows} relations ({crm_bytes // 1024} KB)" if crm_ok else "failed")
+                f"({holdings_total} holdings)"
                 + (f"; {len(_STATUS['errors'])} report(s) failed" if _STATUS["errors"] else "")
             ),
         })
