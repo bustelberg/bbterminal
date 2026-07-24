@@ -4,7 +4,6 @@ import { Fragment, useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { sectorLabel } from '../../lib/assetLabels';
-import AssetNav from './AssetNav';
 import { REG, type RegKey } from './alphalab/regimeBands';
 import { RANGES, type RangeId } from './alphalab/window';
 
@@ -119,7 +118,6 @@ export default function SignalLab() {
 
   return (
     <div className="min-h-screen bg-page text-fg">
-      <AssetNav />
       <div className="px-8 py-5 border-b border-neutral-800/40">
         <h1 className="text-xl font-semibold text-fg-strong">Signal Lab</h1>
         <p className="text-sm text-fg-subtle mt-1">

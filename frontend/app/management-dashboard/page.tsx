@@ -1,6 +1,5 @@
 'use client';
 
-import AssetNav from '../components/AssetNav';
 import BenchmarksPanel from '../components/BenchmarksPanel';
 import CorrelationMatrix from '../components/CorrelationMatrix';
 import PortfolioOverviewPanel from '../components/PortfolioOverviewPanel';
@@ -18,9 +17,8 @@ import PortfolioOverviewPanel from '../components/PortfolioOverviewPanel';
 export default function Page() {
   return (
     <div className="min-h-screen bg-page text-fg">
-      <AssetNav />
       <div className="px-8 py-5 border-b border-neutral-800/40">
-        <h1 className="text-xl font-semibold text-fg-strong">Portfolios</h1>
+        <h1 className="text-xl font-semibold text-fg-strong">Management Dashboard</h1>
       </div>
 
       <div className="px-8 py-6 space-y-6">

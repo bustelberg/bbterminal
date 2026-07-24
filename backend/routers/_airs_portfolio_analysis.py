@@ -89,14 +89,24 @@ _ALLOC_ORDER = ["Equity", "Equity ETF", "Bonds", "Alternatives", "Cash", UNKNOWN
 
 
 def _weigh_alloc(items: list[tuple[float, str]]) -> list[dict]:
-    """Sum the (weight, bucket) pairs into ordered percentage slices (drops empty buckets)."""
+    """Sum the (weight, bucket) pairs into ordered percentage slices (drops empty buckets).
+
+    ⚠ `holdings` COUNTS THE EXPANDED LEGS, WHICH IS THE POINT OF COUNTING THEM. After the
+    certificates are looked through, a slice is no longer "one certificate" — ToppenbergBeheer
+    Defensief's Stocks sleeve is 9 lines in AIRS and 160-odd real companies underneath. A weight
+    alone cannot tell those apart, and they are not the same portfolio: 66% in one bond ETF and
+    66% spread over sixty names carry different risk and read identically on a pie.
+    """
     total = sum(w for w, _ in items)
     if total <= 0:
         return []
     agg: dict[str, float] = defaultdict(float)
+    cnt: dict[str, int] = defaultdict(int)
     for w, b in items:
         agg[b] += w
-    return [{"bucket": b, "pct": agg[b] / total * 100.0} for b in _ALLOC_ORDER if agg.get(b)]
+        cnt[b] += 1
+    return [{"bucket": b, "pct": agg[b] / total * 100.0, "holdings": cnt[b]}
+            for b in _ALLOC_ORDER if agg.get(b)]
 
 
 def _sector(raw: str | None) -> str:
@@ -381,6 +391,89 @@ def _book_return(portfolio_id: int, ytd_from: str | None, model_ytd: float | Non
     }
 
 
+
+def _expand_book_rows(rows: list[dict]) -> list[dict]:
+    """Book holdings with each linked certificate replaced by the stocks of the model it IS.
+
+    The certificate's EUR value is split across that model's composition by its own percentages,
+    so the book's total value is unchanged — only its resolution improves.
+
+    ⚠ START VALUE IS SPLIT ON THE SAME PROPORTIONS AS THE CURRENT ONE. It has to travel with it:
+    the per-bucket return is `Σnow ÷ Σstart − 1`, so expanding `current_value_eur` alone would
+    hand every expanded leg a return computed against a start of zero.
+
+    ⚠ A CERTIFICATE WITH NOTHING BEHIND IT IS LEFT WHOLE — dropping it would delete real book
+    value, and every percentage here is a share of a total that would silently shrink.
+    """
+    from ._airs_lookthrough import _datum_of, _positions_of  # noqa: PLC0415
+
+    out: list[dict] = []
+    for r in rows:
+        target = r.get("linked_portfolio_id")
+        if not target:
+            out.append({**r, "via_names": []})   # held directly — no strategy in between
+            continue
+        child = _positions_of(target, _datum_of(target))
+        inner = sum(float(c.get("percentage") or 0) for c in child)
+        if not child or inner <= 0:
+            out.append({**r, "via_names": []})
+            continue
+        cur = float(r.get("current_value_eur") or 0)
+        start = float(r.get("start_value_eur") or 0)
+        for c in child:
+            share = float(c.get("percentage") or 0) / inner
+            if share <= 0:
+                continue
+            out.append({
+                **{k: v for k, v in r.items() if k not in
+                   ("isin", "holding_name", "current_value_eur", "start_value_eur", "bucket")},
+                "isin": c.get("isin"),
+                "holding_name": c.get("fonds"),
+                "current_value_eur": cur * share,
+                "start_value_eur": start * share,
+                # ⚠ The parent's Class is NOT inherited: a certificate classified "Equity" would
+                # stamp that on a bond the child holds. Cleared so the shared classifier re-derives
+                # it from the child instrument's own grid row.
+                "bucket": None,
+                "linked_portfolio_id": None,
+                # WHICH strategy put us in this instrument. The certificate's own name is the only
+                # record of it once its value has been split across the model behind it.
+                "via_names": ([r["linked_portfolio_name"]]
+                              if r.get("linked_portfolio_name") else []),
+            })
+    # ⚠ ONE LEG PER ISIN. A book can hold a stock directly AND through two certificates — three
+    # rows for one instrument. React keys the drill-down by ISIN and treats duplicates as
+    # unsupported, free to omit a row, so an unmerged list can silently lose a holding.
+    # Both EUR fields are summed: merging the current value alone would leave the merged leg's
+    # return computed against one fragment's start.
+    from ._airs_lookthrough import merge_by_isin  # noqa: PLC0415
+
+    return _reclassify_book_rows(
+        merge_by_isin(out, fields=("current_value_eur", "start_value_eur")))
+
+
+def _reclassify_book_rows(rows: list[dict]) -> list[dict]:
+    """Give every expanded leg its own Class, from the same classifier the rest of the app uses."""
+    from routers._airs_holding_isin import classify_bucket  # noqa: PLC0415
+
+    need = sorted({r["isin"] for r in rows if r.get("isin") and not r.get("bucket")})
+    if not need:
+        return rows
+    grid = _grid(need)
+    for r in rows:
+        if r.get("bucket") or not r.get("isin"):
+            continue
+        g = grid.get(r["isin"])
+        r["bucket"] = classify_bucket(None, _is_fund(g), r["isin"], r.get("holding_name") or "", g)
+    return rows
+
+
+def _is_fund(grid_row: dict | None) -> bool:
+    from routers._airs_holding_isin import _is_etf  # noqa: PLC0415
+
+    return _is_etf(grid_row)
+
+
 def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     """The composition as the BOOK actually holds it — weighted by AIRS's EUR values, not the
     model's nominal percentages.
@@ -409,9 +502,19 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     if not rows:
         return None
 
+    # ⚠ THE BOOK SIDE NEEDS THE SAME LOOK-THROUGH, AND FOR A SHARPER REASON. The model side at
+    # least held nominal percentages; here the certificates ARE the book — ToppenbergBeheer
+    # Defensief holds nine of them — so weighting by AIRS's EUR values and classifying what is
+    # left charts "Unclassified 100%". A composition chart that says the portfolio is entirely
+    # unclassifiable is not a limitation, it is a wrong answer: the stocks are known, one link
+    # away, and the model side is already drawing them.
+    rows = _expand_book_rows(rows)
+
     grid = _grid(sorted({r["isin"] for r in rows if r.get("isin")}))
     items: list[tuple[float, tuple[str, str, str]]] = []
     alloc_items: list[tuple[float, str]] = []
+    # (row, current EUR value, class) for every LONG position — the whole-portfolio holdings table.
+    raw_positions: list[tuple[dict, float, str]] = []
     classified_w = total_w = 0.0
     foreign = holdings = 0
     for r in rows:
@@ -434,6 +537,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         items.append((w, b))
         # The book row is already classified by resolve_account_isins (the shared classifier).
         alloc_items.append((w, r.get("bucket") or UNKNOWN_BUCKET))
+        raw_positions.append((r, w, r.get("bucket") or UNKNOWN_BUCKET))
     if not items:
         return None
     # Per-bucket return = the START-WEIGHTED value change, Σnow ÷ Σstart − 1 (equivalently each
@@ -448,24 +552,70 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
               for r in rows
               if float(r.get("start_value_eur") or 0) != 0 and r.get("current_value_eur") is not None]
     total_start = sum(s for _r, s, _n in priced) or 1.0
-    holdings_detail: list[dict] = []
-    for r, start, now in priced:
-        b = r.get("bucket") or UNKNOWN_BUCKET
+    for _r, start, now in priced:
+        b = _r.get("bucket") or UNKNOWN_BUCKET
         bucket_agg[b][0] += start
         bucket_agg[b][1] += now
+    priced_by_id = {id(r): (s, n) for r, s, n in priced}
+
+    # ⚠ EVERY LONG POSITION, not only the priced ones — this list is also the whole-portfolio
+    # holdings table, and a cash line or an unpriceable structured product that silently vanished
+    # from it would leave a table whose classes do not add up to the pie beside them.
+    #
+    # ⚠ TWO WEIGHTS, TWO DENOMINATORS, AND SWAPPING THEM IS A REAL BUG:
+    #   `weight_pct`      OPENING-value share of the PRICED book. None when we could not price the
+    #                     position over the window. This is the one that makes a class's
+    #                     contribution reconcile: Σ over a class of (startᵢ/Σstart)·retᵢ IS that
+    #                     class's return, exactly. Weighting by CURRENT value instead lets one
+    #                     winner dominate (a holding up +148% has tripled its share of the book —
+    #                     AITopSelectie reads +56.11% current-weighted against a true +41.98%).
+    #   `weight_now_pct`  CURRENT-value share of the WHOLE book — the same number the allocation
+    #                     pie is drawn from, so per-class subtotals in the table equal the pie's
+    #                     slices to the decimal. A table that disagrees with the chart directly
+    #                     above it is read as a bug in both.
+    # ⚠ A LOOKED-THROUGH LEG HAS NO BOOK RETURN OF ITS OWN, AND SPLITTING ONE IS A FABRICATION.
+    # `_expand_book_rows` divides a certificate's start AND current value by the same composition
+    # share, so every instrument behind it comes out with the CERTIFICATE's return — measured on
+    # ToppenbergBeheer Defensief, 135 stocks carried just 37 distinct returns, one per certificate,
+    # and NVIDIA reported +0.08% (its wrapper's figure) against its own +2.82% over the window.
+    # The number was not noise, it was confident and wrong, and it is the kind nobody re-checks.
+    #
+    # The book simply does not know what NVIDIA did — it knows what the certificate did. So the
+    # per-instrument return comes from the instrument's OWN EUR price series, through the same
+    # `compute_holding_marks` that produces the arithmetic behind a portfolio's YTD elsewhere:
+    # same anchor, same split adjustment, same per-date FX. Aggregates are untouched — a class
+    # return is still the book's own value change, which is the right answer to "what did my money
+    # in this class do" and ties to the portfolio figure.
+    from ._airs_lookthrough import _datum_of  # noqa: PLC0415
+    from ._airs_portfolio_perf import compute_holding_marks, ytd_anchor_for  # noqa: PLC0415
+
+    anchor = ytd_anchor_for(_datum_of(portfolio_id))
+    marks = compute_holding_marks(
+        sorted({r["isin"] for r, _w, _b in raw_positions if r.get("isin")}), anchor)
+
+    holdings_detail: list[dict] = []
+    for r, w, b_alloc in raw_positions:
         isin = r.get("isin")
         grow = grid.get(isin) if isin else None
         # The holding's own quote currency — NOT folded to Unclassified the way the fund axes are.
-        # For a bond/ETF sleeve the quote currency is a fair first-order FX signal (a EUR-quoted line
-        # vs a USD one), which is exactly what the sleeve currency chart is for.
+        # For a bond/ETF class the quote currency is a fair first-order FX signal (a EUR-quoted line
+        # vs a USD one), which is exactly what the currency chart is for.
         cur = (grow.get("market_cap_currency") or grow.get("currency")) if grow else None
+        pr = priced_by_id.get(id(r))
+        mk = marks.get(isin) if isin else None
         holdings_detail.append({
             "name": r.get("holding_name"),
             "isin": isin,
-            "bucket": b,
+            "bucket": b_alloc,
             "currency": cur,
-            "weight_pct": start / total_start * 100.0,   # OPENING-value share of the whole book
-            "return_pct": (now / start - 1.0) * 100.0,
+            "via_names": r.get("via_names") or [],
+            "weight_pct": (pr[0] / total_start * 100.0) if pr else None,
+            "weight_now_pct": w / total_w * 100.0 if total_w else 0.0,
+            "return_pct": ((pr[1] / pr[0] - 1.0) * 100.0) if pr else None,
+            "own_return_pct": mk.get("return_pct") if mk else None,
+            "own_return_from": anchor,
+            # A sparse series gets an interpolated opening mark, and it has to say so.
+            "own_return_estimated": bool(mk.get("start_interpolated")) if mk else False,
         })
     bucket_returns = {b: (v[1] / v[0] - 1) * 100.0 for b, v in bucket_agg.items() if v[0]}
     return {"items": items, "alloc_items": alloc_items, "bucket_returns": bucket_returns,
@@ -503,6 +653,15 @@ def compute_portfolio_analysis(portfolio_id: int,
            .eq("portfolio_id", portfolio_id).execute().data or [])
     if p.get("positions_datum"):
         pos = [r for r in pos if r.get("datum") == p["positions_datum"]]
+
+    # ⚠ LOOK THROUGH THE CERTIFICATES FIRST, OR THIS CHARTS THE WRONG PORTFOLIO. Nine of
+    # ToppenbergBeheer Defensief's twelve positions are Leonteq certificates that ARE other
+    # models, carrying 44.56% of it. Unexpanded they are unpriceable CH ISINs, so the sector
+    # breakdown is drawn over the remaining 55% — two bond ETFs and a cash line — and presented
+    # as the portfolio's composition. Expanding replaces each with the stocks it actually holds.
+    from ._airs_lookthrough import expand_positions  # noqa: PLC0415  (cycle at module level)
+
+    pos, lookthrough = expand_positions(portfolio_id, p.get("positions_datum"), pos)
 
     # --- the portfolio side -------------------------------------------------------------
     from routers._airs_holding_isin import (  # noqa: PLC0415  (avoid a module-level cycle)
@@ -590,8 +749,26 @@ def compute_portfolio_analysis(portfolio_id: int,
     general_items = port_items
     if bucket_filter:
         general_items = [pi for pi, ai in zip(port_items, alloc_items) if ai[1] == bucket_filter]
-    sector_items = [pi for pi, ai in zip(port_items, alloc_items)
-                    if ai[1] in _EQUITY and (not bucket_filter or ai[1] == bucket_filter)]
+    # ⚠ THE SECTOR DENOMINATOR IS THE EQUITY SLEEVE, AND SELECTING A CLASS MUST NOT MOVE IT.
+    # This used to intersect with `bucket_filter` as well, so picking "Stocks" dropped Equity ETFs
+    # out of the denominator and every sector percentage rose: Technology 34.41% -> 35.88% on
+    # ToppenbergBeheer Defensief, +1.07 to +1.47pp across the three Toppenberg books.
+    #
+    # Arithmetically that was correct — a different question, honestly answered. As an interface
+    # it is not: the bar you clicked reported one number and reported another once clicked, so the
+    # act of inspecting a figure changed it. A reader cannot tell that from a bug, and the first
+    # thing they lose is trust in the chart they were about to rely on.
+    #
+    # Sector is an EQUITY view either way (a bond has no sector), so the equity sleeve is the only
+    # denominator that answers one question consistently. Selecting a class now re-colours the
+    # chart without moving it.
+    # ⚠ BUT A NON-EQUITY SELECTION STILL EMPTIES IT. Picking Bonds or Cash must not leave the
+    # equity sector chart standing — sector is not a question about a bond, and showing the
+    # stocks' sectors under a "Bonds" selection would attribute them to the wrong sleeve. So the
+    # filter still decides WHETHER the chart is drawn; it just no longer decides its denominator.
+    sector_items = (
+        [] if (bucket_filter and bucket_filter not in _EQUITY)
+        else [pi for pi, ai in zip(port_items, alloc_items) if ai[1] in _EQUITY])
     pw_general, pw_sector = _weigh(general_items), _weigh(sector_items)
     bw = _weigh(bench_items)
 
@@ -640,6 +817,16 @@ def compute_portfolio_analysis(portfolio_id: int,
         "benchmark_priced": bench_coverage.get("priced") or 0,
         "benchmark_coverage_pct": bench_coverage.get("covered_pct"),
         "returns": _returns(portfolio_id, p.get("positions_datum"), benchmark_label, source),
+        # ⚠ THE COMPOSITION WAS EXPANDED, AND THAT MUST BE VISIBLE. These charts are drawn over
+        # the stocks BEHIND the certificates, not over the twelve lines AIRS stores. Without
+        # this the reader cannot tell a portfolio that genuinely holds 22 names from one that
+        # holds three certificates — and cannot check the figures against the composition table,
+        # which still shows the unexpanded rows.
+        "looked_through_pct": lookthrough["looked_through_pct"],
+        # Weight still inside a certificate we could NOT expand — its target has no stored
+        # composition. Not dropped (that would delete the weight silently); reported.
+        "opaque_pct": lookthrough["opaque_pct"],
+        "looked_through": lookthrough["expanded"],
         "axes": axes,
         # The portfolio's own asset-class split, on the active weighting basis; each slice carries
         # the bucket's value-weighted YTD price return (from the paired book), for the pie legend.

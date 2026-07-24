@@ -7,6 +7,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { formatPct, visibleBuckets } from './composition';
 import { allocColor, bucketLabel } from './allocationColors';
+import { Provenance } from '../../../lib/provenance';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
 import BucketDetailPanel from './BucketDetailPanel';
@@ -90,7 +91,11 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive }: {
   );
 }
 
-type AllocSlice = { bucket: string; pct: number; return_pct?: number | null };
+type AllocSlice = {
+  bucket: string; pct: number; return_pct?: number | null;
+  /** Individual holdings in this class, counted AFTER the certificates are looked through. */
+  holdings?: number;
+};
 const RADIAN = Math.PI / 180;
 const fmtRet = (v?: number | null) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`);
 const retTone = (v?: number | null) => (v == null ? 'text-fg-faint' : v >= 0 ? 'text-pos-400' : 'text-neg-400');
@@ -166,6 +171,17 @@ function AllocationPie({ slices, selected, onSelect }: {
                 <span className="w-2.5 h-2.5 rounded-sm inline-block shrink-0" style={{ backgroundColor: allocColor(s.bucket) }} />
                 <span className={active ? 'text-fg-strong font-medium' : 'text-fg-muted'}>{bucketLabel(s.bucket)}</span>
                 <span className="font-mono text-fg-soft">{s.pct.toFixed(1)}%</span>
+                {/* ⚠ HOW MANY NAMES CARRY THAT WEIGHT. Counted after the certificates are looked
+                    through, so a slice reads as the companies actually behind it rather than the
+                    lines AIRS stores. "66% in one bond ETF" and "66% across sixty names" draw an
+                    identical wedge and are not the same portfolio; the count is the only thing on
+                    the legend that separates them. */}
+                {(s.holdings ?? 0) > 0 && (
+                  <span className="text-fg-faint tabular-nums"
+                    title={`${s.holdings} individual holding${s.holdings === 1 ? '' : 's'} in ${bucketLabel(s.bucket)}`}>
+                    ({s.holdings})
+                  </span>
+                )}
                 <span className="text-fg-faint">·</span>
                 <span className={`font-mono ${retTone(s.return_pct)}`}>{fmtRet(s.return_pct)}</span>
               </>
@@ -275,6 +291,209 @@ function Chart({ axis, rows, benchmark, onBucket, selected }: {
 
 type BookHolding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
 
+/** THE WHOLE PORTFOLIO, one row per instrument, grouped by asset class — what the reader sees
+ *  before picking a class. Every long position is here, counted AFTER the certificates are looked
+ *  through, so a model that stores twelve lines shows the 172 instruments it actually holds.
+ *
+ *  ⚠ WEIGHT IS `weight_now_pct`, NOT `weight_pct`. The two answer different questions and only one
+ *  of them belongs beside a chart: `weight_now_pct` shares the allocation chart's denominator, so
+ *  each class subtotal here EQUALS its slice to the decimal. `weight_pct` is the opening-value
+ *  weight the per-class contribution view needs (a contribution must be weighted by what was held
+ *  when the window opened, not by what a winner has grown into) and
+ *  is measured over the priced book only — showing it here would put a table and the chart directly
+ *  above it a few points apart, which reads as a bug in both.
+ *
+ *  ⚠ RETURN IS `own_return_pct`, NOT `return_pct`, FOR THE SAME REASON IN REVERSE. `return_pct` is
+ *  the book's value change, and the book knows what the CERTIFICATE did, not what NVIDIA did —
+ *  splitting it hands all 135 stocks their wrapper's number (NVIDIA read +0.08% against its own
+ *  +2.82%). `own_return_pct` prices each instrument off its own EUR series. It follows that the
+ *  rows do NOT sum to a class return, so no class return is shown in this table; that figure is a
+ *  different measure and it lives in the chart legend, where it is the only one on offer.
+ *
+ *  NO CLASS RETURN IN THE GROUP HEADER. Two returns for one class, a few points apart and both
+ *  correct, is exactly the pair a reader cannot arbitrate. */
+type HoldingSortKey = 'name' | 'weight' | 'return';
+
+/** Weights and returns to TWO decimals, always — including the trailing zero. A 0.4% and a 0.44%
+ *  position round to the same "0.4%", and in a 172-row table that is where the small holdings live.
+ *  Fixed precision also keeps the column optically aligned in a mono font. */
+const num2 = (v: number) => v.toFixed(2);
+const ret2 = (v?: number | null) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
+
+function PortfolioHoldings({ holdings, slices, asOf }: {
+  holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
+}) {
+  const [sortKey, setSortKey] = useState<HoldingSortKey>('weight');
+  const [dir, setDir] = useState<'asc' | 'desc'>('desc');
+
+  if (!holdings.length) return (
+    <p className="text-[11px] text-fg-subtle py-8 text-center">No positions to show for this portfolio.</p>
+  );
+
+  // Classes in the chart's own order, so the eye moves between them without re-reading.
+  const order = (slices ?? []).map((s) => s.bucket);
+  const groups = [...new Set([...order, ...holdings.map((h) => h.bucket)])]
+    .map((bucket) => ({
+      bucket,
+      slice: (slices ?? []).find((s) => s.bucket === bucket),
+      rows: holdings.filter((h) => h.bucket === bucket),
+    }))
+    .filter((g) => g.rows.length > 0);
+
+  const cmp = (a: BookHolding, b: BookHolding) => {
+    if (sortKey === 'name') {
+      const c = (a.name ?? '').localeCompare(b.name ?? '');
+      return dir === 'asc' ? c : -c;
+    }
+    const av = sortKey === 'weight' ? (a.weight_now_pct ?? 0) : a.own_return_pct;
+    const bv = sortKey === 'weight' ? (b.weight_now_pct ?? 0) : b.own_return_pct;
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;          // an unpriced holding always sorts last, both directions
+    if (bv == null) return -1;
+    return dir === 'asc' ? av - bv : bv - av;
+  };
+  const click = (k: HoldingSortKey) => {
+    if (k === sortKey) { setDir((d) => (d === 'asc' ? 'desc' : 'asc')); return; }
+    setSortKey(k);
+    setDir(k === 'name' ? 'asc' : 'desc');
+  };
+  const caret = (k: HoldingSortKey) => (
+    <span className={`ml-0.5 ${sortKey === k ? 'text-accent-400' : 'text-transparent'}`}>
+      {sortKey === k && dir === 'asc' ? '▲' : '▼'}
+    </span>
+  );
+  const th = 'py-2 font-medium cursor-pointer select-none whitespace-nowrap hover:text-fg-soft transition-colors';
+  const anchor = holdings.find((h) => h.own_return_from)?.own_return_from;
+
+  return (
+    <div className="bg-card border border-neutral-800/40 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-neutral-800/40">
+        <h4 className="text-xs font-medium text-fg-strong">
+          Holdings
+          <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+            what={'Every instrument the portfolio holds, grouped by asset class. A position held '
+              + 'through a certificate is listed as the instruments behind it, not as the '
+              + 'certificate.'}
+            how={'One row per ISIN. An instrument reached through more than one strategy is a '
+              + 'single row with the weights added, and every strategy it came through is named '
+              + 'in the Via column.'} />
+        </h4>
+        <span className="text-[10px] font-mono text-fg-faint">
+          {holdings.length} positions · {groups.length} classes
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-[10px] uppercase tracking-wide text-fg-faint bg-card sticky top-0 z-10">
+            <tr className="border-b border-neutral-800/40">
+              <th className="text-right w-10 pl-4 pr-2 py-2 font-medium">#</th>
+              <th className={`text-left ${th}`} onClick={() => click('name')}>Name{caret('name')}</th>
+              <th className="text-left py-2 font-medium w-32">ISIN</th>
+              <th className="text-left py-2 font-medium">
+                Via
+                <Provenance source="airs_model" asOf={asOf} kind="copied" column
+                  what={'The strategies this instrument is held through — the model portfolios '
+                    + 'whose certificates were looked through to reach it.'}
+                  how={'Empty means the position is held directly. More than one is normal: the '
+                    + 'same stock can be reached through several certificates, and the weights '
+                    + 'shown are the sum of all of them.'} />
+              </th>
+              <th className={`text-right w-24 ${th}`} onClick={() => click('weight')}>
+                Weight{caret('weight')}
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what={'The share of the portfolio held in this instrument, right now.'}
+                  how={'The position’s current EUR value ÷ the portfolio’s total current EUR '
+                    + 'value. A position reached through a certificate takes the certificate’s '
+                    + 'EUR value split by the strategy’s own percentages, so each class subtotal '
+                    + 'equals its share of the chart above.'} />
+              </th>
+              <th className={`text-right w-28 pr-4 ${th}`} onClick={() => click('return')}>
+                Return{caret('return')}
+                <Provenance source="yfinance" asOf={asOf} kind="formula" column
+                  what={'What this instrument itself returned in euros over the window, '
+                    + 'independent of how much of it the portfolio holds.'}
+                  how={'Its closing price now ÷ its closing price on '
+                    + `${anchor ?? 'the window’s opening date'}, minus 1, both converted to euros `
+                    + 'at that date’s rate, so the figure carries the currency leg. The window '
+                    + 'opens on 1 January or on the composition’s effective date, whichever is '
+                    + 'later. This is the instrument’s own return, not the portfolio’s share of '
+                    + 'it — the rows do not add up to a class return.'} />
+              </th>
+            </tr>
+          </thead>
+          {groups.map((g) => (
+            <tbody key={g.bucket}>
+              <tr className="bg-inset border-y border-neutral-800/40">
+                <td className="pl-4" />
+                <td className="py-2 text-[11px] font-medium text-fg-strong" colSpan={3}>
+                  <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 align-middle"
+                    style={{ background: allocColor(g.bucket) }} />
+                  {bucketLabel(g.bucket)}
+                  <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[10px] font-normal text-fg-muted">
+                    {g.rows.length}
+                  </span>
+                </td>
+                <td className="py-2 text-right font-mono text-[11px] font-semibold text-fg-strong">
+                  {num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}%
+                </td>
+                {/* Deliberately blank. A class return here would be the book's value change —
+                    a different measure from the instrument returns beneath it, and putting the
+                    two in one column is how a reader ends up trusting neither. */}
+                <td className="pr-4" />
+              </tr>
+              {[...g.rows].sort(cmp).map((h, i) => (
+                <tr key={h.isin ?? `${g.bucket}-${h.name ?? i}`}
+                  className="border-b border-neutral-800/[0.15] last:border-0 hover:bg-overlay/[0.03] transition-colors">
+                  <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[10px] text-fg-faint tabular-nums">{i + 1}</td>
+                  <td className="py-1.5 pr-3 text-fg truncate max-w-0" title={h.name ?? undefined}>{h.name ?? '—'}</td>
+                  <td className="py-1.5 pr-3 font-mono text-[10px] text-fg-faint">{h.isin ?? '—'}</td>
+                  <td className="py-1.5 pr-3">
+                    <ViaChips names={h.via_names ?? []} />
+                  </td>
+                  <td className="py-1.5 text-right font-mono text-fg tabular-nums">
+                    {num2(h.weight_now_pct ?? 0)}%
+                  </td>
+                  {/* An unpriced position shows a dash, never 0% — "we could not price this over
+                      the window" and "it did not move" are different facts and a 0 states the
+                      wrong one. An interpolated opening mark is flagged per value, because that
+                      one IS a property of the number rather than of the column. */}
+                  <td className={`py-1.5 pr-4 text-right font-mono tabular-nums ${retTone(h.own_return_pct)}`}
+                    title={h.own_return_pct == null ? 'No price series over this window' : undefined}>
+                    {ret2(h.own_return_pct)}
+                    {h.own_return_estimated && (
+                      <span className="ml-1 text-warn-400" title="Opening price interpolated — no close near the window's start">≈</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          ))}
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** The strategies a holding is reached through. Two named, the rest counted — a third long model
+ *  name pushes the numeric columns off the row, and the full list is one hover away. */
+function ViaChips({ names }: { names: string[] }) {
+  if (!names.length) return <span className="text-[10px] text-fg-faint">direct</span>;
+  const shown = names.slice(0, 2);
+  return (
+    <span className="flex flex-wrap items-center gap-1" title={names.join(' · ')}>
+      {shown.map((n) => (
+        <span key={n}
+          className="px-1.5 py-0.5 rounded-md bg-accent-500/10 text-accent-400 text-[10px] whitespace-nowrap max-w-[11rem] truncate">
+          {n}
+        </span>
+      ))}
+      {names.length > shown.length && (
+        <span className="text-[10px] text-fg-faint">+{names.length - shown.length}</span>
+      )}
+    </span>
+  );
+}
+
 /** The headline tile for a NON-EQUITY sleeve: its own return + weight, no benchmark. Replaces the
  *  Return/vs-SP500/Excess/Attribution scorecard, none of which makes sense off the equity book. */
 function SleeveTile({ bucket, slices }: { bucket: string; slices?: AllocSlice[] }) {
@@ -287,10 +506,10 @@ function SleeveTile({ bucket, slices }: { bucket: string; slices?: AllocSlice[] 
   );
 }
 
-/** What to show for a bond / fund / cash / alternatives sleeve, where sector-vs-SP500 says nothing:
- *  (1) a CONTRIBUTION breakdown — each holding's weight × return, which sums to the sleeve return —
- *  and (2) a CURRENCY-exposure chart (no benchmark). Both computed client-side from the book detail,
- *  so switching sleeves is instant. */
+/** What to show for a bond / fund / cash / alternatives class, where sector-vs-SP500 says nothing:
+ *  (1) a CONTRIBUTION breakdown — each holding's weight × its own return — and (2) a CURRENCY
+ *  exposure chart (no benchmark). Both computed client-side from the book detail, so switching
+ *  classes is instant. */
 type SleeveSortKey = 'name' | 'weight' | 'return' | 'contrib';
 
 function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket: string }) {
@@ -298,14 +517,23 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
   const [sortKey, setSortKey] = useState<SleeveSortKey>('weight');
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
 
-  const rows = holdings.filter((h) => h.bucket === bucket);
+  // ⚠ PRICED POSITIONS ONLY. `weight_pct` is null where we could not price the holding over the
+  // window, and a row with no return contributes nothing to the breakdown — so listing it at a
+  // `?? 0` weight would add a 0.0% line that reads as a tiny holding rather than an unpriced one.
+  const rows = holdings.filter((h) => h.bucket === bucket && h.weight_pct != null);
   const totalW = rows.reduce((s, h) => s + (h.weight_pct ?? 0), 0) || 1;
-  // Renormalise each holding's (opening-value) weight WITHIN the sleeve, then contribution =
-  // weight × return (in pp of the sleeve return). Σ contribution == the sleeve figure exactly.
+  // Renormalise each holding's (opening-value) weight WITHIN the class, then contribution =
+  // weight × return, in pp of the class return.
+  //
+  // ⚠ THE RETURN IS THE INSTRUMENT'S OWN (`own_return_pct`), NOT THE BOOK SPLIT. The book's
+  // per-leg return is the CERTIFICATE's return stamped on everything behind it — every stock in
+  // one strategy showing the same figure — which made Σ contribution land on the class number
+  // exactly while telling the reader nothing true about any single holding. Exact and
+  // uninformative is the worse trade: the sum is now approximate and each row is real.
   const items = rows.map((h) => {
     const w = (h.weight_pct ?? 0) / totalW * 100;
-    return { name: h.name, weight: w, ret: h.return_pct,
-      contrib: h.return_pct != null ? (w / 100) * h.return_pct : null };
+    return { name: h.name, weight: w, ret: h.own_return_pct,
+      contrib: h.own_return_pct != null ? (w / 100) * h.own_return_pct : null };
   });
   type Item = (typeof items)[number];
   const val = (it: Item): number | string | null =>
@@ -341,7 +569,7 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
 
   if (!rows.length) return (
     <p className="text-[11px] text-fg-subtle py-8 text-center">
-      No priced holdings in the {bucketLabel(bucket)} sleeve.
+      No priced holdings in {bucketLabel(bucket)}.
     </p>
   );
 
@@ -366,7 +594,7 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
                 return (
                   <tr key={i} className="border-t border-neutral-800/20">
                     <td className="py-1 pr-2 text-fg-soft" title={it.name ?? ''}>{it.name ?? '—'}</td>
-                    <td className="py-1 px-2 text-right font-mono text-fg">{it.weight.toFixed(1)}%</td>
+                    <td className="py-1 px-2 text-right font-mono text-fg">{it.weight.toFixed(2)}%</td>
                     <td className={`py-1 px-2 text-right font-mono ${retTone(it.ret)}`}>{fmtRet(it.ret)}</td>
                     <td className={`py-1 pl-2 text-right font-mono ${c >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
                       {c >= 0 ? '+' : ''}{c.toFixed(2)}pp
@@ -551,6 +779,10 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                 screen (the whole-portfolio scorecard, or the Stocks charts). ACWI's missing names
                 go a whole country at a time, and a cap-weighted index renormalised over the rest
                 does not LOSE that weight — it redistributes it. Stated, never assumed to be 100%. */}
+            {/* ⚠ NO LOOK-THROUGH BANNER HERE. These charts ARE drawn through the certificates —
+                the composition is the stocks behind them, not the lines AIRS stores — and the
+                payload still reports `looked_through_pct` / `opaque_pct` / `looked_through` for
+                anyone reading the API. It is simply not announced on screen. */}
             {!sleeve && (data.benchmark_coverage_pct ?? 100) < 97 && (
               <p className="text-[11px] text-warn-300 mb-3">
                 {'⚠ This index is rebuilt from '}
@@ -565,14 +797,12 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
               </p>
             )}
             {selected == null ? (
-              /* NOTHING selected → prompt the reader to pick a class. */
-              <div className="py-14 text-center">
-                <p className="text-sm text-fg-muted">Select a class in the chart above to break it down.</p>
-                <p className="text-[11px] text-fg-faint mt-1">
-                  Its holdings, contribution and currency — or, for stocks, sector &amp; region
-                  versus {data.benchmark ?? 'SP500'}.
-                </p>
-              </div>
+              /* NOTHING selected → the whole portfolio, one row per instrument, grouped by class.
+                 A prompt to click something used to sit here; it told the reader what to do next
+                 and nothing about what they hold. Picking a class still narrows this to that
+                 class's own breakdown. */
+              <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
+                asOf={data.as_of} />
             ) : sleeve ? (
               /* NON-EQUITY class: its holdings' contribution + a currency chart, no benchmark. */
               <SleeveBreakdown holdings={data.book_holdings ?? []} bucket={sleeve} />

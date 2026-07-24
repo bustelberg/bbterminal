@@ -5,7 +5,6 @@ import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { runSSE } from '../../lib/stream';
 import { sectorLabel } from '../../lib/assetLabels';
-import AssetNav from './AssetNav';
 import LwLineChart from './LwLineChart';
 import PerfTables from './alphalab/PerfTables';
 import SectorBreakdown, { type SectorIndex } from './alphalab/SectorBreakdown';
@@ -189,7 +188,6 @@ export default function AlphaLab() {
 
   return (
     <div className="min-h-screen bg-page text-fg">
-      <AssetNav />
       <div className="px-8 py-5 border-b border-neutral-800/40">
         <h1 className="text-xl font-semibold text-fg-strong">AlphaLab</h1>
         <p className="text-sm text-fg-subtle mt-1">Equal-weight price index of a saved universe, indexed to 100 at the start.</p>

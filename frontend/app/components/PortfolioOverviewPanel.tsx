@@ -65,6 +65,16 @@ function RefreshIcon({ spinning, size = 14 }: { spinning?: boolean; size?: numbe
 
 export default function PortfolioOverviewPanel() {
   const [rows, setRows] = useState<AirsPortfolioOverview[] | null>(null);
+  // Sort. Name ascending by default: the list is read to FIND a portfolio far more often than to
+  // rank one, and alphabetical is the only order you can navigate without reading every row.
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const toggleSort = (k: SortKey) => {
+    // Same column -> flip. New column -> its own natural first direction: A-Z for a name, but
+    // biggest-first for a number, because nobody opens a returns column to see the worst.
+    if (k === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(k); setSortDir(k === 'name' ? 'asc' : 'desc'); }
+  };
   const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, AirsAccountDetail>>({});
@@ -194,7 +204,29 @@ export default function PortfolioOverviewPanel() {
     setIsins((m) => ({ ...m, [p]: resolved }));
   }, []);
 
-  const view = (rows ?? []).filter((r) => (onlyLinked ? !!r.fixed_name : true));
+  const view = (() => {
+    const base = (rows ?? []).filter((r) => (onlyLinked ? !!r.fixed_name : true));
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const val = (r: AirsPortfolioOverview): string | number | null => (
+      sortKey === 'name' ? (r.name ?? '')
+        : sortKey === 'isins' ? r.isins ?? null
+          : sortKey === 'ytd' ? r.ytd_pct ?? null
+            : r.latest_month_pct ?? null);
+    return [...base].sort((a, b) => {
+      const x = val(a), y = val(b);
+      // ⚠ ABSENT SORTS TO THE BOTTOM IN BOTH DIRECTIONS. A portfolio with no ISINs or no return
+      // has no value here — it is not a very small one. Letting null fall through to a numeric
+      // compare would park every unlinked book at the top of an ascending sort and read as "these
+      // are the worst performers", which is a claim the data never made.
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      return (typeof x === 'string'
+        // localeCompare so "AziëTopSelectie" files under A, not after Z.
+        ? x.localeCompare(String(y), undefined, { sensitivity: 'base' })
+        : (x as number) - (y as number)) * dir;
+    });
+  })();
   const linked = (rows ?? []).filter((r) => !!r.fixed_name).length;
   const unconfirmed = (rows ?? []).filter((r) => r.link_source === 'guess').length;
 
@@ -273,19 +305,16 @@ export default function PortfolioOverviewPanel() {
                     people can talk about the same line. `text-right` so the digits align. */}
                 <th className="px-3 py-1.5 font-medium text-right w-8">#</th>
                 <th className="px-3 py-1.5 font-medium text-left" />{/* Analyse */}
-                <th className="px-3 py-1.5 font-medium text-left">Name</th>
-                <th className="px-3 py-1.5 font-medium text-right"
-                  title="Positions in the Fixed portfolio — the ISINs this pairing can reach. Blank = not linked to one.">
-                  ISINs
-                </th>
-                <th className="px-3 py-1.5 font-medium text-right"
-                  title="AIRS's own cumulatief_rendement for the year — each month's investment return compounded. It accounts for deposits and withdrawals, so it is not just (end value ÷ start value − 1).">
-                  YTD
-                </th>
-                <th className="px-3 py-1.5 font-medium text-right"
-                  title="AIRS's rendement from its newest row — the current (latest) month, a different window from the year. Not a rival YTD.">
-                  Current month
-                </th>
+                <SortTh label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortTh label="ISINs" k="isins" align="right"
+                  sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
+                  title="Positions in the Fixed portfolio — the ISINs this pairing can reach. Blank = not linked to one." />
+                <SortTh label="YTD" k="ytd" align="right"
+                  sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
+                  title="AIRS's own cumulatief_rendement for the year — each month's investment return compounded. It accounts for deposits and withdrawals, so it is not just (end value ÷ start value − 1)." />
+                <SortTh label="Current month" k="month" align="right"
+                  sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
+                  title="AIRS's rendement from its newest row — the current (latest) month, a different window from the year. Not a rival YTD." />
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
@@ -410,7 +439,12 @@ export default function PortfolioOverviewPanel() {
         </div>
       )}
       {analyse && (
-        <PortfolioAnalysisModal id={analyse.id} name={analyse.name}
+        // ⚠ KEYED BY PORTFOLIO. The modal deliberately does NOT clear `data` when its request key
+        // changes (clearing inside the effect cascades a render), so a surviving instance would
+        // paint the PREVIOUS portfolio's composition for the ~4s the next one takes to load —
+        // a complete, plausible, wrong answer with no loading state to warn the reader. The key
+        // forces a fresh mount, so an unloaded modal can only ever show "Loading composition…".
+        <PortfolioAnalysisModal key={analyse.id} id={analyse.id} name={analyse.name}
           onClose={() => setAnalyse(null)} />
       )}
       {pfFund && (
@@ -433,6 +467,31 @@ export default function PortfolioOverviewPanel() {
  *  For an ISIN-bearing row it is EDITABLE: an overlaid `<select>` lets a user pin the Class (or
  *  pick "Auto" to revert to the calculated one). The choice is persisted per ISIN and beats the
  *  calculation forever; an overridden badge wears a ring on its dot. Cash (no ISIN) is read-only. */
+type SortKey = 'name' | 'isins' | 'ytd' | 'month';
+
+/** A sortable column heading. The arrow shows the ACTIVE column only — an indicator on every
+ *  header tells the reader nothing about which one is in force. */
+function SortTh({ label, k, sortKey, sortDir, onSort, align = 'left', title }: {
+  label: string; k: SortKey; sortKey: SortKey; sortDir: 'asc' | 'desc';
+  onSort: (k: SortKey) => void; align?: 'left' | 'right'; title?: string;
+}) {
+  const active = sortKey === k;
+  return (
+    <th className={'px-3 py-1.5 font-medium ' + (align === 'right' ? 'text-right' : 'text-left')}
+      title={title}>
+      <button type="button" onClick={() => onSort(k)}
+        className={'inline-flex items-center gap-1 hover:text-accent-400 transition-colors '
+          + (active ? 'text-fg-soft' : '')}>
+        {label}
+        <span className={'text-[8px] ' + (active ? 'text-accent-400' : 'text-fg-faint/40')}>
+          {active ? (sortDir === 'asc' ? '▲' : '▼') : '▾'}
+        </span>
+      </button>
+    </th>
+  );
+}
+
+
 function BucketBadge({ bucket, isin, overridden, onOverride }: {
   bucket?: string | null; isin?: string | null; overridden?: boolean | null;
   onOverride?: (isin: string, bucket: string | null) => void | Promise<void>;

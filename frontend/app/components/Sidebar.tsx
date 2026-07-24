@@ -24,6 +24,8 @@ const isSection = (e: NavEntry): e is NavSection => 'children' in e;
 // (`proxy.ts`) enforces — so the nav can never show a page the user can't open.
 const navItems: NavEntry[] = [
   { href: '/', label: 'Welcome' },
+  // The AIRS books, their models and the analysis built on them.
+  { href: '/management-dashboard', label: 'Management Dashboard' },
   { href: '/earnings', label: 'Earnings Dashboard' },
   { href: '/backtest', label: 'Backtest' },
   { href: '/diversifier', label: 'Diversifier' },
@@ -47,6 +49,7 @@ const navItems: NavEntry[] = [
   { href: '/isin-compare', label: 'ISIN Compare' },
   { href: '/asset-pipeline', label: 'Asset Pipeline' },
   { href: '/alphalab', label: 'AlphaLab' },
+  { href: '/signal-lab', label: 'Signal Lab' },
   { href: '/schedule', label: 'Schedule' },
   { href: '/fees', label: 'Fees' },
   { href: '/api', label: 'API' },

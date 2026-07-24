@@ -2903,7 +2903,7 @@
         "type": "object"
       },
       "BookHoldingDetail": {
-        "description": "One paired-book holding, for a non-equity sleeve's contribution + currency view.\n\n`weight_pct` is the holding's OPENING value (beginwaarde) as a share of the whole book, so that\nwithin ANY bucket, \u03a3 (weight_pct / \u03a3_bucket weight_pct) \u00b7 return_pct reproduces that bucket's\nSTART-weighted return (\u03a3now/\u03a3start\u22121) exactly \u2014 the true value change, not the current-value\nweighting that lets a big winner dominate. `currency` is the holding's quote currency (a fair\nfirst-order FX signal for a bond/ETF sleeve \u2014 NOT folded to Unclassified like the fund axes).",
+        "description": "One paired-book position \u2014 every LONG line, priced or not.\n\n\u26a0 TWO WEIGHTS ON PURPOSE, AND THEY ARE NOT INTERCHANGEABLE.\n\n`weight_pct` is the holding's OPENING value (beginwaarde) as a share of the PRICED book, so that\nwithin ANY asset class, \u03a3 (weight_pct / \u03a3_class weight_pct) \u00b7 return_pct reproduces that class's\nSTART-weighted return (\u03a3now/\u03a3start\u22121) exactly \u2014 the true value change, not the current-value\nweighting that lets a big winner dominate. It is None where we could not price the position over\nthe window, which is why it is nullable: a 0% there would read as \"held nothing\", not \"unknown\".\n\n`weight_now_pct` is the CURRENT value as a share of the WHOLE book \u2014 the very number the\nallocation chart is drawn from, so per-class subtotals in the holdings table equal the chart's\nslices to the decimal. Use this one for anything shown beside the chart; a table that disagrees\nwith the chart above it is read as a bug in both.\n\n`currency` is the holding's quote currency (a fair first-order FX signal for a bond/ETF class \u2014\nNOT folded to Unclassified like the fund axes).",
         "properties": {
           "bucket": {
             "title": "Bucket",
@@ -2942,6 +2942,33 @@
             ],
             "title": "Name"
           },
+          "own_return_estimated": {
+            "default": false,
+            "title": "Own Return Estimated",
+            "type": "boolean"
+          },
+          "own_return_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Own Return From"
+          },
+          "own_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Own Return Pct"
+          },
           "return_pct": {
             "anyOf": [
               {
@@ -2953,14 +2980,33 @@
             ],
             "title": "Return Pct"
           },
-          "weight_pct": {
-            "title": "Weight Pct",
+          "via_names": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Via Names",
+            "type": "array"
+          },
+          "weight_now_pct": {
+            "default": 0.0,
+            "title": "Weight Now Pct",
             "type": "number"
+          },
+          "weight_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Pct"
           }
         },
         "required": [
-          "bucket",
-          "weight_pct"
+          "bucket"
         ],
         "title": "BookHoldingDetail",
         "type": "object"
@@ -5028,6 +5074,20 @@
             "title": "Holdings",
             "type": "integer"
           },
+          "looked_through": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Looked Through",
+            "type": "array"
+          },
+          "looked_through_pct": {
+            "default": 0.0,
+            "title": "Looked Through Pct",
+            "type": "number"
+          },
           "name": {
             "anyOf": [
               {
@@ -5038,6 +5098,11 @@
               }
             ],
             "title": "Name"
+          },
+          "opaque_pct": {
+            "default": 0.0,
+            "title": "Opaque Pct",
+            "type": "number"
           },
           "portfolio_id": {
             "anyOf": [
@@ -6284,6 +6349,11 @@
           "bucket": {
             "title": "Bucket",
             "type": "string"
+          },
+          "holdings": {
+            "default": 0,
+            "title": "Holdings",
+            "type": "integer"
           },
           "pct": {
             "title": "Pct",

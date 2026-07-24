@@ -537,7 +537,9 @@ export default function PortfoliosPanel() {
       )}
 
       {analyse && (
-        <PortfolioAnalysisModal id={analyse.id} name={analyse.name}
+        // ⚠ Keyed by portfolio — see the twin in `PortfolioOverviewPanel`. Without it a surviving
+        // instance paints the previous portfolio's composition while the next one loads.
+        <PortfolioAnalysisModal key={analyse.id} id={analyse.id} name={analyse.name}
           onClose={() => setAnalyse(null)} />
       )}
     </section>

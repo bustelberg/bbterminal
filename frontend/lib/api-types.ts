@@ -7160,13 +7160,23 @@ export interface components {
         };
         /**
          * BookHoldingDetail
-         * @description One paired-book holding, for a non-equity sleeve's contribution + currency view.
+         * @description One paired-book position — every LONG line, priced or not.
          *
-         *     `weight_pct` is the holding's OPENING value (beginwaarde) as a share of the whole book, so that
-         *     within ANY bucket, Σ (weight_pct / Σ_bucket weight_pct) · return_pct reproduces that bucket's
+         *     ⚠ TWO WEIGHTS ON PURPOSE, AND THEY ARE NOT INTERCHANGEABLE.
+         *
+         *     `weight_pct` is the holding's OPENING value (beginwaarde) as a share of the PRICED book, so that
+         *     within ANY asset class, Σ (weight_pct / Σ_class weight_pct) · return_pct reproduces that class's
          *     START-weighted return (Σnow/Σstart−1) exactly — the true value change, not the current-value
-         *     weighting that lets a big winner dominate. `currency` is the holding's quote currency (a fair
-         *     first-order FX signal for a bond/ETF sleeve — NOT folded to Unclassified like the fund axes).
+         *     weighting that lets a big winner dominate. It is None where we could not price the position over
+         *     the window, which is why it is nullable: a 0% there would read as "held nothing", not "unknown".
+         *
+         *     `weight_now_pct` is the CURRENT value as a share of the WHOLE book — the very number the
+         *     allocation chart is drawn from, so per-class subtotals in the holdings table equal the chart's
+         *     slices to the decimal. Use this one for anything shown beside the chart; a table that disagrees
+         *     with the chart above it is read as a bug in both.
+         *
+         *     `currency` is the holding's quote currency (a fair first-order FX signal for a bond/ETF class —
+         *     NOT folded to Unclassified like the fund axes).
          */
         BookHoldingDetail: {
             /** Bucket */
@@ -7177,10 +7187,29 @@ export interface components {
             isin?: string | null;
             /** Name */
             name?: string | null;
+            /**
+             * Own Return Estimated
+             * @default false
+             */
+            own_return_estimated?: boolean;
+            /** Own Return From */
+            own_return_from?: string | null;
+            /** Own Return Pct */
+            own_return_pct?: number | null;
             /** Return Pct */
             return_pct?: number | null;
+            /**
+             * Via Names
+             * @default []
+             */
+            via_names?: string[];
+            /**
+             * Weight Now Pct
+             * @default 0
+             */
+            weight_now_pct?: number;
             /** Weight Pct */
-            weight_pct: number;
+            weight_pct?: number | null;
         };
         /** BuildUniverseRequest */
         BuildUniverseRequest: {
@@ -7991,8 +8020,25 @@ export interface components {
              * @default 0
              */
             holdings?: number;
+            /**
+             * Looked Through
+             * @default []
+             */
+            looked_through?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Looked Through Pct
+             * @default 0
+             */
+            looked_through_pct?: number;
             /** Name */
             name?: string | null;
+            /**
+             * Opaque Pct
+             * @default 0
+             */
+            opaque_pct?: number;
             /** Portfolio Id */
             portfolio_id?: number | null;
             returns?: components["schemas"]["PortfolioAnalysisReturns"] | null;
@@ -8507,6 +8553,11 @@ export interface components {
         PortfolioAllocationSlice: {
             /** Bucket */
             bucket: string;
+            /**
+             * Holdings
+             * @default 0
+             */
+            holdings?: number;
             /** Pct */
             pct: number;
             /** Return Pct */

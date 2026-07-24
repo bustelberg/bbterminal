@@ -216,7 +216,14 @@ export default function CorrelationMatrix() {
     : null;
 
   return (
-    <section className="bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
+    // ⚠ `isolate` — THIS TABLE'S STACKING ORDER MUST NOT ESCAPE IT. `headerZ`/`cornerZ` climb
+    // with the COLUMN COUNT (`20 + n - j`, corner `20 + n + 1`), so at ~56 portfolios the sticky
+    // headers reach z≈77 and painted straight over the Analyse modal's `z-50` — the modal opened
+    // *underneath* the correlation grid. Raising the modal would only move the collision to
+    // whatever portfolio count crosses the new number next; `isolation: isolate` creates a
+    // stacking context so every z-index in here is compared only against its siblings, and the
+    // table can rank its own headers however it likes without competing with the page.
+    <section className="isolate bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h3 className="text-sm font-semibold text-fg-strong">Portfolio correlations</h3>

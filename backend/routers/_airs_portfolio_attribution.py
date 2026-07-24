@@ -74,6 +74,14 @@ def _model_holdings(portfolio_id: int, eff: str | None, start: str) -> list[dict
            .eq("portfolio_id", portfolio_id).execute().data or [])
     if eff:
         pos = [r for r in pos if r.get("datum") == eff]
+
+    # ⚠ THE SAME EXPANSION THE COMPOSITION CHART USES, from the same function. A certificate has
+    # no price series, so unexpanded it lands in `unpriced_pct` — and an unpriced EQUITY is the
+    # dangerous exclusion this module already warns about: its sectors read as UNOWNED, and the
+    # allocation column then credits the model for avoiding a sector it holds 44% of.
+    from ._airs_lookthrough import expand_positions  # noqa: PLC0415
+
+    pos, _lt = expand_positions(portfolio_id, eff, pos)
     held = sorted({r["isin"] for r in pos if r.get("isin")})
     marks = compute_holding_marks(held, start)
     out: list[dict] = []
@@ -118,6 +126,16 @@ def _book_holdings(portfolio_id: int) -> list[dict] | None:
     if not link:
         return None
     rows = resolve_account_isins(link["portefeuille"]).get("rows") or []
+
+    # ⚠ THE SAME EXPANSION THE COMPOSITION CHART APPLIES TO THIS SIDE. The modal drives BOTH from
+    # `source='book'`, so leaving this unexpanded put the two straight into contradiction: the
+    # sector bar read Technology 35% while clicking it listed ZERO holdings, because the book is
+    # nine certificates and none of them is a technology stock. A chart and its own drill-down
+    # disagreeing is worse than either being wrong alone — it tells the reader one of them is
+    # lying and gives them no way to tell which.
+    from ._airs_portfolio_analysis import _expand_book_rows  # noqa: PLC0415  (cycle at import)
+
+    rows = _expand_book_rows(rows)
     total = sum(float(r.get("start_value_eur") or 0) for r in rows) or 1.0
     out: list[dict] = []
     for r in rows:
@@ -325,6 +343,24 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     b_norm: dict[str, list[tuple[float, float]]] = {
         k: [(w / b_w_total * 100.0, r) for w, r in rows] for k, rows in b_by_bucket.items()
     }
+
+    # ⚠ THE HOLDINGS LISTS MUST BE ON THE SAME BASE AS THE BUCKET WEIGHT THEY SIT UNDER.
+    # `w_p`/`w_b` are renormalised over what each side can attribute (the identity below needs
+    # weights summing to 1), but the per-holding lists were left as raw shares of the WHOLE
+    # portfolio. Measured on ToppenbergBeheer Defensief: the drill-down said Technology 34.38%
+    # and its own holdings added to 9.11% — out by exactly 100/attributable_pct (3.77x), on every
+    # bucket. A reader who adds up the list gets a different number from the heading above it,
+    # and neither is wrong on its own, which is the worst kind of disagreement to debug.
+    for legs in port_holdings_by_bucket.values():
+        for h in legs:
+            h["weight_pct"] = h["weight_pct"] / p_w_total * 100.0
+            # The contribution is weight x return, so it has to be rescaled with the weight or it
+            # stops being the product of the two numbers printed beside it.
+            h["contribution_pct"] = h["weight_pct"] / 100.0 * (h["return_pct"] or 0.0)
+    for legs in bench_holdings_by_bucket.values():
+        for h in legs:
+            h["weight_pct"] = h["weight_pct"] / b_w_total * 100.0
+            h["contribution_pct"] = h["weight_pct"] / 100.0 * (h["return_pct"] or 0.0)
 
     r_p_total = sum(w / 100.0 * ret for rows in p_by_bucket.values() for w, ret in rows)
     r_b_total = sum(w / 100.0 * ret for rows in b_norm.values() for w, ret in rows)

@@ -535,23 +535,55 @@ class PortfolioAllocationSlice(BaseModel):
     pct: float
     # The bucket's value-weighted YTD price return (from the paired book); null when no book.
     return_pct: float | None = None
+    # ⚠ How many INDIVIDUAL holdings sit in this class, counted AFTER the certificates are looked
+    # through. A weight alone cannot tell "66% in one bond ETF" from "66% across sixty names" —
+    # they draw the same slice and are not the same portfolio. On ToppenbergBeheer Defensief the
+    # Stocks sleeve is nine lines in AIRS and ~160 real companies underneath.
+    holdings: int = 0
 
 
 class BookHoldingDetail(BaseModel):
-    """One paired-book holding, for a non-equity sleeve's contribution + currency view.
+    """One paired-book position — every LONG line, priced or not.
 
-    `weight_pct` is the holding's OPENING value (beginwaarde) as a share of the whole book, so that
-    within ANY bucket, Σ (weight_pct / Σ_bucket weight_pct) · return_pct reproduces that bucket's
+    ⚠ TWO WEIGHTS ON PURPOSE, AND THEY ARE NOT INTERCHANGEABLE.
+
+    `weight_pct` is the holding's OPENING value (beginwaarde) as a share of the PRICED book, so that
+    within ANY asset class, Σ (weight_pct / Σ_class weight_pct) · return_pct reproduces that class's
     START-weighted return (Σnow/Σstart−1) exactly — the true value change, not the current-value
-    weighting that lets a big winner dominate. `currency` is the holding's quote currency (a fair
-    first-order FX signal for a bond/ETF sleeve — NOT folded to Unclassified like the fund axes).
+    weighting that lets a big winner dominate. It is None where we could not price the position over
+    the window, which is why it is nullable: a 0% there would read as "held nothing", not "unknown".
+
+    `weight_now_pct` is the CURRENT value as a share of the WHOLE book — the very number the
+    allocation chart is drawn from, so per-class subtotals in the holdings table equal the chart's
+    slices to the decimal. Use this one for anything shown beside the chart; a table that disagrees
+    with the chart above it is read as a bug in both.
+
+    `currency` is the holding's quote currency (a fair first-order FX signal for a bond/ETF class —
+    NOT folded to Unclassified like the fund axes).
     """
     name: str | None = None
     isin: str | None = None
     bucket: str
     currency: str | None = None
-    weight_pct: float
+    # Which strategies put us in this instrument — the model portfolios whose certificates were
+    # looked through to reach it. Empty when the position is held directly. More than one is
+    # normal: NVIDIA arrives through three of ToppenbergBeheer Defensief's certificates.
+    via_names: list[str] = []
+    weight_pct: float | None = None
+    weight_now_pct: float = 0.0
     return_pct: float | None = None
+    # ⚠ THE INSTRUMENT'S OWN EUR RETURN — NOT `return_pct`, AND THE DIFFERENCE IS THE WHOLE POINT.
+    # `return_pct` is the book's value change, and the book does not know what NVIDIA did: it knows
+    # what the CERTIFICATE holding NVIDIA did. Splitting that certificate's start and current value
+    # by the same composition share hands every instrument behind it the wrapper's return — 135
+    # stocks with 37 distinct returns, NVIDIA reporting +0.08% against its own +2.82%. So a
+    # per-instrument figure is priced from the instrument's own EUR series over `own_return_from`
+    # (the portfolio's YTD anchor: max(1 Jan, the composition's effective date)), through the same
+    # marks that produce the arithmetic behind a portfolio's YTD elsewhere. Use THIS one per row;
+    # `return_pct` only aggregates correctly, and only over a whole class.
+    own_return_pct: float | None = None
+    own_return_from: str | None = None
+    own_return_estimated: bool = False
 
 
 class ModelPortfolioAnalysis(BaseModel):
@@ -585,6 +617,21 @@ class ModelPortfolioAnalysis(BaseModel):
     holdings: int = 0
     covered_pct: float = 0.0
     benchmark_covered_pct: float = 0.0
+    # ── Look-through ───────────────────────────────────────────────────────────────────────
+    # Some positions are not instruments: they are other model portfolios wrapped as a Leonteq
+    # certificate. These charts are drawn over the stocks BEHIND them, not over the lines AIRS
+    # stores — measured on ToppenbergBeheer Defensief, 9 of 12 positions and 44.56% of the
+    # weight. Unexpanded it charted "Unclassified 100%" over 1% classified weight.
+    #
+    # ⚠ REPORTED, NOT SILENT. The composition table still shows the unexpanded rows, so without
+    # this a reader cannot reconcile 168 holdings against the twelve in front of them, and cannot
+    # tell a portfolio that genuinely holds 22 names from one holding three certificates.
+    looked_through_pct: float = 0.0
+    # Weight still inside a certificate we could NOT expand (its target has no stored
+    # composition). Kept as an opaque leg rather than dropped — deleting it would shrink the
+    # portfolio and everything else would renormalise over the gap, invisibly.
+    opaque_pct: float = 0.0
+    looked_through: list[dict] = []
     # Rows priced on a venue whose currency differs from the company's own — the wrong-listing
     # bug, surfaced rather than absorbed. 40 of the S&P's 491 sit on European/Canadian lines.
     foreign_listings: int = 0

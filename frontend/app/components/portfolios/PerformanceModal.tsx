@@ -107,7 +107,7 @@ export default function PerformanceModal({
           <div className="space-y-2">
             <p className="text-[11px] text-fg-muted">
               Compare each metric across windows — when the recent regime (2Y) diverges sharply from
-              the long run (8Y), the {basket ? 'sleeve' : "company"}&apos;s return/risk distribution has <strong>drifted</strong>.
+              the long run (8Y), the {basket ? 'group' : 'company'}&apos;s return/risk distribution has <strong>drifted</strong>.
             </p>
             <PerformanceTable windows={windows} asOf={asOf} />
           </div>
