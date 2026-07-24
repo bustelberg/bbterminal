@@ -131,6 +131,22 @@ def _mark(isin: str, st: str, reason: str | None = None) -> None:
     ).eq("isin", isin).execute()
 
 
+def _reapply_symbol_overrides() -> None:
+    """Put every `asset_symbol_override` back after a resolution slice."""
+    from .symbol_override import apply_symbol_overrides  # noqa: PLC0415
+    n = apply_symbol_overrides()
+    if n:
+        log.warning("[queue] re-applied %d symbol override(s) this slice overwrote", n)
+
+
+def _reapply_aliases() -> None:
+    """Put every `asset_isin_alias` back after a resolution slice."""
+    from .isin_alias import apply_aliases  # noqa: PLC0415
+    n = apply_aliases()
+    if n:
+        log.warning("[queue] re-applied %d ISIN alias(es) this slice overwrote", n)
+
+
 def process_slice(limit: int = SLICE, verbose: bool = False) -> dict:
     """Process up to `limit` pending ISINs through the throttled resolve+store,
     marking each done/failed. THE worker step (one Yahoo consumer). On a Yahoo
@@ -206,6 +222,17 @@ def process_slice(limit: int = SLICE, verbose: bool = False) -> dict:
         store.set_default_executions()
     except Exception:  # noqa: BLE001
         pass
+    # ⚠ MANUAL OVERRIDES GO BACK ON LAST, OR THIS SLICE JUST UNDID THEM. A resolution writes
+    # `asset_execution` per ISIN and picks the listing BY NAME, which is exactly how a wrong share
+    # class gets chosen (iShares Global Corp Bond "EUR" hedged vs "USD (Dist)" — three characters
+    # apart, different currency exposure). Both are no-ops when nothing drifted: they compare the
+    # stored row first and only then reach for the network.
+    for _fn, _what in ((_reapply_symbol_overrides, "symbol override"),
+                       (_reapply_aliases, "ISIN alias")):
+        try:
+            _fn()
+        except Exception as e:  # noqa: BLE001 — never fail a completed slice on a re-assert
+            log.warning("[queue] re-applying %ss failed: %s: %s", _what, type(e).__name__, e)
     remaining = supabase.table("asset_ingest_queue").select("isin", count="exact").eq("status", "pending").limit(1).execute().count or 0
     return {"processed": ok + failed, "ok": ok, "failed": failed, "remaining": remaining}
 

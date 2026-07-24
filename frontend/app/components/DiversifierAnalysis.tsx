@@ -103,7 +103,7 @@ export default function DiversifierAnalysis() {
               />
             </div>
             <div>
-              <label className="text-fg-subtle text-xs block mb-1" title="The optimizer searches the strategy weight over this range on a 2.5% grid (the diversifier sleeve = 100 − strategy is split among the funds, also in 2.5% steps). Set min = max to pin it.">
+              <label className="text-fg-subtle text-xs block mb-1" title="The optimizer searches the strategy weight over this range on a 2.5% grid (the diversifier share = 100 − strategy is split among the funds, also in 2.5% steps). Set min = max to pin it.">
                 Strategy weight % (min–max)
               </label>
               <div className="flex items-center gap-1.5">
@@ -198,7 +198,7 @@ export default function DiversifierAnalysis() {
             <button
               onClick={d.runOptimize}
               disabled={d.selectedRunId == null || d.selectedEtfIds.size === 0 || d.optimizing}
-              title="Optimize the diversifier sleeve around your strategy, with a drift-rebalance band"
+              title="Optimize the diversifier share around your strategy, with a drift-rebalance band"
               className="px-4 py-2 rounded-lg text-sm font-medium border border-accent-500 text-accent-400 hover:bg-accent-600/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {d.optimizing ? <LoadingDots /> : 'Optimize portfolio'}
@@ -242,7 +242,7 @@ export default function DiversifierAnalysis() {
         {/* ── Funds (ETFs & bonds, treated the same) ────────────────── */}
         <BenchmarkSection
           title="Funds (ETFs & bonds)"
-          hint="Add any GuruFocus-priced fund by ticker; all selected funds are optimized into the diversifier sleeve."
+          hint="Add any GuruFocus-priced fund by ticker; all selected funds are optimized into the diversifier share."
           rows={d.visibleEtfs}
           selectedIds={d.selectedEtfIds}
           onToggle={d.toggleEtf}

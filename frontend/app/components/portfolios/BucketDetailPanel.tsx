@@ -208,10 +208,10 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
               {attr?.start && (
                 <span className="font-mono text-fg-muted">Since {attr.start}</span>
               )}
-              <span title="Overweighting a bucket that beat the index (vs the whole index's return).">
+              <span title="Overweighting a group that beat the index (vs the whole index's return).">
                 allocation <Num v={row.allocation_pct} pp />
               </span>
-              <span title="Did your names in this bucket beat the index's names in it?">
+              <span title="Did your names in this group beat the index's names in it?">
                 selection <Num v={row.selection_pct} pp />
               </span>
               <span title="The cross term (over/underweight × out/under-performance).">

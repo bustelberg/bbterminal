@@ -27,14 +27,22 @@ export type SourceKey =
   | 'benchmark'      // yfinance close, benchmark constituents
   | 'derived';       // computed from the above (no single source of its own)
 
-const SOURCE: Record<SourceKey, { label: string; vendor: string }> = {
-  airs_volk: { label: 'AIRS Vermogensoverzicht (VOLK)', vendor: 'AIRS scan' },
-  airs_att: { label: 'AIRS Rendementen (ATT)', vendor: 'AIRS scan' },
-  airs_model: { label: 'AIRS Model-portefeuille', vendor: 'AIRS scan' },
-  yfinance: { label: 'yfinance daily close', vendor: 'Yahoo' },
-  fx: { label: 'ECB / Yahoo FX rate', vendor: 'ECB' },
-  benchmark: { label: 'yfinance close (benchmark)', vendor: 'Yahoo' },
-  derived: { label: 'Computed on our side', vendor: '' },
+/**
+ * ⚠ THE LABEL IS THE WHOLE ANSWER — there is no second "vendor" line, and there must not be one
+ * again. Every source used to carry one, and in all seven cases it restated the label it sat
+ * next to: "AIRS Vermogensoverzicht (VOLK) · AIRS scan", "yfinance daily close · Yahoo",
+ * "ECB / Yahoo FX rate · ECB". It read as a second, more precise fact and was not one, so the
+ * card spent a line teaching the reader nothing. Name the source once, in terms someone can go
+ * and look up.
+ */
+const SOURCE: Record<SourceKey, { label: string }> = {
+  airs_volk: { label: 'AIRS Vermogensoverzicht (VOLK)' },
+  airs_att: { label: 'AIRS Rendementen (ATT)' },
+  airs_model: { label: 'AIRS Model-portefeuille' },
+  yfinance: { label: 'yfinance daily close' },
+  fx: { label: 'ECB / Yahoo FX rate' },
+  benchmark: { label: 'yfinance close (benchmark)' },
+  derived: { label: 'Computed on our side' },
 };
 
 /** The as-of freshness as a small coloured pill: green "current", neutral "1 trading day old",
@@ -72,26 +80,49 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
  */
 export type ProvKind = 'copied' | 'formula';
 
-/** The designed popover body: Source (WHERE + field) · When · How (copied vs formula). */
-function ProvenanceCard({ source, asOf, note, how, kind }: {
+/**
+ * The designed popover body: What · Source (WHERE) · When · How (copied vs formula).
+ *
+ * ⚠ `what` LEADS WHEN IT IS GIVEN, AND THAT IS THE POINT. Source/When/How all answer questions
+ * ABOUT a number the reader has already identified. They are useless — worse, they look like an
+ * answer — to someone who does not yet know what the number IS. So a card carrying `what` puts it
+ * in the headline and demotes the source to a field beneath it; the reader learns what they are
+ * looking at, then where it came from.
+ *
+ * Without `what` the card renders exactly as before (Source in the headline). That is not a fork:
+ * it is the same shell with a different field promoted, and it keeps every call site that has not
+ * been given a `what` yet rendering correctly rather than showing an empty heading.
+ */
+function ProvenanceCard({ source, asOf, note, how, kind, column, what }: {
   source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
+  column?: boolean; what?: string;
 }) {
   const s = SOURCE[source];
   const f = asOf ? snapshotFreshness(asOf) : null;
   return (
     // The shared shell — identical chrome to every other tooltip; only the FIELDS differ.
-    <TipCard label="Source" title={s.label} subtitle={note}
-      labelSuffix={s.vendor ? <span className="text-[9px] text-fg-faint">· {s.vendor}</span> : undefined}>
+    <TipCard label={what ? 'What' : 'Source'} title={what ?? s.label}
+      subtitle={what ? undefined : note}>
       <>
+        {what && (
+          <Field label="Source">
+            <span className="text-fg-soft">
+              {s.label}
+              {note && <span className="text-fg-muted"> — {note}</span>}
+            </span>
+          </Field>
+        )}
         <Field label="When">
-          {asOf
-            ? (
-              <span className="flex items-center gap-1.5 flex-wrap">
-                <span className="font-mono text-fg">{asOf}</span>
-                {f && <FreshnessPill tone={f.tone} label={f.label} />}
-              </span>
-            )
-            : <span className="text-fg-muted">no dated source (a structural / computed value)</span>}
+          {column
+            ? <span className="text-fg-muted">per value — each cell carries its own date</span>
+            : asOf
+              ? (
+                <span className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-mono text-fg">{asOf}</span>
+                  {f && <FreshnessPill tone={f.tone} label={f.label} />}
+                </span>
+              )
+              : <span className="text-fg-muted">no dated source (a structural / computed value)</span>}
         </Field>
         {(kind || how) && (
           <Field label="How">
@@ -115,13 +146,32 @@ function ProvenanceCard({ source, asOf, note, how, kind }: {
  *
  *  `note` — the specific field/line at the source ("cumulatief_rendement", "Beginwaarde").
  *  `kind` — 'copied' (read from the source, unchanged) or 'formula' (computed here); the only two
- *           ways a number arrives. `how` carries the formula when kind is 'formula'. */
-export function Provenance({ source, asOf, note, how, kind }: {
+ *           ways a number arrives. `how` carries the formula when kind is 'formula'.
+ *
+ *  ⚠ `column` — THIS ⓘ DESCRIBES A COLUMN, NOT A VALUE, AND A COLUMN CANNOT BE OUT OF DATE.
+ *  A header is a label: it says where a column's numbers come from and how they are computed,
+ *  both of which are true whatever date the data carries. Handing it an `asOf` made the amber
+ *  "!" fire on the HEADING — measured on the attribution table, where `w_B` and `R_B` sat there
+ *  wearing a staleness warning while the label itself was as current as it would ever be. Worse,
+ *  it is the wrong alarm in the wrong place: staleness is a property of an observation, so the
+ *  reader who needs it is the one reading a NUMBER, and every value carries its own chip that
+ *  can still go amber. So `column` suppresses the warn state outright and the When field says
+ *  where the date actually lives. It is not a styling opt-out — it is the statement that this
+ *  icon has no observation behind it. */
+export function Provenance({ source, asOf, note, how, kind, column = false, what }: {
   source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
+  column?: boolean;
+  /** WHAT this number is, in one plain sentence — "Your share of the model held in Industrials."
+   *  Answered FIRST, because Source/When/How are all questions about a number the reader has
+   *  already identified, and none of them helps someone who cannot tell what they are looking at. */
+  what?: string;
 }) {
-  const stale = asOf ? snapshotFreshness(asOf)?.tone === 'stale' : false;
+  // ⚠ `!column &&` FIRST. A column header must never reach the stale branch, whatever it was
+  // handed — the guard belongs here, not at ~90 call sites that each have to remember it.
+  const stale = !column && asOf ? snapshotFreshness(asOf)?.tone === 'stale' : false;
   return (
-    <InfoTip content={<ProvenanceCard source={source} asOf={asOf} note={note} how={how} kind={kind} />}>
+    <InfoTip content={<ProvenanceCard source={source} asOf={asOf} note={note} how={how}
+      kind={kind} column={column} what={what} />}>
       <span
         className={`ml-1 ${stale ? INFO_ICON_WARN : INFO_ICON}`}
         aria-label="data source and formula"

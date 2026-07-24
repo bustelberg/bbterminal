@@ -82,6 +82,30 @@ describe('there is exactly one info icon', () => {
     expect(INFO_ICON).not.toEqual(INFO_ICON_WARN);
   });
 
+  it.each([
+    // ⚠ THE FORK THAT ARRIVES THROUGH INHERITANCE. The icon's content is the literal character
+    // `i` — it is TEXT, and text inherits. Each property left unset here was picked by whatever
+    // container the icon happened to sit in, and each one produced the same bug in a different
+    // place on the SAME page:
+    //   font-family     the ⓘ beside a portfolio NAME (`text-fg`) vs beside its position COUNT
+    //                   (`font-mono`) — one row, two letterforms, two baselines.
+    //   text-transform  the attribution `<thead>` is `uppercase tracking-wide`, so `i` rendered
+    //                   as a wide-tracked capital `I` — and the WARN `!`, immune to case, then
+    //                   disagreed with its own other state.
+    // There is no duplicated class string here for a reviewer or the scan above to catch, which
+    // is exactly why these are asserted.
+    ['font family', /\bfont-(mono|sans|serif)\b/],
+    ['text case', /\b(normal-case|uppercase|lowercase|capitalize)\b/],
+    ['letter spacing', /\btracking-\w+\b/],
+  ])('pins its own %s — an unset property is inherited, not shared', (_label, pattern) => {
+    for (const cls of [INFO_ICON, INFO_ICON_WARN]) {
+      expect(cls).toMatch(pattern);
+    }
+    // ...and BOTH variants must pin the SAME value, or the warning state becomes another control.
+    const value = (s: string) => s.match(pattern)![0];
+    expect(value(INFO_ICON_WARN)).toBe(value(INFO_ICON));
+  });
+
   it('carries no margin — spacing belongs to the call site', () => {
     // Folding `ml-1` in here would force every caller to accept it or override it, and an
     // overridden shared class is how the next fork starts.

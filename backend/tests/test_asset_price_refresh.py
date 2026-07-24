@@ -171,6 +171,63 @@ class TestTheStartupCatchUp:
             scheduler._run_asset_price_refresh)
 
 
+class TestTheAnchorQueryMustNotSCAN:
+    """⚠ THE ANCHOR ITSELF TOOK THE WHOLE JOB DOWN.
+
+        postgrest.exceptions.APIError: {'message': 'canceling statement due to statement
+        timeout', 'code': '57014'}    <- global_latest_close(), in production
+
+    `SELECT target_date FROM asset_price ORDER BY target_date DESC LIMIT 1` reads like one
+    indexed row and is not. `asset_price`'s ONLY index is the primary key
+    `(analysis_id, target_date)` — nothing LEADS with `target_date`, so Postgres has no ordered
+    path to the newest date and falls back to a full scan + top-N sort over 14M+ rows. And this
+    is the FIRST thing `find_stale` asks for, so the timeout takes the entire refresh with it —
+    on the daily tick AND on every startup catch-up.
+
+    `latest_close_by_analysis` escapes the same trap only because its grouped aggregate goes over
+    COPY, where the statement timeout is disabled. Per-analysis lookups are safe for a different
+    reason: `analysis_id` is the PK's LEADING column, so they are genuine index seeks.
+    """
+
+    def test_it_reads_the_denormalized_max_and_never_touches_asset_price(self, monkeypatch):
+        """`asset_analysis.price_to` is the same fact over a few thousand rows instead of
+        fourteen million — denormalized by migration 20260703010000 for exactly this class of
+        timeout, and maintained by `store_series` AND `extend_series`, the only two writers of
+        `asset_price` there are."""
+        from tests._fake_supabase import FakeSupabase
+
+        class _Tripwire(FakeSupabase):
+            def table(self, name: str):
+                assert name != "asset_price", (
+                    "global_latest_close() went back to asset_price — a 14M-row scan through "
+                    "PostgREST, i.e. the 57014 this exists to avoid"
+                )
+                return super().table(name)
+
+        fake = _Tripwire({"asset_analysis": [
+            {"analysis_id": 1, "price_to": "2026-07-11"},
+            {"analysis_id": 2, "price_to": "2026-07-23"},   # the freshest close we hold
+            {"analysis_id": 3, "price_to": None},           # resolved but never priced
+        ]})
+        monkeypatch.setattr(price_refresh, "supabase", fake)
+        # A NULL must be filtered, not sorted: descending, "no price at all" would otherwise
+        # outrank every real date and the anchor would come back None — which reads as
+        # "the table is empty", i.e. nothing is stale, i.e. a silent no-op.
+        assert price_refresh.global_latest_close() == "2026-07-23"
+
+    def test_the_exact_aggregate_survives_only_behind_COPY(self):
+        """A database whose denormalized column was never populated still needs an answer — but
+        `max(target_date)` over 14M rows may only run where `statement_timeout = 0`, which is
+        `_run_copy` and nowhere else."""
+        src = inspect.getsource(price_refresh.global_latest_close)
+        assert "_run_copy(" in src
+        assert "max(target_date)" in src.split("_run_copy(", 1)[1]
+        # ...and the scan is NOT the primary path: this runs on every startup catch-up, and a
+        # 14M-row seq scan per `uvicorn --reload` restart is not the near-free probe that
+        # `test_it_DETECTS_before_it_fetches` promises.
+        assert src.index("asset_analysis") < src.index("_run_copy(")
+
+
 class TestACapMustSayItCapped:
     def test_a_limited_run_reports_what_it_skipped(self):
         """"6 refreshed" over a silent 197 reads like a clean bill of health."""

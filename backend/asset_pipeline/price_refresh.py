@@ -128,10 +128,43 @@ def latest_close_by_analysis(ids: list[int]) -> dict[int, str]:
 
 
 def global_latest_close() -> str | None:
-    """The freshest close ANYWHERE in the table — one indexed row, not a scan. THE anchor."""
-    r = (supabase.table("asset_price").select("target_date")
-         .order("target_date", desc=True).limit(1).execute().data or [])
-    return r[0]["target_date"] if r else None
+    """The freshest close ANYWHERE. THE anchor everything else is measured against.
+
+    ⚠ NOT `SELECT target_date FROM asset_price ORDER BY target_date DESC LIMIT 1`.
+        That reads like one indexed row and is not. `asset_price`'s ONLY index is the primary
+        key `(analysis_id, target_date)`; nothing leads with `target_date`, so Postgres has no
+        ordered path to the newest date and falls back to a full scan + top-N sort over 14M+
+        rows. Through PostgREST that is a statement timeout (57014) — measured, in production,
+        and it takes the whole refresh with it because this is the FIRST thing `find_stale`
+        asks for. `latest_close_by_analysis` is safe from the same trap only because its
+        grouped aggregate goes over COPY, where the timeout is disabled.
+
+    So the anchor comes from `asset_analysis.price_to` — the per-asset max that migration
+    20260703010000 denormalized for exactly this reason, and that `store.store_series` /
+    `store.extend_series` (the ONLY writers of `asset_price`) both maintain. Same fact, over a
+    few thousand rows instead of fourteen million.
+
+    The exact aggregate stays available as the fallback, but only over COPY (`statement_timeout
+    = 0`), for a database whose denormalized column has never been populated. It is deliberately
+    NOT the primary path: this function runs on every startup kickstart, and a 14M-row seq scan
+    on every `uvicorn --reload` restart is not the near-free no-op that detection promises.
+    """
+    r = (supabase.table("asset_analysis").select("price_to")
+         .not_.is_("price_to", "null")
+         .order("price_to", desc=True).limit(1).execute().data or [])
+    if r and r[0].get("price_to"):
+        return r[0]["price_to"]
+
+    from common.pg import _run_copy  # noqa: PLC0415
+    buf = _run_copy(
+        "COPY (SELECT max(target_date)::text FROM asset_price WHERE close IS NOT NULL) "
+        "TO STDOUT WITH CSV",
+        (),
+    )
+    if buf is None:
+        return None
+    line = buf.getvalue().decode().strip()
+    return line or None
 
 
 def find_stale(held_only: bool = True,

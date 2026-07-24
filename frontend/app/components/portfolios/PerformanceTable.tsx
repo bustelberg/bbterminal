@@ -32,6 +32,9 @@ const winTone = (v: number | null) =>
 
 type Metric = {
   label: string;
+  /** WHAT the reader is looking at, in one plain sentence — answered before where it came
+   *  from, because Source/When/How are all questions ABOUT a number already identified. */
+  what: string;
   note: string;
   how: string;
   get: (w: PerfWindow) => number | null | undefined;
@@ -40,28 +43,28 @@ type Metric = {
 };
 
 const METRICS: Metric[] = [
-  { label: 'Price increase (ann.)', note: 'geometric annualized price gain',
+  { label: 'Price increase (ann.)', what: 'How fast the price grew, per year on average.', note: 'geometric annualized price gain',
     how: 'From the daily EUR close: (end ÷ start)^(1/years) − 1. Annualized so the windows compare directly. Price only — dividends excluded.',
     get: (w) => w.cagr_pct, fmt: spct, tone: signTone },
-  { label: 'Price R²', note: 'log-price trend fit',
+  { label: 'Price R²', what: 'How steadily it grew — a straight line up, or a jagged one.', note: 'log-price trend fit',
     how: 'R² of log(price) regressed on time — 1 = a straight line on a log axis (steady compounding). Fit on every daily close in the window, not a few points. ⚠ Strict: a crash-then-recovery (a deep V) scores near 0 even though it ended up, and R² also RISES with window length by construction — so read the "Positive 1-yr holds" row as the more forgiving consistency measure.',
     get: (w) => w.r2, fmt: num3, tone: r2Tone },
-  { label: 'Positive 1-yr holds', note: 'rolling 12-month win rate',
+  { label: 'Positive 1-yr holds', what: 'How often simply holding for a year would have paid.', note: 'rolling 12-month win rate',
     how: 'Of the window’s trading days, the share from which a 1-year hold (this price ÷ the price ~12 months earlier) ended positive. Uses every daily close, and — unlike R² — a dip that recovered still scores high, so it answers "how often did simply holding for a year actually pay?"',
     get: (w) => w.pos_12m_pct, fmt: upct, tone: winTone },
-  { label: 'Volatility (ann.)', note: 'annualized σ of daily returns',
+  { label: 'Volatility (ann.)', what: 'How bumpy the ride was, per year.', note: 'annualized σ of daily returns',
     how: 'Standard deviation of daily EUR returns × √252 — how bumpy the ride was.',
     get: (w) => w.ann_vol_pct, fmt: upct, tone: () => 'text-fg' },
-  { label: 'Sharpe', note: 'return per unit of total risk',
+  { label: 'Sharpe', what: 'How much return was earned per unit of the risk taken.', note: 'return per unit of total risk',
     how: 'Annualized return ÷ annualized volatility (risk-free = 0). ≥1 is good.',
     get: (w) => w.sharpe, fmt: num2, tone: ratioTone },
-  { label: 'Sortino', note: 'return per unit of downside risk',
+  { label: 'Sortino', what: 'The same, counting only the falls — upside swings are not risk.', note: 'return per unit of downside risk',
     how: 'Annualized return ÷ downside deviation (only sub-zero daily returns), risk-free = 0.',
     get: (w) => w.sortino, fmt: num2, tone: ratioTone },
-  { label: 'Max drawdown', note: 'worst peak-to-trough',
+  { label: 'Max drawdown', what: 'The worst fall from a high point to the low that followed.', note: 'worst peak-to-trough',
     how: 'Largest fall from a running peak in the EUR price over the window. ⚠ Tends to deepen with a longer window — more chances for a big fall.',
     get: (w) => w.max_drawdown_pct, fmt: spct, tone: negTone },
-  { label: 'Up days', note: 'share of positive days',
+  { label: 'Up days', what: 'How often the price finished a day higher than it started.', note: 'share of positive days',
     how: 'Fraction of trading days with a positive EUR return.',
     get: (w) => w.up_days_pct, fmt: upct, tone: () => 'text-fg' },
 ];
@@ -119,7 +122,7 @@ export default function PerformanceTable({ windows, asOf, benchWindows, benchLab
               <tr key={m.label} className="hover:bg-overlay/[0.02]">
                 <td className="px-3 py-1.5 text-fg-soft whitespace-nowrap">
                   {m.label}
-                  <Provenance source="yfinance" asOf={asOf} note={m.note} how={m.how} />
+                  <Provenance source="yfinance" asOf={asOf} what={m.what} note={m.note} how={m.how} />
                 </td>
                 {windows.map((w) => {
                   const val = m.get(w) ?? null;

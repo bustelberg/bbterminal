@@ -113,13 +113,29 @@ def main() -> int:
         print(f"    !! {target} stored 0 bars — NOT a usable listing. Nothing was repointed.")
         return 1
     store.set_default_executions()
-    # ⚠ A repoint writes `asset_execution` per ISIN and would hand an ALIASED row a listing of its
-    # own again. Put every alias back before returning, or the override lasts until the next run.
+    # ⚠ A repoint writes `asset_execution` per ISIN and would hand an ALIASED or OVERRIDDEN row a
+    # listing of its own again. Put both back before returning, or the override lasts until the
+    # next run. (A repoint of the overridden ISIN itself is a no-op here — it already names the
+    # pinned symbol — so this cannot fight the thing the user just asked for.)
     from asset_pipeline.isin_alias import apply_aliases  # noqa: PLC0415
+    from asset_pipeline.symbol_override import apply_symbol_overrides  # noqa: PLC0415
 
     n = apply_aliases()
+    m = apply_symbol_overrides()
     print(f"    stored {rows:,} bars on {target}."
-          + (f"  ({n} alias row(s) re-applied.)" if n else "") + "\n")
+          + (f"  ({n} alias row(s) re-applied.)" if n else "")
+          + (f"  ({m} symbol override(s) re-applied.)" if m else "") + "\n")
+
+    # ⚠ A HAND REPOINT IS NOT DURABLE ON ITS OWN. Nothing here records the decision, so the next
+    # by-name resolution can undo it and no other database learns of it. Say so, every time.
+    pinned = (supabase.table("asset_symbol_override").select("isin")
+              .eq("isin", isin).limit(1).execute().data or [])
+    if not pinned:
+        print(f"  NOTE  this repoint is not recorded. To make it survive a re-resolve and to\n"
+              f"        carry it to another database, store it:\n"
+              f"          insert into asset_symbol_override (isin, yahoo_symbol, note)\n"
+              f"          values ('{isin}', '{target}', '<why>');\n"
+              f"        then: uv run python scripts/apply_symbol_overrides.py\n")
     return 0
 
 

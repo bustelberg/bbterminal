@@ -76,7 +76,7 @@ export default function SavedPortfoliosSection({
                         <th className="text-right font-medium py-1.5 px-2">Target</th>
                         <th className="text-right font-medium py-1.5 px-2">Current</th>
                         <th className="text-right font-medium py-1.5 px-2">Band</th>
-                        <th className="text-right font-medium py-1.5 px-2" title="The sleeve's own return over the since-inception window — cross-check against its price move">Return ↗</th>
+                        <th className="text-right font-medium py-1.5 px-2" title="This holding's own return over the since-inception window — cross-check against its price move">Return ↗</th>
                       </tr>
                     </thead>
                     <tbody>

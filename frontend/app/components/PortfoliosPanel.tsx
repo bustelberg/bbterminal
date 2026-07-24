@@ -374,7 +374,7 @@ export default function PortfoliosPanel() {
           )}
           {rows && (
             <label className="flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer select-none whitespace-nowrap"
-              title={`Shows only the portfolios whose counted model holds more than ${MIN_HOLDINGS_SHOWN} instruments. Hides ${smallCount}: the single-instrument wrappers, plus every row with no countable model at all — no fixed model, no snapshot, or a count that failed.`}>
+              title={`Shows only the portfolios whose counted model holds more than ${MIN_HOLDINGS_SHOWN} instruments. Hides ${smallCount}: the single-instrument portfolios, plus every row with no countable model at all — no fixed model, no snapshot, or a count that failed.`}>
               <input type="checkbox" checked={hideSmall} onChange={(e) => setHideSmall(e.target.checked)}
                 className="accent-accent-600 cursor-pointer" />
               Hide small portfolios
@@ -416,7 +416,7 @@ export default function PortfoliosPanel() {
             <thead className="bg-card sticky top-0 z-10">
               <tr className="group text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
                 <th className="px-3 py-1.5 font-medium text-left w-[5.5rem]"
-                  title="Composition of this model — sector, region and currency — beside the SP500 benchmark, on one set of buckets.">
+                  title="Composition of this model — sector, region and currency — beside the SP500 benchmark, on one set of groups.">
                   Analyse
                 </th>
                 {th('name', 'Portfolio')}
@@ -591,8 +591,10 @@ function YtdCell({ p }: { p: Portfolio }) {
       {isPartialYear(f) && <span className="text-warn-400" aria-label="partial year">⚠</span>}
       {approx && <span className="text-warn-400" aria-label="approximate">≈</span>}
       <span className={colour}>{v >= 0 ? '+' : ''}{v.toFixed(2)}%</span>
-      <Provenance source="yfinance" asOf={f.sources?.yf_close} note="asset_price close, EUR via fx_rate"
-        how="Buy-and-hold EUR return of the composition from the YTD anchor (max of 1 Jan and the model's inception) to the latest close, weighted by the model's percentages." />
+      <Provenance source="yfinance" asOf={f.sources?.yf_close}
+        what="What this model has returned so far this year, holding its current weights."
+        note="asset_price close, EUR via fx_rate"
+        how="Buy-and-hold EUR return of the composition from the YTD start date (max of 1 Jan and the model's inception) to the latest close, weighted by the model's percentages." />
     </span>
   );
 }
@@ -715,7 +717,9 @@ function SinceCell({ p }: { p: Portfolio }) {
   return (
     <span title={`EUR return since this composition took effect on ${f.model_effective} — ${statDays(f)} trading day(s) ago. Realized, not backtested: these are the weights it has held for that whole window.`}>
       <Pct v={f.since_model_pct} />
-      <Provenance source="yfinance" asOf={f.sources?.yf_close} note="asset_price close, EUR via fx_rate"
+      <Provenance source="yfinance" asOf={f.sources?.yf_close}
+        what="What this model has returned since the day its composition took effect."
+        note="asset_price close, EUR via fx_rate"
         how="Same buy-and-hold EUR return, measured from the composition's own inception (model_effective) to the latest close." />
     </span>
   );
@@ -756,7 +760,11 @@ function RatioCell({ p, kind }: { p: Portfolio; kind: 'sharpe' | 'sortino' }) {
     <span className={v >= 0 ? 'text-fg' : 'text-neg-400'}
       title={`${kind === 'sharpe' ? 'Sharpe' : 'Sortino'} of the daily EUR curve since ${f.model_effective}, annualized over ${statDays(f)} trading days at rf = 0.${vol}`}>
       {v.toFixed(2)}
-      <Provenance source="yfinance" asOf={f.sources?.yf_close} note="asset_price daily EUR curve"
+      <Provenance source="yfinance" asOf={f.sources?.yf_close}
+        what={kind === 'sharpe'
+          ? 'Return measured against how much the model bounced around, up or down, to earn it.'
+          : 'Return measured against the FALLS only — a rise is not a risk.'}
+        note="asset_price daily EUR curve"
         how={kind === 'sharpe'
           ? 'Mean ÷ standard deviation of the daily EUR return series since inception, annualized ×√252, risk-free = 0.'
           : 'Mean ÷ downside deviation (negative days only) of the daily EUR returns since inception, annualized ×√252, risk-free = 0.'} />
@@ -790,7 +798,9 @@ function CagrCell({ p }: { p: Portfolio }) {
   return (
     <span title={`Geometric annualized return since ${f.model_effective}, over ${f.years_running?.toFixed(2)} years. Compounding this rate for that long reproduces the ${f.since_model_pct?.toFixed(2)}% in Since incep.`}>
       <Pct v={f.cagr_pct} />
-      <Provenance source="yfinance" asOf={f.sources?.yf_close} note="asset_price daily EUR curve"
+      <Provenance source="yfinance" asOf={f.sources?.yf_close}
+        what="The model's return restated as a per-year rate, so different ages compare."
+        note="asset_price daily EUR curve"
         how="Geometric annualized return: (1 + since-inception return) ^ (365.25 / days held) − 1." />
     </span>
   );
@@ -975,10 +985,11 @@ function MarkCells({ p, ytdFrom, source }: {
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
         <span className={startClass} title={startTitle}>
           {est && <span aria-label="interpolated" className="text-warn-400 mr-1">⚠</span>}
-          {lt && <span aria-label="look-through" className="text-accent-400 mr-1">↳</span>}
+          {lt && <span aria-label="priced via the linked model portfolio" className="text-accent-400 mr-1">↳</span>}
           {eur(p.start_price_eur)}
         </span>
-        <Provenance source={markSrc} asOf={p.start_date} note={startNote} how={startHow} />
+        <Provenance source={markSrc} asOf={p.start_date} note={startNote} how={startHow}
+          what={`What one unit of ${p.fonds ?? 'this holding'} was worth when the window opened.`} />
       </td>
       <td className="px-3 py-1.5 font-mono whitespace-nowrap">
         <span className={est ? 'text-warn-300' : lt ? 'text-accent-400/80' : 'text-fg-subtle'}
@@ -989,13 +1000,15 @@ function MarkCells({ p, ytdFrom, source }: {
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
         <span className={lt ? 'text-accent-400' : 'text-fg'}
           title={lt ? ltWhy : local(p.end_price_local, p.end_date)}>{eur(p.end_price_eur)}</span>
-        <Provenance source={markSrc} asOf={p.end_date} note={endNote} how={endHow} />
+        <Provenance source={markSrc} asOf={p.end_date} note={endNote} how={endHow}
+          what={`What one unit of ${p.fonds ?? 'this holding'} is worth now.`} />
       </td>
       <td className={`px-3 py-1.5 font-mono whitespace-nowrap ${lt ? 'text-accent-400/80' : 'text-fg-subtle'}`}>{p.end_date}</td>
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
         {p.return_pct != null ? <Pct v={p.return_pct} /> : <span className="text-fg-faint">—</span>}
         {p.return_pct != null && (
           <Provenance source="derived" asOf={p.end_date}
+            what={`What ${p.fonds ?? 'this holding'} returned over the window, in euros.`}
             note={source === 'book' ? 'Huidige / Beginwaarde − 1 (EUR)' : 'End / Start − 1 (EUR)'}
             how={returnHow} />
         )}
@@ -1409,7 +1422,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, onLinkSaved
               </th>
               {/* Some holdings are not instruments — they are other model portfolios, wrapped as
                   a Leonteq certificate. "Star Selection Index" IS StarTopSelectie OFF FX. */}
-              <th className="px-3 py-1.5 font-medium text-left" title="The model portfolio this holding IS. A few positions are not instruments at all but other models, held via a Leonteq certificate — those can never be priced directly, so the link is what lets us look through to the model behind them. The badge is the confidence of our automatic guess; pick from the dropdown to overrule it. An edit applies to the holding everywhere it is held, not just to this row.">
+              <th className="px-3 py-1.5 font-medium text-left" title="The model portfolio this holding IS. A few positions are not instruments at all but other models, held via a Leonteq certificate — those can never be priced directly, so the link is what lets us price them from the model they stand for. The badge is the confidence of our automatic guess; pick from the dropdown to overrule it. An edit applies to the holding everywhere it is held, not just to this row.">
                 Link
               </th>
               <th className="px-3 py-1.5 font-medium text-right">Weight</th>
@@ -1474,6 +1487,9 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, onLinkSaved
                   {p.percentage != null ? `${p.percentage.toFixed(2)}%` : '—'}
                   {p.percentage != null && (
                     <Provenance source={isBook ? 'airs_volk' : 'airs_model'} asOf={d.datum}
+                      what={isBook
+                        ? 'How much of the account this holding was at the start of the year.'
+                        : 'How much of this model the holding is meant to be.'}
                       note={isBook ? 'start-of-year value weight' : 'nominal % from the fixed model'}
                       how={isBook
                         ? 'The holding’s Beginwaarde as a share of the book’s total start-of-year value.'

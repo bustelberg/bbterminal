@@ -123,7 +123,7 @@ export default function AccountModelLinkPanel() {
         <div>
           <h2 className="text-base font-semibold text-fg-strong">Dynamic → Fixed</h2>
           <p className="text-xs text-fg-muted mt-1 max-w-3xl"
-            title="Fixed portfolios carry the ISINs and AIRS values none of them; Dynamic ones carry the values and no ISIN. The pairing is the only bridge, and it cannot be derived: the risk variants of a strategy hold the same instruments at different weights, so only the name distinguishes them.">
+            title="Fixed portfolios carry the ISINs and AIRS values none of them; Dynamic ones carry the values and no ISIN. The pairing is the only link between them, and it cannot be derived: the risk variants of a strategy hold the same instruments at different weights, so only the name distinguishes them.">
             Which Fixed portfolio each Dynamic portfolio runs. Only the name links them.
           </p>
         </div>

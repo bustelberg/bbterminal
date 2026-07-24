@@ -1,12 +1,10 @@
 'use client';
 
-import { Fragment, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import type { ModelPortfolioAttribution } from '../../../lib/types/api';
 import { Provenance, type SourceKey } from '../../../lib/provenance';
-import InfoTip from '../InfoTip';
-import Formula, { Op, Paren, V, VBar } from '../Formula';
 
 /**
  * WHY the model beat or lagged the index — Brinson-Fachler.
@@ -35,28 +33,46 @@ const pct = (v: number | null | undefined, dp = 2) =>
  *  it contributed nothing — which is a fact, not an unknown, so it is safe to default here. */
 const n = (v: number | null | undefined) => v ?? 0;
 
-/** An effect cell. `title` (when given) is the row's explanation IN WORDS — rendered through
- *  `InfoTip`, not the native attribute, because the browser delays that by ~1-2 seconds. */
-function Eff({ v, title }: { v?: number | null; title?: string }) {
-  if (v == null) return <span className="text-fg-faint">—</span>;
-  // An allocation / selection / interaction effect and a contribution are all WEIGHT × RETURN
-  // decompositions of the excess — percentage POINTS (pp), never percent. The excess is a
-  // difference of two returns; % here would claim a different quantity.
-  const body = Math.abs(v) < 0.005
-    ? <span className="text-fg-faint">—</span>
-    : <span className={v >= 0 ? 'text-pos-400' : 'text-neg-400'}>{`${v >= 0 ? '+' : ''}${v.toFixed(2)}pp`}</span>;
-  return title ? <InfoTip text={title}>{body}</InfoTip> : body;
-}
+/** `pp` — an effect is percentage POINTS, never percent. The excess is a difference of two
+ *  returns; a `%` here would claim a different quantity. */
+const pp = (v: number | null | undefined, dp = 2) =>
+  v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(dp)}pp`;
 
 /**
- * The allocation effect, IN WORDS.
+ * A number with its OWN ⓘ.
  *
- * The column is doing something specific and non-obvious, and a bare number does not say it: an
- * over/underweight is scored against how that bucket did *relative to the INDEX AS A WHOLE*, not
- * against zero. Overweighting a sector that rose 12.8% while the index rose 36.9% is a BAD call
- * even though the sector went up — and that is exactly the case a reader misreads without being
- * told. So every cell explains itself.
+ * ⚠ THE ⓘ IS THE ONLY HOVER TARGET IN THIS PANEL, AND EVERY ONE OF THEM OPENS THE SAME CARD —
+ * What · Source · When · How. Nothing else reacts to a pointer: not the value, not the column
+ * label. That single rule is what makes the gesture worth learning, and it was arrived at by
+ * removing two earlier answers. Free prose under each chip made the affordance unpredictable
+ * (some opened a definition, some an essay, some a source). A second tooltip on the column label
+ * was worse: two targets in one header, no way to tell which held the answer, so a reader found
+ * one, read it, and concluded that was all there was.
+ *
+ * ⚠ THE ICON, NOT THE NUMBER, IS THE TRIGGER. Hovering a bare value is invisible — a tooltip
+ * nobody knows is there is a tooltip that does not exist.
  */
+function Num({ children, prov }: { children: React.ReactNode; prov: React.ReactNode }) {
+  // `justify-end` inside a right-aligned cell: the icon is a fixed width and sits OUTSIDE the
+  // digits, so the numeric column still lines up on its own right edge rather than on the icon.
+  return (
+    <span className="inline-flex items-center justify-end gap-1 whitespace-nowrap">
+      {children}
+      {prov}
+    </span>
+  );
+}
+
+/** An effect cell — allocation / selection / interaction / contribution, all of them a
+ *  weight × return decomposition of the excess, all of them in `pp`. */
+function Eff({ v, prov }: { v?: number | null; prov?: React.ReactNode }) {
+  if (v == null) return <span className="text-fg-faint">—</span>;
+  const body = Math.abs(v) < 0.005
+    ? <span className="text-fg-faint">—</span>
+    : <span className={v >= 0 ? 'text-pos-400' : 'text-neg-400'}>{pp(v)}</span>;
+  return prov ? <Num prov={prov}>{body}</Num> : body;
+}
+
 /**
  * ⚠ THE WORD FOLLOWS THE AXIS. It is "sector" only when the axis IS sector — switch to Region and
  * every "sector" in this panel becomes a lie. "Bucket" was correct but it is jargon; naming the
@@ -68,175 +84,48 @@ const AXIS_WORD: Record<string, string> = {
   currency: 'currency',
 };
 
-function allocationWhy(
-  group: string, axis: string, wP: number, wB: number,
-  rB: number | null | undefined, rBTotal: number,
-): string {
-  const w = AXIS_WORD[axis] ?? 'group';
-  const tilt = wP - wB;
-  if (rB == null) return `The index holds nothing in ${group}, so there is no index return to judge the tilt against.`;
-  const side = tilt >= 0 ? 'overweight' : 'underweight';
-  const beat = rB >= rBTotal;
-  const verdict = (tilt >= 0) === beat
-    ? (tilt >= 0
-      ? `You leaned into a ${w} that beat the index, so the tilt paid.`
-      : `You avoided a ${w} that lagged the index, so the tilt paid.`)
-    : (tilt >= 0
-      ? `You leaned into a ${w} that lagged the index, so the tilt cost you.`
-      : `You avoided a ${w} that beat the index, so the tilt cost you.`);
-  return (
-    `You held ${wP.toFixed(1)}% vs the index's ${wB.toFixed(1)}% — a ${Math.abs(tilt).toFixed(1)}pp `
-    + `${side}.\n\nIn the index, ${group} returned ${pct(rB, 1)} while the index as a whole `
-    + `returned ${pct(rBTotal, 1)}, so it ${beat ? 'beat' : 'lagged'} the index. ${verdict}\n\n`
-    + `This is judged at the index's returns, not yours. Whether the companies you picked in `
-    + `${group} were any good is the Selection column.`
-  );
-}
-
-function selectionWhy(
-  group: string, wB: number, rP: number | null | undefined, rB: number | null | undefined,
-): string {
-  if (rP == null) return `You hold nothing in ${group}, so there are no companies to judge. The whole effect is the decision not to own it — see Allocation.`;
-  if (rB == null) return `The index holds nothing in ${group}, so there is nothing to measure your companies against.`;
-  return (
-    `Your ${group} companies returned ${pct(rP, 1)}; the index's returned ${pct(rB, 1)}.\n\n`
-    + `Scored at the index's weight (${wB.toFixed(1)}%), so this is purely about the companies you `
-    + `picked — not how much you held.`
-  );
-}
-
 /**
- * A column header that explains itself.
+ * A column header. The LABEL is inert; the ⓘ beside it is the only thing to hover.
  *
- * Every column here is a term of art or a subscripted symbol — `w_P`, `R_B`, "Interact." — and a
- * reader who has to guess what one means will guess wrong in a way that LOOKS right. The
- * allocation column especially: its number is meaningless until you know it is scored against the
- * index's TOTAL return, not against zero.
- *
- * ⚠ NOT the native `title=` attribute. The browser sits on that for ~1-2 SECONDS before showing
- * it, and the delay is not configurable — by which time the reader has already explained the
- * column to themselves, wrongly. `InfoTip` renders on hover, immediately.
- *
- * The dotted underline is the affordance. A tooltip nobody knows is there is a tooltip that does
- * not exist.
+ * ⚠ ONE TARGET PER HEADER. The label used to carry its own dotted-underline tooltip explaining
+ * what the column means, beside an ⓘ carrying What/Source/When/How — two hover targets, two
+ * different cards, one header. A reader cannot see which of them holds the answer they want, so
+ * they find one, read it, and stop; whichever they land on, they conclude that is all there is.
+ * The ⓘ is now the single place, and anything the label's card said that its card did not must
+ * be folded INTO it — deleting the second tooltip is only safe if nothing was left behind in it.
  */
-function Th({ label, help, prov, align = 'right' }: {
+function Th({ label, prov, align = 'right' }: {
   label: React.ReactNode;
-  help: string;
-  // The per-column provenance ⓘ (source / when / how). One per column — every cell below shares it.
+  /** The column's ⓘ — What / Source / When / How. One per column; every cell repeats it with its
+   *  own row's figures. */
   prov?: React.ReactNode;
   align?: 'left' | 'right';
 }) {
   return (
     <th className={`px-2 py-1.5 font-medium whitespace-nowrap ${align === 'left' ? 'text-left' : 'text-right'}`}>
-      <InfoTip text={help}>
-        <span className="decoration-dotted underline decoration-neutral-600 underline-offset-2 hover:text-accent-400 transition-colors">
-          {label}
-        </span>
-      </InfoTip>
+      {label}
       {prov}
     </th>
   );
 }
 
-/**
- * The four effects: what each one MEANS, and the arithmetic that produces it.
- *
- * A prose paragraph could say what allocation is, but not what it *is* — and a reader looking at
- * a −5.07 wants to know which numbers made it. So each row carries the formula next to the
- * sentence. They are the same four columns, in the same order, as the table below.
- *
- * The symbols are the table's: w = weight, R = return, P = your portfolio, B = the benchmark
- * inside that bucket, and R̄B = the benchmark's TOTAL return — the reference allocation is scored
- * against, which is the single fact that makes the column readable.
- */
-/** One headline number, in the tile language the rest of the modal already speaks. */
-function Stat({ label, value, tone, hint, strong }: {
-  label: string; value: string; tone?: number | null; hint?: string; strong?: boolean;
-}) {
-  const cls = tone == null ? 'text-fg-strong' : tone >= 0 ? 'text-pos-400' : 'text-neg-400';
-  return (
-    <div className={`rounded-lg px-3 py-1.5 min-w-[6.5rem] border ${
-      strong ? 'bg-accent-500/10 border-accent-500/30' : 'bg-elevated border-neutral-800/40'}`}>
-      <div className="text-[9px] uppercase tracking-wide text-fg-faint flex items-center gap-1">
-        {label}
-        {hint && <InfoTip text={hint} />}
-      </div>
-      <div className={`text-sm font-mono font-semibold ${cls}`}>{value}</div>
-    </div>
-  );
-}
-
-function Legend({ rIndex, axis }: { rIndex: string; axis: string }) {
-  const w = AXIS_WORD[axis] ?? 'group';
-  // The two deviations every effect is built from — spelled once, reused, so the formulas below
-  // read as variations on one idea rather than four unrelated products.
-  const tilt = (
-    <Paren>
-      <V name="w" sub="P" /><Op>−</Op><V name="w" sub="B" />
-    </Paren>
-  );
-  const edge = (
-    <Paren>
-      <V name="R" sub="P" /><Op>−</Op><V name="R" sub="B" />
-    </Paren>
-  );
-
-  const rows: Array<{ name: string; formula: React.ReactNode; meaning: string }> = [
-    {
-      name: 'Allocation',
-      formula: (
-        <Formula>
-          {tilt}<Op>×</Op>
-          <Paren>
-            <V name="R" sub="B" /><Op>−</Op><VBar name="R" sub="B" />
-          </Paren>
-        </Formula>
-      ),
-      meaning: `Where the money was placed, scored against the index total (${rIndex}).`,
-    },
-    {
-      name: 'Selection',
-      formula: <Formula><V name="w" sub="B" /><Op>×</Op>{edge}</Formula>,
-      meaning: `The companies chosen inside the ${w}, at the index’s weight.`,
-    },
-    {
-      name: 'Interaction',
-      formula: <Formula>{tilt}<Op>×</Op>{edge}</Formula>,
-      meaning: 'The cross term. Requires a tilt and a pick edge at once.',
-    },
-  ];
-  return (
-    // A quiet strip, not a table of prose. ⚠ The MEANINGS are tooltips now, not columns: they were
-    // printed here word for word AND on the stat tiles above, so the panel said everything twice.
-    // The formula is the one thing a tooltip cannot replace — a reader looking at a −5.07 wants to
-    // see which numbers made it, at a glance, beside the table that shows them.
-    <div className="bg-inset rounded-lg px-3 py-2 mb-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px]">
-      {rows.map((r) => (
-        <Fragment key={r.name}>
-          <InfoTip text={r.meaning}>
-            <span className="inline-flex items-baseline gap-1.5 cursor-help">
-              <span className="text-fg-muted">{r.name}</span>
-              <span className="font-mono text-accent-400">{r.formula}</span>
-            </span>
-          </InfoTip>
-        </Fragment>
-      ))}
-      {/* The symbol key. It belongs beside the symbols, not in the panel header two blocks up. */}
-      <span className="text-fg-faint ml-auto">
-        <V name="w" /> weight · <V name="R" /> return · <V name="P" /> you ·{' '}
-        <V name="B" /> index · <VBar name="R" sub="B" /> index total
-      </span>
-    </div>
-  );
-}
-
-function Names({ title, rows, hint, src, asOf }: {
+function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
+  owner = 'the model', held = true }: {
   title: string;
   rows: NonNullable<ModelPortfolioAttribution['top_contributors']>;
   hint: string;
   src: SourceKey;
   asOf?: string | null;
+  /** ⚠ The numerator of the weight, named exactly — the AIRS book weights by `Beginwaarde`, the
+   *  model by its own stated percentage, and the index by start-of-window cap. Passed in rather
+   *  than guessed here: all three land in the same three columns. */
+  weightHow: string;
+  /** How one holding's return is computed, in the same terms. */
+  returnHow: string;
+  /** Whose basket these weights are a share of — "the model", or the benchmark's name. */
+  owner?: string;
+  /** False for the index's winners you do NOT own: same columns, different meaning. */
+  held?: boolean;
 }) {
   if (!rows?.length) return null;
   return (
@@ -247,11 +136,14 @@ function Names({ title, rows, hint, src, asOf }: {
           column take the rest and TRUNCATE — without it the table sizes to its content and, in the
           narrower dock, spills past its grid cell and overlaps the neighbouring list. */}
       <table className="w-full text-[11px] table-fixed">
+        {/* ⚠ Widened for the per-cell ⓘ. Every numeric column now carries a 14px chip plus its
+            gap OUTSIDE the digits, and at the old `w-9` the weight column could not fit "4.7%"
+            and an icon — under `table-fixed` that does not wrap, it spills over the neighbour. */}
         <colgroup>
           <col />
-          <col className="w-9" />
-          <col className="w-14" />
-          <col className="w-14" />
+          <col className="w-12" />
+          <col className="w-[4.5rem]" />
+          <col className="w-[4.5rem]" />
         </colgroup>
         {/* Three bare percentages in a row (10.0% · +59.2% · +5.92%) are unreadable without
             labels — worse than an unexplained header, because there is nothing to hover. */}
@@ -259,16 +151,24 @@ function Names({ title, rows, hint, src, asOf }: {
           <tr className="text-fg-faint text-[9px] uppercase tracking-wide">
             <th className="py-0.5 pr-2 text-left font-medium">Name</th>
             <th className="py-0.5 px-1 text-right font-medium whitespace-nowrap">
-              <InfoTip text="Its weight in the model over this window."><span className="decoration-dotted underline decoration-neutral-600 underline-offset-2">w<sub>t</sub></span></InfoTip>
-              <Provenance source={src} asOf={asOf} note="weight over the window" how="The holding's weight in this basket." />
+              Weight
+              <Provenance source={src} column kind="copied" note={`weight in ${owner}`}
+                what={`Each holding's share of ${owner}.`}
+                how={`${weightHow} ÷ Σ over ${owner}.`} />
             </th>
             <th className="py-0.5 px-1 text-right font-medium whitespace-nowrap">
-              <InfoTip text="What it returned over the window, in EUR."><span className="decoration-dotted underline decoration-neutral-600 underline-offset-2">Ret.</span></InfoTip>
-              <Provenance source={src} asOf={asOf} note="EUR return over the window" how="The holding's EUR return over the window." />
+              Ret.
+              <Provenance source={src} column kind="formula" note="EUR return over the window"
+                what="What each holding returned, in EUR."
+                how={`${returnHow}.`} />
             </th>
             <th className="py-0.5 pl-1 text-right font-medium whitespace-nowrap">
-              <InfoTip text={"Weight × return — how many percentage points of the model's return this single company is responsible for.\n\nA big move in a tiny position contributes little, so this is the column that says which companies actually mattered."}><span className="decoration-dotted underline decoration-neutral-600 underline-offset-2">Contr.</span></InfoTip>
-              <Provenance source="derived" note="contribution" how="Weight × return — this holding's share of the basket's return." />
+              Contr.
+              <Provenance source="derived" column kind="formula" note="contribution"
+                what={held
+                  ? `How much of ${owner}'s return each holding is responsible for — a big move in a tiny position contributes almost nothing, so this column ranks and the return beside it does not.`
+                  : `What each holding was worth to ${owner}.`}
+                how="weight × return." />
             </th>
           </tr>
         </thead>
@@ -279,13 +179,29 @@ function Names({ title, rows, hint, src, asOf }: {
                 {r.name ?? r.ticker ?? r.isin}
               </td>
               <td className="py-1 px-1 text-right font-mono text-fg-subtle">
-                {n(r.weight_pct).toFixed(1)}%
+                <Num prov={<Provenance source={src} asOf={asOf} kind="copied"
+                  what={`${r.name ?? r.ticker ?? r.isin}'s share of ${owner}.`}
+                  note={`weight in ${owner}`}
+                  how={`${weightHow} ÷ Σ over ${owner} = ${n(r.weight_pct).toFixed(1)}%.`} />}>
+                  {n(r.weight_pct).toFixed(1)}%
+                </Num>
               </td>
               <td className="py-1 px-1 text-right font-mono text-fg-subtle">
-                {pct(r.return_pct, 1)}
+                <Num prov={<Provenance source={src} asOf={asOf} kind="formula"
+                  what={`What ${r.name ?? r.ticker ?? r.isin} returned, in EUR.`}
+                  note="EUR return over the window"
+                  how={`${returnHow} = ${pct(r.return_pct, 1)}.`} />}>
+                  {pct(r.return_pct, 1)}
+                </Num>
               </td>
               <td className="py-1 pl-1 text-right font-mono font-semibold">
-                <Eff v={r.contribution_pct} />
+                <Eff v={r.contribution_pct}
+                  prov={<Provenance source="derived" kind="formula"
+                    what={held
+                      ? `How much of ${owner}'s return ${r.name ?? r.ticker ?? r.isin} is responsible for.`
+                      : `What ${r.name ?? r.ticker ?? r.isin} was worth to ${owner}.`}
+                    note={held ? `share of ${owner}'s return` : `what it was worth to ${owner}`}
+                    how={`${n(r.weight_pct).toFixed(1)}% × ${pct(r.return_pct, 1)} = ${pp(r.contribution_pct)}.`} />} />
               </td>
             </tr>
           ))}
@@ -332,6 +248,16 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   // Where the PORTFOLIO side of every number came from — the AIRS book's VOLK values, or our
   // yfinance reconstruction. The benchmark side is always yfinance; the effect columns are derived.
   const pSrc: SourceKey = (data?.source ?? source) === 'book' ? 'airs_volk' : 'yfinance';
+  // ⚠ THE PORTFOLIO WEIGHT IS A DIFFERENT QUANTITY IN THE TWO SOURCES, so a How that names one
+  // is wrong for the other. The BOOK weights by `Beginwaarde` — the position's value when the
+  // window opened, which is why a holding bought mid-window has weight 0 and drops out. The
+  // MODEL weights by the composition's own stated percentage. Both then renormalise over the
+  // attributable sleeve; only the numerator differs.
+  const isBook = (data?.source ?? source) === 'book';
+  const pWeightSrc = isBook ? 'Beginwaarde' : 'the model’s stated weight';
+  const pReturnHow = isBook
+    ? 'value now ÷ Beginwaarde − 1'
+    : 'EUR close at the window’s end ÷ its close at the start − 1';
 
   return (
     <section className="bg-card border border-accent-500/30 rounded-xl p-4">
@@ -340,7 +266,6 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
           <h4 className="text-sm font-semibold text-fg-strong">
             {`Why — ${label} vs ${benchmark}`}
           </h4>
-          <p className="text-[11px] text-fg-faint mt-0.5">Brinson-Fachler attribution</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <select value={axis} onChange={(e) => { setData(null); setAxis(e.target.value as Axis); }}
@@ -365,17 +290,6 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
 
       {data && (
         <>
-          {/* Which world the portfolio legs came from. Book = AIRS's actual holdings, priced by
-              AIRS over the calendar year; the per-holding returns are price-only (no income), so
-              the attributed excess differs from the book's income-inclusive headline. */}
-          {/* ⚠ Quiet, not accent. It is a caveat on the numbers, not a headline: in accent blue at
-              full width it out-shouted the tiles it qualifies. */}
-          {data.source === 'book' && (
-            <p className="text-[11px] text-fg-faint mb-2">
-              {'AIRS book, calendar year. Returns are price only, so this excess differs from '}
-              {'the income-inclusive headline.'}
-            </p>
-          )}
           {data.note && (
             <p className="text-[11px] text-warn-300 mb-2">⚠ {data.note}</p>
           )}
@@ -401,136 +315,177 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
             </p>
           )}
 
-          {/* THE ANSWER, FIRST AND AS TILES. This is the question the reader opened the panel to
-              ask, and it was three sentences buried between two others. Same visual language as
-              the modal above (micro-label + mono value), so the panel reads as part of it.
-              ⚠ The excess arithmetic and the per-effect definitions moved into the tiles' own
-              tooltips: on screen at all times they are noise, one hover away they are exactly
-              what a reader wants. */}
-          {(() => {
-            const sum = (k: 'allocation_pct' | 'selection_pct' | 'interaction_pct') =>
-              (data.rows ?? []).reduce((t, r) => t + n(r[k]), 0);
-            const alloc = sum('allocation_pct');
-            const sel = sum('selection_pct');
-            const inter = sum('interaction_pct');
-            const pp = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}pp`;
-            return (
-              <>
-                <div className="flex flex-wrap items-stretch gap-2 mb-2">
-                  <Stat label="Excess" value={pct(data.excess_pct)} tone={data.excess_pct} strong
-                    hint={`Portfolio ${pct(data.portfolio_return_pct)} minus ${benchmark} ${pct(data.benchmark_return_pct)}.\n\nThe three effects sum to this, and that identity is checked, not assumed.`} />
-                  <Stat label="Selection" value={pp(sel)} tone={sel}
-                    hint={`The companies chosen inside each ${w}, scored at the index’s weight.`} />
-                  <Stat label="Allocation" value={pp(alloc)} tone={alloc}
-                    hint={`Where the money was placed, scored against the index total (${pct(data.benchmark_return_pct, 1)}).`} />
-                  <Stat label="Interaction" value={pp(inter)} tone={inter}
-                    hint="The cross term. Requires a weight tilt and a pick edge at once." />
-                </div>
-                <p className="text-xs text-fg-soft mb-3">
-                  {Math.abs(sel) >= Math.abs(alloc)
-                    ? `Mostly the companies, not the ${w}s.`
-                    : `Mostly the ${w}s, not the companies.`}
-                  {/* ⚠ Shown only when something IS excluded. At full coverage the old line read
-                      "Explains 100% of the model. 0% is excluded", spending three clauses to say
-                      nothing was left out — a caveat that fires when it does not apply trains a
-                      reader to skip it, which is exactly when it needs to be read. */}
-                  {(data.excluded_pct ?? 0) >= 0.5 && (
-                    <span className="text-fg-faint">
-                      {' Excludes '}
-                      <span className="font-mono">{(data.excluded_pct ?? 0).toFixed(0)}%</span>
-                      {' of the model (funds and cash).'}
-                    </span>
-                  )}
-                </p>
-              </>
-            );
-          })()}
+          {/* ⚠ Shown only when something IS excluded. At full coverage the old line read
+              "Explains 100% of the model. 0% is excluded", spending three clauses to say
+              nothing was left out — a caveat that fires when it does not apply trains a
+              reader to skip it, which is exactly when it needs to be read. */}
+          {(data.excluded_pct ?? 0) >= 0.5 && (
+            <p className="text-xs text-fg-faint mb-3">
+              {'Excludes '}
+              <span className="font-mono">{(data.excluded_pct ?? 0).toFixed(0)}%</span>
+              {' of the model (funds and cash).'}
+            </p>
+          )}
 
-          {/* The arithmetic, beside the table it explains — the tiles say WHAT, this says HOW. */}
-          <Legend rIndex={pct(data.benchmark_return_pct, 1)} axis={data.axis ?? axis} />
-
+          {/* ⚠ NO FORMULA STRIP HERE. Each effect's arithmetic lives in its OWN column header's
+              info icon (`Th prov` → `Provenance how`), stated in the SAME WORDS the headers use
+              so the two cannot drift — a strip above the table restated all three permanently,
+              so the panel carried every formula twice. */}
           <div className="overflow-auto rounded-lg border border-neutral-800/40 mb-3">
             <table className="w-full text-[11px]">
               <thead className="bg-card">
                 <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
                   <Th align="left" label={w}
-                    help={`The ${w}s the excess is split across.\n\nEvery ${w} either side holds appears — including the ones the index holds and you don't, because choosing not to own something is a decision the numbers can price.`} />
-                  <Th label={<>w<sub>P</sub></>}
-                    prov={<Provenance source={pSrc} asOf={portfolioAsOf} note={`your weight in this ${w}`}
-                      how={`Your weight in this ${w} ÷ the attributable sleeve's total (funds & cash removed, renormalised to 100%).`} />}
-                    help={`Your weight in this ${w}, as a % of the attributable sleeve — funds and cash removed, the rest renormalised to 100%.\n\nNot the raw model weight: the table only explains what it can decompose.`} />
-                  <Th label={<>w<sub>B</sub></>}
-                    prov={<Provenance source="benchmark" asOf={benchmarkAsOf} note={`the index's weight in this ${w}`}
-                      how="The index's weight in this bucket at the START of the window (not today's cap — that would be look-ahead)." />}
-                    help={`The index's weight in this ${w}, at the start of the window.\n\nStart-of-window, because weighting by today's market cap is look-ahead bias: a company that doubled would retroactively be given twice the share of the index it actually had.`} />
-                  <Th label={<>R<sub>P</sub></>}
-                    prov={<Provenance source={pSrc} asOf={portfolioAsOf} note={`your return in this ${w}`}
-                      how={`Your holdings' EUR return in this ${w} over the window.`} />}
-                    help={`What your holdings in this ${w} returned, in EUR, over this window.\n\nA dash means you hold nothing here.`} />
+                    prov={<Provenance source="derived" column kind="formula" note={`the ${w}s`}
+                      what={`The ${w}s the excess is split across — including the ones ${benchmark} holds and you do NOT, because choosing not to own something is a decision the numbers can price.`}
+                      how={`Every ${w} held on either side, from the same classification both sides are read with.`} />} />
+                  {/* ⚠ WORDS, NOT `w_P` / `R_B`. The subscripted notation was readable only while
+                      the formula strip below carried its key (w = weight, R = return, P = you,
+                      B = index); with that strip gone the symbols arrive undecoded, and the
+                      `uppercase` on this row was flattening the lowercase `w` that carries half
+                      the convention. A header that needs a hover to be read at all is a header
+                      that will be guessed at instead. The tooltip formulas use the same words, so
+                      the two cannot drift apart the way symbols and a missing key did. */}
+                  <Th label="Your wt"
+                    prov={<Provenance source={pSrc} column kind="formula"
+                      what={`Your share of the attributable model in each ${w} — funds and cash removed, the rest renormalised to 100%, so it is not the raw model weight.`}
+                      note={`your weight in this ${w}`}
+                      how={`Σ(${pWeightSrc}) over your ${w} holdings ÷ Σ over all attributable holdings.`} />} />
+                  <Th label="Index wt"
+                    prov={<Provenance source="benchmark" column kind="formula"
+                      what={`${benchmark}'s share in each ${w}, at the START of the window — weighting by today’s cap would be look-ahead.`}
+                      note={`${benchmark} weight in this ${w}`}
+                      how={`Σ(start-of-window cap weight) over ${benchmark}'s ${w} constituents ÷ Σ over the index.`} />} />
+                  <Th label="Your ret."
+                    prov={<Provenance source={pSrc} column kind="formula"
+                      what={`What your holdings in each ${w} returned, in EUR. A dash means you hold nothing there.`}
+                      note={`your return in this ${w}`}
+                      how={`Σ(wᵢ × rᵢ) ÷ Σwᵢ over your ${w} holdings, where rᵢ = ${pReturnHow}.`} />} />
                   {/* The reference point. Allocation is scored against THIS number, so it has to
                       be on the screen — an over/underweight is judged by whether its sector beat
                       or lagged the index as a whole, not by whether it went up. */}
-                  <Th label={<>R<sub>B</sub></>}
-                    prov={<Provenance source="benchmark" asOf={benchmarkAsOf} note={`the index's return in this ${w}`}
-                      how={`The index's holdings' EUR return in this ${w}. Allocation scores it against the index total (${pct(data.benchmark_return_pct, 1)}).`} />}
-                    help={`What the index's holdings in this ${w} returned, in EUR.\n\nCompare it to the index's total (${pct(data.benchmark_return_pct, 1)}) — that comparison is the allocation effect. A ${w} can rise and still have been a bad place to be, if it rose by less than the index.`} />
+                  <Th label="Index ret."
+                    prov={<Provenance source="benchmark" column kind="formula"
+                      what={`What ${benchmark}'s holdings in each ${w} returned, in EUR.`}
+                      note={`${benchmark} return in this ${w}`}
+                      how={`Σ(wᵢ × rᵢ) ÷ Σwᵢ over ${benchmark}'s ${w} constituents, rᵢ in EUR.`} />} />
                   <Th label="Allocation"
-                    prov={<Provenance source="derived" note="Brinson-Fachler allocation — the right buckets?"
-                      how={`(wP − wB) × (RB − index total ${pct(data.benchmark_return_pct, 1)}).`} />}
-                    help={`Your over/underweight, multiplied by how that ${w} did versus the index as a whole.\n\nPositive means you leaned into a ${w} that beat the index, or avoided one that lagged it. It is judged at the index's returns, so your company-picking is held constant — this column is only about where you placed the money.\n\nThe catch: overweighting a ${w} that rose 5% while the index rose 10% is negative. It went up, and it was still the wrong place to be.`} />
+                    prov={<Provenance source="derived" column kind="formula" note="Brinson-Fachler allocation"
+                      what={`What choosing where to put the money was worth — scored against the index total, so a ${w} that rose by LESS than the index counts against you.`}
+                      how={`(your wt − index wt) × (index ret − index total ${pct(data.benchmark_return_pct, 1)}).`} />} />
                   <Th label="Selection"
-                    prov={<Provenance source="derived" note="Brinson selection — the right companies?"
-                      how="wB × (RP − RB)." />}
-                    help={`Your companies against the index's companies inside the ${w}, scored at the index's weight.\n\nUsing the index's weight is what makes it purely about the picks — how much you held is the Allocation column's job, not this one.`} />
+                    prov={<Provenance source="derived" column kind="formula" note="Brinson selection"
+                      what="What choosing which companies to hold was worth, scored at the index’s weight so sizing is held constant."
+                      how="index wt × (your ret − index ret)." />} />
                   <Th label="Interact."
-                    prov={<Provenance source="derived" note="interaction (the cross term)"
-                      how="(wP − wB) × (RP − RB)." />}
-                    help={`Your tilt multiplied by your selection edge.\n\nThe part that can't be assigned cleanly to either column: a big overweight and good picks in the same ${w} reinforce each other, and that reinforcement belongs to neither alone.\n\nUsually small. When it is large, the tilt and the picks were pulling hard in the same direction.`} />
+                    prov={<Provenance source="derived" column kind="formula" note="interaction (the cross term)"
+                      what="What the tilt and the picks were worth together."
+                      how="(your wt − index wt) × (your ret − index ret)." />} />
                   <Th label="Total"
-                    prov={<Provenance source="derived" note="this bucket's share of the excess"
-                      how="Allocation + Selection + Interaction." />}
-                    help={`Allocation + selection + interaction for this ${w} — how much of the total excess came from here.\n\nThe column sums to the whole excess. That identity is checked, not assumed.`} />
+                    prov={<Provenance source="derived" column kind="formula" note={`this ${w}'s share of the excess`}
+                      what={`Each ${w}'s whole share of the excess. The column sums to the excess, and that identity is checked, not assumed.`}
+                      how="Allocation + Selection + Interaction." />} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-800/20">
-                {(data.rows ?? []).map((r) => (
-                  <tr key={r.bucket} className="hover:bg-overlay/[0.02]">
-                    <td className="px-2 py-1.5 text-fg whitespace-nowrap">{r.bucket}</td>
-                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">{n(r.portfolio_weight_pct).toFixed(1)}</td>
-                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">{n(r.benchmark_weight_pct).toFixed(1)}</td>
-                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">{pct(r.portfolio_return_pct, 1)}</td>
-                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">{pct(r.benchmark_return_pct, 1)}</td>
-                    <td className="px-2 py-1.5 text-right font-mono">
-                      <Eff v={n(r.allocation_pct)} title={allocationWhy(
-                        r.bucket, data.axis ?? axis, n(r.portfolio_weight_pct), n(r.benchmark_weight_pct),
-                        r.benchmark_return_pct, n(data.benchmark_return_pct))} />
-                    </td>
-                    <td className="px-2 py-1.5 text-right font-mono">
-                      <Eff v={n(r.selection_pct)} title={selectionWhy(
-                        r.bucket, n(r.benchmark_weight_pct),
-                        r.portfolio_return_pct, r.benchmark_return_pct)} />
-                    </td>
-                    <td className="px-2 py-1.5 text-right font-mono">
-                      <Eff v={n(r.interaction_pct)}
-                        title={`The cross term: your tilt multiplied by your selection edge.\n\nIt is the part that can't be assigned cleanly to either column — a big overweight and good picks in the same ${w} reinforce each other.`} />
-                    </td>
-                    <td className="px-2 py-1.5 text-right font-mono font-semibold"><Eff v={n(r.total_pct)} /></td>
-                  </tr>
-                ))}
+                {(data.rows ?? []).map((r) => {
+                  // The row's own figures, formatted once — every card below quotes them, so a
+                  // reader can check the arithmetic against the digits in the row.
+                  const wP = n(r.portfolio_weight_pct);
+                  const wB = n(r.benchmark_weight_pct);
+                  const rP = pct(r.portfolio_return_pct, 1);
+                  const rB = pct(r.benchmark_return_pct, 1);
+                  const rBt = pct(data.benchmark_return_pct, 1);
+                  return (
+                    <tr key={r.bucket} className="hover:bg-overlay/[0.02]">
+                      <td className="px-2 py-1.5 text-fg whitespace-nowrap">{r.bucket}</td>
+                      <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
+                        <Num prov={<Provenance source={pSrc} asOf={portfolioAsOf} kind="formula"
+                          what={`Your share of the attributable model held in ${r.bucket}.`}
+                          note={`your weight in ${r.bucket}`}
+                          how={`Σ(${pWeightSrc}) over your ${r.bucket} holdings ÷ Σ over all attributable holdings = ${wP.toFixed(1)}%.`} />}>
+                          {wP.toFixed(1)}
+                        </Num>
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
+                        <Num prov={<Provenance source="benchmark" asOf={benchmarkAsOf} kind="formula"
+                          what={`${benchmark}'s share held in ${r.bucket}.`}
+                          note={`${benchmark} weight in ${r.bucket}`}
+                          how={`Σ(start-of-window cap weight) over ${benchmark}'s ${r.bucket} constituents ÷ Σ over the index = ${wB.toFixed(1)}%.`} />}>
+                          {wB.toFixed(1)}
+                        </Num>
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
+                        <Num prov={<Provenance source={pSrc} asOf={portfolioAsOf} kind="formula"
+                          what={`What your ${r.bucket} holdings returned, in EUR.`}
+                          note={`your return in ${r.bucket}`}
+                          how={`Σ(wᵢ × rᵢ) ÷ Σwᵢ over your ${r.bucket} holdings = ${rP}, with rᵢ = ${pReturnHow}.`} />}>
+                          {rP}
+                        </Num>
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
+                        <Num prov={<Provenance source="benchmark" asOf={benchmarkAsOf} kind="formula"
+                          what={`What ${benchmark}'s ${r.bucket} holdings returned, in EUR.`}
+                          note={`${benchmark} return in ${r.bucket}`}
+                          how={`Σ(wᵢ × rᵢ) ÷ Σwᵢ over ${benchmark}'s ${r.bucket} constituents = ${rB}, rᵢ in EUR.`} />}>
+                          {rB}
+                        </Num>
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono">
+                        <Eff v={n(r.allocation_pct)}
+                          prov={<Provenance source="derived" kind="formula" note={`allocation — ${r.bucket}`}
+                            what={`What your ${r.bucket} over/underweight was worth, scored against the index total (${rBt}).`}
+                            how={`(${wP.toFixed(1)}% − ${wB.toFixed(1)}%) × (${rB} − ${rBt}) = ${pp(r.allocation_pct)}.`} />} />
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono">
+                        <Eff v={n(r.selection_pct)}
+                          prov={<Provenance source="derived" kind="formula" note={`selection — ${r.bucket}`}
+                            what={`What your ${r.bucket} company picks were worth, scored at the index’s weight.`}
+                            how={`${wB.toFixed(1)}% × (${rP} − ${rB}) = ${pp(r.selection_pct)}.`} />} />
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono">
+                        <Eff v={n(r.interaction_pct)}
+                          prov={<Provenance source="derived" kind="formula" note={`interaction — ${r.bucket}`}
+                            what={`What the ${r.bucket} tilt and picks were worth together.`}
+                            how={`(${wP.toFixed(1)}% − ${wB.toFixed(1)}%) × (${rP} − ${rB}) = ${pp(r.interaction_pct)}.`} />} />
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-mono font-semibold">
+                        <Eff v={n(r.total_pct)}
+                          prov={<Provenance source="derived" kind="formula" note={`${r.bucket}'s share of the excess`}
+                            what={`${r.bucket}'s whole share of the excess.`}
+                            how={`${pp(r.allocation_pct)} + ${pp(r.selection_pct)} + ${pp(r.interaction_pct)} = ${pp(r.total_pct)}.`} />} />
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr className="border-t border-neutral-800/40 font-semibold">
                   <td className="px-2 py-1.5 text-fg" colSpan={5}>Total (= the excess)</td>
                   <td className="px-2 py-1.5 text-right font-mono">
-                    <Eff v={(data.rows ?? []).reduce((s, r) => s + n(r.allocation_pct), 0)} />
+                    <Eff v={(data.rows ?? []).reduce((s, r) => s + n(r.allocation_pct), 0)}
+                      prov={<Provenance source="derived" kind="formula" note="total allocation"
+                        what={`What choosing where to put the money was worth, across every ${w}.`}
+                        how={`Every ${w}'s allocation effect, summed.`} />} />
                   </td>
                   <td className="px-2 py-1.5 text-right font-mono">
-                    <Eff v={(data.rows ?? []).reduce((s, r) => s + n(r.selection_pct), 0)} />
+                    <Eff v={(data.rows ?? []).reduce((s, r) => s + n(r.selection_pct), 0)}
+                      prov={<Provenance source="derived" kind="formula" note="total selection"
+                        what={`What choosing which companies to hold was worth, across every ${w}.`}
+                        how={`Every ${w}'s selection effect, summed.`} />} />
                   </td>
                   <td className="px-2 py-1.5 text-right font-mono">
-                    <Eff v={(data.rows ?? []).reduce((s, r) => s + n(r.interaction_pct), 0)} />
+                    <Eff v={(data.rows ?? []).reduce((s, r) => s + n(r.interaction_pct), 0)}
+                      prov={<Provenance source="derived" kind="formula" note="total interaction"
+                        what={`The cross terms, across every ${w}.`}
+                        how={`Every ${w}'s interaction effect, summed.`} />} />
                   </td>
-                  <td className="px-2 py-1.5 text-right font-mono"><Eff v={data.attributed_pct} /></td>
+                  <td className="px-2 py-1.5 text-right font-mono">
+                    <Eff v={data.attributed_pct}
+                      prov={<Provenance source="derived" kind="formula" note="the attributed excess"
+                        what="The excess this table explains."
+                        how={`Allocation + selection + interaction across every ${w}, over the attributable holdings.`} />} />
+                  </td>
                 </tr>
               </tfoot>
             </table>
@@ -538,13 +493,21 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
 
           <div className="grid gap-4 md:grid-cols-3">
             <Names title="Biggest contributors" rows={data.top_contributors ?? []}
-              hint="weight × return, in EUR" src={pSrc} asOf={portfolioAsOf} />
+              hint="weight × return, in EUR" src={pSrc} asOf={portfolioAsOf}
+              weightHow={pWeightSrc} returnHow={pReturnHow} />
             <Names title="Biggest detractors" rows={data.top_detractors ?? []}
-              hint="what cost you the most" src={pSrc} asOf={portfolioAsOf} />
-            {/* The other half of "why" — and the half a holdings-only view can never show. */}
+              hint="what cost you the most" src={pSrc} asOf={portfolioAsOf}
+              weightHow={pWeightSrc} returnHow={pReturnHow} />
+            {/* The other half of "why" — and the half a holdings-only view can never show.
+                ⚠ `held={false}`: these three columns are the INDEX's weight, the index's return
+                and what the name was worth TO THE INDEX. Same columns as the two lists beside it,
+                different subject — the per-cell text has to say so or a benchmark's gain reads as
+                something that happened in your book. */}
             <Names title={`${benchmark} winners you didn’t own`} rows={data.missed_winners ?? []}
               hint="matched by COMPANY, not ISIN — a share class is not a different business"
-              src="benchmark" asOf={benchmarkAsOf} />
+              src="benchmark" asOf={benchmarkAsOf} owner={benchmark} held={false}
+              weightHow="start-of-window cap weight"
+              returnHow="EUR close at the window’s end ÷ its close at the start − 1" />
           </div>
         </>
       )}
