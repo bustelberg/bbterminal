@@ -64,6 +64,15 @@ def classify_holding(isin: str | None, grid: dict | None, has_company: bool,
     ⚠ ORDER IS THE RULE. `not_equity` and `fund` come BEFORE the company/subscription tests,
     because a bond on an unsubscribed exchange is not an unsubscribed company — reporting it as
     one would put it on the list of things a subscription would fix, and it never would.
+
+    ⚠ A COMPANY PINNED TO AN UNSUBSCRIBED EXCHANGE IS NOT NECESSARILY UNREACHABLE — so it is NOT
+    pre-classified `unsubscribed`. Shopify's `company` row sits on TSX (out of subscription), yet
+    GuruFocus lists it as NASDAQ:SHOP, which we DO subscribe to; the same is true of Brookfield
+    (NYSE:BN). Whether a subscribed primary listing exists is only knowable via the ISIN bridge (an
+    API call), which is too expensive for this bulk, no-API classifier — so a no-metrics company
+    stays `no_metrics` (ingestable), and the ingest resolves the primary listing, repoints the
+    company to it, and fetches. Only when NO listing is subscribed does the ingest report
+    `unsubscribed` — the honest verdict, made where the evidence actually is.
     """
     if not isin:
         return "cash"
@@ -103,7 +112,7 @@ def coverage_for(members: list[dict]) -> dict:
                   .in_("isin", chunk).execute().data or []):
             grid[g["isin"]] = g
         for c in (supabase.table("company")
-                  .select("company_id,company_name,isin,"
+                  .select("company_id,company_name,isin,gurufocus_ticker,"
                           "gurufocus_exchange:gurufocus_exchange(exchange_code)")
                   .in_("isin", chunk).execute().data or []):
             companies[c["isin"]] = c
@@ -136,6 +145,7 @@ def coverage_for(members: list[dict]) -> dict:
         lookup = alias.get(isin or "", isin)
         comp = companies.get(lookup or "")
         subscribed: bool | None = None
+        code: str | None = None
         if comp:
             code = ((comp.get("gurufocus_exchange") or {}) or {}).get("exchange_code")
             subscribed = is_gf_subscribed_exchange(code) if code else None
@@ -147,8 +157,16 @@ def coverage_for(members: list[dict]) -> dict:
             "isin": isin, "name": m.get("name"), "weight_pct": round(100 * w / total_w, 3),
             "reason": reason, "company_id": (comp or {}).get("company_id"),
             "company_name": (comp or {}).get("company_name"),
+            # The GuruFocus exchange + ticker the company sits on — the reason an `unsubscribed`
+            # row is unreachable, the halves of the GuruFocus URL, and both blank for a
+            # `no_company` row (no company yet to read them off; ingesting fills them in on reload).
+            "exchange": code,
+            "ticker": (comp or {}).get("gurufocus_ticker"),
             # Surfaced so a reader can see WHY an ISIN they know is uncovered came back covered.
             "served_by": (lookup if lookup != isin else None),
+            # The certificate this stock was looked THROUGH from, if any — so an excluded
+            # constituent reads "via Star Selection Index" and not as a mystery top-level holding.
+            "via_certificate": m.get("via"),
         })
     rows.sort(key=lambda r: -r["weight_pct"])
     return {

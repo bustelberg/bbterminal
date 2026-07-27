@@ -14,7 +14,7 @@
  */
 import InfoTip from '../app/components/InfoTip';
 import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
-import { TipCard } from './tipCard';
+import { Field, TipCard } from './tipCard';
 import { trimStop } from './provenanceText';
 import { snapshotFreshness, type SnapshotTone } from './snapshotAge';
 
@@ -59,16 +59,6 @@ function FreshnessPill({ tone, label }: { tone: SnapshotTone; label: string }) {
   );
 }
 
-/** A short label column ("WHEN", "HOW") beside its value — the card's two-column grid. */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline gap-2">
-      <span className="text-[9px] uppercase tracking-wider text-fg-faint w-9 shrink-0 pt-px">{label}</span>
-      <span className="min-w-0 text-[11px]">{children}</span>
-    </div>
-  );
-}
-
 /**
  * HOW a number came to exist — and there are only ever TWO honest answers:
  *   'copied'  — read straight out of the source above, unchanged, at the When date. Nothing was
@@ -101,11 +91,11 @@ function ProvenanceCard({ source, asOf, note, how, kind, column, what }: {
   const f = asOf ? snapshotFreshness(asOf) : null;
   return (
     // The shared shell — identical chrome to every other tooltip; only the FIELDS differ.
-    <TipCard label={what ? 'What' : 'Source'} title={what ?? s.label}
+    <TipCard label={what ? 'What' : 'Where'} title={what ?? s.label}
       subtitle={what ? undefined : note}>
       <>
         {what && (
-          <Field label="Source">
+          <Field label="Where">
             <span className="text-fg-soft">
               {s.label}
               {note && <span className="text-fg-muted"> — {note}</span>}

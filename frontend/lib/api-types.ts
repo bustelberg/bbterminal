@@ -3522,6 +3522,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/benchmark-margin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Margin
+         * @description A benchmark index's FCF-SBC margin per fiscal year: `(FCF − SBC) / Revenue` per constituent,
+         *     then a CAP-WEIGHTED AVERAGE across them.
+         *
+         *     ⚠ A WEIGHTED AVERAGE OF MARGINS, NOT Σ(FCF−SBC)/ΣRevenue. The constituents report in different
+         *     currencies (Shell $, RELX £, ASML €), so summing their euros/pounds/dollars would be
+         *     meaningless. Each margin is a pure ratio (currency-free), so averaging them — weighted by
+         *     market cap — is the currency-safe aggregate. SBC missing for a constituent is treated as 0
+         *     (many report none). Returns `{label, series:[{year, margin_pct}], members}`.
+         */
+        get: operations["benchmark_margin_api_earnings_benchmark_margin_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/benchmark-revenue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Revenue
+         * @description A benchmark index's revenue (or any `_METRIC_CODES` metric) as a GROWTH INDEX — its
+         *     constituents' figures blended the same
+         *     way a portfolio's is (a LEVEL → each rebased to 100 at its first year, then weighted).
+         *
+         *     ⚠ NOT A SUM OF ABSOLUTE REVENUES. AEX constituents report in different currencies (Shell/RELX/
+         *     Unilever in GBP), so a euro total would silently add pounds to euros. The level-blend sidesteps
+         *     that — it compares GROWTH, which is what the R² read on the /Long Equity tab needs — and drops
+         *     any year under the 60% coverage floor rather than drawing it thin.
+         *
+         *     Cap-weighted by `market_cap_eur` where known, else equal-weighted (a benchmark growth reference,
+         *     not a priced index). Returns `{label, series:[{year, value}], members, covered_pct}`.
+         */
+        get: operations["benchmark_revenue_api_earnings_benchmark_revenue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/benchmark-revenue-matrix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Revenue Matrix
+         * @description The audit grid behind the benchmark revenue line: every constituent's revenue at every year,
+         *     the blended footer that reconciles to the line, AND where each series comes from.
+         *
+         *     Same `blend_matrix` the Forward-P/E "All periods" grid uses (revenue is a LEVEL → each rebased
+         *     to a growth index, weighted), so the cells and footer are built from exactly what the line is.
+         *     Each row (and each excluded constituent) carries a `source` — `TICKER@EXCHANGE` — so a reader
+         *     sees which listing's GuruFocus figures fed it. Constituents with no revenue land in `excluded`
+         *     (reason `no_data`): that names the ones we simply have nothing for, which is half the answer.
+         */
+        get: operations["benchmark_revenue_matrix_api_earnings_benchmark_revenue_matrix_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/by-isin/{isin}/metrics": {
         parameters: {
             query?: never;
@@ -3545,6 +3629,63 @@ export interface paths {
         get: operations["get_earnings_metrics_by_isin_api_earnings_by_isin__isin__metrics_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/cash-return-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cash Return Inputs
+         * @description The base inputs behind Cash return on capital, per holding: Free Cash Flow, non-current
+         *     (long-term) liabilities and total equity per fiscal year, in the company's own reporting
+         *     currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `FCF / (non-current liabilities + total equity)` is derived on
+         *     the client from these three so the drill-down shows exactly what it is computed from (3 rows per
+         *     company). Non-current liabilities absent (a bank / Berkshire doesn't split current from
+         *     non-current) → the ratio is blank there, NOT computed against equity alone. Total equity is
+         *     incl. minority interest on purpose (see `_METRIC_CODES`). Deduped by ISIN, weight is the share
+         *     of the whole book, holdings with no company row omitted.
+         */
+        post: operations["cash_return_inputs_api_earnings_cash_return_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/debt-ratio-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Debt Ratio Inputs
+         * @description The base inputs behind the LTD / (Total Assets − Goodwill) ratio, per holding: Long-Term
+         *     Debt, Total Assets and Goodwill per fiscal year, in the company's own reporting currency
+         *     (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `LTD / (Total Assets − Goodwill)` is derived on the client from
+         *     these three so the drill-down shows exactly what it is computed from (3 rows per company). A
+         *     missing Goodwill is a genuine 0 (no acquisitions); a missing Long-Term Debt line is NOT — the
+         *     ratio is blank there (Berkshire has no such line). Deduped by ISIN, weight is the share of the
+         *     whole book, holdings with no company row omitted.
+         */
+        post: operations["debt_ratio_inputs_api_earnings_debt_ratio_inputs_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3608,6 +3749,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/fundamental-blend-matrix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fundamental Blend Matrix
+         * @description The audit grid behind a blended line: every holding's value at every period, plus the
+         *     blended value + coverage per period.
+         *
+         *     ⚠ SAME LOADER AND SAME `_prepare` AS THE LINE AND THE PER-POINT DRILL-DOWN. It reads ONE
+         *     metric's rows per covered holding (+ the actual a forecast is anchored on) and hands them to
+         *     `blend_matrix`, so the grid a reader verifies against is built from exactly what the chart
+         *     drew — there is no second computation to disagree with.
+         */
+        post: operations["fundamental_blend_matrix_api_earnings_fundamental_blend_matrix_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/fundamental-blend-metrics": {
         parameters: {
             query?: never;
@@ -3659,6 +3826,117 @@ export interface paths {
          *     the same fabrication `MIN_COVERAGE_PCT` already guards against on the AIRS returns.
          */
         post: operations["fundamental_coverage_api_earnings_fundamental_coverage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fundamental-coverage/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Fundamental Coverage
+         * @description Fetch + load the GuruFocus fundamentals ONE uncovered holding is missing.
+         *
+         *     Handles both gaps the coverage table flags as ours to close: a `no_metrics` holding (a company
+         *     row exists — just fetch) and a `no_company` holding (resolve the ISIN to a listing, CREATE the
+         *     company, then fetch). Every other reason is refused with its own status, never as a failure —
+         *     see `_fundamental_ingest`.
+         *
+         *     ⚠ ADMIN-ONLY BY DEFAULT. This CREATES company rows and spends GuruFocus quota, so it is not in
+         *     the earnings-refresh user-write allow-list (the path carries no `/refresh`) and the auth gate
+         *     holds it to admins. The /management-dashboard portfolios page that surfaces it is admin-only.
+         *
+         *     The frontend calls this per row and, for "ingest all", once per distinct ingestable ISIN.
+         */
+        post: operations["ingest_fundamental_coverage_api_earnings_fundamental_coverage_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/interest-burden-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Interest Burden Inputs
+         * @description The base inputs behind the interest-burden ratio, per holding: Interest expense and
+         *     Operating income per fiscal year, in the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `|Interest expense| / Operating income` (the % of operating
+         *     profit spent servicing debt) is derived on the client from these two so the drill-down shows
+         *     exactly what it is computed from (2 rows per company). Interest expense is reported NEGATIVE (an
+         *     outflow) — the client takes its magnitude; a 0 is real (nets to nothing). Operating income ≤ 0
+         *     → the ratio is blank (a loss). "Operating profit" is `Operating Income`, NOT `EBIT`. Deduped by
+         *     ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["interest_burden_inputs_api_earnings_interest_burden_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/margin-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Margin Inputs
+         * @description The base inputs behind the FCF-SBC margin, per holding: Revenue, Free Cash Flow and Stock
+         *     Based Compensation per fiscal year, in the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. The margin `(FCF − SBC) / Revenue` is derived on the client
+         *     from these three so the drill-down shows exactly what it is computed from (3 rows per company).
+         *     Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["margin_inputs_api_earnings_margin_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/portfolio-revenue-matrix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Portfolio Revenue Matrix
+         * @description Each equity the portfolio HOLDS: its weight, currency, and actual `metric` per fiscal year
+         *     (2015 onwards), in the company's own reporting currency.
+         *
+         *     ⚠ THE HOLDINGS, NOT AN INDEX. Members come from the portfolio (looked THROUGH any linked
+         *     certificate via `_load_and_expand_members`), deduped by ISIN (a name held twice is one row with
+         *     summed weight). Weight is the share of the WHOLE book (cash/bonds in the denominator, so the
+         *     shown companies sum to under 100%). Holdings with no company row / no revenue are omitted —
+         *     this lists the companies we can actually show revenue for.
+         */
+        post: operations["portfolio_revenue_matrix_api_earnings_portfolio_revenue_matrix_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3775,6 +4053,32 @@ export interface paths {
         get: operations["portfolio_metrics_api_earnings_portfolios__portfolio_id__metrics_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/relative-growth-breakdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Relative Growth Breakdown
+         * @description The holdings behind ONE year of the Share-Price-vs-Owner-Earnings chart: each holding's
+         *     price-growth index, its Owner-Earnings-growth index, and price ÷ OE (its multiple change).
+         *
+         *     ⚠ BOTH LINES ARE DECOMPOSED THROUGH THE SAME LEVEL `blend_breakdown` THE CHART IS BUILT FROM —
+         *     price and OE are month-end price and EPS-ex-NRI, both LEVELS, rebased to an index and weighted.
+         *     Merging the two per holding (`merge_relative_growth`) gives the price-vs-OE table without a
+         *     second copy of the growth rules.
+         */
+        post: operations["relative_growth_breakdown_api_earnings_relative_growth_breakdown_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7661,6 +7965,36 @@ export interface components {
             /** Portfolio Id */
             portfolio_id?: number | null;
         };
+        /**
+         * FundamentalIngestRequest
+         * @description One uncovered holding to try to ingest fundamentals for. `name` seeds the `company` row
+         *     when one must be created (a `no_company` holding); `force` re-asks GuruFocus past the cache.
+         */
+        FundamentalIngestRequest: {
+            /**
+             * Force
+             * @default false
+             */
+            force?: boolean;
+            /** Isin */
+            isin: string;
+            /** Name */
+            name?: string | null;
+        };
+        /**
+         * FundamentalMatrixRequest
+         * @description The whole blended line taken apart: which metric (every period, every holding).
+         */
+        FundamentalMatrixRequest: {
+            /** Holdings */
+            holdings?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Metric Code */
+            metric_code: string;
+            /** Portfolio Id */
+            portfolio_id?: number | null;
+        };
         /** FundamentalPoint */
         FundamentalPoint: {
             /** Date */
@@ -8910,6 +9244,20 @@ export interface components {
             ytd_eur_pct?: number | null;
             /** Ytd Local Pct */
             ytd_local_pct?: number | null;
+        };
+        /**
+         * RelativeGrowthRequest
+         * @description One year of the Share-Price-vs-Owner-Earnings chart, decomposed per holding.
+         */
+        RelativeGrowthRequest: {
+            /** Holdings */
+            holdings?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Period */
+            period: string;
+            /** Portfolio Id */
+            portfolio_id?: number | null;
         };
         /** RenameBacktestRequest */
         RenameBacktestRequest: {
@@ -13854,6 +14202,100 @@ export interface operations {
             };
         };
     };
+    benchmark_margin_api_earnings_benchmark_margin_get: {
+        parameters: {
+            query?: {
+                label?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_revenue_api_earnings_benchmark_revenue_get: {
+        parameters: {
+            query?: {
+                label?: string;
+                metric?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_revenue_matrix_api_earnings_benchmark_revenue_matrix_get: {
+        parameters: {
+            query?: {
+                label?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_earnings_metrics_by_isin_api_earnings_by_isin__isin__metrics_get: {
         parameters: {
             query?: never;
@@ -13864,6 +14306,72 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cash_return_inputs_api_earnings_cash_return_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    debt_ratio_inputs_api_earnings_debt_ratio_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -13951,6 +14459,39 @@ export interface operations {
             };
         };
     };
+    fundamental_blend_matrix_api_earnings_fundamental_blend_matrix_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalMatrixRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     fundamental_blend_metrics_api_earnings_fundamental_blend_metrics_post: {
         parameters: {
             query?: never;
@@ -13987,6 +14528,140 @@ export interface operations {
     fundamental_coverage_api_earnings_fundamental_coverage_post: {
         parameters: {
             query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_fundamental_coverage_api_earnings_fundamental_coverage_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalIngestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    interest_burden_inputs_api_earnings_interest_burden_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    margin_inputs_api_earnings_margin_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    portfolio_revenue_matrix_api_earnings_portfolio_revenue_matrix_post: {
+        parameters: {
+            query?: {
+                metric?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14217,6 +14892,39 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    relative_growth_breakdown_api_earnings_relative_growth_breakdown_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelativeGrowthRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -35,6 +35,44 @@ export function TipCard({ label, labelSuffix, title, subtitle, children }: {
   );
 }
 
+/** A short label column ("WHERE", "WHEN", "HOW") beside its value — the card's two-column grid.
+ *  Shared by the provenance card and the generic {@link AspectCard} so every field row lines up
+ *  the same way, whatever fills it. */
+export function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <span className="text-[9px] uppercase tracking-wider text-fg-faint w-11 shrink-0 pt-px">{label}</span>
+      <span className="min-w-0 text-[11px]">{children}</span>
+    </div>
+  );
+}
+
+/**
+ * THE default explanatory template: WHAT (headline) · WHERE · WHEN · HOW.
+ *
+ * ⚠ WHAT LEADS, THE REST ARE ABOUT IT. Where/When/How all answer questions about a thing the
+ * reader has already identified, so they are useless — worse, they look like an answer — to someone
+ * who does not yet know what they are looking at. So `what` is the headline and the other three are
+ * fields beneath it. Each field is optional and simply omitted when a column has nothing to say for
+ * it (a definition with no origin renders WHAT alone rather than "WHERE: —", which would fabricate
+ * provenance). This is the same shell + field grid the per-value provenance card uses; only the
+ * source-specific machinery (freshness pill, copied/formula) is left to that one.
+ */
+export function AspectCard({ what, where, when, how }: {
+  what: React.ReactNode;
+  where?: React.ReactNode;
+  when?: React.ReactNode;
+  how?: React.ReactNode;
+}) {
+  return (
+    <TipCard label="What" title={what}>
+      {where != null && where !== '' && <Field label="Where">{where}</Field>}
+      {when != null && when !== '' && <Field label="When">{when}</Field>}
+      {how != null && how !== '' && <Field label="How">{how}</Field>}
+    </TipCard>
+  );
+}
+
 /** Longest a leading fragment may be and still be a TITLE rather than the start of a sentence. */
 const MAX_TITLE_LEN = 48;
 

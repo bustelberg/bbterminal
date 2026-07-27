@@ -305,6 +305,15 @@ class NoDividendData(Exception):
         super().__init__(f"GuruFocus has no dividend data for {symbol}")
 
 
+# How many times to re-ask the flaky isin/ endpoint before giving up (transient 500s — see
+# `_resolve_listing`). Measured 2026-07-27 the 500s come in bursts of 5+, so a low ceiling loses a
+# resolvable ISIN to a bad spell. `_api_request` spaces calls 1.5s apart, so this is ~12s worst
+# case for a genuinely dead ISIN — but a real `not_found` (200 with []) returns on the FIRST try
+# (it is a list), so only transient-erroring ISINs ever pay the retry cost. A give-up returns an
+# UNCACHED `error`, so the next click/ingest retries fresh rather than being stuck.
+_ISIN_MAX_TRIES = 8
+
+
 def _resolve_listing(isin: str, *, force: bool = False) -> dict:
     """ISIN -> a GuruFocus listing row, cached in `gurufocus_listing`.
 
@@ -339,8 +348,24 @@ def _resolve_listing(isin: str, *, force: bool = False) -> dict:
         supabase.table("gurufocus_listing").upsert(row, on_conflict="isin").execute()
         return row
 
-    api = _api_request(_build_api_url(f"isin/{quote(isin)}"))
-    candidates = api.data if isinstance(api.data, list) else []
+    # ⚠ GuruFocus's isin/ endpoint 500s INTERMITTENTLY — measured 2026-07-27, Apple's ISIN needed
+    # 3 tries and Shopify's 3 before a 200. A 500 gives `data=None`, and the old code read that as
+    # an empty candidate list and NEGATIVE-CACHED it as `not_found` — poisoning the cache so a
+    # perfectly resolvable ISIN (CA82509L1076 -> NASDAQ:SHOP) stayed unresolved until a manual
+    # force-refresh. So retry the transient failure, and NEVER cache when no real answer arrived: a
+    # server error is not "this ISIN does not exist". A genuine 200 with `[]` still caches
+    # not_found, because that IS the answer.
+    api = None
+    for _ in range(_ISIN_MAX_TRIES):
+        api = _api_request(_build_api_url(f"isin/{quote(isin)}"))
+        if isinstance(api.data, list):
+            break
+    if api is None or not isinstance(api.data, list):
+        return {
+            "isin": isin, "gurufocus_ticker": None, "exchange_code": None,
+            "status": "error", "is_home": False, "candidates": [], "checked_at": _now_iso(),
+        }
+    candidates = api.data
 
     symbol_hint = asset.get("yahoo_symbol") or asset.get("analysis_symbol")
     currency_hint = asset.get("currency")

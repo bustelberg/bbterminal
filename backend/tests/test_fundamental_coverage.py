@@ -6,6 +6,7 @@ guard against: the number looks entirely normal and describes something else.
 """
 from __future__ import annotations
 
+from routers._airs_portfolio_links import expand_members
 from routers._fundamental_coverage import classify_holding, coverage_for
 
 
@@ -43,6 +44,19 @@ class TestTheReasonsAreNotInterchangeable:
         assert classify_holding("X00000000001", _grid("equity"), False, False) == "unsubscribed"
         assert classify_holding("X00000000002", _grid("equity"), False, None) == "no_company"
         assert classify_holding("X00000000003", _grid("equity"), True, True) == "no_metrics"
+
+    def test_a_company_on_an_unsubscribed_exchange_is_still_no_metrics_not_unsubscribed(self):
+        """⚠ THE SHOPIFY / BROOKFIELD CASE. A company pinned to an exchange we don't subscribe to
+        (Shopify on TSX) is NOT pre-classified `unsubscribed` — GuruFocus often lists a subscribed
+        primary (NASDAQ:SHOP) that the ingest resolves and repoints to. Whether a subscribed
+        listing exists needs an API call, so the cheap classifier leaves it `no_metrics`
+        (ingestable) and the ingest makes the real verdict."""
+        assert classify_holding("CA82509L1076", _grid("equity"), True, False,
+                                has_metrics=False) == "no_metrics"
+
+    def test_a_company_WITH_metrics_stays_covered_even_on_an_unsubscribed_exchange(self):
+        assert classify_holding("CA11271J1075", _grid("equity"), True, False,
+                                has_metrics=True) == "covered"
 
 
 class TestOrderIsTheRule:
@@ -193,6 +207,106 @@ class TestAnAliasedIsinIsCoveredByItsCanonical:
 
     def test_an_unaliased_isin_reports_no_served_by(self, monkeypatch):
         assert self._wire(monkeypatch, aliased=False)["rows"][0]["served_by"] is None
+
+
+class TestLookThroughLinkedCertificates:
+    """⚠ A LINKED CERTIFICATE IS NOT A DEAD ROW. `Star Selection Index` (a CH structured product no
+    vendor prices) IS `StarTopSelectie OFF FX`, 24 real stocks. Looking through it lets those
+    stocks feed the coverage + blend instead of dropping 4.70% of the book on the floor."""
+
+    def _through(self, isin, fonds, pid):
+        """A resolver that links exactly ONE holding to one portfolio; None for everything else."""
+        def _f(i, f, _owner):
+            return pid if (i == isin or f == fonds) else None
+        return _f
+
+    def test_a_linked_certificate_is_replaced_by_the_underlying_stocks(self):
+        positions = {7: [{"isin": "US1", "fonds": "Apple", "percentage": 60},
+                         {"isin": "US2", "fonds": "MSFT", "percentage": 40}]}
+        out = expand_members(
+            [{"isin": "CH_CERT", "name": "Star Selection Index", "weight": 10.0}],
+            positions, self._through("CH_CERT", "Star Selection Index", 7))
+        assert [m["isin"] for m in out] == ["US1", "US2"]
+        # ⚠ WEIGHT IS CONSERVED AND SPLIT BY THE UNDERLYING FRACTIONS: 10% -> 6% + 4%.
+        assert [round(m["weight"], 4) for m in out] == [6.0, 4.0]
+        # And every constituent names the certificate it came from.
+        assert {m["via"] for m in out} == {"Star Selection Index"}
+
+    def test_a_holding_with_no_link_is_left_alone(self):
+        out = expand_members([{"isin": "NL0010273215", "name": "ASML", "weight": 5.0}],
+                          {}, lambda *_a: None)
+        assert out == [{"isin": "NL0010273215", "name": "ASML", "weight": 5.0}]
+
+    def test_a_target_with_one_or_zero_positions_is_a_wrapper_not_a_model(self):
+        """The >1 rule mirrors the guesser's gate 3: a single-position target is another wrapper,
+        and linking to it walks back to the row we started from."""
+        positions = {7: [{"isin": "US1", "fonds": "only", "percentage": 100}]}
+        out = expand_members([{"isin": "CH_CERT", "name": "Cert", "weight": 10.0}],
+                          positions, self._through("CH_CERT", "Cert", 7))
+        assert out == [{"isin": "CH_CERT", "name": "Cert", "weight": 10.0}]
+
+    def test_a_cycle_is_not_expanded_for_ever(self):
+        """⚠ A wrapper holds the very certificate it links from. A portfolio already on the path is
+        left as a row rather than re-expanded — the honest outcome, and it terminates."""
+        # pid 7 links to pid 8, and pid 8 links back to pid 7.
+        positions = {
+            7: [{"isin": "CH_B", "fonds": "B cert", "percentage": 100},
+                {"isin": "US1", "fonds": "real", "percentage": 100}],
+            8: [{"isin": "CH_A", "fonds": "A cert", "percentage": 100},
+                {"isin": "US2", "fonds": "real2", "percentage": 100}],
+        }
+
+        def _resolve(i, _f, _owner):
+            return {"CH_A": 7, "CH_B": 8}.get(i)
+
+        out = expand_members([{"isin": "CH_A", "name": "A cert", "weight": 10.0}],
+                          positions, _resolve, max_depth=10)
+        # A -> {CH_B, US1} -> CH_B expands to {CH_A(cycle, kept), US2}; US1/US2 are real.
+        isins = sorted(m["isin"] for m in out)
+        assert "US1" in isins and "US2" in isins
+        assert "CH_A" in isins             # the cycle-closing row survives, uncovered
+        assert len(out) == 3
+
+    def test_the_top_level_certificate_name_survives_a_two_level_look_through(self):
+        """`via` is fixed at the FIRST hop, so a nested stock still reads "via A cert" — the row
+        the reader actually holds — not the intermediate model's name."""
+        positions = {
+            7: [{"isin": "CH_B", "fonds": "B cert", "percentage": 50},
+                {"isin": "US1", "fonds": "real", "percentage": 50}],
+            8: [{"isin": "US2", "fonds": "deep1", "percentage": 50},
+                {"isin": "US3", "fonds": "deep2", "percentage": 50}],
+        }
+
+        def _resolve(i, _f, _owner):
+            return {"CH_A": 7, "CH_B": 8}.get(i)
+
+        out = expand_members([{"isin": "CH_A", "name": "A cert", "weight": 20.0}],
+                          positions, _resolve)
+        assert {m["via"] for m in out} == {"A cert"}
+        # 20% -> CH_B(10%) + US1(10%); CH_B(10%) -> US2(5%) + US3(5%).
+        by_isin = {m["isin"]: round(m["weight"], 4) for m in out}
+        assert by_isin == {"US1": 10.0, "US2": 5.0, "US3": 5.0}
+
+
+class TestCoverageCarriesTheLookThroughLabel:
+    """The `via` a look-through stamps on a member must reach the coverage row, or an excluded
+    constituent reads as a mystery top-level holding."""
+
+    def test_via_certificate_is_passed_through_to_the_row(self, monkeypatch):
+        import routers._fundamental_coverage as fc
+
+        class _Q:
+            def select(self, *_a, **_k): return self
+            def in_(self, *_a, **_k): return self
+            def eq(self, *_a, **_k): return self
+            def limit(self, *_a, **_k): return self
+            def execute(self): return type("R", (), {"data": []})()
+
+        monkeypatch.setattr(fc, "supabase",
+                            type("S", (), {"table": staticmethod(lambda _n: _Q())})())
+        out = fc.coverage_for([{"isin": "US0000000001", "name": "underlying", "weight": 1.0,
+                                "via": "Star Selection Index"}])
+        assert out["rows"][0]["via_certificate"] == "Star Selection Index"
 
 
 class TestTheEmptyAnswerHasTheSameShapeAsARealOne:

@@ -1,0 +1,179 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import {
+  CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from 'recharts';
+import { chartTheme } from '../../../lib/chartTheme';
+import { logLinearFit } from '../../../lib/trendFit';
+import { AspectCard } from '../../../lib/tipCard';
+import InfoTip from '../InfoTip';
+import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
+
+/**
+ * One "Long Equity" growth card: a metric per fiscal year on a LOG axis with an exponential-trend
+ * overlay, its R²/CAGR, and a click-through to the per-holding table. A repeatable unit — Revenue
+ * and FCF/share are two instances of it; more slot into the grid the same way.
+ *
+ * ⚠ R² IS COMPUTED FROM THE POINTS ON SCREEN (`logLinearFit`), so the headline can't disagree with
+ * the plotted line. The company series is EXTRACTED from `data.metrics` (fetched once by the tab),
+ * matching either section spelling.
+ */
+
+export type MetricCfg = {
+  title: string;                 // 'Revenue' | 'FCF / share' | 'ROIC'
+  noun: string;                  // 'revenue' | 'FCF/share' | 'ROIC' — for labels/messages
+  codes: string[];               // company-metric codes (both section spellings)
+  benchmarkMetric: string;       // the `metric` param for the holdings drill-down endpoint
+  unit: 'millions' | 'per_share' | 'percent';
+  // 'growth' = a compounding series on a LOG axis with an exponential trend + R²/CAGR;
+  // 'ratio'  = a % on a LINEAR axis with an average line (a ratio doesn't compound).
+  kind?: 'growth' | 'ratio';
+};
+
+type MetricRow = { metric_code: string; target_date: string; numeric_value: number | null };
+
+export function Stat({ label, value, tone, color, info }: {
+  label: string; value: string; tone?: string; color?: string; info?: React.ReactNode;
+}) {
+  // `color` (a chart hex) ties the tile to its line — a coloured left bar + matching value ink.
+  return (
+    <div className="rounded-lg border border-neutral-800/40 bg-inset px-3 py-2 min-w-[6.5rem]"
+      style={color ? { borderLeft: `3px solid ${color}` } : undefined}>
+      <div className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-fg-muted">{label}{info}</div>
+      <div className={`font-mono text-xl font-semibold leading-tight ${color ? '' : (tone ?? 'text-fg-strong')}`}
+        style={color ? { color } : undefined}>{value}</div>
+    </div>
+  );
+}
+
+export default function MetricGrowthCard({
+  cfg, metrics, isAgg, currency, holdingsTarget, holdingsName,
+}: {
+  cfg: MetricCfg;
+  metrics: MetricRow[] | null;   // null = still loading (the tab's company fetch)
+  isAgg: boolean;
+  currency?: string | null;
+  holdingsTarget: Target;
+  holdingsName?: string | null;  // the portfolio/company the drill-down is for
+}) {
+  const [showHoldings, setShowHoldings] = useState(false);
+  const isRatio = cfg.kind === 'ratio';
+
+  const points = useMemo(() => {
+    const rows = metrics ?? [];
+    const codes = new Set(cfg.codes);
+    const byYear = new Map<number, { date: string; value: number }>();
+    for (const m of rows) {
+      if (!codes.has(m.metric_code) || m.numeric_value == null) continue;
+      const y = parseInt(String(m.target_date).slice(0, 4), 10);
+      if (y < 2015) continue;   // charts start from 2015, like the holdings/margin views
+      const cur = byYear.get(y);
+      if (!cur || m.target_date > cur.date) byYear.set(y, { date: m.target_date, value: m.numeric_value });
+    }
+    return [...byYear.entries()].map(([year, v]) => ({ year, value: v.value })).sort((a, b) => a.year - b.year);
+  }, [metrics, cfg]);
+
+  const fit = useMemo(() => logLinearFit(points), [points]);            // growth only
+  const avg = points.length ? points.reduce((a, p) => a + p.value, 0) / points.length : null;  // ratio only
+  const latest = points.length ? points[points.length - 1].value : null;
+
+  const chartData = useMemo(() => {
+    const trendByYear = new Map(fit.trend.map((t) => [t.year, t.value]));
+    return points.map((p) => ({
+      year: p.year,
+      // A log axis can't plot ≤ 0; a linear ratio can (ROIC can be negative), so keep it.
+      value: isRatio ? p.value : (p.value > 0 ? p.value : null),
+      trend: isRatio ? null : (trendByYear.get(p.year) ?? null),
+    }));
+  }, [points, fit, isRatio]);
+
+  const fmt = (v: number | null | undefined) => {
+    if (v == null) return '—';
+    if (cfg.unit === 'percent') return `${v.toFixed(1)}%`;
+    if (isAgg) return v.toFixed(1);                      // blended growth index
+    if (cfg.unit === 'per_share') return v.toFixed(2);
+    const a = Math.abs(v);
+    if (a >= 1e6) return `${(v / 1e6).toFixed(2)}T`;
+    if (a >= 1e3) return `${(v / 1e3).toFixed(1)}B`;
+    return `${v.toFixed(0)}M`;
+  };
+  const ccy = !isAgg && currency && cfg.unit !== 'percent' ? `${currency} ` : '';
+  const cagr = (v: number | null) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`);
+
+  return (
+    <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
+      <h4 className="text-base font-semibold text-fg-strong">{cfg.title}</h4>
+
+      {metrics == null ? (
+        <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
+      ) : points.length === 0 ? (
+        <p className="text-[11px] text-fg-faint py-16 text-center">No {cfg.noun} ingested for this {isAgg ? 'portfolio' : 'company'}.</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {isRatio ? (
+              <>
+                <Stat label="Avg" value={fmt(avg)} color={chartTheme.accent}
+                  info={<InfoTip content={<AspectCard
+                    what={`Average ${cfg.noun} over the years shown.`}
+                    where="Computed here from the points below." when={`${points.length} year(s).`}
+                    how="A simple mean — a ratio doesn't compound, so there's no growth rate." />} />} />
+                <Stat label="Latest" value={fmt(latest)} color={chartTheme.accent} />
+              </>
+            ) : (
+              <>
+                <Stat label="R²" value={fit.r2 == null ? '—' : fit.r2.toFixed(2)} color={chartTheme.accent}
+                  info={<InfoTip content={<AspectCard
+                    what={`How tightly ${cfg.noun} hugs a constant-growth line (0–1).`}
+                    where="Computed here — a log-linear regression on the points below."
+                    when={`Over the ${fit.n} year(s) shown.`}
+                    how={`R² of ln(${cfg.noun}) vs year. 1.0 = perfectly steady compounding; low = lumpy or cyclical.`} />} />} />
+                <Stat label="CAGR" value={cagr(fit.cagr)} color={chartTheme.accent}
+                  info={<InfoTip content={<AspectCard
+                    what="The compound annual growth rate of the fitted trend."
+                    where="Computed here from the same fit." when={`Over the ${fit.n} year(s) shown.`}
+                    how="e^(slope) − 1 of the log-linear regression." />} />} />
+              </>
+            )}
+          </div>
+
+          <div>
+            <ResponsiveContainer width="100%" height={320}>
+              <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
+                style={{ cursor: 'pointer' }} onClick={() => setShowHoldings(true)}>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
+                <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
+                {isRatio ? (
+                  <YAxis tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                    tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
+                ) : (
+                  // Log scale: an exponential (constant-%) growth trend draws as a straight line.
+                  <YAxis scale="log" domain={['dataMin', 'dataMax']} allowDataOverflow
+                    tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: number) => fmt(v)} width={60} />
+                )}
+                <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
+                  formatter={(v, name) => [`${ccy}${fmt(typeof v === 'number' ? v : null)}`, name === 'trend' ? 'Trend' : cfg.title]} />
+                {isRatio && <ReferenceLine y={0} stroke={chartTheme.zeroLine} />}
+                {isRatio && avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
+                <Line dataKey="value" name="value" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
+                {!isRatio && <Line dataKey="trend" name="trend" type="monotone" stroke={chartTheme.warn} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />}
+              </ComposedChart>
+            </ResponsiveContainer>
+            <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
+              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />{cfg.title}{isRatio ? ' (avg dashed)' : ''}</span>
+              {!isRatio && (
+                <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.warn }} />Trend (R² {fit.r2 == null ? '—' : fit.r2.toFixed(2)})</span>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {showHoldings && (
+        <HoldingsRevenueModal target={holdingsTarget} metric={cfg.benchmarkMetric} unit={cfg.unit}
+          noun={cfg.noun} portfolioName={holdingsName} onClose={() => setShowHoldings(false)} />
+      )}
+    </div>
+  );
+}

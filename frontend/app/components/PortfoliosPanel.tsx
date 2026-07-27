@@ -1245,7 +1245,7 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved }: {
           disabled={busy}
           onChange={(e) => void save(e.target.value)}
           title={linkedLabel}
-          className={`bg-page border rounded-lg px-1.5 py-0.5 text-[11px] max-w-[15rem] focus:border-accent-500 disabled:opacity-50 ${
+          className={`bg-page border rounded-lg px-1.5 py-0.5 text-[11px] w-[15rem] focus:border-accent-500 disabled:opacity-50 ${
             p.linked_portfolio_id != null
               ? 'border-accent-600/40 text-accent-400'
               : 'border-neutral-800/40 text-fg-faint'

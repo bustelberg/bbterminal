@@ -4226,6 +4226,76 @@
         "title": "FundamentalCoverageRequest",
         "type": "object"
       },
+      "FundamentalIngestRequest": {
+        "description": "One uncovered holding to try to ingest fundamentals for. `name` seeds the `company` row\nwhen one must be created (a `no_company` holding); `force` re-asks GuruFocus past the cache.",
+        "properties": {
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "isin"
+        ],
+        "title": "FundamentalIngestRequest",
+        "type": "object"
+      },
+      "FundamentalMatrixRequest": {
+        "description": "The whole blended line taken apart: which metric (every period, every holding).",
+        "properties": {
+          "holdings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings"
+          },
+          "metric_code": {
+            "title": "Metric Code",
+            "type": "string"
+          },
+          "portfolio_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Id"
+          }
+        },
+        "required": [
+          "metric_code"
+        ],
+        "title": "FundamentalMatrixRequest",
+        "type": "object"
+      },
       "FundamentalPoint": {
         "properties": {
           "date": {
@@ -7405,6 +7475,46 @@
           "member_count"
         ],
         "title": "ReconstructedIndex",
+        "type": "object"
+      },
+      "RelativeGrowthRequest": {
+        "description": "One year of the Share-Price-vs-Owner-Earnings chart, decomposed per holding.",
+        "properties": {
+          "holdings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "portfolio_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Id"
+          }
+        },
+        "required": [
+          "period"
+        ],
+        "title": "RelativeGrowthRequest",
         "type": "object"
       },
       "RenameBacktestRequest": {
@@ -15834,6 +15944,142 @@
         ]
       }
     },
+    "/api/earnings/benchmark-margin": {
+      "get": {
+        "description": "A benchmark index's FCF-SBC margin per fiscal year: `(FCF \u2212 SBC) / Revenue` per constituent,\nthen a CAP-WEIGHTED AVERAGE across them.\n\n\u26a0 A WEIGHTED AVERAGE OF MARGINS, NOT \u03a3(FCF\u2212SBC)/\u03a3Revenue. The constituents report in different\ncurrencies (Shell $, RELX \u00a3, ASML \u20ac), so summing their euros/pounds/dollars would be\nmeaningless. Each margin is a pure ratio (currency-free), so averaging them \u2014 weighted by\nmarket cap \u2014 is the currency-safe aggregate. SBC missing for a constituent is treated as 0\n(many report none). Returns `{label, series:[{year, margin_pct}], members}`.",
+        "operationId": "benchmark_margin_api_earnings_benchmark_margin_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "default": "AEX",
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Benchmark Margin",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/benchmark-revenue": {
+      "get": {
+        "description": "A benchmark index's revenue (or any `_METRIC_CODES` metric) as a GROWTH INDEX \u2014 its\nconstituents' figures blended the same\nway a portfolio's is (a LEVEL \u2192 each rebased to 100 at its first year, then weighted).\n\n\u26a0 NOT A SUM OF ABSOLUTE REVENUES. AEX constituents report in different currencies (Shell/RELX/\nUnilever in GBP), so a euro total would silently add pounds to euros. The level-blend sidesteps\nthat \u2014 it compares GROWTH, which is what the R\u00b2 read on the /Long Equity tab needs \u2014 and drops\nany year under the 60% coverage floor rather than drawing it thin.\n\nCap-weighted by `market_cap_eur` where known, else equal-weighted (a benchmark growth reference,\nnot a priced index). Returns `{label, series:[{year, value}], members, covered_pct}`.",
+        "operationId": "benchmark_revenue_api_earnings_benchmark_revenue_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "default": "AEX",
+              "title": "Label",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "metric",
+            "required": false,
+            "schema": {
+              "default": "revenue",
+              "title": "Metric",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Benchmark Revenue",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/benchmark-revenue-matrix": {
+      "get": {
+        "description": "The audit grid behind the benchmark revenue line: every constituent's revenue at every year,\nthe blended footer that reconciles to the line, AND where each series comes from.\n\nSame `blend_matrix` the Forward-P/E \"All periods\" grid uses (revenue is a LEVEL \u2192 each rebased\nto a growth index, weighted), so the cells and footer are built from exactly what the line is.\nEach row (and each excluded constituent) carries a `source` \u2014 `TICKER@EXCHANGE` \u2014 so a reader\nsees which listing's GuruFocus figures fed it. Constituents with no revenue land in `excluded`\n(reason `no_data`): that names the ones we simply have nothing for, which is half the answer.",
+        "operationId": "benchmark_revenue_matrix_api_earnings_benchmark_revenue_matrix_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "label",
+            "required": false,
+            "schema": {
+              "default": "AEX",
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Benchmark Revenue Matrix",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
     "/api/earnings/by-isin/{isin}/metrics": {
       "get": {
         "description": "Dashboard metrics for a company resolved BY ISIN \u2014 the /portfolios\nFundamental modal bridge (ISIN \u2192 `company.isin` \u2192 company_id, \"Bridge A\").\n\nOnly the ~13% of instruments backed by a `company` row have earnings\nmetrics; everything else (ETFs, structured products, foreign listings with\nno company row) 404s here, and the modal falls back to its owner-earnings /\nprice tabs, which work for every ISIN. Returns\n`{company_id, company_name, currency, metrics}` \u2014 `currency` is the\nexchange's `currency_code` (the reporting/trading currency the FCF/share\nchart converts to EUR), mirroring how `/api/companies` derives it.",
@@ -15870,6 +16116,86 @@
           }
         },
         "summary": "Get Earnings Metrics By Isin",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/cash-return-inputs": {
+      "post": {
+        "description": "The base inputs behind Cash return on capital, per holding: Free Cash Flow, non-current\n(long-term) liabilities and total equity per fiscal year, in the company's own reporting\ncurrency (millions).\n\n\u26a0 THE RAW LINES, NOT THE RATIO. `FCF / (non-current liabilities + total equity)` is derived on\nthe client from these three so the drill-down shows exactly what it is computed from (3 rows per\ncompany). Non-current liabilities absent (a bank / Berkshire doesn't split current from\nnon-current) \u2192 the ratio is blank there, NOT computed against equity alone. Total equity is\nincl. minority interest on purpose (see `_METRIC_CODES`). Deduped by ISIN, weight is the share\nof the whole book, holdings with no company row omitted.",
+        "operationId": "cash_return_inputs_api_earnings_cash_return_inputs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cash Return Inputs",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/debt-ratio-inputs": {
+      "post": {
+        "description": "The base inputs behind the LTD / (Total Assets \u2212 Goodwill) ratio, per holding: Long-Term\nDebt, Total Assets and Goodwill per fiscal year, in the company's own reporting currency\n(millions).\n\n\u26a0 THE RAW LINES, NOT THE RATIO. `LTD / (Total Assets \u2212 Goodwill)` is derived on the client from\nthese three so the drill-down shows exactly what it is computed from (3 rows per company). A\nmissing Goodwill is a genuine 0 (no acquisitions); a missing Long-Term Debt line is NOT \u2014 the\nratio is blank there (Berkshire has no such line). Deduped by ISIN, weight is the share of the\nwhole book, holdings with no company row omitted.",
+        "operationId": "debt_ratio_inputs_api_earnings_debt_ratio_inputs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Debt Ratio Inputs",
         "tags": [
           "earnings"
         ]
@@ -15955,6 +16281,46 @@
         ]
       }
     },
+    "/api/earnings/fundamental-blend-matrix": {
+      "post": {
+        "description": "The audit grid behind a blended line: every holding's value at every period, plus the\nblended value + coverage per period.\n\n\u26a0 SAME LOADER AND SAME `_prepare` AS THE LINE AND THE PER-POINT DRILL-DOWN. It reads ONE\nmetric's rows per covered holding (+ the actual a forecast is anchored on) and hands them to\n`blend_matrix`, so the grid a reader verifies against is built from exactly what the chart\ndrew \u2014 there is no second computation to disagree with.",
+        "operationId": "fundamental_blend_matrix_api_earnings_fundamental_blend_matrix_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalMatrixRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fundamental Blend Matrix",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
     "/api/earnings/fundamental-blend-metrics": {
       "post": {
         "description": "The portfolio as ONE pseudo-company, in the exact shape `/by-isin/{isin}/metrics` returns.\n\nSame payload, so the whole /earnings chart suite renders for a portfolio with no changes \u2014\n`{company_id, company_name, currency, metrics}` where `metrics` are blended across the covered\nholdings, weighted by their portfolio weight.\n\n\u26a0 EVERY METRIC IS BLENDED BY THE RULE ITS OWN KIND REQUIRES (see `_fundamental_blend`): a\nmultiple harmonically, a ratio/margin arithmetically, and a LEVEL only after rebasing to an\nindex. Weighting Apple's revenue by 5% and ASML's by 3% is not a portfolio's revenue.\n\n\u26a0 `currency` IS NULL, DELIBERATELY. Members report in their own currencies, and a level series\nhas been rebased to an index anyway \u2014 there is no currency such a number could be in. The\ncharts' EUR conversion is driven off this field, so a currency here would relabel an index as\nmoney. A null says \"not a currency amount\", which is the truth.",
@@ -16030,6 +16396,178 @@
           }
         },
         "summary": "Fundamental Coverage",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/fundamental-coverage/ingest": {
+      "post": {
+        "description": "Fetch + load the GuruFocus fundamentals ONE uncovered holding is missing.\n\nHandles both gaps the coverage table flags as ours to close: a `no_metrics` holding (a company\nrow exists \u2014 just fetch) and a `no_company` holding (resolve the ISIN to a listing, CREATE the\ncompany, then fetch). Every other reason is refused with its own status, never as a failure \u2014\nsee `_fundamental_ingest`.\n\n\u26a0 ADMIN-ONLY BY DEFAULT. This CREATES company rows and spends GuruFocus quota, so it is not in\nthe earnings-refresh user-write allow-list (the path carries no `/refresh`) and the auth gate\nholds it to admins. The /management-dashboard portfolios page that surfaces it is admin-only.\n\nThe frontend calls this per row and, for \"ingest all\", once per distinct ingestable ISIN.",
+        "operationId": "ingest_fundamental_coverage_api_earnings_fundamental_coverage_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Fundamental Coverage",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/interest-burden-inputs": {
+      "post": {
+        "description": "The base inputs behind the interest-burden ratio, per holding: Interest expense and\nOperating income per fiscal year, in the company's own reporting currency (millions).\n\n\u26a0 THE RAW LINES, NOT THE RATIO. `|Interest expense| / Operating income` (the % of operating\nprofit spent servicing debt) is derived on the client from these two so the drill-down shows\nexactly what it is computed from (2 rows per company). Interest expense is reported NEGATIVE (an\noutflow) \u2014 the client takes its magnitude; a 0 is real (nets to nothing). Operating income \u2264 0\n\u2192 the ratio is blank (a loss). \"Operating profit\" is `Operating Income`, NOT `EBIT`. Deduped by\nISIN, weight is the share of the whole book, holdings with no company row omitted.",
+        "operationId": "interest_burden_inputs_api_earnings_interest_burden_inputs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Interest Burden Inputs",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/margin-inputs": {
+      "post": {
+        "description": "The base inputs behind the FCF-SBC margin, per holding: Revenue, Free Cash Flow and Stock\nBased Compensation per fiscal year, in the company's own reporting currency (millions).\n\n\u26a0 THE RAW LINES, NOT THE RATIO. The margin `(FCF \u2212 SBC) / Revenue` is derived on the client\nfrom these three so the drill-down shows exactly what it is computed from (3 rows per company).\nDeduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.",
+        "operationId": "margin_inputs_api_earnings_margin_inputs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Margin Inputs",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/portfolio-revenue-matrix": {
+      "post": {
+        "description": "Each equity the portfolio HOLDS: its weight, currency, and actual `metric` per fiscal year\n(2015 onwards), in the company's own reporting currency.\n\n\u26a0 THE HOLDINGS, NOT AN INDEX. Members come from the portfolio (looked THROUGH any linked\ncertificate via `_load_and_expand_members`), deduped by ISIN (a name held twice is one row with\nsummed weight). Weight is the share of the WHOLE book (cash/bonds in the denominator, so the\nshown companies sum to under 100%). Holdings with no company row / no revenue are omitted \u2014\nthis lists the companies we can actually show revenue for.",
+        "operationId": "portfolio_revenue_matrix_api_earnings_portfolio_revenue_matrix_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "metric",
+            "required": false,
+            "schema": {
+              "default": "revenue",
+              "title": "Metric",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Portfolio Revenue Matrix",
         "tags": [
           "earnings"
         ]
@@ -16388,6 +16926,46 @@
           }
         },
         "summary": "Portfolio Metrics",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/relative-growth-breakdown": {
+      "post": {
+        "description": "The holdings behind ONE year of the Share-Price-vs-Owner-Earnings chart: each holding's\nprice-growth index, its Owner-Earnings-growth index, and price \u00f7 OE (its multiple change).\n\n\u26a0 BOTH LINES ARE DECOMPOSED THROUGH THE SAME LEVEL `blend_breakdown` THE CHART IS BUILT FROM \u2014\nprice and OE are month-end price and EPS-ex-NRI, both LEVELS, rebased to an index and weighted.\nMerging the two per holding (`merge_relative_growth`) gives the price-vs-OE table without a\nsecond copy of the growth rules.",
+        "operationId": "relative_growth_breakdown_api_earnings_relative_growth_breakdown_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelativeGrowthRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Relative Growth Breakdown",
         "tags": [
           "earnings"
         ]

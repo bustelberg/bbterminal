@@ -13,6 +13,7 @@ import RelativeGrowthChart from '../earnings/RelativeGrowthChart';
 import FCFShareChart from '../earnings/FCFShareChart';
 import MetricBandChart from '../earnings/MetricBandChart';
 import BlendDrilldownModal from './BlendDrilldownModal';
+import RelativeGrowthDrilldownModal from './RelativeGrowthDrilldownModal';
 
 /** The full /earnings chart suite, reused inside the /portfolios Fundamental
  * modal for a SINGLE company. Data comes from the company-keyed earnings
@@ -68,6 +69,8 @@ export default function FundamentalCharts({ isin, name, blend }: {
   /** The clicked point, or null. Portfolio-only — see `drill` below. */
   const [drilled, setDrill] = useState<
     { code: string; period: string; title: string; format?: (v: number) => string } | null>(null);
+  /** The clicked year on the Share-Price-vs-OE chart (portfolio only) — its own modal. */
+  const [rgDrilled, setRgDrill] = useState<string | null>(null);
   const deferredCadence = useDeferredValue(cadence);
 
   useEffect(() => {
@@ -176,7 +179,8 @@ export default function FundamentalCharts({ isin, name, blend }: {
         </ChartCard>
 
         <ChartCard title="Share Price vs. Owners Earnings" info={RG_INFO}>
-          <RelativeGrowthChart metrics={metrics} nameA={nameA} />
+          <RelativeGrowthChart metrics={metrics} nameA={nameA}
+            onPointClick={blend ? (period) => setRgDrill(period) : undefined} />
         </ChartCard>
 
         <ChartCard title="FCF / share" info={FCF_INFO}>
@@ -214,6 +218,14 @@ export default function FundamentalCharts({ isin, name, blend }: {
           basket={blend?.basket}
           format={drilled.format}
           onClose={() => setDrill(null)}
+        />
+      )}
+      {rgDrilled && (
+        <RelativeGrowthDrilldownModal
+          period={rgDrilled}
+          portfolioId={blend?.portfolioId}
+          basket={blend?.basket}
+          onClose={() => setRgDrill(null)}
         />
       )}
     </div>

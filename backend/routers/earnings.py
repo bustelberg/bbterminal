@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 
-from deps import supabase
+from deps import IN_CHUNK_SIZE, supabase
 from ingest.earnings import fetch_analyst_estimates, fetch_financials, fetch_indicators
 from ingest.prices import ensure_prices_for_company
 
@@ -397,20 +397,24 @@ class FundamentalCoverageRequest(BaseModel):
     holdings: list[dict] | None = None
 
 
-@router.post("/api/earnings/fundamental-coverage")
-async def fundamental_coverage(body: FundamentalCoverageRequest):
-    """Which of a portfolio's holdings a fundamentals view can reach, BY WEIGHT, and why not.
+async def _load_and_expand_members(body: FundamentalCoverageRequest) -> list[dict]:
+    """The flat holdings to analyse, with every linked certificate looked THROUGH to the model it
+    IS — so its real stocks feed both the coverage table and the blended charts, rather than
+    dropping out as one dead CH-ISIN row.
 
-    ⚠ COVERAGE IS THE FIRST ANSWER, NOT A FOOTNOTE. Every holding that cannot be reached is weight
-    that drops out of any blend, and a blended figure over 61% of a book presented as the book's is
-    the same fabrication `MIN_COVERAGE_PCT` already guards against on the AIRS returns.
+    ⚠ ONE PLACE, THREE ENDPOINTS. coverage / blend / blend-metrics all start from the identical
+    member list and must agree on it — the blend renormalises over the coverage the SAME members
+    produce. A look-through applied in one but not another would blend over stocks the coverage
+    table never admitted. Raises 422 when neither field is set; returns [] for an empty portfolio.
     """
-    from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
+    from routers._airs_portfolio_links import expand_members_through_links  # noqa: PLC0415
 
     members = body.holdings
+    owner_id = 0
     if members is None:
         if body.portfolio_id is None:
             raise HTTPException(status_code=422, detail="portfolio_id or holdings is required")
+        owner_id = body.portfolio_id
 
         def _load() -> list[dict]:
             return [{"isin": p.get("isin"), "name": p.get("fonds"),
@@ -421,6 +425,55 @@ async def fundamental_coverage(body: FundamentalCoverageRequest):
                               .limit(500).execute().data or [])]
 
         members = await asyncio.to_thread(_load)
+    if not members:
+        return []
+    return await asyncio.to_thread(
+        expand_members_through_links, supabase, members, owner_id=owner_id)
+
+
+class FundamentalIngestRequest(BaseModel):
+    """One uncovered holding to try to ingest fundamentals for. `name` seeds the `company` row
+    when one must be created (a `no_company` holding); `force` re-asks GuruFocus past the cache."""
+
+    isin: str
+    name: str | None = None
+    force: bool = False
+
+
+@router.post("/api/earnings/fundamental-coverage/ingest")
+async def ingest_fundamental_coverage(body: FundamentalIngestRequest):
+    """Fetch + load the GuruFocus fundamentals ONE uncovered holding is missing.
+
+    Handles both gaps the coverage table flags as ours to close: a `no_metrics` holding (a company
+    row exists — just fetch) and a `no_company` holding (resolve the ISIN to a listing, CREATE the
+    company, then fetch). Every other reason is refused with its own status, never as a failure —
+    see `_fundamental_ingest`.
+
+    ⚠ ADMIN-ONLY BY DEFAULT. This CREATES company rows and spends GuruFocus quota, so it is not in
+    the earnings-refresh user-write allow-list (the path carries no `/refresh`) and the auth gate
+    holds it to admins. The /management-dashboard portfolios page that surfaces it is admin-only.
+
+    The frontend calls this per row and, for "ingest all", once per distinct ingestable ISIN.
+    """
+    from routers._fundamental_ingest import ingest_fundamentals_for_isin  # noqa: PLC0415
+
+    if not (body.isin or "").strip():
+        raise HTTPException(status_code=422, detail="isin is required")
+    return await asyncio.to_thread(
+        ingest_fundamentals_for_isin, body.isin, body.name, force=body.force)
+
+
+@router.post("/api/earnings/fundamental-coverage")
+async def fundamental_coverage(body: FundamentalCoverageRequest):
+    """Which of a portfolio's holdings a fundamentals view can reach, BY WEIGHT, and why not.
+
+    ⚠ COVERAGE IS THE FIRST ANSWER, NOT A FOOTNOTE. Every holding that cannot be reached is weight
+    that drops out of any blend, and a blended figure over 61% of a book presented as the book's is
+    the same fabrication `MIN_COVERAGE_PCT` already guards against on the AIRS returns.
+    """
+    from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
     if not members:
         return _EMPTY_COVERAGE()
     return await coverage_for_async(members)
@@ -466,20 +519,7 @@ async def fundamental_blend(body: FundamentalCoverageRequest):
     from routers._fundamental_blend import blend_series  # noqa: PLC0415
     from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
 
-    members = body.holdings
-    if members is None:
-        if body.portfolio_id is None:
-            raise HTTPException(status_code=422, detail="portfolio_id or holdings is required")
-
-        def _load() -> list[dict]:
-            return [{"isin": p.get("isin"), "name": p.get("fonds"),
-                     "weight": float(p.get("percentage") or 0)}
-                    for p in (supabase.table("airs_model_portfolio_position")
-                              .select("fonds,isin,percentage")
-                              .eq("portfolio_id", body.portfolio_id)
-                              .limit(500).execute().data or [])]
-
-        members = await asyncio.to_thread(_load)
+    members = await _load_and_expand_members(body)
     if not members:
         # ⚠ The SAME shape as a populated answer — see `_EMPTY_COVERAGE`.
         return {"coverage": _EMPTY_COVERAGE(), "labels": BLEND_LABELS, "series": {}}
@@ -589,20 +629,7 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
     from routers._fundamental_blend import blend_series  # noqa: PLC0415
     from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
 
-    members = body.holdings
-    if members is None:
-        if body.portfolio_id is None:
-            raise HTTPException(status_code=422, detail="portfolio_id or holdings is required")
-
-        def _load() -> list[dict]:
-            return [{"isin": p.get("isin"), "name": p.get("fonds"),
-                     "weight": float(p.get("percentage") or 0)}
-                    for p in (supabase.table("airs_model_portfolio_position")
-                              .select("fonds,isin,percentage")
-                              .eq("portfolio_id", body.portfolio_id)
-                              .limit(500).execute().data or [])]
-
-        members = await asyncio.to_thread(_load)
+    members = await _load_and_expand_members(body)
     if not members:
         raise HTTPException(status_code=404, detail="no holdings to blend")
 
@@ -696,20 +723,7 @@ async def fundamental_blend_breakdown(body: FundamentalBreakdownRequest):
     from routers._fundamental_blend import blend_breakdown  # noqa: PLC0415
     from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
 
-    members = body.holdings
-    if members is None:
-        if body.portfolio_id is None:
-            raise HTTPException(status_code=422, detail="portfolio_id or holdings is required")
-
-        def _load() -> list[dict]:
-            return [{"isin": p.get("isin"), "name": p.get("fonds"),
-                     "weight": float(p.get("percentage") or 0)}
-                    for p in (supabase.table("airs_model_portfolio_position")
-                              .select("fonds,isin,percentage")
-                              .eq("portfolio_id", body.portfolio_id)
-                              .limit(500).execute().data or [])]
-
-        members = await asyncio.to_thread(_load)
+    members = await _load_and_expand_members(body)
     if not members:
         raise HTTPException(status_code=404, detail="no holdings to blend")
 
@@ -739,6 +753,740 @@ async def fundamental_blend_breakdown(body: FundamentalBreakdownRequest):
               "points": per_company.get(r["company_id"], {}),
               "base_points": base_by_company.get(r["company_id"], {})}
              for r in covered], code, period)
+
+    out = await asyncio.to_thread(_build)
+    out["blend_covered_pct"] = cov["covered_pct"]
+    return out
+
+
+# The two level series the Share-Price-vs-Owner-Earnings chart compares.
+_RG_PRICE_CODE = "annuals__Per Share Data__Month End Stock Price"
+_RG_OE_CODE = "annuals__Per Share Data__EPS without NRI"
+# ⚠ TWO SPELLINGS PER METRIC. GuruFocus renamed its statement sections ("Income Statement" → the
+# lowercase "income_statement", "Per Share Data" → "per_share_data"), and both live in `metric_data`
+# depending on when a company was fetched (ASML capitalised, a fresh OTC fetch lowercase). Match
+# BOTH or a whole cohort reads as missing. Same latent rename `_asset_financials._SECTIONS` handles.
+_METRIC_CODES: dict[str, tuple[str, ...]] = {
+    "revenue": ("annuals__Income Statement__Revenue", "annuals__income_statement__Revenue"),
+    "fcf_ps": ("annuals__Per Share Data__Free Cash Flow per Share",
+               "annuals__per_share_data__Free Cash Flow per Share"),
+    "fcf": ("annuals__Cashflow Statement__Free Cash Flow",
+            "annuals__cashflow_statement__Free Cash Flow"),
+    "sbc": ("annuals__Cashflow Statement__Stock Based Compensation",
+            "annuals__cashflow_statement__Stock Based Compensation"),
+    # Balance-sheet lines behind the LTD / (Total Assets − Goodwill) card. ⚠ Some issuers
+    # carry NO "Long-Term Debt" line at all (Berkshire) — the ratio is then blank, not 0.
+    "long_term_debt": ("annuals__Balance Sheet__Long-Term Debt",
+                       "annuals__balance_sheet__Long-Term Debt"),
+    "total_assets": ("annuals__Balance Sheet__Total Assets",
+                     "annuals__balance_sheet__Total Assets"),
+    "goodwill": ("annuals__Balance Sheet__Goodwill",
+                 "annuals__balance_sheet__Goodwill"),
+    # Behind the Cash-return-on-capital card: FCF ÷ (non-current liabilities + total equity).
+    # ⚠ Non-current liabilities is ABSENT for issuers that don't split current/non-current
+    # (Berkshire, and banks — JPMorgan has no such line) → the ratio is blank there, not 0.
+    # `total_equity` is INCL. minority interest deliberately: NCL + Total Equity = Total
+    # Assets − Current Liabilities (the balance-sheet identity), a coherent capital base;
+    # stockholders'-equity-only would drop minority capital and not close.
+    "noncurrent_liabilities": ("annuals__Balance Sheet__Total Long-Term Liabilities",
+                               "annuals__balance_sheet__Total Long-Term Liabilities"),
+    "total_equity": ("annuals__Balance Sheet__Total Equity",
+                     "annuals__balance_sheet__Total Equity"),
+    # Behind the interest-burden card: |Interest expense| ÷ Operating income. ⚠ Interest
+    # expense is reported NEGATIVE (an outflow); the card takes its magnitude. "Operating
+    # profit" is GuruFocus's `Operating Income` line — deliberately NOT `EBIT`, which is a
+    # DIFFERENT line (Constellation: OpInc 2,108 vs EBIT 1,195). The ratio is blank when
+    # operating income ≤ 0 (a loss — the "% of profit" question doesn't apply).
+    "interest_expense": ("annuals__Income Statement__Interest Expense",
+                         "annuals__income_statement__Interest Expense"),
+    "operating_income": ("annuals__Income Statement__Operating Income",
+                         "annuals__income_statement__Operating Income"),
+}
+_REVENUE_CODES = _METRIC_CODES["revenue"]
+_REVENUE_CODE = _REVENUE_CODES[0]   # for blend_kind() only — it classifies, it doesn't query
+
+
+def _metric_codes(metric: str) -> tuple[str, ...]:
+    return _METRIC_CODES.get(metric, _METRIC_CODES["revenue"])
+
+
+def _metric_rows(company_id: int, metric: str = "revenue") -> list[dict]:
+    """A metric's rows for a company under EITHER section spelling (see `_METRIC_CODES`)."""
+    out: list[dict] = []
+    for code in _metric_codes(metric):
+        out += _page_metrics(company_id, code, exact=True)
+    return out
+
+
+def _revenue_rows(company_id: int) -> list[dict]:
+    return _metric_rows(company_id, "revenue")
+
+
+def _metric_by_year(company_id: int, metric: str) -> dict[str, float]:
+    """{year: value} for a metric, the LATEST observation in each fiscal year (both spellings)."""
+    by: dict[str, tuple[str, float]] = {}
+    for m in _metric_rows(company_id, metric):
+        v = m.get("numeric_value")
+        if v is None:
+            continue
+        d = str(m["target_date"])[:10]
+        y = d[:4]
+        if y not in by or d > by[y][0]:
+            by[y] = (d, float(v))
+    return {y: v for y, (_d, v) in by.items()}
+
+
+@router.get("/api/earnings/benchmark-revenue")
+async def benchmark_revenue(label: str = "AEX", metric: str = "revenue"):
+    """A benchmark index's revenue (or any `_METRIC_CODES` metric) as a GROWTH INDEX — its
+    constituents' figures blended the same
+    way a portfolio's is (a LEVEL → each rebased to 100 at its first year, then weighted).
+
+    ⚠ NOT A SUM OF ABSOLUTE REVENUES. AEX constituents report in different currencies (Shell/RELX/
+    Unilever in GBP), so a euro total would silently add pounds to euros. The level-blend sidesteps
+    that — it compares GROWTH, which is what the R² read on the /Long Equity tab needs — and drops
+    any year under the 60% coverage floor rather than drawing it thin.
+
+    Cap-weighted by `market_cap_eur` where known, else equal-weighted (a benchmark growth reference,
+    not a priced index). Returns `{label, series:[{year, value}], members, covered_pct}`.
+    """
+    from routers._fundamental_blend import blend_series  # noqa: PLC0415
+
+    def _run() -> dict:
+        uni = (supabase.table("universe").select("universe_id")
+               .eq("label", label).limit(1).execute().data or [])
+        if not uni:
+            raise HTTPException(status_code=404, detail=f"No universe labelled {label!r}")
+        uid = uni[0]["universe_id"]
+        ids = sorted({r["company_id"] for r in
+                      (supabase.table("universe_membership").select("company_id")
+                       .eq("universe_id", uid).execute().data or []) if r.get("company_id")})
+        if not ids:
+            raise HTTPException(status_code=404, detail=f"{label} has no members")
+
+        caps: dict[int, float] = {}
+        for i in range(0, len(ids), IN_CHUNK_SIZE):
+            for c in (supabase.table("company").select("company_id,market_cap_eur")
+                      .in_("company_id", ids[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                if c.get("market_cap_eur"):
+                    caps[c["company_id"]] = float(c["market_cap_eur"])
+
+        members = []
+        for cid in ids:
+            pts = {str(m["target_date"])[:10]: float(m["numeric_value"])
+                   for m in _metric_rows(cid, metric)
+                   if m.get("numeric_value") is not None}
+            if pts:
+                members.append({"weight": caps.get(cid, 1.0), "points": pts})
+        blend = blend_series(members, _metric_codes(metric)[0])
+        # ⚠ `period` is the YEAR AS A STRING ("2015"); return it as an int so the frontend can join
+        # it against the company's numeric years (a string/number mismatch = no overlap = no line).
+        return {"label": label, "members": len(members),
+                "covered_pct": blend["covered_pct"],
+                "series": [{"year": int(p["period"]), "value": p["value"]}
+                           for p in blend["points"] if str(p["period"]).isdigit()]}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.get("/api/earnings/benchmark-revenue-matrix")
+async def benchmark_revenue_matrix(label: str = "AEX"):
+    """The audit grid behind the benchmark revenue line: every constituent's revenue at every year,
+    the blended footer that reconciles to the line, AND where each series comes from.
+
+    Same `blend_matrix` the Forward-P/E "All periods" grid uses (revenue is a LEVEL → each rebased
+    to a growth index, weighted), so the cells and footer are built from exactly what the line is.
+    Each row (and each excluded constituent) carries a `source` — `TICKER@EXCHANGE` — so a reader
+    sees which listing's GuruFocus figures fed it. Constituents with no revenue land in `excluded`
+    (reason `no_data`): that names the ones we simply have nothing for, which is half the answer.
+    """
+    from routers._fundamental_blend import blend_matrix  # noqa: PLC0415
+
+    def _run() -> dict:
+        uni = (supabase.table("universe").select("universe_id")
+               .eq("label", label).limit(1).execute().data or [])
+        if not uni:
+            raise HTTPException(status_code=404, detail=f"No universe labelled {label!r}")
+        uid = uni[0]["universe_id"]
+        ids = sorted({r["company_id"] for r in
+                      (supabase.table("universe_membership").select("company_id")
+                       .eq("universe_id", uid).execute().data or []) if r.get("company_id")})
+        if not ids:
+            raise HTTPException(status_code=404, detail=f"{label} has no members")
+
+        info: dict[int, dict] = {}
+        for i in range(0, len(ids), IN_CHUNK_SIZE):
+            for c in (supabase.table("company")
+                      .select("company_id,company_name,isin,gurufocus_ticker,market_cap_eur,"
+                              "has_financials,"
+                              "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
+                      .in_("company_id", ids[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                info[c["company_id"]] = c
+
+        members: list[dict] = []
+        source_by_key: dict[str, str] = {}
+        ccy_by_key: dict[str, str | None] = {}
+        fin_by_key: dict[str, bool | None] = {}
+        for cid in ids:
+            c = info.get(cid, {})
+            name = c.get("company_name") or f"company {cid}"
+            isin = c.get("isin")
+            key = isin or name
+            gx = (c.get("gurufocus_exchange") or {}) or {}
+            exch = gx.get("exchange_code") or "?"
+            source_by_key[key] = f"{c.get('gurufocus_ticker') or '?'}@{exch}"
+            ccy_by_key[key] = gx.get("currency_code")
+            fin_by_key[key] = c.get("has_financials")
+            pts = {str(m["target_date"])[:10]: float(m["numeric_value"])
+                   for m in _revenue_rows(cid)
+                   if m.get("numeric_value") is not None}
+            # Include even the empty ones — blend_matrix routes them to `excluded` as `no_data`,
+            # which is exactly the "which constituents do we have nothing for" answer.
+            members.append({"isin": isin, "name": name,
+                            "weight": c.get("market_cap_eur") or 1.0, "points": pts})
+
+        mx = blend_matrix(members, _REVENUE_CODE)
+        for row in mx["members"]:
+            key = row.get("isin") or row.get("name")
+            row["source"] = source_by_key.get(key)
+            row["currency"] = ccy_by_key.get(key)
+        for row in mx.get("excluded", []):
+            key = row.get("isin") or row.get("name")
+            row["source"] = source_by_key.get(key)
+            row["currency"] = ccy_by_key.get(key)
+            # ⚠ DISTINGUISH "WE NEVER FETCHED IT" FROM "GURUFOCUS HAS NO REVENUE LINE". A member
+            # with financials but no Revenue is a template thing (a bank reports Net Interest
+            # Income); one with no financials at all simply hasn't been ingested — a gap on our
+            # side, fixable, NOT a claim that GuruFocus lacks the data.
+            if row.get("reason") == "no_data":
+                row["detail"] = ("financials ingested, but no Revenue line (e.g. a bank template)"
+                                 if fin_by_key.get(key) else "financials not ingested yet")
+        mx["label"] = label
+        return mx
+
+    return await asyncio.to_thread(_run)
+
+
+@router.post("/api/earnings/portfolio-revenue-matrix")
+async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str = "revenue"):
+    """Each equity the portfolio HOLDS: its weight, currency, and actual `metric` per fiscal year
+    (2015 onwards), in the company's own reporting currency.
+
+    ⚠ THE HOLDINGS, NOT AN INDEX. Members come from the portfolio (looked THROUGH any linked
+    certificate via `_load_and_expand_members`), deduped by ISIN (a name held twice is one row with
+    summed weight). Weight is the share of the WHOLE book (cash/bonds in the denominator, so the
+    shown companies sum to under 100%). Holdings with no company row / no revenue are omitted —
+    this lists the companies we can actually show revenue for.
+    """
+    from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings")
+
+    def _run() -> dict:
+        total_w = sum(abs(float(m.get("weight") or 0)) for m in members) or 1.0
+        raw = sorted({m["isin"] for m in members if m.get("isin")})
+        alias = canonical_map(raw)
+
+        weight_by: dict[str, float] = {}
+        name_by: dict[str, str] = {}
+        for m in members:
+            isin = (m.get("isin") or "").strip()
+            if not isin:
+                continue                      # cash / no-ISIN line — not a company
+            ci = alias.get(isin, isin)
+            weight_by[ci] = weight_by.get(ci, 0.0) + abs(float(m.get("weight") or 0))
+            name_by.setdefault(ci, m.get("name") or isin)
+
+        canon = sorted(weight_by)
+        comp: dict[str, dict] = {}
+        for i in range(0, len(canon), IN_CHUNK_SIZE):
+            for c in (supabase.table("company")
+                      .select("company_id,company_name,isin,gurufocus_ticker,"
+                              "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
+                      .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                comp[c["isin"]] = c
+
+        rows: list[dict] = []
+        years: set[str] = set()
+        for ci in canon:
+            c = comp.get(ci)
+            if not c:
+                continue
+            gx = (c.get("gurufocus_exchange") or {}) or {}
+            by_year: dict[str, tuple[str, float]] = {}
+            for m in _metric_rows(c["company_id"], metric):
+                if m.get("numeric_value") is None:
+                    continue
+                d = str(m["target_date"])[:10]
+                y = d[:4]
+                if y < "2015":
+                    continue
+                if y not in by_year or d > by_year[y][0]:     # latest observation in the year
+                    by_year[y] = (d, float(m["numeric_value"]))
+            rev = {y: v for y, (_d, v) in by_year.items()}
+            years |= set(rev)
+            # WHY revenue is missing, when it is: a company on an exchange outside the GuruFocus
+            # subscription (Brookfield on TSX) can't be fetched at all → `unsubscribed`; one on a
+            # subscribed exchange with nothing ingested → `no_data`; otherwise `ok`.
+            exch = gx.get("exchange_code")
+            subscribed = is_gf_subscribed_exchange(exch) if exch else None
+            status = "ok" if rev else ("unsubscribed" if subscribed is False else "no_data")
+            rows.append({
+                "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
+                "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                "currency": gx.get("currency_code"),
+                "ticker": c.get("gurufocus_ticker"),
+                "exchange": exch,
+                "status": status,
+                "revenue": rev,
+            })
+        rows.sort(key=lambda r: -r["weight_pct"])
+        return {"years": sorted(years), "rows": rows, "holdings": len(members)}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.post("/api/earnings/margin-inputs")
+async def margin_inputs(body: FundamentalCoverageRequest):
+    """The base inputs behind the FCF-SBC margin, per holding: Revenue, Free Cash Flow and Stock
+    Based Compensation per fiscal year, in the company's own reporting currency (millions).
+
+    ⚠ THE RAW LINES, NOT THE RATIO. The margin `(FCF − SBC) / Revenue` is derived on the client
+    from these three so the drill-down shows exactly what it is computed from (3 rows per company).
+    Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+    """
+    from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings")
+
+    def _run() -> dict:
+        total_w = sum(abs(float(m.get("weight") or 0)) for m in members) or 1.0
+        raw = sorted({m["isin"] for m in members if m.get("isin")})
+        alias = canonical_map(raw)
+        weight_by: dict[str, float] = {}
+        name_by: dict[str, str] = {}
+        for m in members:
+            isin = (m.get("isin") or "").strip()
+            if not isin:
+                continue
+            ci = alias.get(isin, isin)
+            weight_by[ci] = weight_by.get(ci, 0.0) + abs(float(m.get("weight") or 0))
+            name_by.setdefault(ci, m.get("name") or isin)
+
+        canon = sorted(weight_by)
+        comp: dict[str, dict] = {}
+        for i in range(0, len(canon), IN_CHUNK_SIZE):
+            for c in (supabase.table("company")
+                      .select("company_id,company_name,isin,gurufocus_ticker,"
+                              "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
+                      .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                comp[c["isin"]] = c
+
+        rows: list[dict] = []
+        years: set[str] = set()
+        for ci in canon:
+            c = comp.get(ci)
+            if not c:
+                continue
+            gx = (c.get("gurufocus_exchange") or {}) or {}
+            rev = _metric_by_year(c["company_id"], "revenue")
+            fcf = _metric_by_year(c["company_id"], "fcf")
+            sbc = _metric_by_year(c["company_id"], "sbc")
+            years |= set(rev) | set(fcf) | set(sbc)
+            exch = gx.get("exchange_code")
+            subscribed = is_gf_subscribed_exchange(exch) if exch else None
+            status = "ok" if (rev or fcf) else ("unsubscribed" if subscribed is False else "no_data")
+            rows.append({
+                "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
+                "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                "currency": gx.get("currency_code"),
+                "ticker": c.get("gurufocus_ticker"), "exchange": exch,
+                "status": status, "revenue": rev, "fcf": fcf, "sbc": sbc,
+            })
+        rows.sort(key=lambda r: -r["weight_pct"])
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.post("/api/earnings/debt-ratio-inputs")
+async def debt_ratio_inputs(body: FundamentalCoverageRequest):
+    """The base inputs behind the LTD / (Total Assets − Goodwill) ratio, per holding: Long-Term
+    Debt, Total Assets and Goodwill per fiscal year, in the company's own reporting currency
+    (millions).
+
+    ⚠ THE RAW LINES, NOT THE RATIO. `LTD / (Total Assets − Goodwill)` is derived on the client from
+    these three so the drill-down shows exactly what it is computed from (3 rows per company). A
+    missing Goodwill is a genuine 0 (no acquisitions); a missing Long-Term Debt line is NOT — the
+    ratio is blank there (Berkshire has no such line). Deduped by ISIN, weight is the share of the
+    whole book, holdings with no company row omitted.
+    """
+    from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings")
+
+    def _run() -> dict:
+        total_w = sum(abs(float(m.get("weight") or 0)) for m in members) or 1.0
+        raw = sorted({m["isin"] for m in members if m.get("isin")})
+        alias = canonical_map(raw)
+        weight_by: dict[str, float] = {}
+        name_by: dict[str, str] = {}
+        for m in members:
+            isin = (m.get("isin") or "").strip()
+            if not isin:
+                continue
+            ci = alias.get(isin, isin)
+            weight_by[ci] = weight_by.get(ci, 0.0) + abs(float(m.get("weight") or 0))
+            name_by.setdefault(ci, m.get("name") or isin)
+
+        canon = sorted(weight_by)
+        comp: dict[str, dict] = {}
+        for i in range(0, len(canon), IN_CHUNK_SIZE):
+            for c in (supabase.table("company")
+                      .select("company_id,company_name,isin,gurufocus_ticker,"
+                              "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
+                      .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                comp[c["isin"]] = c
+
+        rows: list[dict] = []
+        years: set[str] = set()
+        for ci in canon:
+            c = comp.get(ci)
+            if not c:
+                continue
+            gx = (c.get("gurufocus_exchange") or {}) or {}
+            ltd = _metric_by_year(c["company_id"], "long_term_debt")
+            ta = _metric_by_year(c["company_id"], "total_assets")
+            gw = _metric_by_year(c["company_id"], "goodwill")
+            years |= set(ltd) | set(ta) | set(gw)
+            exch = gx.get("exchange_code")
+            subscribed = is_gf_subscribed_exchange(exch) if exch else None
+            # `ok` if we have Total Assets (the denominator base) OR any debt to show; a company on
+            # an unsubscribed exchange can't be fetched at all; else nothing ingested yet.
+            status = "ok" if (ta or ltd) else ("unsubscribed" if subscribed is False else "no_data")
+            rows.append({
+                "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
+                "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                "currency": gx.get("currency_code"),
+                "ticker": c.get("gurufocus_ticker"), "exchange": exch,
+                "status": status,
+                "long_term_debt": ltd, "total_assets": ta, "goodwill": gw,
+            })
+        rows.sort(key=lambda r: -r["weight_pct"])
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.post("/api/earnings/cash-return-inputs")
+async def cash_return_inputs(body: FundamentalCoverageRequest):
+    """The base inputs behind Cash return on capital, per holding: Free Cash Flow, non-current
+    (long-term) liabilities and total equity per fiscal year, in the company's own reporting
+    currency (millions).
+
+    ⚠ THE RAW LINES, NOT THE RATIO. `FCF / (non-current liabilities + total equity)` is derived on
+    the client from these three so the drill-down shows exactly what it is computed from (3 rows per
+    company). Non-current liabilities absent (a bank / Berkshire doesn't split current from
+    non-current) → the ratio is blank there, NOT computed against equity alone. Total equity is
+    incl. minority interest on purpose (see `_METRIC_CODES`). Deduped by ISIN, weight is the share
+    of the whole book, holdings with no company row omitted.
+    """
+    from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings")
+
+    def _run() -> dict:
+        total_w = sum(abs(float(m.get("weight") or 0)) for m in members) or 1.0
+        raw = sorted({m["isin"] for m in members if m.get("isin")})
+        alias = canonical_map(raw)
+        weight_by: dict[str, float] = {}
+        name_by: dict[str, str] = {}
+        for m in members:
+            isin = (m.get("isin") or "").strip()
+            if not isin:
+                continue
+            ci = alias.get(isin, isin)
+            weight_by[ci] = weight_by.get(ci, 0.0) + abs(float(m.get("weight") or 0))
+            name_by.setdefault(ci, m.get("name") or isin)
+
+        canon = sorted(weight_by)
+        comp: dict[str, dict] = {}
+        for i in range(0, len(canon), IN_CHUNK_SIZE):
+            for c in (supabase.table("company")
+                      .select("company_id,company_name,isin,gurufocus_ticker,"
+                              "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
+                      .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                comp[c["isin"]] = c
+
+        rows: list[dict] = []
+        years: set[str] = set()
+        for ci in canon:
+            c = comp.get(ci)
+            if not c:
+                continue
+            gx = (c.get("gurufocus_exchange") or {}) or {}
+            fcf = _metric_by_year(c["company_id"], "fcf")
+            ncl = _metric_by_year(c["company_id"], "noncurrent_liabilities")
+            eq = _metric_by_year(c["company_id"], "total_equity")
+            years |= set(fcf) | set(ncl) | set(eq)
+            exch = gx.get("exchange_code")
+            subscribed = is_gf_subscribed_exchange(exch) if exch else None
+            # `ok` if we have equity (the capital base) OR any FCF to show; a company on an
+            # unsubscribed exchange can't be fetched at all; else nothing ingested yet.
+            status = "ok" if (eq or fcf) else ("unsubscribed" if subscribed is False else "no_data")
+            rows.append({
+                "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
+                "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                "currency": gx.get("currency_code"),
+                "ticker": c.get("gurufocus_ticker"), "exchange": exch,
+                "status": status,
+                "fcf": fcf, "noncurrent_liabilities": ncl, "total_equity": eq,
+            })
+        rows.sort(key=lambda r: -r["weight_pct"])
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.post("/api/earnings/interest-burden-inputs")
+async def interest_burden_inputs(body: FundamentalCoverageRequest):
+    """The base inputs behind the interest-burden ratio, per holding: Interest expense and
+    Operating income per fiscal year, in the company's own reporting currency (millions).
+
+    ⚠ THE RAW LINES, NOT THE RATIO. `|Interest expense| / Operating income` (the % of operating
+    profit spent servicing debt) is derived on the client from these two so the drill-down shows
+    exactly what it is computed from (2 rows per company). Interest expense is reported NEGATIVE (an
+    outflow) — the client takes its magnitude; a 0 is real (nets to nothing). Operating income ≤ 0
+    → the ratio is blank (a loss). "Operating profit" is `Operating Income`, NOT `EBIT`. Deduped by
+    ISIN, weight is the share of the whole book, holdings with no company row omitted.
+    """
+    from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings")
+
+    def _run() -> dict:
+        total_w = sum(abs(float(m.get("weight") or 0)) for m in members) or 1.0
+        raw = sorted({m["isin"] for m in members if m.get("isin")})
+        alias = canonical_map(raw)
+        weight_by: dict[str, float] = {}
+        name_by: dict[str, str] = {}
+        for m in members:
+            isin = (m.get("isin") or "").strip()
+            if not isin:
+                continue
+            ci = alias.get(isin, isin)
+            weight_by[ci] = weight_by.get(ci, 0.0) + abs(float(m.get("weight") or 0))
+            name_by.setdefault(ci, m.get("name") or isin)
+
+        canon = sorted(weight_by)
+        comp: dict[str, dict] = {}
+        for i in range(0, len(canon), IN_CHUNK_SIZE):
+            for c in (supabase.table("company")
+                      .select("company_id,company_name,isin,gurufocus_ticker,"
+                              "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
+                      .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                comp[c["isin"]] = c
+
+        rows: list[dict] = []
+        years: set[str] = set()
+        for ci in canon:
+            c = comp.get(ci)
+            if not c:
+                continue
+            gx = (c.get("gurufocus_exchange") or {}) or {}
+            ie = _metric_by_year(c["company_id"], "interest_expense")
+            oi = _metric_by_year(c["company_id"], "operating_income")
+            years |= set(ie) | set(oi)
+            exch = gx.get("exchange_code")
+            subscribed = is_gf_subscribed_exchange(exch) if exch else None
+            # `ok` if we have operating income (the denominator) OR any interest line to show; a
+            # company on an unsubscribed exchange can't be fetched at all; else nothing ingested.
+            status = "ok" if (oi or ie) else ("unsubscribed" if subscribed is False else "no_data")
+            rows.append({
+                "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
+                "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                "currency": gx.get("currency_code"),
+                "ticker": c.get("gurufocus_ticker"), "exchange": exch,
+                "status": status,
+                "interest_expense": ie, "operating_income": oi,
+            })
+        rows.sort(key=lambda r: -r["weight_pct"])
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.get("/api/earnings/benchmark-margin")
+async def benchmark_margin(label: str = "AEX"):
+    """A benchmark index's FCF-SBC margin per fiscal year: `(FCF − SBC) / Revenue` per constituent,
+    then a CAP-WEIGHTED AVERAGE across them.
+
+    ⚠ A WEIGHTED AVERAGE OF MARGINS, NOT Σ(FCF−SBC)/ΣRevenue. The constituents report in different
+    currencies (Shell $, RELX £, ASML €), so summing their euros/pounds/dollars would be
+    meaningless. Each margin is a pure ratio (currency-free), so averaging them — weighted by
+    market cap — is the currency-safe aggregate. SBC missing for a constituent is treated as 0
+    (many report none). Returns `{label, series:[{year, margin_pct}], members}`.
+    """
+    def _run() -> dict:
+        uni = (supabase.table("universe").select("universe_id")
+               .eq("label", label).limit(1).execute().data or [])
+        if not uni:
+            raise HTTPException(status_code=404, detail=f"No universe labelled {label!r}")
+        uid = uni[0]["universe_id"]
+        ids = sorted({r["company_id"] for r in
+                      (supabase.table("universe_membership").select("company_id")
+                       .eq("universe_id", uid).execute().data or []) if r.get("company_id")})
+        if not ids:
+            raise HTTPException(status_code=404, detail=f"{label} has no members")
+
+        caps: dict[int, float] = {}
+        for i in range(0, len(ids), IN_CHUNK_SIZE):
+            for c in (supabase.table("company").select("company_id,market_cap_eur")
+                      .in_("company_id", ids[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                if c.get("market_cap_eur"):
+                    caps[c["company_id"]] = float(c["market_cap_eur"])
+
+        per_member: list[tuple[float, dict[str, float]]] = []
+        for cid in ids:
+            rev = _metric_by_year(cid, "revenue")
+            fcf = _metric_by_year(cid, "fcf")
+            sbc = _metric_by_year(cid, "sbc")
+            marg = {y: (fcf[y] - sbc.get(y, 0.0)) / rev[y] * 100.0
+                    for y in rev if rev[y] and rev[y] > 0 and y in fcf}
+            if marg:
+                per_member.append((caps.get(cid, 1.0), marg))
+
+        years = sorted({y for _w, m in per_member for y in m if y >= "2015"})
+        series = []
+        for y in years:
+            num = sum(w * m[y] for w, m in per_member if y in m)
+            den = sum(w for w, m in per_member if y in m)
+            if den > 0:
+                series.append({"year": int(y), "margin_pct": round(num / den, 4)})
+        return {"label": label, "members": len(per_member), "series": series}
+
+    return await asyncio.to_thread(_run)
+
+
+class RelativeGrowthRequest(FundamentalCoverageRequest):
+    """One year of the Share-Price-vs-Owner-Earnings chart, decomposed per holding."""
+
+    period: str
+
+
+@router.post("/api/earnings/relative-growth-breakdown")
+async def relative_growth_breakdown(body: RelativeGrowthRequest):
+    """The holdings behind ONE year of the Share-Price-vs-Owner-Earnings chart: each holding's
+    price-growth index, its Owner-Earnings-growth index, and price ÷ OE (its multiple change).
+
+    ⚠ BOTH LINES ARE DECOMPOSED THROUGH THE SAME LEVEL `blend_breakdown` THE CHART IS BUILT FROM —
+    price and OE are month-end price and EPS-ex-NRI, both LEVELS, rebased to an index and weighted.
+    Merging the two per holding (`merge_relative_growth`) gives the price-vs-OE table without a
+    second copy of the growth rules.
+    """
+    from routers._fundamental_blend import (  # noqa: PLC0415
+        blend_breakdown,
+        merge_relative_growth,
+    )
+    from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings to blend")
+
+    cov = await coverage_for_async(members)
+    covered = [r for r in cov["rows"] if r["reason"] == "covered" and r.get("company_id")]
+    if not covered:
+        raise HTTPException(status_code=404, detail="no holding has fundamentals to blend")
+
+    period = body.period[:4]
+
+    def _build() -> dict:
+        pts: dict[str, dict[int, dict[str, float]]] = {_RG_PRICE_CODE: {}, _RG_OE_CODE: {}}
+        for r in covered:
+            cid = r["company_id"]
+            for code in (_RG_PRICE_CODE, _RG_OE_CODE):
+                pts[code][cid] = {str(m["target_date"])[:10]: float(m["numeric_value"])
+                                  for m in _page_metrics(cid, code, exact=True)
+                                  if m.get("numeric_value") is not None}
+
+        def _members(code: str) -> list[dict]:
+            return [{"isin": r.get("isin"), "name": r.get("name"), "weight": r["weight_pct"],
+                     "points": pts[code].get(r["company_id"], {})} for r in covered]
+
+        return merge_relative_growth(
+            blend_breakdown(_members(_RG_PRICE_CODE), _RG_PRICE_CODE, period),
+            blend_breakdown(_members(_RG_OE_CODE), _RG_OE_CODE, period),
+            period,
+        )
+
+    out = await asyncio.to_thread(_build)
+    out["blend_covered_pct"] = cov["covered_pct"]
+    return out
+
+
+class FundamentalMatrixRequest(FundamentalCoverageRequest):
+    """The whole blended line taken apart: which metric (every period, every holding)."""
+
+    metric_code: str
+
+
+@router.post("/api/earnings/fundamental-blend-matrix")
+async def fundamental_blend_matrix(body: FundamentalMatrixRequest):
+    """The audit grid behind a blended line: every holding's value at every period, plus the
+    blended value + coverage per period.
+
+    ⚠ SAME LOADER AND SAME `_prepare` AS THE LINE AND THE PER-POINT DRILL-DOWN. It reads ONE
+    metric's rows per covered holding (+ the actual a forecast is anchored on) and hands them to
+    `blend_matrix`, so the grid a reader verifies against is built from exactly what the chart
+    drew — there is no second computation to disagree with.
+    """
+    from routers._fundamental_blend import blend_matrix  # noqa: PLC0415
+    from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings to blend")
+
+    cov = await coverage_for_async(members)
+    covered = [r for r in cov["rows"] if r["reason"] == "covered" and r.get("company_id")]
+    if not covered:
+        raise HTTPException(status_code=404, detail="no holding has fundamentals to blend")
+
+    code = body.metric_code
+    base_code = _FORECAST_BASE.get(code)
+
+    def _build() -> dict:
+        per_company: dict[int, dict[str, float]] = {}
+        base_by_company: dict[int, dict[str, float]] = {}
+        for r in covered:
+            cid = r["company_id"]
+            for want, sink in ((code, per_company), (base_code, base_by_company)):
+                if not want:
+                    continue
+                sink[cid] = {str(m["target_date"])[:10]: float(m["numeric_value"])
+                             for m in _page_metrics(cid, want, exact=True)
+                             if m.get("numeric_value") is not None}
+        return blend_matrix(
+            [{"isin": r.get("isin"), "name": r.get("name"), "weight": r["weight_pct"],
+              "points": per_company.get(r["company_id"], {}),
+              "base_points": base_by_company.get(r["company_id"], {})}
+             for r in covered], code)
 
     out = await asyncio.to_thread(_build)
     out["blend_covered_pct"] = cov["covered_pct"]

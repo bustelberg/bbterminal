@@ -309,6 +309,106 @@ def linkable_context(supabase, owner_id: int) -> dict:
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# Look-through: a linked certificate IS a model portfolio, so its real stocks can be reached.
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def expand_members(
+    members: list[dict],
+    positions_by_pid: dict[int, list[dict]],
+    linked_pid_of,                       # (isin, fonds, cur_owner) -> int | None
+    *,
+    owner_id: int = 0,
+    max_depth: int = 5,
+) -> list[dict]:
+    """Replace each linked-certificate holding with the underlying model portfolio's positions.
+
+    A holding that resolves to a linked model portfolio is a WRAPPER, not an instrument — a CH
+    structured product no vendor prices (`Star Selection Index` IS `StarTopSelectie OFF FX`, 24
+    real stocks). Looking through it lets those stocks feed the coverage table AND the blended
+    fundamentals, instead of dropping out as one dead 4.70% row.
+
+    `members`          : [{isin, name, weight, via?}]
+    `positions_by_pid` : portfolio_id -> [{isin, fonds, percentage}]
+    `linked_pid_of`    : resolves a holding to the portfolio it IS (a stored link wins, else the
+                         guess — the SAME resolution the Link column shows). Returns None for "not
+                         a portfolio", including a stored NULL ("explicitly not a portfolio").
+
+    ⚠ CYCLE-GUARDED, AND THAT IS LOAD-BEARING. A wrapper like TOPS_STS_L holds the very
+    certificate it would be linked from, so a naive walk loops for ever. A portfolio already on
+    the path is NOT re-expanded — its weight stays on the certificate row, uncovered, which is the
+    honest outcome (same circularity the guesser's gate 2 refuses).
+
+    ⚠ WEIGHTS COMBINE MULTIPLICATIVELY AND THE TOTAL IS CONSERVED: a 4.70% certificate over a
+    model whose stocks sum to 100% contributes 4.70% spread across them, so a look-through never
+    changes the coverage denominator — it only moves weight off an unreachable row onto reachable
+    ones. `via` is fixed at the FIRST hop so a two-level look-through still reads "via Star
+    Selection Index" (the row the reader actually holds), never the intermediate model's name.
+    """
+    def _expand(items: list[dict], cur_owner: int, path: frozenset[int], depth: int) -> list[dict]:
+        out: list[dict] = []
+        for m in items:
+            isin = (m.get("isin") or "").strip() or None
+            fonds = m.get("name") or m.get("fonds") or ""
+            w = abs(float(m.get("weight") or 0))
+            via = m.get("via")
+            pid = linked_pid_of(isin, fonds, cur_owner) if depth > 0 else None
+            subs = positions_by_pid.get(pid, []) if pid is not None else []
+            # The >1 rule mirrors the guesser's gate 3 and `linkable_context`: a 0- or 1-position
+            # target is an empty model or another wrapper — a link to nothing.
+            if pid is None or pid in path or len(subs) <= 1:
+                out.append(m)
+                continue
+            tot = sum(abs(float(s.get("percentage") or 0)) for s in subs)
+            if tot <= 0:
+                out.append(m)
+                continue
+            child = [{
+                "isin": (s.get("isin") or "").strip() or None,
+                "name": s.get("fonds"),
+                "weight": w * abs(float(s.get("percentage") or 0)) / tot,
+                "via": via or fonds or None,
+            } for s in subs]
+            out.extend(_expand(child, pid, path | {pid}, depth - 1))
+        return out
+
+    start = frozenset({owner_id}) if owner_id else frozenset()
+    return _expand(members, owner_id, start, max_depth)
+
+
+def expand_members_through_links(supabase, members: list[dict], *,
+                                 owner_id: int = 0, max_depth: int = 5) -> list[dict]:
+    """`expand_members` wired to the live tables — the same stored-wins-else-guess resolution the
+    Link column shows, so what a reader sees linked is exactly what gets looked through."""
+    if not members:
+        return members
+    portfolios = (supabase.table("airs_model_portfolio")
+                  .select("id,name,display_name,omschrijving").execute().data or [])
+    positions_by_pid: dict[int, list[dict]] = {}
+    for r in (supabase.table("airs_model_portfolio_position")
+              .select("portfolio_id,fonds,isin,percentage").execute().data or []):
+        positions_by_pid.setdefault(r["portfolio_id"], []).append(r)
+    # The guesser only needs isin/fonds per portfolio (its gates), not the percentages.
+    comp = {pid: [{"isin": r.get("isin"), "fonds": r.get("fonds")} for r in rows]
+            for pid, rows in positions_by_pid.items()}
+    stored = {
+        link_key(r.get("isin"), r.get("fonds")): r
+        for r in (supabase.table("airs_model_portfolio_link")
+                  .select("isin,fonds,linked_portfolio_id").execute().data or [])
+    }
+
+    def _linked_pid(isin: str | None, fonds: str, cur_owner: int) -> int | None:
+        key = link_key(isin, fonds)
+        if key in stored:
+            return stored[key].get("linked_portfolio_id")   # None = explicitly not a portfolio
+        g = guess_link(fonds=fonds or "", isin=isin, owner_id=cur_owner,
+                       portfolios=portfolios, composition=comp)
+        return g.linked_portfolio_id if g else None
+
+    return expand_members(members, positions_by_pid, _linked_pid,
+                          owner_id=owner_id, max_depth=max_depth)
+
+
 def linkable_portfolios(supabase, owner_id: int, isin: str | None) -> list[dict]:
     """What the dropdown may offer for a row of `owner_id`: every portfolio except the ones a
     link to would be a cycle.

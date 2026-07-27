@@ -12,7 +12,9 @@ from routers._fundamental_blend import (
     MULTIPLE_CODES,
     blend_breakdown,
     blend_kind,
+    blend_matrix,
     blend_series,
+    merge_relative_growth,
 )
 
 PE = "annuals__Valuation Ratios__PE Ratio"
@@ -230,6 +232,102 @@ class TestTheBreakdownAgreesWithTheLineItExplains:
     def test_the_shares_sum_to_one_hundred_percent(self, code):
         out = blend_breakdown(self.MEMBERS, code, "2025")
         assert sum(m["share_pct"] for m in out["members"]) == pytest.approx(100.0, abs=0.05)
+
+
+class TestTheMatrixAgreesWithTheLineToo:
+    """The audit grid's blended footer must equal the chart's line at every period — same
+    `_prepare`, same combine. If it drifts, the whole point (verification) is defeated."""
+
+    MEMBERS = [
+        {"name": "cheap", "weight": 0.5, "points": {"2024-12-31": 10.0, "2025-12-31": 12.0}},
+        {"name": "rich", "weight": 0.3, "points": {"2024-12-31": 100.0, "2025-12-31": 90.0}},
+        {"name": "thin", "weight": 0.2, "points": {"2025-12-31": 30.0}},
+    ]
+
+    def test_the_footer_matches_the_series_for_every_drawn_period(self):
+        series = {p["period"]: p["value"] for p in blend_series(self.MEMBERS, PE)["points"]}
+        mx = blend_matrix(self.MEMBERS, PE)
+        for period, val in series.items():
+            assert mx["blended"][period] == pytest.approx(val)
+
+    def test_it_shows_below_floor_years_the_chart_hides(self):
+        """The chart omits a year under the coverage floor; the matrix keeps it, flagged — a thin
+        year is exactly what someone verifying the line needs to see."""
+        mx = blend_matrix(self.MEMBERS, PE)
+        # Every period the matrix lists has a covered% and a below_floor verdict.
+        for y in mx["periods"]:
+            assert y in mx["covered"] and y in mx["below_floor"]
+            assert mx["below_floor"][y] == (mx["covered"][y] < MIN_BLEND_COVERAGE_PCT)
+
+    def test_a_loss_making_multiple_cell_is_marked_dropped_not_hidden(self):
+        members = [
+            {"name": "ok", "weight": 0.6, "points": {"2025-12-31": 20.0}},
+            {"name": "loss", "weight": 0.4, "points": {"2025-12-31": -15.0}},
+        ]
+        mx = blend_matrix(members, PE)
+        loss = next(m for m in mx["members"] if m["name"] == "loss")
+        assert loss["cells"]["2025"]["dropped"] is True
+        assert loss["cells"]["2025"]["value"] == -15.0        # shown, not blanked
+        # ...and it did not enter the blend: only the 20x name did.
+        assert mx["blended"]["2025"] == pytest.approx(20.0)
+
+    def test_rows_are_sorted_by_weight_and_carry_every_period(self):
+        mx = blend_matrix(self.MEMBERS, PE)
+        assert [m["name"] for m in mx["members"]] == ["cheap", "rich", "thin"]
+        cheap = mx["members"][0]
+        assert set(cheap["cells"]) == {"2024", "2025"}
+
+
+class TestPriceVsOwnerEarningsMerge:
+    """The Share-Price-vs-OE drilldown merges a PRICE level-breakdown and an OE level-breakdown.
+    Both are LEVELS (growth indices), so a holding carries a price index and an OE index; the ratio
+    is price ÷ OE — how much its earnings multiple expanded."""
+
+    PRICE_IDX = "annuals__Per Share Data__Month End Stock Price"
+    OE = "annuals__Per Share Data__EPS without NRI"
+
+    # Two holdings; price outran earnings for the first, lagged for the second.
+    PRICE_MEMBERS = [
+        {"isin": "A", "name": "runner", "weight": 0.6,
+         "points": {"2020-12-31": 100.0, "2024-12-31": 260.0}},
+        {"isin": "B", "name": "laggard", "weight": 0.4,
+         "points": {"2020-12-31": 50.0, "2024-12-31": 60.0}},
+    ]
+    OE_MEMBERS = [
+        {"isin": "A", "name": "runner", "weight": 0.6,
+         "points": {"2020-12-31": 5.0, "2024-12-31": 9.0}},
+        {"isin": "B", "name": "laggard", "weight": 0.4,
+         "points": {"2020-12-31": 2.0, "2024-12-31": 2.8}},
+    ]
+
+    def _merge(self, period="2024"):
+        return merge_relative_growth(
+            blend_breakdown(self.PRICE_MEMBERS, self.PRICE_IDX, period),
+            blend_breakdown(self.OE_MEMBERS, self.OE, period),
+            period,
+        )
+
+    def test_each_holding_carries_both_indices_and_their_ratio(self):
+        rows = {r["name"]: r for r in self._merge()["members"]}
+        # runner: price 100→260 = index 260; OE 5→9 = index 180; ratio 260/180 ≈ 1.44.
+        assert rows["runner"]["price_index"] == pytest.approx(260.0)
+        assert rows["runner"]["oe_index"] == pytest.approx(180.0)
+        assert rows["runner"]["ratio"] == pytest.approx(260.0 / 180.0, abs=1e-3)
+        # laggard: price 50→60 = 120; OE 2→2.8 = 140; ratio < 1 (earnings outran price).
+        assert rows["laggard"]["ratio"] == pytest.approx(120.0 / 140.0, abs=1e-3)
+
+    def test_the_portfolio_ratio_is_blended_price_over_blended_oe(self):
+        out = self._merge()
+        assert out["ratio"] == pytest.approx(out["price"]["value"] / out["oe"]["value"], abs=1e-6)
+
+    def test_rows_are_sorted_by_weight(self):
+        assert [r["name"] for r in self._merge()["members"]] == ["runner", "laggard"]
+
+    def test_the_raw_amounts_ride_along_for_verification(self):
+        rows = {r["name"]: r for r in self._merge()["members"]}
+        # blend_breakdown for a level returns the as-reported amount too.
+        assert rows["runner"]["price_raw"] == pytest.approx(260.0)
+        assert rows["runner"]["oe_raw"] == pytest.approx(9.0)
 
 
 class TestShareIsComputedInTheSpaceTheMetricCombinesIn:

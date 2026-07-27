@@ -181,6 +181,9 @@ type Props = {
    * then built as weighted-member averages (smooth) instead of the raw blend. */
   breakdownA?: PortfolioMemberMetrics[];
   breakdownB?: PortfolioMemberMetrics[];
+  /** Portfolio only: click a point to open the per-holding price-vs-OE breakdown for that YEAR.
+   * A single company has nothing to decompose, so the parent passes this only for a blend. */
+  onPointClick?: (period: string) => void;
 };
 
 /** Log-scale chart comparing share price growth to Owner Earnings (EPS,
@@ -190,7 +193,7 @@ type Props = {
  * colors so the user can pair "solid A vs dashed B" by hue. Both
  * companies share a common anchor (max of their natural start dates)
  * so the indexed slopes are directly comparable. */
-function RelativeGrowthChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, loadingB, breakdownA, breakdownB }: Props) {
+function RelativeGrowthChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, loadingB, breakdownA, breakdownB, onPointClick }: Props) {
   const hasB = !!metricsB;
   // With two companies this chart has 6 lines (3 metrics × 2) which reads as
   // chaos, so in comparison mode we show ONE company at a time and toggle.
@@ -294,7 +297,15 @@ function RelativeGrowthChartInner({ metrics, metricsB, labelA, labelB, nameA, na
         ) : null}
       </div>
       <ResponsiveContainer width="100%" height={280}>
-        <LineChart data={combined.merged} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
+        <LineChart data={combined.merged} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}
+          style={onPointClick ? { cursor: 'pointer' } : undefined}
+          onClick={onPointClick
+            ? (e: { activeLabel?: string | number }) => {
+              // activeLabel is the x value (a ms timestamp) of the clicked point → its YEAR.
+              const ts = e?.activeLabel;
+              if (ts != null) onPointClick(new Date(Number(ts)).getFullYear().toString());
+            }
+            : undefined}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
           <XAxis
             dataKey="ts"

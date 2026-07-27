@@ -184,6 +184,122 @@ def blend_series(members: list[dict], metric_code: str) -> dict:
     return {"kind": kind, "points": out, "covered_pct": round(spanned, 2)}
 
 
+def blend_matrix(members: list[dict], metric_code: str) -> dict:
+    """The full audit grid: every holding's value at every period, with the blended line under it.
+
+    Returns `{kind, metric_code, periods, members, blended, covered, below_floor, excluded}`:
+      periods      sorted fiscal years that any holding reports.
+      members      [{isin, name, weight_pct, cells:{period:{value, raw, dropped}}}] — one row per
+                   holding, sorted by weight. `dropped` marks a cell the blend threw away (a
+                   loss-making negative multiple), so the reader sees the number AND that it did
+                   not count. `raw` is the as-reported amount for a rebased LEVEL, else = value.
+      blended      {period: value|null} — the harmonic (multiple) or arithmetic aggregate.
+      covered      {period: pct of blended weight reporting}.
+      below_floor  {period: covered < MIN_BLEND_COVERAGE_PCT} — the years the CHART hides. The
+                   matrix still shows them (flagged), because a thin year is exactly what a reader
+                   verifying the line wants to see, not have silently dropped.
+      excluded     holdings with no usable data for this metric at all (no_data / no_weight / …).
+
+    ⚠ REUSES `_prepare`, LIKE `blend_series` AND `blend_breakdown`. The cells and the footer come
+    from the same preparation the chart's line does, so the grid cannot show a number the line was
+    not built from — the whole point of an audit view.
+    """
+    kind = blend_kind(metric_code)
+    combine = _weighted_harmonic if kind == "multiple" else _weighted_arithmetic
+    total_w = sum(abs(float(m.get("weight") or 0)) for m in members)
+    prepared, dropped = _prepare(members, kind)
+
+    def _label(i: int) -> dict:
+        m = members[i]
+        return {"isin": m.get("isin"), "name": m.get("name"),
+                "weight_pct": round(100.0 * abs(float(m.get("weight") or 0)) / total_w, 2)
+                if total_w > 0 else 0.0}
+
+    periods = sorted({y for p in prepared for y in p["by_year"]})
+
+    rows = []
+    for p in prepared:
+        cells: dict[str, dict] = {}
+        for y, (_d, v) in p["by_year"].items():
+            raw = p["raw_by_year"].get(y)
+            cells[y] = {
+                "value": round(v, 6),
+                "raw": round(raw[1], 6) if raw else None,
+                # A non-positive multiple has no reciprocal, so the harmonic blend drops it — show
+                # the figure but mark that it did not contribute (vs an empty "did not report").
+                "dropped": bool(kind == "multiple" and not (v and v > 0)),
+            }
+        rows.append({**_label(p["index"]), "cells": cells})
+    rows.sort(key=lambda r: r["weight_pct"], reverse=True)
+
+    blended, covered, below_floor = {}, {}, {}
+    for y in periods:
+        pairs = [(p["weight"], p["by_year"][y][1]) for p in prepared if y in p["by_year"]]
+        if kind == "multiple":
+            pairs = [(w, v) for w, v in pairs if v and v > 0]
+        cov = 100.0 * sum(w for w, _ in pairs) / total_w if total_w > 0 else 0.0
+        val = combine(pairs)
+        blended[y] = round(val, 6) if val is not None else None
+        covered[y] = round(cov, 2)
+        below_floor[y] = cov < MIN_BLEND_COVERAGE_PCT
+
+    excluded = [{**_label(d["index"]), "reason": d["reason"]} for d in dropped]
+    excluded.sort(key=lambda r: r["weight_pct"], reverse=True)
+    return {"kind": kind, "metric_code": metric_code, "periods": periods,
+            "members": rows, "blended": blended, "covered": covered,
+            "below_floor": below_floor, "excluded": excluded}
+
+
+def merge_relative_growth(price_bd: dict, oe_bd: dict, period: str) -> dict:
+    """Merge a PRICE level-breakdown and an Owner-Earnings level-breakdown (same period) into the
+    price-vs-OE table behind the Share-Price-vs-Owner-Earnings chart.
+
+    Both inputs are `blend_breakdown(..., 'level')` outputs, so each holding's `value` is its growth
+    index (100 at its own first year) and `raw_value` the amount as reported. Per holding we keep
+    both indices and their ratio — price ÷ OE, i.e. how much its earnings multiple has expanded.
+
+    ⚠ THE RATIO IS THE CHART'S MESSAGE, AND IT IS INVARIANT to the extra rebasing the chart does to
+    put both lines on a common start: that normalisation scales price and OE lines by the same
+    per-line constant, so price ÷ OE is unchanged. Both the raw amount and the index are surfaced,
+    so the number is verifiable whichever way the reader checks it.
+
+    ⚠ REUSES `blend_breakdown` TWICE rather than re-deriving — the two lines a reader is comparing
+    are decomposed by the exact rule the chart's lines are built from.
+    """
+    def _key(m: dict) -> str:
+        return (m.get("isin") or "") or (m.get("name") or "")
+
+    by_key: dict[str, dict] = {}
+    for m in price_bd.get("members", []):
+        r = by_key.setdefault(_key(m), {"isin": m.get("isin"), "name": m.get("name"),
+                                        "weight_pct": m.get("weight_pct")})
+        r["price_index"] = m.get("value")
+        r["price_raw"] = m.get("raw_value")
+    for m in oe_bd.get("members", []):
+        r = by_key.setdefault(_key(m), {"isin": m.get("isin"), "name": m.get("name"),
+                                        "weight_pct": m.get("weight_pct")})
+        r["oe_index"] = m.get("value")
+        r["oe_raw"] = m.get("raw_value")
+
+    rows = []
+    for r in by_key.values():
+        pi, oi = r.get("price_index"), r.get("oe_index")
+        r["ratio"] = round(pi / oi, 6) if (pi and oi and oi > 0) else None
+        rows.append(r)
+    rows.sort(key=lambda r: -(r.get("weight_pct") or 0))
+
+    pv, ov = price_bd.get("value"), oe_bd.get("value")
+    return {
+        "period": period,
+        "price": {"value": pv, "covered_pct": price_bd.get("covered_pct")},
+        "oe": {"value": ov, "covered_pct": oe_bd.get("covered_pct")},
+        "ratio": round(pv / ov, 6) if (pv and ov and ov > 0) else None,
+        "members": rows,
+        # A holding with no price series at all (the anchor line) is the one worth naming.
+        "excluded": price_bd.get("excluded", []),
+    }
+
+
 def blend_breakdown(members: list[dict], metric_code: str, period: str) -> dict:
     """ONE blended point, decomposed into the holdings behind it.
 
