@@ -16121,9 +16121,49 @@
         ]
       }
     },
+    "/api/earnings/capex-margin-inputs": {
+      "post": {
+        "description": "The base inputs behind the Capex margin, per holding: Capex and Revenue per fiscal year, in\nthe company's own reporting currency (millions).\n\n\u26a0 THE RAW LINES, NOT THE RATIO. `|Capex| / Revenue` (capital intensity \u2014 the share of sales\nreinvested in capex) is derived on the client from these two so the drill-down shows exactly\nwhat it is computed from (2 rows per company). Capex is reported NEGATIVE (an outflow) \u2014 the\nclient takes its magnitude; a 0 is real (capital-light). Revenue \u2264 0 \u2192 the ratio is blank.\nDeduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.",
+        "operationId": "capex_margin_inputs_api_earnings_capex_margin_inputs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Capex Margin Inputs",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
     "/api/earnings/cash-return-inputs": {
       "post": {
-        "description": "The base inputs behind Cash return on capital, per holding: Free Cash Flow, non-current\n(long-term) liabilities and total equity per fiscal year, in the company's own reporting\ncurrency (millions).\n\n\u26a0 THE RAW LINES, NOT THE RATIO. `FCF / (non-current liabilities + total equity)` is derived on\nthe client from these three so the drill-down shows exactly what it is computed from (3 rows per\ncompany). Non-current liabilities absent (a bank / Berkshire doesn't split current from\nnon-current) \u2192 the ratio is blank there, NOT computed against equity alone. Total equity is\nincl. minority interest on purpose (see `_METRIC_CODES`). Deduped by ISIN, weight is the share\nof the whole book, holdings with no company row omitted.",
+        "description": "The base inputs behind Cash return on capital, per holding: Free Cash Flow, non-current\n(long-term) liabilities and total equity per fiscal year, in the company's own reporting\ncurrency (millions).\n\n\u26a0 THE RAW LINES, NOT THE RATIO. `FCF / (non-current liabilities + total equity)` is derived on\nthe client from these three so the drill-down shows exactly what it is computed from (3 rows per\ncompany). Non-current liabilities absent (a bank / Berkshire doesn't split current from\nnon-current) \u2192 the ratio is blank there, NOT computed against equity alone. Total equity is\nincl. minority interest (see `_METRIC_CODES`). Deduped by ISIN, weight is the share of the whole\nbook, holdings with no company row omitted.",
         "operationId": "cash_return_inputs_api_earnings_cash_return_inputs_post",
         "requestBody": {
           "content": {

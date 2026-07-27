@@ -8,7 +8,7 @@ export type CashReturnRow = {
   status: 'ok' | 'unsubscribed' | 'no_data';
   fcf: Record<string, number | null>;
   noncurrent_liabilities: Record<string, number | null>;
-  total_equity: Record<string, number | null>;
+  total_equity: Record<string, number | null>;   // Total Equity (incl. minority interest)
 };
 export type CashReturnInputs = { years: string[]; rows: CashReturnRow[] };
 

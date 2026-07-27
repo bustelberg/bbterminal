@@ -3635,6 +3635,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/capex-margin-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Capex Margin Inputs
+         * @description The base inputs behind the Capex margin, per holding: Capex and Revenue per fiscal year, in
+         *     the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `|Capex| / Revenue` (capital intensity — the share of sales
+         *     reinvested in capex) is derived on the client from these two so the drill-down shows exactly
+         *     what it is computed from (2 rows per company). Capex is reported NEGATIVE (an outflow) — the
+         *     client takes its magnitude; a 0 is real (capital-light). Revenue ≤ 0 → the ratio is blank.
+         *     Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["capex_margin_inputs_api_earnings_capex_margin_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/cash-return-inputs": {
         parameters: {
             query?: never;
@@ -3654,8 +3681,8 @@ export interface paths {
          *     the client from these three so the drill-down shows exactly what it is computed from (3 rows per
          *     company). Non-current liabilities absent (a bank / Berkshire doesn't split current from
          *     non-current) → the ratio is blank there, NOT computed against equity alone. Total equity is
-         *     incl. minority interest on purpose (see `_METRIC_CODES`). Deduped by ISIN, weight is the share
-         *     of the whole book, holdings with no company row omitted.
+         *     incl. minority interest (see `_METRIC_CODES`). Deduped by ISIN, weight is the share of the whole
+         *     book, holdings with no company row omitted.
          */
         post: operations["cash_return_inputs_api_earnings_cash_return_inputs_post"];
         delete?: never;
@@ -14334,6 +14361,39 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    capex_margin_inputs_api_earnings_capex_margin_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

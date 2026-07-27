@@ -783,12 +783,12 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
                      "annuals__balance_sheet__Total Assets"),
     "goodwill": ("annuals__Balance Sheet__Goodwill",
                  "annuals__balance_sheet__Goodwill"),
-    # Behind the Cash-return-on-capital card: FCF ÷ (non-current liabilities + total equity).
-    # ⚠ Non-current liabilities is ABSENT for issuers that don't split current/non-current
-    # (Berkshire, and banks — JPMorgan has no such line) → the ratio is blank there, not 0.
-    # `total_equity` is INCL. minority interest deliberately: NCL + Total Equity = Total
-    # Assets − Current Liabilities (the balance-sheet identity), a coherent capital base;
-    # stockholders'-equity-only would drop minority capital and not close.
+    # Behind the Cash-return-on-capital + Invested-capital cards: invested capital = non-current
+    # liabilities + total equity (FCF ÷ that = cash return). ⚠ Non-current liabilities is ABSENT
+    # for issuers that don't split current/non-current (Berkshire, and banks — JPMorgan has no such
+    # line) → both cards are blank there, not 0. `total_equity` is `Total Equity` — INCL. minority
+    # interest (Constellation: 4,268 vs 3,576 stockholders'-only), so NCL + Total Equity = Total
+    # Assets − Current Liabilities (the balance-sheet identity), a coherent capital base.
     "noncurrent_liabilities": ("annuals__Balance Sheet__Total Long-Term Liabilities",
                                "annuals__balance_sheet__Total Long-Term Liabilities"),
     "total_equity": ("annuals__Balance Sheet__Total Equity",
@@ -813,6 +813,12 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
     # there, not computed against a negative denominator.
     "ocf": ("annuals__Cashflow Statement__Cash Flow from Operations",
             "annuals__cashflow_statement__Cash Flow from Operations"),
+    # Behind the Capex-margin card: |Capex| ÷ Revenue (capital intensity). ⚠ Capex is GuruFocus's
+    # `Capital Expenditure` line (NOT `Purchase Of Property, Plant, Equipment` — capex also picks up
+    # intangibles), reported NEGATIVE (an outflow); the card takes its magnitude. Revenue is the
+    # `revenue` key above.
+    "capex": ("annuals__Cashflow Statement__Capital Expenditure",
+              "annuals__cashflow_statement__Capital Expenditure"),
 }
 _REVENUE_CODES = _METRIC_CODES["revenue"]
 _REVENUE_CODE = _REVENUE_CODES[0]   # for blend_kind() only — it classifies, it doesn't query
@@ -1209,8 +1215,8 @@ async def cash_return_inputs(body: FundamentalCoverageRequest):
     the client from these three so the drill-down shows exactly what it is computed from (3 rows per
     company). Non-current liabilities absent (a bank / Berkshire doesn't split current from
     non-current) → the ratio is blank there, NOT computed against equity alone. Total equity is
-    incl. minority interest on purpose (see `_METRIC_CODES`). Deduped by ISIN, weight is the share
-    of the whole book, holdings with no company row omitted.
+    incl. minority interest (see `_METRIC_CODES`). Deduped by ISIN, weight is the share of the whole
+    book, holdings with no company row omitted.
     """
     from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
     from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
@@ -1407,6 +1413,76 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
                 "sbc": sbc, "ocf": ocf,
+            })
+        rows.sort(key=lambda r: -r["weight_pct"])
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.post("/api/earnings/capex-margin-inputs")
+async def capex_margin_inputs(body: FundamentalCoverageRequest):
+    """The base inputs behind the Capex margin, per holding: Capex and Revenue per fiscal year, in
+    the company's own reporting currency (millions).
+
+    ⚠ THE RAW LINES, NOT THE RATIO. `|Capex| / Revenue` (capital intensity — the share of sales
+    reinvested in capex) is derived on the client from these two so the drill-down shows exactly
+    what it is computed from (2 rows per company). Capex is reported NEGATIVE (an outflow) — the
+    client takes its magnitude; a 0 is real (capital-light). Revenue ≤ 0 → the ratio is blank.
+    Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+    """
+    from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings")
+
+    def _run() -> dict:
+        total_w = sum(abs(float(m.get("weight") or 0)) for m in members) or 1.0
+        raw = sorted({m["isin"] for m in members if m.get("isin")})
+        alias = canonical_map(raw)
+        weight_by: dict[str, float] = {}
+        name_by: dict[str, str] = {}
+        for m in members:
+            isin = (m.get("isin") or "").strip()
+            if not isin:
+                continue
+            ci = alias.get(isin, isin)
+            weight_by[ci] = weight_by.get(ci, 0.0) + abs(float(m.get("weight") or 0))
+            name_by.setdefault(ci, m.get("name") or isin)
+
+        canon = sorted(weight_by)
+        comp: dict[str, dict] = {}
+        for i in range(0, len(canon), IN_CHUNK_SIZE):
+            for c in (supabase.table("company")
+                      .select("company_id,company_name,isin,gurufocus_ticker,"
+                              "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
+                      .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                comp[c["isin"]] = c
+
+        rows: list[dict] = []
+        years: set[str] = set()
+        for ci in canon:
+            c = comp.get(ci)
+            if not c:
+                continue
+            gx = (c.get("gurufocus_exchange") or {}) or {}
+            capex = _metric_by_year(c["company_id"], "capex")
+            rev = _metric_by_year(c["company_id"], "revenue")
+            years |= set(capex) | set(rev)
+            exch = gx.get("exchange_code")
+            subscribed = is_gf_subscribed_exchange(exch) if exch else None
+            # `ok` if we have revenue (the denominator) OR any capex to show; a company on an
+            # unsubscribed exchange can't be fetched at all; else nothing ingested yet.
+            status = "ok" if (rev or capex) else ("unsubscribed" if subscribed is False else "no_data")
+            rows.append({
+                "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
+                "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                "currency": gx.get("currency_code"),
+                "ticker": c.get("gurufocus_ticker"), "exchange": exch,
+                "status": status,
+                "capex": capex, "revenue": rev,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
         return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
