@@ -4085,6 +4085,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/sbc-ocf-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sbc Ocf Inputs
+         * @description The base inputs behind the SBC/OCF ratio, per holding: Stock-Based Compensation and
+         *     Operating Cash Flow per fiscal year, in the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `SBC / Operating Cash Flow` (the share of operating cash flow
+         *     that is non-cash stock comp) is derived on the client from these two so the drill-down shows
+         *     exactly what it is computed from (2 rows per company). SBC is an add-back, reported positive; a
+         *     0 is real (many report none). Operating cash flow ≤ 0 → the ratio is blank (a bank's OCF goes
+         *     negative). Deduped by ISIN, weight is the share of the whole book, holdings with no company row
+         *     omitted.
+         */
+        post: operations["sbc_ocf_inputs_api_earnings_sbc_ocf_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/sector-universes": {
         parameters: {
             query?: never;
@@ -14923,6 +14951,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RelativeGrowthRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sbc_ocf_inputs_api_earnings_sbc_ocf_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
             };
         };
         responses: {

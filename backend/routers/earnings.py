@@ -808,6 +808,11 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
     # `per_share_data_array`) between the capitalized and lowercase cohorts.
     "shares": ("annuals__Income Statement__Shares Outstanding (Diluted Average)",
                "annuals__income_statement__Shares Outstanding (Diluted Average)"),
+    # Behind the SBC/OCF card: Stock-Based Compensation ÷ Operating Cash Flow (`sbc` above is the
+    # numerator). ⚠ Operating cash flow can go NEGATIVE (a bank: JPMorgan) — the ratio is blank
+    # there, not computed against a negative denominator.
+    "ocf": ("annuals__Cashflow Statement__Cash Flow from Operations",
+            "annuals__cashflow_statement__Cash Flow from Operations"),
 }
 _REVENUE_CODES = _METRIC_CODES["revenue"]
 _REVENUE_CODE = _REVENUE_CODES[0]   # for blend_kind() only — it classifies, it doesn't query
@@ -1331,6 +1336,77 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
                 "interest_expense": ie, "operating_income": oi,
+            })
+        rows.sort(key=lambda r: -r["weight_pct"])
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.post("/api/earnings/sbc-ocf-inputs")
+async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
+    """The base inputs behind the SBC/OCF ratio, per holding: Stock-Based Compensation and
+    Operating Cash Flow per fiscal year, in the company's own reporting currency (millions).
+
+    ⚠ THE RAW LINES, NOT THE RATIO. `SBC / Operating Cash Flow` (the share of operating cash flow
+    that is non-cash stock comp) is derived on the client from these two so the drill-down shows
+    exactly what it is computed from (2 rows per company). SBC is an add-back, reported positive; a
+    0 is real (many report none). Operating cash flow ≤ 0 → the ratio is blank (a bank's OCF goes
+    negative). Deduped by ISIN, weight is the share of the whole book, holdings with no company row
+    omitted.
+    """
+    from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings")
+
+    def _run() -> dict:
+        total_w = sum(abs(float(m.get("weight") or 0)) for m in members) or 1.0
+        raw = sorted({m["isin"] for m in members if m.get("isin")})
+        alias = canonical_map(raw)
+        weight_by: dict[str, float] = {}
+        name_by: dict[str, str] = {}
+        for m in members:
+            isin = (m.get("isin") or "").strip()
+            if not isin:
+                continue
+            ci = alias.get(isin, isin)
+            weight_by[ci] = weight_by.get(ci, 0.0) + abs(float(m.get("weight") or 0))
+            name_by.setdefault(ci, m.get("name") or isin)
+
+        canon = sorted(weight_by)
+        comp: dict[str, dict] = {}
+        for i in range(0, len(canon), IN_CHUNK_SIZE):
+            for c in (supabase.table("company")
+                      .select("company_id,company_name,isin,gurufocus_ticker,"
+                              "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
+                      .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                comp[c["isin"]] = c
+
+        rows: list[dict] = []
+        years: set[str] = set()
+        for ci in canon:
+            c = comp.get(ci)
+            if not c:
+                continue
+            gx = (c.get("gurufocus_exchange") or {}) or {}
+            sbc = _metric_by_year(c["company_id"], "sbc")
+            ocf = _metric_by_year(c["company_id"], "ocf")
+            years |= set(sbc) | set(ocf)
+            exch = gx.get("exchange_code")
+            subscribed = is_gf_subscribed_exchange(exch) if exch else None
+            # `ok` if we have operating cash flow (the denominator) OR any SBC to show; a company on
+            # an unsubscribed exchange can't be fetched at all; else nothing ingested yet.
+            status = "ok" if (ocf or sbc) else ("unsubscribed" if subscribed is False else "no_data")
+            rows.append({
+                "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
+                "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                "currency": gx.get("currency_code"),
+                "ticker": c.get("gurufocus_ticker"), "exchange": exch,
+                "status": status,
+                "sbc": sbc, "ocf": ocf,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
         return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}

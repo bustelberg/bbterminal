@@ -16971,6 +16971,46 @@
         ]
       }
     },
+    "/api/earnings/sbc-ocf-inputs": {
+      "post": {
+        "description": "The base inputs behind the SBC/OCF ratio, per holding: Stock-Based Compensation and\nOperating Cash Flow per fiscal year, in the company's own reporting currency (millions).\n\n\u26a0 THE RAW LINES, NOT THE RATIO. `SBC / Operating Cash Flow` (the share of operating cash flow\nthat is non-cash stock comp) is derived on the client from these two so the drill-down shows\nexactly what it is computed from (2 rows per company). SBC is an add-back, reported positive; a\n0 is real (many report none). Operating cash flow \u2264 0 \u2192 the ratio is blank (a bank's OCF goes\nnegative). Deduped by ISIN, weight is the share of the whole book, holdings with no company row\nomitted.",
+        "operationId": "sbc_ocf_inputs_api_earnings_sbc_ocf_inputs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sbc Ocf Inputs",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
     "/api/earnings/sector-universes": {
       "get": {
         "description": "Universes that carry a sector classification (for the attribution sector\npicker). Leonteq first (the default).",

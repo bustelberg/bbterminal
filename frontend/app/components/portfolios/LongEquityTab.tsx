@@ -8,6 +8,7 @@ import MarginCard from './MarginCard';
 import CashReturnCard from './CashReturnCard';
 import DebtRatioCard from './DebtRatioCard';
 import InterestBurdenCard from './InterestBurdenCard';
+import SbcOcfCard from './SbcOcfCard';
 
 /**
  * The "Long Equity" tab: a grid of growth cards (Revenue, FCF/share, …), each a
@@ -90,7 +91,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId }: {
   if (err) return <p className="text-xs text-neg-300 py-16 text-center">{err}</p>;
 
   // Fixed order across the grid: Revenue, FCF/share, FCF-SBC margin, Cash return on capital,
-  // Debt / assets ex-GW, Interest / op. profit, Shares outstanding — four per row.
+  // Debt / assets ex-GW, Interest / op. profit, Shares outstanding, SBC / OCF — four per row.
   const [revenue, fcfPs, shares] = CARDS;
   // Single-company only: an empty growth card can fetch this company's financials, then reload.
   const ingestIsin = isAgg ? undefined : isin;
@@ -112,6 +113,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId }: {
       <MetricGrowthCard key={shares.title} cfg={shares}
         metrics={data?.metrics ?? null} isAgg={isAgg} currency={data?.currency}
         holdingsTarget={holdingsTarget} holdingsName={gName} ingestIsin={ingestIsin} onIngested={onIngested} />
+      <SbcOcfCard key={`sbcocf-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
     </div>
   );
 }
