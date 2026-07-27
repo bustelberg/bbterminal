@@ -819,6 +819,12 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
     # `revenue` key above.
     "capex": ("annuals__Cashflow Statement__Capital Expenditure",
               "annuals__cashflow_statement__Capital Expenditure"),
+    # Dividends per share (per-share currency level; CAGR = the dividend-growth rate). ⚠ THREE
+    # per-share section spellings: capitalized cohort `Per Share Data`, lowercase cohort
+    # `per_share_data_array` (NOT `per_share_data` — that's the shares-outstanding trap again).
+    "div_ps": ("annuals__Per Share Data__Dividends per Share",
+               "annuals__per_share_data__Dividends per Share",
+               "annuals__per_share_data_array__Dividends per Share"),
 }
 _REVENUE_CODES = _METRIC_CODES["revenue"]
 _REVENUE_CODE = _REVENUE_CODES[0]   # for blend_kind() only — it classifies, it doesn't query

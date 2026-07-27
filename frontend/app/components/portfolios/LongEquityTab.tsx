@@ -41,6 +41,14 @@ const CARDS: MetricCfg[] = [
     codes: ['annuals__Income Statement__Shares Outstanding (Diluted Average)',
       'annuals__income_statement__Shares Outstanding (Diluted Average)'],
   },
+  {
+    // Per-share currency level; CAGR reads as the dividend-growth rate. Three per-share section
+    // spellings across cohorts (see backend `div_ps`); a non-payer plots empty (no growth to show).
+    title: 'Dividend / share', noun: 'dividend/share', unit: 'per_share', kind: 'growth', benchmarkMetric: 'div_ps',
+    codes: ['annuals__Per Share Data__Dividends per Share',
+      'annuals__per_share_data__Dividends per Share',
+      'annuals__per_share_data_array__Dividends per Share'],
+  },
 ];
 
 export default function LongEquityTab({ isin, name, basket, portfolioId }: {
@@ -94,8 +102,8 @@ export default function LongEquityTab({ isin, name, basket, portfolioId }: {
 
   // Fixed order across the grid: Revenue, FCF/share, FCF-SBC margin, Cash return on capital,
   // Debt / assets ex-GW, Interest / op. profit, Shares outstanding, SBC / OCF, Invested capital,
-  // Capex margin.
-  const [revenue, fcfPs, shares] = CARDS;
+  // Capex margin, Dividend / share.
+  const [revenue, fcfPs, shares, divPs] = CARDS;
   // Single-company only: an empty growth card can fetch this company's financials, then reload.
   const ingestIsin = isAgg ? undefined : isin;
   const onIngested = () => setReloadKey((k) => k + 1);
@@ -119,6 +127,9 @@ export default function LongEquityTab({ isin, name, basket, portfolioId }: {
       <SbcOcfCard key={`sbcocf-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <InvestedCapitalCard key={`invcap-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} isAgg={isAgg} />
       <CapexMarginCard key={`capex-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <MetricGrowthCard key={divPs.title} cfg={divPs}
+        metrics={data?.metrics ?? null} isAgg={isAgg} currency={data?.currency}
+        holdingsTarget={holdingsTarget} holdingsName={gName} ingestIsin={ingestIsin} onIngested={onIngested} />
     </div>
   );
 }
