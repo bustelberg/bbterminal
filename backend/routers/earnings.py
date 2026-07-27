@@ -825,6 +825,10 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
     "div_ps": ("annuals__Per Share Data__Dividends per Share",
                "annuals__per_share_data__Dividends per Share",
                "annuals__per_share_data_array__Dividends per Share"),
+    # Behind the FCF-SBC yield card: (FCF − SBC) ÷ Market Cap (`fcf`/`sbc` above are the numerator).
+    # Market cap is the fiscal-year-end figure GuruFocus files under Valuation and Quality.
+    "market_cap": ("annuals__Valuation and Quality__Market Cap",
+                   "annuals__valuation_and_quality__Market Cap"),
 }
 _REVENUE_CODES = _METRIC_CODES["revenue"]
 _REVENUE_CODE = _REVENUE_CODES[0]   # for blend_kind() only — it classifies, it doesn't query
@@ -1489,6 +1493,77 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
                 "capex": capex, "revenue": rev,
+            })
+        rows.sort(key=lambda r: -r["weight_pct"])
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.post("/api/earnings/fcf-sbc-yield-inputs")
+async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
+    """The base inputs behind the FCF-SBC yield, per holding: Free Cash Flow, Stock-Based
+    Compensation and Market Cap per fiscal year, in the company's own reporting currency (millions).
+
+    ⚠ THE RAW LINES, NOT THE RATIO. `(FCF − SBC) / Market Cap` (the cash yield a buyer earns, net of
+    the non-cash stock comp) is derived on the client from these three so the drill-down shows
+    exactly what it is computed from (3 rows per company). SBC missing is treated as 0 (many report
+    none); FCF may be negative (yield goes negative); Market Cap must be present and positive.
+    Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+    """
+    from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings")
+
+    def _run() -> dict:
+        total_w = sum(abs(float(m.get("weight") or 0)) for m in members) or 1.0
+        raw = sorted({m["isin"] for m in members if m.get("isin")})
+        alias = canonical_map(raw)
+        weight_by: dict[str, float] = {}
+        name_by: dict[str, str] = {}
+        for m in members:
+            isin = (m.get("isin") or "").strip()
+            if not isin:
+                continue
+            ci = alias.get(isin, isin)
+            weight_by[ci] = weight_by.get(ci, 0.0) + abs(float(m.get("weight") or 0))
+            name_by.setdefault(ci, m.get("name") or isin)
+
+        canon = sorted(weight_by)
+        comp: dict[str, dict] = {}
+        for i in range(0, len(canon), IN_CHUNK_SIZE):
+            for c in (supabase.table("company")
+                      .select("company_id,company_name,isin,gurufocus_ticker,"
+                              "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
+                      .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                comp[c["isin"]] = c
+
+        rows: list[dict] = []
+        years: set[str] = set()
+        for ci in canon:
+            c = comp.get(ci)
+            if not c:
+                continue
+            gx = (c.get("gurufocus_exchange") or {}) or {}
+            fcf = _metric_by_year(c["company_id"], "fcf")
+            sbc = _metric_by_year(c["company_id"], "sbc")
+            mc = _metric_by_year(c["company_id"], "market_cap")
+            years |= set(fcf) | set(sbc) | set(mc)
+            exch = gx.get("exchange_code")
+            subscribed = is_gf_subscribed_exchange(exch) if exch else None
+            # `ok` if we have market cap (the denominator) OR any FCF to show; a company on an
+            # unsubscribed exchange can't be fetched at all; else nothing ingested yet.
+            status = "ok" if (mc or fcf) else ("unsubscribed" if subscribed is False else "no_data")
+            rows.append({
+                "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
+                "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                "currency": gx.get("currency_code"),
+                "ticker": c.get("gurufocus_ticker"), "exchange": exch,
+                "status": status,
+                "fcf": fcf, "sbc": sbc, "market_cap": mc,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
         return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}

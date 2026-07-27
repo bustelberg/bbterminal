@@ -16241,6 +16241,46 @@
         ]
       }
     },
+    "/api/earnings/fcf-sbc-yield-inputs": {
+      "post": {
+        "description": "The base inputs behind the FCF-SBC yield, per holding: Free Cash Flow, Stock-Based\nCompensation and Market Cap per fiscal year, in the company's own reporting currency (millions).\n\n\u26a0 THE RAW LINES, NOT THE RATIO. `(FCF \u2212 SBC) / Market Cap` (the cash yield a buyer earns, net of\nthe non-cash stock comp) is derived on the client from these three so the drill-down shows\nexactly what it is computed from (3 rows per company). SBC missing is treated as 0 (many report\nnone); FCF may be negative (yield goes negative); Market Cap must be present and positive.\nDeduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.",
+        "operationId": "fcf_sbc_yield_inputs_api_earnings_fcf_sbc_yield_inputs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fcf Sbc Yield Inputs",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
     "/api/earnings/fundamental-blend": {
       "post": {
         "description": "A portfolio's fundamentals, blended \u2014 with the rule that each metric actually requires.\n\n\u26a0 THREE RULES, NOT ONE. A multiple aggregates HARMONICALLY (a portfolio's P/E is aggregate\nprice over aggregate earnings; the arithmetic mean of 10 and 100 is 55 against a true 18.2),\na yield/margin arithmetically, and a level only after rebasing to an index. See\n`_fundamental_blend` for why each alternative is wrong.\n\nCoverage rides along and is a FLOOR: a date under it carries no honest value and is omitted\nrather than drawn as a dip.",

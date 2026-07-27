@@ -3719,6 +3719,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/fcf-sbc-yield-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fcf Sbc Yield Inputs
+         * @description The base inputs behind the FCF-SBC yield, per holding: Free Cash Flow, Stock-Based
+         *     Compensation and Market Cap per fiscal year, in the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `(FCF − SBC) / Market Cap` (the cash yield a buyer earns, net of
+         *     the non-cash stock comp) is derived on the client from these three so the drill-down shows
+         *     exactly what it is computed from (3 rows per company). SBC missing is treated as 0 (many report
+         *     none); FCF may be negative (yield goes negative); Market Cap must be present and positive.
+         *     Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["fcf_sbc_yield_inputs_api_earnings_fcf_sbc_yield_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/fundamental-blend": {
         parameters: {
             query?: never;
@@ -14449,6 +14476,39 @@ export interface operations {
         };
     };
     debt_ratio_inputs_api_earnings_debt_ratio_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fcf_sbc_yield_inputs_api_earnings_fcf_sbc_yield_inputs_post: {
         parameters: {
             query?: never;
             header?: never;
