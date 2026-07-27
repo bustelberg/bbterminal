@@ -12,7 +12,7 @@ import InfoTip from '../InfoTip';
 import { Stat } from './MetricGrowthCard';
 import { type Target } from './HoldingsRevenueModal';
 import MarginInputsModal from './MarginInputsModal';
-import { marginByYear, meanOf, type MarginInputs } from './marginData';
+import { marginByYear, meanOf, paddedDomain, type MarginInputs } from './marginData';
 
 /**
  * FCF-SBC margin card: (Free Cash Flow − Stock-Based Compensation) ÷ Revenue per fiscal year, on a
@@ -90,7 +90,7 @@ export default function MarginCard({ holdingsTarget, holdingsName }: {
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
                 <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
-                <YAxis tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                <YAxis domain={paddedDomain([...marginByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
                   formatter={(v) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, 'Margin']} />

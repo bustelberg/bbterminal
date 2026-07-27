@@ -29,12 +29,12 @@ function cmp(a: number | string | null | undefined, b: number | string | null | 
 export default function HoldingsRevenueModal({ target, metric = 'revenue', unit = 'millions', noun = 'revenue', portfolioName, onClose }: {
   target: Target;
   metric?: string;
-  unit?: 'millions' | 'per_share' | 'percent';
+  unit?: 'millions' | 'per_share' | 'percent' | 'shares';
   noun?: string;
   portfolioName?: string | null;
   onClose: () => void;
 }) {
-  // millions → compact B/T/M; per_share → a plain per-share figure; percent → a % ratio.
+  // millions/shares → compact B/T/M; per_share → a plain per-share figure; percent → a % ratio.
   const fmtM = (v: number | null | undefined) => {
     if (v == null) return '—';
     if (unit === 'percent') return `${v.toFixed(1)}%`;

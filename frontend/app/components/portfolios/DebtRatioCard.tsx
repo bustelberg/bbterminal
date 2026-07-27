@@ -13,7 +13,7 @@ import { Stat } from './MetricGrowthCard';
 import { type Target } from './HoldingsRevenueModal';
 import DebtRatioInputsModal from './DebtRatioInputsModal';
 import { debtRatioByYear, type DebtRatioInputs } from './debtRatioData';
-import { meanOf } from './marginData';
+import { meanOf, paddedDomain } from './marginData';
 
 /**
  * Debt-to-tangible-assets card: Long-Term Debt ÷ (Total Assets − Goodwill) per fiscal year, on a
@@ -91,7 +91,7 @@ export default function DebtRatioCard({ holdingsTarget, holdingsName }: {
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
                 <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
-                <YAxis tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                <YAxis domain={paddedDomain([...ratioByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
                   formatter={(v) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, 'Debt / assets ex-GW']} />

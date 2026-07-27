@@ -31,6 +31,13 @@ const CARDS: MetricCfg[] = [
     codes: ['annuals__Per Share Data__Free Cash Flow per Share',
       'annuals__per_share_data__Free Cash Flow per Share'],
   },
+  {
+    // A count, not currency (no ccy prefix). CAGR reads as the buyback (−) / dilution (+) rate.
+    // Uses the INCOME STATEMENT spelling — the only one both cohorts share (see backend `shares`).
+    title: 'Shares outstanding', noun: 'shares outstanding', unit: 'shares', kind: 'growth', benchmarkMetric: 'shares',
+    codes: ['annuals__Income Statement__Shares Outstanding (Diluted Average)',
+      'annuals__income_statement__Shares Outstanding (Diluted Average)'],
+  },
 ];
 
 export default function LongEquityTab({ isin, name, basket, portfolioId }: {
@@ -42,6 +49,9 @@ export default function LongEquityTab({ isin, name, basket, portfolioId }: {
   const isAgg = !!basket || portfolioId != null;
   const [data, setData] = useState<MetricsResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Bumped after an empty card ingests this company's financials — reloads the metrics (repopulates
+  // every growth card) and re-keys the derived cards so they refetch their inputs too.
+  const [reloadKey, setReloadKey] = useState(0);
 
   // ⚠ Memoised — it's a card/modal effect dep, so a fresh object each render would refetch forever.
   const holdingsTarget = useMemo(() => (isAgg
@@ -75,25 +85,33 @@ export default function LongEquityTab({ isin, name, basket, portfolioId }: {
       }
     })();
     return () => { alive = false; };
-  }, [isin, isAgg, basket, portfolioId]);
+  }, [isin, isAgg, basket, portfolioId, reloadKey]);
 
   if (err) return <p className="text-xs text-neg-300 py-16 text-center">{err}</p>;
 
   // Fixed order across the grid: Revenue, FCF/share, FCF-SBC margin, Cash return on capital,
-  // Debt / assets ex-GW, Interest / op. profit — four per row.
-  const [revenue, fcfPs] = CARDS;
+  // Debt / assets ex-GW, Interest / op. profit, Shares outstanding — four per row.
+  const [revenue, fcfPs, shares] = CARDS;
+  // Single-company only: an empty growth card can fetch this company's financials, then reload.
+  const ingestIsin = isAgg ? undefined : isin;
+  const onIngested = () => setReloadKey((k) => k + 1);
+  const gName = name ?? data?.company_name;
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
       <MetricGrowthCard key={revenue.title} cfg={revenue}
         metrics={data?.metrics ?? null} isAgg={isAgg} currency={data?.currency}
-        holdingsTarget={holdingsTarget} holdingsName={name ?? data?.company_name} />
+        holdingsTarget={holdingsTarget} holdingsName={gName} ingestIsin={ingestIsin} onIngested={onIngested} />
       <MetricGrowthCard key={fcfPs.title} cfg={fcfPs}
         metrics={data?.metrics ?? null} isAgg={isAgg} currency={data?.currency}
-        holdingsTarget={holdingsTarget} holdingsName={name ?? data?.company_name} />
-      <MarginCard holdingsTarget={holdingsTarget} holdingsName={name ?? data?.company_name} />
-      <CashReturnCard holdingsTarget={holdingsTarget} holdingsName={name ?? data?.company_name} />
-      <DebtRatioCard holdingsTarget={holdingsTarget} holdingsName={name ?? data?.company_name} />
-      <InterestBurdenCard holdingsTarget={holdingsTarget} holdingsName={name ?? data?.company_name} />
+        holdingsTarget={holdingsTarget} holdingsName={gName} ingestIsin={ingestIsin} onIngested={onIngested} />
+      {/* Derived cards fetch their own inputs; re-key on reload so an ingest repopulates them too. */}
+      <MarginCard key={`margin-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <CashReturnCard key={`cashret-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <DebtRatioCard key={`debt-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <InterestBurdenCard key={`intburden-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <MetricGrowthCard key={shares.title} cfg={shares}
+        metrics={data?.metrics ?? null} isAgg={isAgg} currency={data?.currency}
+        holdingsTarget={holdingsTarget} holdingsName={gName} ingestIsin={ingestIsin} onIngested={onIngested} />
     </div>
   );
 }

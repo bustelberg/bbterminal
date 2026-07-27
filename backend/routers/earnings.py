@@ -189,6 +189,7 @@ _DASHBOARD_METRIC_CODES = [
     "annuals__Income Statement__Interest Expense",
     "annuals__Income Statement__Net Income",
     "annuals__Income Statement__EPS (Diluted)",
+    "annuals__Income Statement__Shares Outstanding (Diluted Average)",
     # Financials — Valuation
     "annuals__Valuation Ratios__FCF Yield %",
     "annuals__Valuation Ratios__Dividend Yield %",
@@ -801,6 +802,12 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
                          "annuals__income_statement__Interest Expense"),
     "operating_income": ("annuals__Income Statement__Operating Income",
                          "annuals__income_statement__Operating Income"),
+    # Shares outstanding (diluted average, millions of SHARES — not currency, so the holdings
+    # drill-down shows a raw count). ⚠ Use the INCOME STATEMENT spelling: it's the one both
+    # cohorts share — the Per Share Data section diverges (`per_share_data` vs
+    # `per_share_data_array`) between the capitalized and lowercase cohorts.
+    "shares": ("annuals__Income Statement__Shares Outstanding (Diluted Average)",
+               "annuals__income_statement__Shares Outstanding (Diluted Average)"),
 }
 _REVENUE_CODES = _METRIC_CODES["revenue"]
 _REVENUE_CODE = _REVENUE_CODES[0]   # for blend_kind() only — it classifies, it doesn't query

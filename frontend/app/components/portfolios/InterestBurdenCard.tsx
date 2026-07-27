@@ -13,7 +13,7 @@ import { Stat } from './MetricGrowthCard';
 import { type Target } from './HoldingsRevenueModal';
 import InterestBurdenInputsModal from './InterestBurdenInputsModal';
 import { interestBurdenByYear, type InterestBurdenInputs } from './interestBurdenData';
-import { meanOf } from './marginData';
+import { meanOf, paddedDomain } from './marginData';
 
 /**
  * Interest-burden card: the share of operating profit spent on interest = |Interest expense| ÷
@@ -92,7 +92,7 @@ export default function InterestBurdenCard({ holdingsTarget, holdingsName }: {
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
                 <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
-                <YAxis tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                <YAxis domain={paddedDomain([...ratioByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
                   formatter={(v) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, 'Interest / op. profit']} />

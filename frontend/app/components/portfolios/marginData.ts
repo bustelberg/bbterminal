@@ -49,3 +49,25 @@ export function marginByYear(rows: MarginRow[]): Map<number, number> {
 }
 
 export const meanOf = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
+/** A y-axis domain a little beyond the data, so the min/max points don't sit clipped on the axis
+ *  edge. Pads ~10% of the range (at least 1 unit, for a near-flat series) and rounds to whole units
+ *  so the ticks stay tidy. Returns undefined for no data (let the axis auto-scale). */
+export function paddedDomain(values: number[]): [number, number] | undefined {
+  const xs = values.filter((v) => Number.isFinite(v));
+  if (!xs.length) return undefined;
+  const min = Math.min(...xs);
+  const max = Math.max(...xs);
+  const pad = Math.max((max - min) * 0.1, 1);
+  return [Math.floor(min - pad), Math.ceil(max + pad)];
+}
+
+/** Same idea for a LOG axis, where padding must be MULTIPLICATIVE — a fixed delta means nothing on
+ *  a log scale, so the min is divided and the max multiplied by a factor (~15% headroom). Only
+ *  positive values (a log axis can't plot ≤ 0). Returns undefined for no data. */
+export function paddedLogDomain(values: number[]): [number, number] | undefined {
+  const xs = values.filter((v) => Number.isFinite(v) && v > 0);
+  if (!xs.length) return undefined;
+  const f = 1.15;
+  return [Math.min(...xs) / f, Math.max(...xs) * f];
+}

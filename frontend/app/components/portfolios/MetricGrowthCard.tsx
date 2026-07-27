@@ -4,11 +4,14 @@ import { useMemo, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
+import { apiFetch } from '../../../lib/apiFetch';
+import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { logLinearFit } from '../../../lib/trendFit';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
+import { paddedLogDomain } from './marginData';
 
 /**
  * One "Long Equity" growth card: a metric per fiscal year on a LOG axis with an exponential-trend
@@ -25,7 +28,7 @@ export type MetricCfg = {
   noun: string;                  // 'revenue' | 'FCF/share' | 'ROIC' — for labels/messages
   codes: string[];               // company-metric codes (both section spellings)
   benchmarkMetric: string;       // the `metric` param for the holdings drill-down endpoint
-  unit: 'millions' | 'per_share' | 'percent';
+  unit: 'millions' | 'per_share' | 'percent' | 'shares';   // 'shares' = a count, no currency
   // 'growth' = a compounding series on a LOG axis with an exponential trend + R²/CAGR;
   // 'ratio'  = a % on a LINEAR axis with an average line (a ratio doesn't compound).
   kind?: 'growth' | 'ratio';
@@ -48,7 +51,7 @@ export function Stat({ label, value, tone, color, info }: {
 }
 
 export default function MetricGrowthCard({
-  cfg, metrics, isAgg, currency, holdingsTarget, holdingsName,
+  cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin, onIngested,
 }: {
   cfg: MetricCfg;
   metrics: MetricRow[] | null;   // null = still loading (the tab's company fetch)
@@ -56,9 +59,53 @@ export default function MetricGrowthCard({
   currency?: string | null;
   holdingsTarget: Target;
   holdingsName?: string | null;  // the portfolio/company the drill-down is for
+  // Single-company only: its ISIN + a callback to reload the tab's metrics after an ingest, so an
+  // empty card can fetch this company's financials from GuruFocus (which brings every growth line
+  // at once — revenue and shares are the same 192-company set). A portfolio ingests per-row in the
+  // drill-down instead, so this is left undefined there.
+  ingestIsin?: string;
+  onIngested?: () => void;
 }) {
   const [showHoldings, setShowHoldings] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<string | null>(null);
   const isRatio = cfg.kind === 'ratio';
+
+  // A GuruFocus ingest outcome → a plain sentence. Every non-success is a real answer (see the
+  // backend's `classify_fetch_outcome`), so it's stated, never swallowed.
+  const explain = (status: string | undefined, detail: string | undefined, http: number) => {
+    switch (status) {
+      case 'unsubscribed': return 'Unsubscribed — this listing’s exchange is outside our GuruFocus subscription.';
+      case 'no_data': return 'No data — GuruFocus has no fundamentals for this listing.';
+      case 'not_equity': return 'Not an equity — fundamentals don’t apply (bond / fund / derivative).';
+      case 'not_found': return 'Not found — couldn’t resolve this ISIN to a GuruFocus listing.';
+      case 'error': return detail || 'Fetch failed.';
+      default: return detail || status || `HTTP ${http}`;
+    }
+  };
+
+  const ingest = async () => {
+    if (!ingestIsin) return;
+    setBusy(true); setOutcome(null);
+    try {
+      const r = await apiFetch(`${API_URL}/api/earnings/fundamental-coverage/ingest`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isin: ingestIsin, name: holdingsName ?? undefined }),
+      });
+      const j = (await r.json().catch(() => null)) as { status?: string; detail?: string } | null;
+      if (r.ok && j?.status === 'ingested') {
+        // Financials landed (revenue AND shares come together) → reload the tab; the chart appears.
+        onIngested?.();
+        return;
+      }
+      // Anything else is a stated reason, and we do NOT reload — nothing changed, so keep it visible.
+      setOutcome(explain(j?.status, j?.detail, r.status));
+    } catch (e) {
+      setOutcome(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const points = useMemo(() => {
     const rows = metrics ?? [];
@@ -88,17 +135,24 @@ export default function MetricGrowthCard({
     }));
   }, [points, fit, isRatio]);
 
+  // Log axis: pad the domain (multiplicatively) so the min/max points + trend endpoints don't clip.
+  const logDomain = useMemo(() =>
+    paddedLogDomain(chartData.flatMap((d) => [d.value, d.trend]).filter((v): v is number => v != null)),
+  [chartData]);
+
   const fmt = (v: number | null | undefined) => {
     if (v == null) return '—';
     if (cfg.unit === 'percent') return `${v.toFixed(1)}%`;
     if (isAgg) return v.toFixed(1);                      // blended growth index
     if (cfg.unit === 'per_share') return v.toFixed(2);
+    // 'millions' (currency) and 'shares' (a count) both scale B/T/M; only the prefix differs.
     const a = Math.abs(v);
     if (a >= 1e6) return `${(v / 1e6).toFixed(2)}T`;
     if (a >= 1e3) return `${(v / 1e3).toFixed(1)}B`;
     return `${v.toFixed(0)}M`;
   };
-  const ccy = !isAgg && currency && cfg.unit !== 'percent' ? `${currency} ` : '';
+  // A share count carries no currency, so no ccy prefix on 'shares' (nor on a % ratio).
+  const ccy = !isAgg && currency && cfg.unit !== 'percent' && cfg.unit !== 'shares' ? `${currency} ` : '';
   const cagr = (v: number | null) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`);
 
   return (
@@ -108,7 +162,26 @@ export default function MetricGrowthCard({
       {metrics == null ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
       ) : points.length === 0 ? (
-        <p className="text-[11px] text-fg-faint py-16 text-center">No {cfg.noun} ingested for this {isAgg ? 'portfolio' : 'company'}.</p>
+        <div className="py-16 flex flex-col items-center gap-3 text-center px-4">
+          <p className="text-[11px] text-fg-faint">No {cfg.noun} ingested for this {isAgg ? 'portfolio' : 'company'}.</p>
+          {ingestIsin && (busy ? (
+            <span className="text-xs text-fg-subtle">Fetching from GuruFocus…</span>
+          ) : outcome ? (
+            <>
+              <p className="text-xs text-warn-300 max-w-[28ch]">{outcome}</p>
+              <button type="button" onClick={ingest}
+                className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
+                Try again
+              </button>
+            </>
+          ) : (
+            <button type="button" onClick={ingest}
+              title="Fetch this company's financials from GuruFocus."
+              className="text-xs px-3 py-1 rounded-lg border border-accent-600/40 text-accent-400 hover:bg-overlay/5">
+              Fetch financials from GuruFocus
+            </button>
+          ))}
+        </div>
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
@@ -149,7 +222,7 @@ export default function MetricGrowthCard({
                     tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 ) : (
                   // Log scale: an exponential (constant-%) growth trend draws as a straight line.
-                  <YAxis scale="log" domain={['dataMin', 'dataMax']} allowDataOverflow
+                  <YAxis scale="log" domain={logDomain ?? ['dataMin', 'dataMax']} allowDataOverflow
                     tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: number) => fmt(v)} width={60} />
                 )}
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
