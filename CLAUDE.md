@@ -40,11 +40,20 @@ Useful: `npx supabase status` (URLs/keys), `db reset` (wipe + re-migrate + seed 
 >
 > **Deleted, do not re-add**: the Playwright e2e suite (`frontend/e2e/`, `playwright.config.ts`,
 > the `@playwright/test` dep, the `E2E_BYPASS_AUTH` proxy short-circuit and `lib/authBypass.ts`),
-> the CI `backend-stack-smoke` job and `supabase/ci_seed.sql`, and a permanently-skipped
-> network test in `test_aex_template.py`.
+> the CI `backend-stack-smoke` job and `supabase/ci_seed.sql`, a permanently-skipped
+> network test in `test_aex_template.py`, and — 2026-07-28 — the **`prod-smoke` workflow**
+> (`.github/workflows/prod-smoke.yml`), which curled ~8 live production endpoints on every push to
+> `main`, every 6 hours and on demand. It survived the 2026-07-23 sweep because it lived in its own
+> workflow file rather than in `ci.yml`, so a grep for the deleted job never found it.
+>
+> ⚠ **That one was a PRODUCTION MONITOR, not a test of the code being pushed** — it is the only
+> thing that was watching whether prod actually answers. Nothing replaces it. If prod breaking
+> silently matters, that is an uptime/alerting job (Railway healthcheck, an external pinger), not a
+> CI job — do not bring it back into this pipeline.
 >
 > **Banned**: browser/e2e tests · anything booting Postgres, PostgREST, uvicorn or a Next build ·
-> anything hitting the network or a live Supabase · any fixture needing a seeded database.
+> anything hitting the network or a live Supabase · any fixture needing a seeded database ·
+> anything probing a deployed environment.
 >
 > The e2e suite earned this: 5 `/portfolios` specs sat red for weeks against a fixture that no
 > longer matched the backend, and a red suite nobody trusts stops being read at all. **When
