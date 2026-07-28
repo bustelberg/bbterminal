@@ -14,6 +14,7 @@ from routers._fundamental_blend import (
     blend_kind,
     blend_matrix,
     blend_series,
+    explain_empty,
     merge_relative_growth,
 )
 
@@ -102,11 +103,11 @@ class TestALevelIsRebasedBeforeItIsWeighted:
         # counts in the denominator — correctly, since the metric genuinely does not span it — so
         # at 50/50 the whole date would be omitted instead, which is a different (also correct)
         # behaviour tested below.
-        ok = _m(0.7, **{"2023_12_31": 100, "2024_12_31": 150})
-        loss = _m(0.3, **{"2023_12_31": -50, "2024_12_31": 60})
+        ok = _m(0.85, **{"2023_12_31": 100, "2024_12_31": 150})
+        loss = _m(0.15, **{"2023_12_31": -50, "2024_12_31": 60})
         out = blend_series([ok, loss], REV)
         assert out["points"][-1]["value"] == pytest.approx(150.0)   # the loss member is out
-        assert out["points"][-1]["covered_pct"] == pytest.approx(70.0)
+        assert out["points"][-1]["covered_pct"] == pytest.approx(85.0)
 
     def test_dropping_a_member_can_take_the_date_below_the_floor(self):
         """And then there is no value at all, which is the honest outcome."""
@@ -119,15 +120,15 @@ class TestCoverageIsPerDateAndIsAFloor:
     def test_the_weight_reporting_is_renormalised_AT_EACH_DATE(self):
         """⚠ Members report on different calendars. Dividing by the ORIGINAL weight would drag
         every early period toward zero — a rise that is nothing but coverage improving."""
-        # 70/30 so the early date clears the floor and the renormalisation is observable at all.
-        early = _m(0.7, **{"2023_12_31": 20, "2024_12_31": 20})
-        late = _m(0.3, **{"2024_12_31": 40})
+        # 85/15 so the early date clears the floor and the renormalisation is observable at all.
+        early = _m(0.85, **{"2023_12_31": 20, "2024_12_31": 20})
+        late = _m(0.15, **{"2024_12_31": 40})
         out = blend_series([early, late], ROE)
         first = next(p for p in out["points"] if p["period"] == "2023")
-        assert first["value"] == pytest.approx(20.0)     # NOT 14.0 (= 0.7 x 20 undivided)
-        assert first["covered_pct"] == pytest.approx(70.0)
+        assert first["value"] == pytest.approx(20.0)     # NOT 17.0 (= 0.85 x 20 undivided)
+        assert first["covered_pct"] == pytest.approx(85.0)
         last = next(p for p in out["points"] if p["period"] == "2024")
-        assert last["value"] == pytest.approx(26.0)      # 0.7x20 + 0.3x40, full coverage
+        assert last["value"] == pytest.approx(23.0)      # 0.85x20 + 0.15x40, full coverage
 
     def test_a_date_under_the_floor_is_omitted_not_drawn_as_a_dip(self):
         thin = _m(0.05, **{"2020_12_31": 99})
@@ -136,7 +137,18 @@ class TestCoverageIsPerDateAndIsAFloor:
         assert [p["period"] for p in out["points"]] == ["2024"]
 
     def test_the_floor_is_the_documented_one(self):
-        assert MIN_BLEND_COVERAGE_PCT == 60.0
+        assert MIN_BLEND_COVERAGE_PCT == 80.0
+
+    def test_the_newest_fiscal_year_is_not_drawn_off_the_few_who_have_filed(self):
+        """⚠ THE REASON THE FLOOR IS 80. Books close on different dates, so early in a year a
+        couple of holdings have filed and the rest have not. Renormalising over whoever reported
+        turns that into a full-height point on the right edge, in the same ink as a year every
+        holding reported — a move in the sample, read as a move in the book. At 60 this cleared."""
+        filed = [_m(0.35, **{"2024_12_31": 10, "2025_12_31": 10}),
+                 _m(0.30, **{"2024_12_31": 10, "2025_12_31": 40})]
+        pending = [_m(0.35, **{"2024_12_31": 10})]
+        out = blend_series([*filed, *pending], ROE)
+        assert [p["period"] for p in out["points"]] == ["2024"]   # 2025 spans 65% — omitted
 
     def test_no_members_is_no_series_not_a_zero(self):
         assert blend_series([], ROE)["points"] == []
@@ -415,3 +427,59 @@ class TestTheExclusionsAreHalfTheAnswer:
         m = blend_breakdown(members, REV, "2025")["members"][0]
         assert m["value"] == pytest.approx(150.0)     # rebased index
         assert m["raw_value"] == pytest.approx(75.0)  # as reported
+
+
+DIV_PS = "annuals__Per Share Data__Dividends per Share"
+
+
+class TestAnEmptySeriesIsNotAnEmptyDatabase:
+    """⚠ THE CHART CANNOT TELL THE TWO APART, AND THEY ARE OPPOSITES. A portfolio card drawing
+    nothing says "not ingested" — which, when every holding HAS the line and the blend dropped it,
+    sends the reader to re-fetch data they already own. `explain_empty` is what lets the card say
+    which of the two it is looking at."""
+
+    def test_nothing_reports_it_is_not_explained_away(self):
+        """A code no holding carries genuinely IS "not ingested" — there is nothing to explain,
+        and inventing a note would bury the one message that IS actionable."""
+        members = [{"weight": 0.5, "points": {}}, {"weight": 0.5, "points": {}}]
+        assert explain_empty(members, DIV_PS) is None
+
+    def test_a_dividend_series_starting_at_zero_is_named_as_the_cause(self):
+        """The measured case: a level is rebased to 100 at its first observation, and 100 x v/0 is
+        undefined — so a company that began paying mid-window is dropped from the metric entirely.
+        Two of three holdings here, which takes every year under the coverage floor."""
+        members = [
+            {"weight": 0.4, "points": {"2015-12-31": 0.0, "2024-12-31": 1.2}},
+            {"weight": 0.4, "points": {"2015-12-31": 0.0, "2024-12-31": 0.8}},
+            {"weight": 0.2, "points": {"2015-12-31": 1.0, "2024-12-31": 2.0}},
+        ]
+        assert blend_series(members, DIV_PS)["points"] == []      # the chart draws nothing
+        why = explain_empty(members, DIV_PS)
+        assert why["reporting"] == 3                              # ⚠ all three HAVE the data
+        assert why["reporting_pct"] == pytest.approx(100.0)
+        assert why["contributing"] == 1
+        assert why["dropped"] == {"non_positive_base": 2}
+        assert why["best_covered_pct"] == pytest.approx(20.0)
+        assert why["floor_pct"] == MIN_BLEND_COVERAGE_PCT
+        assert why["years_below_floor"] == 2
+
+    def test_a_thin_year_is_reported_as_the_floor_not_as_a_drop(self):
+        """Every member survives preparation; there simply is not enough weight reporting. A note
+        blaming a rebase here would send the reader after the wrong thing."""
+        members = [{"weight": 0.3, "points": {"2015-12-31": 1.0, "2024-12-31": 2.0}},
+                   {"weight": 0.7, "points": {}}]
+        why = explain_empty(members, DIV_PS)
+        assert why["dropped"] == {"no_data": 1}
+        assert why["contributing"] == 1
+        assert why["best_covered_pct"] == pytest.approx(30.0)
+        assert why["years_below_floor"] == 2
+
+    def test_a_book_of_losses_is_a_multiple_with_no_usable_value(self):
+        """⚠ Above the floor and still no point: the harmonic combine has nothing to invert. Only
+        `years_no_value` distinguishes that from a thin year."""
+        members = [{"weight": 1.0, "points": {"2024-12-31": -8.0}}]
+        why = explain_empty(members, PE)
+        assert why["kind"] == "multiple"
+        assert why["best_covered_pct"] == pytest.approx(100.0)
+        assert why["years_no_value"] == 1
+        assert why["years_below_floor"] == 0

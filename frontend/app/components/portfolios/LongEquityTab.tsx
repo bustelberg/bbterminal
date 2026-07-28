@@ -12,6 +12,8 @@ import SbcOcfCard from './SbcOcfCard';
 import InvestedCapitalCard from './InvestedCapitalCard';
 import CapexMarginCard from './CapexMarginCard';
 import FcfSbcYieldCard from './FcfSbcYieldCard';
+import DividendYieldCard from './DividendYieldCard';
+import { type BlendNote } from './blendNotes';
 
 /**
  * The "Long Equity" tab: a grid of growth cards (Revenue, FCF/share, …), each a
@@ -21,7 +23,12 @@ import FcfSbcYieldCard from './FcfSbcYieldCard';
  */
 
 type MetricRow = { metric_code: string; target_date: string; numeric_value: number | null };
-type MetricsResponse = { currency?: string | null; company_name?: string | null; metrics: MetricRow[] };
+type MetricsResponse = {
+  currency?: string | null; company_name?: string | null; metrics: MetricRow[];
+  // Portfolio only: per metric_code, why a code the holdings DO carry produced no blended line.
+  // See `blendNotes` / the backend's `explain_empty`.
+  blend_notes?: Record<string, BlendNote>;
+};
 
 // Each card is one metric. `codes` carries BOTH GuruFocus section spellings (see the backend's
 // `_METRIC_CODES`); `benchmarkMetric` is the `metric` param for the benchmark + holdings endpoints.
@@ -42,14 +49,11 @@ const CARDS: MetricCfg[] = [
     codes: ['annuals__Income Statement__Shares Outstanding (Diluted Average)',
       'annuals__income_statement__Shares Outstanding (Diluted Average)'],
   },
-  {
-    // Per-share currency level; CAGR reads as the dividend-growth rate. Three per-share section
-    // spellings across cohorts (see backend `div_ps`); a non-payer plots empty (no growth to show).
-    title: 'Dividend / share', noun: 'dividend/share', unit: 'per_share', kind: 'growth', benchmarkMetric: 'div_ps',
-    codes: ['annuals__Per Share Data__Dividends per Share',
-      'annuals__per_share_data__Dividends per Share',
-      'annuals__per_share_data_array__Dividends per Share'],
-  },
+  // ⚠ NO "DIVIDEND / SHARE" CARD — the dividend is reported as a YIELD, for a company and for a
+  // portfolio alike (`DividendYieldCard`). A per-share amount has no portfolio-level meaning: there
+  // is no portfolio share, the amounts sit in different currencies, and the level rule rebases each
+  // holding to 100 at its first year, which a dividend series starting at 0.00 cannot survive — so
+  // the portfolio card read "No dividend/share ingested" while every holding carried the line.
 ];
 
 export default function LongEquityTab({ isin, name, basket, portfolioId }: {
@@ -64,6 +68,10 @@ export default function LongEquityTab({ isin, name, basket, portfolioId }: {
   // Bumped after an empty card ingests this company's financials — reloads the metrics (repopulates
   // every growth card) and re-keys the derived cards so they refetch their inputs too.
   const [reloadKey, setReloadKey] = useState(0);
+  // ⚠ A SECOND, NARROWER KEY. The growth cards all read ONE metrics fetch, while each derived card
+  // owns its own endpoint and refetches on a re-key — so bumping `reloadKey` to refresh one chart
+  // reloads twelve. This one refetches the metrics only; nothing else moves.
+  const [metricsKey, setMetricsKey] = useState(0);
 
   // ⚠ Memoised — it's a card/modal effect dep, so a fresh object each render would refetch forever.
   const holdingsTarget = useMemo(() => (isAgg
@@ -97,40 +105,41 @@ export default function LongEquityTab({ isin, name, basket, portfolioId }: {
       }
     })();
     return () => { alive = false; };
-  }, [isin, isAgg, basket, portfolioId, reloadKey]);
+  }, [isin, isAgg, basket, portfolioId, reloadKey, metricsKey]);
 
   if (err) return <p className="text-xs text-neg-300 py-16 text-center">{err}</p>;
 
   // Fixed order across the grid: Revenue, FCF/share, FCF-SBC margin, Cash return on capital,
   // Debt / assets ex-GW, Interest / op. profit, Shares outstanding, SBC / OCF, Invested capital,
-  // Capex margin, Dividend / share, FCF-SBC yield.
-  const [revenue, fcfPs, shares, divPs] = CARDS;
+  // Capex margin, Dividend yield, FCF-SBC yield.
+  const [revenue, fcfPs, shares] = CARDS;
   // Single-company only: an empty growth card can fetch this company's financials, then reload.
   const ingestIsin = isAgg ? undefined : isin;
   const onIngested = () => setReloadKey((k) => k + 1);
+  const onReloadMetrics = () => setMetricsKey((k) => k + 1);
   const gName = name ?? data?.company_name;
+  const growth = {
+    metrics: data?.metrics ?? null, isAgg, currency: data?.currency,
+    blendNotes: data?.blend_notes, holdingsTarget, holdingsName: gName,
+    ingestIsin, onIngested, onReloadMetrics,
+  };
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
       <MetricGrowthCard key={revenue.title} cfg={revenue}
-        metrics={data?.metrics ?? null} isAgg={isAgg} currency={data?.currency}
-        holdingsTarget={holdingsTarget} holdingsName={gName} ingestIsin={ingestIsin} onIngested={onIngested} />
+        {...growth} />
       <MetricGrowthCard key={fcfPs.title} cfg={fcfPs}
-        metrics={data?.metrics ?? null} isAgg={isAgg} currency={data?.currency}
-        holdingsTarget={holdingsTarget} holdingsName={gName} ingestIsin={ingestIsin} onIngested={onIngested} />
+        {...growth} />
       {/* Derived cards fetch their own inputs; re-key on reload so an ingest repopulates them too. */}
       <MarginCard key={`margin-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <CashReturnCard key={`cashret-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <DebtRatioCard key={`debt-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <InterestBurdenCard key={`intburden-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <MetricGrowthCard key={shares.title} cfg={shares}
-        metrics={data?.metrics ?? null} isAgg={isAgg} currency={data?.currency}
-        holdingsTarget={holdingsTarget} holdingsName={gName} ingestIsin={ingestIsin} onIngested={onIngested} />
+        {...growth} />
       <SbcOcfCard key={`sbcocf-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <InvestedCapitalCard key={`invcap-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} isAgg={isAgg} />
       <CapexMarginCard key={`capex-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
-      <MetricGrowthCard key={divPs.title} cfg={divPs}
-        metrics={data?.metrics ?? null} isAgg={isAgg} currency={data?.currency}
-        holdingsTarget={holdingsTarget} holdingsName={gName} ingestIsin={ingestIsin} onIngested={onIngested} />
+      <DividendYieldCard key={`divyield-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <FcfSbcYieldCard key={`fcfsbcyield-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
     </div>
   );

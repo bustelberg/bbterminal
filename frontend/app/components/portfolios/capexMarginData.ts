@@ -2,6 +2,8 @@
  *  client from two raw lines so the plotted number and the drill-down can't disagree. Mirrors
  *  {@link ./sbcOcfData}. */
 
+import { weightedByYear } from './marginData';
+
 export type CapexMarginRow = {
   isin: string; name: string; weight_pct: number; currency: string | null;
   ticker: string | null; exchange: string | null;
@@ -24,19 +26,6 @@ export function capexMarginOf(capex: number | null | undefined, revenue: number 
  *  currency-free ratio, so averaging is currency-safe; summing mixed-currency amounts is not). For
  *  a single company this is just that company's ratio. */
 export function capexMarginByYear(rows: CapexMarginRow[]): Map<number, number> {
-  const years = new Set<string>();
-  for (const r of rows) for (const y of Object.keys(r.revenue)) years.add(y);
-  const out = new Map<number, number>();
-  for (const y of years) {
-    let num = 0;
-    let den = 0;
-    for (const r of rows) {
-      const v = capexMarginOf(r.capex[y], r.revenue[y]);
-      if (v == null) continue;
-      num += r.weight_pct * v;
-      den += r.weight_pct;
-    }
-    if (den > 0) out.set(Number(y), num / den);
-  }
-  return out;
+  return weightedByYear(rows, (r) => Object.keys(r.revenue),
+    (r, y) => capexMarginOf(r.capex[y], r.revenue[y]));
 }

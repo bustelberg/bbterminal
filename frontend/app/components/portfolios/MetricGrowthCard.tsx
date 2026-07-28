@@ -11,6 +11,8 @@ import { logLinearFit } from '../../../lib/trendFit';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
+import HoldingsIngestPanel from './HoldingsIngestPanel';
+import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
 import { paddedLogDomain } from './marginData';
 
 /**
@@ -52,6 +54,7 @@ export function Stat({ label, value, tone, color, info }: {
 
 export default function MetricGrowthCard({
   cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin, onIngested,
+  blendNotes, onReloadMetrics,
 }: {
   cfg: MetricCfg;
   metrics: MetricRow[] | null;   // null = still loading (the tab's company fetch)
@@ -59,6 +62,12 @@ export default function MetricGrowthCard({
   currency?: string | null;
   holdingsTarget: Target;
   holdingsName?: string | null;  // the portfolio/company the drill-down is for
+  // Portfolio only: why a metric the holdings DO carry produced no blended line. Absent for a
+  // metric nobody reports — that one really is "not ingested". See `blendNotes`.
+  blendNotes?: Record<string, BlendNote>;
+  // Reload just the metrics fetch (the four growth cards share it), NOT the whole tab — the
+  // derived cards each refetch their own inputs on a re-key and none of that is needed here.
+  onReloadMetrics?: () => void;
   // Single-company only: its ISIN + a callback to reload the tab's metrics after an ingest, so an
   // empty card can fetch this company's financials from GuruFocus (which brings every growth line
   // at once — revenue and shares are the same 192-company set). A portfolio ingests per-row in the
@@ -121,6 +130,10 @@ export default function MetricGrowthCard({
     return [...byYear.entries()].map(([year, v]) => ({ year, value: v.value })).sort((a, b) => a.year - b.year);
   }, [metrics, cfg]);
 
+  // Present only when the blend saw this metric and still drew nothing — the one case where
+  // "not ingested" would be false.
+  const blendNote = noteFor(blendNotes, cfg.codes);
+
   const fit = useMemo(() => logLinearFit(points), [points]);            // growth only
   const avg = points.length ? points.reduce((a, p) => a + p.value, 0) / points.length : null;  // ratio only
   const latest = points.length ? points[points.length - 1].value : null;
@@ -161,9 +174,28 @@ export default function MetricGrowthCard({
 
       {metrics == null ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
+      ) : points.length === 0 && isAgg && blendNote ? (
+        // ⚠ THE HOLDINGS HAVE IT AND THE BLEND COULD NOT DRAW IT. Offering "fetch financials" here
+        // would send the reader to spend GuruFocus quota on data that is already in the database.
+        // State the fact and the reason, and open the per-holding table instead.
+        <div className="py-16 flex flex-col items-center gap-2 text-center px-2">
+          <p className="text-[11px] text-fg-soft">{reportingLine(blendNote, cfg.noun)}.</p>
+          <p className="text-[11px] text-fg-faint">No portfolio line: {whyNoLine(blendNote)}</p>
+          <button type="button" onClick={() => setShowHoldings(true)}
+            className="text-xs px-3 py-1 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
+            See per holding
+          </button>
+        </div>
+      ) : points.length === 0 && isAgg ? (
+        // A portfolio has no single ISIN to fetch — it has N of them, each with its own outcome.
+        // The panel runs them one at a time and REPORTS per holding; it stays on screen until the
+        // reader chooses "Reload", so a partial success can't hide the holdings that came back
+        // empty. Reload is metrics-only: the derived cards' inputs are untouched by this run.
+        <HoldingsIngestPanel target={holdingsTarget} metric={cfg.benchmarkMetric}
+          noun={cfg.noun} onIngested={onReloadMetrics ?? onIngested} />
       ) : points.length === 0 ? (
         <div className="py-16 flex flex-col items-center gap-3 text-center px-4">
-          <p className="text-[11px] text-fg-faint">No {cfg.noun} ingested for this {isAgg ? 'portfolio' : 'company'}.</p>
+          <p className="text-[11px] text-fg-faint">No {cfg.noun} ingested for this company.</p>
           {ingestIsin && (busy ? (
             <span className="text-xs text-fg-subtle">Fetching from GuruFocus…</span>
           ) : outcome ? (

@@ -52,7 +52,16 @@ from __future__ import annotations
 from collections import defaultdict
 
 # Below this share of the blended weight reporting on a date, that date has no honest value.
-MIN_BLEND_COVERAGE_PCT = 60.0
+#
+# ⚠ RAISED 60 -> 80 (2026-07-28), AND THE NEWEST YEAR IS WHY. Books close on different dates, so
+# early in a fiscal year a handful of holdings have filed and the rest have not — at 60 that year
+# still cleared the floor and was drawn, full height, in the same ink as a year every holding
+# reported. It reads as a move in the book and it is a move in the sample.
+#
+# ⚠ KEPT IN LOCK-STEP WITH THE FRONTEND'S `marginData.MIN_YEAR_COVERAGE_PCT`, which applies the
+# same floor to the ratio cards derived on the client. Two floors that disagree put two cards on
+# the same screen spanning different fractions of the same book.
+MIN_BLEND_COVERAGE_PCT = 80.0
 
 # A price over something. Aggregates HARMONICALLY.
 #
@@ -182,6 +191,67 @@ def blend_series(members: list[dict], metric_code: str) -> dict:
         out.append({"period": d, "value": round(value, 6), "covered_pct": round(covered, 2)})
     spanned = max((p["covered_pct"] for p in out), default=0.0)
     return {"kind": kind, "points": out, "covered_pct": round(spanned, 2)}
+
+
+def explain_empty(members: list[dict], metric_code: str) -> dict | None:
+    """Why `blend_series` drew NOTHING even though holdings carry this metric — or None when none
+    of them do.
+
+    ⚠ "NO SERIES" AND "NOT INGESTED" ARE DIFFERENT ANSWERS AND THE UI CANNOT TELL THEM APART.
+    An empty chart shows one thing; the two reasons behind it are opposites. Measured on a real
+    book's Dividends per Share: every holding had the line, and the portfolio card still read "No
+    dividend/share ingested for this portfolio" — because a level series is rebased to 100 at its
+    first observation and a dividend series that starts at 0.00 has `base <= 0`, so member after
+    member was dropped (`non_positive_base`) until no year cleared the coverage floor. Telling the
+    reader to go ingest data they already have is worse than saying nothing.
+
+    Returns the FACTS, never a sentence — the caller words it:
+        reporting/reporting_pct   members carrying this metric, and their share of blended weight
+        contributing              of those, how many survived preparation (rebasing etc.)
+        dropped                   {reason: count} — `non_positive_base` | `no_weight` | `no_data`
+        best_covered_pct          the best year's coverage, against `floor_pct`
+        years / years_below_floor / years_no_value
+    """
+    kind = blend_kind(metric_code)
+    total_w = sum(abs(float(m.get("weight") or 0)) for m in members)
+    reporting = [m for m in members
+                 if any(v is not None for v in (m.get("points") or {}).values())]
+    if not reporting:
+        return None                         # nothing carries it — that IS "not ingested"
+
+    prepared, dropped = _prepare(members, kind)
+    combine = _weighted_harmonic if kind == "multiple" else _weighted_arithmetic
+    by_year: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    for p in prepared:
+        for year, (_d, v) in p["by_year"].items():
+            by_year[year].append((p["weight"], v))
+
+    best = 0.0
+    below = no_value = 0
+    for pairs in by_year.values():
+        covered = 100.0 * sum(w for w, _ in pairs) / total_w if total_w > 0 else 0.0
+        best = max(best, covered)
+        if combine(pairs) is None:
+            no_value += 1
+        elif covered < MIN_BLEND_COVERAGE_PCT:
+            below += 1
+
+    counts: dict[str, int] = {}
+    for d in dropped:
+        counts[d["reason"]] = counts.get(d["reason"], 0) + 1
+    return {
+        "kind": kind,
+        "reporting": len(reporting),
+        "reporting_pct": round(100.0 * sum(abs(float(m.get("weight") or 0)) for m in reporting)
+                               / total_w, 2) if total_w > 0 else 0.0,
+        "contributing": len(prepared),
+        "dropped": counts,
+        "best_covered_pct": round(best, 2),
+        "floor_pct": MIN_BLEND_COVERAGE_PCT,
+        "years": len(by_year),
+        "years_below_floor": below,
+        "years_no_value": no_value,
+    }
 
 
 def blend_matrix(members: list[dict], metric_code: str) -> dict:

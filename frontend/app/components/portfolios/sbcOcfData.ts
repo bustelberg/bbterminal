@@ -2,6 +2,8 @@
  *  client from two raw lines so the plotted number and the drill-down can't disagree. Mirrors
  *  {@link ./debtRatioData}. */
 
+import { weightedByYear } from './marginData';
+
 export type SbcOcfRow = {
   isin: string; name: string; weight_pct: number; currency: string | null;
   ticker: string | null; exchange: string | null;
@@ -25,19 +27,5 @@ export function sbcOcfOf(sbc: number | null | undefined, ocf: number | null | un
  *  currency-free ratio, so averaging is currency-safe; summing mixed-currency amounts is not). For
  *  a single company this is just that company's ratio. */
 export function sbcOcfByYear(rows: SbcOcfRow[]): Map<number, number> {
-  const years = new Set<string>();
-  for (const r of rows) for (const y of Object.keys(r.ocf)) years.add(y);
-  const out = new Map<number, number>();
-  for (const y of years) {
-    let num = 0;
-    let den = 0;
-    for (const r of rows) {
-      const v = sbcOcfOf(r.sbc[y], r.ocf[y]);
-      if (v == null) continue;
-      num += r.weight_pct * v;
-      den += r.weight_pct;
-    }
-    if (den > 0) out.set(Number(y), num / den);
-  }
-  return out;
+  return weightedByYear(rows, (r) => Object.keys(r.ocf), (r, y) => sbcOcfOf(r.sbc[y], r.ocf[y]));
 }

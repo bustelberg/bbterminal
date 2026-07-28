@@ -627,7 +627,7 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
     charts' EUR conversion is driven off this field, so a currency here would relabel an index as
     money. A null says "not a currency amount", which is the truth.
     """
-    from routers._fundamental_blend import blend_series  # noqa: PLC0415
+    from routers._fundamental_blend import blend_series, explain_empty  # noqa: PLC0415
     from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
 
     members = await _load_and_expand_members(body)
@@ -672,6 +672,7 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
                 float(r["numeric_value"])
 
         out: list[dict] = []
+        notes: dict[str, dict] = {}
         for code, per_company in by_metric.items():
             # ⚠ A FORECAST INHERITS THE ANCHOR OF THE ACTUAL IT CONTINUES. Both are the same
             # quantity and the chart indexes them off ONE base, so rebasing them independently
@@ -679,17 +680,27 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
             # ~94% earnings collapse that exists only in the arithmetic.
             base_code = _FORECAST_BASE.get(code)
             base_by_company = by_metric.get(base_code, {}) if base_code else {}
-            s = blend_series([{"weight": r["weight_pct"],
-                               "points": per_company.get(r["company_id"], {}),
-                               "base_points": base_by_company.get(r["company_id"], {})}
-                              for r in covered], code)
+            blend_members = [{"weight": r["weight_pct"],
+                              "points": per_company.get(r["company_id"], {}),
+                              "base_points": base_by_company.get(r["company_id"], {})}
+                             for r in covered]
+            s = blend_series(blend_members, code)
+            if not s["points"]:
+                # ⚠ AN EMPTY SERIES IS NOT AN EMPTY DATABASE, AND THE CHART CANNOT TELL. Measured
+                # on a real book's Dividends per Share: every holding carried the line and the
+                # card still read "No dividend/share ingested" — the level rebase drops a series
+                # that starts at 0.00. The reason travels with the (absent) series so the card
+                # states it instead of sending the reader to re-ingest data they already have.
+                why = explain_empty(blend_members, code)
+                if why is not None:
+                    notes[code] = why
             for p in s["points"]:
                 # The fiscal-year key becomes a date the charts can plot. 31 Dec is a convention
                 # here, not a claim about anyone's year-end — members close on different days,
                 # which is exactly why the blend aligns on the year in the first place.
                 out.append({"metric_code": code, "target_date": f"{p['period']}-12-31",
                             "numeric_value": p["value"], "is_prediction": False})
-        return {"metrics": out, "codes": len(by_metric)}
+        return {"metrics": out, "codes": len(by_metric), "blend_notes": notes}
 
     built = await asyncio.to_thread(_build)
     return {
@@ -697,6 +708,9 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
         "company_name": f"{len(covered)} holdings · {cov['covered_pct']:.0f}% of weight",
         "currency": None,
         "metrics": built["metrics"],
+        # Per metric_code, why a code with member data produced no line. Only codes that drew
+        # nothing appear; a code nobody reports is absent (that one IS "not ingested").
+        "blend_notes": built["blend_notes"],
         "coverage": cov,
     }
 
@@ -825,6 +839,16 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
     "div_ps": ("annuals__Per Share Data__Dividends per Share",
                "annuals__per_share_data__Dividends per Share",
                "annuals__per_share_data_array__Dividends per Share"),
+    # Behind the dividend-yield card: DPS ÷ the fiscal year-end share price (`div_ps` is the
+    # numerator). ⚠ THE PRICE IS WHAT MAKES A DIVIDEND REPORTABLE FOR A PORTFOLIO AT ALL. Dividends
+    # per share cannot be aggregated — there is no portfolio share, the amounts are in different
+    # currencies, and a level series that starts at 0.00 cannot be rebased to a growth index (which
+    # is what left the portfolio card permanently empty). DPS ÷ price is currency-free, so the
+    # weighted average IS the portfolio's yield (the weights are value weights), and a non-payer
+    # contributes a true 0 instead of being dropped. Same three per-share spellings as `div_ps`.
+    "price_ps": ("annuals__Per Share Data__Month End Stock Price",
+                 "annuals__per_share_data__Month End Stock Price",
+                 "annuals__per_share_data_array__Month End Stock Price"),
     # Behind the FCF-SBC yield card: (FCF − SBC) ÷ Market Cap (`fcf`/`sbc` above are the numerator).
     # Market cap is the fiscal-year-end figure GuruFocus files under Valuation and Quality.
     "market_cap": ("annuals__Valuation and Quality__Market Cap",
@@ -1564,6 +1588,121 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
                 "fcf": fcf, "sbc": sbc, "market_cap": mc,
+            })
+        rows.sort(key=lambda r: -r["weight_pct"])
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.get("/api/earnings/by-isin/{isin}/growth-estimates")
+async def growth_estimates_by_isin(isin: str, force: bool = False):
+    """Analysts' 3–5 year growth-rate estimates for a company, from GuruFocus `keyratios`.
+
+    The figures a reverse DCF is judged against — the model says the price implies 24%/yr, and the
+    next question is what anyone actually forecasts.
+
+    ⚠ A LIVE FETCH, NOT A METRIC READ. These are scalars with no date, so they never reach
+    `metric_data` (the estimates parser only stores list-valued fields). Cached in Storage for a
+    week per listing; `force=true` re-asks. See `_growth_estimates`.
+
+    Returns `{symbol, fields: {eps_3_5y, eps_nri_3_5y, ocf_ps_3_5y, revenue_3_5y}, cached}` with the
+    rates as PERCENTS. A company with no analyst coverage returns nulls, not an error.
+    """
+    from asset_pipeline.isin_alias import canonical  # noqa: PLC0415
+
+    from routers._growth_estimates import growth_estimates_for  # noqa: PLC0415
+
+    def _run() -> dict:
+        resp = (supabase.table("company")
+                .select("company_id,gurufocus_ticker,"
+                        "gurufocus_exchange:gurufocus_exchange(exchange_code)")
+                .eq("isin", canonical(isin)).limit(1).execute())
+        if not resp.data:
+            raise HTTPException(status_code=404, detail="No company record for this ISIN")
+        return growth_estimates_for(resp.data[0], force=force)
+
+    try:
+        return await asyncio.to_thread(_run)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query failed: {e}") from e
+
+
+@router.post("/api/earnings/dividend-yield-inputs")
+async def dividend_yield_inputs(body: FundamentalCoverageRequest):
+    """The two base lines behind the dividend yield, per holding: Dividends per Share and the
+    fiscal year-end share price, per fiscal year, in the company's own reporting currency.
+
+    ⚠ THE YIELD IS THE PORTFOLIO-LEVEL PRIMITIVE; DIVIDENDS PER SHARE IS NOT. There is no portfolio
+    share to report a per-share amount of, the amounts are in different currencies, and a level
+    series that legitimately starts at 0.00 cannot be rebased to a growth index — which is exactly
+    why the portfolio's dividend card sat empty while every holding carried the line. `DPS / price`
+    is currency-free, so the weight-weighted average IS the book's yield (portfolio yield =
+    Σ value·yield ÷ Σ value, and the weights ARE value weights — the arithmetic mean is the
+    aggregate here, not an approximation of it).
+
+    ⚠ AN ABSENT DPS IS NOT A ZERO. GuruFocus files an explicit `0.00` for a company that pays
+    nothing — a real answer that belongs in the average and drags it down honestly. A MISSING line
+    is not that: reading it as zero would let un-ingested holdings quietly deflate the book's yield.
+    The client keeps them apart (`dividendYieldOf`), so the raw lines are returned untouched here.
+
+    Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+    """
+    from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings")
+
+    def _run() -> dict:
+        total_w = sum(abs(float(m.get("weight") or 0)) for m in members) or 1.0
+        raw = sorted({m["isin"] for m in members if m.get("isin")})
+        alias = canonical_map(raw)
+        weight_by: dict[str, float] = {}
+        name_by: dict[str, str] = {}
+        for m in members:
+            isin = (m.get("isin") or "").strip()
+            if not isin:
+                continue
+            ci = alias.get(isin, isin)
+            weight_by[ci] = weight_by.get(ci, 0.0) + abs(float(m.get("weight") or 0))
+            name_by.setdefault(ci, m.get("name") or isin)
+
+        canon = sorted(weight_by)
+        comp: dict[str, dict] = {}
+        for i in range(0, len(canon), IN_CHUNK_SIZE):
+            for c in (supabase.table("company")
+                      .select("company_id,company_name,isin,gurufocus_ticker,"
+                              "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
+                      .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                comp[c["isin"]] = c
+
+        rows: list[dict] = []
+        years: set[str] = set()
+        for ci in canon:
+            c = comp.get(ci)
+            if not c:
+                continue
+            gx = (c.get("gurufocus_exchange") or {}) or {}
+            div = _metric_by_year(c["company_id"], "div_ps")
+            price = _metric_by_year(c["company_id"], "price_ps")
+            years |= set(div) | set(price)
+            exch = gx.get("exchange_code")
+            subscribed = is_gf_subscribed_exchange(exch) if exch else None
+            # `ok` once the DENOMINATOR is there: a company with prices and no dividend line is a
+            # non-payer we can still say something about, while one with dividends and no price
+            # yields nothing computable.
+            status = "ok" if price else ("unsubscribed" if subscribed is False else "no_data")
+            rows.append({
+                "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
+                "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                "currency": gx.get("currency_code"),
+                "ticker": c.get("gurufocus_ticker"), "exchange": exch,
+                "status": status,
+                "div_ps": div, "price_ps": price,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
         return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}

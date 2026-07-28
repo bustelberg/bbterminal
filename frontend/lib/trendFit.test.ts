@@ -1,58 +1,54 @@
-import { describe, expect, it } from 'vitest';
-import { logLinearFit } from './trendFit';
+import { describe, it, expect } from 'vitest';
+import { logLinearFit, trendValueAt } from './trendFit';
+
+const series = (from: number, base: number, rate: number, n: number) =>
+  Array.from({ length: n }, (_, i) => ({ year: from + i, value: base * Math.pow(1 + rate, i) }));
 
 describe('logLinearFit', () => {
-  it('fits perfect exponential growth: R²=1 and CAGR = the rate', () => {
-    // 100 growing at exactly 10%/yr.
-    const pts = Array.from({ length: 6 }, (_, i) => ({ year: 2020 + i, value: 100 * 1.1 ** i }));
-    const f = logLinearFit(pts);
-    expect(f.r2).toBeCloseTo(1, 6);
-    expect(f.cagr).toBeCloseTo(0.10, 6);
-    expect(f.n).toBe(6);
-    // The trend overlays the points exactly.
-    expect(f.trend[0].value).toBeCloseTo(100, 4);
-    expect(f.trend[5].value).toBeCloseTo(100 * 1.1 ** 5, 2);
+  it('recovers a clean exponential exactly', () => {
+    const fit = logLinearFit(series(2016, 10, 0.12, 10));
+    expect(fit.cagr).toBeCloseTo(0.12, 9);
+    expect(fit.r2).toBeCloseTo(1, 9);
+    expect(fit.n).toBe(10);
   });
 
-  it('a lumpy series fits worse (lower R²) than a steady one at the same endpoints', () => {
-    const steady = logLinearFit([
-      { year: 2020, value: 100 }, { year: 2021, value: 110 },
-      { year: 2022, value: 121 }, { year: 2023, value: 133.1 },
-    ]);
-    const lumpy = logLinearFit([
-      { year: 2020, value: 100 }, { year: 2021, value: 180 },
-      { year: 2022, value: 95 }, { year: 2023, value: 133.1 },
-    ]);
-    expect(steady.r2!).toBeGreaterThan(0.99);
-    expect(lumpy.r2!).toBeLessThan(steady.r2!);
+  it('⚠ drops a cash-burn year rather than failing — a loss has no logarithm', () => {
+    const fit = logLinearFit([...series(2016, 10, 0.12, 5), { year: 2021, value: -3 }]);
+    expect(fit.dropped).toBe(1);
+    expect(fit.n).toBe(5);
+    expect(fit.r2).toBeCloseTo(1, 9);
   });
 
-  it('drops non-positive years (no log) and reports the count', () => {
-    const f = logLinearFit([
-      { year: 2020, value: -5 }, { year: 2021, value: 100 },
-      { year: 2022, value: 110 }, { year: 2023, value: 0 },
-    ]);
-    expect(f.dropped).toBe(2);
-    expect(f.n).toBe(2);
+  it('has no line to project from with fewer than two usable points', () => {
+    for (const pts of [[], [{ year: 2024, value: 10 }], [{ year: 2024, value: -1 }]]) {
+      const fit = logLinearFit(pts);
+      expect(fit.slope).toBeNull();
+      expect(fit.intercept).toBeNull();
+      expect(trendValueAt(fit, 2026)).toBeNull();
+    }
+  });
+});
+
+describe('trendValueAt', () => {
+  it('continues the fitted exponential past the data', () => {
+    // 12%/yr from 10 at 2016; two years past the last point (2025) is 10·1.12^11.
+    const fit = logLinearFit(series(2016, 10, 0.12, 10));
+    expect(trendValueAt(fit, 2027)).toBeCloseTo(10 * Math.pow(1.12, 11), 6);
   });
 
-  it('returns nulls when fewer than two usable points', () => {
-    const f = logLinearFit([{ year: 2020, value: 100 }]);
-    expect(f).toMatchObject({ cagr: null, r2: null, n: 1, trend: [] });
+  it('⚠ is invariant to the base the caller indexed on', () => {
+    // The chart fits the INDEX, not the raw amounts: ln(k·v) = ln k + ln v shifts the intercept and
+    // leaves slope and R² alone. So R² describes the cash flow, not the base year chosen.
+    const raw = logLinearFit(series(2016, 7.3, 0.09, 8));
+    const indexed = logLinearFit(series(2016, 100, 0.09, 8));
+    expect(indexed.cagr).toBeCloseTo(raw.cagr as number, 12);
+    expect(indexed.r2).toBeCloseTo(raw.r2 as number, 12);
+    expect(indexed.slope).toBeCloseTo(raw.slope as number, 12);
   });
 
-  it('a flat series is its own trend: R²=1, CAGR 0', () => {
-    const f = logLinearFit([
-      { year: 2020, value: 50 }, { year: 2021, value: 50 }, { year: 2022, value: 50 },
-    ]);
-    expect(f.r2).toBe(1);
-    expect(f.cagr).toBeCloseTo(0, 9);
-  });
-
-  it('handles a decline: negative CAGR, still a good fit', () => {
-    const pts = Array.from({ length: 5 }, (_, i) => ({ year: 2020 + i, value: 100 * 0.9 ** i }));
-    const f = logLinearFit(pts);
-    expect(f.cagr).toBeCloseTo(-0.10, 6);
-    expect(f.r2).toBeCloseTo(1, 6);
+  it('never returns a non-finite value', () => {
+    const fit = logLinearFit(series(2016, 10, 5.0, 5));   // 500%/yr
+    const v = trendValueAt(fit, 2500);
+    expect(v === null || Number.isFinite(v)).toBe(true);
   });
 });

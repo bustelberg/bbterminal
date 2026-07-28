@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
-import { fmtRevM } from './marginData';
-import { type DebtRatioInputs, type DebtRatioRow } from './debtRatioData';
+import { fmtRatioPct, fmtRevM } from './marginData';
+import { debtRatioOf, type DebtRatioInputs, type DebtRatioRow } from './debtRatioData';
 import { type Target } from './HoldingsRevenueModal';
 
 /** The base inputs behind the LTD / (Total Assets − Goodwill) ratio — THREE rows per company
@@ -159,20 +159,34 @@ export default function DebtRatioInputsModal({ target, portfolioName, onClose }:
                         </tr>
                       );
                     }
-                    return LINES.map((ln, li) => (
-                      <tr key={`${r.isin}-${ln.key}`} className={`${li === 0 ? 'border-t border-neutral-800/40' : ''} hover:bg-overlay/[0.02]`}>
-                        {li === 0 ? head : (
-                          <>
-                            <td className="px-3 py-1 sticky left-0 bg-card z-10" />
-                            <td /><td /><td /><td />
-                          </>
-                        )}
-                        <td className={`px-3 py-1 whitespace-nowrap ${ln.muted ? 'text-fg-muted' : 'text-fg-soft'}`}>{ln.label}</td>
-                        {years.map((y) => (
-                          <td key={y} className="px-3 py-1 text-right font-mono text-fg-soft">{fmtRevM(r[ln.key][y])}</td>
+                    return (
+                      <Fragment key={r.isin}>
+                        {LINES.map((ln, li) => (
+                          <tr key={`${r.isin}-${ln.key}`} className={`${li === 0 ? 'border-t border-neutral-800/40' : ''} hover:bg-overlay/[0.02]`}>
+                            {li === 0 ? head : (
+                              <>
+                                <td className="px-3 py-1 sticky left-0 bg-card z-10" />
+                                <td /><td /><td /><td />
+                              </>
+                            )}
+                            <td className={`px-3 py-1 whitespace-nowrap ${ln.muted ? 'text-fg-muted' : 'text-fg-soft'}`}>{ln.label}</td>
+                            {years.map((y) => (
+                              <td key={y} className="px-3 py-1 text-right font-mono text-fg-soft">{fmtRevM(r[ln.key][y])}</td>
+                            ))}
+                          </tr>
                         ))}
-                      </tr>
-                    ));
+                        {/* The plotted ratio, from the lines above it. */}
+                        <tr className="hover:bg-overlay/[0.02]">
+                          <td className="px-3 py-1 sticky left-0 bg-card z-10" /><td /><td /><td /><td />
+                          <td className="px-3 py-1 whitespace-nowrap text-fg-soft font-medium">Debt / assets ex-GW</td>
+                          {years.map((y) => (
+                            <td key={y} className="px-3 py-1 text-right font-mono text-fg-soft font-medium">
+                              {fmtRatioPct(debtRatioOf(r.long_term_debt[y], r.total_assets[y], r.goodwill[y]))}
+                            </td>
+                          ))}
+                        </tr>
+                      </Fragment>
+                    );
                   })}
                 </tbody>
                 <tfoot>

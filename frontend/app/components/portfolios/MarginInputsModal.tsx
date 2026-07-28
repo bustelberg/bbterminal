@@ -1,16 +1,19 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
-import { fmtRevM, type MarginInputs, type MarginRow } from './marginData';
+import { fmtRatioPct, fmtRevM, marginOf, type MarginInputs, type MarginRow } from './marginData';
 import { type Target } from './HoldingsRevenueModal';
 
 /** The base inputs behind the FCF-SBC margin — THREE rows per company (Revenue, FCF, SBC), each in
- * the company's own reporting currency (millions). Same columns / Unsubscribed / Fetch behaviour as
- * the revenue & FCF-per-share drill-downs, so all three read and act alike. Self-fetches (so Fetch
- * can reload). */
+ * the company's own reporting currency (millions), followed by the DERIVED margin the card plots.
+ * Same columns / Unsubscribed / Fetch behaviour as the revenue & FCF-per-share drill-downs, so all
+ * three read and act alike. Self-fetches (so Fetch can reload).
+ *
+ * ⚠ The derived line calls the SAME `marginOf` the card aggregates — a drill-down that recomputes
+ * the formula its own way is how the inputs and the chart quietly disagree. */
 
 const LINES: { key: 'revenue' | 'fcf' | 'sbc'; label: string }[] = [
   { key: 'revenue', label: 'Revenue' },
@@ -159,20 +162,34 @@ export default function MarginInputsModal({ target, portfolioName, onClose }: {
                         </tr>
                       );
                     }
-                    return LINES.map((ln, li) => (
-                      <tr key={`${r.isin}-${ln.key}`} className={`${li === 0 ? 'border-t border-neutral-800/40' : ''} hover:bg-overlay/[0.02]`}>
-                        {li === 0 ? head : (
-                          <>
-                            <td className="px-3 py-1 sticky left-0 bg-card z-10" />
-                            <td /><td /><td /><td />
-                          </>
-                        )}
-                        <td className={`px-3 py-1 whitespace-nowrap ${ln.key === 'sbc' ? 'text-fg-muted' : 'text-fg-soft'}`}>{ln.label}</td>
-                        {years.map((y) => (
-                          <td key={y} className="px-3 py-1 text-right font-mono text-fg-soft">{fmtRevM(r[ln.key][y])}</td>
+                    return (
+                      <Fragment key={r.isin}>
+                        {LINES.map((ln, li) => (
+                          <tr key={`${r.isin}-${ln.key}`} className={`${li === 0 ? 'border-t border-neutral-800/40' : ''} hover:bg-overlay/[0.02]`}>
+                            {li === 0 ? head : (
+                              <>
+                                <td className="px-3 py-1 sticky left-0 bg-card z-10" />
+                                <td /><td /><td /><td />
+                              </>
+                            )}
+                            <td className={`px-3 py-1 whitespace-nowrap ${ln.key === 'sbc' ? 'text-fg-muted' : 'text-fg-soft'}`}>{ln.label}</td>
+                            {years.map((y) => (
+                              <td key={y} className="px-3 py-1 text-right font-mono text-fg-soft">{fmtRevM(r[ln.key][y])}</td>
+                            ))}
+                          </tr>
                         ))}
-                      </tr>
-                    ));
+                        {/* The plotted ratio, from the three lines above it. */}
+                        <tr className="hover:bg-overlay/[0.02]">
+                          <td className="px-3 py-1 sticky left-0 bg-card z-10" /><td /><td /><td /><td />
+                          <td className="px-3 py-1 whitespace-nowrap text-fg-soft font-medium">FCF-SBC margin</td>
+                          {years.map((y) => (
+                            <td key={y} className="px-3 py-1 text-right font-mono text-fg-soft font-medium">
+                              {fmtRatioPct(marginOf(r.revenue[y], r.fcf[y], r.sbc[y]))}
+                            </td>
+                          ))}
+                        </tr>
+                      </Fragment>
+                    );
                   })}
                 </tbody>
                 <tfoot>

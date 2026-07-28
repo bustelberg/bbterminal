@@ -16080,6 +16080,57 @@
         ]
       }
     },
+    "/api/earnings/by-isin/{isin}/growth-estimates": {
+      "get": {
+        "description": "Analysts' 3\u20135 year growth-rate estimates for a company, from GuruFocus `keyratios`.\n\nThe figures a reverse DCF is judged against \u2014 the model says the price implies 24%/yr, and the\nnext question is what anyone actually forecasts.\n\n\u26a0 A LIVE FETCH, NOT A METRIC READ. These are scalars with no date, so they never reach\n`metric_data` (the estimates parser only stores list-valued fields). Cached in Storage for a\nweek per listing; `force=true` re-asks. See `_growth_estimates`.\n\nReturns `{symbol, fields: {eps_3_5y, eps_nri_3_5y, ocf_ps_3_5y, revenue_3_5y}, cached}` with the\nrates as PERCENTS. A company with no analyst coverage returns nulls, not an error.",
+        "operationId": "growth_estimates_by_isin_api_earnings_by_isin__isin__growth_estimates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Growth Estimates By Isin",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
     "/api/earnings/by-isin/{isin}/metrics": {
       "get": {
         "description": "Dashboard metrics for a company resolved BY ISIN \u2014 the /portfolios\nFundamental modal bridge (ISIN \u2192 `company.isin` \u2192 company_id, \"Bridge A\").\n\nOnly the ~13% of instruments backed by a `company` row have earnings\nmetrics; everything else (ETFs, structured products, foreign listings with\nno company row) 404s here, and the modal falls back to its owner-earnings /\nprice tabs, which work for every ISIN. Returns\n`{company_id, company_name, currency, metrics}` \u2014 `currency` is the\nexchange's `currency_code` (the reporting/trading currency the FCF/share\nchart converts to EUR), mirroring how `/api/companies` derives it.",
@@ -16236,6 +16287,46 @@
           }
         },
         "summary": "Debt Ratio Inputs",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/dividend-yield-inputs": {
+      "post": {
+        "description": "The two base lines behind the dividend yield, per holding: Dividends per Share and the\nfiscal year-end share price, per fiscal year, in the company's own reporting currency.\n\n\u26a0 THE YIELD IS THE PORTFOLIO-LEVEL PRIMITIVE; DIVIDENDS PER SHARE IS NOT. There is no portfolio\nshare to report a per-share amount of, the amounts are in different currencies, and a level\nseries that legitimately starts at 0.00 cannot be rebased to a growth index \u2014 which is exactly\nwhy the portfolio's dividend card sat empty while every holding carried the line. `DPS / price`\nis currency-free, so the weight-weighted average IS the book's yield (portfolio yield =\n\u03a3 value\u00b7yield \u00f7 \u03a3 value, and the weights ARE value weights \u2014 the arithmetic mean is the\naggregate here, not an approximation of it).\n\n\u26a0 AN ABSENT DPS IS NOT A ZERO. GuruFocus files an explicit `0.00` for a company that pays\nnothing \u2014 a real answer that belongs in the average and drags it down honestly. A MISSING line\nis not that: reading it as zero would let un-ingested holdings quietly deflate the book's yield.\nThe client keeps them apart (`dividendYieldOf`), so the raw lines are returned untouched here.\n\nDeduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.",
+        "operationId": "dividend_yield_inputs_api_earnings_dividend_yield_inputs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dividend Yield Inputs",
         "tags": [
           "earnings"
         ]

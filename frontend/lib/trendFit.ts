@@ -20,13 +20,31 @@ export type TrendFit = {
   n: number;
   /** Non-positive / non-finite points dropped (no log). */
   dropped: number;
+  /** The fitted line in LOG space: ln(value) = intercept + slope · year. Null when unfittable.
+   *  Exposed so a caller can evaluate the trend at a year the data does not cover — `trend` only
+   *  spans the observed ones. */
+  slope: number | null;
+  intercept: number | null;
 };
+
+/**
+ * The trend's value at any year, including years beyond the data.
+ *
+ * ⚠ EXTRAPOLATION IS NOT A FORECAST AND MUST NOT BE DRAWN AS ONE. This continues the fitted
+ * exponential; whether the business does is a different question entirely, and the caller is
+ * responsible for making the projected stretch look different from the fitted one.
+ */
+export function trendValueAt(fit: TrendFit, year: number): number | null {
+  if (fit.slope == null || fit.intercept == null) return null;
+  const v = Math.exp(fit.intercept + fit.slope * year);
+  return Number.isFinite(v) ? v : null;
+}
 
 export function logLinearFit(points: { year: number; value: number }[]): TrendFit {
   const used = points.filter((p) => Number.isFinite(p.value) && p.value > 0);
   const dropped = points.length - used.length;
   const n = used.length;
-  if (n < 2) return { trend: [], cagr: null, r2: null, n, dropped };
+  if (n < 2) return { trend: [], cagr: null, r2: null, n, dropped, slope: null, intercept: null };
 
   const xs = used.map((p) => p.year);
   const ys = used.map((p) => Math.log(p.value));
@@ -41,7 +59,7 @@ export function logLinearFit(points: { year: number; value: number }[]): TrendFi
     sxy += (xs[i] - mx) * (ys[i] - my);
   }
   // All points in the same year (or one distinct x) — a slope is undefined.
-  if (sxx === 0) return { trend: [], cagr: null, r2: null, n, dropped };
+  if (sxx === 0) return { trend: [], cagr: null, r2: null, n, dropped, slope: null, intercept: null };
 
   const slope = sxy / sxx;          // growth rate in log space
   const intercept = my - slope * mx;
@@ -58,5 +76,5 @@ export function logLinearFit(points: { year: number; value: number }[]): TrendFi
   const cagr = Math.exp(slope) - 1;
   const trend = used.map((p) => ({ year: p.year, value: Math.exp(intercept + slope * p.year) }));
 
-  return { trend, cagr, r2, n, dropped };
+  return { trend, cagr, r2, n, dropped, slope, intercept };
 }

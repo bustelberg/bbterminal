@@ -5,6 +5,7 @@
  *  ratio. */
 
 import { type CashReturnRow } from './cashReturnData';
+import { weightedByYear } from './marginData';
 
 /** One company's invested capital per fiscal year (2015+), in its reporting currency. Both legs
  *  must be present for a year — a missing non-current-liabilities line (a bank / Berkshire) means
@@ -28,27 +29,17 @@ export function investedCapitalSeries(row: CashReturnRow): Map<number, number> {
 export function investedCapitalIndexByYear(rows: CashReturnRow[]): Map<number, number> {
   const rebased = rows.map((r) => {
     const s = investedCapitalSeries(r);
-    if (!s.size) return null;
+    if (!s.size) return { weight_pct: r.weight_pct, idx: new Map<number, number>() };
     const y0 = Math.min(...s.keys());
     const base = s.get(y0)!;
     const idx = new Map<number, number>();
     if (base > 0) for (const [y, v] of s) idx.set(y, (v / base) * 100);
-    return { w: r.weight_pct, idx };
-  }).filter((x): x is { w: number; idx: Map<number, number> } => x != null && x.idx.size > 0);
-
-  const years = new Set<number>();
-  for (const { idx } of rebased) for (const y of idx.keys()) years.add(y);
-  const out = new Map<number, number>();
-  for (const y of years) {
-    let num = 0;
-    let den = 0;
-    for (const { w, idx } of rebased) {
-      const v = idx.get(y);
-      if (v == null) continue;
-      num += w * v;
-      den += w;
-    }
-    if (den > 0) out.set(y, num / den);
-  }
-  return out;
+    return { weight_pct: r.weight_pct, idx };
+  });
+  // ⚠ EVERY holding stays in the list, including the ones with no series — they are the
+  // denominator the coverage floor is measured against. Filtering them out first would make a
+  // year computed over two of twelve holdings read as 100% covered.
+  return weightedByYear(rebased,
+    (r) => [...r.idx.keys()].map(String),
+    (r, y) => r.idx.get(Number(y)) ?? null);
 }

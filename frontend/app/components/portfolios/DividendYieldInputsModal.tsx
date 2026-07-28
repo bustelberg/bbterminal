@@ -4,19 +4,28 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
-import { fmtRatioPct, fmtRevM } from './marginData';
-import { interestBurdenOf, type InterestBurdenInputs, type InterestBurdenRow } from './interestBurdenData';
+import { fmtRatioPct } from './marginData';
+import {
+  dividendYieldOf, type DividendYieldInputs, type DividendYieldRow,
+} from './dividendYieldData';
 import { type Target } from './HoldingsRevenueModal';
 
-/** The base inputs behind the interest-burden ratio — TWO rows per company (Interest expense,
- * Operating income), each in the company's own reporting currency (millions). Interest expense is
- * shown as reported (negative = outflow). Same columns / Unsubscribed / Fetch behaviour as the
- * other drill-downs. Self-fetches (so Fetch can reload). Mirrors {@link ./DebtRatioInputsModal}. */
+/** The base inputs behind the dividend yield — TWO rows per company (Dividends per share, the
+ * fiscal year-end price), each a PER-SHARE amount in the company's own reporting currency,
+ * followed by the DERIVED yield the card plots. Same columns / Unsubscribed / Fetch behaviour as
+ * the other drill-downs. Mirrors {@link ./FcfSbcYieldInputsModal}.
+ *
+ * ⚠ A BLANK DIVIDEND CELL IS NOT A ZERO — it means no dividend line was ingested for that year,
+ * and the yield row is blank with it. A company that genuinely pays nothing shows `0` and a
+ * `0.00%` yield, which counts in the book's average. */
 
-const LINES: { key: 'interest_expense' | 'operating_income'; label: string; muted?: boolean }[] = [
-  { key: 'interest_expense', label: 'Interest expense' },
-  { key: 'operating_income', label: 'Operating income', muted: true },
+const LINES: { key: 'div_ps' | 'price_ps'; label: string; muted?: boolean }[] = [
+  { key: 'div_ps', label: 'Dividends / share' },
+  { key: 'price_ps', label: 'Year-end price', muted: true },
 ];
+
+// Per-share amounts, not millions — a plain figure (2 decimals), never the compact B/T/M scale.
+const fmtPs = (v: number | null | undefined) => (v == null ? '—' : v.toFixed(2));
 
 type SortKey = 'name' | 'exchange' | 'ticker' | 'weight' | 'ccy';
 function cmp(a: number | string | null | undefined, b: number | string | null | undefined, dir: 'asc' | 'desc') {
@@ -27,10 +36,10 @@ function cmp(a: number | string | null | undefined, b: number | string | null | 
   return dir === 'desc' ? -r : r;
 }
 
-export default function InterestBurdenInputsModal({ target, portfolioName, onClose }: {
+export default function DividendYieldInputsModal({ target, portfolioName, onClose }: {
   target: Target; portfolioName?: string | null; onClose: () => void;
 }) {
-  const [data, setData] = useState<InterestBurdenInputs | null>(null);
+  const [data, setData] = useState<DividendYieldInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'weight', dir: 'desc' });
   const [reloadKey, setReloadKey] = useState(0);
@@ -41,14 +50,14 @@ export default function InterestBurdenInputsModal({ target, portfolioName, onClo
     (async () => {
       setData(null); setErr(null);
       try {
-        const r = await apiFetch(`${API_URL}/api/earnings/interest-burden-inputs`, {
+        const r = await apiFetch(`${API_URL}/api/earnings/dividend-yield-inputs`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(target),
         });
         const b = await r.json().catch(() => null);
         if (!alive) return;
         if (!r.ok) { setErr(b?.detail ?? `HTTP ${r.status}`); return; }
-        setData(b as InterestBurdenInputs);
+        setData(b as DividendYieldInputs);
       } catch (e) {
         if (alive) setErr(e instanceof Error ? e.message : String(e));
       }
@@ -80,7 +89,7 @@ export default function InterestBurdenInputsModal({ target, portfolioName, onClo
   const years = data?.years ?? [];
 
   const rows = useMemo(() => {
-    const get: Record<SortKey, (r: InterestBurdenRow) => number | string | null | undefined> = {
+    const get: Record<SortKey, (r: DividendYieldRow) => number | string | null | undefined> = {
       name: (r) => r.name.toLowerCase(),
       exchange: (r) => r.exchange ?? '',
       ticker: (r) => r.ticker ?? '',
@@ -96,14 +105,17 @@ export default function InterestBurdenInputsModal({ target, portfolioName, onClo
       <div className="bg-card rounded-xl border border-neutral-800/40 shadow-xl w-[88vw] h-[84vh] flex flex-col"
         onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="flex items-baseline gap-3 px-6 py-4 border-b border-neutral-800/40">
-          <h2 className="text-fg-strong font-medium">Holdings — interest-burden inputs by year</h2>
+          <h2 className="text-fg-strong font-medium">Holdings — dividend-yield inputs by year</h2>
           {portfolioName && <span className="text-sm text-fg-soft truncate max-w-[24ch]" title={portfolioName}>{portfolioName}</span>}
           {data && <span className="text-[11px] text-fg-faint">{data.rows.length} companies</span>}
           <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-3">
-          <p className="text-[11px] text-fg-faint">Interest expense (as reported — negative = outflow) and operating income (millions, native currency). Ratio = |Interest expense| ÷ Operating income.</p>
+          <p className="text-[11px] text-fg-faint">
+            Dividends per share and the fiscal year-end price as reported (native currency, per share).
+            Yield = Dividends / share ÷ Year-end price. A blank dividend is “not ingested”, a 0 is “pays nothing”.
+          </p>
           {err && <p className="text-xs text-neg-300">{err}</p>}
           {!data && !err && <p className="text-xs text-fg-subtle">Loading…</p>}
           {data && data.rows.length === 0 && !err && <p className="text-xs text-fg-subtle">No held company has these figures ingested.</p>}
@@ -170,17 +182,17 @@ export default function InterestBurdenInputsModal({ target, portfolioName, onClo
                             )}
                             <td className={`px-3 py-1 whitespace-nowrap ${ln.muted ? 'text-fg-muted' : 'text-fg-soft'}`}>{ln.label}</td>
                             {years.map((y) => (
-                              <td key={y} className="px-3 py-1 text-right font-mono text-fg-soft">{fmtRevM(r[ln.key][y])}</td>
+                              <td key={y} className="px-3 py-1 text-right font-mono text-fg-soft">{fmtPs(r[ln.key][y])}</td>
                             ))}
                           </tr>
                         ))}
-                        {/* The plotted ratio, from the lines above it. */}
+                        {/* The plotted ratio, from the two lines above it. */}
                         <tr className="hover:bg-overlay/[0.02]">
                           <td className="px-3 py-1 sticky left-0 bg-card z-10" /><td /><td /><td /><td />
-                          <td className="px-3 py-1 whitespace-nowrap text-fg-soft font-medium">Interest / op. profit</td>
+                          <td className="px-3 py-1 whitespace-nowrap text-fg-soft font-medium">Dividend yield</td>
                           {years.map((y) => (
                             <td key={y} className="px-3 py-1 text-right font-mono text-fg-soft font-medium">
-                              {fmtRatioPct(interestBurdenOf(r.interest_expense[y], r.operating_income[y]))}
+                              {fmtRatioPct(dividendYieldOf(r.div_ps[y], r.price_ps[y]))}
                             </td>
                           ))}
                         </tr>

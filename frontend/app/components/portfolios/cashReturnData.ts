@@ -2,6 +2,8 @@
  *  derived on the client from three raw lines so the plotted number and the drill-down can't
  *  disagree. Mirrors {@link ./debtRatioData}. */
 
+import { weightedByYear } from './marginData';
+
 export type CashReturnRow = {
   isin: string; name: string; weight_pct: number; currency: string | null;
   ticker: string | null; exchange: string | null;
@@ -32,19 +34,6 @@ export function cashReturnOf(
  *  (each is a currency-free ratio, so averaging is currency-safe; summing mixed-currency amounts is
  *  not). For a single company this is just that company's ratio. */
 export function cashReturnByYear(rows: CashReturnRow[]): Map<number, number> {
-  const years = new Set<string>();
-  for (const r of rows) for (const y of Object.keys(r.total_equity)) years.add(y);
-  const out = new Map<number, number>();
-  for (const y of years) {
-    let num = 0;
-    let den = 0;
-    for (const r of rows) {
-      const v = cashReturnOf(r.fcf[y], r.noncurrent_liabilities[y], r.total_equity[y]);
-      if (v == null) continue;
-      num += r.weight_pct * v;
-      den += r.weight_pct;
-    }
-    if (den > 0) out.set(Number(y), num / den);
-  }
-  return out;
+  return weightedByYear(rows, (r) => Object.keys(r.total_equity),
+    (r, y) => cashReturnOf(r.fcf[y], r.noncurrent_liabilities[y], r.total_equity[y]));
 }

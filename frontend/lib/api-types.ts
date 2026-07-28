@@ -3606,6 +3606,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/by-isin/{isin}/growth-estimates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Growth Estimates By Isin
+         * @description Analysts' 3–5 year growth-rate estimates for a company, from GuruFocus `keyratios`.
+         *
+         *     The figures a reverse DCF is judged against — the model says the price implies 24%/yr, and the
+         *     next question is what anyone actually forecasts.
+         *
+         *     ⚠ A LIVE FETCH, NOT A METRIC READ. These are scalars with no date, so they never reach
+         *     `metric_data` (the estimates parser only stores list-valued fields). Cached in Storage for a
+         *     week per listing; `force=true` re-asks. See `_growth_estimates`.
+         *
+         *     Returns `{symbol, fields: {eps_3_5y, eps_nri_3_5y, ocf_ps_3_5y, revenue_3_5y}, cached}` with the
+         *     rates as PERCENTS. A company with no analyst coverage returns nulls, not an error.
+         */
+        get: operations["growth_estimates_by_isin_api_earnings_by_isin__isin__growth_estimates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/by-isin/{isin}/metrics": {
         parameters: {
             query?: never;
@@ -3713,6 +3743,42 @@ export interface paths {
          *     whole book, holdings with no company row omitted.
          */
         post: operations["debt_ratio_inputs_api_earnings_debt_ratio_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/dividend-yield-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dividend Yield Inputs
+         * @description The two base lines behind the dividend yield, per holding: Dividends per Share and the
+         *     fiscal year-end share price, per fiscal year, in the company's own reporting currency.
+         *
+         *     ⚠ THE YIELD IS THE PORTFOLIO-LEVEL PRIMITIVE; DIVIDENDS PER SHARE IS NOT. There is no portfolio
+         *     share to report a per-share amount of, the amounts are in different currencies, and a level
+         *     series that legitimately starts at 0.00 cannot be rebased to a growth index — which is exactly
+         *     why the portfolio's dividend card sat empty while every holding carried the line. `DPS / price`
+         *     is currency-free, so the weight-weighted average IS the book's yield (portfolio yield =
+         *     Σ value·yield ÷ Σ value, and the weights ARE value weights — the arithmetic mean is the
+         *     aggregate here, not an approximation of it).
+         *
+         *     ⚠ AN ABSENT DPS IS NOT A ZERO. GuruFocus files an explicit `0.00` for a company that pays
+         *     nothing — a real answer that belongs in the average and drags it down honestly. A MISSING line
+         *     is not that: reading it as zero would let un-ingested holdings quietly deflate the book's yield.
+         *     The client keeps them apart (`dividendYieldOf`), so the raw lines are returned untouched here.
+         *
+         *     Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["dividend_yield_inputs_api_earnings_dividend_yield_inputs_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -14378,6 +14444,39 @@ export interface operations {
             };
         };
     };
+    growth_estimates_by_isin_api_earnings_by_isin__isin__growth_estimates_get: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_earnings_metrics_by_isin_api_earnings_by_isin__isin__metrics_get: {
         parameters: {
             query?: never;
@@ -14476,6 +14575,39 @@ export interface operations {
         };
     };
     debt_ratio_inputs_api_earnings_debt_ratio_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dividend_yield_inputs_api_earnings_dividend_yield_inputs_post: {
         parameters: {
             query?: never;
             header?: never;

@@ -5,8 +5,10 @@ import { type Basket } from './PerformanceModal';
 import FundamentalCharts from './FundamentalCharts';
 import FundamentalCoverage from './FundamentalCoverage';
 import LongEquityTab from './LongEquityTab';
+import QuickValuationTab from './QuickValuationTab';
+import DeepValuationTab from './DeepValuationTab';
 
-type Tab = 'fundamentals' | 'longequity';
+type Tab = 'fundamentals' | 'longequity' | 'quickval' | 'deepval';
 
 /**
  * The Fundamental modal: one company's fundamental chart suite.
@@ -65,10 +67,21 @@ export default function OwnerEarningsModal({
             className="text-fg-faint hover:text-fg-strong text-xl leading-none px-1 -mt-1">×</button>
         </div>
 
-        {/* Tabs: the chart suite, and the LongEquity revenue-growth read. */}
+        {/* Tabs: the chart suite, the LongEquity revenue-growth read, and — for a single company
+            only — the price-vs-FCF/share valuation read.
+
+            ⚠ QUICK VALUATION IS NOT OFFERED FOR AN AGGREGATE. It compares a share price with free
+            cash flow PER SHARE, and a basket has neither: no portfolio share exists, and the
+            per-share amounts sit in different currencies and cannot be summed into one. Showing
+            the tab and then explaining the emptiness inside it would be an invitation to a number
+            that does not exist. */}
         {hasInstrument && (
           <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 w-fit mb-3">
-            {([['fundamentals', 'Fundamentals'], ['longequity', 'Long Equity']] as [Tab, string][]).map(([t, label]) => (
+            {((isAgg
+              ? [['fundamentals', 'Fundamentals'], ['longequity', 'Long Equity']]
+              : [['fundamentals', 'Fundamentals'], ['longequity', 'Long Equity'],
+                ['quickval', 'Quick Valuation'], ['deepval', 'Deep Valuation']]
+            ) as [Tab, string][]).map(([t, label]) => (
               <button key={t} type="button" onClick={() => setTab(t)}
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                   tab === t ? 'bg-accent-600 text-fg-strong'
@@ -79,7 +92,13 @@ export default function OwnerEarningsModal({
           </div>
         )}
 
-        {tab === 'longequity' && hasInstrument ? (
+        {tab === 'quickval' && !isAgg && isin ? (
+          <QuickValuationTab isin={isin} name={name} />
+        ) : tab === 'deepval' && !isAgg && isin ? (
+          // Keyed on the ISIN: the panel reads its saved assumptions in a state initialiser, so a
+          // different instrument has to remount to pick up its own overrides.
+          <DeepValuationTab key={isin} isin={isin} name={name} />
+        ) : tab === 'longequity' && hasInstrument ? (
           <LongEquityTab isin={isin} name={title} basket={basket} portfolioId={portfolioId} />
         ) : /* An aggregate gets the SAME chart suite, blended across its holdings, with the coverage
               breakdown beneath it — how much of the book those charts actually span, and which

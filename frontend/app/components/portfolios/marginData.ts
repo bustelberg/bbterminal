@@ -20,6 +20,83 @@ export const fmtRevM = (v: number | null | undefined) => {
   return `${v.toFixed(0)}M`;
 };
 
+/** The derived RATIO line every formula drill-down carries under its raw inputs — the ratio the card
+ *  actually plots, per company per year. One decimal, matching the cards' tiles/tooltips; a `—`
+ *  where the formula can't be computed (a missing leg or a non-positive denominator), never a 0. */
+export const fmtRatioPct = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(1)}%`);
+
+/**
+ * ⚠ THE COVERAGE FLOOR, SHARED BY EVERY CARD ON THE TAB. A year's aggregate is only drawn when
+ * this share of the charted holdings actually reported it.
+ *
+ * Without it the newest fiscal year is the dangerous one: books close on different dates, so early
+ * in a year a handful of holdings have filed and the rest have not — and a weighted average that
+ * renormalises over whoever reported turns that into a full-height point on the right edge of the
+ * chart, drawn in the same ink as a year every holding reported. It reads as a move in the book
+ * and it is a move in the sample. The same applies at the left edge, where holdings had not listed
+ * yet.
+ *
+ * Kept in lock-step with the backend's `_fundamental_blend.MIN_BLEND_COVERAGE_PCT`, which does the
+ * same job for the blended growth cards. Two floors that disagree would put two cards on the same
+ * screen spanning different fractions of the same book.
+ */
+export const MIN_YEAR_COVERAGE_PCT = 80;
+
+/**
+ * The one weighted-average-per-year used by every ratio card. Each card supplies the years it
+ * could have a value for and a per-holding value; this applies the weights, the renormalisation
+ * and the floor in ONE place.
+ *
+ * ⚠ THE DENOMINATOR IS THE CHARTED SET, NOT THE BOOK. `weight_pct` is the share of the WHOLE book
+ * (cash and bonds sit in its denominator), so measuring coverage against 100 would mean a
+ * portfolio holding 20% cash could never clear an 80% floor and every chart would go blank.
+ * Coverage here answers "of the companies this chart aggregates, how many reported this year".
+ */
+export function weightedByYear<T extends { weight_pct: number }>(
+  rows: T[],
+  yearsOf: (r: T) => string[],
+  valueOf: (r: T, year: string) => number | null,
+): Map<number, number> {
+  const total = rows.reduce((a, r) => a + r.weight_pct, 0);
+  const out = new Map<number, number>();
+  if (total <= 0) return out;
+  const years = new Set<string>();
+  for (const r of rows) for (const y of yearsOf(r)) years.add(y);
+  for (const y of years) {
+    let num = 0;
+    let den = 0;
+    for (const r of rows) {
+      const v = valueOf(r, y);
+      if (v == null) continue;
+      num += r.weight_pct * v;
+      den += r.weight_pct;
+    }
+    if (den > 0 && 100 * den / total >= MIN_YEAR_COVERAGE_PCT) out.set(Number(y), num / den);
+  }
+  return out;
+}
+
+/** The share of the charted set that reported in each year — the same denominator and the same
+ *  per-holding test `weightedByYear` uses, so a card can state the coverage behind a point it
+ *  drew (and a year below the floor is visible as a fact rather than as a hole). */
+export function coverageByYear<T extends { weight_pct: number }>(
+  rows: T[],
+  yearsOf: (r: T) => string[],
+  valueOf: (r: T, year: string) => number | null,
+): Map<number, number> {
+  const total = rows.reduce((a, r) => a + r.weight_pct, 0);
+  const out = new Map<number, number>();
+  if (total <= 0) return out;
+  const years = new Set<string>();
+  for (const r of rows) for (const y of yearsOf(r)) years.add(y);
+  for (const y of years) {
+    let den = 0;
+    for (const r of rows) if (valueOf(r, y) != null) den += r.weight_pct;
+    out.set(Number(y), 100 * den / total);
+  }
+  return out;
+}
+
 /** One company's FCF-SBC margin for a year, or null when it can't be computed. SBC missing is
  *  treated as 0 (many companies report none); revenue must be positive. */
 export function marginOf(rev: number | null | undefined, fcf: number | null | undefined, sbc: number | null | undefined) {
@@ -31,21 +108,8 @@ export function marginOf(rev: number | null | undefined, fcf: number | null | un
  *  a currency-free ratio, so averaging is currency-safe; summing mixed-currency euros/£/$ is not).
  *  For a single company this is just that company's margin. */
 export function marginByYear(rows: MarginRow[]): Map<number, number> {
-  const years = new Set<string>();
-  for (const r of rows) for (const y of Object.keys(r.revenue)) years.add(y);
-  const out = new Map<number, number>();
-  for (const y of years) {
-    let num = 0;
-    let den = 0;
-    for (const r of rows) {
-      const m = marginOf(r.revenue[y], r.fcf[y], r.sbc[y]);
-      if (m == null) continue;
-      num += r.weight_pct * m;
-      den += r.weight_pct;
-    }
-    if (den > 0) out.set(Number(y), num / den);
-  }
-  return out;
+  return weightedByYear(rows, (r) => Object.keys(r.revenue),
+    (r, y) => marginOf(r.revenue[y], r.fcf[y], r.sbc[y]));
 }
 
 export const meanOf = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
