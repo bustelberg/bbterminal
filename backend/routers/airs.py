@@ -1367,22 +1367,51 @@ async def airs_portfolio_download(
 
 
 @router.post("/api/airs/vermogen/refresh")
-async def airs_vermogen_refresh():
-    """Trigger the per-portfolio Vermogensoverzicht refresh now (the /airs-
-    portfolio "Refresh now" button). Re-discovers the live portfolio list, then
-    downloads + stores each portfolio's holdings. Runs in a daemon thread and
-    returns immediately; poll `/api/airs/vermogen/status` for progress."""
+async def airs_vermogen_refresh(force: bool = False):
+    """Trigger the fleet AIRS refresh now (the portfolios page "Refresh all" button). Re-discovers
+    the live portfolio list, then downloads + stores the four reports for each account that needs
+    them. Runs in a daemon thread and returns immediately; poll `/api/airs/vermogen/status`.
+
+    ⚠ INCREMENTAL. An account whose last pass got all four reports within `AIRS_FRESH_HOURS` is
+    skipped — 44 accounts × 4 downloads takes minutes, and re-fetching a report AIRS has not
+    republished buys nothing. Discovery itself is never skipped, so an account that is missing
+    (deleted, or new in AIRS) is always scanned. `?force=true` re-scans everything.
+    """
     from airs_vermogen import _STATUS, run_airs_vermogen_refresh_sync  # noqa: PLC0415
 
     if _STATUS.get("running"):
         return {"status": "busy", "message": "A refresh is already running"}
     threading.Thread(
         target=run_airs_vermogen_refresh_sync,
-        kwargs={"triggered_by": "manual"},
+        kwargs={"triggered_by": "manual-force" if force else "manual", "force": force},
         daemon=True,
         name="airs-vermogen-manual",
     ).start()
-    return {"status": "started"}
+    return {"status": "started", "force": force}
+
+
+class AirsAccountDeleted(BaseModel):
+    portefeuille: str
+    deleted: dict[str, int] = {}     # per table; -1 = that table's delete errored
+    total_rows: int = 0
+
+
+@router.delete("/api/airs/portfolios/{portefeuille}", response_model=AirsAccountDeleted)
+async def airs_portfolio_delete(portefeuille: str):
+    """Delete ONE account's scraped rows — returns, holdings, mutations, model weights, its roster
+    entry and its model pairing — so a refresh can be watched rebuilding them.
+
+    ⚠ NOT THE WAY TO REMOVE AN UNWANTED ACCOUNT. The next scrape re-creates everything it can see,
+    so a delete achieves nothing there and costs history; `airs_account_hidden` records that
+    decision instead. This exists to prove the refresh refills a gap.
+
+    ⚠ IT LOSES ANYTHING OLDER THAN 1 JANUARY. A scan fetches `1 Jan → today`, so `airs_performance`
+    months before that are gone permanently — the UI says so before asking. CRM records and the
+    hidden-account decision are deliberately NOT touched (see `_DELETABLE_TABLES`).
+    """
+    from airs_vermogen import delete_account  # noqa: PLC0415
+
+    return await asyncio.to_thread(delete_account, portefeuille)
 
 
 @router.post("/api/airs/portfolios/{portefeuille}/refresh")

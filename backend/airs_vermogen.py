@@ -16,6 +16,7 @@ and `routers.airs._parse_att_excel`/`_save_performance_to_db`).
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from datetime import date, datetime, timedelta, timezone
 
@@ -132,6 +133,140 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
     except Exception as e:  # noqa: BLE001
         _log.warning("[airs_vermogen] could not record report outcomes: %s: %s",
                      type(e).__name__, e)
+
+
+# How long a COMPLETE scan of an account stays good. AIRS publishes at most one valuation a day,
+# so re-downloading four reports for an account we fully scanned this morning buys nothing and
+# costs ~44× that. Env-tunable; the daily job's interval is far longer, so it still scans the fleet
+# once a day exactly as before — this only collapses the repeat presses in between.
+AIRS_FRESH_HOURS = float(os.environ.get("AIRS_FRESH_HOURS", "12"))
+
+
+def _parse_stamp(raw: str | None) -> datetime | None:
+    """A Postgres timestamptz string → an aware datetime, or None if it isn't one.
+
+    ⚠ UNPARSEABLE MUST MEAN "SCAN IT". Every caller treats None as stale, so a format we don't
+    recognise costs one scan; the opposite default would silently skip an account for ever on the
+    strength of a string we couldn't read.
+    """
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    # A naive stamp is ours (we write `datetime.now(timezone.utc).isoformat()`), so read it as UTC
+    # rather than as local time — an hours-wide error in exactly the comparison below.
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def accounts_to_scan(
+    names: list[str],
+    verdicts: dict[str, dict],
+    now: datetime,
+    max_age_hours: float = AIRS_FRESH_HOURS,
+    force: bool = False,
+) -> tuple[list[str], list[str]]:
+    """Split the discovered accounts into (to_scan, already current). Pure — no I/O, no clock.
+
+    An account is skipped ONLY when the last pass got **all four** reports and did so recently.
+    Anything else is scanned:
+
+      - never scanned, or its roster row was deleted  → scan (this is what makes the delete/refill
+        test work: a deleted account has no verdict, so Refresh all refills exactly that gap)
+      - the last pass was short a report               → scan (a retry is the whole point; skipping
+        a partial account would make a transient failure permanent)
+      - the verdict is older than `max_age_hours`      → scan
+
+    ⚠ IT GATES ON WHAT WE FETCHED, NOT ON WHAT THE DATA SAYS. The tempting rule — "skip an account
+    whose newest snapshot equals the fleet's newest snapshot" — punishes exactly the accounts that
+    are fine: `_vermogen_most_recent` walks back to each book's own last VALUED date, and a book
+    valued monthly legitimately sits weeks behind a daily-valued one. Under that rule it would
+    never match the fleet maximum and would be re-downloaded on every single press, for ever.
+
+    ⚠ A FUTURE STAMP IS STALE, NOT ETERNALLY FRESH. Clock skew or one bad row would otherwise pin
+    an account in the skip list permanently, and the failure is invisible — it looks like the
+    refresh working quickly.
+    """
+    if force:
+        return list(names), []
+    cutoff = now - timedelta(hours=max_age_hours)
+    needed = set(REPORTS)
+    to_scan: list[str] = []
+    skipped: list[str] = []
+    for name in names:
+        v = verdicts.get(name) or {}
+        at = _parse_stamp(v.get("reports_at"))
+        got = set(v.get("reports_ok") or ())
+        fresh = at is not None and cutoff <= at <= now and needed.issubset(got)
+        (skipped if fresh else to_scan).append(name)
+    return to_scan, skipped
+
+
+def _roster_verdicts() -> dict[str, dict]:
+    """`portefeuille` → its last recorded `{reports_ok, reports_at}`. One row per account (~44).
+
+    ⚠ ON FAILURE IT RETURNS EMPTY, WHICH MEANS "SCAN EVERYTHING". Failing toward doing the work
+    costs a slow refresh; failing the other way would skip the fleet on the strength of a dropped
+    connection and report it as up to date.
+    """
+    try:
+        resp = (supabase.table("airs_account_roster")
+                .select("portefeuille,reports_ok,reports_at").execute())
+    except Exception as e:  # noqa: BLE001 — bookkeeping must never fail the scrape
+        _log.warning("[airs_vermogen] could not read roster verdicts (scanning all): %s: %s",
+                     type(e).__name__, e)
+        return {}
+    return {r["portefeuille"]: r for r in (resp.data or []) if r.get("portefeuille")}
+
+
+# The tables a "delete this account" clears, and the ONLY ones it touches.
+#
+# ⚠ `airs_crm_relatie` IS DELIBERATELY ABSENT. It is keyed on `portefeuille` too, but it is a CRM
+# record about a RELATION — a client — not a scraped report, and no refresh recreates it. Deleting
+# it here would quietly destroy data this button cannot restore.
+#
+# ⚠ SO IS `airs_account_hidden`. That row is a human DECISION to keep an account off the list;
+# clearing it would resurrect an account somebody deliberately hid, as a side effect of a refresh
+# test.
+_DELETABLE_TABLES = (
+    "airs_performance",       # the returns
+    "airs_holding",           # the snapshots
+    "airs_mutatie",           # dividends / flows
+    "airs_model_weight",      # the book's own strategy weights
+    "airs_account_roster",    # existence + which reports last arrived
+    "airs_account_model_link",  # the fixed↔dynamic pairing (re-guessed on the next read)
+)
+
+
+def delete_account(portefeuille: str) -> dict:
+    """Remove ONE account's scraped rows so a refresh can be watched rebuilding them.
+
+    ⚠ THIS IS A REAL DELETE, AND `airs_account_hidden` EXISTS BECAUSE THAT IS USUALLY WRONG. To
+    take an unwanted account off the list, hide it — the next scrape puts deleted rows straight
+    back, so deleting achieves nothing and costs history. This is for the other case: proving the
+    refresh actually refills a gap.
+
+    ⚠ AND IT LOSES HISTORY THE REFRESH CANNOT RESTORE. A scan fetches `1 Jan → today`, so any
+    `airs_performance` month before January is gone for good — the caller must say so before
+    asking. The counts returned are what was actually removed, per table, so the damage is stated
+    rather than assumed.
+    """
+    removed: dict[str, int] = {}
+    for table in _DELETABLE_TABLES:
+        try:
+            # `count="exact"` so the answer is what the database did, not what we asked for.
+            resp = (supabase.table(table).delete(count="exact")
+                    .eq("portefeuille", portefeuille).execute())
+            removed[table] = resp.count if resp.count is not None else len(resp.data or [])
+        except Exception as e:  # noqa: BLE001 — report the tables that failed, delete the rest
+            _log.warning("[airs_vermogen] deleting %s from %s failed: %s: %s",
+                         portefeuille, table, type(e).__name__, e)
+            removed[table] = -1
+    total = sum(v for v in removed.values() if v > 0)
+    _log.warning("[airs_vermogen] deleted account %s — %d rows across %d tables: %s",
+                 portefeuille, total, len(_DELETABLE_TABLES), removed)
+    return {"portefeuille": portefeuille, "deleted": removed, "total_rows": total}
 
 
 def summarise_errors(errors: list[dict]) -> list[dict]:
@@ -341,10 +476,16 @@ def _save_model_weights(portefeuille: str, van: str, tot: str) -> int:
     return len(rows)
 
 
-def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
-    """Discover → download → parse → store, for every live portfolio. Serialized
+def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = False) -> dict:
+    """Discover → download → parse → store, for every live portfolio that NEEDS it. Serialized
     via `_LOCK` (a second trigger while one runs returns busy). Returns the final
-    status dict. Call from a thread — it does blocking Playwright + DB work."""
+    status dict. Call from a thread — it does blocking Playwright + DB work.
+
+    ⚠ INCREMENTAL BY DEFAULT. Discovery always runs against AIRS — the live list is the point, and
+    it is what refills an account somebody deleted — but an account whose last pass got all four
+    reports within `AIRS_FRESH_HOURS` is skipped rather than re-downloaded (`accounts_to_scan`).
+    `force=True` scans every discovered account regardless.
+    """
     if not _LOCK.acquire(blocking=False):
         return {"status": "busy", "message": "An AIRS refresh is already running"}
     try:
@@ -378,16 +519,24 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             return dict(_STATUS)
 
         _STATUS["portfolios_found"] = len(names)
+        # ⚠ THE SKIP IS DECIDED ONCE, BEFORE THE LOOP, AGAINST THE VERDICTS AS THEY WERE AT THE
+        # START. Re-reading per account would let this run's own writes shorten its own worklist.
+        todo, current = accounts_to_scan(
+            names, _roster_verdicts(), datetime.now(timezone.utc), force=force)
+        _STATUS["skipped"] = len(current)
+        _log.info("[airs_vermogen] %d discovered — %d to scan, %d already current%s",
+                  len(names), len(todo), len(current), " (forced)" if force else "")
         rendement_ok = vermogen_ok = holdings_total = mutaties_total = model_total = 0
-        # ⚠ EVERY ACCOUNT GETS AN ENTRY, INCLUDING ONE THAT YIELDS NOTHING. An account missing
-        # from this dict would keep whatever verdict a previous run left behind, so a report that
-        # started failing today would go on reading as complete.
-        outcomes: dict[str, list[str]] = {n: [] for n in names}
+        # ⚠ EVERY SCANNED ACCOUNT GETS AN ENTRY, INCLUDING ONE THAT YIELDS NOTHING. An account
+        # missing from this dict would keep whatever verdict a previous run left behind, so a
+        # report that started failing today would go on reading as complete. A SKIPPED account is
+        # deliberately absent — keeping its verdict is exactly what skipping it means.
+        outcomes: dict[str, list[str]] = {n: [] for n in todo}
         fleet_errors: list[dict] = []
         # ONE stamp for the whole run — see the note at the `_record_reports` call below.
         run_stamp = datetime.now(timezone.utc).isoformat()
-        for i, name in enumerate(names, 1):
-            _STATUS["message"] = f"{i}/{len(names)}: {name}…"
+        for i, name in enumerate(todo, 1):
+            _STATUS["message"] = f"{i}/{len(todo)}: {name}…"
             # ⚠ THE SAME `scan_one` THE PER-ROW REFRESH CALLS. Refresh-all IS refresh-one, N times
             # — see `scan_one` for why that had to stop being two implementations.
             res = scan_one(name, van, tot)
@@ -413,7 +562,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             # A fresh timestamp per account would make every account except the LAST look stale,
             # so 43 of 44 rows would silently drop out of the newest batch.
             _record_reports({name: res["reports_ok"]}, run_stamp)
-            _STATUS["message"] = f"{i}/{len(names)} done: {name}"
+            _STATUS["message"] = f"{i}/{len(todo)} done: {name}"
 
         # ⚠ THIS JOB DOES NOT TOUCH CRM. It used to also download CRM → Relaties → Alle
         # relaties inline, which is a different report about different objects (relations, not
@@ -423,13 +572,20 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
         # the holdings, and — worse — a CRM failure was appended to THIS job's `errors` and
         # counted in its "N report(s) failed", so a portfolio refresh reported a fault in a
         # report it was never asked to fetch.
-        total = len(names)
-        any_stored = rendement_ok or vermogen_ok
+        total = len(todo)
+        # ⚠ NOTHING TO DO IS A SUCCESS, NOT AN EMPTY FAILURE. `any_stored` alone would call a
+        # fleet that is entirely up to date an "error" — the same vacuous-zero trap as a benchmark
+        # reporting "0 of 0 constituents priced". A skip-everything run stored nothing precisely
+        # because there was nothing to store.
+        any_stored = bool(rendement_ok or vermogen_ok or not todo)
         # ⚠ RECORDED ONLY WHEN THE DISCOVERY ITSELF WAS TRUSTED, on the same threshold the roster
         # uses. A scrape that reached six accounts would otherwise mark the other thirty-eight
         # "no reports retrieved" and empty the portfolios page on the strength of a failed login.
         # Already written per account, under `run_stamp`, as each finished — nothing to flush here.
-        complete = sum(1 for ok in outcomes.values() if len(ok) == len(REPORTS))
+        # ⚠ A SKIPPED ACCOUNT COUNTS AS COMPLETE — being complete is WHY it was skipped. Counting
+        # only the scanned ones would report "2/44 accounts complete" after a healthy no-op run,
+        # which reads as catastrophic and is the exact opposite of what happened.
+        complete = len(current) + sum(1 for ok in outcomes.values() if len(ok) == len(REPORTS))
         _STATUS.update({
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "status": "ok" if any_stored else "error",
@@ -445,10 +601,17 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             # reconciled by anyone reading them. Same flaw the CRM note above describes, one layer
             # in. `complete` leads, because that is what the portfolios page will show.
             "message": (
-                f"{complete}/{total} accounts complete — "
-                f"Rendement {rendement_ok}/{total}, Vermogensoverzicht {vermogen_ok}/{total} "
-                f"({holdings_total} holdings), Mutaties {mutaties_total} rows, "
-                f"Model {model_total} rows"
+                f"{complete}/{len(names)} accounts complete — "
+                # ⚠ THE RATIOS ARE OVER WHAT WAS SCANNED, AND SAY SO. "Rendement 3/44" after an
+                # incremental run would read as 41 failures when 41 were never asked for.
+                + (f"{len(current)} already current, {total} scanned"
+                   + (f": Rendement {rendement_ok}/{total}, "
+                      f"Vermogensoverzicht {vermogen_ok}/{total} ({holdings_total} holdings), "
+                      f"Mutaties {mutaties_total} rows, Model {model_total} rows" if total else "")
+                   if not force else
+                   f"Rendement {rendement_ok}/{total}, Vermogensoverzicht {vermogen_ok}/{total} "
+                   f"({holdings_total} holdings), Mutaties {mutaties_total} rows, "
+                   f"Model {model_total} rows")
                 + (f"; {len(_STATUS['errors'])} report(s) failed" if _STATUS["errors"] else "")
             ),
         })

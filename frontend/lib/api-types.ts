@@ -1449,6 +1449,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/portfolios/{portefeuille}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Airs Portfolio Delete
+         * @description Delete ONE account's scraped rows — returns, holdings, mutations, model weights, its roster
+         *     entry and its model pairing — so a refresh can be watched rebuilding them.
+         *
+         *     ⚠ NOT THE WAY TO REMOVE AN UNWANTED ACCOUNT. The next scrape re-creates everything it can see,
+         *     so a delete achieves nothing there and costs history; `airs_account_hidden` records that
+         *     decision instead. This exists to prove the refresh refills a gap.
+         *
+         *     ⚠ IT LOSES ANYTHING OLDER THAN 1 JANUARY. A scan fetches `1 Jan → today`, so `airs_performance`
+         *     months before that are gone permanently — the UI says so before asking. CRM records and the
+         *     hidden-account decision are deliberately NOT touched (see `_DELETABLE_TABLES`).
+         */
+        delete: operations["airs_portfolio_delete_api_airs_portfolios__portefeuille__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/portfolios/{portefeuille}/refresh": {
         parameters: {
             query?: never;
@@ -1500,10 +1529,14 @@ export interface paths {
         put?: never;
         /**
          * Airs Vermogen Refresh
-         * @description Trigger the per-portfolio Vermogensoverzicht refresh now (the /airs-
-         *     portfolio "Refresh now" button). Re-discovers the live portfolio list, then
-         *     downloads + stores each portfolio's holdings. Runs in a daemon thread and
-         *     returns immediately; poll `/api/airs/vermogen/status` for progress.
+         * @description Trigger the fleet AIRS refresh now (the portfolios page "Refresh all" button). Re-discovers
+         *     the live portfolio list, then downloads + stores the four reports for each account that needs
+         *     them. Runs in a daemon thread and returns immediately; poll `/api/airs/vermogen/status`.
+         *
+         *     ⚠ INCREMENTAL. An account whose last pass got all four reports within `AIRS_FRESH_HOURS` is
+         *     skipped — 44 accounts × 4 downloads takes minutes, and re-fetching a report AIRS has not
+         *     republished buys nothing. Discovery itself is never skipped, so an account that is missing
+         *     (deleted, or new in AIRS) is always scanned. `?force=true` re-scans everything.
          */
         post: operations["airs_vermogen_refresh_api_airs_vermogen_refresh_post"];
         delete?: never;
@@ -6921,6 +6954,23 @@ export interface components {
             /** Ytd Pct */
             ytd_pct?: number | null;
         };
+        /** AirsAccountDeleted */
+        AirsAccountDeleted: {
+            /**
+             * Deleted
+             * @default {}
+             */
+            deleted?: {
+                [key: string]: number;
+            };
+            /** Portefeuille */
+            portefeuille: string;
+            /**
+             * Total Rows
+             * @default 0
+             */
+            total_rows?: number;
+        };
         /**
          * AirsAccountDetail
          * @description One account's freshest snapshot.
@@ -11911,6 +11961,37 @@ export interface operations {
             };
         };
     };
+    airs_portfolio_delete_api_airs_portfolios__portefeuille__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccountDeleted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_portfolio_refresh_api_airs_portfolios__portefeuille__refresh_post: {
         parameters: {
             query?: never;
@@ -11964,7 +12045,9 @@ export interface operations {
     };
     airs_vermogen_refresh_api_airs_vermogen_refresh_post: {
         parameters: {
-            query?: never;
+            query?: {
+                force?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -11978,6 +12061,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

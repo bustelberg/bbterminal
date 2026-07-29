@@ -657,11 +657,17 @@ def _fire_airs_vermogen() -> None:
     """APScheduler callable for the daily AIRS Vermogensoverzicht refresh. Runs
     on its own daemon thread so the long Playwright scrape doesn't block the
     scheduler worker. Re-discovers the live portfolio list + stores each
-    portfolio's holdings snapshot (see `airs_vermogen`)."""
+    portfolio's holdings snapshot (see `airs_vermogen`).
+
+    ⚠ IT FORCES. The manual button is incremental — it skips an account fully scanned in the last
+    `AIRS_FRESH_HOURS` — but this is the once-a-day pass that has to actually pick up the day's
+    valuation. Somebody pressing Refresh all at 08:00, before AIRS had valued the books, would
+    otherwise make the 11:00 job skip the whole fleet and the new valuation would land a day late.
+    """
     def _run():
         try:
             from airs_vermogen import run_airs_vermogen_refresh_sync  # noqa: PLC0415
-            run_airs_vermogen_refresh_sync(triggered_by="auto")
+            run_airs_vermogen_refresh_sync(triggered_by="auto", force=True)
         except Exception as e:
             _log.exception(
                 "[scheduler] airs_vermogen refresh failed: %s: %s", type(e).__name__, e,

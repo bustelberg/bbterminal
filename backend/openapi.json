@@ -210,6 +210,32 @@
         "title": "AirsAccount",
         "type": "object"
       },
+      "AirsAccountDeleted": {
+        "properties": {
+          "deleted": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "Deleted",
+            "type": "object"
+          },
+          "portefeuille": {
+            "title": "Portefeuille",
+            "type": "string"
+          },
+          "total_rows": {
+            "default": 0,
+            "title": "Total Rows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "portefeuille"
+        ],
+        "title": "AirsAccountDeleted",
+        "type": "object"
+      },
       "AirsAccountDetail": {
         "description": "One account's freshest snapshot.\n\n\u26a0 THE ROWS DO NOT SUM TO `ytd_pct`, AND THAT IS CORRECT. Each row is a PRICE return (AIRS\nrestates `Beginwaarde lopend jaar` to the current quantity, so a purchase does not contaminate\nit). The account's figure is flow-aware AND includes `income_eur`, which no price return\ncontains. The /portfolios MODEL view has the opposite property \u2014 its holdings weight exactly\nto its total \u2014 so a reader arriving from there will expect these to tie.",
         "properties": {
@@ -12037,6 +12063,49 @@
         ]
       }
     },
+    "/api/airs/portfolios/{portefeuille}": {
+      "delete": {
+        "description": "Delete ONE account's scraped rows \u2014 returns, holdings, mutations, model weights, its roster\nentry and its model pairing \u2014 so a refresh can be watched rebuilding them.\n\n\u26a0 NOT THE WAY TO REMOVE AN UNWANTED ACCOUNT. The next scrape re-creates everything it can see,\nso a delete achieves nothing there and costs history; `airs_account_hidden` records that\ndecision instead. This exists to prove the refresh refills a gap.\n\n\u26a0 IT LOSES ANYTHING OLDER THAN 1 JANUARY. A scan fetches `1 Jan \u2192 today`, so `airs_performance`\nmonths before that are gone permanently \u2014 the UI says so before asking. CRM records and the\nhidden-account decision are deliberately NOT touched (see `_DELETABLE_TABLES`).",
+        "operationId": "airs_portfolio_delete_api_airs_portfolios__portefeuille__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirsAccountDeleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Delete",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/portfolios/{portefeuille}/refresh": {
       "post": {
         "description": "Re-scan ONE portfolio's AIRS Rendement + Vermogensoverzicht and store both \u2014 the per-row\nRefresh on the overview table. Awaited (a few seconds: two downloads), so the client can\nre-fetch the row on success. Serialized against the full scan via the module lock; returns\n`{status: busy}` if a fleet refresh is in flight.",
@@ -12099,8 +12168,20 @@
     },
     "/api/airs/vermogen/refresh": {
       "post": {
-        "description": "Trigger the per-portfolio Vermogensoverzicht refresh now (the /airs-\nportfolio \"Refresh now\" button). Re-discovers the live portfolio list, then\ndownloads + stores each portfolio's holdings. Runs in a daemon thread and\nreturns immediately; poll `/api/airs/vermogen/status` for progress.",
+        "description": "Trigger the fleet AIRS refresh now (the portfolios page \"Refresh all\" button). Re-discovers\nthe live portfolio list, then downloads + stores the four reports for each account that needs\nthem. Runs in a daemon thread and returns immediately; poll `/api/airs/vermogen/status`.\n\n\u26a0 INCREMENTAL. An account whose last pass got all four reports within `AIRS_FRESH_HOURS` is\nskipped \u2014 44 accounts \u00d7 4 downloads takes minutes, and re-fetching a report AIRS has not\nrepublished buys nothing. Discovery itself is never skipped, so an account that is missing\n(deleted, or new in AIRS) is always scanned. `?force=true` re-scans everything.",
         "operationId": "airs_vermogen_refresh_api_airs_vermogen_refresh_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -12109,6 +12190,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Airs Vermogen Refresh",

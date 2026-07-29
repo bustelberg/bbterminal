@@ -114,6 +114,48 @@ export default function PortfolioOverviewPanel() {
   /** Why reports failed, grouped by cause. A count told the operator nothing actionable. */
   const [failures, setFailures] = useState<FailureGroup[]>([]);
   const [refreshingRows, setRefreshingRows] = useState<Set<string>>(new Set());
+  const [deletingRows, setDeletingRows] = useState<Set<string>>(new Set());
+
+  /**
+   * Delete one account's scraped rows — the way to prove Refresh all actually refills a gap.
+   *
+   * ⚠ IT ASKS FIRST, AND THE QUESTION NAMES WHAT DOES NOT COME BACK. A scan fetches `1 Jan →
+   * today`, so any performance month before January is gone permanently; "the refresh will
+   * restore it" is true only for this year. `dialog.confirm`, never the native one.
+   */
+  const deleteOne = async (portefeuille: string) => {
+    const ok = await dialog.confirm(
+      `Delete every scraped row for ${portefeuille}?\n\n`
+      + 'Removes its returns, holdings, mutations, model weights, roster entry and model pairing. '
+      + 'A refresh rebuilds them — but only from 1 January, so any earlier month is lost for good.\n\n'
+      + 'CRM records and the hidden-account decision are not touched.',
+    );
+    if (!ok) return;
+    setDeletingRows((s) => new Set(s).add(portefeuille));
+    try {
+      const r = await apiFetch(`${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}`,
+        { method: 'DELETE' });
+      const b = (await r.json().catch(() => null)) as
+        { total_rows?: number; deleted?: Record<string, number> } | null;
+      if (!r.ok) {
+        setRefreshMsg({ text: `${portefeuille}: delete failed — HTTP ${r.status}`, kind: 'error' });
+      } else {
+        // Name the tables, so "it deleted nothing" and "it deleted 400 rows" are distinguishable.
+        const per = Object.entries(b?.deleted ?? {})
+          .filter(([, n]) => n !== 0).map(([t, n]) => `${t} ${n}`).join(', ');
+        setRefreshMsg({
+          text: `${portefeuille}: deleted ${b?.total_rows ?? 0} rows${per ? ` (${per})` : ''}. `
+            + 'Run Refresh all to rebuild it.',
+          kind: 'partial',
+        });
+      }
+      await loadOverview();
+    } catch (e) {
+      setRefreshMsg({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
+    } finally {
+      setDeletingRows((s) => { const n = new Set(s); n.delete(portefeuille); return n; });
+    }
+  };
 
   // Fetch ONE account's holdings + ISIN resolution into the caches. Split out of `expand` because
   // a refresh has to be able to re-fetch a row that is ALREADY open: clearing the caches without
@@ -191,14 +233,21 @@ export default function PortfolioOverviewPanel() {
     }
   };
 
-  // Re-scan EVERY live portfolio (the background fleet job), polling its status until it finishes,
-  // then reloading. Minutes, not seconds — hence the progress line and a disabled button.
-  const refreshAll = async () => {
+  // Scan every live portfolio that NEEDS scanning (the background fleet job), polling its status
+  // until it finishes, then reloading.
+  //
+  // ⚠ INCREMENTAL, AND THE BACKEND DECIDES. Discovery always runs against AIRS, so an account that
+  // is new or was deleted is always fetched; one whose last pass got all four reports recently is
+  // skipped. A full pass is minutes, a no-op pass is seconds — hence `force` for when you actually
+  // want the four downloads again.
+  const refreshAll = async (force = false) => {
     if (refreshingAll) return;
     setRefreshingAll(true);
-    setRefreshMsg({ text: 'Starting full refresh…', kind: 'info' });
+    setRefreshMsg({ text: force ? 'Starting full re-scan…' : 'Checking what needs refreshing…',
+      kind: 'info' });
     try {
-      const started = await apiFetch(`${API_URL}/api/airs/vermogen/refresh`, { method: 'POST' });
+      const started = await apiFetch(
+        `${API_URL}/api/airs/vermogen/refresh${force ? '?force=true' : ''}`, { method: 'POST' });
       if (!started.ok) {
         setRefreshMsg({ text: `Refresh failed — HTTP ${started.status}. Is the backend running with AIRS credentials?`, kind: 'error' });
         return;
@@ -293,10 +342,11 @@ export default function PortfolioOverviewPanel() {
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Re-scan EVERY portfolio's AIRS Rendement + Vermogensoverzicht. Minutes — a background
-              job with a live progress line; the button disables while it runs. */}
-          <button type="button" onClick={() => void refreshAll()} disabled={refreshingAll}
-            title="Re-scan every portfolio's AIRS Rendement + Vermogensoverzicht now (takes a few minutes)."
+          {/* Scan every portfolio that NEEDS it — the backend skips an account whose last pass got
+              all four reports within the last few hours, so a press after a full run is seconds
+              rather than minutes. Shift-click forces a full re-scan. */}
+          <button type="button" onClick={(e) => void refreshAll(e.shiftKey)} disabled={refreshingAll}
+            title="Re-scan the AIRS reports for every portfolio that needs them — an account already scanned in the last few hours is skipped, and a missing one is always fetched. Shift-click to force a full re-scan of all 44 (minutes)."
             className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors disabled:opacity-50 disabled:cursor-wait">
             <RefreshIcon spinning={refreshingAll} size={12} />
             {refreshingAll ? 'Refreshing…' : 'Refresh all'}
@@ -395,6 +445,9 @@ export default function PortfolioOverviewPanel() {
                 <SortTh label="Current month" k="month" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
                   title="AIRS's rendement from its newest row — the current (latest) month, a different window from the year. Not a rival YTD." />
+                {/* Rightmost, and unlabelled: a destructive action wants distance from the figures,
+                    not a heading advertising it. */}
+                <th className="px-3 py-1.5 font-medium text-right w-8" />
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
@@ -403,7 +456,7 @@ export default function PortfolioOverviewPanel() {
                 return (
                   <Fragment key={r.dynamic_portefeuille}>
                     <tr onClick={() => void expand(r.dynamic_portefeuille)}
-                      className="hover:bg-accent-500/10 transition-colors cursor-pointer">
+                      className="group hover:bg-accent-500/10 transition-colors cursor-pointer">
                       <td className="px-3 py-1.5 text-right font-mono text-fg-faint tabular-nums">
                         {rowNo + 1}
                       </td>
@@ -514,10 +567,24 @@ export default function PortfolioOverviewPanel() {
                           what="What this account returned in the most recent month AIRS has closed."
                           note="rendement — AIRS's return for the most recent month" />
                       </td>
+                      <td className="px-3 py-1.5 text-right">
+                        {/* ⚠ stopPropagation — the row is the expand toggle, and a delete that also
+                            opened the detail would leave a confirm sitting over a panel loading
+                            data for a row about to disappear. */}
+                        <button type="button" disabled={deletingRows.has(r.dynamic_portefeuille)}
+                          onClick={(e) => { e.stopPropagation(); void deleteOne(r.dynamic_portefeuille); }}
+                          title="Delete this account's scraped rows (returns, holdings, mutations, model weights) so a refresh can be watched rebuilding them."
+                          aria-label={`Delete ${r.name}`}
+                          className={`${deletingRows.has(r.dynamic_portefeuille)
+                            ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
+                            } text-fg-faint hover:text-neg-400 px-1`}>
+                          {deletingRows.has(r.dynamic_portefeuille) ? '…' : '🗑'}
+                        </button>
+                      </td>
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={6} className="px-3 py-3 bg-inset">
+                        <td colSpan={7} className="px-3 py-3 bg-inset">
                           <Holdings d={detail[r.dynamic_portefeuille]} i={isins[r.dynamic_portefeuille]}
                             portefeuille={r.dynamic_portefeuille} onOverride={refreshIsins} />
                         </td>

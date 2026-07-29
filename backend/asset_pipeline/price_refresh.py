@@ -167,15 +167,86 @@ def global_latest_close() -> str | None:
     return line or None
 
 
-def find_stale(held_only: bool = True,
-               stale_days: int = DEFAULT_STALE_DAYS) -> tuple[list[dict], str | None, int]:
-    """Instruments whose last close lags the global freshest close. Most stale first.
+def market_latest_close() -> str | None:
+    """The freshest close YAHOO has, from one probe of a symbol that trades every session.
 
-    Returns `(stale_rows, global_latest, n_considered)` — the last two so a caller can say what
-    it looked at, not just what it found.
+    ⚠ THIS EXISTS BECAUSE A FLEET CANNOT SEE ITS OWN DRIFT. `global_latest_close` anchors on the
+    newest close WE HOLD, which is right for a weekend, a holiday and a Yahoo outage — and blind to
+    the one failure that matters most, because in it every row ages TOGETHER. Measured 2026-07-29
+    on the local DB: the newest close anywhere was 2026-07-23, six days earlier; AMD's own last
+    close was 2026-07-22, i.e. ONE day behind that anchor, so `0 of 232` held instruments were
+    stale and the daily refresh had nothing to do — for ever. Meanwhile AMD had gone 552.33 →
+    430.05 (−22%), and the AIRS price check was reporting the ~21% gap as though our LISTING were
+    wrong. The mapping was perfect: NasdaqGS, USD, `AMD`, every stored bar matching Yahoo to the
+    cent. The series had simply stopped, and nothing inside the database could tell.
+
+    ⚠ IT IS AN ANCHOR, NEVER A PRICE. Nothing is stored from this call and no instrument is priced
+    off the canary; it answers exactly one question — "has the market published since we last
+    looked?" — and `find_stale` takes the LATER of this and our own maximum.
+
+    ⚠ FAILURE MUST MEAN "USE OUR OWN MAXIMUM", NOT "EVERYTHING IS STALE". A throttled or dead probe
+    returning None leaves the previous behaviour intact. Returning, say, today's date on failure
+    would turn a Yahoo outage into a 6,000-instrument stampede at the one moment fetching cannot
+    work — the exact stampede the self-anchoring rule was written to prevent.
+    """
+    from asset_pipeline import yahoo  # noqa: PLC0415
+
+    # The SAME canary the throttle probes with (`YAHOO_CANARY`, default AAPL) — a symbol already
+    # chosen for trading every session. A second, divergent "known liquid symbol" is a second thing
+    # to keep true.
+    sym = getattr(getattr(yahoo, "_throttle", None), "canary", None) or "AAPL"
+    try:
+        r = yahoo.chart(sym, rng="5d", interval="1d")
+    except Exception as e:  # noqa: BLE001 — a probe must never fail the refresh
+        log.warning("[price_refresh] market anchor probe failed: %s: %s", type(e).__name__, e)
+        return None
+    return newest_dated_close(r)
+
+
+def newest_dated_close(chart_result: dict | None) -> str | None:
+    """The date of the newest bar in a Yahoo chart result that actually HAS a close.
+
+    ⚠ THE NEWEST BAR CAN BE TODAY'S UNFINISHED SESSION. Yahoo returns today's bar with
+    `close: null` until the bell (and it returned a null bar for 2026-07-28 mid-session, a
+    real hole, not the last row). Anchoring on a null bar claims a close the market has not
+    printed, which makes every series in the fleet read one day stale every single morning —
+    a daily full-fleet refresh that finds nothing to do.
+    """
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    if not chart_result:
+        return None
+    ts = chart_result.get("timestamp") or []
+    quote = (chart_result.get("indicators", {}).get("quote") or [{}])
+    closes = (quote[0] if quote else {}).get("close") or []
+    for i in range(min(len(ts), len(closes)) - 1, -1, -1):
+        if closes[i] is not None:
+            return datetime.fromtimestamp(ts[i], timezone.utc).date().isoformat()
+    return None
+
+
+def find_stale(held_only: bool = True,
+               stale_days: int = DEFAULT_STALE_DAYS,
+               use_market_anchor: bool = True) -> tuple[list[dict], str | None, int]:
+    """Instruments whose last close lags the freshest close. Most stale first.
+
+    Returns `(stale_rows, anchor, n_considered)` — the last two so a caller can say what it looked
+    at, not just what it found.
+
+    ⚠ THE ANCHOR IS THE LATER OF WHAT WE HOLD AND WHAT THE MARKET HAS PUBLISHED (see
+    `market_latest_close`). Our own maximum alone cannot detect a fleet that stopped updating as a
+    block, because every row stays within `stale_days` of every other one.
     """
     ex = _executions(held_isins() if held_only else None)
     latest_all = global_latest_close()
+    if use_market_anchor:
+        market = market_latest_close()
+        # max() on ISO dates is a string compare, which is a date compare — and `None` is skipped
+        # rather than compared, so a failed probe cannot drag the anchor backwards.
+        if market and (not latest_all or market > latest_all):
+            log.info("[price_refresh] anchor %s -> %s (market has published since our newest bar)",
+                     latest_all, market)
+            latest_all = market
     if not latest_all:
         return [], None, len(ex)
 
