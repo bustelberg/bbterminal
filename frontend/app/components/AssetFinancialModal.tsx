@@ -2,11 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
+import { API_URL } from '../../lib/apiUrl';
 import { chartTheme } from '../../lib/chartTheme';
 import type { AssetGridRow, FinancialSeriesResponse } from '../../lib/types/api';
 import LwLineChart from './LwLineChart';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 type Cadence = 'annual' | 'quarterly';
 type Point = { date: string; value: number };

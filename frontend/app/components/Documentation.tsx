@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { API_URL } from '../../lib/apiUrl';
 
 // Runtime values from the build's NEXT_PUBLIC_* env vars. On Vercel
 // these get the actual deployed URLs; in local dev they fall back to
@@ -12,7 +13,10 @@ import { useState } from 'react';
 // JS bundle the user just loaded), so showing it inline doesn't leak
 // anything that isn't already in the browser.
 const RUNTIME = {
-  apiUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+  // ⚠ THE SHARED CONSTANT, NOT A FOURTH COPY OF THE SAME LINE. This page PRINTS the URL for an
+  // admin to paste into a sibling repo — a local fallback that drifts from the one the rest of the
+  // app calls would hand out a value nothing here actually uses.
+  apiUrl: API_URL,
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || 'http://127.0.0.1:54321',
   supabaseAnonKey:
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||

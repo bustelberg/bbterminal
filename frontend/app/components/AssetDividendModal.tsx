@@ -2,11 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
+import { API_URL } from '../../lib/apiUrl';
 import { chartTheme } from '../../lib/chartTheme';
 import type { AssetGridRow, DividendCoverageEntry, DividendPaymentsResponse } from '../../lib/types/api';
 import LwLineChart from './LwLineChart';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 type PayMode = 'each' | 'ttm';
 type Point = { date: string; value: number };
