@@ -12,7 +12,7 @@ import InfoTip from '../InfoTip';
 import { Stat } from './MetricGrowthCard';
 import { type Target } from './HoldingsRevenueModal';
 import CashReturnInputsModal from './CashReturnInputsModal';
-import { cashReturnByYear, type CashReturnInputs } from './cashReturnData';
+import { MODES, seriesByYear, type CapitalMode, type CashReturnInputs } from './cashReturnData';
 import { meanOf, paddedDomain } from './marginData';
 
 /**
@@ -25,12 +25,18 @@ import { meanOf, paddedDomain } from './marginData';
  * ratios — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./DebtRatioCard}.
  */
 
-export default function CashReturnCard({ holdingsTarget, holdingsName }: {
+export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrection = true }: {
   holdingsTarget: Target; holdingsName?: string | null;
+  /** Tab-level toggle — see `sbcCorrection`. ⚠ Has NO effect in ROIC mode. */
+  sbcCorrection?: boolean;
 }) {
   const [data, setData] = useState<CashReturnInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
+  /** ⚠ ONE PAYLOAD, TWO MODES — the switch does NOT refetch. Both series come from the same
+   *  response, so flipping cannot land you on a different vintage of the same company's accounts. */
+  const [mode, setMode] = useState<CapitalMode>('croic');
+  const M = MODES[mode];
 
   useEffect(() => {
     let alive = true;
@@ -52,7 +58,8 @@ export default function CashReturnCard({ holdingsTarget, holdingsName }: {
     return () => { alive = false; };
   }, [holdingsTarget]);
 
-  const ratioByYr = useMemo(() => cashReturnByYear(data?.rows ?? []), [data]);
+  const ratioByYr = useMemo(
+    () => seriesByYear(data?.rows ?? [], mode, sbcCorrection), [data, mode, sbcCorrection]);
 
   const chartData = useMemo(() => (
     [...ratioByYr.keys()].sort((a, b) => a - b).map((year) => ({ year, ratio: ratioByYr.get(year) ?? null }))
@@ -65,43 +72,80 @@ export default function CashReturnCard({ holdingsTarget, holdingsName }: {
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      <h4 className="text-base font-semibold text-fg-strong">Cash return on capital</h4>
+      {/* ⚠ EXACTLY ONE LINE TALL, LIKE EVERY SIBLING CARD'S BARE <h4>. These cards sit in a grid
+          and the eye reads their stat tiles as a row; a header that wraps to two lines pushes this
+          card's tiles down and breaks that alignment for a decoration. Hence `flex-nowrap`, no
+          subtitle, and a switch shorter than the heading's own line box — the provenance line that
+          used to live here is in the tiles' info card (`M.where`) instead.
+          Rendered even on the empty state: a bank has a published ROIC and no usable capital base,
+          so "no figures" on one mode must not look like "no figures for this company". */}
+      <div className="flex items-center justify-between gap-2 flex-nowrap">
+        {/* `min-w-0` is what lets `truncate` actually shrink — a flex item defaults to
+            min-width:auto and would push the switch off the card instead of ellipsising. */}
+        <h4 className="text-base font-semibold text-fg-strong truncate min-w-0">{M.title}</h4>
+        <div className="inline-flex rounded-lg border border-neutral-700 overflow-hidden shrink-0"
+          role="group" aria-label="Capital-return basis">
+          {(Object.keys(MODES) as CapitalMode[]).map((k) => (
+            <button key={k} type="button" onClick={() => setMode(k)} aria-pressed={mode === k}
+              title={`${MODES[k].title} — ${MODES[k].what}. ${MODES[k].where}`}
+              className={`px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                mode === k ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-overlay/5'}`}>
+              {MODES[k].tab}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {data == null && !err ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : ratioByYr.size === 0 ? (
-        <p className="text-[11px] text-fg-faint py-16 text-center">No FCF / capital figures ingested to compute a ratio.</p>
+        <p className="text-[11px] text-fg-faint py-16 text-center">
+          {M.derived
+            ? 'No FCF / capital figures ingested to compute a ratio.'
+            : 'GuruFocus reports no ROIC for these holdings.'}
+        </p>
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
             <Stat label="Avg" value={pct(avg)} color={chartTheme.accent}
               info={<InfoTip content={<AspectCard
-                what="Average Free Cash Flow ÷ invested capital over the years shown."
-                where="Computed here — the ratio per year, weight-averaged across holdings."
-                when="The years on the chart."
-                how="Invested capital = non-current liabilities + total equity. The cash a business throws off per euro of long-term capital funding it. Higher = more capital-efficient." />} />} />
+                what={`Average ${M.inline} over the years shown — ${M.what}.`}
+                where={M.where}
+                when="The years on the chart. Weight-averaged across holdings — a per-company percentage, averaged, never summed (mixed currencies cannot be added)."
+                how={M.caveat} />} />} />
             <Stat label="Latest" value={pct(latest)} color={chartTheme.accent} />
           </div>
 
           <div>
             <ResponsiveContainer width="100%" height={320}>
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
-                style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
+                style={{ cursor: M.derived ? 'pointer' : 'default' }}
+                onClick={() => { if (M.derived) setShowInputs(true); }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
                 <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
                 <YAxis domain={paddedDomain([...ratioByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, 'Cash return on capital']} />
+                  formatter={(v) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, M.title]} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 <Line dataKey="ratio" name="ratio" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />Cash return on capital (avg dashed)</span>
+              {/* ⚠ ONE LEGEND ROW, LIKE THE SIBLINGS. The drill-down note is a `title`, not a
+                  second line — the same alignment argument as the header. It still has to be said
+                  somewhere: a published ratio has no three lines to check it against, so the chart
+                  is not clickable in ROIC mode and a modal must not imply workings it cannot show. */}
+              <span className="flex items-center gap-1.5"
+                title={M.derived
+                  ? 'Derived here — click the chart for the three underlying lines per company.'
+                  : "GuruFocus's own figure, read through. There are no underlying lines to drill into."}>
+                <span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />
+                {M.title} (avg dashed)
+              </span>
             </div>
           </div>
         </>

@@ -11,6 +11,7 @@ import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { Stat } from './MetricGrowthCard';
 import { type Target } from './HoldingsRevenueModal';
+import { fcfLabel } from './sbcCorrection';
 import FcfSbcYieldInputsModal from './FcfSbcYieldInputsModal';
 import { fcfSbcYieldByYear, type FcfSbcYieldInputs } from './fcfSbcYieldData';
 import { meanOf, paddedDomain } from './marginData';
@@ -26,8 +27,10 @@ import { meanOf, paddedDomain } from './marginData';
  * yields — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./MarginCard}.
  */
 
-export default function FcfSbcYieldCard({ holdingsTarget, holdingsName }: {
+export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorrection = true }: {
   holdingsTarget: Target; holdingsName?: string | null;
+  /** Tab-level toggle. ⚠ This card USED to subtract SBC unconditionally. */
+  sbcCorrection?: boolean;
 }) {
   const [data, setData] = useState<FcfSbcYieldInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -53,7 +56,8 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName }: {
     return () => { alive = false; };
   }, [holdingsTarget]);
 
-  const yieldByYr = useMemo(() => fcfSbcYieldByYear(data?.rows ?? []), [data]);
+  const yieldByYr = useMemo(
+    () => fcfSbcYieldByYear(data?.rows ?? [], sbcCorrection), [data, sbcCorrection]);
 
   const chartData = useMemo(() => (
     [...yieldByYr.keys()].sort((a, b) => a - b).map((year) => ({ year, yld: yieldByYr.get(year) ?? null }))
@@ -66,7 +70,7 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName }: {
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      <h4 className="text-base font-semibold text-fg-strong">FCF-SBC yield</h4>
+      <h4 className="text-base font-semibold text-fg-strong">{fcfLabel(sbcCorrection)} yield</h4>
 
       {data == null && !err ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
@@ -95,14 +99,14 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName }: {
                 <YAxis domain={paddedDomain([...yieldByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, 'FCF-SBC yield']} />
+                  formatter={(v) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, `${fcfLabel(sbcCorrection)} yield`]} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 <Line dataKey="yld" name="yld" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />FCF-SBC yield (avg dashed)</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />{fcfLabel(sbcCorrection)} yield (avg dashed)</span>
             </div>
           </div>
         </>

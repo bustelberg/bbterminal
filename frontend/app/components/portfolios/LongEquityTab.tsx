@@ -11,6 +11,8 @@ import InterestBurdenCard from './InterestBurdenCard';
 import SbcOcfCard from './SbcOcfCard';
 import InvestedCapitalCard from './InvestedCapitalCard';
 import CapexMarginCard from './CapexMarginCard';
+import GrossMarginCard from './GrossMarginCard';
+import CashConversionCard from './CashConversionCard';
 import FcfSbcYieldCard from './FcfSbcYieldCard';
 import DividendYieldCard from './DividendYieldCard';
 import { type BlendNote } from './blendNotes';
@@ -56,11 +58,14 @@ const CARDS: MetricCfg[] = [
   // the portfolio card read "No dividend/share ingested" while every holding carried the line.
 ];
 
-export default function LongEquityTab({ isin, name, basket, portfolioId }: {
+export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorrection = true }: {
   isin?: string;
   name?: string | null;
   basket?: { holdings: { isin: string; weight: number; name?: string }[] };
   portfolioId?: number;
+  /** ⚠ OWNED BY THE MODAL, NOT HERE — its checkbox lives in the tab row, which is in the fixed
+   *  head and therefore always visible. Governs the four charts whose numerator is FCF. */
+  sbcCorrection?: boolean;
 }) {
   const isAgg = !!basket || portfolioId != null;
   const [data, setData] = useState<MetricsResponse | null>(null);
@@ -130,8 +135,8 @@ export default function LongEquityTab({ isin, name, basket, portfolioId }: {
       <MetricGrowthCard key={fcfPs.title} cfg={fcfPs}
         {...growth} />
       {/* Derived cards fetch their own inputs; re-key on reload so an ingest repopulates them too. */}
-      <MarginCard key={`margin-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
-      <CashReturnCard key={`cashret-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <MarginCard key={`margin-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
+      <CashReturnCard key={`cashret-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
       <DebtRatioCard key={`debt-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <InterestBurdenCard key={`intburden-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <MetricGrowthCard key={shares.title} cfg={shares}
@@ -140,7 +145,13 @@ export default function LongEquityTab({ isin, name, basket, portfolioId }: {
       <InvestedCapitalCard key={`invcap-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} isAgg={isAgg} />
       <CapexMarginCard key={`capex-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <DividendYieldCard key={`divyield-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
-      <FcfSbcYieldCard key={`fcfsbcyield-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <FcfSbcYieldCard key={`fcfsbcyield-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
+      {/* Last on the tab, as asked. Gross margin is the cleanest read on pricing power, and it is
+          the one card here a bank simply cannot have — see GrossMarginCard. */}
+      <GrossMarginCard key={`grossmargin-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      {/* Directly after gross margin: the two halves of "are these earnings real" — what the sale
+          leaves after direct cost, then whether the resulting profit turns into money. */}
+      <CashConversionCard key={`cashconv-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
     </div>
   );
 }

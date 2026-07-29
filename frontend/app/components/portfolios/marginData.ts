@@ -1,5 +1,11 @@
-/** Shared types + helpers for the FCF-SBC margin card and its drill-down. The margin is derived on
- *  the client from three raw lines so the numbers and the drill-down can't disagree. */
+/** Shared types + helpers for the FCF margin card and its drill-down. The margin is derived on
+ *  the client from three raw lines so the numbers and the drill-down can't disagree.
+ *
+ *  ⚠ The SBC subtraction is no longer unconditional — it follows the tab-level correction toggle
+ *  (`correctedFcf`). It used to be hardcoded here while two sibling cards never applied it, so one
+ *  screen could describe the same book as both SBC-corrected and not. */
+
+import { correctedFcf } from './sbcCorrection';
 
 export type MarginRow = {
   isin: string; name: string; weight_pct: number; currency: string | null;
@@ -99,17 +105,21 @@ export function coverageByYear<T extends { weight_pct: number }>(
 
 /** One company's FCF-SBC margin for a year, or null when it can't be computed. SBC missing is
  *  treated as 0 (many companies report none); revenue must be positive. */
-export function marginOf(rev: number | null | undefined, fcf: number | null | undefined, sbc: number | null | undefined) {
-  if (rev == null || rev <= 0 || fcf == null) return null;
-  return (fcf - (sbc ?? 0)) / rev * 100;
+export function marginOf(
+  rev: number | null | undefined, fcf: number | null | undefined, sbc: number | null | undefined,
+  correct = true,
+) {
+  if (rev == null || rev <= 0) return null;
+  const num = correctedFcf(fcf, sbc, correct);
+  return num == null ? null : num / rev * 100;
 }
 
 /** The book's FCF-SBC margin per year — a WEIGHT-weighted average of each company's margin (each is
  *  a currency-free ratio, so averaging is currency-safe; summing mixed-currency euros/£/$ is not).
  *  For a single company this is just that company's margin. */
-export function marginByYear(rows: MarginRow[]): Map<number, number> {
+export function marginByYear(rows: MarginRow[], correct = true): Map<number, number> {
   return weightedByYear(rows, (r) => Object.keys(r.revenue),
-    (r, y) => marginOf(r.revenue[y], r.fcf[y], r.sbc[y]));
+    (r, y) => marginOf(r.revenue[y], r.fcf[y], r.sbc[y], correct));
 }
 
 export const meanOf = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);

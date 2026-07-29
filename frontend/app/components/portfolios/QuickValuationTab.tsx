@@ -14,9 +14,13 @@ import QuickValuationInputsModal from './QuickValuationInputsModal';
 import PriceTargetCalculator from './PriceTargetCalculator';
 import { meanOf, paddedDomain, paddedLogDomain } from './marginData';
 import { logLinearFit, trendValueAt } from '../../../lib/trendFit';
-import ForwardMultipleChart from './ForwardMultipleChart';
+import MultipleHistoryChart from './MultipleHistoryChart';
 import {
-  addYears, BASIS, cagrOf, forwardFigures, latestDateOf, priceTarget, priceVsMetric, PRICE_CODES,
+  CLOSE_CODE, forwardSeries, pick, QUARTERLY_EPS_CODES, QUARTERLY_FCF_CODES, since, thin,
+  trailingMultiples, ttm,
+} from './multiplesSeries';
+import {
+  addYears, BASIS, cagrOf, latestDateOf, priceTarget, priceVsMetric, PRICE_CODES,
   rebase, yearsBetween, yieldOf, type Basis, type MetricRow,
 } from './quickValuation';
 
@@ -50,8 +54,12 @@ import {
 const YEARS = 10;
 /** How far the fitted trend is carried past the last reported year. */
 const PROJECT_YEARS = 2;
-/** Both charts share it, so the two grid cells match without either card padding out the gap. */
+/** All three charts share it, so the grid cells match without any card padding out the gap. */
 const CHART_HEIGHT = 320;
+/** Where the multiple-history chart opens. GuruFocus's forward-P/E indicator starts 2015-11-30 —
+ *  earlier years would draw a trailing line with no forward beside it, which is the one comparison
+ *  that chart exists to make. */
+const MULTIPLE_FROM_YEAR = 2015;
 
 /** `GET /api/asset-pipeline/latest-close/isin/{isin}` — the fields this tab reads. */
 type LatestClose = {
@@ -183,12 +191,6 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   const latestPs = [...points].reverse().find((p) => p.value != null)?.value ?? null;
   const latestPrice = [...points].reverse().find((p) => p.price != null)?.price ?? null;
   const lastPriceYear = [...points].reverse().find((p) => p.price != null)?.year ?? null;
-  /** ⚠ THE LAST YEAR WITH A FIGURE, NOT WITH A PRICE, and the two do come apart: a company that
-   *  has closed a year but not yet filed it has the price and no EPS. Cutting the forecast ladder
-   *  at the price year would then drop the one estimate that matters most — the current year's,
-   *  the only one still genuinely unreported. */
-  const lastValueYear = [...points].reverse().find((p) => p.value != null)?.year ?? null;
-
   /**
    * The fitted trend at any year, converted back to per-share currency.
    *
@@ -211,16 +213,36 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   const forecastPs = lastFitted == null ? null : trendPsAt(lastFitted + PROJECT_YEARS);
 
   /**
-   * The forecast per-share figures the forward multiple divides today's price by — analyst
-   * consensus where one is published, and NOTHING where one is not.
+   * The multiple THROUGH TIME — weekly, back to `MULTIPLE_FROM_YEAR`.
    *
-   * ⚠ NOT THE TREND, EVEN THOUGH THE TREND IS RIGHT THERE. `trendPsAt` is used two lines up for
-   * the price-target calculator, where an extrapolation is the declared purpose and the user can
-   * type over it. On the multiple chart it would be a dotted line the reader has every reason to
-   * take for the market's own expectation — so the FCF basis simply has no forward half, and the
-   * chart says why. See `forwardFigures`.
+   * ⚠ COMPUTED FROM ROWS THIS TAB ALREADY HAS. `/api/earnings/by-isin/{isin}/metrics` returns
+   * 12,375 rows for ASML — 6,933 daily closes, 513 forward-P/E points, 113 quarterly FCF rows —
+   * so a second request would only be a second chance to disagree with the charts beside it.
+   *
+   * ⚠ TWO KINDS OF LINE. `forwardHistory` is GuruFocus's OWN published forward-P/E indicator, read
+   * straight through; `trailingHistory` is ours (price ÷ last reported figure, lagged so nothing
+   * uses a number the market did not have). The FCF basis gets no forward at all — nobody
+   * forecasts capex, so no such series exists at any date.
+   *
+   * ⚠ TTM ON THE FCF SIDE, ANNUAL WOULD BE UNREADABLE. A single fiscal year makes the multiple
+   * step once a year and swing violently (ASML: 21.8x → 116.4x → 28.9x). The quarterly rows are
+   * PER-QUARTER — verified against the annual row before this was written — so a rolling four-
+   * quarter sum is the honest trailing-twelve-month figure and updates four times a year.
    */
-  const forward = forwardFigures(metrics ?? [], b, lastValueYear);
+  const closes = useMemo(() => pick(metrics ?? [], [CLOSE_CODE]), [metrics]);
+  const quarters = useMemo(
+    () => ttm(pick(metrics ?? [], basis === 'eps' ? QUARTERLY_EPS_CODES : QUARTERLY_FCF_CODES)),
+    [metrics, basis]);
+  const trailingHistory = useMemo(
+    // Fall back to the ANNUAL series when a company files no quarterlies — a coarser line beats
+    // an empty chart, and `reportedAt` treats both identically.
+    () => since(thin(trailingMultiples(closes, quarters.length ? quarters
+      : pick(metrics ?? [], b.codes).map((r) => ({ date: r.date, value: r.value })))),
+    MULTIPLE_FROM_YEAR),
+    [closes, quarters, metrics, b.codes]);
+  const forwardHistory = useMemo(
+    () => (basis === 'eps' ? since(forwardSeries(metrics ?? []), MULTIPLE_FROM_YEAR) : []),
+    [metrics, basis]);
 
   // ⚠ DERIVED FROM THE SAME TWO LINES THE CHART ABOVE PLOTS, not from GuruFocus's own
   // `Valuation Ratios__FCF Yield %` (or its P/E) — whose denominator convention (year-end price?
@@ -591,12 +613,10 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
       </div>
     </div>
 
-    {/* Bottom-right, by auto-flow. Handed the series and the price, never the ISIN — same rule as
-        the drill-down modal, so it cannot disagree with the charts about what the company earned. */}
-    <ForwardMultipleChart height={CHART_HEIGHT}
-      points={points} basis={b} currency={currency}
-      currentPrice={currentPrice} priceLive={priceLive} nowX={nowX}
-      forward={forward} yearTicks={yearTicks} />
+    {/* Bottom-right, by auto-flow. Handed the computed series, never the ISIN — same rule as the
+        drill-down modal, so it cannot disagree with the charts above about what the company earned. */}
+    <MultipleHistoryChart height={CHART_HEIGHT} basis={b} currency={currency}
+      forward={forwardHistory} trailing={trailingHistory} fromYear={MULTIPLE_FROM_YEAR} />
 
     {/* Top-right, but LAST IN THE DOM — see the grid note above. The only non-chart card, so it
         fills a cell sized by the chart beside it: a flex column with its CAGR footer pinned to the

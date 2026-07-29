@@ -44,14 +44,28 @@ export default function OwnerEarningsModal({
   const blend = useMemo(() => ({ basket, portfolioId }), [basket, portfolioId]);
   const [tab, setTab] = useState<Tab>('fundamentals');
   const hasInstrument = isAgg || !!isin;
+  /**
+   * ⚠ HOISTED OUT OF `LongEquityTab` SO IT CAN SIT IN THE TAB ROW. The setting belongs to that tab
+   * and governs only its charts, but the row is the modal's — and the row is in the fixed head, so
+   * putting the control there is what keeps it visible without any sticky positioning of its own.
+   * Rendered only on the tab it affects: a checkbox on screen while Fundamentals is open would
+   * claim to be doing something to charts it cannot reach.
+   */
+  const [sbcCorrection, setSbcCorrection] = useState(true);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/60"
       onClick={onClose} role="dialog" aria-modal="true">
-      <div className="bg-card border border-neutral-800/40 rounded-xl shadow-xl w-[80vw] h-[80vh] overflow-auto p-4"
+      {/* ⚠ A FIXED HEAD OVER A SCROLLING BODY, NOT ONE `overflow-auto` BOX. Everything used to
+          scroll together, so on a tab twelve charts long the title, the tab bar and a tab's own
+          controls all left the screen — and a control you cannot see is a setting you forget is
+          set. `min-h-0` on the body is what actually lets it scroll: a flex child defaults to
+          min-height:auto and would grow to its content instead, pushing the head off-screen and
+          reproducing the original behaviour. Same shape as QuickValuationInputsModal. */}
+      <div className="bg-card border border-neutral-800/40 rounded-xl shadow-xl w-[80vw] h-[80vh] flex flex-col p-4"
         onClick={(e) => e.stopPropagation()}>
 
-        <div className="flex items-start justify-between gap-3 mb-2">
+        <div className="flex items-start justify-between gap-3 mb-2 shrink-0">
           <div className="min-w-0">
             <div className="flex items-baseline gap-2 flex-wrap">
               <span className="text-base font-semibold text-fg-strong">Fundamental</span>
@@ -76,7 +90,8 @@ export default function OwnerEarningsModal({
             the tab and then explaining the emptiness inside it would be an invitation to a number
             that does not exist. */}
         {hasInstrument && (
-          <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 w-fit mb-3">
+          <div className="flex items-center gap-3 mb-3 shrink-0 flex-wrap">
+          <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 w-fit">
             {((isAgg
               ? [['fundamentals', 'Fundamentals'], ['longequity', 'Long Equity']]
               : [['fundamentals', 'Fundamentals'], ['longequity', 'Long Equity'],
@@ -90,8 +105,32 @@ export default function OwnerEarningsModal({
               </button>
             ))}
           </div>
+
+          {/* Right of the tabs, on the same row. Only on the tab it governs — and it governs four
+              of that tab's charts, which is why it is a tab-level control rather than something
+              inside one card. Stock-based compensation is a real cost paid in shares that never
+              leaves the cash-flow statement, so reported FCF flatters anyone paying in equity;
+              ticked by default, because the uncorrected figure is the flattering one. */}
+          {tab === 'longequity' && (
+            <label className="ml-auto flex items-center gap-2 text-[11px] text-fg-soft cursor-pointer"
+              title="Subtract stock-based compensation from free cash flow before computing FCF margin, FCF yield, cash return on capital and FCF / Net Income. ⚠ No effect on ROIC, which is GuruFocus's own published ratio — there is no numerator of ours to adjust.">
+              <input type="checkbox" checked={sbcCorrection}
+                onChange={(e) => setSbcCorrection(e.target.checked)}
+                className="accent-accent-600 w-3.5 h-3.5" />
+              {/* ⚠ NO STATE-DEPENDENT TEXT HERE. It used to append "— FCF net of stock comp" /
+                  "— FCF as reported", two different widths, on a right-aligned (`ml-auto`) label —
+                  so the checkbox jumped sideways on every toggle, away from the pointer that had
+                  just clicked it. The state is already legible from the box itself, the affected
+                  card titles change with it, and the full explanation is in the label's `title`. */}
+              SBC correction
+            </label>
+          )}
+          </div>
         )}
 
+        {/* The ONLY scrolling region. A tab that wants its own always-visible controls makes
+            them `sticky top-0` inside here — see LongEquityTab. */}
+        <div className="flex-1 min-h-0 overflow-auto">
         {tab === 'quickval' && !isAgg && isin ? (
           <QuickValuationTab isin={isin} name={name} />
         ) : tab === 'deepval' && !isAgg && isin ? (
@@ -99,7 +138,8 @@ export default function OwnerEarningsModal({
           // different instrument has to remount to pick up its own overrides.
           <DeepValuationTab key={isin} isin={isin} name={name} />
         ) : tab === 'longequity' && hasInstrument ? (
-          <LongEquityTab isin={isin} name={title} basket={basket} portfolioId={portfolioId} />
+          <LongEquityTab isin={isin} name={title} basket={basket} portfolioId={portfolioId}
+            sbcCorrection={sbcCorrection} />
         ) : /* An aggregate gets the SAME chart suite, blended across its holdings, with the coverage
               breakdown beneath it — how much of the book those charts actually span, and which
               holdings are missing. */
@@ -119,6 +159,7 @@ export default function OwnerEarningsModal({
           ) : (
             <p className="text-sm text-fg-subtle py-16 text-center">No instrument to look up.</p>
           )}
+        </div>
       </div>
     </div>
   );

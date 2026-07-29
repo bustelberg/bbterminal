@@ -2805,6 +2805,78 @@
         "title": "BenchmarkCompare",
         "type": "object"
       },
+      "BenchmarkFillResult": {
+        "properties": {
+          "capped": {
+            "default": 0,
+            "title": "Capped",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "needs_cap": {
+            "default": 0,
+            "title": "Needs Cap",
+            "type": "integer"
+          },
+          "needs_resolve": {
+            "default": 0,
+            "title": "Needs Resolve",
+            "type": "integer"
+          },
+          "no_isin": {
+            "default": 0,
+            "title": "No Isin",
+            "type": "integer"
+          },
+          "no_isin_names": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "No Isin Names",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "queued": {
+            "default": 0,
+            "title": "Queued",
+            "type": "integer"
+          },
+          "skipped_existing": {
+            "default": 0,
+            "title": "Skipped Existing",
+            "type": "integer"
+          },
+          "universe_members": {
+            "default": 0,
+            "title": "Universe Members",
+            "type": "integer"
+          },
+          "usable": {
+            "default": 0,
+            "title": "Usable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "BenchmarkFillResult",
+        "type": "object"
+      },
       "BenchmarkYear": {
         "properties": {
           "ret": {
@@ -15127,6 +15199,49 @@
         ]
       }
     },
+    "/api/benchmarks/index/{label}/fill": {
+      "post": {
+        "description": "Close the asset-world gap behind a reconstructed index, and report what remains.\n\nA benchmark reads 0 members when its constituents are not in the asset grid \u2014 the universe is\nusually fine. This enqueues the unresolved ISINs for the single paced ingest worker and writes\nmarket caps for the ones already resolved (a batched quote, ~1 call per 100 symbols).\n\n\u26a0 IT DOES NOT RESOLVE INLINE, and the response is therefore not a \"done\": Yahoo returns an\nEMPTY result to an overloaded caller instead of a 429, so a second concurrent consumer is how\na constituent lands on a thin foreign listing. The counts say what was handed to the worker.",
+        "operationId": "benchmark_fill_api_benchmarks_index__label__fill_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchmarkFillResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Benchmark Fill",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
     "/api/benchmarks/{benchmark_id}": {
       "delete": {
         "description": "Delete a benchmark and its prices (cascade).",
@@ -16349,6 +16464,46 @@
         ]
       }
     },
+    "/api/earnings/cash-conversion-inputs": {
+      "post": {
+        "description": "The base inputs behind Cash conversion, per holding: Free Cash Flow and Net Income per\nfiscal year, in the company's own reporting currency (millions).\n\n\u26a0 THE RAW LINES, NOT THE RATIO. `FCF / Net Income` is derived on the client from these two so\nthe drill-down shows exactly what it is computed from (2 rows per company).\n\n\u26a0 ABOVE 100% IS NORMAL AND GOOD, not an error \u2014 depreciation running ahead of capex converts\nmore cash than the accounts book as profit (ASML 2025: 11,027.3 / 9,609.4 = 114.8%).\n\n\u26a0 NET INCOME \u2264 0 \u2192 THE RATIO IS BLANK. A loss-making company with positive free cash flow\nwould otherwise print a NEGATIVE conversion, which reads as burning cash when the opposite is\nhappening. A negative FCF against positive earnings IS kept \u2014 earnings without cash is exactly\nwhat this ratio exists to catch.\n\n\u26a0 NET INCOME IS THE SHAREHOLDERS' LINE while FCF is whole-company; see `_METRIC_CODES`.\n\nDeduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.",
+        "operationId": "cash_conversion_inputs_api_earnings_cash_conversion_inputs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cash Conversion Inputs",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
     "/api/earnings/cash-return-inputs": {
       "post": {
         "description": "The base inputs behind Cash return on capital, per holding: Free Cash Flow, non-current\n(long-term) liabilities and total equity per fiscal year, in the company's own reporting\ncurrency (millions).\n\n\u26a0 THE RAW LINES, NOT THE RATIO. `FCF / (non-current liabilities + total equity)` is derived on\nthe client from these three so the drill-down shows exactly what it is computed from (3 rows per\ncompany). Non-current liabilities absent (a bank / Berkshire doesn't split current from\nnon-current) \u2192 the ratio is blank there, NOT computed against equity alone. Total equity is\nincl. minority interest (see `_METRIC_CODES`). Deduped by ISIN, weight is the share of the whole\nbook, holdings with no company row omitted.",
@@ -16744,6 +16899,46 @@
           }
         },
         "summary": "Ingest Fundamental Coverage",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/gross-margin-inputs": {
+      "post": {
+        "description": "The base inputs behind the Gross margin, per holding: Gross Profit and Revenue per fiscal\nyear, in the company's own reporting currency (millions).\n\n\u26a0 THE RAW LINES, NOT THE RATIO. `Gross Profit / Revenue` is derived on the client from these\ntwo so the drill-down shows exactly what it is computed from (2 rows per company). Revenue \u2264 0\n\u2192 the ratio is blank.\n\n\u26a0 A BANK HAS NO GROSS PROFIT AND THAT IS AN ANSWER, NOT A GAP. GuruFocus's 'B' template has no\ncost of goods sold, so the line is absent (JPMorgan) and the margin is blank there \u2014 never 0,\nwhich would read as \"sells at cost\".\n\n\u26a0 DERIVED THOUGH GURUFOCUS PUBLISHES `Ratios__Gross Margin %`. It reproduces their figure\nexactly (ASML 2025 52.83% vs 52.83; Apple 46.91 vs 46.905) and leaves two lines the drill-down\ncan show \u2014 a published ratio has no workings to check it against.\n\nDeduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.",
+        "operationId": "gross_margin_inputs_api_earnings_gross_margin_inputs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Gross Margin Inputs",
         "tags": [
           "earnings"
         ]

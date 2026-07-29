@@ -2905,6 +2905,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/benchmarks/index/{label}/fill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Benchmark Fill
+         * @description Close the asset-world gap behind a reconstructed index, and report what remains.
+         *
+         *     A benchmark reads 0 members when its constituents are not in the asset grid — the universe is
+         *     usually fine. This enqueues the unresolved ISINs for the single paced ingest worker and writes
+         *     market caps for the ones already resolved (a batched quote, ~1 call per 100 symbols).
+         *
+         *     ⚠ IT DOES NOT RESOLVE INLINE, and the response is therefore not a "done": Yahoo returns an
+         *     EMPTY result to an overloaded caller instead of a 429, so a second concurrent consumer is how
+         *     a constituent lands on a thin foreign listing. The counts say what was handed to the worker.
+         */
+        post: operations["benchmark_fill_api_benchmarks_index__label__fill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/benchmarks/{benchmark_id}": {
         parameters: {
             query?: never;
@@ -3716,6 +3744,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/cash-conversion-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cash Conversion Inputs
+         * @description The base inputs behind Cash conversion, per holding: Free Cash Flow and Net Income per
+         *     fiscal year, in the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `FCF / Net Income` is derived on the client from these two so
+         *     the drill-down shows exactly what it is computed from (2 rows per company).
+         *
+         *     ⚠ ABOVE 100% IS NORMAL AND GOOD, not an error — depreciation running ahead of capex converts
+         *     more cash than the accounts book as profit (ASML 2025: 11,027.3 / 9,609.4 = 114.8%).
+         *
+         *     ⚠ NET INCOME ≤ 0 → THE RATIO IS BLANK. A loss-making company with positive free cash flow
+         *     would otherwise print a NEGATIVE conversion, which reads as burning cash when the opposite is
+         *     happening. A negative FCF against positive earnings IS kept — earnings without cash is exactly
+         *     what this ratio exists to catch.
+         *
+         *     ⚠ NET INCOME IS THE SHAREHOLDERS' LINE while FCF is whole-company; see `_METRIC_CODES`.
+         *
+         *     Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["cash_conversion_inputs_api_earnings_cash_conversion_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/cash-return-inputs": {
         parameters: {
             query?: never;
@@ -4001,6 +4065,41 @@ export interface paths {
          *     The frontend calls this per row and, for "ingest all", once per distinct ingestable ISIN.
          */
         post: operations["ingest_fundamental_coverage_api_earnings_fundamental_coverage_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/gross-margin-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Gross Margin Inputs
+         * @description The base inputs behind the Gross margin, per holding: Gross Profit and Revenue per fiscal
+         *     year, in the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `Gross Profit / Revenue` is derived on the client from these
+         *     two so the drill-down shows exactly what it is computed from (2 rows per company). Revenue ≤ 0
+         *     → the ratio is blank.
+         *
+         *     ⚠ A BANK HAS NO GROSS PROFIT AND THAT IS AN ANSWER, NOT A GAP. GuruFocus's 'B' template has no
+         *     cost of goods sold, so the line is absent (JPMorgan) and the margin is blank there — never 0,
+         *     which would read as "sells at cost".
+         *
+         *     ⚠ DERIVED THOUGH GURUFOCUS PUBLISHES `Ratios__Gross Margin %`. It reproduces their figure
+         *     exactly (ASML 2025 52.83% vs 52.83; Apple 46.91 vs 46.905) and leaves two lines the drill-down
+         *     can show — a published ratio has no workings to check it against.
+         *
+         *     Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["gross_margin_inputs_api_earnings_gross_margin_inputs_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7604,6 +7703,58 @@ export interface components {
             ticker: string;
             /** Ytd */
             ytd?: number | null;
+        };
+        /** BenchmarkFillResult */
+        BenchmarkFillResult: {
+            /**
+             * Capped
+             * @default 0
+             */
+            capped?: number;
+            /** Label */
+            label: string;
+            /**
+             * Needs Cap
+             * @default 0
+             */
+            needs_cap?: number;
+            /**
+             * Needs Resolve
+             * @default 0
+             */
+            needs_resolve?: number;
+            /**
+             * No Isin
+             * @default 0
+             */
+            no_isin?: number;
+            /**
+             * No Isin Names
+             * @default []
+             */
+            no_isin_names?: string[];
+            /** Note */
+            note?: string | null;
+            /**
+             * Queued
+             * @default 0
+             */
+            queued?: number;
+            /**
+             * Skipped Existing
+             * @default 0
+             */
+            skipped_existing?: number;
+            /**
+             * Universe Members
+             * @default 0
+             */
+            universe_members?: number;
+            /**
+             * Usable
+             * @default 0
+             */
+            usable?: number;
         };
         /** BenchmarkYear */
         BenchmarkYear: {
@@ -13679,6 +13830,37 @@ export interface operations {
             };
         };
     };
+    benchmark_fill_api_benchmarks_index__label__fill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BenchmarkFillResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     delete_benchmark_api_benchmarks__benchmark_id__delete: {
         parameters: {
             query?: never;
@@ -14622,6 +14804,39 @@ export interface operations {
             };
         };
     };
+    cash_conversion_inputs_api_earnings_cash_conversion_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     cash_return_inputs_api_earnings_cash_return_inputs_post: {
         parameters: {
             query?: never;
@@ -14929,6 +15144,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["FundamentalIngestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gross_margin_inputs_api_earnings_gross_margin_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
             };
         };
         responses: {

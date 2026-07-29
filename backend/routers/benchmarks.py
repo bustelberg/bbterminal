@@ -319,3 +319,34 @@ async def benchmark_reconstructed_index(label: str, year: int | None = None):
     from routers._asset_benchmark import compute_index_async  # noqa: PLC0415
 
     return await compute_index_async(label, year)
+
+
+class BenchmarkFillResult(BaseModel):
+    label: str
+    universe_members: int = 0
+    usable: int = 0
+    needs_resolve: int = 0
+    needs_cap: int = 0
+    no_isin: int = 0
+    no_isin_names: list[str] = []
+    queued: int = 0
+    skipped_existing: int = 0
+    capped: int = 0
+    note: str | None = None
+
+
+@router.post("/api/benchmarks/index/{label}/fill", response_model=BenchmarkFillResult)
+async def benchmark_fill(label: str):
+    """Close the asset-world gap behind a reconstructed index, and report what remains.
+
+    A benchmark reads 0 members when its constituents are not in the asset grid — the universe is
+    usually fine. This enqueues the unresolved ISINs for the single paced ingest worker and writes
+    market caps for the ones already resolved (a batched quote, ~1 call per 100 symbols).
+
+    ⚠ IT DOES NOT RESOLVE INLINE, and the response is therefore not a "done": Yahoo returns an
+    EMPTY result to an overloaded caller instead of a 429, so a second concurrent consumer is how
+    a constituent lands on a thin foreign listing. The counts say what was handed to the worker.
+    """
+    from routers._benchmark_fill import fill_benchmark  # noqa: PLC0415
+
+    return await asyncio.to_thread(fill_benchmark, label)

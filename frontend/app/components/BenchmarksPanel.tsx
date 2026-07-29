@@ -39,11 +39,65 @@ const tone = (v: number | null | undefined) =>
  * three constituents' price series had to be un-split (our stored closes are not
  * split-adjusted and cannot self-heal).
  */
+/** `POST /api/benchmarks/index/{label}/fill` — the fields the button reads. */
+type FillResult = {
+  label: string; universe_members: number; usable: number; needs_resolve: number;
+  needs_cap: number; no_isin: number; no_isin_names?: string[];
+  queued: number; skipped_existing: number; capped: number; note?: string | null;
+};
+
+/** One sentence saying what the press actually achieved — and, when nothing was queued, WHY.
+ *
+ * ⚠ IT NEVER SAYS "DONE". Resolution is handed to a single paced worker precisely so a second
+ * Yahoo consumer cannot corrupt it (an overloaded caller gets an empty result, not a 429), so the
+ * members count will not move on the next load. A button that implied otherwise would be pressed
+ * again, and again, each press queueing nothing and looking broken. */
+function fillSummary(f: FillResult): string {
+  if (f.note) return f.note;
+  const bits: string[] = [];
+  if (f.queued) bits.push(`${f.queued} queued for ingest (a paced worker drains them — minutes to hours)`);
+  if (f.capped) bits.push(`${f.capped} market caps written`);
+  if (f.skipped_existing) bits.push(`${f.skipped_existing} already queued or ingested`);
+  if (!bits.length) {
+    if (f.usable === f.universe_members) return 'Nothing to do — every constituent is already priced and weighted.';
+    if (f.no_isin) return `Nothing this can fix: ${f.no_isin} of ${f.universe_members} members have no ISIN, which is the only bridge into the price world.`;
+    return 'Nothing to do.';
+  }
+  let s = `${bits.join(', ')}.`;
+  if (f.no_isin) s += ` ⚠ ${f.no_isin} members have no ISIN and can never be reached from here.`;
+  return s;
+}
+
 export default function BenchmarksPanel() {
   const [data, setData] = useState<Record<string, ReconstructedIndex>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [filling, setFilling] = useState<Set<string>>(new Set());
+  const [fillMsg, setFillMsg] = useState<{ text: string; kind: 'info' | 'warn' } | null>(null);
+
+  /** Fill one label, or every label in sequence.
+   *
+   * ⚠ SEQUENTIALLY, NEVER `Promise.all`. Each fill issues batched Yahoo quotes for market caps;
+   * three at once is three concurrent consumers on the throttle, which is the failure this whole
+   * pipeline is arranged to avoid. */
+  const fill = async (labels: string[]) => {
+    setFilling(new Set(labels));
+    setFillMsg({ text: `Filling ${labels.join(', ')}…`, kind: 'info' });
+    const lines: string[] = [];
+    try {
+      for (const label of labels) {
+        const r = await apiFetch(`${API_URL}/api/benchmarks/index/${label}/fill`, { method: 'POST' });
+        if (!r.ok) { lines.push(`${label}: failed — HTTP ${r.status}`); continue; }
+        lines.push(`${label}: ${fillSummary((await r.json()) as FillResult)}`);
+      }
+      setFillMsg({ text: lines.join('  ·  '), kind: 'warn' });
+    } catch (e) {
+      setFillMsg({ text: e instanceof Error ? e.message : String(e), kind: 'warn' });
+    } finally {
+      setFilling(new Set());
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -73,13 +127,32 @@ export default function BenchmarksPanel() {
 
   return (
     <section className="bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
-      <div>
-        <h3 className="text-sm font-semibold text-fg-strong">Benchmarks</h3>
-        <p className="text-[11px] text-fg-faint mt-0.5"
-          title="Rebuilt from our own membership, prices and FX — the same basis a portfolio is measured on, which is what makes the two comparable.">
-          Cap-weighted, rebuilt from our own constituents.
-        </p>
+      <div className="flex items-start gap-3 flex-wrap">
+        <div>
+          <h3 className="text-sm font-semibold text-fg-strong">Benchmarks</h3>
+          <p className="text-[11px] text-fg-faint mt-0.5"
+            title="Rebuilt from our own membership, prices and FX — the same basis a portfolio is measured on, which is what makes the two comparable.">
+            Cap-weighted, rebuilt from our own constituents.
+          </p>
+        </div>
+        <button type="button" onClick={() => void fill(INDICES.map((i) => i.label))}
+          disabled={filling.size > 0}
+          title="For each index: queue its un-ingested constituents for the price worker and write market caps for the ones already resolved. Runs one index at a time — concurrent Yahoo callers are how a constituent lands on the wrong listing."
+          className="ml-auto text-[11px] px-2.5 py-1 rounded-lg bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-50">
+          {filling.size > 1 ? 'Filling…' : 'Fill all'}
+        </button>
       </div>
+
+      {fillMsg && (
+        // ⚠ AMBER, NOT GREEN. The work is handed to a paced background worker, so this is a
+        // receipt for what was QUEUED — the table above will not change on the next load.
+        <div className={`text-[11px] rounded-lg px-3 py-1.5 border ${
+          fillMsg.kind === 'warn'
+            ? 'text-warn-300 bg-warn-500/10 border-warn-500/20'
+            : 'text-fg-subtle bg-overlay/[0.03] border-neutral-800/40'}`}>
+          {fillMsg.text}
+        </div>
+      )}
 
       {loading && <p className="text-xs text-fg-subtle">Computing…</p>}
       {error && (
@@ -96,6 +169,7 @@ export default function BenchmarksPanel() {
                 <th className="px-3 py-1.5 font-medium text-right">YTD (€)</th>
                 <th className="px-3 py-1.5 font-medium text-right">YTD (local)</th>
                 <th className="px-3 py-1.5 font-medium text-left">As of</th>
+                <th className="px-3 py-1.5 font-medium text-right"> </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
@@ -119,10 +193,20 @@ export default function BenchmarksPanel() {
                         {pct(d.ytd_local_pct)}
                       </td>
                       <td className="px-3 py-1.5 font-mono text-fg-subtle whitespace-nowrap">{d.as_of ?? '—'}</td>
+                      <td className="px-3 py-1.5 text-right">
+                        {/* ⚠ `stopPropagation` — the whole row is the expand toggle, and a Fill
+                            that also opened the detail would look like it had rendered a result. */}
+                        <button type="button" disabled={filling.size > 0}
+                          onClick={(e) => { e.stopPropagation(); void fill([ix.label]); }}
+                          title={`Queue ${ix.name}'s un-ingested constituents for the price worker and write market caps for the ones already resolved.`}
+                          className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
+                          {filling.has(ix.label) && filling.size === 1 ? 'Filling…' : 'Fill'}
+                        </button>
+                      </td>
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={5} className="px-3 py-3 bg-inset">
+                        <td colSpan={6} className="px-3 py-3 bg-inset">
                           <IndexDetail d={d} />
                         </td>
                       </tr>

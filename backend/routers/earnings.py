@@ -783,6 +783,29 @@ _RG_OE_CODE = "annuals__Per Share Data__EPS without NRI"
 # BOTH or a whole cohort reads as missing. Same latent rename `_asset_financials._SECTIONS` handles.
 _METRIC_CODES: dict[str, tuple[str, ...]] = {
     "revenue": ("annuals__Income Statement__Revenue", "annuals__income_statement__Revenue"),
+    # Behind the Gross-margin card: Gross Profit ÷ Revenue.
+    # ⚠ A BANK HAS NO GROSS PROFIT LINE AT ALL — GuruFocus's industry template 'B' reports Interest
+    # Income / Net Interest Income and has no cost of goods sold, so the key is simply absent
+    # (JPMorgan). That is an ANSWER — the concept does not apply — not a data gap, and the card must
+    # render it blank rather than 0. Same distinction `_asset_financials._has_line` draws.
+    # ⚠ DERIVED, THOUGH GURUFOCUS ALSO PUBLISHES `Ratios__Gross Margin %`. Deriving costs nothing
+    # extra (Revenue is already fetched for three other cards), reproduces their figure EXACTLY
+    # (ASML 2025: 17,258/32,667.3 = 52.83% vs published 52.83; Apple 46.91 vs 46.905), and — unlike
+    # the published ratio — leaves two lines the drill-down can show, so the number can be checked.
+    "gross_profit": ("annuals__Income Statement__Gross Profit",
+                     "annuals__income_statement__Gross Profit"),
+    # Behind the Cash-conversion card: FCF ÷ Net Income (`fcf` above is the numerator).
+    # ⚠ THE SHAREHOLDERS' LINE, NOT `Net Income Including Noncontrolling Interests`. Same choice
+    # `_asset_financials._ITEMS` makes, and the same trap: the two are IDENTICAL for a company with
+    # no minorities (ASML 9,609.4 = 9,609.4; Apple 112,010 = 112,010), so validating on either of
+    # those blesses whichever you picked. Mitsui is where they part — 34,378 vs 46,910.
+    # ⚠ SO THE RATIO IS SLIGHTLY SCOPE-MISMATCHED BY CONSTRUCTION, and that is a deliberate,
+    # documented choice rather than an oversight: FCF is whole-company cash (before anything is
+    # paid away to minorities) while this denominator is the parent's share. For a group with large
+    # minorities the conversion therefore reads HIGH. The alternative mismatches EPS and every other
+    # card on the tab, which would be the worse inconsistency.
+    "net_income": ("annuals__Income Statement__Net Income",
+                   "annuals__income_statement__Net Income"),
     "fcf_ps": ("annuals__Per Share Data__Free Cash Flow per Share",
                "annuals__per_share_data__Free Cash Flow per Share"),
     "fcf": ("annuals__Cashflow Statement__Free Cash Flow",
@@ -807,6 +830,15 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
                                "annuals__balance_sheet__Total Long-Term Liabilities"),
     "total_equity": ("annuals__Balance Sheet__Total Equity",
                      "annuals__balance_sheet__Total Equity"),
+    # GuruFocus's OWN ROIC, the alternative mode on the cash-return card. ⚠ READ, NEVER DERIVED.
+    # Computing it here would mean choosing a NOPAT numerator (EBIT or Operating Income — different
+    # lines: Mitsui 85,035 vs 56,602) and an invested-capital base, i.e. shipping a bespoke ratio
+    # under a name every reader already has a definition for. GuruFocus applies one definition to
+    # every company, so a cross-company comparison is a comparison. 28 years back for ASML, beside
+    # WACC on the same section — ROIC − WACC being the question ROIC exists to answer.
+    # ⚠ IT IS A PERCENTAGE. It must never reach the `_ITEMS` FX path, which divides by a rate and
+    # would report "23.5% in EUR".
+    "roic": ("annuals__Ratios__ROIC %", "annuals__ratios__ROIC %"),
     # Behind the interest-burden card: |Interest expense| ÷ Operating income. ⚠ Interest
     # expense is reported NEGATIVE (an outflow); the card takes its magnitude. "Operating
     # profit" is GuruFocus's `Operating Income` line — deliberately NOT `EBIT`, which is a
@@ -1290,21 +1322,32 @@ async def cash_return_inputs(body: FundamentalCoverageRequest):
                 continue
             gx = (c.get("gurufocus_exchange") or {}) or {}
             fcf = _metric_by_year(c["company_id"], "fcf")
+            # Carried so the tab-level "SBC correction" toggle can subtract it from FCF without a
+            # second request. ⚠ MISSING SBC IS TREATED AS ZERO by the client, not as "unknown":
+            # most companies genuinely report none, and blanking the ratio for them would empty
+            # the chart for the majority to be pedantic about the minority.
+            sbc = _metric_by_year(c["company_id"], "sbc")
             ncl = _metric_by_year(c["company_id"], "noncurrent_liabilities")
             eq = _metric_by_year(c["company_id"], "total_equity")
-            years |= set(fcf) | set(ncl) | set(eq)
+            # ⚠ A RATIO, NOT A RAW LINE — the one field in this payload that is already the answer.
+            # The other three are amounts the client divides; this one is GuruFocus's own
+            # percentage and is passed through untouched (see `_METRIC_CODES["roic"]`).
+            roic = _metric_by_year(c["company_id"], "roic")
+            years |= set(fcf) | set(ncl) | set(eq) | set(roic)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
             # `ok` if we have equity (the capital base) OR any FCF to show; a company on an
             # unsubscribed exchange can't be fetched at all; else nothing ingested yet.
-            status = "ok" if (eq or fcf) else ("unsubscribed" if subscribed is False else "no_data")
+            status = ("ok" if (eq or fcf or roic)
+                      else ("unsubscribed" if subscribed is False else "no_data"))
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
-                "fcf": fcf, "noncurrent_liabilities": ncl, "total_equity": eq,
+                "fcf": fcf, "sbc": sbc, "noncurrent_liabilities": ncl, "total_equity": eq,
+                "roic": roic,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
         return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
@@ -1517,6 +1560,166 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
                 "capex": capex, "revenue": rev,
+            })
+        rows.sort(key=lambda r: -r["weight_pct"])
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.post("/api/earnings/gross-margin-inputs")
+async def gross_margin_inputs(body: FundamentalCoverageRequest):
+    """The base inputs behind the Gross margin, per holding: Gross Profit and Revenue per fiscal
+    year, in the company's own reporting currency (millions).
+
+    ⚠ THE RAW LINES, NOT THE RATIO. `Gross Profit / Revenue` is derived on the client from these
+    two so the drill-down shows exactly what it is computed from (2 rows per company). Revenue ≤ 0
+    → the ratio is blank.
+
+    ⚠ A BANK HAS NO GROSS PROFIT AND THAT IS AN ANSWER, NOT A GAP. GuruFocus's 'B' template has no
+    cost of goods sold, so the line is absent (JPMorgan) and the margin is blank there — never 0,
+    which would read as "sells at cost".
+
+    ⚠ DERIVED THOUGH GURUFOCUS PUBLISHES `Ratios__Gross Margin %`. It reproduces their figure
+    exactly (ASML 2025 52.83% vs 52.83; Apple 46.91 vs 46.905) and leaves two lines the drill-down
+    can show — a published ratio has no workings to check it against.
+
+    Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+    """
+    from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings")
+
+    def _run() -> dict:
+        total_w = sum(abs(float(m.get("weight") or 0)) for m in members) or 1.0
+        raw = sorted({m["isin"] for m in members if m.get("isin")})
+        alias = canonical_map(raw)
+        weight_by: dict[str, float] = {}
+        name_by: dict[str, str] = {}
+        for m in members:
+            isin = (m.get("isin") or "").strip()
+            if not isin:
+                continue
+            ci = alias.get(isin, isin)
+            weight_by[ci] = weight_by.get(ci, 0.0) + abs(float(m.get("weight") or 0))
+            name_by.setdefault(ci, m.get("name") or isin)
+
+        canon = sorted(weight_by)
+        comp: dict[str, dict] = {}
+        for i in range(0, len(canon), IN_CHUNK_SIZE):
+            for c in (supabase.table("company")
+                      .select("company_id,company_name,isin,gurufocus_ticker,"
+                              "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
+                      .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                comp[c["isin"]] = c
+
+        rows: list[dict] = []
+        years: set[str] = set()
+        for ci in canon:
+            c = comp.get(ci)
+            if not c:
+                continue
+            gx = (c.get("gurufocus_exchange") or {}) or {}
+            gp = _metric_by_year(c["company_id"], "gross_profit")
+            rev = _metric_by_year(c["company_id"], "revenue")
+            years |= set(gp) | set(rev)
+            exch = gx.get("exchange_code")
+            subscribed = is_gf_subscribed_exchange(exch) if exch else None
+            # `ok` if we have revenue (the denominator) OR any gross profit to show; a company
+            # on an unsubscribed exchange can't be fetched at all; else nothing ingested yet.
+            # ⚠ A BANK IS `ok` WITH REVENUE AND NO GROSS PROFIT — it has been fetched fine, the
+            # concept just does not apply. Marking it `no_data` would blame our ingest.
+            status = "ok" if (rev or gp) else ("unsubscribed" if subscribed is False else "no_data")
+            rows.append({
+                "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
+                "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                "currency": gx.get("currency_code"),
+                "ticker": c.get("gurufocus_ticker"), "exchange": exch,
+                "status": status,
+                "gross_profit": gp, "revenue": rev,
+            })
+        rows.sort(key=lambda r: -r["weight_pct"])
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.post("/api/earnings/cash-conversion-inputs")
+async def cash_conversion_inputs(body: FundamentalCoverageRequest):
+    """The base inputs behind Cash conversion, per holding: Free Cash Flow and Net Income per
+    fiscal year, in the company's own reporting currency (millions).
+
+    ⚠ THE RAW LINES, NOT THE RATIO. `FCF / Net Income` is derived on the client from these two so
+    the drill-down shows exactly what it is computed from (2 rows per company).
+
+    ⚠ ABOVE 100% IS NORMAL AND GOOD, not an error — depreciation running ahead of capex converts
+    more cash than the accounts book as profit (ASML 2025: 11,027.3 / 9,609.4 = 114.8%).
+
+    ⚠ NET INCOME ≤ 0 → THE RATIO IS BLANK. A loss-making company with positive free cash flow
+    would otherwise print a NEGATIVE conversion, which reads as burning cash when the opposite is
+    happening. A negative FCF against positive earnings IS kept — earnings without cash is exactly
+    what this ratio exists to catch.
+
+    ⚠ NET INCOME IS THE SHAREHOLDERS' LINE while FCF is whole-company; see `_METRIC_CODES`.
+
+    Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+    """
+    from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings")
+
+    def _run() -> dict:
+        total_w = sum(abs(float(m.get("weight") or 0)) for m in members) or 1.0
+        raw = sorted({m["isin"] for m in members if m.get("isin")})
+        alias = canonical_map(raw)
+        weight_by: dict[str, float] = {}
+        name_by: dict[str, str] = {}
+        for m in members:
+            isin = (m.get("isin") or "").strip()
+            if not isin:
+                continue
+            ci = alias.get(isin, isin)
+            weight_by[ci] = weight_by.get(ci, 0.0) + abs(float(m.get("weight") or 0))
+            name_by.setdefault(ci, m.get("name") or isin)
+
+        canon = sorted(weight_by)
+        comp: dict[str, dict] = {}
+        for i in range(0, len(canon), IN_CHUNK_SIZE):
+            for c in (supabase.table("company")
+                      .select("company_id,company_name,isin,gurufocus_ticker,"
+                              "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
+                      .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                comp[c["isin"]] = c
+
+        rows: list[dict] = []
+        years: set[str] = set()
+        for ci in canon:
+            c = comp.get(ci)
+            if not c:
+                continue
+            gx = (c.get("gurufocus_exchange") or {}) or {}
+            fcf = _metric_by_year(c["company_id"], "fcf")
+            sbc = _metric_by_year(c["company_id"], "sbc")
+            ni = _metric_by_year(c["company_id"], "net_income")
+            years |= set(fcf) | set(ni)
+            exch = gx.get("exchange_code")
+            subscribed = is_gf_subscribed_exchange(exch) if exch else None
+            # `ok` if we have net income (the denominator) OR any FCF to show; a company on an
+            # unsubscribed exchange can't be fetched at all; else nothing ingested yet.
+            status = "ok" if (ni or fcf) else ("unsubscribed" if subscribed is False else "no_data")
+            rows.append({
+                "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
+                "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                "currency": gx.get("currency_code"),
+                "ticker": c.get("gurufocus_ticker"), "exchange": exch,
+                "status": status,
+                "fcf": fcf, "sbc": sbc, "net_income": ni,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
         return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}

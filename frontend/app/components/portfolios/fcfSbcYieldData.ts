@@ -3,6 +3,7 @@
  *  {@link ./marginData}. */
 
 import { weightedByYear } from './marginData';
+import { correctedFcf } from './sbcCorrection';
 
 export type FcfSbcYieldRow = {
   isin: string; name: string; weight_pct: number; currency: string | null;
@@ -21,15 +22,17 @@ export function fcfSbcYieldOf(
   fcf: number | null | undefined,
   sbc: number | null | undefined,
   marketCap: number | null | undefined,
+  correct = true,
 ) {
-  if (fcf == null || marketCap == null || !(marketCap > 0)) return null;
-  return (fcf - (sbc ?? 0)) / marketCap * 100;
+  if (marketCap == null || !(marketCap > 0)) return null;
+  const num = correctedFcf(fcf, sbc, correct);
+  return num == null ? null : num / marketCap * 100;
 }
 
 /** The book's FCF-SBC yield per year — a WEIGHT-weighted average of each company's yield (each is a
  *  currency-free ratio, so averaging is currency-safe; summing mixed-currency amounts is not). For
  *  a single company this is just that company's yield. */
-export function fcfSbcYieldByYear(rows: FcfSbcYieldRow[]): Map<number, number> {
+export function fcfSbcYieldByYear(rows: FcfSbcYieldRow[], correct = true): Map<number, number> {
   return weightedByYear(rows, (r) => Object.keys(r.market_cap),
-    (r, y) => fcfSbcYieldOf(r.fcf[y], r.sbc[y], r.market_cap[y]));
+    (r, y) => fcfSbcYieldOf(r.fcf[y], r.sbc[y], r.market_cap[y], correct));
 }
