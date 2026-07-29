@@ -114,6 +114,14 @@
             ],
             "title": "Latest Month Pct"
           },
+          "missing_reports": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Reports",
+            "type": "array"
+          },
           "months": {
             "anyOf": [
               {
@@ -1420,6 +1428,14 @@
           "link_source": {
             "title": "Link Source",
             "type": "string"
+          },
+          "missing_reports": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Reports",
+            "type": "array"
           },
           "months": {
             "anyOf": [

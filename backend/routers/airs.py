@@ -1554,6 +1554,14 @@ class AirsAccount(BaseModel):
     residual_eur: float | None = None
     reconciles: bool | None = None
     holdings: int | None = None
+    # Which of the four AIRS reports the last scan did NOT retrieve for this account
+    # (`att` / `volk` / `mut` / `model`); empty when it is whole.
+    #
+    # ⚠ THE ROW IS MARKED, NOT WITHHELD. These accounts were briefly filtered OUT of this list
+    # entirely — so a scan that reached all 44 portfolios returned 22, and nobody could see which
+    # report was short or for whom. The figures here are all real; they just do not all describe
+    # the same date, and that is a caveat to display, not a reason to delete the row.
+    missing_reports: list[str] = []
 
 
 class AirsAccountHolding(BaseModel):
@@ -1714,6 +1722,13 @@ class AirsPortfolioOverview(BaseModel):
     holdings: int | None = None
     reconciles: bool | None = None
     residual_eur: float | None = None
+    # Which of the four AIRS reports the last scan did NOT retrieve (`att`/`volk`/`mut`/`model`).
+    #
+    # ⚠ THE ROW IS MARKED, NOT WITHHELD. These accounts were briefly filtered out of the list — so
+    # a scan that reached all 44 portfolios showed 22, and nobody could see which report was short
+    # or for whom. Every figure here is real; they just do not all describe the same date, which is
+    # a caveat to display rather than a reason to delete the row.
+    missing_reports: list[str] = []
 
 
 @router.get("/api/airs/portfolios/overview", response_model=list[AirsPortfolioOverview])

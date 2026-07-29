@@ -6899,6 +6899,11 @@ export interface components {
             investment_result_eur?: number | null;
             /** Latest Month Pct */
             latest_month_pct?: number | null;
+            /**
+             * Missing Reports
+             * @default []
+             */
+            missing_reports?: string[];
             /** Months */
             months?: number | null;
             /** Periode */
@@ -7247,6 +7252,11 @@ export interface components {
             link_reason?: string | null;
             /** Link Source */
             link_source: string;
+            /**
+             * Missing Reports
+             * @default []
+             */
+            missing_reports?: string[];
             /** Months */
             months?: number | null;
             /** Name */

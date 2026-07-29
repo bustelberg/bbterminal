@@ -78,6 +78,9 @@ def list_overview() -> list[dict]:
             "end_value_eur": a.get("end_value_eur"),
             "holdings": a.get("holdings"),
             "reconciles": a.get("reconciles"),
+            # Carried straight through from `list_accounts` — the overview is a composition of that
+            # row with its Fixed pairing, so a caveat about the row's freshness belongs on it.
+            "missing_reports": a.get("missing_reports") or [],
             "residual_eur": a.get("residual_eur"),
         })
     # Linked first (they are the ones with a name), then by that name.

@@ -271,8 +271,44 @@ def _live_accounts() -> set[str] | None:
             for r in rows if r.get("last_seen_at") == newest and r.get("portefeuille")}
 
 
+def _missing_reports() -> dict[str, list[str]]:
+    """Per account (lower-cased), which of the four reports the last refresh did NOT retrieve.
+
+    ⚠ THIS USED TO BE A FILTER AND IT WAS THE WRONG SHAPE. Accounts missing a report were withheld
+    from the list entirely, so a scan that reached all 44 portfolios displayed 22 — the work was
+    done and invisible, and the operator had no way to see WHICH report was short or for whom.
+    Marking a row costs nothing and keeps the finding; hiding it threw the finding away along with
+    the row.
+
+    An account with nothing missing simply has no entry. An account nobody has measured has no
+    entry either — absence of evidence is not evidence of a gap, same rule as before.
+    """
+    try:
+        rows = (supabase.table("airs_account_roster").select("portefeuille,reports_ok,reports_at")
+                .order("reports_at", desc=True).limit(2000).execute().data or [])
+    except Exception:  # noqa: BLE001 — a missing column must not blank the page
+        return {}
+    dated = [r for r in rows if r.get("reports_at")]
+    if not dated:
+        return {}
+    newest = dated[0]["reports_at"]
+    out: dict[str, list[str]] = {}
+    for r in dated:
+        if r.get("reports_at") != newest or not r.get("portefeuille"):
+            continue
+        got = set(r.get("reports_ok") or [])
+        gap = [code for code in REPORTS if code not in got]
+        if gap:
+            out[(r["portefeuille"] or "").strip().lower()] = gap
+    return out
+
+
 def _complete_accounts() -> set[str] | None:
     """Accounts whose last refresh retrieved ALL FOUR reports, lower-cased — or None.
+
+    ⚠ NO LONGER USED AS A LIST FILTER — see `_missing_reports`. Kept because it is the honest
+    expression of "is this account whole", which the tests pin and which any future caller
+    (an alert, a health check) should reuse rather than re-derive.
 
     ⚠ AN ACCOUNT MISSING ONE REPORT IS NOT A SLIGHTLY-WORSE ROW, IT IS A MIXTURE OF DATES.
     Measured 2026-07-29: Rendement 44/44 but Vermogensoverzicht 31/44, so thirteen accounts
@@ -314,7 +350,7 @@ def list_accounts() -> list[dict]:
     counts, newest = _holding_counts()
     hidden = _hidden_accounts()
     live = _live_accounts()
-    complete = _complete_accounts()
+    missing = _missing_reports()
     out: list[dict] = []
     for name, r in perf.items():
         # ⚠ Filtered HERE, at the one place the list is built, so every surface that reads it
@@ -330,14 +366,14 @@ def list_accounts() -> list[dict]:
         # only the discovery pass answers "does AIRS still list it".
         if live is not None and key not in live:
             continue
-        # ⚠ AND EVERY REPORT MUST HAVE ARRIVED. A row assembled from a fresh Rendement and a
-        # week-old Vermogensoverzicht is not a partial answer, it is a wrong one — see
-        # `_complete_accounts`. The per-row "Refresh" retries an account and restores it here.
-        if complete is not None and key not in complete:
-            continue
         begin, end = r.get("beginvermogen"), r.get("eindvermogen")
         out.append({
             "portefeuille": name,
+            # ⚠ MARKED, NOT HIDDEN. A row assembled from a fresh Rendement and a week-old
+            # Vermogensoverzicht mixes dates, and the reader has to be told — but withholding the
+            # row told them nothing at all and threw away the scan's work. Empty list = whole;
+            # absent from `missing` also = whole (or never measured), which is the same display.
+            "missing_reports": missing.get(key, []),
             "periode": str(r["periode"]) if r.get("periode") else None,
             "as_of": newest.get(name),
             "begin_value_eur": begin,

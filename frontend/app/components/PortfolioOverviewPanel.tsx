@@ -50,6 +50,15 @@ const tone = (v: number | null | undefined) =>
 
 /** A clean reload glyph (inline SVG, not the `↻` character) — the standard two-arrow refresh,
  *  spinning while a refresh is running. */
+/** The four AIRS reports, by the code the scan records, in AIRS's own words — a badge saying
+ *  "volk" would send a reader to the wrong screen. Mirrors `airs_vermogen.REPORTS`. */
+const REPORT_LABELS: Record<string, string> = {
+  att: 'Rendement',
+  volk: 'Vermogensoverzicht',
+  mut: 'Mutaties',
+  model: 'Model',
+};
+
 function RefreshIcon({ spinning, size = 14 }: { spinning?: boolean; size?: number }) {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor"
@@ -203,6 +212,12 @@ export default function PortfolioOverviewPanel() {
           break;
         }
         if (st?.message) setRefreshMsg({ text: st.message, kind: 'info' });
+        // ⚠ RELOAD WHILE IT RUNS, NOT ONLY AT THE END. The scan writes each portfolio as it goes,
+        // so the rows already exist — waiting for all 44 meant staring at a stale table for
+        // minutes and then getting everything at once. The list read is a cheap DB query against
+        // rows the scraper has already committed; it costs nothing and turns the wait into
+        // progress you can watch.
+        await loadOverview();
       }
       setDetail({});
       setIsins({});
@@ -303,8 +318,8 @@ export default function PortfolioOverviewPanel() {
           {refreshMsg.text}
           {refreshMsg.kind === 'partial' && (
             <span className="block text-fg-muted mt-0.5">
-              The scan itself succeeded. Accounts missing a report are held back from the list
-              until every report arrives — retry one with its row&apos;s Refresh.
+              The scan itself succeeded. Every account it reached is listed; the ones short a
+              report carry a ⚠ naming which — retry those with the row&apos;s Refresh.
             </span>
           )}
         </div>
@@ -417,6 +432,18 @@ export default function PortfolioOverviewPanel() {
                           title={`AIRS: ${r.dynamic_portefeuille}${r.fixed_name ? ` · ${r.fixed_name}` : ''}`}>
                           {r.name}
                         </span>
+                        {/* ⚠ MARKED, NOT WITHHELD. These rows used to be hidden from the list
+                            entirely, so a scan that reached all 44 portfolios displayed 22 and the
+                            operator could not see which report was short, or for whom. The row's
+                            figures are still real — they just do not all describe the same date,
+                            and the badge names exactly which one is stale. */}
+                        {(r.missing_reports?.length ?? 0) > 0 && (
+                          <span className="ml-1.5 text-[10px] text-warn-300"
+                            title={`This account's last scan did not retrieve: ${r.missing_reports!
+                              .map((c) => REPORT_LABELS[c] ?? c).join(', ')}. Its other figures are from the newer scan, so the row mixes dates — retry with the Refresh button on the left.`}>
+                            ⚠ {r.missing_reports!.map((c) => REPORT_LABELS[c] ?? c).join(', ')}
+                          </span>
+                        )}
                         {r.link_source === 'guess' && (
                           <span className="text-warn-400 ml-1"
                             title={`Unconfirmed: this book is paired with ${r.fixed_name} by a name match nobody has approved (${r.link_reason ?? ''}). The name above is that pairing's.`}>

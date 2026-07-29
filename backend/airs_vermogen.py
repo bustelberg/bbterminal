@@ -131,6 +131,67 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
                      type(e).__name__, e)
 
 
+def scan_one(name: str, van: str, tot: str) -> dict:
+    """Fetch + store ONE account's four AIRS reports. THE only place that work is written.
+
+    ⚠ IT DOES NOT TAKE `_LOCK`. Both callers hold it already — `refresh_one_portfolio` for a single
+    row, `run_airs_vermogen_refresh_sync` for the whole fleet — and taking it here would deadlock
+    the fleet run against itself on its very first account.
+
+    ⚠ THIS EXISTS BECAUSE THERE WERE TWO COPIES. "Refresh all" ran a bespoke loop and the per-row
+    "Refresh" ran its own near-identical block: four try/excepts each, duplicated error strings,
+    duplicated outcome bookkeeping. Two implementations of "scan an account" is one more than the
+    number of ways an account can be scanned, and they had already drifted — only one of them
+    recorded which reports arrived. Refresh-all is now literally refresh-one, N times.
+
+    Returns `{reports_ok, holdings, mutaties, model_weights, as_of, errors}`. Each report is
+    independent: one failing must not lose the other three — a book's dividends are worth having
+    even when its valuation is unavailable.
+    """
+    from airs_scanner import download_portfolio_sync  # noqa: PLC0415
+    from portfolio import parse_airs_excel  # noqa: PLC0415
+    from routers.airs import _parse_att_excel, _save_performance_to_db  # noqa: PLC0415
+
+    ok: list[str] = []
+    errors: list[str] = []
+    holdings = mutaties = model_weights = 0
+    as_of = tot
+
+    def _step(code: str, label: str, fn) -> None:
+        nonlocal errors
+        try:
+            fn()
+            ok.append(code)
+        except Exception as e:  # noqa: BLE001 — one report failing must not lose the others
+            errors.append(f"{label}: {type(e).__name__}: {e}")
+            _log.warning("[airs_vermogen] %s %s failed: %s: %s", name, label, type(e).__name__, e)
+
+    def _att() -> None:
+        _save_performance_to_db(name, _parse_att_excel(download_portfolio_sync(name, van, tot)))
+
+    def _volk() -> None:
+        nonlocal holdings, as_of
+        # Most recent VALUED date, not today (which AirSPMS has not valued yet).
+        as_of, vmo = _vermogen_most_recent(name, van)
+        holdings = _save_holdings(name, as_of, parse_airs_excel(vmo))
+
+    def _mut() -> None:
+        nonlocal mutaties
+        mutaties = _save_mutaties(name, van, tot)
+
+    def _model() -> None:
+        nonlocal model_weights
+        model_weights = _save_model_weights(name, van, tot)
+
+    _step("att", "Rendement", _att)
+    _step("volk", "Vermogensoverzicht", _volk)
+    _step("mut", "Mutaties", _mut)
+    _step("model", "Model", _model)
+
+    return {"reports_ok": ok, "holdings": holdings, "mutaties": mutaties,
+            "model_weights": model_weights, "as_of": as_of, "errors": errors}
+
+
 def _save_holdings(portefeuille: str, as_of: str, holdings) -> int:
     """Replace this portfolio's snapshot for `as_of` with `holdings`. Delete-then-
     insert so a position that dropped out doesn't linger from an earlier run."""
@@ -250,9 +311,6 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
     if not _LOCK.acquire(blocking=False):
         return {"status": "busy", "message": "An AIRS refresh is already running"}
     try:
-        from airs_scanner import download_portfolio_sync  # noqa: PLC0415
-        from portfolio import parse_airs_excel  # noqa: PLC0415
-        from routers.airs import _parse_att_excel, _save_performance_to_db  # noqa: PLC0415
 
         today = date.today()
         van, tot = f"{today.year}-01-01", today.isoformat()
@@ -287,44 +345,31 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
         # from this dict would keep whatever verdict a previous run left behind, so a report that
         # started failing today would go on reading as complete.
         outcomes: dict[str, list[str]] = {n: [] for n in names}
+        # ONE stamp for the whole run — see the note at the `_record_reports` call below.
+        run_stamp = datetime.now(timezone.utc).isoformat()
         for i, name in enumerate(names, 1):
             _STATUS["message"] = f"{i}/{len(names)}: {name}…"
-            # Rendement (ATT) → airs_performance. Independent of the holdings
-            # fetch so one report failing doesn't lose the other.
-            try:
-                att = download_portfolio_sync(name, van, tot)
-                _save_performance_to_db(name, _parse_att_excel(att))
-                rendement_ok += 1
-                outcomes[name].append("att")
-            except Exception as e:
-                _STATUS["errors"].append(f"{name} (Rendement): {type(e).__name__}: {e}")
-                _log.warning("[airs_vermogen] %s Rendement failed: %s: %s", name, type(e).__name__, e)
-            # Vermogensoverzicht (VOLK) → airs_holding.
-            try:
-                # Most recent VALUED date, not today (which AirSPMS has not valued yet).
-                v_as_of, vmo = _vermogen_most_recent(name, van)
-                holdings_total += _save_holdings(name, v_as_of, parse_airs_excel(vmo))
-                vermogen_ok += 1
-                outcomes[name].append("volk")
-            except Exception as e:
-                _STATUS["errors"].append(f"{name} (Vermogensoverzicht): {type(e).__name__}: {e}")
-                _log.warning("[airs_vermogen] %s Vermogensoverzicht failed: %s: %s", name, type(e).__name__, e)
-            # Mutaties (MUT) → airs_mutatie. Independent of the other two: a book's dividends are
-            # worth having even when its valuation is unavailable, and a shared try would lose them.
-            try:
-                mutaties_total += _save_mutaties(name, van, tot)
-                outcomes[name].append("mut")
-            except Exception as e:
-                _STATUS["errors"].append(f"{name} (Mutaties): {type(e).__name__}: {e}")
-                _log.warning("[airs_vermogen] %s Mutaties failed: %s: %s", name, type(e).__name__, e)
-            # MODEL → airs_model_weight. The book's own strategy weights — this is what replaces
-            # the fixed↔dynamic pairing, so it runs for every account, paired or not.
-            try:
-                model_total += _save_model_weights(name, van, tot)
-                outcomes[name].append("model")
-            except Exception as e:
-                _STATUS["errors"].append(f"{name} (Model): {type(e).__name__}: {e}")
-                _log.warning("[airs_vermogen] %s Model failed: %s: %s", name, type(e).__name__, e)
+            # ⚠ THE SAME `scan_one` THE PER-ROW REFRESH CALLS. Refresh-all IS refresh-one, N times
+            # — see `scan_one` for why that had to stop being two implementations.
+            res = scan_one(name, van, tot)
+            outcomes[name] = res["reports_ok"]
+            rendement_ok += 1 if "att" in res["reports_ok"] else 0
+            vermogen_ok += 1 if "volk" in res["reports_ok"] else 0
+            holdings_total += res["holdings"]
+            mutaties_total += res["mutaties"]
+            model_total += res["model_weights"]
+            _STATUS["errors"].extend(f"{name} ({e})" for e in res["errors"])
+            # ⚠ RECORDED AFTER EVERY ACCOUNT, NOT ONCE AT THE END — the list is reloaded while the
+            # scan runs, so a verdict written only on completion would leave every row already
+            # scanned wearing a stale badge, and a run that died halfway would record nothing at
+            # all about the accounts it did reach.
+            #
+            # ⚠ BUT WITH THE RUN'S STAMP, NOT `now()` PER ACCOUNT. `_missing_reports` and
+            # `_complete_accounts` both read "this refresh's verdict" as `reports_at = max(...)`.
+            # A fresh timestamp per account would make every account except the LAST look stale,
+            # so 43 of 44 rows would silently drop out of the newest batch.
+            _record_reports({name: res["reports_ok"]}, run_stamp)
+            _STATUS["message"] = f"{i}/{len(names)} done: {name}"
 
         # ⚠ THIS JOB DOES NOT TOUCH CRM. It used to also download CRM → Relaties → Alle
         # relaties inline, which is a different report about different objects (relations, not
@@ -339,9 +384,8 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
         # ⚠ RECORDED ONLY WHEN THE DISCOVERY ITSELF WAS TRUSTED, on the same threshold the roster
         # uses. A scrape that reached six accounts would otherwise mark the other thirty-eight
         # "no reports retrieved" and empty the portfolios page on the strength of a failed login.
+        # Already written per account, under `run_stamp`, as each finished — nothing to flush here.
         complete = sum(1 for ok in outcomes.values() if len(ok) == len(REPORTS))
-        if len(names) >= _MIN_ROSTER:
-            _record_reports(outcomes, datetime.now(timezone.utc).isoformat())
         _STATUS.update({
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "status": "ok" if any_stored else "error",
@@ -409,69 +453,33 @@ def refresh_one_portfolio(portefeuille: str) -> dict:
     if not _LOCK.acquire(blocking=False):
         return {"status": "busy", "message": "An AIRS refresh is already running", "portefeuille": portefeuille}
     try:
-        from airs_scanner import download_portfolio_sync  # noqa: PLC0415
-        from portfolio import parse_airs_excel  # noqa: PLC0415
-        from routers.airs import _parse_att_excel, _save_performance_to_db  # noqa: PLC0415
-
         today = date.today()
         van, tot = f"{today.year}-01-01", today.isoformat()
-        errors: list[str] = []
-        rendement_ok = vermogen_ok = holdings = mutaties = model_weights = 0
-        # ⚠ A ROW COUNT IS NOT AN OUTCOME. `mutaties`/`model_weights` are ROWS STORED, and a book
-        # with no transactions this year legitimately stores zero — so completeness is tracked on
-        # its own flags, set where the fetch actually succeeded.
-        mutaties_ok = model_ok = 0
-        vermogen_as_of = tot
-        # Independent — one report failing must not lose the other (same as the fleet loop).
-        try:
-            att = download_portfolio_sync(portefeuille, van, tot)
-            _save_performance_to_db(portefeuille, _parse_att_excel(att))
-            rendement_ok = 1
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"Rendement: {type(e).__name__}: {e}")
-            _log.warning("[airs_vermogen] %s single Rendement failed: %s", portefeuille, e)
-        try:
-            # Most recent VALUED date, not today — see `_vermogen_most_recent`.
-            vermogen_as_of, vmo = _vermogen_most_recent(portefeuille, van)
-            holdings = _save_holdings(portefeuille, vermogen_as_of, parse_airs_excel(vmo))
-            vermogen_ok = 1
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"Vermogensoverzicht: {type(e).__name__}: {e}")
-            _log.warning("[airs_vermogen] %s single Vermogensoverzicht failed: %s", portefeuille, e)
-        # Independent of the other two: a book's dividends are worth having even if its valuation
-        # failed, and losing them because the price report was unvalued would be silent.
-        try:
-            mutaties = _save_mutaties(portefeuille, van, tot)
-            mutaties_ok = 1
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"Mutaties: {type(e).__name__}: {e}")
-            _log.warning("[airs_vermogen] %s single Mutaties failed: %s", portefeuille, e)
-        try:
-            model_weights = _save_model_weights(portefeuille, van, tot)
-            model_ok = 1
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"Model: {type(e).__name__}: {e}")
-            _log.warning("[airs_vermogen] %s single Model failed: %s", portefeuille, e)
-        # ⚠ THE PER-ROW REFRESH MUST RECORD ITS VERDICT TOO, or the button cannot do the one thing
-        # it is now for: an account hidden from the list because a report failed is retried HERE,
-        # and without this its stale "incomplete" verdict would survive a successful retry until
-        # the next full scan. `_MIN_ROSTER` does not apply — this is a deliberate request for one
-        # named account, not a discovery whose size might mean the scrape failed.
-        ok = [code for code, done in (("att", rendement_ok), ("volk", vermogen_ok),
-                                      ("mut", mutaties_ok), ("model", model_ok)) if done]
+
+        # ⚠ THE SAME FUNCTION THE FLEET SCAN CALLS. This used to be a second, near-identical copy
+        # of the four downloads — and the two had already drifted (only one recorded which reports
+        # arrived). One body, so "refresh this row" and "refresh everything" cannot mean different
+        # things.
+        res = scan_one(portefeuille, van, tot)
+        ok = res["reports_ok"]
+
+        # ⚠ THE PER-ROW REFRESH RECORDS ITS VERDICT TOO — it is how an account short a report gets
+        # its badge cleared without waiting for the next full scan. `_MIN_ROSTER` does not apply:
+        # this is a deliberate request for one named account, not a discovery whose size might mean
+        # the scrape failed.
         _record_reports({portefeuille: ok}, datetime.now(timezone.utc).isoformat())
         return {
-            "status": "ok" if (rendement_ok or vermogen_ok) else "error",
+            "status": "ok" if ("att" in ok or "volk" in ok) else "error",
             "portefeuille": portefeuille,
-            "as_of": vermogen_as_of if vermogen_ok else tot,
-            "holdings_rows": holdings,
-            "mutatie_rows": mutaties,
-            "model_weight_rows": model_weights,
-            "rendement_stored": bool(rendement_ok),
-            "vermogen_stored": bool(vermogen_ok),
+            "as_of": res["as_of"] if "volk" in ok else tot,
+            "holdings_rows": res["holdings"],
+            "mutatie_rows": res["mutaties"],
+            "model_weight_rows": res["model_weights"],
+            "rendement_stored": "att" in ok,
+            "vermogen_stored": "volk" in ok,
             "reports_ok": ok,
             "complete": len(ok) == len(REPORTS),
-            "errors": errors,
+            "errors": res["errors"],
         }
     finally:
         _LOCK.release()
