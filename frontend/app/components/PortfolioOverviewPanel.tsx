@@ -86,7 +86,17 @@ export default function PortfolioOverviewPanel() {
   const [pfFund, setPfFund] = useState<{ id: number; name: string } | null>(null);
   // Refresh state: the fleet job is running; a status/error line; which single rows are re-scanning.
   const [refreshingAll, setRefreshingAll] = useState(false);
-  const [refreshMsg, setRefreshMsg] = useState<{ text: string; kind: 'info' | 'error' | 'ok' } | null>(null);
+  /**
+   * ⚠ `partial` IS NOT `error`, AND CONFLATING THEM COST A DAY. The fleet refresh fetches FOUR
+   * reports for each of ~44 accounts, so 27 individual failures out of ~176 attempts is a job that
+   * WORKED and is incomplete for some accounts — the backend says `status: "ok"` and stored a
+   * snapshot. Painting that red says "the scan failed", which sends you looking for a broken
+   * session or missing credentials when the actual answer is "thirteen books had no valuation
+   * yet". A partial result and a dead job need different colours because they need different
+   * reactions: one is "look at which accounts", the other is "the scraper is down".
+   */
+  const [refreshMsg, setRefreshMsg] = useState<
+    { text: string; kind: 'info' | 'error' | 'partial' | 'ok' } | null>(null);
   const [refreshingRows, setRefreshingRows] = useState<Set<string>>(new Set());
 
   // Fetch ONE account's holdings + ISIN resolution into the caches. Split out of `expand` because
@@ -132,13 +142,23 @@ export default function PortfolioOverviewPanel() {
         `${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh`,
         { method: 'POST' });
       const b = (await r.json().catch(() => null)) as
-        { status?: string; errors?: string[]; as_of?: string; holdings_rows?: number } | null;
+        { status?: string; errors?: string[]; as_of?: string; holdings_rows?: number;
+          complete?: boolean } | null;
       if (!r.ok) {
         setRefreshMsg({ text: `${portefeuille}: refresh failed — HTTP ${r.status}. Is the backend running with AIRS credentials?`, kind: 'error' });
       } else if (b?.status === 'busy') {
         setRefreshMsg({ text: 'A full refresh is already running — try again in a moment.', kind: 'info' });
-      } else if (b?.status === 'error' || b?.errors?.length) {
+      } else if (b?.status === 'error') {
         setRefreshMsg({ text: `${portefeuille}: AIRS scan failed — ${b?.errors?.join('; ') || 'unknown error'}`, kind: 'error' });
+      } else if (b?.complete === false) {
+        // ⚠ THE OUTCOME THIS BUTTON EXISTS FOR, so it has to say what it means. Some reports
+        // arrived and some did not, which is exactly why the account is not on the list — and
+        // "AIRS scan failed" (what this said before) sends you to check credentials that are fine.
+        setRefreshMsg({
+          text: `${portefeuille}: partly refreshed — still missing ${
+            b?.errors?.join('; ') || 'a report'}. The account stays off the list until every report arrives.`,
+          kind: 'partial',
+        });
       } else {
         setRefreshMsg({ text: `${portefeuille}: refreshed — ${b?.holdings_rows ?? 0} holdings as of ${b?.as_of ?? 'today'}.`, kind: 'ok' });
       }
@@ -171,9 +191,15 @@ export default function PortfolioOverviewPanel() {
         await new Promise((res) => setTimeout(res, 2500));
         const s = await apiFetch(`${API_URL}/api/airs/vermogen/status`);
         const st = (await s.json().catch(() => null)) as
-          { running?: boolean; message?: string; errors?: string[] } | null;
+          { running?: boolean; status?: string; message?: string; errors?: string[] } | null;
         if (!st?.running) {
-          setRefreshMsg({ text: st?.message ?? 'Refresh complete.', kind: st?.errors?.length ? 'error' : 'ok' });
+          // ⚠ THE BACKEND'S OWN VERDICT DECIDES RED, NOT THE ERROR COUNT. `status` is "error" only
+          // when NOTHING was stored — a genuinely failed scan. Anything else stored a snapshot,
+          // so individual report failures are amber: real, worth reading, not a dead job.
+          setRefreshMsg({
+            text: st?.message ?? 'Refresh complete.',
+            kind: st?.status === 'error' ? 'error' : st?.errors?.length ? 'partial' : 'ok',
+          });
           break;
         }
         if (st?.message) setRefreshMsg({ text: st.message, kind: 'info' });
@@ -264,14 +290,23 @@ export default function PortfolioOverviewPanel() {
       </div>
 
       {/* Refresh outcome — LOUD, so a failed AIRS scan (session expired, backend down, no
-          credentials) is never mistaken for "nothing happened". Green when a snapshot was actually
-          written, red with the AIRS error otherwise. */}
+          credentials) is never mistaken for "nothing happened". Three states, because there are
+          three: green = every account came back whole; RED = nothing was stored, the scan is
+          broken; AMBER = a snapshot was written but some reports did not arrive, which is a thing
+          to read rather than a thing to fix. */}
       {refreshMsg && (
         <div className={`text-[11px] rounded-lg px-3 py-1.5 border ${
           refreshMsg.kind === 'error' ? 'text-neg-300 bg-neg-500/10 border-neg-500/20'
-            : refreshMsg.kind === 'ok' ? 'text-pos-300 bg-pos-500/10 border-pos-500/20'
-              : 'text-fg-subtle bg-overlay/[0.03] border-neutral-800/40'}`}>
+            : refreshMsg.kind === 'partial' ? 'text-warn-300 bg-warn-500/10 border-warn-500/20'
+              : refreshMsg.kind === 'ok' ? 'text-pos-300 bg-pos-500/10 border-pos-500/20'
+                : 'text-fg-subtle bg-overlay/[0.03] border-neutral-800/40'}`}>
           {refreshMsg.text}
+          {refreshMsg.kind === 'partial' && (
+            <span className="block text-fg-muted mt-0.5">
+              The scan itself succeeded. Accounts missing a report are held back from the list
+              until every report arrives — retry one with its row&apos;s Refresh.
+            </span>
+          )}
         </div>
       )}
 

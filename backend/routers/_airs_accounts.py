@@ -57,6 +57,10 @@ from __future__ import annotations
 import asyncio
 from datetime import date
 
+# ⚠ IMPORTED, NOT RE-LISTED. The set of reports an account needs is the set the refresh fetches;
+# two copies would drift the moment a fifth report is added, and the drift would show up as
+# accounts silently missing from the page.
+from airs_vermogen import REPORTS
 from deps import supabase
 
 # AIRS reports a portfolio's own return; we never recompute it. These are the columns it uses.
@@ -267,6 +271,39 @@ def _live_accounts() -> set[str] | None:
             for r in rows if r.get("last_seen_at") == newest and r.get("portefeuille")}
 
 
+def _complete_accounts() -> set[str] | None:
+    """Accounts whose last refresh retrieved ALL FOUR reports, lower-cased — or None.
+
+    ⚠ AN ACCOUNT MISSING ONE REPORT IS NOT A SLIGHTLY-WORSE ROW, IT IS A MIXTURE OF DATES.
+    Measured 2026-07-29: Rendement 44/44 but Vermogensoverzicht 31/44, so thirteen accounts
+    rendered this week's return beside last week's holdings, with nothing on screen saying so.
+    Every figure was real; only their combination was fiction.
+
+    ⚠ `None` MEANS "DO NOT FILTER" — same contract as `_live_accounts`, same reason. Before any
+    refresh has recorded an outcome (a fresh database, or the deploy that added the columns) every
+    account looks incomplete, and asserting that would blank the page over a measurement never
+    taken. An empty SET is different: it means a refresh ran and nothing came back whole.
+
+    ⚠ AND ONLY THE NEWEST VERDICT COUNTS. Rows carry the batch stamp their refresh wrote, so an
+    account skipped by a later run keeps an older `reports_at` and is correctly not counted as
+    complete-as-of-now — rather than coasting on a verdict from a week ago.
+    """
+    try:
+        rows = (supabase.table("airs_account_roster").select("portefeuille,reports_ok,reports_at")
+                .order("reports_at", desc=True).limit(2000).execute().data or [])
+    except Exception:  # noqa: BLE001 — a missing column must not blank the page
+        return None
+    dated = [r for r in rows if r.get("reports_at")]
+    if not dated:
+        return None
+    newest = dated[0]["reports_at"]
+    need = set(REPORTS)
+    return {(r["portefeuille"] or "").strip().lower()
+            for r in dated
+            if r.get("reports_at") == newest and r.get("portefeuille")
+            and need.issubset(set(r.get("reports_ok") or []))}
+
+
 def list_accounts() -> list[dict]:
     """Every AIRS account with a reported return, freshest first.
 
@@ -277,6 +314,7 @@ def list_accounts() -> list[dict]:
     counts, newest = _holding_counts()
     hidden = _hidden_accounts()
     live = _live_accounts()
+    complete = _complete_accounts()
     out: list[dict] = []
     for name, r in perf.items():
         # ⚠ Filtered HERE, at the one place the list is built, so every surface that reads it
@@ -291,6 +329,11 @@ def list_accounts() -> list[dict]:
         # performance table answers "what did it make", which stays true after the book is gone;
         # only the discovery pass answers "does AIRS still list it".
         if live is not None and key not in live:
+            continue
+        # ⚠ AND EVERY REPORT MUST HAVE ARRIVED. A row assembled from a fresh Rendement and a
+        # week-old Vermogensoverzicht is not a partial answer, it is a wrong one — see
+        # `_complete_accounts`. The per-row "Refresh" retries an account and restores it here.
+        if complete is not None and key not in complete:
             continue
         begin, end = r.get("beginvermogen"), r.get("eindvermogen")
         out.append({

@@ -102,6 +102,35 @@ def _record_roster(names: list[str]) -> None:
                      type(e).__name__, e)
 
 
+# The four reports an account needs for every figure on the portfolios page to describe the same
+# moment. Order is display order, not fetch order.
+REPORTS = ("att", "volk", "mut", "model")
+
+
+def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
+    """Persist which reports each account yielded on this pass — what `list_accounts` gates on.
+
+    ⚠ THE OUTCOME IS THE FETCH'S, NOT THE TABLE'S. A book with no transactions this year returns a
+    valid EMPTY Mutaties report; counting rows afterwards would mark it incomplete and hide a
+    perfectly healthy account. `outcomes` therefore carries what the `try` blocks observed.
+
+    ⚠ ONE TIMESTAMP FOR THE WHOLE BATCH, exactly as `_record_roster` does and for the same reason:
+    "this refresh's verdict" is then `reports_at = max(...)`, not a race against the write.
+
+    Best-effort — bookkeeping must never fail the scrape that produced it.
+    """
+    rows = [{"portefeuille": n, "last_seen_at": stamp, "reports_ok": sorted(ok),
+             "reports_at": stamp}
+            for n, ok in sorted(outcomes.items())]
+    try:
+        for i in range(0, len(rows), 200):
+            supabase.table("airs_account_roster").upsert(
+                rows[i:i + 200], on_conflict="portefeuille").execute()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("[airs_vermogen] could not record report outcomes: %s: %s",
+                     type(e).__name__, e)
+
+
 def _save_holdings(portefeuille: str, as_of: str, holdings) -> int:
     """Replace this portfolio's snapshot for `as_of` with `holdings`. Delete-then-
     insert so a position that dropped out doesn't linger from an earlier run."""
@@ -254,6 +283,10 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
 
         _STATUS["portfolios_found"] = len(names)
         rendement_ok = vermogen_ok = holdings_total = mutaties_total = model_total = 0
+        # ⚠ EVERY ACCOUNT GETS AN ENTRY, INCLUDING ONE THAT YIELDS NOTHING. An account missing
+        # from this dict would keep whatever verdict a previous run left behind, so a report that
+        # started failing today would go on reading as complete.
+        outcomes: dict[str, list[str]] = {n: [] for n in names}
         for i, name in enumerate(names, 1):
             _STATUS["message"] = f"{i}/{len(names)}: {name}…"
             # Rendement (ATT) → airs_performance. Independent of the holdings
@@ -262,6 +295,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
                 att = download_portfolio_sync(name, van, tot)
                 _save_performance_to_db(name, _parse_att_excel(att))
                 rendement_ok += 1
+                outcomes[name].append("att")
             except Exception as e:
                 _STATUS["errors"].append(f"{name} (Rendement): {type(e).__name__}: {e}")
                 _log.warning("[airs_vermogen] %s Rendement failed: %s: %s", name, type(e).__name__, e)
@@ -271,6 +305,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
                 v_as_of, vmo = _vermogen_most_recent(name, van)
                 holdings_total += _save_holdings(name, v_as_of, parse_airs_excel(vmo))
                 vermogen_ok += 1
+                outcomes[name].append("volk")
             except Exception as e:
                 _STATUS["errors"].append(f"{name} (Vermogensoverzicht): {type(e).__name__}: {e}")
                 _log.warning("[airs_vermogen] %s Vermogensoverzicht failed: %s: %s", name, type(e).__name__, e)
@@ -278,6 +313,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             # worth having even when its valuation is unavailable, and a shared try would lose them.
             try:
                 mutaties_total += _save_mutaties(name, van, tot)
+                outcomes[name].append("mut")
             except Exception as e:
                 _STATUS["errors"].append(f"{name} (Mutaties): {type(e).__name__}: {e}")
                 _log.warning("[airs_vermogen] %s Mutaties failed: %s: %s", name, type(e).__name__, e)
@@ -285,6 +321,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             # the fixed↔dynamic pairing, so it runs for every account, paired or not.
             try:
                 model_total += _save_model_weights(name, van, tot)
+                outcomes[name].append("model")
             except Exception as e:
                 _STATUS["errors"].append(f"{name} (Model): {type(e).__name__}: {e}")
                 _log.warning("[airs_vermogen] %s Model failed: %s: %s", name, type(e).__name__, e)
@@ -299,6 +336,12 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
         # report it was never asked to fetch.
         total = len(names)
         any_stored = rendement_ok or vermogen_ok
+        # ⚠ RECORDED ONLY WHEN THE DISCOVERY ITSELF WAS TRUSTED, on the same threshold the roster
+        # uses. A scrape that reached six accounts would otherwise mark the other thirty-eight
+        # "no reports retrieved" and empty the portfolios page on the strength of a failed login.
+        complete = sum(1 for ok in outcomes.values() if len(ok) == len(REPORTS))
+        if len(names) >= _MIN_ROSTER:
+            _record_reports(outcomes, datetime.now(timezone.utc).isoformat())
         _STATUS.update({
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "status": "ok" if any_stored else "error",
@@ -307,9 +350,17 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             "holdings_rows": holdings_total,
             "mutatie_rows": mutaties_total,
             "model_weight_rows": model_total,
+            "complete_accounts": complete,
+            # ⚠ EVERY REPORT THE JOB FETCHES IS NAMED. It said "Rendement 44/44, Vermogensoverzicht
+            # 31/44 … 27 report(s) failed", and 44−31=13 — because `errors` also carried Mutaties
+            # and Model failures the message never mentioned, so the two numbers could not be
+            # reconciled by anyone reading them. Same flaw the CRM note above describes, one layer
+            # in. `complete` leads, because that is what the portfolios page will show.
             "message": (
+                f"{complete}/{total} accounts complete — "
                 f"Rendement {rendement_ok}/{total}, Vermogensoverzicht {vermogen_ok}/{total} "
-                f"({holdings_total} holdings)"
+                f"({holdings_total} holdings), Mutaties {mutaties_total} rows, "
+                f"Model {model_total} rows"
                 + (f"; {len(_STATUS['errors'])} report(s) failed" if _STATUS["errors"] else "")
             ),
         })
@@ -366,6 +417,10 @@ def refresh_one_portfolio(portefeuille: str) -> dict:
         van, tot = f"{today.year}-01-01", today.isoformat()
         errors: list[str] = []
         rendement_ok = vermogen_ok = holdings = mutaties = model_weights = 0
+        # ⚠ A ROW COUNT IS NOT AN OUTCOME. `mutaties`/`model_weights` are ROWS STORED, and a book
+        # with no transactions this year legitimately stores zero — so completeness is tracked on
+        # its own flags, set where the fetch actually succeeded.
+        mutaties_ok = model_ok = 0
         vermogen_as_of = tot
         # Independent — one report failing must not lose the other (same as the fleet loop).
         try:
@@ -387,14 +442,24 @@ def refresh_one_portfolio(portefeuille: str) -> dict:
         # failed, and losing them because the price report was unvalued would be silent.
         try:
             mutaties = _save_mutaties(portefeuille, van, tot)
+            mutaties_ok = 1
         except Exception as e:  # noqa: BLE001
             errors.append(f"Mutaties: {type(e).__name__}: {e}")
             _log.warning("[airs_vermogen] %s single Mutaties failed: %s", portefeuille, e)
         try:
             model_weights = _save_model_weights(portefeuille, van, tot)
+            model_ok = 1
         except Exception as e:  # noqa: BLE001
             errors.append(f"Model: {type(e).__name__}: {e}")
             _log.warning("[airs_vermogen] %s single Model failed: %s", portefeuille, e)
+        # ⚠ THE PER-ROW REFRESH MUST RECORD ITS VERDICT TOO, or the button cannot do the one thing
+        # it is now for: an account hidden from the list because a report failed is retried HERE,
+        # and without this its stale "incomplete" verdict would survive a successful retry until
+        # the next full scan. `_MIN_ROSTER` does not apply — this is a deliberate request for one
+        # named account, not a discovery whose size might mean the scrape failed.
+        ok = [code for code, done in (("att", rendement_ok), ("volk", vermogen_ok),
+                                      ("mut", mutaties_ok), ("model", model_ok)) if done]
+        _record_reports({portefeuille: ok}, datetime.now(timezone.utc).isoformat())
         return {
             "status": "ok" if (rendement_ok or vermogen_ok) else "error",
             "portefeuille": portefeuille,
@@ -404,6 +469,8 @@ def refresh_one_portfolio(portefeuille: str) -> dict:
             "model_weight_rows": model_weights,
             "rendement_stored": bool(rendement_ok),
             "vermogen_stored": bool(vermogen_ok),
+            "reports_ok": ok,
+            "complete": len(ok) == len(REPORTS),
             "errors": errors,
         }
     finally:
