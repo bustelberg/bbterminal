@@ -92,11 +92,27 @@ if os.environ.get("RAILWAY_PUBLIC_DOMAIN"):
 # ⚠ ORIGINS ONLY — scheme + host, no path, no trailing slash. Starlette compares the `Origin`
 # header verbatim, so "https://x.vercel.app/" matches nothing and fails exactly like a missing
 # entry. A blank segment is dropped rather than becoming "", which would match nothing either.
-_cors_origins += [
-    o.strip().rstrip("/")
-    for o in os.environ.get("CORS_ORIGINS", "").split(",")
-    if o.strip()
-]
+#
+# ⚠ A BARE HOSTNAME IS ASSUMED https. Typing `CORS_ORIGINS=bbterminal-dev.vercel.app` is the
+# obvious thing to do and was silently useless: a browser always sends a full origin, so a
+# scheme-less entry can never match anything, and the symptom is identical to not having set the
+# variable at all. `localhost`/`127.0.0.1` keep http, since that is what a dev server serves.
+def _origin(raw: str) -> str:
+    o = raw.strip().rstrip("/")
+    if "://" in o:
+        return o
+    scheme = "http" if o.startswith(("localhost", "127.0.0.1")) else "https"
+    return f"{scheme}://{o}"
+
+
+_cors_origins += [_origin(o) for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
+
+# ⚠ `print`, NOT `logging.info`. uvicorn leaves the ROOT logger at WARNING in production, so an
+# info line is invisible exactly where this matters. The allow-list is the one piece of CORS
+# config with no way to read it back from outside — a rejected origin and an unset variable
+# produce the byte-identical "no Access-Control-Allow-Origin" in the browser — so it is printed at
+# startup and a deploy log answers the question in one glance.
+print(f"[cors] allow_origins = {_cors_origins}", flush=True)
 
 app.add_middleware(
     CORSMiddleware,

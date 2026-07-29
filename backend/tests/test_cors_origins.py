@@ -65,3 +65,26 @@ class TestTheAllowList:
 
     def test_unset_changes_nothing(self, monkeypatch):
         assert _origins(monkeypatch, "") == _origins(monkeypatch, None)
+
+    def test_a_bare_hostname_is_assumed_https(self, monkeypatch):
+        """⚠ The fourth silent typo, and the most natural one to make. A browser always sends a
+        full origin, so `bbterminal-dev.vercel.app` can never match — and it fails identically to
+        never having set the variable, which is what makes it expensive to diagnose."""
+        got = _origins(monkeypatch, "bbterminal-dev.vercel.app")
+        assert "https://bbterminal-dev.vercel.app" in got
+        assert "bbterminal-dev.vercel.app" not in got
+
+    def test_a_bare_localhost_keeps_http(self, monkeypatch):
+        """A dev server serves http; upgrading it to https would be the same bug with the sign
+        flipped."""
+        got = _origins(monkeypatch, "localhost:3000,127.0.0.1:3000")
+        assert "http://localhost:3000" in got
+        assert "http://127.0.0.1:3000" in got
+
+    def test_an_explicit_scheme_is_never_rewritten(self, monkeypatch):
+        got = _origins(monkeypatch, "http://staging.internal:8080")
+        assert "http://staging.internal:8080" in got
+
+    def test_scheme_and_trailing_slash_together(self, monkeypatch):
+        got = _origins(monkeypatch, " bbterminal-dev.vercel.app/ ")
+        assert "https://bbterminal-dev.vercel.app" in got
