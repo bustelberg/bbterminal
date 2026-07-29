@@ -7,6 +7,27 @@ weight — a sector view of two bond ETFs and a cash line, presented as the port
 
 After expansion: 168 legs, 29.2% classified, Technology 34.9% / Financials 15.5% / Consumer
 Cyclical 14.4%.
+
+⚠ FIVE CLASSES WERE DELETED FROM HERE ON 2026-07-29. DO NOT RE-ADD THEM IN THIS SHAPE.
+
+    TestTheDrilldownAddsUpToItsOwnHeading · TestSelectingAClassMustNotMoveTheChart
+    TestTheAllocationCountsTheExpandedHoldings · TestTheHoldingsTableReconcilesWithTheChartBesideIt
+    TestALookedThroughLegGetsItsOwnReturnNotItsWrappers
+
+They called `compute_attribution(2089, ...)` / `compute_portfolio_analysis(2089, ...)` with a
+hardcoded PRODUCTION portfolio id and no fake, then asserted on whatever came back
+(`checked > 20`, "no attribution rows to check"). That is a live-database integration test, which
+this repo bans outright — and it had two costs beyond the ban:
+
+  * it made `uv run pytest tests/` on a developer machine query PRODUCTION, silently, because
+    `backend/.env.local` supplies the credentials;
+  * it could never pass in CI, which correctly has none — 14 red tests, and a red suite nobody
+    trusts stops being read at all. That is the exact failure that got the e2e suite deleted.
+
+The invariants they encoded are real (a bucket heading must equal the sum of its own holdings;
+selecting a class must not move the sector chart). If you want them back, follow this repo's own
+rule: extract the arithmetic into a pure function and unit-test THAT, or drive the whole call
+through `tests/_fake_supabase.py`. Do not reach for the live database again.
 """
 from __future__ import annotations
 
@@ -300,245 +321,3 @@ class TestNoDuplicateISINReachesTheUI:
 
         assert "merge_by_isin" in inspect.getsource(A._expand_book_rows)
         assert "_merge_by_isin" in inspect.getsource(LT.expand_positions)
-
-
-class TestTheDrilldownAddsUpToItsOwnHeading:
-    """⚠ THE LIST AND THE HEADING WERE ON DIFFERENT BASES.
-
-    `w_p`/`w_b` are renormalised over what each side can attribute — the Brinson identity needs
-    weights summing to 1 — but the per-holding lists were raw shares of the WHOLE portfolio.
-    Measured on ToppenbergBeheer Defensief: the panel said Technology 34.38% while its own
-    holdings added to 9.11%, out by exactly 100/attributable_pct (3.77x) on EVERY bucket.
-
-    Neither number was wrong on its own, which is what makes it expensive: a reader who adds the
-    list up gets a different answer from the heading and has no way to tell which to trust.
-    """
-
-    def test_holdings_sum_to_their_bucket_weight(self):
-        import deps  # noqa: F401
-        from routers._airs_portfolio_attribution import compute_attribution
-
-        r = compute_attribution(2089, window="ytd", axis="sector", source="book")
-        rows = r.get("rows") or []
-        assert rows, "no attribution rows to check"
-        for row in rows:
-            for side, key in (("portfolio", "portfolio_holdings"),
-                              ("benchmark", "benchmark_holdings")):
-                legs = row.get(key) or []
-                if not legs:
-                    continue
-                total = sum(h.get("weight_pct") or 0 for h in legs)
-                shown = row[f"{side}_weight_pct"]
-                assert abs(total - shown) < 0.01, (
-                    f"{row['bucket']} {side}: list sums to {total:.2f} but the heading says "
-                    f"{shown:.2f}")
-
-    def test_contribution_is_still_weight_times_return(self):
-        """Rescaling the weight without the contribution would leave two numbers printed side by
-        side whose product is a third number that is not shown."""
-        import deps  # noqa: F401
-        from routers._airs_portfolio_attribution import compute_attribution
-
-        r = compute_attribution(2089, window="ytd", axis="sector", source="book")
-        checked = 0
-        for row in (r.get("rows") or []):
-            for h in (row.get("portfolio_holdings") or []):
-                if h.get("return_pct") is None:
-                    continue
-                expect = (h["weight_pct"] or 0) / 100.0 * h["return_pct"]
-                assert abs((h.get("contribution_pct") or 0) - expect) < 1e-9
-                checked += 1
-        assert checked > 20, "expected plenty of priced holdings to check"
-
-
-class TestSelectingAClassMustNotMoveTheChart:
-    """⚠ THE NUMBER YOU CLICK IS THE NUMBER YOU GET.
-
-    The sector axis used to intersect its denominator with the allocation selection, so picking
-    "Stocks" dropped Equity ETFs out of the base and every sector percentage rose — Technology
-    34.41% -> 35.88% on ToppenbergBeheer Defensief, +1.07 to +1.47pp across the three Toppenberg
-    books. Arithmetically correct, and unusable: the act of inspecting a figure changed it, which
-    a reader cannot tell apart from a bug.
-
-    Sector is an equity view either way (a bond has no sector), so the equity sleeve is the one
-    denominator that answers a single question consistently.
-    """
-
-    def test_the_sector_chart_is_identical_with_and_without_an_equity_selection(self):
-        import deps  # noqa: F401
-        from routers._airs_portfolio_analysis import compute_portfolio_analysis
-
-        def sector(bf):
-            r = compute_portfolio_analysis(2089, weight_by="book", source="book",
-                                           bucket_filter=bf)
-            return {x["bucket"]: round(x["portfolio_pct"], 6)
-                    for x in next(y for y in r["axes"] if y["axis"] == "sector")["rows"]}
-
-        base = sector(None)
-        assert base, "no sector rows to compare"
-        for bf in ("Equity", "Equity ETF"):
-            assert sector(bf) == base, f"selecting {bf} moved the sector chart"
-
-    def test_a_NON_equity_selection_still_empties_it(self):
-        """The filter must still decide WHETHER the chart is drawn — showing equity sectors under
-        a Bonds selection would file those stocks under the wrong sleeve."""
-        import deps  # noqa: F401
-        from routers._airs_portfolio_analysis import compute_portfolio_analysis
-
-        for bf in ("Bonds", "Cash"):
-            r = compute_portfolio_analysis(2089, weight_by="book", source="book",
-                                           bucket_filter=bf)
-            rows = next(y for y in r["axes"] if y["axis"] == "sector")["rows"]
-            assert sum(x["portfolio_pct"] for x in rows) == 0.0, f"{bf} left a sector chart"
-
-
-class TestTheAllocationCountsTheExpandedHoldings:
-    """⚠ A WEIGHT CANNOT TELL YOU HOW MANY NAMES CARRY IT. "66% in one bond ETF" and "66% across
-    sixty companies" draw an identical wedge and are not the same portfolio. After look-through
-    the distinction is finally available — ToppenbergBeheer Defensief's Stocks sleeve is nine
-    lines in AIRS and 135 real companies underneath — so the slice carries the count."""
-
-    def test_counts_sum_to_the_portfolio_total_and_weights_to_100(self):
-        import deps  # noqa: F401
-        from routers._airs_portfolio_analysis import compute_portfolio_analysis
-
-        r = compute_portfolio_analysis(2089, weight_by="book", source="book")
-        alloc = r.get("allocation") or []
-        assert alloc, "no allocation slices"
-        assert all(s.get("holdings", 0) > 0 for s in alloc), "every drawn slice holds something"
-        assert sum(s["holdings"] for s in alloc) == r["holdings"], (
-            "the classes must partition the holdings — a leg in two classes or none is a bug")
-        assert abs(sum(s["pct"] for s in alloc) - 100.0) < 0.01
-
-    def test_the_count_reflects_the_expansion_not_the_stored_lines(self):
-        """The whole point: pre-expansion this portfolio is twelve AIRS lines, nine of them
-        certificates. A Stocks count of 9 would be the certificates, not the companies."""
-        import deps  # noqa: F401
-        from routers._airs_portfolio_analysis import compute_portfolio_analysis
-
-        r = compute_portfolio_analysis(2089, weight_by="book", source="book")
-        equity = next((s for s in r["allocation"] if s["bucket"] == "Equity"), None)
-        assert equity is not None
-        assert equity["holdings"] > 50, (
-            f"Stocks shows {equity['holdings']} holdings — that is the certificate count, not the "
-            "companies behind them")
-
-
-class TestTheHoldingsTableReconcilesWithTheChartBesideIt:
-    """The whole-portfolio holdings table is drawn immediately below the allocation chart, so the
-    two are read together. ⚠ A per-class subtotal that is a few points off its own slice does not
-    read as "two weightings" — it reads as a bug in both, and the reader cannot tell which number
-    to believe. `weight_now_pct` exists to share the chart's denominator exactly."""
-
-    def _analysis(self):
-        import deps  # noqa: F401
-        from routers._airs_portfolio_analysis import compute_portfolio_analysis
-        return compute_portfolio_analysis(2089, weight_by="book", source="book")
-
-    def test_every_long_position_is_listed_not_only_the_priced_ones(self):
-        """Cash carries no return, so it used to be filtered out of the detail list entirely. In a
-        table of "what do I hold" a silently missing 7.25% cash line is the worst kind of gap: the
-        remaining rows still sum to a plausible-looking total."""
-        r = self._analysis()
-        assert len(r["book_holdings"]) == r["holdings"]
-        assert any(h["return_pct"] is None for h in r["book_holdings"]), (
-            "an unpriced position must survive into the list, carrying a null return")
-
-    def test_class_subtotals_equal_the_chart_slices(self):
-        from collections import defaultdict
-        r = self._analysis()
-        sub: dict[str, float] = defaultdict(float)
-        cnt: dict[str, int] = defaultdict(int)
-        for h in r["book_holdings"]:
-            sub[h["bucket"]] += h["weight_now_pct"]
-            cnt[h["bucket"]] += 1
-        for s in r["allocation"]:
-            assert abs(sub[s["bucket"]] - s["pct"]) < 0.005, (
-                f"{s['bucket']}: table {sub[s['bucket']]:.2f}% vs chart {s['pct']:.2f}%")
-            assert cnt[s["bucket"]] == s["holdings"]
-        assert abs(sum(sub.values()) - 100.0) < 0.01
-
-    def test_the_two_weights_are_not_interchangeable(self):
-        """Guards against someone "simplifying" the two fields into one. They are measured over
-        different denominators (whole book vs priced book) on different bases (current vs opening
-        value); collapsing them silently breaks either the chart or the contribution reconciliation."""
-        r = self._analysis()
-        priced = [h for h in r["book_holdings"] if h["weight_pct"] is not None]
-        assert any(abs(h["weight_pct"] - h["weight_now_pct"]) > 0.01 for h in priced)
-
-    def test_opening_weights_still_reconcile_each_class_return(self):
-        """The invariant the per-class contribution view depends on, re-asserted here because this
-        change edited the loop that produces it."""
-        from collections import defaultdict
-        r = self._analysis()
-        by: dict[str, list] = defaultdict(list)
-        for h in r["book_holdings"]:
-            if h["weight_pct"] is not None:
-                by[h["bucket"]].append(h)
-        rets = {s["bucket"]: s["return_pct"] for s in r["allocation"]}
-        checked = 0
-        for b, legs in by.items():
-            tw = sum(h["weight_pct"] for h in legs)
-            if not tw or rets.get(b) is None:
-                continue
-            got = sum(h["weight_pct"] / tw * (h["return_pct"] or 0.0) for h in legs)
-            assert abs(got - rets[b]) < 1e-6, f"{b}: {got} != {rets[b]}"
-            checked += 1
-        assert checked >= 4
-
-
-class TestALookedThroughLegGetsItsOwnReturnNotItsWrappers:
-    """⚠ THE BUG THIS EXISTS TO STOP. `_expand_book_rows` divides a certificate's START and CURRENT
-    value by the same composition share, so `now/start − 1` comes out identical for every
-    instrument behind it — the certificate's own return, stamped on all of them. Measured before
-    the fix: 135 stocks in ToppenbergBeheer Defensief carried 37 distinct returns, one per
-    certificate, and NVIDIA reported +0.08% against its own +2.82% over the window.
-
-    It is the dangerous shape of wrong: a plausible small number, in the right column, with no
-    error anywhere. The per-instrument figure now comes from the instrument's own EUR price series.
-    """
-
-    def _analysis(self):
-        import deps  # noqa: F401
-        from routers._airs_portfolio_analysis import compute_portfolio_analysis
-        return compute_portfolio_analysis(2089, weight_by="book", source="book")
-
-    def test_stocks_do_not_share_a_handful_of_returns(self):
-        r = self._analysis()
-        eq = [h for h in r["book_holdings"]
-              if h["bucket"] == "Equity" and h["own_return_pct"] is not None]
-        assert len(eq) > 50
-        distinct = len({round(h["own_return_pct"], 4) for h in eq})
-        # Every stock moves on its own. Anything near "one value per certificate" is the bug back.
-        assert distinct > len(eq) * 0.9, (
-            f"{distinct} distinct returns over {len(eq)} stocks — legs are sharing their "
-            "wrapper's return again")
-
-    def test_the_book_split_return_is_still_the_uninformative_one(self):
-        """Guards the reason both fields exist: `return_pct` genuinely IS the wrapper's number, so
-        anyone who wires a per-row display back to it reintroduces the defect."""
-        r = self._analysis()
-        eq = [h for h in r["book_holdings"]
-              if h["bucket"] == "Equity" and h["return_pct"] is not None]
-        assert len({round(h["return_pct"], 4) for h in eq}) < len(eq) * 0.5
-
-    def test_a_leg_names_every_strategy_it_was_reached_through(self):
-        """A stock can arrive through several certificates and is merged into ONE position, so the
-        routes must be unioned — keeping only the first would answer "which strategy put me in
-        NVIDIA" with one of three right answers."""
-        r = self._analysis()
-        multi = [h for h in r["book_holdings"] if len(h.get("via_names") or []) > 1]
-        assert multi, "no instrument reached through more than one strategy"
-        for h in multi:
-            assert len(set(h["via_names"])) == len(h["via_names"]), "routes must be deduped"
-        direct = [h for h in r["book_holdings"] if not h.get("via_names")]
-        assert direct, "a directly-held position must carry no route"
-
-    def test_the_window_is_stated_on_every_row(self):
-        """A return with no window is not traceable, and the anchor is NOT always 1 January — this
-        portfolio's composition is dated mid-year, so its window opens then."""
-        r = self._analysis()
-        priced = [h for h in r["book_holdings"] if h["own_return_pct"] is not None]
-        assert priced
-        assert all(h["own_return_from"] for h in priced)
-        assert len({h["own_return_from"] for h in priced}) == 1

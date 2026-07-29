@@ -6,8 +6,29 @@ guard against: the number looks entirely normal and describes something else.
 """
 from __future__ import annotations
 
+import pytest
+
 from routers._airs_portfolio_links import expand_members
 from routers._fundamental_coverage import classify_holding, coverage_for
+
+
+@pytest.fixture(autouse=True)
+def _no_alias_lookup(monkeypatch):
+    """Neutralise the ISIN-alias hop, which reaches its OWN Supabase handle.
+
+    ⚠ PATCHING `fc.supabase` IS NOT ENOUGH AND THE GAP IS INVISIBLE LOCALLY. `coverage_for` opens
+    with `canonical_map(...)` -> `asset_pipeline.isin_alias.load_aliases()`, a different module
+    with a different handle; a test that patches only the coverage module's one still builds a
+    REAL client for the alias lookup. On a developer machine `backend/.env.local` supplies the
+    credentials, so it silently succeeds — against production. In CI there are none and it is a
+    `KeyError: 'SUPABASE_URL'`, which is the first anyone hears of it.
+
+    Autouse so a test added tomorrow inherits the fix. `TestTheADRAliasIsResolvedFirst` re-patches
+    `load_aliases` for its own purposes and wins, because its `setattr` runs after this one.
+    """
+    from asset_pipeline import isin_alias
+
+    monkeypatch.setattr(isin_alias, "load_aliases", dict)
 
 
 def _grid(asset_class=None, product=None):

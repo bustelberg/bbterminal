@@ -226,6 +226,21 @@ class TestBookWeighting:
         monkeypatch.setattr(links, "list_account_links", lambda: {
             "accounts": ([{"portefeuille": "X_DYN", "model_portfolio_id": 7}] if link else [])})
         monkeypatch.setattr(hisin, "resolve_account_isins", lambda p: {"rows": rows})
+        # ⚠ THE LOOK-THROUGH HOP, WHICH READS THE DATABASE. `_book_port_items` expands certificates
+        # that ARE other models before classifying, and that path holds its own Supabase handle —
+        # so without this the test builds a real client and, on a developer machine, queries
+        # PRODUCTION (it only fails in CI, where there are no credentials). None of these fixtures
+        # contains a certificate, so passing the rows straight through is what expansion does here
+        # anyway; expansion itself is covered by `test_lookthrough.TestTheBookSideIsExpandedToo`.
+        monkeypatch.setattr(pa, "_expand_book_rows", lambda rows: rows)
+        # The two other database hops on this path, both added after these tests were written:
+        # the composition's effective date, and the per-holding entry/exit price marks. These
+        # tests assert on WEIGHTING and CLASSIFICATION only, so both are stubbed to "nothing
+        # known" — a holding with no mark simply carries no return, which is the same blank the
+        # UI shows for an unpriceable name.
+        monkeypatch.setattr("routers._airs_lookthrough._datum_of", lambda pid: None)
+        monkeypatch.setattr("routers._airs_portfolio_perf.compute_holding_marks",
+                            lambda isins, anchor, **kw: {})
         # The classification grid — yfinance attributes, the SAME source the model side uses.
         monkeypatch.setattr(pa, "_grid", lambda isins: {
             "US1": {"sector": "Technology", "msci_region": "North America",
