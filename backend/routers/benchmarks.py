@@ -332,6 +332,8 @@ class BenchmarkFillResult(BaseModel):
     queued: int = 0
     skipped_existing: int = 0
     capped: int = 0
+    # True when the label had NO universe row and its template was run to create one — AEX.
+    universe_built: bool = False
     note: str | None = None
 
 

@@ -346,8 +346,28 @@ def _download_report_sync(
 
     if len(content) < 100:
         raise RuntimeError(f"Response too small ({len(content)} bytes)")
-    if content[:15].lower().startswith(b'<!doctype'):
-        raise RuntimeError("Got HTML instead of Excel — session may have expired")
+
+    # ⚠ THE SAME STRAY BYTE THE LIST EXPORT HAS. AirSPMS prepends an APOSTROPHE before the zip
+    # magic on some responses, and pandas rejects the whole file with "Excel file format cannot be
+    # determined, you must specify an engine manually" — which reads as a broken download rather
+    # than one junk byte. Measured 2026-07-29: 14 Model and 13 Vermogensoverzicht downloads failed
+    # with exactly that message while ATT succeeded 44/44, i.e. per REPORT, not per account.
+    # `_strip_spreadsheet_preamble` is a no-op on a clean file, so this is safe for all four.
+    content = _strip_spreadsheet_preamble(content)
+
+    # ⚠ AND IF IT IS STILL NOT A SPREADSHEET, SAY WHAT IT IS. The old check only caught a body
+    # beginning exactly `<!doctype`; an error page with leading whitespace, a bare `<html>` or a
+    # BOM sailed through into pandas, where every cause — expired session, "no data for this
+    # period", an IP block — arrived as the same opaque engine error. `_describe_non_excel` prints
+    # the status, content-type, page title and an excerpt, so the next failure is a diagnosis.
+    if not content.startswith((_XLSX_MAGIC, _XLS_MAGIC)):
+        where = f"{rapport_types} for {portfolio_name!r} ({datum_van}..{datum_tot}) is not a spreadsheet"
+        if _looks_like_html(content):
+            raise RuntimeError(f"{where} — " + _describe_non_excel(AirsHttpResponse(
+                body=content, status=200, content_type="", url=url)))
+        # Not HTML either: show the head so the next investigation starts from the bytes rather
+        # than from a guess about which of five causes it was.
+        raise RuntimeError(f"{where}: {len(content)} bytes starting {content[:16]!r}")
 
     return content
 

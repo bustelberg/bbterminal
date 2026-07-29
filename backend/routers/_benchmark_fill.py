@@ -32,7 +32,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import logging
+
 from deps import IN_CHUNK_SIZE, supabase
+
+_log = logging.getLogger(__name__)
 
 # The four states a constituent can be in, in the order they must be fixed.
 _USABLE, _NEEDS_CAP, _NEEDS_RESOLVE, _NO_ISIN = "usable", "needs_cap", "needs_resolve", "no_isin"
@@ -114,6 +118,26 @@ def _backfill_caps(isins: list[str], grid: dict[str, dict]) -> dict:
     return {"quoted": len(quotes), "capped": capped}
 
 
+def _build_universe(label: str) -> bool:
+    """Run the label's universe template, if one is registered. True when it ran.
+
+    ⚠ BEST-EFFORT, AND A FAILURE IS NOT AN EXCEPTION HERE. The reconstruction scrapes third parties
+    (iShares, Wikipedia, MSCI); a bad day there must leave the caller reporting "could not build"
+    rather than 500-ing a button whose other work — enqueuing and capping — is unaffected.
+    """
+    from index_universe.templates import TEMPLATES, get_template  # noqa: PLC0415
+
+    if label not in TEMPLATES:
+        return False
+    try:
+        get_template(label).refresh(supabase)
+        return True
+    except Exception as e:  # noqa: BLE001
+        _log.warning("[benchmark_fill] building the %s universe failed: %s: %s",
+                     label, type(e).__name__, e)
+        return False
+
+
 def fill_benchmark(label: str, *, do_caps: bool = True) -> dict:
     """Close the asset-world gap for one benchmark, and report exactly what remains.
 
@@ -126,15 +150,25 @@ def fill_benchmark(label: str, *, do_caps: bool = True) -> dict:
     from routers._asset_benchmark import _universe_company_ids  # noqa: PLC0415
 
     ids = _universe_company_ids(label)
+    built = False
     if not ids:
-        # ⚠ A DIFFERENT PROBLEM WITH THE SAME SYMPTOM. AEX has no universe row at all, so there is
-        # nothing to bridge into the asset world — it needs its TEMPLATE built first
-        # (`POST /api/universe-templates/AEX/refresh`). Enqueuing nothing and reporting success
-        # here would send someone looking for a pricing fault that does not exist.
+        # ⚠ THE MISSING UNIVERSE IS BUILT HERE, NOT REPORTED AS A CHORE. AEX has no `universe` row
+        # at all — a different fault from "constituents unpriced" with the identical symptom (0
+        # members) — and telling the operator to go and POST a second endpoint made the button a
+        # riddle rather than a button. Where a template exists for the label, run it.
+        #
+        # ⚠ IT IS THE SAME REFRESH `/api/universe-templates/{key}/refresh` RUNS, not a second
+        # reconstruction: `get_template` reads the one registry, and `refresh` is documented
+        # idempotent, so pressing Fill twice converges rather than duplicating membership.
+        built = _build_universe(label)
+        ids = _universe_company_ids(label) if built else []
+    if not ids:
         return {"label": label, "universe_members": 0, "queued": 0, "capped": 0,
                 "usable": 0, "needs_resolve": 0, "needs_cap": 0, "no_isin": 0, "no_isin_names": [],
-                "note": f"No universe labelled {label!r}. Build it first — "
-                        f"POST /api/universe-templates/{label}/refresh if a template exists."}
+                "universe_built": built,
+                "note": (f"Built the {label!r} universe but it has no members — the reconstruction "
+                         f"returned nothing." if built else
+                         f"No universe labelled {label!r} and no template registered to build one.")}
 
     companies: list[dict] = []
     for i in range(0, len(ids), IN_CHUNK_SIZE):
@@ -165,5 +199,6 @@ def fill_benchmark(label: str, *, do_caps: bool = True) -> dict:
         "queued": int(queued.get("queued") or 0),
         "skipped_existing": int(queued.get("skipped_existing") or 0),
         "capped": caps["capped"],
+        "universe_built": built,
         "note": None,
     }

@@ -2876,6 +2876,11 @@
             "title": "Skipped Existing",
             "type": "integer"
           },
+          "universe_built": {
+            "default": false,
+            "title": "Universe Built",
+            "type": "boolean"
+          },
           "universe_members": {
             "default": 0,
             "title": "Universe Members",

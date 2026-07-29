@@ -7756,6 +7756,11 @@ export interface components {
              */
             skipped_existing?: number;
             /**
+             * Universe Built
+             * @default false
+             */
+            universe_built?: boolean;
+            /**
              * Universe Members
              * @default 0
              */

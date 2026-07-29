@@ -44,6 +44,8 @@ type FillResult = {
   label: string; universe_members: number; usable: number; needs_resolve: number;
   needs_cap: number; no_isin: number; no_isin_names?: string[];
   queued: number; skipped_existing: number; capped: number; note?: string | null;
+  /** The template was run because no universe existed — AEX had none at all. */
+  universe_built?: boolean;
 };
 
 /** One sentence saying what the press actually achieved — and, when nothing was queued, WHY.
@@ -55,10 +57,16 @@ type FillResult = {
 function fillSummary(f: FillResult): string {
   if (f.note) return f.note;
   const bits: string[] = [];
+  if (f.universe_built) bits.push('built the universe from its template');
   if (f.queued) bits.push(`${f.queued} queued for ingest (a paced worker drains them — minutes to hours)`);
   if (f.capped) bits.push(`${f.capped} market caps written`);
   if (f.skipped_existing) bits.push(`${f.skipped_existing} already queued or ingested`);
   if (!bits.length) {
+    // ⚠ ZERO MEMBERS IS NOT "EVERYTHING IS FINE". `usable === universe_members` is vacuously true
+    // at 0 === 0, so an EMPTY universe reported "every constituent is already priced and
+    // weighted" — the most reassuring possible sentence about a benchmark with nothing in it.
+    // Measured on AEX, whose universe did not exist at all.
+    if (!f.universe_members) return 'The universe is empty — nothing to price. Its template produced no members.';
     if (f.usable === f.universe_members) return 'Nothing to do — every constituent is already priced and weighted.';
     if (f.no_isin) return `Nothing this can fix: ${f.no_isin} of ${f.universe_members} members have no ISIN, which is the only bridge into the price world.`;
     return 'Nothing to do.';
