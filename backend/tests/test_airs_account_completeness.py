@@ -173,7 +173,12 @@ class TestRetrievedIsNotTheSameAsNonEmpty:
         assert "volk" not in res["reports_ok"]
         assert {"att", "mut", "model"} <= set(res["reports_ok"])
         assert res["mutaties"] == 7
-        assert len(res["errors"]) == 1 and "Vermogensoverzicht" in res["errors"][0]
+        # ⚠ STRUCTURED, so the fleet run can group 27 failures by CAUSE rather than regex-ing a
+        # message it formatted itself one line earlier — see `summarise_errors`.
+        assert len(res["errors"]) == 1
+        assert res["errors"][0]["report"] == "Vermogensoverzicht"
+        assert res["errors"][0]["account"] == "BUS_X"
+        assert "no valued" in res["errors"][0]["message"]
 
 
 class TestOneImplementation:

@@ -52,6 +52,11 @@ const tone = (v: number | null | undefined) =>
  *  spinning while a refresh is running. */
 /** The four AIRS reports, by the code the scan records, in AIRS's own words — a badge saying
  *  "volk" would send a reader to the wrong screen. Mirrors `airs_vermogen.REPORTS`. */
+/** One CAUSE of failure, with how many accounts hit it — see the backend's `summarise_errors`. */
+type FailureGroup = {
+  report: string; error_type: string; message: string; count: number; accounts: string[];
+};
+
 const REPORT_LABELS: Record<string, string> = {
   att: 'Rendement',
   volk: 'Vermogensoverzicht',
@@ -106,6 +111,8 @@ export default function PortfolioOverviewPanel() {
    */
   const [refreshMsg, setRefreshMsg] = useState<
     { text: string; kind: 'info' | 'error' | 'partial' | 'ok' } | null>(null);
+  /** Why reports failed, grouped by cause. A count told the operator nothing actionable. */
+  const [failures, setFailures] = useState<FailureGroup[]>([]);
   const [refreshingRows, setRefreshingRows] = useState<Set<string>>(new Set());
 
   // Fetch ONE account's holdings + ISIN resolution into the caches. Split out of `expand` because
@@ -200,7 +207,9 @@ export default function PortfolioOverviewPanel() {
         await new Promise((res) => setTimeout(res, 2500));
         const s = await apiFetch(`${API_URL}/api/airs/vermogen/status`);
         const st = (await s.json().catch(() => null)) as
-          { running?: boolean; status?: string; message?: string; errors?: string[] } | null;
+          { running?: boolean; status?: string; message?: string; errors?: string[];
+            error_summary?: FailureGroup[] } | null;
+        setFailures(st?.error_summary ?? []);
         if (!st?.running) {
           // ⚠ THE BACKEND'S OWN VERDICT DECIDES RED, NOT THE ERROR COUNT. `status` is "error" only
           // when NOTHING was stored — a genuinely failed scan. Anything else stored a snapshot,
@@ -321,6 +330,27 @@ export default function PortfolioOverviewPanel() {
               The scan itself succeeded. Every account it reached is listed; the ones short a
               report carry a ⚠ naming which — retry those with the row&apos;s Refresh.
             </span>
+          )}
+          {/* ⚠ THE REASON, NOT THE COUNT. "27 report(s) failed" says something is wrong and gives
+              no handle on what; 27 individual lines are no better, because nobody reads 27 of them
+              looking for the pattern. Grouped by cause, thirteen unvalued books and fourteen
+              expired-session failures are visibly two different problems with two different
+              fixes. */}
+          {failures.length > 0 && (
+            <ul className="mt-1.5 space-y-0.5 border-t border-warn-500/20 pt-1.5">
+              {failures.map((f) => (
+                <li key={`${f.report}-${f.error_type}-${f.message}`} className="text-fg-soft">
+                  <span className="font-mono">{f.count}×</span>{' '}
+                  <span className="font-medium">{f.report}</span>
+                  {' — '}{f.message || f.error_type}
+                  {f.accounts.length > 0 && (
+                    <span className="text-fg-faint">
+                      {' ('}{f.accounts.join(', ')}{f.count > f.accounts.length ? ', …' : ''}{')'}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}

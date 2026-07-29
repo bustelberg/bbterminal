@@ -39,6 +39,9 @@ _STATUS: dict = {
     "vermogen_stored": 0,      # portfolios whose Vermogensoverzicht (VOLK) was stored
     "holdings_rows": 0,        # total holding rows stored
     "errors": [],
+    # Failures grouped by CAUSE, commonest first — see `summarise_errors`. A bare count is
+    # not a diagnosis, and 27 individual lines are not one either.
+    "error_summary": [],
 }
 
 
@@ -131,6 +134,36 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
                      type(e).__name__, e)
 
 
+def summarise_errors(errors: list[dict]) -> list[dict]:
+    """Group failures by CAUSE, commonest first — the difference between an actionable message and
+    a number.
+
+    ⚠ "27 report(s) failed" IS NOT A DIAGNOSIS. It says something is wrong, gives no handle on
+    what, and 27 individual lines are no better — nobody reads 27 stack summaries looking for the
+    pattern. Grouped, the same data says "13 × Vermogensoverzicht: no valued snapshot in the last
+    7 days" and the fix is obvious (those books have not been valued yet), versus "14 × Model:
+    login expired", which is a different fix entirely.
+
+    ⚠ THE MESSAGE IS TRUNCATED FOR THE KEY, NOT FOR DISPLAY. Two failures of the same kind often
+    differ in a trailing detail (a date, an account code), and keying on the whole string would
+    scatter one cause across a dozen groups of one — which is exactly the un-summarised list this
+    exists to replace.
+    """
+    groups: dict[tuple[str, str, str], dict] = {}
+    for e in errors:
+        msg = (e.get("message") or "").strip()
+        key = (e.get("report") or "?", e.get("error_type") or "?", msg[:80])
+        g = groups.setdefault(key, {
+            "report": key[0], "error_type": key[1], "message": msg[:200],
+            "count": 0, "accounts": [],
+        })
+        g["count"] += 1
+        # A few names, not all 13 — enough to go and look at one, not enough to be a second list.
+        if len(g["accounts"]) < 4 and e.get("account"):
+            g["accounts"].append(e["account"])
+    return sorted(groups.values(), key=lambda g: -g["count"])
+
+
 def scan_one(name: str, van: str, tot: str) -> dict:
     """Fetch + store ONE account's four AIRS reports. THE only place that work is written.
 
@@ -153,17 +186,21 @@ def scan_one(name: str, van: str, tot: str) -> dict:
     from routers.airs import _parse_att_excel, _save_performance_to_db  # noqa: PLC0415
 
     ok: list[str] = []
-    errors: list[str] = []
+    # ⚠ STRUCTURED, NOT PRE-FORMATTED STRINGS. The fleet run groups 27 failures by CAUSE so the
+    # operator sees "13 × Vermogensoverzicht: no valued snapshot in the last 7 days" instead of a
+    # bare count — and regex-ing that back out of "BUS_X (Vermogensoverzicht: RuntimeError: …)"
+    # would be parsing a message we formatted ourselves one line earlier.
+    errors: list[dict] = []
     holdings = mutaties = model_weights = 0
     as_of = tot
 
     def _step(code: str, label: str, fn) -> None:
-        nonlocal errors
         try:
             fn()
             ok.append(code)
         except Exception as e:  # noqa: BLE001 — one report failing must not lose the others
-            errors.append(f"{label}: {type(e).__name__}: {e}")
+            errors.append({"account": name, "report": label,
+                           "error_type": type(e).__name__, "message": str(e)})
             _log.warning("[airs_vermogen] %s %s failed: %s: %s", name, label, type(e).__name__, e)
 
     def _att() -> None:
@@ -326,6 +363,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             "vermogen_stored": 0,
             "holdings_rows": 0,
             "errors": [],
+            "error_summary": [],
         })
 
         try:
@@ -345,6 +383,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
         # from this dict would keep whatever verdict a previous run left behind, so a report that
         # started failing today would go on reading as complete.
         outcomes: dict[str, list[str]] = {n: [] for n in names}
+        fleet_errors: list[dict] = []
         # ONE stamp for the whole run — see the note at the `_record_reports` call below.
         run_stamp = datetime.now(timezone.utc).isoformat()
         for i, name in enumerate(names, 1):
@@ -358,7 +397,12 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual") -> dict:
             holdings_total += res["holdings"]
             mutaties_total += res["mutaties"]
             model_total += res["model_weights"]
-            _STATUS["errors"].extend(f"{name} ({e})" for e in res["errors"])
+            # Structured, so the summary can group by cause rather than by wording.
+            fleet_errors.extend(res["errors"])
+            _STATUS["errors"] = [
+                f"{e['account']} ({e['report']}: {e['error_type']}: {e['message']})"
+                for e in fleet_errors]
+            _STATUS["error_summary"] = summarise_errors(fleet_errors)
             # ⚠ RECORDED AFTER EVERY ACCOUNT, NOT ONCE AT THE END — the list is reloaded while the
             # scan runs, so a verdict written only on completion would leave every row already
             # scanned wearing a stale badge, and a run that died halfway would record nothing at
@@ -479,7 +523,9 @@ def refresh_one_portfolio(portefeuille: str) -> dict:
             "vermogen_stored": "volk" in ok,
             "reports_ok": ok,
             "complete": len(ok) == len(REPORTS),
-            "errors": res["errors"],
+            # Formatted for the single-row toast; the structured form rides along beside it.
+            "errors": [f"{e['report']}: {e['error_type']}: {e['message']}" for e in res["errors"]],
+            "error_details": res["errors"],
         }
     finally:
         _LOCK.release()
