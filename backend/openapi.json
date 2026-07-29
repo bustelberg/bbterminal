@@ -4872,6 +4872,83 @@
         "title": "IsinCompareResponse",
         "type": "object"
       },
+      "LatestCloseResponse": {
+        "properties": {
+          "close": {
+            "title": "Close",
+            "type": "number"
+          },
+          "close_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close Eur"
+          },
+          "close_in": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close In"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "in_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "In Currency"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "stale_days": {
+            "default": 0,
+            "title": "Stale Days",
+            "type": "integer"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          }
+        },
+        "required": [
+          "isin",
+          "date",
+          "close",
+          "currency"
+        ],
+        "title": "LatestCloseResponse",
+        "type": "object"
+      },
       "LinkableContext": {
         "properties": {
           "excluded_by_isin": {
@@ -13561,6 +13638,66 @@
         },
         "summary": "Ingest",
         "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/latest-close/isin/{isin}": {
+      "get": {
+        "description": "The newest yfinance close for one ISIN \u2014 native, EUR, and optionally converted into\n`currency` (the caller's reporting currency).\n\n404 when the ISIN has no priced Yahoo listing or no stored bars; the caller falls back to\nwhatever fiscal-year price it already had and must say that it did.",
+        "operationId": "latest_close_by_isin_api_asset_pipeline_latest_close_isin__isin__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "currency",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Currency"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LatestCloseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Latest Close By Isin",
+        "tags": [
+          "asset-pipeline",
           "asset-pipeline"
         ]
       }

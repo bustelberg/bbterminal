@@ -2,22 +2,33 @@
 
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { type PriceTarget } from './quickValuation';
+import { type BASIS, type PriceTarget } from './quickValuation';
 
 /**
- * A price target from a demanded FCF yield, and the return it implies.
+ * A price target from a demanded yield, and the return it implies.
  *
- *     forecast price = forecast FCF/share ÷ forecast yield
+ *     forecast price = forecast <FCF or EPS>/share ÷ forecast yield
  *     CAGR           = (forecast price / today's price) ^ (1/years) − 1
  *
- * Both forecasts start from what the chart above already knows — the trend's value two years out,
- * and the company's own average FCF yield over the decade — and both are editable, because the
- * whole point is to try your own.
+ * ⚠ THE BASIS IS FCF **OR** EPS, AND EVERY LABEL HERE COMES FROM IT (`basis`, the `BASIS` entry the
+ * tab has switched on). Not one string in this panel says "FCF" literally — an earnings yield
+ * rendered under an FCF label is not a broken panel, it is a plausible valuation of a company
+ * nobody analysed.
  *
- * ⚠ IT IS FCF YIELD, NOT FCF-SBC YIELD. The series behind it is GuruFocus's `Free Cash Flow per
- * Share` as reported, with no stock-compensation deduction; the FCF-SBC cards elsewhere in the app
- * subtract SBC explicitly and are a different, lower number. Labelling this one "FCF-SBC" would
- * claim an adjustment that was never made.
+ * Both forecasts start from what the chart above already knows — the trend's value two years out,
+ * and the company's own average yield over the decade — and both are editable, because the whole
+ * point is to try your own.
+ *
+ * ⚠ "TODAY'S PRICE" IS LITERAL, AND IT IS THE ONE NON-FISCAL FIGURE ON THE PANEL. It is the newest
+ * yfinance close, converted into the reporting currency the rows above are filed in. When there is
+ * no priced Yahoo listing the fiscal year-end close stands in and the row SAYS `⚠ fiscal` — the
+ * whole point of the change was that a year-old price was being printed under the word "current",
+ * so an unlabelled fallback would put the bug straight back.
+ *
+ * ⚠ WHAT EACH BASIS IS *NOT* TRAVELS WITH IT, in `BASIS[...].caveat`, and this panel prints it —
+ * an FCF that is not SBC-adjusted (the FCF-SBC cards elsewhere subtract stock compensation and are
+ * a different, lower number), an EPS that is accrual rather than cash. Neither caveat is written
+ * here, because a caveat hard-coded in the panel is one the switch cannot change.
  */
 
 /**
@@ -69,15 +80,52 @@ function Input({ value, onChange, suffix }: {
   );
 }
 
+/** Where the "current" price came from — it decides what the panel is allowed to claim. */
+export type PriceProvenance = {
+  /** The close's OWN date: the yfinance bar's, or the fiscal year end. Never "today". */
+  date: string | null;
+  /** True = the newest yfinance close in the reporting currency. False = the fiscal year-end
+   *  close, i.e. the old behaviour, which the panel must then admit to. */
+  live: boolean;
+  /** We have not asked yet. ⚠ NOT the same as `live: false` — a fallback badge shown for the
+   *  length of one request is a provenance claim we have not established. */
+  pending?: boolean;
+  symbol?: string | null;
+  staleDays?: number | null;
+};
+
+/** A live close older than this is flagged in the row. A weekend plus a holiday is four days; past
+ *  a week the listing is not trading, or we have stopped fetching it, and either way the reader
+ *  should not have to open a tooltip to find out. */
+const STALE_WARN_DAYS = 7;
+
+const fmtDate = (iso: string | null) => {
+  if (!iso) return 'unknown date';
+  const d = new Date(`${iso}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? iso
+    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+};
+
 export default function PriceTargetCalculator({
   target, years, currency, className = '',
+  horizonYears, targetYear, price, basis: b,
   fcfStr, onFcf, defaultForecastFcfPs,
   yieldStr, onYield, defaultForecastYield, onReset,
 }: {
   /** ⚠ COMPUTED BY THE PARENT, because the chart draws the price line out to the same target. One
    *  computation, two readers — see the priceTarget() helper. */
   target: PriceTarget;
+  /** The FCF forecast's horizon past the last REPORTED year — a label, not the CAGR's divisor. */
   years: number;
+  /** What the CAGR is actually annualised over: from `price.date` to the target. Between one and
+   *  two years off a live price, exactly `years` off the fiscal one. */
+  horizonYears: number;
+  /** The fiscal year the target lands in, so the CAGR can name its endpoint instead of quoting a
+   *  horizon like "1.4 years" that means nothing on the chart beside it. */
+  targetYear: number | null;
+  price: PriceProvenance;
+  /** The switched-on `BASIS` entry — every label and info card on this panel reads from it. */
+  basis: (typeof BASIS)[keyof typeof BASIS];
   currency?: string | null;
   /** Grid placement from the parent — the component owns its look, the layout owns its slot. */
   className?: string;
@@ -99,7 +147,12 @@ export default function PriceTargetCalculator({
   const ccy = currency ? currency + ' ' : '';
 
   return (
-    <div className={`rounded-xl border border-neutral-800/40 bg-card p-4 space-y-1.5 min-w-0 ${className}`}>
+    // ⚠ A FLEX COLUMN, BECAUSE THIS CARD IS SHORTER THAN THE CHART BESIDE IT. The 2×2 grid sizes
+    // every cell to the tallest, so seven text rows in a cell built for a 320px plot leave a gap.
+    // The rows stay at the top, the CAGR — the conclusion — is pushed to the bottom edge by its
+    // own `mt-auto`, and the space lands between them where it reads as layout rather than as a
+    // card that failed to finish rendering.
+    <div className={`rounded-xl border border-neutral-800/40 bg-card p-4 space-y-1.5 min-w-0 flex flex-col ${className}`}>
       <div className="flex items-center gap-2 pb-1">
         <h4 className="text-base font-semibold text-fg-strong">Price target</h4>
         {dirty && (
@@ -108,62 +161,100 @@ export default function PriceTargetCalculator({
         )}
       </div>
 
-      <Row label="Current FCF / share"
+      <Row label={`Current ${b.perShare}`}
         info={<InfoTip content={<AspectCard
-          what="The latest reported free cash flow per share."
-          where="GuruFocus `Free Cash Flow per Share`, as filed — the same series the chart to the left plots."
+          what={`The latest reported figure — ${b.what}.`}
+          where={`${b.source} The same series the chart to the left plots.`}
           when="The most recent fiscal year, so up to a year old."
-          how="⚠ Not SBC-adjusted. The FCF-SBC cards on the Long Equity tab subtract stock compensation and are a lower number; this one is free cash flow as reported." />} />}>
-        {ccy}{n2(target.currentFcfPs)}
+          how={b.caveat} />} />}>
+        {ccy}{n2(target.currentPs)}
       </Row>
-      <Row label="Forecast FCF / share"
+      <Row label={`Forecast ${b.perShare}`}
         info={<InfoTip content={<AspectCard
-          what="What the fitted trend says free cash flow per share will be."
+          what={`What the fitted trend says ${b.perShare} will be.`}
           where="The dotted projection on the chart to the left, converted from the index back into currency."
           when={`${years} years past the last reported one.`}
           how="⚠ An extrapolation, not a forecast anyone made — it continues the exponential through the last decade. Type your own over it." />} />}>
         <Input value={show(fcfStr, defaultForecastFcfPs, 2)} onChange={onFcf} />
       </Row>
-      <Row label="Current FCF yield"
+      <Row label={`Current ${b.yieldInline}`}
         info={<InfoTip content={<AspectCard
-          what="What the shares yield in free cash flow at today's price."
-          where="Current FCF per share ÷ current share price — the two rows above and below."
-          when="The latest fiscal year."
-          how="The starting point the forecast yield is judged against: the gap between the two IS the rerating this calculator assumes." />} />}>
+          what={price.live
+            ? "What the shares yield on this measure at today's price."
+            : 'What the shares yielded on this measure at the last fiscal year-end price.'}
+          where={`Current ${b.perShare} ÷ current share price — the two rows above and below.`}
+          when={price.live
+            ? `Last filed year's figure over the close of ${fmtDate(price.date)}. ⚠ Two dates, deliberately: that is what a current yield is.`
+            : 'The latest fiscal year — both sides.'}
+          how={`The starting point the forecast yield is judged against: the gap between the two IS the rerating this calculator assumes.${
+            price.live ? ' ⚠ It will not match the “Latest” yield on the chart to the left, which is fiscal on both sides.' : ''}`} />} />}>
         {n1(target.currentYield)}%
       </Row>
-      <Row label="Forecast FCF yield"
+      <Row label={`Forecast ${b.yieldInline}`}
         info={<InfoTip content={<AspectCard
           what="The yield you expect the market to price the shares at."
-          where="Defaults to this company's OWN average FCF yield over the charted decade — the dashed line on the yield chart."
+          where={`Defaults to this company's OWN average ${b.yieldInline} over the charted decade — the dashed line on the yield chart.`}
           when="At the end of the forecast window."
-          how="⚠ THE ASSUMPTION THAT DRIVES EVERYTHING BELOW. The forecast price is simply the forecast cash flow divided by this, so a percentage point here moves the target more than any other input." />} />}>
+          how={`⚠ THE ASSUMPTION THAT DRIVES EVERYTHING BELOW. The forecast price is simply the forecast ${b.perShare} divided by this, so a percentage point here moves the target more than any other input.`} />} />}>
         <Input value={show(yieldStr, defaultForecastYield, 1)} onChange={onYield} suffix="%" />
       </Row>
+      {/* ⚠ THE ONE ROW THAT IS NOT FISCAL. Everything above it comes from the last filed year;
+          this is the market's price for the shares now, and the yield and CAGR are measured from
+          it. The two provenances therefore cannot share one info card — a live figure described
+          as a fiscal close, or the reverse, is worse than either being wrong. */}
       <Row label="Current share price"
-        info={<InfoTip content={<AspectCard
+        info={<InfoTip content={price.pending ? <AspectCard
           what="The price the return is measured from."
-          where="GuruFocus `Month End Stock Price` — the close at the last fiscal year end."
-          when="⚠ NOT TODAY'S QUOTE. It can be up to a year old, and the CAGR below is measured from it."
-          how="Both series come from the same fiscal rows, which is what makes the yield above internally consistent — at the cost of being stale against a live price." />} />}>
+          where="Fetching today's yfinance close…"
+          when="Until it lands, this is the fiscal year-end close."
+          how="If the ISIN has no priced Yahoo listing it will stay that way, and the row will say so." />
+          : price.live ? <AspectCard
+          what="The price the return is measured from — today's."
+          where={`yfinance (\`asset_price\`)${price.symbol ? ` — ${price.symbol}` : ''}, the same price series /portfolios values every model with, converted into ${currency ?? 'the reporting currency'} so it divides into the per-share figure above.`}
+          when={`Its close of ${fmtDate(price.date)}${price.staleDays != null && price.staleDays > STALE_WARN_DAYS ? ` — ⚠ ${price.staleDays} days ago. A listing that has not traded in that long, or one we have stopped fetching.` : '.'}`}
+          how={`⚠ THE ONLY LIVE NUMBER HERE. The ${b.perShare} above it is the last FILED year, so the yield is this year's price against last year's figure — which is what a current yield is, and why the two rows carry different dates.`} />
+          : <AspectCard
+            what="The price the return is measured from."
+            where="GuruFocus `Month End Stock Price` — the close at the last fiscal year end."
+            when="⚠ NOT TODAY'S QUOTE. It can be up to a year old, and the CAGR below is measured from it."
+            how="⚠ THE FALLBACK. This ISIN has no priced Yahoo listing (or none we could convert into the reporting currency), so the live close could not be used and the fiscal one stands in." />} />}>
         {ccy}{n2(target.currentPrice)}
+        {/* Provenance in the row, not only in the tooltip: a stale price that reads as live is the
+            failure this row exists to fix, and nobody opens a tooltip to check a number that
+            looks fine. */}
+        {price.pending ? (
+          <span className="ml-1 text-[10px] text-fg-faint">…</span>
+        ) : !price.live ? (
+          <span className="ml-1 text-[10px] text-warn-300" title="No live close available — this is the fiscal year-end price.">⚠ fiscal</span>
+        ) : price.staleDays != null && price.staleDays > STALE_WARN_DAYS ? (
+          <span className="ml-1 text-[10px] text-warn-300" title={`Last close ${fmtDate(price.date)} — ${price.staleDays} days ago.`}>⚠ {price.staleDays}d old</span>
+        ) : null}
       </Row>
       <Row label="Forecast share price"
         info={<InfoTip content={<AspectCard
-          what="What the shares are worth if the forecast cash flow is priced at the forecast yield."
-          where="Forecast FCF per share ÷ forecast FCF yield."
+          what={`What the shares are worth if the forecast ${b.perShare} is priced at the forecast ${b.yieldInline}.`}
+          where={`Forecast ${b.perShare} ÷ forecast ${b.yieldInline}.`}
           when={`${years} years out.`}
-          how="Blank when either input is non-positive: a zero yield divides to infinity, and a cash-burning forecast has no price at a positive one." />} />}>
+          how="Blank when either input is non-positive: a zero yield divides to infinity, and a forecast that loses money has no price at a positive one." />} />}>
         {ccy}{n2(target.forecastPrice)}
       </Row>
 
-      <div className="flex items-baseline gap-2 pt-1.5 border-t border-neutral-800/40">
+      <div className="flex items-baseline gap-2 pt-1.5 mt-auto border-t border-neutral-800/40">
         <span className="flex items-center gap-1 text-[11px] text-fg-muted shrink-0">
-          Est. {years}-year CAGR
+          {/* Named by its ENDPOINT, not its length: off a live price the horizon is a fraction
+              ("Est. 1.4-year CAGR" reads like a typo), and the fiscal year is the thing the chart
+              beside it actually plots the target at. */}
+          Est. CAGR{targetYear != null ? ` to FY${targetYear}` : ''}
           <InfoTip content={<AspectCard
-            what="The annualised return from today's price to the forecast one."
+            what={price.live
+              ? "The annualised return from today's price to the forecast one."
+              : 'The annualised return from the last fiscal year-end price to the forecast one.'}
             where="(forecast price ÷ current price) ^ (1/years) − 1."
-            when={`Over ${years} years.`}
+            when={`${horizonYears.toFixed(1)} years — from the ${price.live ? 'close' : 'fiscal close'} of ${fmtDate(price.date)} to ${
+              targetYear != null ? `the FY${targetYear} year end` : 'the forecast year'}. ${
+              price.live
+                ? '⚠ Less than the ' + years + '-year projection above it: the forecast sits ' + years + ' years past the last REPORTED year, and today is already part of the way there.'
+                : `The full ${years}-year projection, because the price is the fiscal one.`}`}
             how="⚠ Price only — no dividends, and no return on the cash the business throws off in the meantime. It answers what the multiple and the cash flow do to the share price, not what you would earn holding it." />} />
         </span>
         <Leader />

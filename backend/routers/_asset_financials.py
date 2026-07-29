@@ -1138,7 +1138,10 @@ def _price_series_for_isin(isin: str, years: int = 15) -> PriceSeriesResponse:
     if not raw:
         raise HTTPException(404, f"No stored price series for {isin} ({ex.get('yahoo_symbol')}).")
 
-    ccy = (ex.get("currency") or "").upper()
+    # ⚠ `_norm_ccy`, NOT `.upper()` — upper-casing `GBp` gives `GBP`, a code `fx_rate` HAS, so the
+    # lookup succeeds with divisor 1.0 and every EUR point on this chart came out 100× too high for
+    # a London pence listing. The native line was right, which is what made it survive.
+    ccy = _norm_ccy(ex.get("currency")) or ""
     is_eur = not ccy or ccy == "EUR"
     adjusted, _ = _split_adjust(raw)
     # Last positive close of each calendar month (raw is ascending, so a later write wins).
@@ -1168,6 +1171,119 @@ async def price_series_by_isin(isin: str, years: int = 15):
 
     404 when the ISIN has no priced Yahoo listing or no stored bars."""
     return await asyncio.to_thread(_price_series_for_isin, isin, years)
+
+
+# LATEST CLOSE — the one live quote the fiscal-year world does not have. The Quick Valuation tab
+# reads its whole picture off GuruFocus's `Month End Stock Price`, which is the close at the last
+# FISCAL YEAR END and can be a year old; a panel that prints that under the label "Current share
+# price" is telling the reader something false, and the FCF yield and CAGR hanging off it inherit
+# the lie. This is the yfinance (`asset_price`) close, the same series /portfolios prices its
+# models with.
+class LatestCloseResponse(BaseModel):
+    isin: str
+    symbol: str | None = None
+    # ⚠ THE CLOSE'S OWN DATE, NEVER "today". A market is shut at the weekend and a vendor
+    # publishes late; stamping the request date on a Friday close is how a stale price gets
+    # trusted. `stale_days` is the distance the caller must be able to show.
+    date: str
+    stale_days: int = 0
+    close: float                   # as the listing quotes it (⚠ may be a minor unit — GBp)
+    currency: str                  # that listing's quoting currency
+    close_eur: float | None = None
+    # Converted into the currency the CALLER works in — for Quick Valuation, the reporting
+    # currency its FCF/share series is filed in. Null when no rate reaches the close's date.
+    close_in: float | None = None
+    in_currency: str | None = None
+
+
+def _norm_ccy(code: str | None) -> str | None:
+    """Tidy a currency code WITHOUT destroying a minor unit.
+
+    ⚠ `.upper()` IS NOT NORMALISATION HERE. `SUBUNIT` is keyed on the exact strings Yahoo quotes —
+    `GBp`, `GBX`, `ZAc`, `ILA` — and upper-casing `GBp` yields `GBP`, a currency we DO have a rate
+    for. So the lookup succeeds, the ÷100 never happens, and a 1,424p share converts to €1,661
+    instead of €16.61: a hundredfold error that raises nothing and still looks like a price. (I
+    wrote `.upper()` here first and the probe caught exactly that on CHRT.L.)
+    """
+    from asset_pipeline.fx import SUBUNIT  # noqa: PLC0415
+
+    c = (code or "").strip()
+    if not c:
+        return None
+    return c if c in SUBUNIT else c.upper()
+
+
+def _latest_close_for_isin(isin: str, in_currency: str | None = None) -> LatestCloseResponse:
+    """The newest stored yfinance close for one ISIN, in its own currency, in EUR, and in
+    `in_currency`.
+
+    ⚠ IT IS A CURRENCY CONVERSION, NOT A RELABEL. The ISIN fixes the share class, so our Yahoo
+    listing and GuruFocus's differ by FX and nothing else — but they DO differ by FX: a company
+    filing in USD whose priced listing is Xetra quotes euros, and dividing a dollar cash flow by
+    a euro price is a yield that is wrong by the exchange rate and looks entirely plausible. So
+    the caller names the currency it needs and gets `null` if we cannot get there, rather than a
+    number in the wrong one.
+
+    ⚠ AND `GBp` IS PENCE. `_rate` carries the minor-unit divisor, so both legs go through it and
+    neither side can half-apply the ÷100 (a £46.75 share priced at £4,675 still reads as a
+    number). Same-code conversion short-circuits: it needs no rate at all, and requiring one
+    would blank a holding we can price exactly.
+
+    One row read (`ORDER BY target_date DESC LIMIT 1`) — no split adjustment, because
+    `_split_adjust` rescales the bars BEFORE a split onto today's basis and the newest bar is
+    already on it.
+    """
+    from datetime import date, timedelta  # noqa: PLC0415
+
+    from deps import supabase  # noqa: PLC0415
+    from routers._airs_portfolio_perf import _executions, _fx  # noqa: PLC0415
+    from routers._benchmark_index import _rate  # noqa: PLC0415
+
+    ex = (_executions([isin]) or {}).get(isin)
+    if not ex or not ex.get("analysis_id"):
+        raise HTTPException(404, f"No priced Yahoo listing for {isin} — no live close.")
+    got = (supabase.table("asset_price").select("target_date,close")
+           .eq("analysis_id", ex["analysis_id"]).not_.is_("close", "null")
+           .order("target_date", desc=True).limit(1).execute().data or [])
+    if not got or not got[0].get("close"):
+        raise HTTPException(404, f"No stored price bars for {isin} ({ex.get('yahoo_symbol')}).")
+
+    d = got[0]["target_date"]
+    close = float(got[0]["close"])
+    ccy = _norm_ccy(ex.get("currency")) or "EUR"
+    want = _norm_ccy(in_currency)
+
+    # A 30-day lookback: `fx_rate` is a trading-day table, and a close on a Monday after a long
+    # weekend has no rate of its own. `_rate` walks back to the newest earlier one.
+    need = {c for c in (ccy, want) if c}
+    fx = _fx(need, (date.fromisoformat(d) - timedelta(days=30)).isoformat(), d)
+    r_native = _rate(fx, ccy, d)
+    close_eur = round(close / r_native, 4) if r_native else None
+
+    if want is None:
+        close_in = None
+    elif want == ccy:
+        close_in = round(close, 4)          # nothing to convert, and no rate needed to say so
+    else:
+        r_want = _rate(fx, want, d)
+        close_in = round(close_eur * r_want, 4) if (close_eur is not None and r_want) else None
+
+    return LatestCloseResponse(
+        isin=isin, symbol=ex.get("yahoo_symbol"), date=d,
+        stale_days=(date.today() - date.fromisoformat(d)).days,
+        close=round(close, 4), currency=ccy, close_eur=close_eur,
+        close_in=close_in, in_currency=want,
+    )
+
+
+@router.get("/api/asset-pipeline/latest-close/isin/{isin}", response_model=LatestCloseResponse)
+async def latest_close_by_isin(isin: str, currency: str | None = None):
+    """The newest yfinance close for one ISIN — native, EUR, and optionally converted into
+    `currency` (the caller's reporting currency).
+
+    404 when the ISIN has no priced Yahoo listing or no stored bars; the caller falls back to
+    whatever fiscal-year price it already had and must say that it did."""
+    return await asyncio.to_thread(_latest_close_for_isin, isin, currency)
 
 
 # PERFORMANCE — returns AND risk, across several trailing windows, off the SAME daily EUR price
@@ -1306,7 +1422,9 @@ def _performance_for_isin(isin: str, windows: tuple[int, ...] = _PERF_WINDOWS) -
     since = (date.today() - timedelta(days=365 * (max_years + 1) + 45)).isoformat()
     today = date.today().isoformat()
     raw = (_closes([aid], since, today) or {}).get(aid) or []
-    ccy = (ex.get("currency") or "").upper()
+    # ⚠ `_norm_ccy` — see `_price_series_for_isin`. Here a 100× scale would cancel out of every
+    # RETURN, so the metrics are unharmed; the `currency` we report back would still be a lie.
+    ccy = _norm_ccy(ex.get("currency")) or ""
     fx = _fx({ccy}, since, today) if ccy and ccy != "EUR" else {}
     eur = _eur_series(raw, ccy, fx)
     if len(eur) < 30:

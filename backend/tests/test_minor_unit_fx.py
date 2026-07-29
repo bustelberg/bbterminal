@@ -155,3 +155,58 @@ class TestAMarketCapIsNotAPrice:
         src = inspect.getsource(yahoo.fx_to_eur)
         assert "SUBUNIT" in src
         assert '"GBp"' not in src.split('"""')[-1]      # no inline special-case left in the body
+
+
+class TestUpperCasingIsNotNormalisation:
+    """⚠ THE THIRD WAY TO LOSE THE DIVISOR, and the quietest: `.upper()`.
+
+    Forgetting to normalise gives no rate and the holding disappears (loud). Forgetting the divisor
+    gives £4,675 for a £46.75 share (wrong, but at least the code was `GBp` all along). Upper-casing
+    is worse than both, because it *manufactures a valid code*: `GBp` -> `GBP`, which `fx_rate` HAS.
+    `SUBUNIT` no longer matches, so `_rate` returns the pound rate with divisor 1.0, and every
+    conversion lands 100x high with no missing lookup anywhere to notice.
+
+    Measured on the /portfolios price chart, 2026-07-29: CHRT.L's close of 1,424p rendered as
+    EUR 1,661.22 on the EUR panel — beside a NATIVE panel that was perfectly correct, which is how
+    it survived. It is EUR 16.61.
+    """
+
+    def test_a_minor_unit_survives_normalisation(self):
+        from routers._asset_financials import _norm_ccy
+
+        assert _norm_ccy("GBp") == "GBp"          # NOT "GBP"
+        assert _norm_ccy("GBX") == "GBX"
+        assert _norm_ccy("ZAc") == "ZAc"
+        assert _norm_ccy("ILA") == "ILA"
+
+    def test_everything_else_is_tidied(self):
+        from routers._asset_financials import _norm_ccy
+
+        assert _norm_ccy("usd") == "USD"
+        assert _norm_ccy(" eur ") == "EUR"
+        assert _norm_ccy("") is None
+        assert _norm_ccy(None) is None
+
+    def test_the_pence_close_converts_to_the_right_order_of_magnitude(self):
+        """End to end through the shared `_rate`: the CHRT.L figure, pinned."""
+        from routers._asset_financials import _norm_ccy
+
+        fx = {"GBP": {"2026-07-03": 0.8572}}
+        eur = 1424.0 / _rate(fx, _norm_ccy("GBp"), "2026-07-03")
+        assert eur == pytest.approx(16.61, abs=0.05)
+        assert eur < 100                          # not EUR 1,661
+
+    def test_the_yahoo_price_readers_route_through_it(self):
+        """All three readers of `asset_execution.currency` in this module. `.upper()` here is the
+        bug; a new one added without `_norm_ccy` re-opens it for London, Johannesburg and Tel Aviv."""
+        import inspect
+
+        from routers import _asset_financials as m
+
+        for fn in (m._price_series_for_isin, m._performance_for_isin, m._latest_close_for_isin):
+            # Comments talk ABOUT `.upper()` on purpose — it is the trap being warned against.
+            code = [ln for ln in inspect.getsource(fn).splitlines()
+                    if not ln.lstrip().startswith("#")]
+            src = "\n".join(code)
+            assert "_norm_ccy(" in src, fn.__name__
+            assert ".upper()" not in src, fn.__name__

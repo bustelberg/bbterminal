@@ -2238,6 +2238,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/latest-close/isin/{isin}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Latest Close By Isin
+         * @description The newest yfinance close for one ISIN — native, EUR, and optionally converted into
+         *     `currency` (the caller's reporting currency).
+         *
+         *     404 when the ISIN has no priced Yahoo listing or no stored bars; the caller falls back to
+         *     whatever fiscal-year price it already had and must say that it did.
+         */
+        get: operations["latest_close_by_isin_api_asset_pipeline_latest_close_isin__isin__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/leonteq/upload": {
         parameters: {
             query?: never;
@@ -8378,6 +8402,30 @@ export interface components {
             /** Unmatched Count */
             unmatched_count: number;
         };
+        /** LatestCloseResponse */
+        LatestCloseResponse: {
+            /** Close */
+            close: number;
+            /** Close Eur */
+            close_eur?: number | null;
+            /** Close In */
+            close_in?: number | null;
+            /** Currency */
+            currency: string;
+            /** Date */
+            date: string;
+            /** In Currency */
+            in_currency?: string | null;
+            /** Isin */
+            isin: string;
+            /**
+             * Stale Days
+             * @default 0
+             */
+            stale_days?: number;
+            /** Symbol */
+            symbol?: string | null;
+        };
         /** LinkableContext */
         LinkableContext: {
             /** Excluded By Isin */
@@ -12673,6 +12721,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    latest_close_by_isin_api_asset_pipeline_latest_close_isin__isin__get: {
+        parameters: {
+            query?: {
+                currency?: string | null;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LatestCloseResponse"];
                 };
             };
             /** @description Validation Error */

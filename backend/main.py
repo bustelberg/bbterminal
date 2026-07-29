@@ -78,8 +78,25 @@ _cors_origins = [
     "https://bbterminal.vercel.app",
     "https://bbterminal-api.vercel.app",
 ]
+# ⚠ `RAILWAY_PUBLIC_DOMAIN` IS THIS BACKEND'S OWN DOMAIN, NOT A FRONTEND'S. It does nothing for a
+# browser calling us from Vercel; it is here for same-origin tooling only. Do not mistake it for
+# "the deployment's frontend is allowed".
 if os.environ.get("RAILWAY_PUBLIC_DOMAIN"):
     _cors_origins.append(f"https://{os.environ['RAILWAY_PUBLIC_DOMAIN']}")
+
+# Per-DEPLOYMENT frontends, comma-separated. A second Railway environment (dev) is served by a
+# second Vercel project, whose origin cannot be hardcoded above without a code deploy per
+# environment — and the failure mode if you forget is a browser-side CORS block that never reaches
+# a handler, so nothing is logged server-side and it reads like the backend is down.
+#
+# ⚠ ORIGINS ONLY — scheme + host, no path, no trailing slash. Starlette compares the `Origin`
+# header verbatim, so "https://x.vercel.app/" matches nothing and fails exactly like a missing
+# entry. A blank segment is dropped rather than becoming "", which would match nothing either.
+_cors_origins += [
+    o.strip().rstrip("/")
+    for o in os.environ.get("CORS_ORIGINS", "").split(",")
+    if o.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
