@@ -861,6 +861,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/display-name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Airs Account Set Display Name
+         * @description Name one AIRS account, or clear the name.
+         *
+         *     ⚠ THE NAME BELONGS TO THE ACCOUNT, NOT TO THE MODEL IT RUNS. `display_name` on
+         *     `airs_model_portfolio` names a strategy, and an account borrowed it through its pairing — so a
+         *     book paired with no model could not be named at all, which is exactly backwards: those are the
+         *     books still wearing AIRS's own code (`BUS_Ris_bepOff_Kl_AFS_Dy`) and most in need of one. Two
+         *     accounts running one model may also deserve different names, and renaming a model must not
+         *     silently rename every book paired with it.
+         *
+         *     ⚠ CLEARING IS A DELETE, NOT AN EMPTY STRING. A stored "" would be a name that renders as
+         *     nothing, indistinguishable on screen from an un-named row and invisible to the fallback chain.
+         */
+        put: operations["airs_account_set_display_name_api_airs_accounts__portefeuille__display_name_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/accounts/{portefeuille}/holdings": {
         parameters: {
             query?: never;
@@ -7165,6 +7195,14 @@ export interface components {
             models: components["schemas"]["AirsModelChoice"][];
         };
         /**
+         * AirsAccountName
+         * @description A nickname for one account. Empty or absent CLEARS it, restoring the fallback chain.
+         */
+        AirsAccountName: {
+            /** Display Name */
+            display_name?: string | null;
+        };
+        /**
          * AirsHoldingIsin
          * @description One account holding, with the ISIN we believe it is — and how much to believe it.
          *
@@ -7361,6 +7399,11 @@ export interface components {
             months?: number | null;
             /** Name */
             name: string;
+            /**
+             * Name Is Custom
+             * @default false
+             */
+            name_is_custom?: boolean;
             /** Periode */
             periode?: string | null;
             /** Price Result Eur */
@@ -11286,6 +11329,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AirsAccount"][];
+                };
+            };
+        };
+    };
+    airs_account_set_display_name_api_airs_accounts__portefeuille__display_name_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AirsAccountName"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

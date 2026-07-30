@@ -1414,6 +1414,43 @@ async def airs_portfolio_delete(portefeuille: str):
     return await asyncio.to_thread(delete_account, portefeuille)
 
 
+class AirsAccountName(BaseModel):
+    """A nickname for one account. Empty or absent CLEARS it, restoring the fallback chain."""
+
+    display_name: str | None = None
+
+
+@router.put("/api/airs/accounts/{portefeuille}/display-name")
+async def airs_account_set_display_name(portefeuille: str, body: AirsAccountName):
+    """Name one AIRS account, or clear the name.
+
+    ⚠ THE NAME BELONGS TO THE ACCOUNT, NOT TO THE MODEL IT RUNS. `display_name` on
+    `airs_model_portfolio` names a strategy, and an account borrowed it through its pairing — so a
+    book paired with no model could not be named at all, which is exactly backwards: those are the
+    books still wearing AIRS's own code (`BUS_Ris_bepOff_Kl_AFS_Dy`) and most in need of one. Two
+    accounts running one model may also deserve different names, and renaming a model must not
+    silently rename every book paired with it.
+
+    ⚠ CLEARING IS A DELETE, NOT AN EMPTY STRING. A stored "" would be a name that renders as
+    nothing, indistinguishable on screen from an un-named row and invisible to the fallback chain.
+    """
+    def _run() -> dict:
+        key = (portefeuille or "").strip()
+        if not key:
+            raise HTTPException(status_code=422, detail="portefeuille is required")
+        name = (body.display_name or "").strip()
+        if not name:
+            supabase.table("airs_account_display_name").delete().eq("portefeuille", key).execute()
+            return {"portefeuille": key, "display_name": None, "cleared": True}
+        supabase.table("airs_account_display_name").upsert(
+            {"portefeuille": key, "display_name": name,
+             "updated_at": datetime.now(UTC).isoformat()},
+            on_conflict="portefeuille").execute()
+        return {"portefeuille": key, "display_name": name, "cleared": False}
+
+    return await asyncio.to_thread(_run)
+
+
 @router.post("/api/airs/portfolios/{portefeuille}/refresh")
 async def airs_portfolio_refresh(portefeuille: str):
     """Re-scan ONE portfolio's AIRS Rendement + Vermogensoverzicht and store both — the per-row
@@ -1728,12 +1765,18 @@ class AirsPortfolioOverview(BaseModel):
     """
 
     name: str
+    # True when a human named THIS account (`airs_account_display_name`), rather than the name
+    # being borrowed from a paired model or falling back to AIRS's own code.
+    name_is_custom: bool = False
     description: str | None = None
     dynamic_portefeuille: str
     fixed_name: str | None = None
     fixed_portfolio_id: int | None = None
     fixed_type: str | None = None
-    isins: int | None = None            # None = unlinked; NOT 0
+    # ⚠ THE BOOK'S OWN DISTINCT ISINs, not the paired model's position count. It was the latter,
+    # so an unpaired book showed "—" beside 22 holdings you could see on expanding it, and a paired
+    # book's number described a different object. None = no snapshot stored; NOT 0.
+    isins: int | None = None
     link_source: str
     link_reason: str | None = None
     as_of: str | None = None

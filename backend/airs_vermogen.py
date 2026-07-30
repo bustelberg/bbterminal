@@ -759,7 +759,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         bogus: set[str] = set()
         if not force:
             try:
-                counts, _ = _holding_counts()
+                counts, _, _isin = _holding_counts()
                 bogus = bogus_accounts(counts, verdicts)
             except Exception as e:  # noqa: BLE001 — a failed lookup must scan MORE, never less
                 _log.warning("[airs_vermogen] could not read holdings counts (%s: %s) — scanning "

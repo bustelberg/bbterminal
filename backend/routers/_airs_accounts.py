@@ -232,16 +232,18 @@ def parse_holding_counts_csv(raw: str) -> tuple[dict[str, int], dict[str, str]]:
 
     counts: dict[str, int] = {}
     newest: dict[str, str] = {}
+    isins: dict[str, int] = {}
     for row in csv.reader(_io.StringIO(raw)):
-        if len(row) != 3:
+        if len(row) != 4:
             continue
-        name, day, n = row
+        name, day, n, n_isin = row
         newest[name] = day
         counts[name] = int(n)
-    return counts, newest
+        isins[name] = int(n_isin)
+    return counts, newest, isins
 
 
-def _holding_counts() -> tuple[dict[str, int], dict[str, str]]:
+def _holding_counts() -> tuple[dict[str, int], dict[str, str], dict[str, int]]:
     """(holdings per account, that account's snapshot date) — off the freshest snapshot only.
 
     ⚠ AGGREGATED IN POSTGRES, BECAUSE READING THE TABLE DOES NOT SCALE AND FAILS SILENTLY. This
@@ -259,8 +261,10 @@ def _holding_counts() -> tuple[dict[str, int], dict[str, str]]:
     from common.pg import _run_copy  # noqa: PLC0415
 
     buf = _run_copy(
-        "COPY (SELECT DISTINCT ON (portefeuille) portefeuille, as_of_date::text, cnt "
-        "FROM (SELECT portefeuille, as_of_date, count(*) AS cnt "
+        "COPY (SELECT DISTINCT ON (portefeuille) portefeuille, as_of_date::text, cnt, isins "
+        "FROM (SELECT portefeuille, as_of_date, count(*) AS cnt, "
+        "             count(DISTINCT isin) FILTER "
+        "               (WHERE isin IS NOT NULL AND btrim(isin) <> '') AS isins "
         "        FROM airs_holding GROUP BY portefeuille, as_of_date) g "
         "ORDER BY portefeuille, as_of_date DESC) TO STDOUT WITH CSV",
         (),
@@ -270,7 +274,7 @@ def _holding_counts() -> tuple[dict[str, int], dict[str, str]]:
     return _holding_counts_paged()
 
 
-def _holding_counts_paged() -> tuple[dict[str, int], dict[str, str]]:
+def _holding_counts_paged() -> tuple[dict[str, int], dict[str, str], dict[str, int]]:
     """The COPY-less fallback: the same reduction, but PAGED rather than capped.
 
     ⚠ `.range()` IN A LOOP, NOT A BIGGER `.limit()`. Raising the cap only moves the cliff; paging
@@ -280,7 +284,7 @@ def _holding_counts_paged() -> tuple[dict[str, int], dict[str, str]]:
     rows: list[dict] = []
     off = 0
     while True:
-        page = (supabase.table("airs_holding").select("portefeuille,as_of_date")
+        page = (supabase.table("airs_holding").select("portefeuille,as_of_date,isin")
                 .range(off, off + 999).execute().data or [])
         rows += page
         if len(page) < 1000:
@@ -293,10 +297,14 @@ def _holding_counts_paged() -> tuple[dict[str, int], dict[str, str]]:
         if d > newest.get(r["portefeuille"], ""):
             newest[r["portefeuille"]] = d
     counts: dict[str, int] = {}
+    seen_isins: dict[str, set[str]] = {}
     for r in rows:
         if str(r["as_of_date"]) == newest.get(r["portefeuille"]):
             counts[r["portefeuille"]] = counts.get(r["portefeuille"], 0) + 1
-    return counts, newest
+            iv = (r.get("isin") or "").strip()
+            if iv:
+                seen_isins.setdefault(r["portefeuille"], set()).add(iv)
+    return counts, newest, {k: len(v) for k, v in seen_isins.items()}
 
 
 
@@ -412,7 +420,7 @@ def list_accounts() -> list[dict]:
     `_year_perf`, never the freshest row's (which is one month; see that docstring).
     """
     perf = _year_perf()
-    counts, newest = _holding_counts()
+    counts, newest, isin_counts = _holding_counts()
     hidden = _hidden_accounts()
     live = _live_accounts()
     missing = _missing_reports()
@@ -473,6 +481,12 @@ def list_accounts() -> list[dict]:
             "deposits_eur": r.get("stortingen"),
             "withdrawals_eur": r.get("onttrekkingen"),
             "holdings": counts.get(name),          # None = we hold no snapshot for it
+            # ⚠ THE BOOK'S OWN ISINs, NOT THE PAIRED MODEL'S POSITION COUNT. The column used to
+            # read the model — so a book with no model showed "—" beside 22 holdings you could see
+            # the moment you expanded it, and the number it DID show for a paired book described a
+            # different object. The Vermogensoverzicht has carried `ISIN-code` since 2026-07-23;
+            # distinct non-null ISINs on the newest snapshot is what a reader means by "ISINs".
+            "isins": isin_counts.get(name),
         })
     out.sort(key=lambda x: (x["portefeuille"] or "").lower())
     return out

@@ -37,6 +37,13 @@ def list_overview() -> list[dict]:
     from ._airs_accounts import list_accounts  # noqa: PLC0415
 
     links = {a["portefeuille"]: a for a in list_account_links()["accounts"]}
+    # ⚠ THE ACCOUNT'S OWN NICKNAME BEATS THE MODEL'S. A human typed it for THIS book; the model's
+    # `display_name` names a different object and is only borrowed when nothing better exists —
+    # which is also why a book paired with no model could not be named at all before.
+    nicknames = {(r["portefeuille"] or "").strip().lower(): r["display_name"]
+                 for r in (supabase.table("airs_account_display_name")
+                           .select("portefeuille,display_name").limit(2000).execute().data or [])
+                 if r.get("display_name")}
     models = {m["id"]: m for m in (supabase.table("airs_model_portfolio")
                                    .select("id,name,display_name,omschrijving,portfolio_type")
                                    .limit(500).execute().data or [])}
@@ -52,15 +59,22 @@ def list_overview() -> list[dict]:
         out.append({
             # The name a human gave it. Falls back to AIRS's code rather than to a blank: an
             # unlinked book is still a book, and a nameless row is unreadable.
-            "name": (m or {}).get("display_name") or a["portefeuille"],
+            # Precedence: this book's nickname > the model's display name > AIRS's own code. Every
+            # step down is a FALLBACK, never a preference.
+            "name": (nicknames.get((a["portefeuille"] or "").strip().lower())
+                     or (m or {}).get("display_name") or a["portefeuille"]),
+            # True when a human named this row, so the UI can show it as chosen rather than derived.
+            "name_is_custom": (a["portefeuille"] or "").strip().lower() in nicknames,
             "description": (m or {}).get("omschrijving"),
             "dynamic_portefeuille": a["portefeuille"],
             "fixed_name": (m or {}).get("name"),
             "fixed_portfolio_id": (m or {}).get("id"),
             "fixed_type": (m or {}).get("portfolio_type"),
-            # How many ISINs the pairing can reach. None = unlinked, which is not 0 (that would
-            # claim a Fixed portfolio holding nothing).
-            "isins": positions.get((m or {}).get("id")) if m else None,
+            # ⚠ THE ACCOUNT'S OWN ISIN COUNT — see `list_accounts`. It was the paired MODEL's
+            # position count, which is a different object and absent entirely for an unpaired book:
+            # BUS_WTS_StMerken_Dyn showed "—" while holding 22 ISINs. `positions` is still read for
+            # nothing else, so it goes with it.
+            "isins": a.get("isins"),
             "link_source": link.get("source") or "none",
             "link_reason": link.get("reason"),
             # --- AIRS's own, all of it, all the year's. Never recomputed here. ---
