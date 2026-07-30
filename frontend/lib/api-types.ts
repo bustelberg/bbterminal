@@ -7859,6 +7859,26 @@ export interface components {
              */
             repriced?: number;
             /**
+             * Resolve Failed
+             * @default 0
+             */
+            resolve_failed?: number;
+            /**
+             * Resolve Pending
+             * @default 0
+             */
+            resolve_pending?: number;
+            /**
+             * Resolve Unmapped
+             * @default 0
+             */
+            resolve_unmapped?: number;
+            /**
+             * Resolved
+             * @default 0
+             */
+            resolved?: number;
+            /**
              * Skipped Existing
              * @default 0
              */
@@ -7878,6 +7898,11 @@ export interface components {
              * @default 0
              */
             usable?: number;
+            /**
+             * Worker Live
+             * @default false
+             */
+            worker_live?: boolean;
         };
         /** BenchmarkResetResult */
         BenchmarkResetResult: {

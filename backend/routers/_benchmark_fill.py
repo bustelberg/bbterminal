@@ -350,6 +350,67 @@ def reset_benchmark(label: str, *, drop_caps: bool = True, drop_prices: bool = T
             "had_template": bool(live[0].get("template_key")), "note": None}
 
 
+# How many queued ISINs one press of Fill resolves inline. `process_slice` runs them concurrently
+# behind the shared Yahoo throttle (`YAHOO_CONCURRENCY`, default 4), so this is ~20s, not 25×3s.
+_RESOLVE_PER_PRESS = 25
+
+# The queue's newest activity timestamp as it stood after OUR last drain — see `_drain_now`. Any
+# value other than this means somebody else has been draining since, and we stand down.
+_LAST_SELF_DRAIN: str | None = None
+
+
+def _drain_now(isins: list[str], limit: int = _RESOLVE_PER_PRESS) -> dict:
+    """Resolve a bounded slice of the ingest queue RIGHT NOW, rather than leaving it for a worker.
+
+    ⚠ "QUEUED FOR INGEST" IS A PROMISE ABOUT A PROCESS THAT MAY NOT EXIST. The in-process worker is
+    OPT-IN (`ASSET_QUEUE_INPROCESS`); the default drainer is the standalone
+    `scripts/asset_queue_worker.py`, which on a single-service deployment is nobody. Measured in
+    production 2026-07-30: Fill on the AEX reported "25 queued for ingest (a paced worker drains
+    them — minutes to hours)" and nothing ever drained them. A button that reports work no one will
+    do is worse than a button that does nothing, because it reads like progress.
+
+    ⚠ IT IS THE WORKER'S OWN STEP, NOT A SECOND RESOLVER. `queue.process_slice` is THE one Yahoo
+    consumer's unit of work — OpenFIGI batch lookup, then the throttled resolve+store, marking each
+    done/failed. Writing a faster path here would be a second consumer with its own idea of pacing,
+    which is precisely how a resolution lands on a thin foreign listing (Yahoo answers an
+    overloaded caller with an EMPTY search, not a 429).
+
+    ⚠ AND IT STANDS DOWN IF A WORKER IS ALREADY LIVE. Two drainers competing for the throttle is
+    the same failure from the other direction, so when `is_worker_active()` says something is
+    already consuming Yahoo, the queue is left to it and the caller is told that is what happened.
+
+    ⚠ SCOPED TO **THIS BENCHMARK'S** ISINs. The queue is FIFO by `added_at` and holds ~10,000
+    pending rows, so an unscoped slice resolves ten-thousand-place-old strangers and leaves the 71
+    constituents this press just enqueued exactly where they were. Measured 2026-07-30 — the press
+    reported work and the benchmark did not move.
+    """
+    global _LAST_SELF_DRAIN
+    from asset_pipeline import queue as _queue  # noqa: PLC0415
+
+    # ⚠ THE GUARD MUST NOT SEE ITS OWN FOOTPRINTS. `is_worker_active()` answers "has anything moved
+    # a row out of pending recently" — and draining a slice IS that. So the first press made the
+    # second one stand down for ten minutes and report `worker_live`, i.e. pressing Fill twice did
+    # nothing the second time, which is the exact symptom this whole change exists to remove.
+    # Comparing the queue's newest activity with the timestamp OUR last drain left tells the two
+    # apart: unchanged means we are the only thing touching it, and we may carry on.
+    # ⚠ ONE MINUTE, NOT THE DEFAULT TEN. The in-process worker ticks every 20 SECONDS, so anything
+    # actually draining shows activity inside a minute. The 10-minute default is calibrated for the
+    # opposite question — "is this backlog abandoned?" — and here it means a single drain (ours or
+    # anyone's) locks the button out for ten minutes, which to the operator is indistinguishable
+    # from the button being broken.
+    seen = _queue.last_activity()
+    if _queue.is_worker_active(within_minutes=1) and seen != _LAST_SELF_DRAIN:
+        _log.info("[benchmark_fill] queue worker is live (last activity %s) — leaving it to them",
+                  seen)
+        return {"processed": 0, "ok": 0, "failed": 0, "unmapped": 0,
+                "remaining": len(isins), "worker_live": True}
+    done = _queue.process_slice(limit, isins=isins)
+    _LAST_SELF_DRAIN = _queue.last_activity()
+    # `remaining` from the queue is the WHOLE backlog; what this caller wants to know is how many
+    # of ITS OWN are still pending, which is what the next press will work on.
+    return {**done, "remaining": max(0, len(isins) - done["processed"]), "worker_live": False}
+
+
 # How many instruments one press of Fill may re-price. Yahoo is one windowed call each, paced —
 # so ACWI's 1,684 cannot be done in a request and the honest answer is to do a bounded slice, SAY
 # how many are left, and converge over presses. The 06:00 asset-price tick finishes the rest
@@ -406,7 +467,8 @@ def _refill_prices(isins: list[str], grid: dict[str, dict], lookback: str,
     return {"needed": len(need), "repriced": repriced, "failed": failed, "pending": pending}
 
 
-def fill_benchmark(label: str, *, do_caps: bool = True, do_prices: bool = True) -> dict:
+def fill_benchmark(label: str, *, do_caps: bool = True, do_prices: bool = True,
+                   do_resolve: bool = True) -> dict:
     """Close the asset-world gap for one benchmark, and report exactly what remains.
 
     Returns the breakdown plus what it did: `queued` (handed to the ingest worker) and `capped`
@@ -451,6 +513,18 @@ def fill_benchmark(label: str, *, do_caps: bool = True, do_prices: bool = True) 
     buckets = _classify(companies, grid)
 
     queued = _queue.enqueue(buckets[_NEEDS_RESOLVE]) if buckets[_NEEDS_RESOLVE] else {}
+    # ⚠ ENQUEUE **THEN DRAIN**. The queue row is still written first — it is the durable record and
+    # what a worker (or the next press) picks up — but the work no longer waits on a process that
+    # may not be running. See `_drain_now`.
+    drained = (_drain_now(buckets[_NEEDS_RESOLVE]) if (do_resolve and buckets[_NEEDS_RESOLVE])
+               else {"processed": 0, "ok": 0, "failed": 0, "unmapped": 0, "remaining": 0,
+                     "worker_live": False})
+    if drained.get("ok"):
+        # The rows just resolved are in the grid now, so re-read it — otherwise the cap and price
+        # steps below run against the grid as it was BEFORE this press did its work, and report
+        # every fresh row as still needing a resolve.
+        grid = _grid_for(isins)
+        buckets = _classify(companies, grid)
     caps = (_backfill_caps(buckets[_NEEDS_CAP], grid)
             if (do_caps and buckets[_NEEDS_CAP]) else {"quoted": 0, "capped": 0})
     # ⚠ THE THIRD JOB, AND IT RUNS OVER THE ROWS THAT ARE ALREADY "USABLE". A constituent resolved,
@@ -472,6 +546,18 @@ def fill_benchmark(label: str, *, do_caps: bool = True, do_prices: bool = True) 
         "no_isin_names": buckets[_NO_ISIN][:50],
         "queued": int(queued.get("queued") or 0),
         "skipped_existing": int(queued.get("skipped_existing") or 0),
+        # What this press RESOLVED, as opposed to merely queued — see `_drain_now`.
+        "resolved": int(drained.get("ok") or 0),
+        # ⚠ NOT A FAILURE AND NOT A RETRY. OpenFIGI identified the security and Yahoo has no daily
+        # series for it — a bond, a structured product, a listing on an exchange Yahoo does not
+        # carry. The row is marked done for ever. Reported separately because a press that resolved
+        # 25 such names shows `resolved: 0`, which reads exactly like a press that did nothing.
+        "resolve_unmapped": int(drained.get("unmapped") or 0),
+        "resolve_failed": int(drained.get("failed") or 0),
+        "resolve_pending": int(drained.get("remaining") or 0),
+        # True = something else is already consuming Yahoo, so the queue was left to it. The
+        # distinction matters: it is the ONE case where "queued" really is the whole answer.
+        "worker_live": bool(drained.get("worker_live")),
         "capped": caps["capped"],
         # Prices re-fetched this press, and how many still have no mark in the window. `pending`
         # is not a failure — one press is a bounded slice on purpose (see `_REPRICE_PER_PRESS`),
