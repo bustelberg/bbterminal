@@ -122,3 +122,46 @@ class TestAirsNoDataIsAnAnswerNotAFailure:
         branch = src.split("except AirsNoData")[1].split("except Exception")[0]
         assert "ok.append(code)" in branch
         assert "errors.append" not in branch
+
+
+class TestTheRosterIsCheckedAgainstAirsOwnCount:
+    """⚠ THE THREE FILTERS ARE SENT AND NOTHING CONFIRMS THEY APPLIED.
+
+    `actief=actief&portefeuilleIntern=1&metConsolidatie=0` defines the Front-Office population, and
+    the response to a wrong combination is a perfectly normal table with the wrong rows in it. The
+    only independent check is the count AIRS itself prints — "44 Items in selectie". Measured
+    2026-07-30 the scan reported 46 and there was no way to tell whether a filter had stopped
+    applying, the pager had walked into another selection, or AIRS's roster had genuinely grown.
+    Reading the page's own number makes those three separable.
+    """
+
+    def test_it_reads_the_count_airs_prints(self):
+        from airs_scanner import _SELECTIE_RE
+
+        assert _SELECTIE_RE.search("44 Items in selectie").group(1) == "44"
+
+    def test_a_thousands_separator_survives(self):
+        from airs_scanner import _SELECTIE_RE
+
+        assert _SELECTIE_RE.search("1.234 Items in selectie").group(1) == "1.234"
+
+    def test_it_does_not_invent_a_count(self):
+        """None must mean "the page did not say", never a guess — an unreadable count has to leave
+        the scrape alone rather than veto it."""
+        from airs_scanner import _SELECTIE_RE
+
+        for text in ("Item in selectie", "geen items", "", "Items in selectie"):
+            assert _SELECTIE_RE.search(text) is None, text
+
+    def test_the_scraper_dedupes_and_stops_when_a_page_adds_nothing(self):
+        """⚠ AirSPMS CLAMPS an out-of-range page instead of returning nothing — the trap the
+        model-portfolio list already documents. A pager that trusts the "next" arrow re-reads the
+        last page, and appending without dedupe turns that into extra portfolios rather than an
+        error."""
+        import inspect
+
+        import airs_scanner
+
+        src = inspect.getsource(airs_scanner.scan_portfolios_sync)
+        assert "seen" in src and "dupes" in src
+        assert "len(portfolios) == before" in src, "must stop when a page adds no new names"

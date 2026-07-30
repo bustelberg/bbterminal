@@ -266,15 +266,23 @@ export default function PortfolioOverviewPanel() {
    *
    * SSE because it is minutes long: the list lands in ~6s, then a holdings count per portfolio.
    */
-  const scanModels = async () => {
-    if (scanningModels) return;
+  const scanModels = async (force: boolean) => {
+    // ⚠ SKIPPED UNLESS IT WOULD CHANGE SOMETHING. This is the slow half — a list page plus an
+    // edit-page GET and an XLS download for each of ~95 portfolios, minutes every time — and it
+    // describes models, which change when somebody EDITS one, not daily. Running it on every press
+    // would make the routine refresh unusable to keep a nickname current. Missing entirely is the
+    // case that matters (a fresh deployment), and shift-click forces the rest.
+    const have = (rows ?? []).some((r) => r.fixed_portfolio_id != null);
+    if (have && !force) {
+      console.warn('[AIRS models] skipped — models already scanned (shift-click Refresh all to re-scan)');
+      return;
+    }
     setScanningModels(true);
-    setRefreshMsg({ text: 'Scanning model portfolios…', kind: 'info' });
-    console.warn('[AIRS models] scan started — this is the scan that fills Analyse/Fundamental');
+    console.warn('[AIRS models] scanning Stamgegevens → Model portefeuilles (minutes)…');
     let seen = 0;
     try {
       await runSSE(`${API_URL}/api/airs/model-portfolios/scan`, { method: 'GET' }, (raw) => {
-        const e = raw as { type?: string; count?: number; message?: string; portefeuille?: string };
+        const e = raw as { type?: string; count?: number; message?: string };
         if (e.type === 'portfolios' || e.type === 'done') {
           seen = e.count ?? seen;
           console.warn(`[AIRS models] ${e.type}: ${seen} portfolios`);
@@ -282,14 +290,13 @@ export default function PortfolioOverviewPanel() {
           console.warn(`[AIRS models] ${e.message}`);
         }
       });
-      setRefreshMsg({
-        text: `Model portfolios scanned${seen ? ` — ${seen} found` : ''}. Reloading the table.`,
-        kind: 'ok',
-      });
-      void loadOverview();
+      console.warn(`[AIRS models] done — ${seen} model portfolios`);
     } catch (e) {
-      console.warn('[AIRS models] scan failed', e);
-      setRefreshMsg({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
+      // ⚠ REPORTED, NEVER RAISED INTO THE ACCOUNT SCAN'S RESULT. This is the CRM lesson: a failure
+      // in a scan of DIFFERENT objects must not appear in the account refresh's error summary, or
+      // a portfolio refresh reports a fault in a report it was never asked to fetch. One button,
+      // two subjects, two verdicts.
+      console.warn('[AIRS models] scan failed — the accounts are unaffected', e);
     } finally {
       setScanningModels(false);
     }
@@ -498,6 +505,13 @@ export default function PortfolioOverviewPanel() {
         // progress you can watch.
         await loadOverview();
       }
+      // ⚠ PHASE TWO OF THE SAME BUTTON. Front-Office → the four reports per book is the whole
+      // workflow and it is done by here; this adds the model portfolios, which supply the readable
+      // nickname and the id-only views (attribution, bucket drill-downs). Kept as a separate PHASE
+      // rather than a separate BUTTON: two scans of different objects must keep their verdicts
+      // apart (the CRM lesson), but that is an implementation rule and was never a reason to make
+      // the operator press twice.
+      await scanModels(force);
       setDetail({});
       setIsins({});
       await loadOverview();
@@ -588,27 +602,16 @@ export default function PortfolioOverviewPanel() {
               rather than minutes. Shift-click forces a full re-scan. */}
           {isAdmin && (
             <button type="button" onClick={(e) => void refreshAll(e.shiftKey)} disabled={refreshingAll}
-              title="Re-scan the AIRS reports for every portfolio that needs them — an account already scanned in the last few hours is skipped, and a missing one is always fetched. Shift-click to force a full re-scan of all 44 (minutes)."
+              title="Everything AIRS has: Rapportage → Front-Office (Actieve · Interne · zonder consolidatie), then Rendement, Vermogensoverzicht, Mutaties and Model for each book — plus the model portfolios if they have never been scanned. An account fully scanned in the last few hours is skipped. Shift-click forces a full re-scan of everything (minutes)."
               className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors disabled:opacity-50 disabled:cursor-wait">
               <RefreshIcon spinning={refreshingAll} size={12} />
-              {refreshingAll ? 'Refreshing…' : 'Refresh all'}
+              {refreshingAll ? (scanningModels ? 'Scanning models…' : 'Refreshing…') : 'Refresh all'}
             </button>
           )}
-          {/* ⚠ A DIFFERENT SUBJECT AND AN OPTIONAL ONE. "Refresh all" scans the ACCOUNTS (returns,
-              holdings, mutations, model weights) — everything the table and both modals need. This
-              scans the MODEL portfolios from Stamgegevens, which adds the readable nickname and
-              unlocks the id-only views (Brinson attribution, the per-bucket drill-downs). Separate
-              because it is minutes long and changes only when someone edits a model, and because a
-              failure here must never land in the account scan's error summary — the mistake CRM
-              taught this codebase. */}
-          {isAdmin && (
-            <button type="button" onClick={() => void scanModels()} disabled={scanningModels || refreshingAll}
-              title="Scan Stamgegevens → Model portefeuilles. Optional: it adds each book's readable name and enables attribution. Minutes."
-              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors disabled:opacity-50 disabled:cursor-wait">
-              <RefreshIcon spinning={scanningModels} size={12} />
-              {scanningModels ? 'Scanning models…' : 'Scan models'}
-            </button>
-          )}
+          {/* ⚠ ONE BUTTON. It ran as two for a while — accounts here, model portfolios on a second
+              control — which put an implementation rule (keep the two scans' error verdicts apart)
+              in front of the operator as a chore. They are phases of one action now; only the
+              reporting stays separate. */}
           {rows && (
             <label className={`flex items-center gap-1.5 text-xs cursor-pointer whitespace-nowrap ${
               substantial === 0 ? 'text-fg-faint' : 'text-fg-subtle'}`}

@@ -1,5 +1,6 @@
 import os
 import queue
+import re
 import threading
 import time
 from urllib.parse import urlencode
@@ -606,6 +607,34 @@ FRONT_OFFICE_SELECTIE_PATH = "rapportFrontofficeClientSelectie.php"
 # Together: exactly 44 portfolios across 2 pages.
 FRONT_OFFICE_FILTERS = "actief=actief&portefeuilleIntern=1&metConsolidatie=0"
 
+# "44 Items in selectie" — the count AIRS itself prints for the current filter combination.
+_SELECTIE_RE = re.compile(r"(\d[\d.]*)\s*Items?\s+in\s+selectie", re.I)
+
+
+def _selectie_count(frame) -> int | None:
+    """AIRS's OWN count of the current selection, or None if the page does not state one.
+
+    ⚠ THIS IS THE ONLY INDEPENDENT CHECK ON THE THREE FILTERS. `actief` / `portefeuilleIntern` /
+    `metConsolidatie` are sent as query parameters and nothing in the response confirms they were
+    honoured — a changed default, a dropped parameter or a pager that walks a different selection
+    all produce a perfectly normal-looking table with the wrong number of rows in it. The page
+    prints the server's own count; comparing the two turns "we read 46" into "AIRS says 44 and we
+    read 46", which is a bug report rather than a number.
+
+    None on failure, never a guess: an unreadable count must leave the scrape alone, not veto it.
+    """
+    try:
+        text = frame.inner_text("body")
+    except Exception:  # noqa: BLE001 — a diagnostic must never break the scan
+        return None
+    m = _SELECTIE_RE.search(text or "")
+    if not m:
+        return None
+    try:
+        return int(m.group(1).replace(".", ""))
+    except ValueError:
+        return None
+
 # ─── Scanner (uses its own browser for DOM scraping) ──────────────────────────
 
 def scan_portfolios_sync(send_event):
@@ -637,9 +666,23 @@ def scan_portfolios_sync(send_event):
             page.wait_for_timeout(3000)
             send_event("progress", step="navigate", status="done", message="Navigated to internal portfolio selection")
 
+            # ⚠ AIRS STATES ITS OWN COUNT, AND WE NEVER READ IT. The selection page prints
+            # "44 Items in selectie" — the number the three filters produced, straight from the
+            # server. Scraping rows without ever comparing against it means a filter that silently
+            # stops applying, or a paging bug that picks up rows from another selection, shows up
+            # only as a row count nobody can check. Measured 2026-07-30: the scan reported 46 where
+            # the page says 44, and there was no way to tell which half was wrong.
+            declared = _selectie_count(content)
+            send_event("progress", step="filters", status="done",
+                       message=(f"Filters {FRONT_OFFICE_FILTERS} — AIRS says "
+                                f"{declared if declared is not None else '?'} items in selectie"),
+                       declared=declared)
+
             # Scrape portfolio table across all pages
             nav = page.frame("navigatie")
             portfolios = []
+            seen: set[str] = set()
+            dupes: list[str] = []
             page_num = 1
 
             while True:
@@ -647,26 +690,58 @@ def scan_portfolios_sync(send_event):
                 content.wait_for_selector('tr.list_dataregel', timeout=10000)
 
                 rows = content.query_selector_all('tr.list_dataregel')
+                before = len(portfolios)
                 for row in rows:
                     cells = row.query_selector_all('td.listTableData')
                     if len(cells) >= 4:
+                        name = cells[0].inner_text().strip()
+                        # ⚠ DEDUPED, AND THE DUPLICATES ARE NAMED. AirSPMS CLAMPS an out-of-range
+                        # page instead of returning nothing (the trap the model-portfolio list
+                        # already documents), so a paging loop can re-read the last page and count
+                        # the same books twice. Silently appending made that arithmetic, not an
+                        # error: the roster simply came back too big.
+                        if name in seen:
+                            dupes.append(name)
+                            continue
+                        seen.add(name)
                         portfolios.append({
-                            "portefeuille": cells[0].inner_text().strip(),
+                            "portefeuille": name,
                             "depotbank": cells[1].inner_text().strip(),
                             "client": cells[2].inner_text().strip(),
                             "naam": cells[3].inner_text().strip(),
                         })
+                send_event("progress", step="scrape", status="in_progress",
+                           message=(f"  page {page_num}: {len(rows)} rows, "
+                                    f"{len(portfolios) - before} new, {len(portfolios)} total"))
 
                 # Next page link is in the navigatie frame — active ones have
                 # img.simbisIcon (not .simbisIconGray) inside an <a> tag
                 next_link = nav.query_selector('a:has(img[src*="navigate_right"].simbisIcon)') if nav else None
                 if not next_link:
                     break
+                # ⚠ NO NEW NAMES MEANS THE LIST HAS ENDED, whatever the pager says. AirSPMS clamps,
+                # so a "next" arrow can stay active on the final page and the loop would re-read it
+                # for ever (or until the clamp repeats enough rows to matter).
+                if len(portfolios) == before:
+                    send_event("progress", step="scrape", status="in_progress",
+                               message=f"  page {page_num} added nothing new — stopping (AIRS clamps)")
+                    break
 
                 page_num += 1
                 next_link.click()
                 page.wait_for_timeout(2000)
 
+            if dupes:
+                send_event("progress", step="scrape", status="in_progress",
+                           message=f"  ⚠ {len(dupes)} duplicate row(s) skipped: {sorted(set(dupes))}")
+            # ⚠ THE COMPARISON IS THE POINT. Equal means the three filters produced what we read;
+            # different means one of them is not applying, or the pager is walking another
+            # selection — and either way the roster is wrong in a way no row count reveals.
+            if declared is not None and declared != len(portfolios):
+                send_event("progress", step="scrape", status="in_progress",
+                           message=(f"  ⚠ MISMATCH: AIRS says {declared} items in selectie, we read "
+                                    f"{len(portfolios)}. Check the Actieve/Interne/Zonder-consolidatie "
+                                    f"filters and the pager."))
             send_event("progress", step="scrape", status="done", message=f"Read {len(portfolios)} portfolios across {page_num} page(s)")
             send_event("portfolios", data=portfolios)
             send_event("done", message=f"Scan complete. Found {len(portfolios)} portfolios.")

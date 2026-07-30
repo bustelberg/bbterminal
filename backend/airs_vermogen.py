@@ -60,6 +60,11 @@ _STATUS: dict = {
 # table in one pass.
 _MIN_ROSTER = 10
 
+# What the three Front-Office filters (Actieve / Interne / Zonder consolidatie) are known to
+# produce. Not enforced — AIRS's roster is allowed to change — but any other number is called out,
+# because the same symptom has two opposite causes and only the page's own count separates them.
+_EXPECTED_ROSTER = 44
+
 
 def _discover_portfolios() -> list[str]:
     """Current live AirSPMS portfolio names, scraped fresh (Playwright)."""
@@ -72,6 +77,14 @@ def _discover_portfolios() -> list[str]:
             captured.extend(kw.get("data") or [])
         elif msg_type == "error":
             raise RuntimeError(kw.get("message") or "scan error")
+        elif msg_type == "progress" and kw.get("message"):
+            # ⚠ DISCOVERY USED TO NARRATE TO NOBODY. The scraper already emitted every step — which
+            # filters it sent, AIRS's own "N Items in selectie", the per-page row counts — and this
+            # sink threw all of it away, so the roster arrived as a bare number with no way to ask
+            # how it was arrived at. It is the one phase where the answer is a COUNT, and a count
+            # is exactly what cannot be checked after the fact.
+            _emit("discovery", step=kw.get("step"), declared=kw.get("declared"),
+                  message=f"  {kw['message']}")
 
     result = scan_portfolios_sync(_sink)
     rows = result if result else captured
@@ -655,6 +668,17 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         # discovery picked the Interne/actief/no-consolidation population and not some other one.
         _emit("discovered", count=len(names), names=names,
               message=f"AIRS lists {len(names)} portfolios")
+        # ⚠ THE EXPECTED COUNT IS 44, AND ANYTHING ELSE IS WORTH SAYING OUT LOUD. The three filters
+        # (Actieve / Interne / Zonder consolidatie) define exactly that population; a different
+        # number means either a filter stopped applying or AIRS's own roster changed, and those need
+        # opposite responses. The scraper's own "N Items in selectie" comparison, emitted just
+        # above, says which.
+        if len(names) != _EXPECTED_ROSTER:
+            _emit("roster_unexpected", count=len(names), expected=_EXPECTED_ROSTER,
+                  message=(f"⚠ EXPECTED {_EXPECTED_ROSTER} portfolios, got {len(names)}. If AIRS's "
+                           f"own 'Items in selectie' above also says {len(names)}, the roster "
+                           f"genuinely changed; if it says {_EXPECTED_ROSTER}, a filter or the "
+                           f"pager is wrong."))
         # ⚠ THE SKIP IS DECIDED ONCE, BEFORE THE LOOP, AGAINST THE VERDICTS AS THEY WERE AT THE
         # START. Re-reading per account would let this run's own writes shorten its own worklist.
         # ⚠ READ ONCE, HERE. `known` is which accounts we already had a roster row for BEFORE this
