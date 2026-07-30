@@ -55,3 +55,70 @@ class TestItDoesNotRelabelABrokenDownload:
         """A full error page is genuinely HTML however long it runs — only the FRAGMENT rule is
         size-bounded, because only the fragment rule is ambiguous."""
         assert _looks_like_html(b"<html>" + b"x" * 9000) is True
+
+
+class TestAirsNoDataIsAnAnswerNotAFailure:
+    """⚠ 14 OF 44 ACCOUNTS FAILED THEIR MODEL REPORT ON EVERY SINGLE RUN, AND NONE OF THEM WAS
+    BROKEN. AIRS answers a report it has nothing for with a ~170-byte fragment; that was reported
+    as a hard error, so those books never counted as COMPLETE — which meant they wore a permanent
+    ⚠, and (the expensive part) an account that can never be complete is never skipped as fresh, so
+    they were the ONLY accounts the incremental scan ever visited: "1/14: BUS_WTS_SterkeMerken_Fx…"
+    while the 30 real books were correctly skipped.
+
+    ⚠ WHAT MAKES THIS SAFE TO CLASSIFY IS THE OTHER THREE REPORTS. A dead session or an IP block
+    breaks all four; measured 2026-07-30 the same accounts in the same session returned Rendement
+    44/44, Vermogensoverzicht 44/44, Mutaties 44/44 and Model 30/44. Per-REPORT failure is a fact
+    about the report. The 14 are all `_MV` (meervoudig), `_BM_`, `WTS test` or `_Fx` books — the
+    types that have no fixed model at all.
+
+    So the test that matters is not "does it spot the message" — it is "does it REFUSE to spot one
+    in anything that could be a real fault".
+    """
+
+    def test_the_airs_no_data_fragment_is_recognised(self):
+        from airs_scanner import _is_no_data
+
+        assert _is_no_data(AIRS_NO_DATA + b" Er zijn geen gegevens gevonden.") is True
+
+    def test_a_login_page_is_NEVER_no_data(self):
+        """The failure that must still be loud: reporting an expired session as "no model" hides
+        the one thing a human has to act on."""
+        from airs_scanner import _is_no_data
+
+        assert _is_no_data(b"<!doctype html><html><body><form name=login></form></body></html>") is False
+
+    def test_a_full_document_mentioning_it_is_still_an_error(self):
+        """A real page that happens to contain the phrase is not AIRS's terse no-data reply."""
+        from airs_scanner import _is_no_data
+
+        assert _is_no_data(b"<html><body>geen gegevens</body></html>") is False
+
+    def test_an_unrecognised_short_fragment_stays_an_error(self):
+        from airs_scanner import _is_no_data
+
+        assert _is_no_data(b"<br>\n30-07-2026 Onbekende fout") is False
+
+    def test_a_long_body_is_never_no_data(self):
+        from airs_scanner import _is_no_data
+
+        assert _is_no_data(b"<br>geen gegevens" + b"x" * 5000) is False
+
+    def test_a_spreadsheet_is_never_no_data(self):
+        from airs_scanner import _is_no_data
+
+        assert _is_no_data(b"PK\x03\x04" + b"x" * 400) is False
+
+    def test_the_step_wrapper_counts_it_as_retrieved(self):
+        """⚠ THE POINT OF THE WHOLE CHANGE. `reports_ok` is what `accounts_to_scan` reads to decide
+        an account is complete and can be skipped — so a no-data report must land in `ok`, not in
+        `errors`, or the account is re-scanned for ever."""
+        import inspect
+
+        import airs_vermogen
+
+        src = inspect.getsource(airs_vermogen.scan_one)
+        assert "AirsNoData" in src
+        # It appends to `ok` in that branch rather than recording an error.
+        branch = src.split("except AirsNoData")[1].split("except Exception")[0]
+        assert "ok.append(code)" in branch
+        assert "errors.append" not in branch

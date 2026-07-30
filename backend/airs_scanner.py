@@ -354,6 +354,66 @@ class _AirsSession:
 _session = _AirsSession()
 
 
+class AirsNoData(RuntimeError):
+    """AirSPMS answered the report request with "there is nothing here".
+
+    ⚠ AN ANSWER, NOT A FAULT — AND TELLING THEM APART NEEDED EVIDENCE, NOT A GUESS. AIRS replies
+    with a ~170-byte HTML fragment (`<br>\\n30-07-2026 …`) where a spreadsheet would be. That is
+    roughly what an expired session or an IP block also looks like, which is why it was reported as
+    a hard error and 14 of 44 accounts failed their MODEL report on every single run.
+
+    What settles it is that the OTHER THREE REPORTS SUCCEED FOR THE SAME ACCOUNT IN THE SAME
+    SESSION. Measured 2026-07-30: Rendement 44/44, Vermogensoverzicht 44/44, Mutaties 44/44 —
+    Model 30/44. A dead session cannot break one report and leave three working. And all 14 are
+    `_MV` (meervoudig), `_BM_` (benchmark), `WTS test` or `_Fx` books: exactly the types that HAVE
+    no fixed model. The failure was per-REPORT, which makes it a fact about the report.
+
+    Raised distinctly so a caller can record "nothing to store" rather than "the scan broke". The
+    account then counts as COMPLETE, stops wearing a permanent ⚠ — and, the part that actually cost
+    something, stops being re-scanned every run: an account that can never be complete is never
+    skipped as fresh, so those 14 were the ONLY accounts the incremental scan ever visited
+    ("1/14: BUS_WTS_SterkeMerken_Fx…" while the 30 real books were correctly skipped).
+    """
+
+
+# AIRS's no-data fragment carries the report date and no table. Kept narrow deliberately: a body
+# that merely FAILS to be a spreadsheet is still an error — only one that positively looks like
+# this message is an answer.
+#
+# ⚠ THESE ARE AIRS'S ACTUAL WORDS, COPIED FROM A REAL REPLY — NOT A GUESS AT THEM. The first
+# version of this list guessed "geen gegevens" and matched nothing, because what AIRS really sends
+# for a book with no model is (measured 2026-07-30, 177 bytes, HTTP 200):
+#
+#   <br> 30-07-2026 16:26:13 Modelvergelijking voor portefeuille BUS_WTS_SterkeMerken_Fx gestopt,
+#   geen waarden voor modelportefeuille '' gevonden.<br>
+#
+# "geen WAARDEN", not "geen gegevens". Both variants of the tail appear and both are answers:
+# `modelportefeuille ''` (no model assigned at all — the `_MV`/benchmark/test books) and
+# `modelportefeuille 'BUS_WTS_SterkeMerken_Fx'` (a model IS named but holds no values).
+_NO_DATA_MARKERS = (
+    "geen waarden voor modelportefeuille",   # the measured MODEL reply, both tail variants
+    "modelvergelijking",                     # …and the sentence it always opens with
+    "geen gegevens", "geen data", "niets gevonden", "no data",
+)
+
+
+def _is_no_data(body: bytes) -> bool:
+    """Is this AIRS saying the report is empty, rather than failing to produce it?
+
+    ⚠ IT MUST NOT MATCH A LOGIN PAGE. `_classify_html_page` already recognises those, and an
+    expired session returns a full document with a form in it — this requires a SHORT fragment
+    (no doctype, no <html>) that contains one of AIRS's own no-data phrases. Anything longer or
+    less specific stays an error, because reporting a broken session as "no model" would hide the
+    one failure that needs a human.
+    """
+    if len(body) > 2048:
+        return False
+    text = body.decode("utf-8", "replace").lower()
+    if "<html" in text or "<!doctype" in text or "<form" in text:
+        return False
+    return any(m in text for m in _NO_DATA_MARKERS)
+
+
 def _download_report_sync(
     portfolio_name: str, datum_van: str, datum_tot: str, rapport_types: str,
 ) -> bytes:
@@ -386,6 +446,11 @@ def _download_report_sync(
     # period", an IP block — arrived as the same opaque engine error. `_describe_non_excel` prints
     # the status, content-type, page title and an excerpt, so the next failure is a diagnosis.
     if not content.startswith((_XLSX_MAGIC, _XLS_MAGIC)):
+        # ⚠ ASKED BEFORE THE ERROR PATHS: "there is nothing here" is an ANSWER. See `AirsNoData`.
+        if _is_no_data(content):
+            raise AirsNoData(
+                f"{rapport_types} for {portfolio_name!r} ({datum_van}..{datum_tot}): AIRS reports "
+                f"no data — this book has no {rapport_types} for that period.")
         where = f"{rapport_types} for {portfolio_name!r} ({datum_van}..{datum_tot}) is not a spreadsheet"
         if _looks_like_html(content):
             raise RuntimeError(f"{where} — " + _describe_non_excel(AirsHttpResponse(
