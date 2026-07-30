@@ -170,12 +170,37 @@ class AirsHttpResponse:
         self.url = url
 
 
+# AirSPMS answers a report request it has no data for with a bare HTML FRAGMENT — no doctype, no
+# <html>, just a line of markup: `<br>\n30-07-2026 …`. It is a message, and it is the commonest
+# non-spreadsheet reply we get.
+_HTML_DOC_MARKERS = (b"<!doctype", b"<html", b"<!--", b"<head", b"<?php")
+_HTML_FRAGMENT_MARKERS = (b"<br", b"<p", b"<div", b"<span", b"<b>", b"<font", b"<table")
+
+
 def _looks_like_html(body: bytes) -> bool:
-    """Heuristic: does this response body start with an HTML document marker?
-    Covers `<!doctype html>`, a bare `<html>`, and a leading `<?xml`/BOM-then-tag
-    that some PHP error pages emit."""
+    """Heuristic: is this response body HTML rather than a file?
+
+    Covers a document (`<!doctype html>`, a bare `<html>`, a leading `<?xml`/BOM-then-tag that some
+    PHP error pages emit) AND a bare fragment.
+
+    ⚠ THE FRAGMENT CASE IS NOT AN EDGE CASE — IT IS AIRS SAYING "NO DATA". A report the book has
+    nothing for comes back as ~170 bytes beginning `<br>`, which matched no document marker, so it
+    fell through to the raw-bytes branch and every one of them was reported as
+    `RuntimeError: … 177 bytes starting b'<br>\\n30-07-2026 '`. Measured in production 2026-07-30:
+    14 of 44 accounts failed their MODEL report that way — and all 14 are `_MV` (meervoudig),
+    `_BM_` (benchmark) or `WTS test` books, i.e. exactly the types that HAVE no fixed model. The
+    message AIRS sent was the answer, and 16 bytes of it was all anyone ever saw.
+
+    Being HTML routes it to `_describe_non_excel`, which prints the status, content-type and a
+    300-character excerpt — so the next run states what AIRS actually said instead of hinting at it.
+    """
     head = body[:512].lstrip().lower()
-    return head.startswith((b"<!doctype", b"<html", b"<!--", b"<head", b"<?php"))
+    if head.startswith(_HTML_DOC_MARKERS):
+        return True
+    # A fragment only counts when the whole body is small: a real spreadsheet never starts with a
+    # tag, but a truncated binary might, and calling a corrupt download "an HTML page" would hide
+    # a genuine transport fault behind a tidier-looking diagnosis.
+    return len(body) <= 4096 and head.startswith(_HTML_FRAGMENT_MARKERS)
 
 
 # A transient connection reset drops the request but not the account — the socket

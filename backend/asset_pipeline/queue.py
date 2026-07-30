@@ -18,7 +18,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from deps import supabase
+from deps import IN_CHUNK_SIZE, supabase
 
 from . import openfigi, store
 from .resolve import resolve, same_company
@@ -147,18 +147,36 @@ def _reapply_aliases() -> None:
         log.warning("[queue] re-applied %d ISIN alias(es) this slice overwrote", n)
 
 
-def process_slice(limit: int = SLICE, verbose: bool = False) -> dict:
+def process_slice(limit: int = SLICE, verbose: bool = False,
+                  isins: list[str] | None = None) -> dict:
     """Process up to `limit` pending ISINs through the throttled resolve+store,
     marking each done/failed. THE worker step (one Yahoo consumer). On a Yahoo
     ban (`YahooThrottled`) it leaves the current ISIN pending and stops — the
     next tick retries once Yahoo recovers. `verbose` prints each ISIN's OpenFIGI
-    + yfinance result to stdout. Returns per-tick counts."""
-    pend = (
-        supabase.table("asset_ingest_queue").select("isin")
-        .eq("status", "pending").order("added_at").limit(limit).execute().data
-    ) or []
+    + yfinance result to stdout. Returns per-tick counts.
+
+    ⚠ `isins` PICKS THE SLICE BY IDENTITY INSTEAD OF BY AGE, AND WITHOUT IT AN INTERACTIVE CALLER
+    CANNOT REACH ITS OWN WORK. The default order is `added_at` — right for a background worker
+    chewing through a backlog, and useless for "resolve THIS benchmark now": the queue holds ~10,000
+    pending ISINs, so a benchmark's 71 constituents enqueued a second ago are ~10,000 places from
+    the front. Measured 2026-07-30: Fill enqueued 71 ACWI names, drained a slice, and resolved 25
+    unrelated week-old rows instead. Same worker step either way — only the selection differs.
+    """
+    if isins:
+        want, pend = [i.strip().upper() for i in isins if i], []
+        for i in range(0, len(want), IN_CHUNK_SIZE):
+            if len(pend) >= limit:
+                break
+            pend += (supabase.table("asset_ingest_queue").select("isin")
+                     .eq("status", "pending").in_("isin", want[i:i + IN_CHUNK_SIZE])
+                     .limit(limit - len(pend)).execute().data or [])
+    else:
+        pend = (
+            supabase.table("asset_ingest_queue").select("isin")
+            .eq("status", "pending").order("added_at").limit(limit).execute().data
+        ) or []
     if not pend:
-        return {"processed": 0, "ok": 0, "failed": 0, "remaining": 0}
+        return {"processed": 0, "ok": 0, "failed": 0, "unmapped": 0, "remaining": 0}
     ids = [r["isin"] for r in pend]
     try:
         figi_map = openfigi.lookup_isins(ids)
@@ -218,6 +236,12 @@ def process_slice(limit: int = SLICE, verbose: bool = False) -> dict:
         results = list(ex.map(_one, ids))
     ok = results.count("ok")
     failed = results.count("failed")
+    # ⚠ `unmapped` IS AN OUTCOME, NOT A GAP IN THE TALLY. OpenFIGI identified the security and
+    # Yahoo has no daily series for it (a bond, a structured product, a delisted line) — the row is
+    # marked done and will never be retried, which is correct and is NOT a failure. It was counted
+    # in neither `ok` nor `failed`, so a slice that resolved 25 such ISINs reported `processed: 0`
+    # and read exactly like a slice that did nothing at all.
+    unmapped = results.count("unmapped")
     try:
         store.set_default_executions()
     except Exception:  # noqa: BLE001
@@ -234,7 +258,8 @@ def process_slice(limit: int = SLICE, verbose: bool = False) -> dict:
         except Exception as e:  # noqa: BLE001 — never fail a completed slice on a re-assert
             log.warning("[queue] re-applying %ss failed: %s: %s", _what, type(e).__name__, e)
     remaining = supabase.table("asset_ingest_queue").select("isin", count="exact").eq("status", "pending").limit(1).execute().count or 0
-    return {"processed": ok + failed, "ok": ok, "failed": failed, "remaining": remaining}
+    return {"processed": ok + failed + unmapped, "ok": ok, "failed": failed,
+            "unmapped": unmapped, "remaining": remaining}
 
 
 # OpenFIGI securityTypes that have no Yahoo daily price series — don't bother

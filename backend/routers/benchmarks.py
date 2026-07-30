@@ -331,6 +331,17 @@ class BenchmarkFillResult(BaseModel):
     no_isin_names: list[str] = []
     queued: int = 0
     skipped_existing: int = 0
+    # ⚠ `resolved` IS WORK DONE; `queued` IS ONLY WORK RECORDED. The queue's default drainer is a
+    # standalone process that a single-service deployment does not run, so a press used to report
+    # "25 queued (a paced worker drains them)" and nothing ever drained them. Fill now runs the
+    # worker's own slice inline unless something else is already consuming Yahoo (`worker_live`).
+    resolved: int = 0
+    # OpenFIGI identified it, Yahoo has no daily series (a bond, a structured product, an exchange
+    # Yahoo does not carry). Done for ever, never retried — an answer, not a failure.
+    resolve_unmapped: int = 0
+    resolve_failed: int = 0
+    resolve_pending: int = 0
+    worker_live: bool = False
     capped: int = 0
     # Prices re-fetched this press, and how many constituents still have no mark in the window.
     # `price_pending` is not a failure: one press re-prices a bounded slice on purpose, and the

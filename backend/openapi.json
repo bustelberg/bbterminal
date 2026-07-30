@@ -2934,6 +2934,26 @@
             "title": "Repriced",
             "type": "integer"
           },
+          "resolve_failed": {
+            "default": 0,
+            "title": "Resolve Failed",
+            "type": "integer"
+          },
+          "resolve_pending": {
+            "default": 0,
+            "title": "Resolve Pending",
+            "type": "integer"
+          },
+          "resolve_unmapped": {
+            "default": 0,
+            "title": "Resolve Unmapped",
+            "type": "integer"
+          },
+          "resolved": {
+            "default": 0,
+            "title": "Resolved",
+            "type": "integer"
+          },
           "skipped_existing": {
             "default": 0,
             "title": "Skipped Existing",
@@ -2953,6 +2973,11 @@
             "default": 0,
             "title": "Usable",
             "type": "integer"
+          },
+          "worker_live": {
+            "default": false,
+            "title": "Worker Live",
+            "type": "boolean"
           }
         },
         "required": [

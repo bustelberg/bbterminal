@@ -348,8 +348,24 @@ export default function PortfolioOverviewPanel() {
     setIsins((m) => ({ ...m, [p]: resolved }));
   }, []);
 
+  const linked = (rows ?? []).filter((r) => !!r.fixed_name).length;
+  /**
+   * ⚠ A FILTER THAT HIDES EVERY ROW IS NOT A FILTER, IT IS AN EMPTY PAGE — AND IT SHIPPED.
+   *
+   * `fixed_name` comes from a model portfolio, and model portfolios are populated by a DIFFERENT
+   * scan from the one that fills this table. On a fresh deployment the accounts scan runs, stores
+   * 44 books with their returns and holdings, and every one of them has `fixed_name: null` because
+   * no models have been scanned yet — so "Linked only", on by default, hid all 44. Measured in
+   * production 2026-07-30: the scan reported "44 updated" and the page rendered nothing, which
+   * reads as the scan having silently failed. The only clue was "(0 of 44)" on the checkbox.
+   *
+   * A default that can empty a full table is not a default. The preference is kept — the moment
+   * ANY row is linked it applies again — but it can no longer be the reason the page is blank.
+   */
+  const effectiveOnlyLinked = onlyLinked && linked > 0;
+
   const view = (() => {
-    const base = (rows ?? []).filter((r) => (onlyLinked ? !!r.fixed_name : true));
+    const base = (rows ?? []).filter((r) => (effectiveOnlyLinked ? !!r.fixed_name : true));
     const dir = sortDir === 'asc' ? 1 : -1;
     const val = (r: AirsPortfolioOverview): string | number | null => (
       sortKey === 'name' ? (r.name ?? '')
@@ -371,7 +387,6 @@ export default function PortfolioOverviewPanel() {
         : (x as number) - (y as number)) * dir;
     });
   })();
-  const linked = (rows ?? []).filter((r) => !!r.fixed_name).length;
 
   return (
     <section className="bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
@@ -398,12 +413,19 @@ export default function PortfolioOverviewPanel() {
             </button>
           )}
           {rows && (
-            <label className="flex items-center gap-1.5 text-xs text-fg-subtle cursor-pointer whitespace-nowrap">
-              <input type="checkbox" checked={onlyLinked}
+            <label className={`flex items-center gap-1.5 text-xs cursor-pointer whitespace-nowrap ${
+              linked === 0 ? 'text-fg-faint' : 'text-fg-subtle'}`}
+              title={linked === 0
+                ? 'No account is paired with a model portfolio yet, so this filter would hide every row — it is inactive until a model-portfolio scan has run.'
+                : undefined}>
+              <input type="checkbox" checked={onlyLinked} disabled={linked === 0}
                 onChange={(e) => setOnlyLinked(e.target.checked)} />
               {/* An unlinked book is a real book — the benchmarks and tests. Hidden by default
-                  because it has no nickname and no ISINs, not because it is not a portfolio. */}
+                  because it has no nickname and no ISINs, not because it is not a portfolio.
+                  ⚠ Disabled at zero: see `effectiveOnlyLinked`. A checkbox that silently does
+                  nothing is worse than one that says it cannot. */}
               Linked only ({linked} of {rows.length})
+              {linked === 0 && <span className="text-warn-400">· no models scanned</span>}
             </label>
           )}
         </div>

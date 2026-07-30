@@ -65,6 +65,10 @@ type FillResult = {
   /** Prices re-fetched this press, and how many constituents still have no mark in the window.
    *  `price_pending` is not a failure — a press re-prices a bounded slice on purpose. */
   repriced?: number; price_pending?: number; price_failed?: number;
+  /** What this press RESOLVED, as opposed to merely queued. `worker_live` = something else is
+   *  already draining the queue, which is the only case where queuing IS the whole answer. */
+  resolved?: number; resolve_unmapped?: number; resolve_failed?: number;
+  resolve_pending?: number; worker_live?: boolean;
 };
 
 /** One sentence saying what the press actually achieved — and, when nothing was queued, WHY.
@@ -77,7 +81,20 @@ function fillSummary(f: FillResult): string {
   if (f.note) return f.note;
   const bits: string[] = [];
   if (f.universe_built) bits.push('built the universe from its template');
-  if (f.queued) bits.push(`${f.queued} queued for ingest (a paced worker drains them — minutes to hours)`);
+  // ⚠ SAY WHAT WAS DONE, NOT WHAT WAS RECORDED. This read "N queued for ingest (a paced worker
+  // drains them — minutes to hours)" — a promise about a process that a single-service deployment
+  // does not run, so in production the number went up and nothing ever happened. Fill now runs the
+  // worker's own slice itself; `worker_live` is the one case where queuing really is the answer.
+  if (f.worker_live && f.queued) {
+    bits.push(`${f.queued} handed to the ingest worker, which is already running`);
+  } else {
+    if (f.resolved) bits.push(`${f.resolved} constituents resolved and priced`);
+    // Not a failure: Yahoo has no daily series for them and never will. Said plainly, because
+    // otherwise a press that did 25 of these reports "0" and reads as broken.
+    if (f.resolve_unmapped) bits.push(`${f.resolve_unmapped} have no Yahoo listing (bonds, structured products — they cannot be priced)`);
+    if (f.resolve_failed) bits.push(`${f.resolve_failed} failed to resolve`);
+    if (f.resolve_pending) bits.push(`${f.resolve_pending} left to resolve — press again`);
+  }
   if (f.capped) bits.push(`${f.capped} market caps written`);
   if (f.repriced) bits.push(`${f.repriced} price series refilled`);
   // ⚠ SAID EVERY TIME IT IS NON-ZERO. A press re-prices a bounded slice, so silence here would
