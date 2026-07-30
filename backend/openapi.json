@@ -797,6 +797,24 @@
         "title": "AirsAccountModelLinks",
         "type": "object"
       },
+      "AirsAccountName": {
+        "description": "A nickname for one account. Empty or absent CLEARS it, restoring the fallback chain.",
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          }
+        },
+        "title": "AirsAccountName",
+        "type": "object"
+      },
       "AirsHoldingIsin": {
         "description": "One account holding, with the ISIN we believe it is \u2014 and how much to believe it.\n\n\u26a0 `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.\n  ok             the implied price agrees with that ISIN's own close (FX-converted)\n  price_mismatch it does NOT \u2014 the ISIN is not what the book holds, or the book drifted\n  unpriced       we have no series for it, so there is NOTHING confirming the name match\n  unmatched      NO ISIN: the model has no position for this holding\n  cross_listed   the prices differ, and they are SUPPOSED to \u2014 this ISIN's execution row is\n                 deliberately served by another instrument (`asset_isin_alias`), e.g. an ADR\n                 priced from the main company's listing. Not a fault, and not a pass either. at all\n\n`unpriced` is not a pass. The name matched and nothing checked it \u2014 which for a fund is\nexactly where the Acc/Inc share-class trap lives.\n\n\u26a0 `unmatched` AND `price_mismatch` ARE OPPOSITE FINDINGS, NOT DEGREES OF ONE. A mismatch means\nthe row pairing is RIGHT and the ISIN on it is wrong (a share class, a venue) \u2014 a finding\nabout the model. `unmatched` means the pairing itself was refused: the name says a different\ninstrument and the price independently agrees, which is what a STALE model snapshot looks like\nwhen the book has since swapped a position. `rejected_isin`/`rejected_fonds` name the leftover\nwe declined; re-scan the model portfolio to fix it.",
         "properties": {
@@ -1507,6 +1525,11 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "name_is_custom": {
+            "default": false,
+            "title": "Name Is Custom",
+            "type": "boolean"
           },
           "periode": {
             "anyOf": [
@@ -10922,6 +10945,57 @@
           }
         },
         "summary": "Airs Accounts",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/display-name": {
+      "put": {
+        "description": "Name one AIRS account, or clear the name.\n\n\u26a0 THE NAME BELONGS TO THE ACCOUNT, NOT TO THE MODEL IT RUNS. `display_name` on\n`airs_model_portfolio` names a strategy, and an account borrowed it through its pairing \u2014 so a\nbook paired with no model could not be named at all, which is exactly backwards: those are the\nbooks still wearing AIRS's own code (`BUS_Ris_bepOff_Kl_AFS_Dy`) and most in need of one. Two\naccounts running one model may also deserve different names, and renaming a model must not\nsilently rename every book paired with it.\n\n\u26a0 CLEARING IS A DELETE, NOT AN EMPTY STRING. A stored \"\" would be a name that renders as\nnothing, indistinguishable on screen from an un-named row and invisible to the fallback chain.",
+        "operationId": "airs_account_set_display_name_api_airs_accounts__portefeuille__display_name_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AirsAccountName"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Account Set Display Name",
         "tags": [
           "airs"
         ]

@@ -210,6 +210,43 @@ export default function PortfolioOverviewPanel() {
   const [opening, setOpening] = useState<string | null>(null);
 
   /**
+   * Name one book, or clear the name.
+   *
+   * ⚠ THE NAME IS THE ACCOUNT'S, NOT THE MODEL'S. `display_name` on a model names a STRATEGY, and
+   * an account only borrowed it through its pairing — so a book paired with no model could not be
+   * named at all, which is backwards: those are precisely the rows still wearing AIRS's own code.
+   *
+   * ⚠ EMPTY CLEARS, AND CANCEL DOES NOT. `dialog.prompt` returns null on cancel and "" when the
+   * field is emptied deliberately; collapsing the two would make "clear this name" unreachable and
+   * every accidental Escape a silent rename.
+   */
+  const renameAccount = async (r: AirsPortfolioOverview) => {
+    const p = r.dynamic_portefeuille;
+    const next = await dialog.prompt(
+      `A readable name for ${p}.\n\nLeave it empty to clear it and fall back to `
+      + `${r.fixed_name ? 'the paired model portfolio’s name' : 'AIRS’s own code'}.`,
+      { title: 'Name this portfolio', defaultValue: r.name_is_custom ? r.name : '', placeholder: p },
+    );
+    if (next == null) return;                       // cancelled — not the same as cleared
+    try {
+      const res = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/display-name`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display_name: next.trim() || null }),
+      });
+      if (!res.ok) {
+        const b = (await res.json().catch(() => null)) as { detail?: string } | null;
+        console.warn(`[AIRS name] ${p} failed`, { status: res.status, body: b });
+        setRefreshMsg({ text: b?.detail ?? `${p}: could not save the name (HTTP ${res.status})`, kind: 'error' });
+        return;
+      }
+      await loadOverview();
+    } catch (e) {
+      console.warn(`[AIRS name] ${p} threw`, e);
+      setRefreshMsg({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
+    }
+  };
+
+  /**
    * What Analyse / Fundamental should open for a row — the model portfolio if it has one, else the
    * book's OWN holdings.
    *
@@ -756,10 +793,28 @@ export default function PortfolioOverviewPanel() {
                             The codes are what you search AirSPMS for, which is a deliberate act
                             and can afford a hover — but it has to hang off something hoverable,
                             so it hangs off the name rather than an empty span nobody can reach. */}
-                        <span className="cursor-help"
-                          title={`AIRS: ${r.dynamic_portefeuille}${r.fixed_name ? ` · ${r.fixed_name}` : ''}`}>
-                          {r.name}
-                        </span>
+                        {/* ⚠ CLICK TO NAME IT — and admin-only, because a nickname is shared. The
+                            books still wearing AIRS's own code (`BUS_Ris_bepOff_Kl_AFS_Dy`) are
+                            exactly the ones paired with no model, i.e. the ones nothing else can
+                            name; before this the only way to give a book a readable name was to
+                            rename a model it might not even have. stopPropagation so naming a row
+                            does not also expand it. */}
+                        {isAdmin ? (
+                          <button type="button"
+                            onClick={(e) => { e.stopPropagation(); void renameAccount(r); }}
+                            title={`AIRS: ${r.dynamic_portefeuille}${r.fixed_name ? ` · ${r.fixed_name}` : ''}\n\nClick to ${r.name_is_custom ? 'change or clear this name' : 'give this book a name'}.`}
+                            className="text-left hover:text-accent-300 hover:underline decoration-dotted underline-offset-2">
+                            {r.name}
+                            {r.name_is_custom && (
+                              <span className="text-accent-400 text-[9px] leading-none ml-1 align-middle">✎</span>
+                            )}
+                          </button>
+                        ) : (
+                          <span className="cursor-help"
+                            title={`AIRS: ${r.dynamic_portefeuille}${r.fixed_name ? ` · ${r.fixed_name}` : ''}`}>
+                            {r.name}
+                          </span>
+                        )}
                         {/* ⚠ MARKED, NOT WITHHELD. These rows used to be hidden from the list
                             entirely, so a scan that reached all 44 portfolios displayed 22 and the
                             operator could not see which report was short, or for whom. The row's
