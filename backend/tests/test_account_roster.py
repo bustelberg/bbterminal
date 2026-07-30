@@ -106,3 +106,40 @@ class TestTheTwoFiltersAreIndependent:
                hidden=["LIVE_B"])
         assert _airs_accounts._live_accounts() == {"live_a", "live_b"}
         assert _airs_accounts._hidden_accounts() == {"live_b"}
+
+
+class TestRecordingReportsMustNotRedefineTheLiveSet:
+    """⚠ ROWS VANISHED FROM THE PORTFOLIOS PAGE MID-SCAN, AND THIS IS WHY.
+
+    `_live_accounts` means "the accounts AIRS listed on the most recent discovery", computed as
+    `last_seen_at == max(last_seen_at)`. `_record_reports` runs PER ACCOUNT as the scan progresses,
+    and it used to stamp `last_seen_at` too — which silently re-defined the live set to mean "the
+    accounts scanned so far". Measured 2026-07-30: the table filled with all 44 and then collapsed
+    to the single book that had just been scanned.
+
+    It outlived the run, too. The scan is INCREMENTAL: a pass that scanned 14 and skipped 30 left
+    only those 14 carrying the newest stamp, so 30 healthy books were filtered off their own page
+    until the next discovery re-stamped them.
+
+    "AIRS listed this account" and "we scanned this account" are facts about different sets, and
+    the incremental scan is exactly what makes them differ.
+    """
+
+    def test_it_writes_reports_at_and_not_last_seen_at(self):
+        import inspect
+
+        import airs_vermogen
+
+        src = inspect.getsource(airs_vermogen._record_reports)
+        rows = src.split("rows = [")[1].split("]")[0]
+        assert "reports_at" in rows
+        assert "reports_ok" in rows
+        assert "last_seen_at" not in rows, "discovery owns last_seen_at — see the docstring"
+
+    def test_discovery_still_owns_last_seen_at(self):
+        """The other half of the invariant: something must still stamp it, or nothing is ever live."""
+        import inspect
+
+        import airs_vermogen
+
+        assert "last_seen_at" in inspect.getsource(airs_vermogen._record_roster)

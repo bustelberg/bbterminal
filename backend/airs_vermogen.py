@@ -131,8 +131,20 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
 
     Best-effort — bookkeeping must never fail the scrape that produced it.
     """
-    rows = [{"portefeuille": n, "last_seen_at": stamp, "reports_ok": sorted(ok),
-             "reports_at": stamp}
+    # ⚠ IT MUST NOT TOUCH `last_seen_at` — THAT FIELD BELONGS TO DISCOVERY, AND WRITING IT HERE
+    # MADE ROWS DISAPPEAR. `_live_accounts` is "the accounts AIRS listed on the most recent
+    # discovery", computed as `last_seen_at == max(last_seen_at)`. This function runs per account
+    # AS THE SCAN PROGRESSES, so stamping it here re-defined "the live set" to mean "the accounts
+    # scanned so far": mid-run the portfolios table filled with all 44 and then collapsed to the
+    # one book that had just been scanned (measured 2026-07-30 — `BUS_WTS_StMerken_Dyn`, alone).
+    #
+    # And it survived the run: the scan is INCREMENTAL, so a pass that scanned 14 and skipped 30
+    # left only those 14 carrying the newest stamp — the 30 healthy books were filtered out of
+    # their own page until the next discovery re-stamped them.
+    #
+    # "AIRS listed this account" and "we scanned this account" are different facts about different
+    # sets. `reports_at` is this function's timestamp; `last_seen_at` is `_record_roster`'s.
+    rows = [{"portefeuille": n, "reports_ok": sorted(ok), "reports_at": stamp}
             for n, ok in sorted(outcomes.items())]
     try:
         for i in range(0, len(rows), 200):
@@ -148,6 +160,25 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
 # costs ~44× that. Env-tunable; the daily job's interval is far longer, so it still scans the fleet
 # once a day exactly as before — this only collapses the repeat presses in between.
 AIRS_FRESH_HOURS = float(os.environ.get("AIRS_FRESH_HOURS", "12"))
+
+
+def _emit(kind: str, **fields) -> None:
+    """Append one step to the run's live log — what the scan is doing, as it does it.
+
+    ⚠ A MINUTES-LONG SCRAPE WITH NO NARRATION IS INDISTINGUISHABLE FROM A HUNG ONE. The fleet pass
+    is 44 accounts x 4 downloads behind a headless browser; before this the only thing anyone could
+    see was `i/n: name…` and, at the very end, a summary. Which portfolios AIRS listed, which were
+    skipped and why, and which of the four reports arrived for whom were all invisible while it
+    mattered — and every one of them turned out to be where the bugs were.
+
+    The list is polled with the status, so the UI can print each new entry exactly once. It is a
+    log, so it is APPEND-ONLY and never rewritten: a step that already happened cannot become
+    untrue later, and the operator's console must not silently disagree with what they read a
+    minute ago.
+    """
+    entry = {"seq": len(_STATUS.get("log") or []), "kind": kind,
+             "at": datetime.now(timezone.utc).isoformat(), **fields}
+    _STATUS.setdefault("log", []).append(entry)
 
 
 def _parse_stamp(raw: str | None) -> datetime | None:
@@ -359,7 +390,7 @@ def format_run_message(counts: dict[str, int]) -> str:
     return line + (f", {counts['failed']} failed" if counts.get("failed") else "")
 
 
-def scan_one(name: str, van: str, tot: str) -> dict:
+def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     """Fetch + store ONE account's four AIRS reports. THE only place that work is written.
 
     ⚠ IT DOES NOT TAKE `_LOCK`. Both callers hold it already — `refresh_one_portfolio` for a single
@@ -389,13 +420,47 @@ def scan_one(name: str, van: str, tot: str) -> dict:
     holdings = mutaties = model_weights = 0
     as_of = tot
 
+    from airs_scanner import AirsNoData  # noqa: PLC0415
+
+    def _step_detail(code: str) -> str:
+        """What the successful download actually yielded — the number that makes "ok" verifiable."""
+        return {"att": "stored", "volk": f"{holdings} holdings as of {as_of}",
+                "mut": f"{mutaties} mutations", "model": f"{model_weights} model weights",
+                }.get(code, "")
+
+    def _say(report: str, status: str, detail: str = "") -> None:
+        """Report ONE download's outcome the moment it is known.
+
+        ⚠ AS IT HAPPENS, NOT AT THE END. A fleet pass is 44 accounts x 4 downloads and runs for
+        minutes; reporting only on completion means the operator watches a spinner and cannot tell
+        a slow scan from a hung one, or see which account it is stuck on. Three outcomes, kept
+        apart on purpose: `ok` stored something, `no_data` is AIRS answering that this book has no
+        such report (see `AirsNoData`), `failed` is a fault.
+        """
+        if on_report:
+            try:
+                on_report(name, report, status, detail)
+            except Exception:  # noqa: BLE001 — telemetry must never break the scan
+                pass
+
     def _step(code: str, label: str, fn) -> None:
         try:
             fn()
             ok.append(code)
+            _say(label, "ok", _step_detail(code))
+        except AirsNoData as e:
+            # ⚠ RETRIEVED, AND EMPTY. AIRS answered; this book simply has no such report — 14 of
+            # 44 have no fixed MODEL because they are benchmarks, `meervoudig` books or test
+            # shells. Counting it as `ok` is what makes the account COMPLETE, which is what stops
+            # it wearing a permanent ⚠ and being re-scanned on every run for ever. See `AirsNoData`
+            # for why this is safe to distinguish from a dead session.
+            ok.append(code)
+            _say(label, "no_data", "AIRS has no such report for this book")
+            _log.info("[airs_vermogen] %s %s: no data — %s", name, label, e)
         except Exception as e:  # noqa: BLE001 — one report failing must not lose the others
             errors.append({"account": name, "report": label,
                            "error_type": type(e).__name__, "message": str(e)})
+            _say(label, "failed", f"{type(e).__name__}: {e}")
             _log.warning("[airs_vermogen] %s %s failed: %s: %s", name, label, type(e).__name__, e)
 
     def _att() -> None:
@@ -570,6 +635,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             "holdings_rows": 0,
             "errors": [],
             "error_summary": [],
+            "log": [],
         })
 
         try:
@@ -584,6 +650,11 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             return dict(_STATUS)
 
         _STATUS["portfolios_found"] = len(names)
+        # ⚠ THE ROSTER ITSELF, NAMED. "44 found" is a number you cannot check; the 44 names are the
+        # thing to compare against AIRS's own "44 Items in selectie", and the only way to see that
+        # discovery picked the Interne/actief/no-consolidation population and not some other one.
+        _emit("discovered", count=len(names), names=names,
+              message=f"AIRS lists {len(names)} portfolios")
         # ⚠ THE SKIP IS DECIDED ONCE, BEFORE THE LOOP, AGAINST THE VERDICTS AS THEY WERE AT THE
         # START. Re-reading per account would let this run's own writes shorten its own worklist.
         # ⚠ READ ONCE, HERE. `known` is which accounts we already had a roster row for BEFORE this
@@ -595,6 +666,10 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         todo, current = accounts_to_scan(
             names, verdicts, datetime.now(timezone.utc), force=force)
         _STATUS["skipped"] = len(current)
+        _emit("plan", to_scan=len(todo), skipped=len(current), todo=todo, current=current,
+              forced=force,
+              message=(f"{len(todo)} to scan, {len(current)} already current"
+                       + (" (forced re-scan)" if force else "")))
         _log.info("[airs_vermogen] %d discovered — %d to scan, %d already current%s",
                   len(names), len(todo), len(current), " (forced)" if force else "")
         rendement_ok = vermogen_ok = holdings_total = mutaties_total = model_total = 0
@@ -606,11 +681,31 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         fleet_errors: list[dict] = []
         # ONE stamp for the whole run — see the note at the `_record_reports` call below.
         run_stamp = datetime.now(timezone.utc).isoformat()
-        for i, name in enumerate(todo, 1):
-            _STATUS["message"] = f"{i}/{len(todo)}: {name}…"
+        # ⚠ THE COUNTER RUNS OVER THE ROSTER, NOT THE WORKLIST. It used to read `i/len(todo)`, so a
+        # pass that skipped 30 fresh accounts and scanned 14 counted "1/14…14/14" — and every one
+        # of those 14 was a book with a failing report, which is precisely the population that can
+        # never be skipped. The operator saw "3/14" against a list of 44 and had no way to tell
+        # whether discovery had broken or the worklist was short on purpose. Walking all 44 and
+        # SAYING which are skipped makes the two legible, and the number matches AIRS's own count.
+        skipped_set = set(current)
+        for i, name in enumerate(names, 1):
+            if name in skipped_set:
+                _emit("account_skipped", i=i, n=len(names), account=name,
+                      message=f"[{i}/{len(names)}] {name}: skipped — all reports current")
+                continue
+            _STATUS["message"] = f"{i}/{len(names)}: {name}…"
+            _emit("account_start", i=i, n=len(names), account=name,
+                  message=f"[{i}/{len(names)}] {name}")
             # ⚠ THE SAME `scan_one` THE PER-ROW REFRESH CALLS. Refresh-all IS refresh-one, N times
             # — see `scan_one` for why that had to stop being two implementations.
-            res = scan_one(name, van, tot)
+            res = scan_one(
+                name, van, tot,
+                # Each of the four downloads narrates itself the moment it lands, so a slow account
+                # shows WHICH report it is waiting on rather than just a name and a spinner.
+                on_report=lambda acct, report, status, detail: _emit(
+                    "report", account=acct, report=report, status=status, detail=detail,
+                    message=f"    {report}: {status}{f' — {detail}' if detail else ''}"),
+            )
             outcomes[name] = res["reports_ok"]
             rendement_ok += 1 if "att" in res["reports_ok"] else 0
             vermogen_ok += 1 if "volk" in res["reports_ok"] else 0
@@ -633,7 +728,14 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             # A fresh timestamp per account would make every account except the LAST look stale,
             # so 43 of 44 rows would silently drop out of the newest batch.
             _record_reports({name: res["reports_ok"]}, run_stamp)
-            _STATUS["message"] = f"{i}/{len(todo)} done: {name}"
+            _emit("account_done", i=i, n=len(names), account=name,
+                  got=sorted(res["reports_ok"]), failed=[e["report"] for e in res["errors"]],
+                  complete=len(res["reports_ok"]) == len(REPORTS),
+                  message=(f"  [{i}/{len(names)}] {name}: "
+                           f"{len(res['reports_ok'])}/{len(REPORTS)} reports"
+                           + (f", FAILED {[e['report'] for e in res['errors']]}"
+                              if res["errors"] else "")))
+            _STATUS["message"] = f"{i}/{len(names)} done: {name}"
 
         # ⚠ THIS JOB DOES NOT TOUCH CRM. It used to also download CRM → Relaties → Alle
         # relaties inline, which is a different report about different objects (relations, not

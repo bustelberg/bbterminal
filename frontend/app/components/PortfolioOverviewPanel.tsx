@@ -72,6 +72,62 @@ type FailureGroup = {
 const logDetail = (what: string, ...detail: unknown[]) =>
   console.warn(`[AIRS portfolios] ${what}`, ...detail);
 
+/** One step of a running scan, as `airs_vermogen._emit` stamps it. `seq` is append-only. */
+type ScanStep = {
+  seq: number; kind: string; message?: string;
+  names?: string[]; todo?: string[]; current?: string[];
+  account?: string; report?: string; status?: string; detail?: string;
+  got?: string[]; failed?: string[]; complete?: boolean; count?: number;
+};
+
+/** ✓ / — / ✗ per report outcome. `no_data` is AIRS ANSWERING (this book has no such report), so it
+ *  must not wear the failure mark: 14 of 44 books have no fixed model and never will. */
+const STEP_MARK: Record<string, string> = { ok: '✓', no_data: '—', failed: '✗' };
+
+/**
+ * Print every scan step the console has not seen yet; returns the new high-water mark.
+ *
+ * ⚠ THE ROSTER IS PRINTED IN FULL, NOT COUNTED. "44 found" is a number nobody can check; the 44
+ * NAMES are what you compare against AIRS's own "44 Items in selectie" to confirm the scan is
+ * looking at the Interne/actief population and not some other one.
+ */
+function logSteps(log: ScanStep[], from: number): number {
+  let high = from;
+  for (const s of log) {
+    if (s.seq < from) continue;
+    high = Math.max(high, s.seq + 1);
+    if (s.kind === 'discovered') {
+      console.warn(`[AIRS scan] ${s.message}`);
+      // A table, so the names are readable and sortable rather than a wrapped comma list.
+      console.table((s.names ?? []).map((n, i) => ({ '#': i + 1, portfolio: n })));
+    } else if (s.kind === 'plan') {
+      console.warn(`[AIRS scan] ${s.message}`);
+      if (s.current?.length) console.warn('[AIRS scan]   already current (skipped):', s.current);
+      if (s.todo?.length) console.warn('[AIRS scan]   to scan:', s.todo);
+    } else if (s.kind === 'report') {
+      console.warn(`[AIRS scan]     ${STEP_MARK[s.status ?? ''] ?? '?'} ${s.report}`
+        + (s.detail ? ` — ${s.detail}` : ''));
+    } else {
+      console.warn(`[AIRS scan] ${s.message ?? s.kind}`);
+    }
+  }
+  return high;
+}
+
+/**
+ * Can this row be ANALYSED — i.e. does it have a paired model portfolio?
+ *
+ * ⚠ THIS IS THE PREDICATE THE ANALYSE AND FUNDAMENTAL BUTTONS THEMSELVES RENDER ON, and it is
+ * defined once so the list and the buttons cannot come to disagree. Both modals describe the MODEL
+ * portfolio's composition (`fixed_portfolio_id`), so a book paired with no model has nothing for
+ * them to open — and a row you cannot analyse is a row that does nothing but take up space.
+ *
+ * Measured 2026-07-30: of 40 live accounts, `BUS_Ris_bepOff_Kl_AFS_Dy` and `BUS_WTS_StMerken_Dyn`
+ * were the only two showing figures with no buttons, and both are confirmed bogus books. Filtering
+ * on "has holdings" showed them; filtering on "can be analysed" does not, and says why.
+ */
+const canAnalyse = (r: AirsPortfolioOverview) => r.fixed_portfolio_id != null;
+
 const REPORT_LABELS: Record<string, string> = {
   att: 'Rendement',
   volk: 'Vermogensoverzicht',
@@ -113,7 +169,7 @@ export default function PortfolioOverviewPanel() {
   const [open, setOpen] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, AirsAccountDetail>>({});
   const [isins, setIsins] = useState<Record<string, AirsAccountIsins>>({});
-  const [onlyLinked, setOnlyLinked] = useState(true);
+  const [hideSmall, setHideSmall] = useState(true);
   // The Fixed portfolio to analyse. Its id, not the row's — the modal describes the strategy.
   const [analyse, setAnalyse] = useState<{ id: number; name: string } | null>(null);
   // The whole portfolio's Fundamental (blended owner earnings + price steadiness), by its id.
@@ -284,12 +340,20 @@ export default function PortfolioOverviewPanel() {
         setRefreshMsg({ text: `Refresh failed — HTTP ${started.status}. Is the backend running with AIRS credentials?`, kind: 'error' });
         return;
       }
+      console.warn(`[AIRS scan] started${force ? ' (forced full re-scan)' : ''} — step-by-step progress follows`);
+      let printed = 0;             // high-water mark over the log's append-only `seq`
       for (;;) {
         await new Promise((res) => setTimeout(res, 2500));
         const s = await apiFetch(`${API_URL}/api/airs/vermogen/status`);
         const st = (await s.json().catch(() => null)) as
           { running?: boolean; status?: string; message?: string; detail?: string;
-            errors?: string[]; error_summary?: FailureGroup[] } | null;
+            errors?: string[]; error_summary?: FailureGroup[]; log?: ScanStep[] } | null;
+        // ⚠ EACH STEP PRINTED ONCE, IN ORDER, WHILE IT IS STILL RELEVANT. The status is POLLED, so
+        // the log arrives whole every 2.5s and the same entries would be reprinted on every tick;
+        // `seq` is the append-only index the backend stamps, so anything above the high-water mark
+        // is new. Printed as it arrives rather than collected for the end — a minutes-long scrape
+        // with no narration cannot be told apart from a hung one.
+        printed = logSteps(st?.log ?? [], printed);
         if (!st?.running) {
           // ⚠ THE REASON, NOT THE COUNT — but in the CONSOLE. "27 report(s) failed" gives no
           // handle on what; 27 individual lines are no better, because nobody reads 27 of them
@@ -348,24 +412,29 @@ export default function PortfolioOverviewPanel() {
     setIsins((m) => ({ ...m, [p]: resolved }));
   }, []);
 
-  const linked = (rows ?? []).filter((r) => !!r.fixed_name).length;
   /**
-   * ⚠ A FILTER THAT HIDES EVERY ROW IS NOT A FILTER, IT IS AN EMPTY PAGE — AND IT SHIPPED.
+   * ⚠ THE FILTER KEEPS WHAT THE PAGE CAN ACTUALLY DO SOMETHING WITH — `canAnalyse`, the same
+   * predicate the Analyse and Fundamental buttons render on.
    *
-   * `fixed_name` comes from a model portfolio, and model portfolios are populated by a DIFFERENT
-   * scan from the one that fills this table. On a fresh deployment the accounts scan runs, stores
-   * 44 books with their returns and holdings, and every one of them has `fixed_name: null` because
-   * no models have been scanned yet — so "Linked only", on by default, hid all 44. Measured in
-   * production 2026-07-30: the scan reported "44 updated" and the page rendered nothing, which
-   * reads as the scan having silently failed. The only clue was "(0 of 44)" on the checkbox.
+   * It went through a wrong turn worth recording. It was "Linked only", which hid two books that
+   * showed real figures (`BUS_Ris_bepOff_Kl_AFS_Dy`, 24 holdings; `BUS_WTS_StMerken_Dyn`, 22), so
+   * it was changed to keep anything with real holdings. That surfaced them — and surfaced that
+   * they are the ONLY two rows with no Analyse/Fundamental buttons, because they pair with no
+   * model portfolio. Both turned out to be bogus books. Holdings measure whether a row has DATA;
+   * the buttons measure whether a row is USABLE, and this table exists to open them.
    *
-   * A default that can empty a full table is not a default. The preference is kept — the moment
-   * ANY row is linked it applies again — but it can no longer be the reason the page is blank.
+   * Defining it as the buttons' own condition is the point: a row can no longer appear in the list
+   * and then refuse to do the thing the list is for.
+   *
+   * ⚠ AND IT CAN NEVER EMPTY A FULL TABLE. On a fresh deployment the accounts scan runs before any
+   * model scan, so nothing is paired; that filter hid all 44 and the page read as a failed scan.
+   * Whatever the rule, if it would leave nothing it does not apply.
    */
-  const effectiveOnlyLinked = onlyLinked && linked > 0;
+  const substantial = (rows ?? []).filter(canAnalyse).length;
+  const effectiveHideSmall = hideSmall && substantial > 0;
 
   const view = (() => {
-    const base = (rows ?? []).filter((r) => (effectiveOnlyLinked ? !!r.fixed_name : true));
+    const base = (rows ?? []).filter((r) => (effectiveHideSmall ? canAnalyse(r) : true));
     const dir = sortDir === 'asc' ? 1 : -1;
     const val = (r: AirsPortfolioOverview): string | number | null => (
       sortKey === 'name' ? (r.name ?? '')
@@ -414,18 +483,15 @@ export default function PortfolioOverviewPanel() {
           )}
           {rows && (
             <label className={`flex items-center gap-1.5 text-xs cursor-pointer whitespace-nowrap ${
-              linked === 0 ? 'text-fg-faint' : 'text-fg-subtle'}`}
-              title={linked === 0
+              substantial === 0 ? 'text-fg-faint' : 'text-fg-subtle'}`}
+              title={substantial === 0
                 ? 'No account is paired with a model portfolio yet, so this filter would hide every row — it is inactive until a model-portfolio scan has run.'
-                : undefined}>
-              <input type="checkbox" checked={onlyLinked} disabled={linked === 0}
-                onChange={(e) => setOnlyLinked(e.target.checked)} />
-              {/* An unlinked book is a real book — the benchmarks and tests. Hidden by default
-                  because it has no nickname and no ISINs, not because it is not a portfolio.
-                  ⚠ Disabled at zero: see `effectiveOnlyLinked`. A checkbox that silently does
+                : 'Keeps only the books that can actually be opened: Analyse and Fundamental both describe the paired model portfolio, so a book with no model has neither button and nothing this page can do with it. Hides the AIRS benchmarks and the test shells for the same reason.'}>
+              <input type="checkbox" checked={hideSmall} disabled={substantial === 0}
+                onChange={(e) => setHideSmall(e.target.checked)} />
+              {/* ⚠ Disabled at zero — see `effectiveHideSmall`. A checkbox that silently does
                   nothing is worse than one that says it cannot. */}
-              Linked only ({linked} of {rows.length})
-              {linked === 0 && <span className="text-warn-400">· no models scanned</span>}
+              Analysable only ({substantial} of {rows.length})
             </label>
           )}
         </div>
@@ -504,7 +570,7 @@ export default function PortfolioOverviewPanel() {
                           row cannot offer it. stopPropagation so it does not also toggle the row. */}
                       <td className="px-3 py-1.5 whitespace-nowrap">
                         <div className="flex items-stretch gap-1">
-                          {r.fixed_portfolio_id != null && (
+                          {canAnalyse(r) && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -515,7 +581,7 @@ export default function PortfolioOverviewPanel() {
                               Analyse
                             </button>
                           )}
-                          {r.fixed_portfolio_id != null && (
+                          {canAnalyse(r) && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();

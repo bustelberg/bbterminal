@@ -218,10 +218,75 @@ def _model_weights(portefeuille: str) -> dict[str, dict]:
     return {r["fonds"]: r for r in rows}
 
 
+def parse_holding_counts_csv(raw: str) -> tuple[dict[str, int], dict[str, str]]:
+    """`portefeuille,as_of_date,count` CSV -> (counts, newest dates). Pure, so the parsing is
+    testable without a database.
+
+    ⚠ PARSED AS CSV, NEVER `line.split(",")`. AIRS portfolio names are free text with spaces
+    ("WTS test 1 FX", "VTopSelectie OFF DY") and nothing stops one containing a comma — at which
+    point a naive split shifts every field on that row and the account silently gets the wrong
+    count. Postgres quotes such a field; `csv.reader` unquotes it.
+    """
+    import csv  # noqa: PLC0415
+    import io as _io  # noqa: PLC0415
+
+    counts: dict[str, int] = {}
+    newest: dict[str, str] = {}
+    for row in csv.reader(_io.StringIO(raw)):
+        if len(row) != 3:
+            continue
+        name, day, n = row
+        newest[name] = day
+        counts[name] = int(n)
+    return counts, newest
+
+
 def _holding_counts() -> tuple[dict[str, int], dict[str, str]]:
-    """(holdings per account, that account's snapshot date) — off the freshest snapshot only."""
-    rows = (supabase.table("airs_holding").select("portefeuille,as_of_date,holding_name")
-            .limit(20000).execute().data or [])
+    """(holdings per account, that account's snapshot date) — off the freshest snapshot only.
+
+    ⚠ AGGREGATED IN POSTGRES, BECAUSE READING THE TABLE DOES NOT SCALE AND FAILS SILENTLY. This
+    used to `select(...).limit(20000)` over ALL of `airs_holding` and reduce it in Python.
+    `airs_holding` keeps one snapshot per account PER DATE and grows on every scan — measured
+    2026-07-30 it was already at 9,817 rows across 18 snapshot dates for 39 accounts. The moment it
+    crosses 20,000, PostgREST returns the first page and says nothing: accounts whose newest rows
+    fall outside it get a count of 0 or a stale date, which reads on the page as a book that holds
+    nothing rather than as a truncated read. It is the same silent-cap failure the price loaders
+    already carry warnings about, on a table nobody was watching grow.
+
+    One row per account comes back instead of one per holding — ~44 rows rather than ~10,000 — and
+    the answer no longer depends on how much history has accumulated.
+    """
+    from common.pg import _run_copy  # noqa: PLC0415
+
+    buf = _run_copy(
+        "COPY (SELECT DISTINCT ON (portefeuille) portefeuille, as_of_date::text, cnt "
+        "FROM (SELECT portefeuille, as_of_date, count(*) AS cnt "
+        "        FROM airs_holding GROUP BY portefeuille, as_of_date) g "
+        "ORDER BY portefeuille, as_of_date DESC) TO STDOUT WITH CSV",
+        (),
+    )
+    if buf is not None:
+        return parse_holding_counts_csv(buf.getvalue().decode())
+    return _holding_counts_paged()
+
+
+def _holding_counts_paged() -> tuple[dict[str, int], dict[str, str]]:
+    """The COPY-less fallback: the same reduction, but PAGED rather than capped.
+
+    ⚠ `.range()` IN A LOOP, NOT A BIGGER `.limit()`. Raising the cap only moves the cliff; paging
+    until a short page arrives has no cliff at all. Slower and correct beats fast and quietly wrong
+    — this runs wherever `SUPABASE_DB_URL` is unset.
+    """
+    rows: list[dict] = []
+    off = 0
+    while True:
+        page = (supabase.table("airs_holding").select("portefeuille,as_of_date")
+                .range(off, off + 999).execute().data or [])
+        rows += page
+        if len(page) < 1000:
+            break
+        off += 1000
+
     newest: dict[str, str] = {}
     for r in rows:
         d = str(r["as_of_date"])
