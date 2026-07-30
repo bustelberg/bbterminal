@@ -637,6 +637,14 @@
             "title": "Segments",
             "type": "array"
           },
+          "timings_ms": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "Timings Ms",
+            "type": "object"
+          },
           "unmatched_model_positions": {
             "default": [],
             "items": {

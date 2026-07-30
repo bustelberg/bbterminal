@@ -1908,6 +1908,10 @@ class AirsAccountIsins(BaseModel):
     model_source: str | None = None
     as_of: str | None = None
     reason: str | None = None
+    # Per-phase milliseconds for THIS request — see `_airs_holding_isin._phase`. Expanding a row
+    # is a dozen distinct steps and the slow one is not the obvious one, so the breakdown travels
+    # with the payload and lands in the operator's console rather than only in a server log.
+    timings_ms: dict[str, int] = {}
     rows: list[AirsHoldingIsin] = []
     segments: list[AirsHoldingSegment] = []
     unmatched_model_positions: list[AirsModelPositionLeftover] = []

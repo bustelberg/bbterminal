@@ -6,6 +6,7 @@ import { API_URL } from '../../lib/apiUrl';
 import { dialog } from '../../lib/dialog';
 import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { Provenance } from '../../lib/provenance';
+import { runSSE } from '../../lib/stream';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
@@ -115,18 +116,24 @@ function logSteps(log: ScanStep[], from: number): number {
 }
 
 /**
- * Can this row be ANALYSED — i.e. does it have a paired model portfolio?
+ * Can this row be ANALYSED — i.e. is there a composition for the modals to open?
  *
- * ⚠ THIS IS THE PREDICATE THE ANALYSE AND FUNDAMENTAL BUTTONS THEMSELVES RENDER ON, and it is
- * defined once so the list and the buttons cannot come to disagree. Both modals describe the MODEL
- * portfolio's composition (`fixed_portfolio_id`), so a book paired with no model has nothing for
- * them to open — and a row you cannot analyse is a row that does nothing but take up space.
+ * ⚠ THIS IS THE PREDICATE THE ANALYSE AND FUNDAMENTAL BUTTONS RENDER ON, defined once so the list
+ * and the buttons cannot disagree.
  *
- * Measured 2026-07-30: of 40 live accounts, `BUS_Ris_bepOff_Kl_AFS_Dy` and `BUS_WTS_StMerken_Dyn`
- * were the only two showing figures with no buttons, and both are confirmed bogus books. Filtering
- * on "has holdings" showed them; filtering on "can be analysed" does not, and says why.
+ * ⚠ AND IT ASKS FOR HOLDINGS, NOT FOR A MODEL PORTFOLIO. It used to require `fixed_portfolio_id`,
+ * which made both buttons depend on the Stamgegevens model scan — a SECOND workflow the account
+ * scan never touches. Measured in production 2026-07-30: 46 books, every report fetched, and not
+ * one button anywhere, because that scan had never run. Neither modal ever needed it; both take a
+ * plain basket of `{isin, weight}`, and the Vermogensoverzicht's `ISIN-code` column is exactly
+ * that. The pairing is preferred where it exists (attribution and the bucket drill-downs are
+ * id-only) but it is an upgrade, not a prerequisite — see `openModal`.
+ *
+ * So the remaining exclusions are the honest ones: a book with no holdings at all (the `_MV`
+ * shells, the test books) has no composition to analyse in any sense.
  */
-const canAnalyse = (r: AirsPortfolioOverview) => r.fixed_portfolio_id != null;
+const canAnalyse = (r: AirsPortfolioOverview) =>
+  r.fixed_portfolio_id != null || (r.holdings ?? 0) > 0;
 
 const REPORT_LABELS: Record<string, string> = {
   att: 'Rendement',
@@ -171,9 +178,9 @@ export default function PortfolioOverviewPanel() {
   const [isins, setIsins] = useState<Record<string, AirsAccountIsins>>({});
   const [hideSmall, setHideSmall] = useState(true);
   // The Fixed portfolio to analyse. Its id, not the row's — the modal describes the strategy.
-  const [analyse, setAnalyse] = useState<{ id: number; name: string } | null>(null);
+  const [analyse, setAnalyse] = useState<{ id?: number; name: string; basket?: Basket } | null>(null);
   // The whole portfolio's Fundamental (blended owner earnings + price steadiness), by its id.
-  const [pfFund, setPfFund] = useState<{ id: number; name: string } | null>(null);
+  const [pfFund, setPfFund] = useState<{ id?: number; name: string; basket?: Basket } | null>(null);
   // Refresh state: the fleet job is running; a status/error line; which single rows are re-scanning.
   const [refreshingAll, setRefreshingAll] = useState(false);
   /**
@@ -194,6 +201,99 @@ export default function PortfolioOverviewPanel() {
     { text: string; kind: 'info' | 'error' | 'warn' | 'ok' } | null>(null);
   const [refreshingRows, setRefreshingRows] = useState<Set<string>>(new Set());
   const [deletingRows, setDeletingRows] = useState<Set<string>>(new Set());
+  const [scanningModels, setScanningModels] = useState(false);
+  const [opening, setOpening] = useState<string | null>(null);
+
+  /**
+   * What Analyse / Fundamental should open for a row — the model portfolio if it has one, else the
+   * book's OWN holdings.
+   *
+   * ⚠ NEITHER MODAL EVER NEEDED A MODEL PORTFOLIO, AND WIRING THEM TO ONE COST DAYS. Both accept a
+   * plain basket of `{isin, weight}` — `PortfolioAnalysisModal`'s own comment says "a basket is
+   * treated as a portfolio-of-N: same view" — and every account already carries exactly that, from
+   * the Vermogensoverzicht's `ISIN-code` column. Gating the buttons on `fixed_portfolio_id` instead
+   * made them depend on a SECOND scan (Stamgegevens → model portfolios) that the account workflow
+   * never touches: in production 46 books were listed, fully scanned, and not one could be opened.
+   *
+   * The pairing is still PREFERRED where it exists, because the id-based view can do more — Brinson
+   * attribution and the per-bucket drill-downs are portfolio-only. But it is an upgrade, not a
+   * prerequisite: Front-Office → the four reports per book is the whole workflow, and it is enough.
+   *
+   * The ISINs come from `/isins`, which an expanded row has already loaded; otherwise one fetch.
+   */
+  const openModal = async (r: AirsPortfolioOverview, which: 'analyse' | 'fundamental') => {
+    const set = which === 'analyse' ? setAnalyse : setPfFund;
+    if (r.fixed_portfolio_id != null) {
+      set({ id: r.fixed_portfolio_id, name: r.name });
+      return;
+    }
+    const p = r.dynamic_portefeuille;
+    setOpening(p);
+    try {
+      let resolved = isins[p];
+      if (!resolved) {
+        const i = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/isins`);
+        if (!i.ok) throw new Error(`HTTP ${i.status}`);
+        resolved = (await i.json()) as AirsAccountIsins;
+        setIsins((m) => ({ ...m, [p]: resolved }));
+      }
+      // ⚠ ISIN-BEARING ROWS ONLY, AND WEIGHTS AS AIRS STATES THEM. A cash line has no ISIN and no
+      // instrument to analyse; including it as a zero would put a phantom holding in every bucket.
+      const holdings = (resolved.rows ?? [])
+        .filter((h) => h.isin && (h.weight ?? 0) > 0)
+        .map((h) => ({ isin: h.isin!, weight: h.weight!, name: h.holding_name }));
+      if (!holdings.length) {
+        setRefreshMsg({ text: `${r.name}: no ISIN-bearing holdings to analyse.`, kind: 'warn' });
+        return;
+      }
+      set({ name: r.name, basket: { holdings, label: r.name } });
+    } catch (e) {
+      console.warn(`[AIRS expand] could not build a basket for ${p}`, e);
+      setRefreshMsg({ text: `${r.name}: ${e instanceof Error ? e.message : String(e)}`, kind: 'error' });
+    } finally {
+      setOpening(null);
+    }
+  };
+
+  /**
+   * Run the MODEL-PORTFOLIO scan — the prerequisite this page has no other way to satisfy.
+   *
+   * ⚠ IT IS A SEPARATE SCAN FROM "Refresh all", AND THAT IS THE WHOLE TRAP. Refresh all scans the
+   * ACCOUNTS (returns, holdings, mutations); this one scans the MODEL portfolios that give an
+   * account its name, its ISINs and — the part you notice — its Analyse and Fundamental buttons.
+   * Until 2026-07-30 it had no button anywhere in the app, so a fresh deployment could never get
+   * past "0 analysable" from inside the UI.
+   *
+   * SSE because it is minutes long: the list lands in ~6s, then a holdings count per portfolio.
+   */
+  const scanModels = async () => {
+    if (scanningModels) return;
+    setScanningModels(true);
+    setRefreshMsg({ text: 'Scanning model portfolios…', kind: 'info' });
+    console.warn('[AIRS models] scan started — this is the scan that fills Analyse/Fundamental');
+    let seen = 0;
+    try {
+      await runSSE(`${API_URL}/api/airs/model-portfolios/scan`, { method: 'GET' }, (raw) => {
+        const e = raw as { type?: string; count?: number; message?: string; portefeuille?: string };
+        if (e.type === 'portfolios' || e.type === 'done') {
+          seen = e.count ?? seen;
+          console.warn(`[AIRS models] ${e.type}: ${seen} portfolios`);
+        } else if (e.message) {
+          console.warn(`[AIRS models] ${e.message}`);
+        }
+      });
+      setRefreshMsg({
+        text: `Model portfolios scanned${seen ? ` — ${seen} found` : ''}. Reloading the table.`,
+        kind: 'ok',
+      });
+      void loadOverview();
+    } catch (e) {
+      console.warn('[AIRS models] scan failed', e);
+      setRefreshMsg({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
+    } finally {
+      setScanningModels(false);
+    }
+  };
 
   /**
    * Delete one account's scraped rows — the way to prove Refresh all actually refills a gap.
@@ -245,17 +345,30 @@ export default function PortfolioOverviewPanel() {
   // re-fetching left the open row on "Loading holdings…" for ever, since nothing re-requests until
   // the next click — the row had to be collapsed and re-expanded by hand to recover.
   const loadDetail = useCallback(async (p: string) => {
+    // ⚠ TIMED, BECAUSE "IT TAKES A WHILE" IS NOT A BUG REPORT. Expanding a row fires three
+    // requests and the slow one is not the obvious one: measured 2026-07-30, `/isins` spent
+    // 11,537 ms of 11,793 ms inside a single step (refreshing stale prices from Yahoo) while
+    // every DB read was under 60 ms. The backend returns its own per-phase breakdown; this
+    // logs the wall time around it so network and server time are told apart.
+    const t0 = performance.now();
     // Fetched together: a holding briefly showing its value without its identity, or worse with
     // the wrong one, is not an improvement over showing neither.
     const [h, i] = await Promise.all([
       apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/holdings`),
       apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/isins`),
     ]);
+    console.warn(`[AIRS expand] ${p}: holdings+isins in ${Math.round(performance.now() - t0)}ms`);
     if (!h.ok) return;
     // Awaited BEFORE the updaters: a setState callback is not async, so `await` inside one
     // stores the Promise itself and the row renders `[object Promise]`-shaped nothing.
     const holdings = (await h.json()) as AirsAccountDetail;
     const resolved = i.ok ? ((await i.json()) as AirsAccountIsins) : null;
+    // The server's own breakdown, slowest step first — this is what names the phase to argue with.
+    const ms = (resolved as { timings_ms?: Record<string, number> } | null)?.timings_ms;
+    if (ms) {
+      console.warn(`[AIRS expand] ${p}: server phases (ms)`,
+        Object.fromEntries(Object.entries(ms).sort((a, b) => b[1] - a[1])));
+    }
     setDetail((d) => ({ ...d, [p]: holdings }));
     if (resolved) setIsins((m) => ({ ...m, [p]: resolved }));
   }, []);
@@ -481,6 +594,21 @@ export default function PortfolioOverviewPanel() {
               {refreshingAll ? 'Refreshing…' : 'Refresh all'}
             </button>
           )}
+          {/* ⚠ A DIFFERENT SUBJECT AND AN OPTIONAL ONE. "Refresh all" scans the ACCOUNTS (returns,
+              holdings, mutations, model weights) — everything the table and both modals need. This
+              scans the MODEL portfolios from Stamgegevens, which adds the readable nickname and
+              unlocks the id-only views (Brinson attribution, the per-bucket drill-downs). Separate
+              because it is minutes long and changes only when someone edits a model, and because a
+              failure here must never land in the account scan's error summary — the mistake CRM
+              taught this codebase. */}
+          {isAdmin && (
+            <button type="button" onClick={() => void scanModels()} disabled={scanningModels || refreshingAll}
+              title="Scan Stamgegevens → Model portefeuilles. Optional: it adds each book's readable name and enables attribution. Minutes."
+              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors disabled:opacity-50 disabled:cursor-wait">
+              <RefreshIcon spinning={scanningModels} size={12} />
+              {scanningModels ? 'Scanning models…' : 'Scan models'}
+            </button>
+          )}
           {rows && (
             <label className={`flex items-center gap-1.5 text-xs cursor-pointer whitespace-nowrap ${
               substantial === 0 ? 'text-fg-faint' : 'text-fg-subtle'}`}
@@ -502,6 +630,12 @@ export default function PortfolioOverviewPanel() {
           three: green = every account came back whole; RED = nothing was stored, the scan is
           broken; AMBER = a snapshot was written but some reports did not arrive, which is a thing
           to read rather than a thing to fix. */}
+      {/* ⚠ NO "MISSING PREREQUISITE" BANNER, BECAUSE THERE IS NO PREREQUISITE. One lived here
+          briefly, announcing that the model scan had to run before anything could be analysed —
+          which was the bug, not the diagnosis: both modals take a basket, and Front-Office → the
+          four reports per book already supplies one. The model scan is now what it always was, an
+          upgrade (nicknames, Brinson attribution, the bucket drill-downs), and it sits beside
+          Refresh all rather than blocking the page. */}
       {refreshMsg && (
         <div className={`text-[11px] rounded-lg px-3 py-1.5 border ${
           refreshMsg.kind === 'error' ? 'text-neg-300 bg-neg-500/10 border-neg-500/20'
@@ -572,23 +706,19 @@ export default function PortfolioOverviewPanel() {
                         <div className="flex items-stretch gap-1">
                           {canAnalyse(r) && (
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setAnalyse({ id: r.fixed_portfolio_id!, name: r.name });
-                              }}
-                              className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg"
+                              onClick={(e) => { e.stopPropagation(); void openModal(r, 'analyse'); }}
+                              disabled={opening === r.dynamic_portefeuille}
+                              className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg disabled:opacity-50"
                             >
-                              Analyse
+                              {opening === r.dynamic_portefeuille ? '…' : 'Analyse'}
                             </button>
                           )}
                           {canAnalyse(r) && (
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setPfFund({ id: r.fixed_portfolio_id!, name: r.name });
-                              }}
+                              onClick={(e) => { e.stopPropagation(); void openModal(r, 'fundamental'); }}
+                              disabled={opening === r.dynamic_portefeuille}
                               title="Fundamental — the whole portfolio's blended owner earnings & price steadiness"
-                              className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg"
+                              className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg disabled:opacity-50"
                             >
                               Fundamental
                             </button>
@@ -715,11 +845,11 @@ export default function PortfolioOverviewPanel() {
         // paint the PREVIOUS portfolio's composition for the ~4s the next one takes to load —
         // a complete, plausible, wrong answer with no loading state to warn the reader. The key
         // forces a fresh mount, so an unloaded modal can only ever show "Loading composition…".
-        <PortfolioAnalysisModal key={analyse.id} id={analyse.id} name={analyse.name}
-          onClose={() => setAnalyse(null)} />
+        <PortfolioAnalysisModal key={analyse.id ?? analyse.name} id={analyse.id} basket={analyse.basket}
+          name={analyse.name} onClose={() => setAnalyse(null)} />
       )}
       {pfFund && (
-        <OwnerEarningsModal portfolioId={pfFund.id} name={pfFund.name}
+        <OwnerEarningsModal portfolioId={pfFund.id} basket={pfFund.basket} name={pfFund.name}
           onClose={() => setPfFund(null)} />
       )}
     </section>
@@ -1103,9 +1233,13 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
     if (!portefeuille) return;
     let live = true;
     void (async () => {
+      // The third request an expand fires. Timed alongside the other two so the console accounts
+      // for the whole wait rather than two thirds of it.
+      const t0 = performance.now();
       try {
         const r = await apiFetch(
           `${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/linkable`);
+        console.warn(`[AIRS expand] ${portefeuille}: linkable in ${Math.round(performance.now() - t0)}ms`);
         if (live && r.ok) setLinkCtx(await r.json());
       } catch { /* the table is still usable without the dropdown */ }
     })();
