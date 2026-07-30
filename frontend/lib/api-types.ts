@@ -7111,6 +7111,13 @@ export interface components {
              */
             segments?: components["schemas"]["AirsHoldingSegment"][];
             /**
+             * Timings Ms
+             * @default {}
+             */
+            timings_ms?: {
+                [key: string]: number;
+            };
+            /**
              * Unmatched Model Positions
              * @default []
              */

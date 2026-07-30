@@ -51,6 +51,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
+from contextlib import contextmanager
 from datetime import date, timedelta
 
 from deps import supabase
@@ -61,6 +63,24 @@ from ._airs_portfolio_links import link_key, resolve_links
 from ._benchmark_index import _fx_to_eur, _rate
 
 _log = logging.getLogger(__name__)
+
+
+@contextmanager
+def _phase(store: dict, name: str):
+    """Time one step of the expand and record it in milliseconds.
+
+    ⚠ EXPANDING A ROW FIRES THREE ENDPOINTS AND USED TO TAKE SECONDS FOR NO STATED REASON. This one
+    does a dozen distinct things — several DB reads, an FX load, a link resolution, and (since the
+    price check started refreshing stale series) potentially a run of YAHOO calls. "It takes a
+    while" is unactionable; "freshen 4,100ms, closes 90ms, everything else 200ms" names the step to
+    argue with. The numbers ride along in the payload so they land in the operator's console rather
+    than only in a server log nobody has open.
+    """
+    t0 = time.perf_counter()
+    try:
+        yield
+    finally:
+        store[name] = round((time.perf_counter() - t0) * 1000)
 
 # The cash line, which carries no ISIN and no category. Named explicitly: a blank category is NOT
 # by itself cash — the model also holds an ISIN-less `Brown & Brown` stub, and calling that cash
@@ -220,7 +240,11 @@ def _dedupe(holdings: list[dict]) -> list[dict]:
 # How many of one account's instruments a single expand may fetch. The refresh is normally a
 # no-op — the 06:00 tick keeps held instruments current — so this only bites the first read after
 # an outage, where finishing 25 and saying so beats a two-minute page load.
-_ONDEMAND_REFRESH_LIMIT = 25
+_ONDEMAND_REFRESH_LIMIT = 5
+
+# ISINs this process has already freshened, and on which day. Expanding a row must not re-ask Yahoo
+# about an instrument it asked about a minute ago — see `_freshen`.
+_FRESHENED: dict[str, str] = {}
 
 # ⚠ ONE DAY BEHIND THE MARKET IS STALE **FOR THIS CALLER**, and the fleet default is not.
 # `DEFAULT_STALE_DAYS = 3` answers "is it worth a Yahoo call to top this series up", where clearing
@@ -261,8 +285,26 @@ def _freshen(isins: list[str]) -> None:
     grouped COPY and one canary probe — so the usual case, everything current, costs no per-symbol
     Yahoo calls at all. Best effort throughout: a failed refresh leaves the old close in place, and
     `_MAX_CLOSE_LAG_DAYS` then stops the check drawing a conclusion from it.
+
+    ⚠ IT IS A SAFETY NET, NOT THE REFRESH — AND FORGETTING THAT COST 12 SECONDS A CLICK. The first
+    version asked Yahoo about EVERY holding on EVERY expand: `stale_days=1` means anything a day
+    behind the market anchor qualifies, which overnight is the whole book, and `extend_series` is a
+    round trip apiece. Measured 2026-07-30 with per-phase timing: 11,537 ms of an 11,793 ms expand
+    — 97% of it — and again on the next click, for the same instruments.
+
+    The actual keeper of these prices is the 06:00 tick, which now covers account holdings too
+    (`price_refresh.held_isins` unions `airs_holding`). So this only has to catch what slipped
+    through, and it is bounded twice:
+      * `_ONDEMAND_REFRESH_LIMIT` per expand — no single click can be slow;
+      * `_FRESHENED` per process per day — a second expand of the same book costs nothing.
+    Whatever is still behind afterwards is not judged: it gets the `stale_price` verdict, which is
+    the honest answer rather than an expensive attempt at a better one.
     """
     if not isins:
+        return
+    today = date.today().isoformat()
+    want = [i for i in isins if _FRESHENED.get(i) != today]
+    if not want:
         return
     try:
         from asset_pipeline import price_refresh, queue as _q  # noqa: PLC0415
@@ -273,8 +315,13 @@ def _freshen(isins: list[str]) -> None:
         # ⚠ `stale_days=_CHECK_STALE_DAYS`, NOT the fleet default — see the constant. One detection
         # pass, not two: `refresh_stale` finds them itself, so calling `find_stale` here as well
         # would cost a second canary probe on every expand.
-        r = price_refresh.refresh_stale(isins=set(isins), stale_days=_CHECK_STALE_DAYS,
+        r = price_refresh.refresh_stale(isins=set(want), stale_days=_CHECK_STALE_DAYS,
                                         limit=_ONDEMAND_REFRESH_LIMIT)
+        # ⚠ MARKED WHATEVER THE OUTCOME. "Yahoo has nothing newer" is as final an answer as a
+        # successful fetch — re-asking about a dormant listing on every click is the exact cost
+        # this memo exists to remove.
+        for i in want:
+            _FRESHENED[i] = today
         if r.get("stale"):
             _log.info("[airs price check] %d of %d instrument(s) behind %s — %d moved, %d had "
                       "nothing newer, %d failed, %d over the per-read cap",
@@ -483,19 +530,22 @@ def resolve_account_isins(portefeuille: str) -> dict:
     AIRS names, so a mismatch means our listing is wrong. That is a finding we could not make at
     all while the ISIN was itself a guess.
     """
-    snap = (supabase.table("airs_holding").select("as_of_date")
-            .eq("portefeuille", portefeuille).order("as_of_date", desc=True)
-            .limit(1).execute().data or [])
+    t: dict[str, int] = {}
+    with _phase(t, "snapshot"):
+        snap = (supabase.table("airs_holding").select("as_of_date")
+                .eq("portefeuille", portefeuille).order("as_of_date", desc=True)
+                .limit(1).execute().data or [])
     if not snap:
         return {"portefeuille": portefeuille, "as_of": None,
                 "reason": "no holdings snapshot stored", "rows": [], "segments": [],
                 "unmatched_model_positions": []}
     as_of = str(snap[0]["as_of_date"])
-    holdings = _dedupe(supabase.table("airs_holding")
-                       .select("holding_name,isin,quantity,currency,weight,current_value_eur,"
-                               "start_value_eur,ytd_return_eur,fund_result_eur,fx_result_eur")
-                       .eq("portefeuille", portefeuille).eq("as_of_date", as_of)
-                       .limit(500).execute().data or [])
+    with _phase(t, "holdings"):
+        holdings = _dedupe(supabase.table("airs_holding")
+                           .select("holding_name,isin,quantity,currency,weight,current_value_eur,"
+                                   "start_value_eur,ytd_return_eur,fund_result_eur,fx_result_eur")
+                           .eq("portefeuille", portefeuille).eq("as_of_date", as_of)
+                           .limit(500).execute().data or [])
     if not holdings:
         return {"portefeuille": portefeuille, "as_of": as_of, "reason": "no holdings",
                 "rows": [], "segments": [], "unmatched_model_positions": []}
@@ -507,13 +557,14 @@ def resolve_account_isins(portefeuille: str) -> dict:
     isins = [x for x in ((h.get("isin") or (pin_of[i] or {}).get("isin"))
                          for i, h in enumerate(holdings)) if x]
 
-    grid: dict[str, dict] = {}
-    for i in range(0, len(isins), 100):
-        for g in (supabase.table("asset_grid")
-                  .select("isin,name,openfigi_name,leonteq_name,leonteq_product_type,"
-                          "country,continent,msci_region,asset_class,sector")
-                  .in_("isin", isins[i:i + 100]).execute().data or []):
-            grid[g["isin"]] = g
+    with _phase(t, "grid"):
+        grid: dict[str, dict] = {}
+        for i in range(0, len(isins), 100):
+            for g in (supabase.table("asset_grid")
+                      .select("isin,name,openfigi_name,leonteq_name,leonteq_product_type,"
+                              "country,continent,msci_region,asset_class,sector")
+                      .in_("isin", isins[i:i + 100]).execute().data or []):
+                grid[g["isin"]] = g
 
     # ⚠ AN EXECUTION ROW IS PRICED FROM ITS *ANALYSIS* INSTRUMENT, WHICH CAN BE A DIFFERENT
     # LISTING. That is the design, not a fault: an ADR's execution row is deliberately served by
@@ -530,15 +581,19 @@ def resolve_account_isins(portefeuille: str) -> dict:
     # on purpose. They get their own verdict instead — see `cross_listed`.
     from asset_pipeline.isin_alias import load_aliases  # noqa: PLC0415
 
-    aliased = load_aliases()
-    overrides = _load_bucket_overrides(isins)   # manual Class pins, keyed by ISIN — they win
+    with _phase(t, "aliases_overrides"):
+        aliased = load_aliases()
+        overrides = _load_bucket_overrides(isins)   # manual Class pins, keyed by ISIN — they win
     # ⚠ BEFORE the closes are read, never after: the check below is a comparison, and half of it
     # comes from here. See `_freshen` — a series that merely stopped updating reads as a wrong
     # listing, which is the loudest finding this table can make.
-    _freshen(isins)
-    closes = _last_closes(isins, as_of)
-    ccys = {c["currency"] for c in closes.values() if c.get("currency")}
-    fx = _fx_to_eur(ccys, (date.fromisoformat(as_of) - timedelta(days=21)).isoformat(), as_of) if ccys else {}
+    with _phase(t, "freshen_prices"):
+        _freshen(isins)
+    with _phase(t, "closes"):
+        closes = _last_closes(isins, as_of)
+    with _phase(t, "fx"):
+        ccys = {c["currency"] for c in closes.values() if c.get("currency")}
+        fx = _fx_to_eur(ccys, (date.fromisoformat(as_of) - timedelta(days=21)).isoformat(), as_of) if ccys else {}
 
     # A holding that IS another model portfolio, wrapped as a Leonteq certificate. Same fact, same
     # store and same guesser as the model-portfolio positions table — `airs_model_portfolio_link`
@@ -551,14 +606,15 @@ def resolve_account_isins(portefeuille: str) -> dict:
     # of its own strategy is precisely the wrapper cycle the gate exists to stop (TOPS_STS_L holds
     # 'Star Selection Index' at 100%). Unpaired account -> no self to exclude, and `guess_link`
     # already treats an owner it cannot match as "exclude nothing".
-    owner_id = _account_owner_model_id(portefeuille)
-    link_rows = [{"isin": (h.get("isin") or (pin_of[i] or {}).get("isin")),
-                  "fonds": h.get("holding_name") or ""}
-                 for i, h in enumerate(holdings)]
-    links = resolve_links(supabase, owner_id, link_rows)
-    # ⚠ The PRETTY name, falling back to AIRS's `Portefeuille` code — see `linkable_context`.
-    pf_names = {p["id"]: (p.get("display_name") or p["name"]) for p in (
-        supabase.table("airs_model_portfolio").select("id,name,display_name").execute().data or [])}
+    with _phase(t, "links"):
+        owner_id = _account_owner_model_id(portefeuille)
+        link_rows = [{"isin": (h.get("isin") or (pin_of[i] or {}).get("isin")),
+                      "fonds": h.get("holding_name") or ""}
+                     for i, h in enumerate(holdings)]
+        links = resolve_links(supabase, owner_id, link_rows)
+        # ⚠ The PRETTY name, falling back to AIRS's `Portefeuille` code — see `linkable_context`.
+        pf_names = {p["id"]: (p.get("display_name") or p["name"]) for p in (
+            supabase.table("airs_model_portfolio").select("id,name,display_name").execute().data or [])}
 
     rows = []
     for i, h in enumerate(holdings):
@@ -654,9 +710,15 @@ def resolve_account_isins(portefeuille: str) -> dict:
     # hold. Same meaning as the old `unmatched_model_positions`, without the pairing.
     unheld = (supabase.table("airs_model_weight").select("fonds,model_pct")
               .eq("portefeuille", portefeuille).limit(1000).execute().data or [])
+    t["total"] = sum(v for k, v in t.items() if k != "total")
+    _log.info("[airs isins] %s: %s", portefeuille,
+              ", ".join(f"{k} {v}ms" for k, v in sorted(t.items(), key=lambda kv: -kv[1])))
     return {
         "portefeuille": portefeuille,
         "as_of": as_of,
+        # Per-phase milliseconds — see `_phase`. Rides along so the console can say WHICH step
+        # was slow, not just that the expand was.
+        "timings_ms": t,
         "rows": rows,
         "segments": _segments(rows),
         "unmatched_model_positions": [
