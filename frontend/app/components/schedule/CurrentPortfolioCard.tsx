@@ -431,7 +431,7 @@ export default function CurrentPortfolioCard({
         </table>
       </div>
       <p className="text-xs text-fg-subtle mt-3 leading-relaxed">
-        Sorted by current weight. <span className="font-medium">Target</span> is the last-rebalance weight; <span className="font-medium">Current</span> is the drifted weight, renormalized to 100%. <span className="font-medium">Start/End</span> are entry and latest-close prices in local currency. <span className="font-medium">Return (€)</span> and <span className="font-medium">Total</span> are the engine&apos;s figures (per-holding and weighted portfolio return), matching the headline MTD. <span className="font-medium">Start/End (€)</span> are the engine&apos;s EUR marks — &quot;—&quot; until priced (ETFs self-heal on the next price update).
+        Sorted by current weight. <span className="font-medium">Target</span> is the last-rebalance weight; <span className="font-medium">Current</span> is the drifted weight, renormalized to 100%. <span className="font-medium">Start/End</span> are entry and latest-close prices in local currency. <span className="font-medium">Return (€)</span> and <span className="font-medium">Total</span> are the engine&apos;s figures (per-holding and weighted portfolio return), matching the headline MTD. <span className="font-medium">Start/End (€)</span>{' '}are the engine&apos;s EUR marks — &quot;—&quot; until priced (ETFs self-heal on the next price update).
         {canEditCash && <> A stale (<span className="text-warn-400">orange</span>) close date shows a <span className="text-warn-400">↻</span> to refresh that holding from GuruFocus, with the request and response inline.</>}
       </p>
     </div>

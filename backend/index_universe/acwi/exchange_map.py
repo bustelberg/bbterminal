@@ -346,6 +346,16 @@ FEASIBLE_GF_EXCHANGES = frozenset([
     "",  # US (NYSE, NASDAQ, Cboe BZX)
     "OTCPK",  # US OTC Pink — GuruFocus prices these (e.g. QinetiQ QNTQF), USD
 
+    # US ETF venues. GuruFocus's own `exchange_list` puts these in region USA:
+    #   NAS  NYSE  OTCPK  OTCBB  AMEX  ARCA  IEXG  BATS  GREY
+    # ARCA (NYSE Arca) is where most US ETFs actually list — of SPY / IWM / VOO /
+    # XLU / EDV / GLD / QQQ, SIX are ARCA and only QQQ is NAS. Omitting it doesn't
+    # merely lose coverage, it MIS-RESOLVES: SPY and GLD also list on SGX, which IS
+    # in this set, so an unknown ARCA silently hands you the SINGAPORE line of SPY.
+    # (OTCBB and GREY are left out deliberately — defunct / grey-market venues we
+    # have no reason to price.)
+    "ARCA", "BATS", "IEXG",
+
     # Europe — NOTE: UK (LSE) and Ireland (DUB) are NOT here; GuruFocus
     # returns "403 unsubscribed region" for them (confirmed by probing every
     # exchange), same as India. Continental Europe is covered.

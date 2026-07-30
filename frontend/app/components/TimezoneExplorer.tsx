@@ -121,7 +121,7 @@ export default function TimezoneExplorer() {
         <p className="text-sm text-fg-subtle mt-1 max-w-3xl">
           Every exchange in the selected universe, with its regular trading session converted to{' '}
           <span className="text-fg-soft">Amsterdam</span> time. We trade at the <em>previous day&apos;s close</em>, so the
-          Amsterdam <span className="text-fg-soft">close</span> is when that price is final in our day. Hours shift with
+          Amsterdam <span className="text-fg-soft">close</span>{' '}is when that price is final in our day. Hours shift with
           daylight-saving — toggle the season to see the variant.
         </p>
       </div>

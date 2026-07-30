@@ -12,6 +12,11 @@ type Tile = {
 
 const tiles: Tile[] = [
   {
+    href: '/management-dashboard',
+    label: 'Management Dashboard',
+    description: 'The AIRS books: each portfolio on AIRS\'s own returns, its holdings, how they correlate, and the benchmarks to read them against.',
+  },
+  {
     href: '/earnings',
     label: 'Earnings Dashboard',
     description: 'Browse per-company earnings metrics pulled from GuruFocus, with quick refresh by source.',

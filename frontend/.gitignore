@@ -12,10 +12,6 @@
 
 # testing
 /coverage
-# Playwright e2e artifacts — traces, screenshots, html report
-/test-results/
-/playwright-report/
-/playwright/.cache/
 
 # eslint incremental cache (written by `npx eslint --cache` on manual runs)
 /.eslintcache

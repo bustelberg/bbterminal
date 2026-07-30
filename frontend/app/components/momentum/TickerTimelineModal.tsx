@@ -539,7 +539,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
                       <CellInfoTip>
                         Chain-linked return across the months in this visit:
                         <span className="font-mono"> (1+r₁)(1+r₂)…(1+rₙ) − 1</span>,
-                        where each <span className="font-mono">rᵢ</span> is the forward return for that month.
+                        where each <span className="font-mono">rᵢ</span>{' '}is the forward return for that month.
                       </CellInfoTip>
                     </span>
                   </th>
@@ -824,7 +824,7 @@ function NormStep({ s }: { s: SignalBreakdown }) {
   if (s.raw_value == null) {
     return (
       <div className="text-[11px] text-fg-subtle mt-0.5">
-        Norm: raw value missing → defaults to <span className="text-fg-soft font-mono">50</span> in scoring
+        Norm: raw value missing → defaults to <span className="text-fg-soft font-mono">50</span>{' '}in scoring
       </div>
     );
   }

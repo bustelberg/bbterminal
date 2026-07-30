@@ -338,7 +338,7 @@ export default function LongEquityUniverse() {
         <div>
           <h1 className="text-lg font-semibold text-fg-strong">LongEquity Universe</h1>
           <p className="text-xs text-fg-subtle mt-0.5">
-            Per-month snapshots of LongEquity reports. The <span className="font-mono">LongEquity</span> universe holds true point-in-time membership per month (rebuilt each ingest). Use <span className="font-medium">Freeze union</span> to snapshot every company across every month into one frozen set for backtests/earnings.
+            Per-month snapshots of LongEquity reports. The <span className="font-mono">LongEquity</span> universe holds true point-in-time membership per month (rebuilt each ingest). Use <span className="font-medium">Freeze union</span>{' '}to snapshot every company across every month into one frozen set for backtests/earnings.
           </p>
         </div>
         <div className="flex items-center gap-4 shrink-0">
@@ -407,7 +407,7 @@ export default function LongEquityUniverse() {
 
         {!hasLoaded ? (
           <p className="text-sm text-fg-subtle">
-            Click <span className="text-fg-soft">Load</span> to fetch saved snapshots, or <span className="text-fg-soft">Run ingest</span> to pull the latest LongEquity data.
+            Click <span className="text-fg-soft">Load</span> to fetch saved snapshots, or <span className="text-fg-soft">Run ingest</span>{' '}to pull the latest LongEquity data.
           </p>
         ) : snapshotsLoading ? (
           <div>

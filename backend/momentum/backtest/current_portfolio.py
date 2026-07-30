@@ -114,7 +114,9 @@ def run_current_portfolio(
     Mirrors a single iteration of run_backtest:
       * as_of_date = first of current month
       * signals computed using prices strictly before as_of_date
-      * entry_price = first price on/after as_of_date
+      * entry_price = the last close STRICTLY BEFORE as_of_date (the prior
+        trading day's bar — the same one the signals are computed from, and
+        where run_backtest enters). See the `prior_anchor` comment below.
       * exit_price = LATEST available price (vs run_backtest's next-month price)
       * forward_return_pct field carries the MTD return
 

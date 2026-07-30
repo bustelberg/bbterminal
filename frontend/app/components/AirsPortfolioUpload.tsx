@@ -594,8 +594,6 @@ type VermogenStatus = {
   rendement_stored: number;
   vermogen_stored: number;
   holdings_rows: number;
-  crm_stored: boolean | null;
-  crm_bytes: number;
   errors: string[];
   latest_snapshot_date: string | null;
   latest_snapshot_portfolios: number;
@@ -696,17 +694,6 @@ function VermogenJobCard() {
             </span>
           )}
         </div>
-
-        {s && s.crm_stored !== null && (
-          <div className="text-fg-subtle">
-            CRM Alle relaties:{' '}
-            {s.crm_stored ? (
-              <span className="text-pos-400">✓ stored ({Math.round(s.crm_bytes / 1024)} KB raw)</span>
-            ) : (
-              <span className="text-neg-300">failed</span>
-            )}
-          </div>
-        )}
 
         {s && s.errors.length > 0 && (
           <div>

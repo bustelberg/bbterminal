@@ -210,7 +210,7 @@ export default function IsinComparer() {
           </div>
           {colIdx != null && rows.length > 0 && (
             <p className="text-xs text-fg-subtle mt-3">
-              <span className="font-mono text-fg-strong">{isins.length}</span> distinct non-empty ISINs
+              <span className="font-mono text-fg-strong">{isins.length}</span>{' '}distinct non-empty ISINs
               {rawCount - isins.length > 0 && <> ({rawCount - isins.length} duplicate{rawCount - isins.length === 1 ? '' : 's'} / blanks dropped)</>}.
             </p>
           )}

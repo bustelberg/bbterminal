@@ -11,17 +11,16 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from momentum.signals import (
-    _annualized_volatility_pct,
-    _compute_single_company_signals,
-    _compute_volume_signals,
-    _drawdown_from_recent_high_pct,
-    _mom_return,
-    _volatility_adjusted_return,
-    _volume_ratio,
-    _volume_trend,
-    compute_price_signals,
-    compute_signals_panel,
+from momentum.signals import compute_price_signals, compute_signals_panel
+from signal_engine.daily import (
+    annualized_volatility_pct as _annualized_volatility_pct,
+    compute_single_company_signals as _compute_single_company_signals,
+    compute_volume_signals as _compute_volume_signals,
+    drawdown_from_recent_high_pct as _drawdown_from_recent_high_pct,
+    mom_return as _mom_return,
+    volatility_adjusted_return as _volatility_adjusted_return,
+    volume_ratio as _volume_ratio,
+    volume_trend as _volume_trend,
 )
 
 

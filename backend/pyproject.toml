@@ -20,6 +20,7 @@ dependencies = [
     "curl-cffi>=0.7.0",
     "psycopg[binary]>=3.2.0",
     "rapidfuzz>=3.14.5",
+    "pyarrow>=15.0.0",
 ]
 
 [dependency-groups]
@@ -30,3 +31,20 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 
+# ⚠ THE RULE SET IS DECLARED, NOT INHERITED — CI RUNS `uvx ruff check .`, WHICH IS UNPINNED.
+# With no config, ruff picks its own default, and that default is not a constant: ruff 0.16.0
+# widened it and 1,794 "errors" appeared across untouched code, on a green commit, with no push
+# involved. Nothing was wrong with the code — the linter had changed its mind, and CI is the
+# only place that noticed.
+#
+# `E4,E7,E9,F` is the selection this codebase was actually written against: it passes cleanly on
+# every file today. Stating it means a future ruff release adds rules we can adopt deliberately
+# instead of discovering them as a red build nobody can explain.
+#
+# ⚠ PLC0415 (import-outside-top-level) is NOT enabled, though ~540 `# noqa: PLC0415` comments
+# imply it once was. Enabling it now costs 239 failures in local imports that carry no noqa —
+# most of them deliberate (cycle-breaking, or keeping an optional dependency optional). The
+# comments are harmless while it is off, and turning it on is a cleanup with a real decision in
+# it, not a config tweak. Left as a choice rather than made silently.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

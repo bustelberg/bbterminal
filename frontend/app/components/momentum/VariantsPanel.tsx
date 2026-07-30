@@ -152,7 +152,7 @@ export default function VariantsPanel({
             className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           />
           <p className="text-[10px] text-fg-faint mt-1.5">
-            A vol-targeted variant scales exposure toward the target each rebalance (holds cash when turbulent; never levers). Include <span className="font-mono">off</span> to compare against the original strategy.
+            A vol-targeted variant scales exposure toward the target each rebalance (holds cash when turbulent; never levers). Include <span className="font-mono">off</span>{' '}to compare against the original strategy.
           </p>
         </div>
         <div>
@@ -183,7 +183,7 @@ export default function VariantsPanel({
             Compare tit-for-tat
           </label>
           <p className="text-[10px] text-fg-faint mt-1.5">
-            Fans each variant into a plain and a <span className="font-mono">tit-for-tat</span> version: invested today only if yesterday&apos;s daily return was up, else cash. A daily in/out overlay — holdings unchanged.
+            Fans each variant into a plain and a <span className="font-mono">tit-for-tat</span>{' '}version: invested today only if yesterday&apos;s daily return was up, else cash. A daily in/out overlay — holdings unchanged.
           </p>
         </div>
       </div>

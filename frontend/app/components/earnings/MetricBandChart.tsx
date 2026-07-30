@@ -89,6 +89,11 @@ type Props = {
   emptyText: string;
   /** Per-member metrics when a side is a portfolio — drives the
    * ranked-by-impact holdings list in the tooltip. */
+  /** Portfolio drill-down: click a point to decompose it into holdings. The chart reports the
+   * clicked period and nothing more — it does not know what a portfolio is. Omitted => not
+   * clickable, and no pointer cursor, so a chart that cannot be decomposed does not look like
+   * one that can. */
+  onPointClick?: (period: string) => void;
   breakdownA?: PortfolioMemberMetrics[];
   breakdownB?: PortfolioMemberMetrics[];
 };
@@ -148,7 +153,7 @@ function BandBreakdownTooltip({
 function MetricBandChartInner({
   metrics, metricsB, labelA, labelB, nameA, nameB, loadingB, cadence = 'quarterly', hideOutliers = false,
   buildSeries, band, format, axisFormat, subtitle, cadenceLabel, infoText, emptyText,
-  breakdownA, breakdownB,
+  breakdownA, breakdownB, onPointClick,
 }: Props) {
   const buildOne = useMemo(
     () => (m: MetricRow[]) => {
@@ -273,7 +278,15 @@ function MetricBandChartInner({
         )}
       </div>
       <ResponsiveContainer width="100%" height={280}>
-        <LineChart data={merged} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
+        <LineChart data={merged} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}
+          style={onPointClick ? { cursor: 'pointer' } : undefined}
+          onClick={onPointClick
+            ? (e: { activeLabel?: string | number }) => {
+              // recharts hands back the x-axis label; the blend is keyed on the fiscal YEAR.
+              const l = String(e?.activeLabel ?? '');
+              if (l.length >= 4) onPointClick(l.slice(0, 4));
+            }
+            : undefined}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
           <XAxis dataKey="date" tick={{ fontSize: 10, fill: chartTheme.axisTick }} tickFormatter={(v: string) => v.slice(0, 7)} />
           <YAxis

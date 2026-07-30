@@ -1,0 +1,159 @@
+'use client';
+
+import { useEffect, useMemo, useState } from 'react';
+import {
+  CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from 'recharts';
+import { apiFetch } from '../../../lib/apiFetch';
+import { API_URL } from '../../../lib/apiUrl';
+import { chartTheme } from '../../../lib/chartTheme';
+import { AspectCard } from '../../../lib/tipCard';
+import InfoTip from '../InfoTip';
+import { Stat } from './MetricGrowthCard';
+import { type Target } from './HoldingsRevenueModal';
+import CashReturnInputsModal from './CashReturnInputsModal';
+import { MODES, seriesByYear, type CapitalMode, type CashReturnInputs } from './cashReturnData';
+import { meanOf, paddedDomain } from './marginData';
+
+/**
+ * Cash-return-on-capital card: Free Cash Flow ÷ invested capital (non-current liabilities + total
+ * equity) per fiscal year, on a LINEAR % axis (a ratio, not a compounding series — no log /
+ * exponential trend). Click through to the three base lines per company.
+ *
+ * ⚠ THE RATIO IS DERIVED HERE from the raw lines (`cashReturnByYear`), so the line, the tiles and
+ * the drill-down are one computation. Aggregation is a weight-weighted average of per-company
+ * ratios — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./DebtRatioCard}.
+ */
+
+export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrection = true }: {
+  holdingsTarget: Target; holdingsName?: string | null;
+  /** Tab-level toggle — see `sbcCorrection`. ⚠ Has NO effect in ROIC mode. */
+  sbcCorrection?: boolean;
+}) {
+  const [data, setData] = useState<CashReturnInputs | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [showInputs, setShowInputs] = useState(false);
+  /** ⚠ ONE PAYLOAD, TWO MODES — the switch does NOT refetch. Both series come from the same
+   *  response, so flipping cannot land you on a different vintage of the same company's accounts. */
+  const [mode, setMode] = useState<CapitalMode>('croic');
+  const M = MODES[mode];
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      setData(null); setErr(null);
+      try {
+        const r = await apiFetch(`${API_URL}/api/earnings/cash-return-inputs`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(holdingsTarget),
+        });
+        const b = await r.json().catch(() => null);
+        if (!alive) return;
+        if (!r.ok) { setErr(b?.detail ?? `HTTP ${r.status}`); return; }
+        setData(b as CashReturnInputs);
+      } catch (e) {
+        if (alive) setErr(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => { alive = false; };
+  }, [holdingsTarget]);
+
+  const ratioByYr = useMemo(
+    () => seriesByYear(data?.rows ?? [], mode, sbcCorrection), [data, mode, sbcCorrection]);
+
+  const chartData = useMemo(() => (
+    [...ratioByYr.keys()].sort((a, b) => a - b).map((year) => ({ year, ratio: ratioByYr.get(year) ?? null }))
+  ), [ratioByYr]);
+
+  const avg = meanOf([...ratioByYr.values()]);
+  const latestYear = Math.max(-Infinity, ...ratioByYr.keys());
+  const latest = Number.isFinite(latestYear) ? ratioByYr.get(latestYear) ?? null : null;
+  const pct = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)}%`);
+
+  return (
+    <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
+      {/* ⚠ EXACTLY ONE LINE TALL, LIKE EVERY SIBLING CARD'S BARE <h4>. These cards sit in a grid
+          and the eye reads their stat tiles as a row; a header that wraps to two lines pushes this
+          card's tiles down and breaks that alignment for a decoration. Hence `flex-nowrap`, no
+          subtitle, and a switch shorter than the heading's own line box — the provenance line that
+          used to live here is in the tiles' info card (`M.where`) instead.
+          Rendered even on the empty state: a bank has a published ROIC and no usable capital base,
+          so "no figures" on one mode must not look like "no figures for this company". */}
+      <div className="flex items-center justify-between gap-2 flex-nowrap">
+        {/* `min-w-0` is what lets `truncate` actually shrink — a flex item defaults to
+            min-width:auto and would push the switch off the card instead of ellipsising. */}
+        <h4 className="text-base font-semibold text-fg-strong truncate min-w-0">{M.title}</h4>
+        <div className="inline-flex rounded-lg border border-neutral-700 overflow-hidden shrink-0"
+          role="group" aria-label="Capital-return basis">
+          {(Object.keys(MODES) as CapitalMode[]).map((k) => (
+            <button key={k} type="button" onClick={() => setMode(k)} aria-pressed={mode === k}
+              title={`${MODES[k].title} — ${MODES[k].what}. ${MODES[k].where}`}
+              className={`px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                mode === k ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-overlay/5'}`}>
+              {MODES[k].tab}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {data == null && !err ? (
+        <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
+      ) : err ? (
+        <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
+      ) : ratioByYr.size === 0 ? (
+        <p className="text-[11px] text-fg-faint py-16 text-center">
+          {M.derived
+            ? 'No FCF / capital figures ingested to compute a ratio.'
+            : 'GuruFocus reports no ROIC for these holdings.'}
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <Stat label="Avg" value={pct(avg)} color={chartTheme.accent}
+              info={<InfoTip content={<AspectCard
+                what={`Average ${M.inline} over the years shown — ${M.what}.`}
+                where={M.where}
+                when="The years on the chart. Weight-averaged across holdings — a per-company percentage, averaged, never summed (mixed currencies cannot be added)."
+                how={M.caveat} />} />} />
+            <Stat label="Latest" value={pct(latest)} color={chartTheme.accent} />
+          </div>
+
+          <div>
+            <ResponsiveContainer width="100%" height={320}>
+              <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
+                style={{ cursor: M.derived ? 'pointer' : 'default' }}
+                onClick={() => { if (M.derived) setShowInputs(true); }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
+                <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
+                <YAxis domain={paddedDomain([...ratioByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                  tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
+                <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
+                  formatter={(v) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, M.title]} />
+                <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
+                {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
+                <Line dataKey="ratio" name="ratio" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
+              </ComposedChart>
+            </ResponsiveContainer>
+            <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
+              {/* ⚠ ONE LEGEND ROW, LIKE THE SIBLINGS. The drill-down note is a `title`, not a
+                  second line — the same alignment argument as the header. It still has to be said
+                  somewhere: a published ratio has no three lines to check it against, so the chart
+                  is not clickable in ROIC mode and a modal must not imply workings it cannot show. */}
+              <span className="flex items-center gap-1.5"
+                title={M.derived
+                  ? 'Derived here — click the chart for the three underlying lines per company.'
+                  : "GuruFocus's own figure, read through. There are no underlying lines to drill into."}>
+                <span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />
+                {M.title} (avg dashed)
+              </span>
+            </div>
+          </div>
+        </>
+      )}
+
+      {showInputs && (
+        <CashReturnInputsModal target={holdingsTarget} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+      )}
+    </div>
+  );
+}

@@ -36,6 +36,11 @@ type Props = {
   /** Per-member metrics when a side is a portfolio (already EUR-converted) —
    * the line is then the weighted-member average, smooth instead of the raw
    * fiscal-misaligned blend. */
+  /** Portfolio drill-down: click a point to decompose it into holdings. The chart reports the
+   * clicked period and nothing more — it does not know what a portfolio is. Omitted => not
+   * clickable, and no pointer cursor, so a chart that cannot be decomposed does not look like
+   * one that can. */
+  onPointClick?: (period: string) => void;
   breakdownA?: PortfolioMemberMetrics[];
   breakdownB?: PortfolioMemberMetrics[];
 };
@@ -47,7 +52,7 @@ const IDENTITY = (v: number) => v;
  * compound math meaningful. With a comparison company, the second
  * series renders in amber + its own CAGR / Latest pills appear in the
  * header. */
-function FCFShareChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, toEurA = IDENTITY, toEurB = IDENTITY, loadingB, breakdownA, breakdownB }: Props) {
+function FCFShareChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, toEurA = IDENTITY, toEurB = IDENTITY, loadingB, breakdownA, breakdownB, onPointClick }: Props) {
   // FCF/share is reported in the company's native currency; convert each
   // year's value to EUR (at that year's FX rate) so A and B compare directly.
   // A portfolio's line is the weighted average of its holdings' (already-EUR)
@@ -121,7 +126,15 @@ function FCFShareChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, t
         )}
       </div>
       <ResponsiveContainer width="100%" height={280}>
-        <LineChart data={merged} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
+        <LineChart data={merged} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}
+          style={onPointClick ? { cursor: 'pointer' } : undefined}
+          onClick={onPointClick
+            ? (e: { activeLabel?: string | number }) => {
+              // recharts hands back the x-axis label; the blend is keyed on the fiscal YEAR.
+              const l = String(e?.activeLabel ?? '');
+              if (l.length >= 4) onPointClick(l.slice(0, 4));
+            }
+            : undefined}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
           <XAxis dataKey="date" tick={{ fontSize: 10, fill: chartTheme.axisTick }} tickFormatter={(v: string) => v.slice(0, 4)} />
           <YAxis

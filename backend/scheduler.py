@@ -45,6 +45,7 @@ from datetime import date, datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from routers.ingest_runs import kick_off_refresh
 
@@ -510,6 +511,120 @@ def maybe_schedule_price_retry(*, reason: str = "") -> None:
         )
 
 
+def _fire_asset_ingest_queue() -> None:
+    """Drain one slice of the asset-pipeline ingest queue. THE single Yahoo/
+    OpenFIGI consumer for uploaded ISINs — runs on a short interval with
+    max_instances=1, so slices process back-to-back without ever overlapping (no
+    competing Yahoo traffic → no throttle-corrupted resolutions). A no-op when the
+    queue is empty. Never raises into the scheduler."""
+    try:
+        from asset_pipeline import queue as _q  # noqa: PLC0415
+        r = _q.process_slice()
+        if r.get("processed"):
+            _log.info("[scheduler] asset ingest queue: %s processed (%s ok, %s failed, %s remaining)",
+                      r.get("processed"), r.get("ok"), r.get("failed"), r.get("remaining"))
+    except Exception:  # noqa: BLE001
+        _log.exception("[scheduler] asset ingest queue worker failed")
+
+
+def _fire_asset_price_refresh() -> None:
+    """Daily refresh of STALE `asset_price` series for the HELD instruments.
+
+    `metric_data` (GuruFocus) has had a daily refresh for ever; `asset_price` (Yahoo) never did —
+    it was written when a row was added and then aged, silently. A stale series still returns
+    prices and still charts; it is just old. Measured 2026-07-14: 197 of the 223 instruments held
+    by the AIRS model portfolios were stale, and Meta Platforms — correctly mapped, 3,556 bars —
+    rendered as a BLANK row in BUS_2.0_NEU_FX because its last close (2026-07-02) predated that
+    portfolio's window (2026-07-09): no price inside the window, so no return over it exists.
+
+    ⚠ STANDS DOWN WHILE A WORKER IS ACTUALLY DRAINING THE INGEST QUEUE. That queue is *the*
+    single Yahoo consumer by design: Yahoo answers an overloaded caller with an EMPTY result
+    rather than a 429, and an empty candidate set is how a resolution silently lands on a thin
+    foreign listing (the NVDA-on-Stuttgart / Alphabet-on-Vienna class of bug). Our own traffic is
+    only chart fetches for symbols we already hold, so it cannot mis-resolve anything ITSELF —
+    but it can push Yahoo into that regime while the resolver is mid-search and corrupt ITS work.
+    A day-late price is a nuisance; a wrong listing is a wrong price series for ever.
+
+    ⚠ ...AND THAT MEANS THE WORKER, NOT THE BACKLOG. The first version gated on `pending > 0` and
+    never ran once: the queue holds 9,945 pending ISINs last touched 2026-07-07, a week earlier —
+    a stalled backlog, not active work (`status()["working"]` is just `pending > 0`, so it says
+    "working" about a queue nobody is draining). `is_worker_active()` reads the real heartbeat:
+    when a row was last MOVED out of pending.
+
+    Scope is HELD-only (~220 instruments, not the 16k grid). Own daemon thread; never raises.
+
+    Also fired ON STARTUP by `_maybe_kickstart_asset_prices` — see there for why a daily tick
+    alone is not enough.
+    """
+    threading.Thread(
+        target=_run_asset_price_refresh, args=("daily tick",),
+        name="asset-price-refresh", daemon=True,
+    ).start()
+
+
+def _run_asset_price_refresh(trigger: str) -> None:
+    """The body, shared by the 06:00 tick and the startup catch-up. Never raises."""
+    try:
+        from asset_pipeline import price_refresh, queue as _q  # noqa: PLC0415
+
+        if _q.is_worker_active():
+            _log.info(
+                "[scheduler] asset price refresh (%s) SKIPPED — the ingest queue worker is live "
+                "(last activity %s); adding Yahoo load now risks corrupting the listings it is "
+                "resolving.", trigger, _q.last_activity(),
+            )
+            return
+
+        # Detect BEFORE fetching. A restart must not cost ~220 Yahoo calls just to discover
+        # there was nothing to do — and with `--reload` in dev, restarts are constant. This is
+        # a handful of queries (one grouped COPY), so the common case is a near-free no-op.
+        stale, latest, considered = price_refresh.find_stale(held_only=True)
+        if not stale:
+            _log.info(
+                "[scheduler] asset price refresh (%s): all %s held instrument(s) current as of "
+                "%s — nothing to do", trigger, considered, latest,
+            )
+            return
+
+        # WARNING, not info: uvicorn leaves the ROOT logger at WARNING, so an `info` here is
+        # invisible in production — and "we found the held prices stale and are refetching them"
+        # is exactly the line you want in the deploy log. `_maybe_kickstart_smart` logs its own
+        # firing at warning for the same reason. The no-op case above stays at info: a healthy
+        # restart should be quiet.
+        _log.warning(
+            "[scheduler] asset price refresh (%s): %s of %s held instrument(s) stale vs %s "
+            "(oldest %s) — fetching the gap",
+            trigger, len(stale), considered, latest, stale[0]["last_close"],
+        )
+        r = price_refresh.refresh_stale(held_only=True)
+        _log.warning(
+            "[scheduler] asset price refresh (%s) done — %s moved, %s unchanged, %s failed",
+            trigger, r["moved"], r["unchanged"], r["failed"],
+        )
+    except Exception:  # noqa: BLE001
+        _log.exception("[scheduler] asset price refresh (%s) failed", trigger)
+
+
+def _maybe_kickstart_asset_prices() -> None:
+    """On STARTUP: if the held instruments' prices are behind, fix them now rather than waiting
+    for 06:00.
+
+    The daily tick keeps them current going forward; it cannot repair the PAST. A backend that
+    was down over the weekend, a fresh deploy, a machine that has not run in a week — all come up
+    with stale held prices and, until this, would serve blank rows on /portfolios until the next
+    morning. That is the exact state the whole problem was found in: 197 of 223 held instruments
+    stale, and Meta Platforms rendering as an empty row in a portfolio that holds it.
+
+    Cheap when there is nothing to do: it DETECTS first (a few queries) and only then fetches, so
+    the constant restarts of `uvicorn --reload` cost a couple of round-trips, not 220 Yahoo calls.
+    Mirrors `_maybe_kickstart_smart`, which does the same for the GuruFocus pipeline.
+    """
+    threading.Thread(
+        target=_run_asset_price_refresh, args=("startup catch-up",),
+        name="asset-price-kickstart", daemon=True,
+    ).start()
+
+
 def _fire_fx_sync() -> None:
     """Daily ECB FX sync — keeps EVERY fetchable currency's `fx_rate` current.
     The daily pipeline only syncs the currencies the held strategies actually
@@ -542,11 +657,17 @@ def _fire_airs_vermogen() -> None:
     """APScheduler callable for the daily AIRS Vermogensoverzicht refresh. Runs
     on its own daemon thread so the long Playwright scrape doesn't block the
     scheduler worker. Re-discovers the live portfolio list + stores each
-    portfolio's holdings snapshot (see `airs_vermogen`)."""
+    portfolio's holdings snapshot (see `airs_vermogen`).
+
+    ⚠ IT FORCES. The manual button is incremental — it skips an account fully scanned in the last
+    `AIRS_FRESH_HOURS` — but this is the once-a-day pass that has to actually pick up the day's
+    valuation. Somebody pressing Refresh all at 08:00, before AIRS had valued the books, would
+    otherwise make the 11:00 job skip the whole fleet and the new valuation would land a day late.
+    """
     def _run():
         try:
             from airs_vermogen import run_airs_vermogen_refresh_sync  # noqa: PLC0415
-            run_airs_vermogen_refresh_sync(triggered_by="auto")
+            run_airs_vermogen_refresh_sync(triggered_by="auto", force=True)
         except Exception as e:
             _log.exception(
                 "[scheduler] airs_vermogen refresh failed: %s: %s", type(e).__name__, e,
@@ -672,6 +793,43 @@ def register_scheduler(app) -> None:
             coalesce=True,
             misfire_grace_time=3600,
         )
+        # Daily Yahoo price refresh for the HELD instruments — the `asset_price` twin of the
+        # 05:00 GuruFocus price update, which `asset_price` never had (it aged silently: 197 of
+        # 223 held instruments were stale, and a portfolio whose window opened after its
+        # holdings' last close rendered blank rows).
+        #
+        # 06:00 UTC: every market's previous close is long settled, and it is AFTER the 05:00
+        # daily sequence rather than racing it. `max_instances=1` so a slow run (≈220 gap fetches
+        # at ~1.5s each) can never overlap the next day's tick, and the job itself stands down
+        # entirely while the ingest queue is resolving — see `_fire_asset_price_refresh`.
+        sched.add_job(
+            _fire_asset_price_refresh,
+            CronTrigger(day_of_week="mon-sun", hour=6, minute=0, timezone="UTC"),
+            id="asset_price_refresh",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+            misfire_grace_time=3600,
+        )
+        # Asset-pipeline ingest-queue worker — OPT-IN (ASSET_QUEUE_INPROCESS=1).
+        # By default the worker is the STANDALONE `scripts/asset_queue_worker.py`
+        # process, which survives backend restarts (dev --reload / redeploys) and
+        # keeps draining. Run EXACTLY ONE worker — this in-process tick OR the
+        # standalone script, never both (two would compete for the Yahoo throttle
+        # and re-introduce throttle-corrupted resolutions). When enabled: every
+        # 20s drain one slice; max_instances=1 + coalesce run slices back-to-back
+        # without overlap; empty queue → instant no-op.
+        if os.environ.get("ASSET_QUEUE_INPROCESS", "").lower() in ("1", "true", "yes"):
+            sched.add_job(
+                _fire_asset_ingest_queue,
+                IntervalTrigger(seconds=20),
+                id="asset_ingest_queue",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=30,
+            )
+            _log.info("[scheduler] ASSET_QUEUE_INPROCESS set — in-process ingest-queue worker enabled")
         sched.start()
         _scheduler = sched
         # Reap any orphan `ingest_run` rows left in `status='running'`
@@ -698,6 +856,18 @@ def register_scheduler(app) -> None:
         except Exception as e:
             _log.warning(
                 "[scheduler] smart-kickstart wrapper failed: %s: %s",
+                type(e).__name__, e,
+            )
+        # ...and the same catch-up for `asset_price` (Yahoo, the /portfolios holdings). The 06:00
+        # tick keeps them current going FORWARD; it cannot repair the past. A backend down over a
+        # weekend, or a fresh deploy, comes up with stale held prices and would serve blank rows
+        # on /portfolios until the next morning. Detects first (a few queries), so the constant
+        # restarts of `uvicorn --reload` are a near-free no-op rather than 220 Yahoo calls.
+        try:
+            _maybe_kickstart_asset_prices()
+        except Exception as e:
+            _log.warning(
+                "[scheduler] asset-price kickstart wrapper failed: %s: %s",
                 type(e).__name__, e,
             )
         next_runs = {j.id: str(j.next_run_time) for j in sched.get_jobs()}

@@ -249,3 +249,149 @@ async def get_benchmark_prices(benchmark_id: int, start_date: str = "", end_date
         offset += page_size
 
     return rows
+
+
+# ── Reconstructed cap-weighted index (currently: the S&P 500) ──────────────────────────
+
+
+class IndexMember(BaseModel):
+    company_id: int
+    company_name: str | None = None
+    ticker: str | None = None
+    isin: str | None = None
+    currency: str | None = None
+    weight_pct: float                 # as of the START of the year — see `_benchmark_index`
+    return_local_pct: float
+    return_eur_pct: float
+    market_cap_eur: float
+    start_date: str
+    start_price: float
+    end_date: str
+    end_price: float
+
+
+class SplitAdjustment(BaseModel):
+    """A price series we had to rescale. Surfaced, never applied silently."""
+
+    company_name: str | None = None
+    ticker: str | None = None
+    factor: float
+
+
+class ReconstructedIndex(BaseModel):
+    """A cap-weighted index rebuilt from our own membership + prices + FX.
+
+    Validated against the real thing: for 2026 YTD this returns +9.10% in USD against SPY's
+    +9.02% — 8bp apart. It is NOT a replacement for SPY (which is exact); it exists so a
+    benchmark is computed the same way a portfolio is, and is therefore comparable to one.
+    """
+
+    label: str
+    year: int
+    member_count: int
+    priced_of_universe: str | None = None
+    start_date: str | None = None
+    as_of: str | None = None
+    ytd_eur_pct: float | None = None
+    ytd_local_pct: float | None = None
+    members: list[IndexMember] = []
+    split_adjusted: list[SplitAdjustment] = []
+    note: str | None = None
+
+
+@router.get("/api/benchmarks/index/{label}", response_model=ReconstructedIndex)
+async def benchmark_reconstructed_index(label: str, year: int | None = None):
+    """Cap-weighted YTD for a reconstructed index (`SP500`, `ACWI`, `AEX`), in EUR and local.
+
+    Weights are as of the START of the period. Weighting by TODAY's market cap would be
+    look-ahead bias — measured, it turns the S&P's +9.10% into +21.70%.
+
+    ⚠ THE ASSET PATH, NOT THE GURUFOCUS ONE (2026-07-16). This panel's whole claim is that its
+    numbers are comparable to the portfolios beside them — and those are priced from `asset_price`
+    (yfinance). Pricing the benchmark from GuruFocus instead compared two price universes and
+    called the difference alpha. It was also structurally unable to price two of the three
+    indices: GuruFocus is blind to 31.96% of the AEX (Shell, Unilever, RELX are LSE rows with no
+    GuruFocus market cap) and to ~7.8% of ACWI, and a cap-weighted rebuild redistributes that
+    weight rather than losing it — the GuruFocus AEX printed +14.80% against the true +12.12%,
+    and looked entirely plausible doing it. `_benchmark_index.compute_index` remains as the SPY
+    cross-check (+9.05% vs SPY's +9.02%), which validates the METHOD; it is not the basis.
+    """
+    from routers._asset_benchmark import compute_index_async  # noqa: PLC0415
+
+    return await compute_index_async(label, year)
+
+
+class BenchmarkFillResult(BaseModel):
+    label: str
+    universe_members: int = 0
+    usable: int = 0
+    needs_resolve: int = 0
+    needs_cap: int = 0
+    no_isin: int = 0
+    no_isin_names: list[str] = []
+    queued: int = 0
+    skipped_existing: int = 0
+    capped: int = 0
+    # Prices re-fetched this press, and how many constituents still have no mark in the window.
+    # `price_pending` is not a failure: one press re-prices a bounded slice on purpose, and the
+    # 06:00 asset-price tick clears the rest unattended.
+    repriced: int = 0
+    price_pending: int = 0
+    price_failed: int = 0
+    # True when the label had NO universe row and its template was run to create one — AEX.
+    universe_built: bool = False
+    note: str | None = None
+
+
+@router.post("/api/benchmarks/index/{label}/fill", response_model=BenchmarkFillResult)
+async def benchmark_fill(label: str):
+    """Close the asset-world gap behind a reconstructed index, and report what remains.
+
+    A benchmark reads 0 members when its constituents are not in the asset grid — the universe is
+    usually fine. This enqueues the unresolved ISINs for the single paced ingest worker and writes
+    market caps for the ones already resolved (a batched quote, ~1 call per 100 symbols).
+
+    ⚠ IT DOES NOT RESOLVE INLINE, and the response is therefore not a "done": Yahoo returns an
+    EMPTY result to an overloaded caller instead of a 429, so a second concurrent consumer is how
+    a constituent lands on a thin foreign listing. The counts say what was handed to the worker.
+    """
+    from routers._benchmark_fill import fill_benchmark  # noqa: PLC0415
+
+    return await asyncio.to_thread(fill_benchmark, label)
+
+
+class BenchmarkResetResult(BaseModel):
+    label: str
+    deleted: bool = False
+    members_deleted: int = 0
+    # The other two thirds of Fill, undone so they can be watched running.
+    caps_cleared: int = 0
+    price_rows_deleted: int = 0
+    # The date the price deletion starts from — the window's lookback, not 1 January: the opening
+    # mark is the last close ON OR BEFORE the anchor, so 31 December is what a YTD actually opens at.
+    prices_from: str | None = None
+    # True when the deleted universe was template-managed — i.e. Fill will rebuild it.
+    had_template: bool = False
+    note: str | None = None
+
+
+@router.delete("/api/benchmarks/index/{label}", response_model=BenchmarkResetResult)
+async def benchmark_reset(label: str):
+    """Delete the LIVE universe behind one reconstructed benchmark, so Fill can rebuild it.
+
+    The inverse of Fill's first step, for watching the whole path run: the benchmark drops to 0
+    members and the next Fill re-runs the label's template, re-enqueues what needs resolving and
+    re-caps what is already priced.
+
+    ⚠ MEMBERSHIP ONLY. Prices, the asset grid and market caps are shared with every other surface
+    and expensive to rebuild — see `reset_benchmark`, which also refuses a frozen snapshot, a
+    universe with derived children, and any label Fill has no template to rebuild (SP500).
+
+    422 carries the refusal's reason; it is always a sentence about this label, not a generic error.
+    """
+    from routers._benchmark_fill import reset_benchmark  # noqa: PLC0415
+
+    try:
+        return await asyncio.to_thread(reset_benchmark, label)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e

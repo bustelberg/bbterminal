@@ -76,7 +76,7 @@ export default function SavedPortfoliosSection({
                         <th className="text-right font-medium py-1.5 px-2">Target</th>
                         <th className="text-right font-medium py-1.5 px-2">Current</th>
                         <th className="text-right font-medium py-1.5 px-2">Band</th>
-                        <th className="text-right font-medium py-1.5 px-2" title="The sleeve's own return over the since-inception window — cross-check against its price move">Return ↗</th>
+                        <th className="text-right font-medium py-1.5 px-2" title="This holding's own return over the since-inception window — cross-check against its price move">Return ↗</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -98,7 +98,7 @@ export default function SavedPortfoliosSection({
                   </table>
                   <p className="text-xs text-fg-subtle mt-2">
                     Weights drifted from the last rebalance through {state.as_of ?? 'the latest data'}; a holding is flagged ⚠ when outside its band.
-                    <strong className="text-fg-soft"> Return ↗</strong> is each sleeve&apos;s own gain over the since-inception window — cross-check it against the strategy / ETF&apos;s actual price move to verify the prices used.
+                    <strong className="text-fg-soft"> Return ↗</strong>{' '}is each sleeve&apos;s own gain over the since-inception window — cross-check it against the strategy / ETF&apos;s actual price move to verify the prices used.
                   </p>
                 </div>
               )}

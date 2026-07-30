@@ -605,7 +605,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                               Total<CellInfoTip>Weighted combination of the category scores. Selection ranks by this.</CellInfoTip>
                             </th>
                             <th className="text-right py-1 font-medium pl-4">
-                              Init wt<CellInfoTip>Target portfolio weight at the rebalance (period start). Plain momentum picks are equal-weighted; a blended (diversified) strategy scales the stock sleeve and adds the ETF weights (so e.g. ~3.3% per stock + 20% per ETF).</CellInfoTip>
+                              Init wt<CellInfoTip>Target portfolio weight at the rebalance (period start). Plain momentum picks are equal-weighted; a blended (diversified) strategy scales the stock allocation and adds the ETF weights (so e.g. ~3.3% per stock + 20% per ETF).</CellInfoTip>
                             </th>
                             <th className="text-right py-1 font-medium">
                               Cur wt<CellInfoTip>Current (drifted) weight = the initial weight grown by this holding&apos;s EUR return over the period (End € ÷ Start €), renormalized so the book sums to 100%. Winners drift above their target, losers below — this is what you&apos;d trim/top-up at the next rebalance.</CellInfoTip>

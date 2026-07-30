@@ -11,9 +11,26 @@ from __future__ import annotations
 import re
 import statistics as st
 import time
-from datetime import date, datetime, timezone
+import unicodedata
+from datetime import date
 
 from . import ibkr, openfigi, yahoo
+
+try:
+    from rapidfuzz import fuzz as _fuzz
+except Exception:  # noqa: BLE001
+    _fuzz = None
+
+
+_NAME_MATCH = 80  # rapidfuzz token_set_ratio floor to treat two names as the SAME company
+
+
+def _name_score(a: str | None, b: str | None) -> float:
+    """rapidfuzz token_set_ratio of two company names — 0 when either is missing
+    or rapidfuzz is unavailable (→ no anchoring, keep the liquidity pick)."""
+    if not a or not b or _fuzz is None:
+        return 0.0
+    return _fuzz.token_set_ratio(a.lower(), b.lower())
 
 ISIN_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
 MIN_YEARS = 3.0
@@ -23,6 +40,65 @@ _STOP = {
     "the", "inc", "plc", "ag", "sa", "co", "ltd", "group", "holdings", "corp",
     "nv", "oyj", "asa", "ab", "spa", "class", "ord", "shares", "limited", "company",
 }
+
+# When comparing a STORED analysis name to the OpenFIGI name, also strip
+# depositary/listing markers — OpenFIGI often names a US ISIN as its ADR
+# ("TOYOTA MOTOR CORP -SPON ADR") while yfinance resolved the home line
+# ("Toyota Motor Corporation"). Same company; only these suffixes differ.
+_DEPOSITARY_STOP = _STOP | {
+    "corporation", "incorporated", "adr", "ads", "gdr", "sdr", "spon", "sponsored",
+    "unsponsored", "sp", "reg", "repr", "representing", "depositary", "depository",
+    "receipt", "receipts", "series", "ser", "cl", "new", "old", "common", "stock",
+    "units", "unit", "npv", "and", "se", "warrants", "warrant", "rights", "right",
+    "pref", "preferred", "grp", "sponsered", "part", "cer", "prf",
+    # common abbreviation ↔ word pairs (strip BOTH sides so they can't disagree)
+    "international", "intl", "technology", "technologies", "tech", "reit",
+    "services", "service", "serv", "svcs", "svc", "national", "natl", "companies",
+    "cos", "mfg", "manufacturing", "industries", "hldgs", "hldg", "hold",
+    "publ", "shs", "shrs", "spons", "spns", "invt", "invts", "investment",
+    "investments", "mgmt", "management", "info", "informat", "information",
+    # non-english corporate forms
+    "sab", "sociedad", "anonima", "societe", "societa", "aktiengesellschaft",
+    "kgaa", "bhd", "berhad", "tbk", "pjsc", "ojsc", "pcl", "aps", "gmbh",
+}
+
+
+def _strip_accents(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+
+
+def _company_root(name: str | None) -> str:
+    """Reduce a name to comparable core tokens — accents, punctuation, corporate
+    forms, share-class + depositary (ADR/GDR/SDR) markers, common abbreviations
+    and single letters removed. So 'Toyota Motor Corporation' and 'TOYOTA MOTOR
+    CORP -SPON ADR' both reduce to 'toyota motor', and 'Schrödinger' matches
+    'SCHRODINGER INC' — but 'Qualcomm' and 'Cytokinetics' stay distinct."""
+    if not name:
+        return ""
+    s = re.sub(r"[^a-z0-9 ]", " ", _strip_accents(name.lower()))
+    return " ".join(t for t in s.split() if len(t) > 1 and t not in _DEPOSITARY_STOP)
+
+
+def same_company(stored_name: str | None, figi_name: str | None) -> bool:
+    """True when the stored analysis name and OpenFIGI name are the SAME company
+    after stripping depositary/share-class/corp-form noise. Empty roots → True
+    (can't judge — don't flag the mapping as wrong)."""
+    a, b = _company_root(stored_name), _company_root(figi_name)
+    if not a or not b:
+        return True
+    return _name_score(a, b) >= _NAME_MATCH
+
+
+def identity_status(resolved_name: str | None, figi_name: str | None) -> str:
+    """The OpenFIGI CONFIRMATION verdict for a resolved instrument:
+      'verified' — the independent OpenFIGI name agrees with the resolved
+                   (yfinance) name → we priced the right security;
+      'mismatch' — OpenFIGI names a DIFFERENT company → likely wrong resolution;
+      'unknown'  — no OpenFIGI name (or no resolved name) to compare.
+    Reuses `same_company` so it matches the requeue-suspects detector exactly."""
+    if not figi_name or not resolved_name:
+        return "unknown"
+    return "verified" if same_company(resolved_name, figi_name) else "mismatch"
 
 
 def detect_id_type(identifier: str) -> str:
@@ -59,18 +135,41 @@ def _asset_class(quote_type: str | None, symbol: str) -> str:
 # literally named "Barrick Gold" is never mis-mapped.
 _UNDERLYING: list[tuple[tuple[str, ...], str, str, list[str]]] = [
     (("bitcoin cash",), "Bitcoin Cash", "crypto", ["BCH-USD"]),
-    (("bitcoin", "btc", "xbt"), "Bitcoin", "crypto", ["BTC-USD"]),
+    (("bitcoin", "btc"), "Bitcoin", "crypto", ["BTC-USD"]),  # NOT "xbt" — it's the
+    # "XBT Provider" brand prefix on BOTH their Bitcoin AND Ether trackers, so it
+    # mis-mapped "XBT … Ether Tracker" -> BTC. The real BTC name always says bitcoin/btc.
     (("ethereum", "ether"), "Ethereum", "crypto", ["ETH-USD"]),
     (("solana",), "Solana", "crypto", ["SOL-USD"]),
     (("ripple", "xrp"), "XRP", "crypto", ["XRP-USD"]),
     (("litecoin",), "Litecoin", "crypto", ["LTC-USD"]),
+    # Long-tail single-coin ETPs -> their yfinance <COIN>-USD spot series. Keyed on
+    # the FULL coin name (unambiguous; short tickers like COMP/DOT/UNI would false-
+    # match equities). The wrapper gate + name guard keep real equities out.
+    (("cardano",), "Cardano", "crypto", ["ADA-USD"]),
+    (("polkadot",), "Polkadot", "crypto", ["DOT-USD"]),
+    (("avalanche",), "Avalanche", "crypto", ["AVAX-USD"]),
+    (("chainlink",), "Chainlink", "crypto", ["LINK-USD"]),
+    (("polygon", "matic"), "Polygon", "crypto", ["POL-USD", "MATIC-USD"]),
+    (("dogecoin",), "Dogecoin", "crypto", ["DOGE-USD"]),
+    (("uniswap",), "Uniswap", "crypto", ["UNI-USD"]),
+    (("algorand",), "Algorand", "crypto", ["ALGO-USD"]),
+    (("cosmos",), "Cosmos", "crypto", ["ATOM-USD"]),
+    (("tezos",), "Tezos", "crypto", ["XTZ-USD"]),
+    (("chiliz",), "Chiliz", "crypto", ["CHZ-USD"]),
+    (("aave",), "Aave", "crypto", ["AAVE-USD"]),
+    (("stellar",), "Stellar", "crypto", ["XLM-USD"]),
+    (("filecoin",), "Filecoin", "crypto", ["FIL-USD"]),
+    (("compound",), "Compound", "crypto", ["COMP-USD"]),
+    (("decentraland",), "Decentraland", "crypto", ["MANA-USD"]),
+    (("apecoin",), "ApeCoin", "crypto", ["APE-USD"]),
+    (("axie",), "Axie Infinity", "crypto", ["AXS-USD"]),
     (("gold",), "Gold", "commodity", ["GLD", "IAU", "GC=F"]),
     (("silver",), "Silver", "commodity", ["SLV", "SI=F"]),
     (("platinum",), "Platinum", "commodity", ["PPLT", "PL=F"]),
     (("palladium",), "Palladium", "commodity", ["PALL", "PA=F"]),
     (("natural gas",), "Natural Gas", "commodity", ["UNG", "NG=F"]),
     (("brent",), "Brent Crude", "commodity", ["BNO", "BZ=F"]),
-    (("crude", "wti"), "Crude Oil (WTI)", "commodity", ["USO", "CL=F"]),
+    (("crude", "wti", "oil"), "Crude Oil (WTI)", "commodity", ["USO", "CL=F"]),
     (("copper",), "Copper", "commodity", ["CPER", "HG=F"]),
 ]
 
@@ -91,8 +190,15 @@ _EQUITY_HINT = re.compile(
     r"\b(mining|miner|miners|producers|resources|corp|corporation|company|companies|holdings|ltd|plc|inc|ag|sa|nv)\b",
     re.I,
 )
-# Baskets of commodity EQUITIES (miners/producers) are NOT the commodity itself.
-_BASKET_RE = re.compile(r"\b(miner|miners|mining|producers|equities|companies)\b", re.I)
+# Baskets of commodity/crypto EQUITIES (miners / exploration / production / oil
+# services / sector indices / equity blends) are NOT the commodity itself — never
+# swap them to the underlying. STEMS so every form is caught: explor(ation/ers),
+# produc(tion/ers), refin(ing/ers), equit(y/ies), compan(y/ies).
+_BASKET_RE = re.compile(
+    r"(miner|mining|explor|produc|refin|service|equipment|equit|compan|"
+    r"\bindex\b|\bsector\b|equal weight)",
+    re.I,
+)
 
 
 def _looks_like_wrapper(name: str | None, asset_class: str) -> bool:
@@ -165,7 +271,7 @@ def _score(symbol: str) -> dict | None:
     ]
     med = st.median(vals) if vals else 0.0
     ft = meta.get("firstTradeDate")
-    start = datetime.fromtimestamp(ft, timezone.utc).date().isoformat() if ft else None
+    start = yahoo.utc_dt(ft).date().isoformat() if ft else None
     return {
         "symbol": symbol,
         "currency": ccy,
@@ -196,7 +302,7 @@ def _bars(result: dict | None) -> list[dict]:
         if g(c, i) is None or not yahoo.is_closed_bar(ts[i]):  # skip null + today's partial
             continue
         out.append({
-            "date": datetime.fromtimestamp(ts[i], timezone.utc).date().isoformat(),
+            "date": yahoo.utc_dt(ts[i]).date().isoformat(),
             "open": g(o, i), "high": g(h, i), "low": g(low, i), "close": g(c, i), "volume": g(v, i),
         })
     return out
@@ -278,16 +384,75 @@ def _identity_result(identifier: str, idt: str, name: str | None, asset_class: s
     }
 
 
-def resolve(identifier: str, id_type: str | None = None, with_candles: bool = True) -> dict:
+def resolve_analysis_instrument(chosen: dict, asset_class: str) -> dict:
+    """Given the resolved EXECUTION listing (`chosen`), decide the ANALYSIS
+    instrument. For a single-underlying crypto/commodity WRAPPER (a BTC/ETH/gold
+    ETP) swap the analysis series to the underlying's long history (BTC-USD /
+    ETH-USD / GLD …), keeping the ETP as execution; a leveraged/inverse product
+    backtests on ITSELF (different return profile). Returns the execution/analysis
+    split + flags. Shared by `resolve()` and `fast_resolve.fast_resolve()` so both
+    paths map wrappers identically."""
+    execution = chosen
+    analysis_note: str | None = None
+    is_leveraged = False
+    underlying: tuple[str, str, list[str]] | None = None
+    if _looks_like_wrapper(chosen.get("name"), asset_class):
+        if _is_leveraged(chosen.get("name")):
+            is_leveraged = True  # leveraged/inverse — backtest on ITSELF, not the underlying
+            analysis_note = (
+                f"{execution['symbol']} looks leveraged/inverse — NOT mapped to a plain "
+                "underlying (different return profile). Backtested on itself (short history)."
+            )
+        else:
+            underlying = _detect_underlying(chosen.get("name"))
+    picked = _pick_analysis(underlying[2]) if underlying else None
+    if underlying and picked:
+        u_label, u_aclass, _cands = underlying
+        analysis = picked
+        analysis_asset_class = u_aclass  # the TRUE asset (commodity/crypto), not the proxy's 'etf'
+        analysis_note = (
+            f"Input resolves to a {u_label} ETP ({execution['symbol']}); backtest on "
+            f"{picked['symbol']} (since {picked.get('first_date')}, {picked.get('years')}y, "
+            "real daily volume) — chosen over lower-quality alternatives (e.g. continuous "
+            "futures with settlement-only / zero-volume early history). The ETP is the "
+            "execution instrument."
+        )
+    else:
+        analysis = chosen
+        analysis_asset_class = asset_class
+    return {
+        "execution": execution, "analysis": analysis,
+        "analysis_asset_class": analysis_asset_class,
+        "wrapper": "etf" if (underlying and picked) else None,
+        "is_leveraged": is_leveraged, "underlying": underlying,
+        "analysis_note": analysis_note,
+    }
+
+
+def resolve(identifier: str, id_type: str | None = None, with_candles: bool = True,
+            figi_hint: dict | None = None) -> dict:
     identifier = identifier.strip()
     idt = id_type or detect_id_type(identifier)
     sector: str | None = None
 
     if idt == "isin":
         isin = identifier.upper()
+        # OpenFIGI identity for this ISIN (passed in by the batch, else looked up
+        # here) — authoritative name + ticker(s). Used to ANCHOR the pick so
+        # Yahoo's fuzzy ISIN search can't hand us a more-liquid but WRONG company.
+        if figi_hint is None:
+            figi_hint = openfigi.extract_columns(openfigi.lookup_isins([isin]).get(isin, []))
+        figi_name = (figi_hint or {}).get("openfigi_name")
+        figi_tickers = {
+            t.strip().upper()
+            for t in ((figi_hint or {}).get("openfigi_ticker") or "").split(",") if t.strip()
+        }
         quotes = yahoo.search(isin)
-        name_hint = next((q.get("shortname") or q.get("longname") for q in quotes
-                          if q.get("shortname") or q.get("longname")), None)
+        # Prefer the OpenFIGI name as the search/guard hint (authoritative) over
+        # Yahoo's first ISIN-search hit, which may itself be a false match.
+        name_hint = figi_name or next(
+            (q.get("shortname") or q.get("longname") for q in quotes
+             if q.get("shortname") or q.get("longname")), None)
         if name_hint:  # broaden with a name search — catches cross-listings ISIN search misses
             quotes = quotes + yahoo.search(name_hint)
         scored, sector = _rank_candidates(quotes, name_hint)
@@ -319,12 +484,43 @@ def resolve(identifier: str, id_type: str | None = None, with_candles: bool = Tr
 
         elig = [s for s in scored if s["years"] >= MIN_YEARS] or scored
         elig.sort(key=lambda s: (-s["med_adv_eur"], s["first_date"] or "9999"))
+        # Anchor to the OpenFIGI NAME: KEEP the most-liquid listing unless its name
+        # is a different company than the ISIN's OpenFIGI name (a Yahoo ISIN-search
+        # false match — SkyWater→Micron, several ES ISINs→GGAL). Only then swap to
+        # the most-liquid candidate whose NAME actually matches OpenFIGI. Name, not
+        # ticker: Yahoo/OpenFIGI ticker conventions differ per exchange (SGX F34 vs
+        # WIL), so a ticker anchor wrongly downgrades correct cross-listings.
         chosen = elig[0]
+        anchored = False
+        # `same_company`, NOT a raw `_name_score` floor. `token_set_ratio` scores
+        # "NVIDIA Corporation" vs OpenFIGI's "NVIDIA CORP" at 75.9 — under the 80
+        # floor — so the anchor concluded the most-liquid NVDA was a DIFFERENT
+        # company and swapped in the Stuttgart line (€1.6M ADV vs €28,076M). Same
+        # for "Intel Corporation"/"INTEL CORP" (74.1) and "Eli Lilly and
+        # Company"/"LILLY(ELI) & CO" (50.0). `same_company` strips corporate forms
+        # first, so those match while Micron/SkyWater still doesn't — and it is
+        # what `identity_status` already uses, so the two can no longer disagree.
+        if figi_name and not same_company(chosen.get("name"), figi_name):
+            better = [s for s in elig if same_company(s.get("name"), figi_name)]
+            if better:
+                # Right company established by NAME; among ITS listings prefer the
+                # one whose ticker matches OpenFIGI (usually the primary), else the
+                # most liquid.
+                tmatch = [s for s in better if s["symbol"].split(".")[0].upper() in figi_tickers]
+                chosen = (tmatch or better)[0]
+                anchored = True
         for s in scored:
             s["eligible"] = s["years"] >= MIN_YEARS
         scored.sort(key=lambda s: -s["med_adv_eur"])
         runner = next((s for s in scored if s["symbol"] != chosen["symbol"]), None)
-        reason = _reason(chosen, runner, scored)
+        if anchored:
+            reason = (
+                f"Picked {chosen['symbol']} ({chosen.get('exchange')}, {chosen.get('currency')}) — its "
+                f"name matches this ISIN's OpenFIGI identity ({figi_name}). The more-liquid "
+                f"{elig[0]['symbol']} is a different company Yahoo's ISIN search false-matched."
+            )
+        else:
+            reason = _reason(chosen, runner, scored)
         asset_class = _asset_class(chosen.get("quote_type"), chosen["symbol"])
         ibkr_res = ibkr.resolve_tradeable_eu(isin, analysis=chosen)
     else:
@@ -342,35 +538,14 @@ def resolve(identifier: str, id_type: str | None = None, with_candles: bool = Tr
     # (EXECUTION) listing. If it's a single-underlying WRAPPER (a crypto/
     # commodity ETP), the thing to BACKTEST is the underlying's long series —
     # e.g. a Bitcoin ETF (short history) → BTC-USD (since 2014). Swap the
-    # ANALYSIS instrument to it; keep the ETF as execution.
-    execution = chosen
-    analysis_note: str | None = None
-    is_leveraged = False
-    underlying: tuple[str, str, list[str]] | None = None
-    if _looks_like_wrapper(chosen.get("name"), asset_class):
-        if _is_leveraged(chosen.get("name")):
-            is_leveraged = True  # leveraged/inverse — backtest on ITSELF, not the underlying
-            analysis_note = (
-                f"{execution['symbol']} looks leveraged/inverse — NOT mapped to a plain "
-                "underlying (different return profile). Backtested on itself (short history)."
-            )
-        else:
-            underlying = _detect_underlying(chosen.get("name"))
-    picked = _pick_analysis(underlying[2]) if underlying else None
-    if underlying and picked:
-        u_label, u_aclass, _cands = underlying
-        analysis = picked
-        analysis_asset_class = u_aclass  # the TRUE asset (commodity/crypto), not the proxy's 'etf'
-        analysis_note = (
-            f"Input resolves to a {u_label} ETP ({execution['symbol']}); backtest on "
-            f"{picked['symbol']} (since {picked.get('first_date')}, {picked.get('years')}y, "
-            "real daily volume) — chosen over lower-quality alternatives (e.g. continuous "
-            "futures with settlement-only / zero-volume early history). The ETP is the "
-            "execution instrument."
-        )
-    else:
-        analysis = chosen
-        analysis_asset_class = asset_class
+    # ANALYSIS instrument to it; keep the ETF as execution. (Shared helper.)
+    _ai = resolve_analysis_instrument(chosen, asset_class)
+    execution = _ai["execution"]
+    analysis = _ai["analysis"]
+    analysis_asset_class = _ai["analysis_asset_class"]
+    is_leveraged = _ai["is_leveraged"]
+    underlying = _ai["underlying"]
+    analysis_note = _ai["analysis_note"]
 
     candles = _fetch_candles(analysis["symbol"], analysis.get("first_ts")) if with_candles else None
 
@@ -378,7 +553,7 @@ def resolve(identifier: str, id_type: str | None = None, with_candles: bool = Tr
         "input": identifier,
         "id_type": idt,
         "asset_class": analysis_asset_class,   # the TRUE asset (crypto for a BTC ETF)
-        "wrapper": "etf" if (underlying and picked) else None,
+        "wrapper": _ai["wrapper"],
         "is_leveraged": is_leveraged,
         "candidates": scored,
         "execution": execution,                # what you trade (resolved from the ISIN)
@@ -391,3 +566,32 @@ def resolve(identifier: str, id_type: str | None = None, with_candles: bool = Tr
         "candles": candles,                    # candles OF THE ANALYSIS instrument
         "ibkr": ibkr_res,
     }
+
+
+def sector_for(symbol: str, asset_class: str, current: str | None = None) -> str:
+    """The sector to store for `symbol` — Yahoo's, else what the row already had, else the class.
+
+    ⚠ THE ASSET CLASS IS THE LAST RESORT, NOT THE ANSWER. A repoint used to write it
+    unconditionally, which turned 3i Group from "Financials" into "equity" and Samsung from
+    "Technology" into "equity". `asset_grid.sector` is what the portfolio sector breakdown and the
+    Brinson attribution bucket a holding by, so that is not a label change — it moves the holding
+    into a bucket of its own and invents an allocation decision the model never made.
+
+    `current` is the row's existing sector, kept when Yahoo has none to offer (an ETF, or a
+    throttled profile call): losing a good classification because a lookup failed is the same bug
+    in a quieter form.
+    """
+    from . import yahoo  # noqa: PLC0415
+
+    try:
+        prof = (yahoo.asset_profile([symbol]) or {}).get(symbol) or {}
+        found = prof.get("sector")
+    except Exception:  # noqa: BLE001 — a failed lookup must not erase what we already knew
+        found = None
+    if found:
+        return found
+    # ⚠ Do not carry a previously-clobbered value forward: "equity"/"etf" IS the class, so treating
+    # it as a sector would make the old bug self-perpetuating through every future repoint.
+    if current and current.lower() not in {asset_class.lower(), "equity", "etf", "fund"}:
+        return current
+    return asset_class

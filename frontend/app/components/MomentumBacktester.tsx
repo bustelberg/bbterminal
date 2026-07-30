@@ -563,7 +563,7 @@ export default function MomentumBacktester() {
                 <div className="text-fg-soft font-medium mb-1">No tunable parameters.</div>
                 Each rebalance period holds every company in the selected universe&apos;s month-snapshot,
                 equal-weighted. Use this as an index-proxy benchmark to compare against the momentum
-                strategy. Only <span className="text-fg-soft">long-only</span> is supported — long-short would need a top/bottom split that doesn&apos;t exist in this mode.
+                strategy. Only <span className="text-fg-soft">long-only</span>{' '}is supported — long-short would need a top/bottom split that doesn&apos;t exist in this mode.
               </div>
             )}
           </div>

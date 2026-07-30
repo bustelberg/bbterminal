@@ -202,12 +202,31 @@ def _fetch_twd_latest() -> dict | None:
 
 
 def _fetch_twd_history(start_date: str | None = None) -> list[dict]:
-    """Fetch TWD/EUR daily history from Yahoo Finance."""
-    # Yahoo max range for daily data
+    """TWD-per-EUR daily history from Yahoo.
+
+    ⚠⚠ THE PAIR IS `EURTWD=X`, NOT `TWDEUR=X`, AND THE WRONG SIDE FAILS SILENTLY WITH HTTP 200.
+        Yahoo carries deep history only for the conventionally-quoted direction. Measured
+        2026-07-23 over an identical 10-year request:
+
+            TWDEUR=X   200 OK      1 close      (today only)
+            EURTWD=X   200 OK  3,008 closes     2014-12-31 .. today
+
+        No error, no empty body, no 429 — just one row. So `fx_rate` held TWD only from
+        2026-05-27, every TWD holding was unpriceable before that date, and the effect was
+        invisible at the point of failure: a YTD window opening 1 Jan found no rate at or before
+        its anchor, `_eur_series` dropped the whole series, and Taiwan Semiconductor vanished from
+        the Technology bucket of every book holding it — reported as "unpriced", which reads as a
+        missing price series rather than a missing exchange rate.
+
+    ⚠ AND THIS DIRECTION IS NOT INVERTED. `EURTWD=X` already quotes TWD per EUR, which is what
+        `fx_rate.rate` stores. The old code divided because `TWDEUR=X` is the reciprocal; carrying
+        that `1/close` over to this pair would store ~0.027 where 36.8 belongs — a 1,350x error
+        that still looks like a plausible number in a column of exchange rates.
+    """
     start = start_date or "2000-01-01"
     period1 = int(datetime.strptime(start, "%Y-%m-%d").timestamp())
     period2 = int(datetime.now().timestamp())
-    url = f"{_YAHOO_BASE}/TWDEUR=X?period1={period1}&period2={period2}&interval=1d"
+    url = f"{_YAHOO_BASE}/EURTWD=X?period1={period1}&period2={period2}&interval=1d"
     try:
         resp = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
@@ -219,7 +238,7 @@ def _fetch_twd_history(start_date: str | None = None) -> list[dict]:
         for ts, close in zip(timestamps, closes):
             if close is not None and close > 0:
                 dt = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
-                results.append({"date": dt, "rate": round(1.0 / close, 4)})
+                results.append({"date": dt, "rate": round(close, 4)})
         return sorted(results, key=lambda r: r["date"])
     except Exception as e:
         log.warning("Failed to fetch TWD history from Yahoo: %s", e)

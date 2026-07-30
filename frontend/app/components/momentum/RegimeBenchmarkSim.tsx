@@ -163,7 +163,7 @@ export default function RegimeBenchmarkSim({
       bodyClassName="px-5 py-4 space-y-4"
     >
       <p className="text-[11px] text-fg-faint">
-        Hold <span className="text-fg-soft">{benchName}</span> only in months the filter is at 100% exposure; cash otherwise. Equity curve is log-scaled so early moves read fairly. Per-month return is on hover; per-year below.
+        Hold <span className="text-fg-soft">{benchName}</span>{' '}only in months the filter is at 100% exposure; cash otherwise. Equity curve is log-scaled so early moves read fairly. Per-month return is on hover; per-year below.
       </p>
 
       {benchId == null ? (

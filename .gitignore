@@ -245,3 +245,10 @@ loyalty4g_created.json
 # backend/scripts/scrape_leonteq_logos.py; don't bloat the repo.
 backend/leonteq_logos/
 db-backups/
+
+# lynqs session cookie (secret — captured by scripts/lynqs_login.py)
+lynqs_cookie*.txt
+backend/lynqs_universe*.csv
+
+# GuruFocus API probe cache (scripts/gurufocus_catalog.py) — raw responses, re-fetchable
+backend/.gurufocus_cache/

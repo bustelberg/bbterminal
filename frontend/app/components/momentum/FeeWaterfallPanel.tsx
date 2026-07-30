@@ -53,7 +53,7 @@ export default function FeeWaterfallPanel({
     >
         <p className="text-[11px] text-fg-subtle leading-relaxed">
           Each row is one year <span className="text-fg-soft">in isolation</span>. Off that year&apos;s
-          gross return, <span className="text-fg-soft">Leonteq&apos;s fees</span> come off first
+          gross return, <span className="text-fg-soft">Leonteq&apos;s fees</span>{' '}come off first
           (transaction {cfg.transaction_bps}bps/trade + annual {cfg.leonteq_annual_bps}bps, final year
           pro-rated), then <span className="text-fg-soft">Bustelberg&apos;s</span> (management{' '}
           {cfg.bustelberg_mgmt_bps}bps/mo + {cfg.bustelberg_perf_pct}% of gains above the running high-water

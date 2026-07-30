@@ -786,6 +786,236 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/account-model-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Model Links
+         * @description Which MODEL is each AIRS ACCOUNT running — decided, guessed, or neither.
+         *
+         *     This is the only bridge between the ISINs (models have them, and AIRS values nothing) and
+         *     the money (accounts have it, and carry no ISIN). It cannot be derived: the holdings do not
+         *     identify the model — BUS_FTS_Bepoff/DEF/NEU_AFS hold the IDENTICAL 27 ISINs — so the name
+         *     is the only discriminator, and the name is four conventions and a typo. Hence a guess that
+         *     refuses rather than approximates, plus a stored human decision.
+         */
+        get: operations["airs_account_model_links_api_airs_account_model_links_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/account-model-links/{portefeuille}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Airs Account Model Link
+         * @description Record which model an account runs. `model_portfolio_id: null` means "explicitly none".
+         */
+        put: operations["set_airs_account_model_link_api_airs_account_model_links__portefeuille__put"];
+        post?: never;
+        /**
+         * Clear Airs Account Model Link
+         * @description Forget the decision — the guess speaks again. NOT the same as storing "none".
+         */
+        delete: operations["clear_airs_account_model_link_api_airs_account_model_links__portefeuille__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Accounts
+         * @description The AIRS ACCOUNTS — what the books actually made, on AIRS's own EUR values.
+         *
+         *     A different object from the model portfolios: a model is a COMPOSITION (weights), which AIRS
+         *     has nothing to value — of 58 models and 39 valued accounts, the overlap is zero. The models
+         *     answer "would this strategy work" (and need yfinance, since nothing else can price a set of
+         *     weights); these answer "what did this book make", and AIRS is the system of record.
+         */
+        get: operations["airs_accounts_api_airs_accounts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/holdings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Holdings
+         * @description One account's positions, with AIRS's own EUR values — including the Leonteq certificates
+         *     Yahoo cannot price at all (TOPS_OFF_BEH_DYN: AIRS values 7 of 7 where the yfinance path
+         *     prices 0 of 9).
+         */
+        get: operations["airs_account_holdings_api_airs_accounts__portefeuille__holdings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/isins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Isins
+         * @description An account's holdings with an ISIN attached to each, price-checked.
+         *
+         *     The account has the money and no ISIN; its model has the ISINs and nothing AIRS values.
+         *     This joins them row-by-row inside the pair confirmed on `/account-model-links`, and then
+         *     REFUSES TO TRUST ITS OWN NAME MATCH: every row is checked against the instrument's own
+         *     close, because a name cannot see a share class (IE00BNDS1P30 vs IE00BNDS1Q47 are both
+         *     "Vanguard ESG Global Corporate Bond UCITS ETF EUR Hedged" — Acc and Inc, €4.79 vs €3.99,
+         *     and they compound differently).
+         */
+        get: operations["airs_account_isins_api_airs_accounts__portefeuille__isins_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Airs Set Account Holding Link
+         * @description Point one of an ACCOUNT's holdings at the model portfolio it IS (or, with a null target,
+         *     record that it is not one).
+         *
+         *     ⚠ THE SAME ROW THE MODEL-PORTFOLIO SCREEN WRITES. `airs_model_portfolio_link` is keyed on the
+         *     holding, not on (parent, holding) — one certificate is the same portfolio wherever it is held
+         *     — so this is not a second store for the same fact, and the two screens cannot disagree.
+         */
+        put: operations["airs_set_account_holding_link_api_airs_accounts__portefeuille__link_put"];
+        post?: never;
+        /**
+         * Airs Clear Account Holding Link
+         * @description Forget the human decision for this holding and fall back to the automatic guess. NOT the
+         *     same as linking it to nothing — that is a decision too, and is stored as a null.
+         *
+         *     `portefeuille` names which table the request came from; the row it clears is the same one the
+         *     model-portfolio screen writes, because the link is keyed on the holding.
+         */
+        delete: operations["airs_clear_account_holding_link_api_airs_accounts__portefeuille__link_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/linkable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Linkable Portfolios
+         * @description What an ACCOUNT's holdings may be linked to — the same dropdown the model-portfolio
+         *     positions table uses, and the same gates.
+         *
+         *     ⚠ "SELF" FOR AN ACCOUNT IS THE MODEL IT RUNS. `linkable_context` excludes the owner so a
+         *     portfolio cannot be its own holding; an account is not a model, so its analogue is the model
+         *     it is paired with on `/account-model-links`. A certificate of the account's own strategy is
+         *     exactly the wrapper cycle the gate exists to stop. An unpaired account excludes nothing,
+         *     which is right: we do not know its strategy, so we cannot say which link would be circular.
+         *
+         *     ONE call for the whole table — per row it would be a request per holding.
+         */
+        get: operations["airs_account_linkable_portfolios_api_airs_accounts__portefeuille__linkable_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/asset-bucket-override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Asset Bucket Override
+         * @description Manually pin (or clear) a holding's Class. Keyed by ISIN — a property of the instrument,
+         *     remembered forever, and it beats the calculated `classify_bucket`. A null/empty bucket deletes
+         *     the override (revert to Auto). Returns `{isin, bucket}` (bucket null when cleared).
+         */
+        post: operations["set_asset_bucket_override_api_airs_asset_bucket_override_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/basket/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Basket Analysis
+         * @description Composition + return of an ARBITRARY basket (a single stock, a group) beside the benchmark —
+         *     the same payload as the model-portfolio analysis, so ONE Analyse view serves a stock (a basket
+         *     of one) and a portfolio alike. yfinance only (a basket has no AIRS book).
+         */
+        post: operations["airs_basket_analysis_api_airs_basket_analysis_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/crm-relaties": {
         parameters: {
             query?: never;
@@ -800,6 +1030,354 @@ export interface paths {
          *     (whatever columns the export has). Empty until the daily job has run it.
          */
         get: operations["airs_crm_relaties_api_airs_crm_relaties_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/holding-isin-override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Holding Isin Override
+         * @description Pin (or clear) the ISIN of an account holding the model has no position for.
+         *
+         *     Keyed by holding NAME, so one entry fixes every book that holds it (the measured case appears
+         *     in four). ⚠ It decides IDENTITY ONLY: the pinned ISIN is price-checked like any other, so a
+         *     wrong one comes back `price_mismatch` rather than being trusted because a human typed it.
+         */
+        post: operations["set_holding_isin_override_api_airs_holding_isin_override_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolios Stored
+         * @description The stored portfolios — an instant DB read. The page opens on this; `/scan` is the
+         *     explicit refresh, because re-scraping AirSPMS costs minutes.
+         */
+        get: operations["airs_model_portfolios_stored_api_airs_model_portfolios_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/correlations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Correlations
+         * @description YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models.
+         */
+        get: operations["airs_model_portfolio_correlations_api_airs_model_portfolios_correlations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Performance
+         * @description YTD (EUR) for every stored model portfolio. Read `ModelPortfolioPerformance`'s
+         *     docstring — for half of them the number is a backtest, not a track record.
+         */
+        get: operations["airs_model_portfolio_performance_api_airs_model_portfolios_performance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolios Scan
+         * @description Every model portfolio from Stamgegevens > Onderhoud portefeuilles > Model
+         *     portefeuilles, with its FULL name (the list page truncates them). Persists as it goes.
+         */
+        get: operations["airs_model_portfolios_scan_api_airs_model_portfolios_scan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Analysis
+         * @description Sector / region / currency split of one model portfolio, beside the benchmark's.
+         *
+         *     `weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings
+         *     instead of the model's nominal weights; the benchmark and the classification are unchanged.
+         *
+         *     `source=book` reads the RETURN numbers from AIRS's own book (`cumulatief_rendement` + the
+         *     VOLK per-holding results) instead of the yfinance model reconstruction. The benchmark stays
+         *     yfinance either way, so the two are comparable.
+         *
+         *     `bucket` (an allocation label — Equity, Bonds, …) filters the CHART axes to that asset-class
+         *     sleeve; the `allocation` bar itself stays over the whole model so a reader can re-select.
+         */
+        get: operations["airs_model_portfolio_analysis_api_airs_model_portfolios__portfolio_id__analysis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Attribution
+         * @description Brinson-Fachler attribution of one model against a benchmark, over one window.
+         *
+         *     ⚠ THE DEFAULT IS `book` — THE BEGINWAARDE START WEIGHTS, NOT THE MODEL'S DESIGN PERCENTAGES.
+         *     An attribution weighted by the design % (a flat 5.00% per name) decomposes a portfolio nobody
+         *     held: it assumes every position opened the year at its target weight and never drifted. Only
+         *     the start weights reproduce the book's realised return, because
+         *     `Σ start_i·ret_i / Σ start_i == (Σ cur − Σ start) / Σ start` is an identity — so with any
+         *     other weighting the "excess" being decomposed is not the excess the book earned.
+         *
+         *     `source=model` still gives the yfinance reconstruction of the model's nominal composition,
+         *     which is the right question for an unlinked model — it is just not what the book did.
+         */
+        get: operations["airs_model_portfolio_attribution_api_airs_model_portfolios__portfolio_id__attribution_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/display-name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Airs Set Portfolio Display Name
+         * @description Give a model a human name, or clear it back to AIRS's code with a null/empty value.
+         *
+         *     Admin-only by default: `_USER_WRITE_PREFIXES` is empty, so the auth gate 403s a non-admin
+         *     write to any /api/airs path without this needing its own check.
+         */
+        put: operations["airs_set_portfolio_display_name_api_airs_model_portfolios__portfolio_id__display_name_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Airs Set Portfolio Link
+         * @description Point a holding at the model portfolio it IS (or, with a null target, record that it is
+         *     NOT one). Stored against the HOLDING, not the (parent, holding) pair: 'Star Selection Index'
+         *     is `StarTopSelectie OFF FX` in all 11 models that hold it, and eleven copies of one fact are
+         *     eleven chances to disagree. So this edit takes effect in every portfolio holding it.
+         */
+        put: operations["airs_set_portfolio_link_api_airs_model_portfolios__portfolio_id__link_put"];
+        post?: never;
+        /**
+         * Airs Clear Portfolio Link
+         * @description Forget the human decision for this holding and fall back to the automatic guess. This is
+         *     NOT the same as linking it to nothing — that is a decision too, and is stored as a null.
+         */
+        delete: operations["airs_clear_portfolio_link_api_airs_model_portfolios__portfolio_id__link_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/linkable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Linkable Portfolios
+         * @description What the rows of this portfolio may be linked TO — every model except the ones a link to
+         *     would be a cycle: the portfolio itself (no self-reference), and per row, any portfolio that
+         *     already HOLDS that holding (TOPS_STS_L holds 'Star Selection Index' at 100% — a link there
+         *     walks straight back to the row you started from).
+         *
+         *     ONE call for the whole table. Per row it would be ~30 requests to open one portfolio.
+         */
+        get: operations["airs_linkable_portfolios_api_airs_model_portfolios__portfolio_id__linkable_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/owner-earnings-stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Portfolio Owner Earnings Stream
+         * @description SSE: the whole portfolio's blended owner-earnings (Fundamental → Owner earnings), streaming
+         *     per-holding progress then the result — its holdings run through the same basket blender.
+         */
+        get: operations["airs_portfolio_owner_earnings_stream_api_airs_model_portfolios__portfolio_id__owner_earnings_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Positions
+         * @description One model portfolio's positions — the XLS export that DOES carry an ISIN (the AIRS
+         *     *holdings* sheet does not; it has only a fund name).
+         *
+         *     `source=book` instead returns the paired AIRS BOOK's own holdings, with AIRS's own per-holding
+         *     EUR values (Beginwaarde / Huidige waarde) — a different set of rows than the model composition,
+         *     and never cached (the caching below is for the model XLS path).
+         *
+         *     SERVED FROM OUR CACHE by default: the scan already downloaded this XLS to count the
+         *     portfolio's holdings, so re-scraping AirSPMS on every expand is pure waste (and a
+         *     several-second wait on an authenticated round-trip). Goes to AIRS only when:
+         *       * `refresh=true`   — the user explicitly wants the current truth, or
+         *       * `datum` is given — a historical snapshot, of which we cache only the newest, or
+         *       * we have nothing stored for this portfolio yet.
+         *
+         *     A cached answer carries `cached_at` and the UI says so. A cached response presented as
+         *     fresh is exactly how a stale holding gets trusted.
+         *
+         *     `known_instrument` is NEVER cached — it is a join against `asset_execution`, which grows
+         *     every time we add an instrument, so it is recomputed on every read. Cached, a "not in
+         *     grid" flag would be wrong the moment the grid catches up.
+         */
+        get: operations["airs_model_portfolio_positions_api_airs_model_portfolios__portfolio_id__positions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/price-series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Portfolio Price Series
+         * @description The whole portfolio's price-steadiness series (Fundamental → Stock price) — its holdings as
+         *     one value-weighted EUR index. Same shape as the basket / single-instrument endpoints.
+         */
+        get: operations["airs_portfolio_price_series_api_airs_model_portfolios__portfolio_id__price_series_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/risk-windows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Risk Windows
+         * @description Whole-portfolio returns+risk over 2/4/8-year windows — the Analyse modal's Risk section.
+         *
+         *     The model's holdings priced as ONE value-weighted daily EUR basket (yfinance / `asset_price`),
+         *     so it is the same metric table an instrument or a sleeve gets. yfinance-only by nature (AIRS has
+         *     no daily history); 404 when the portfolio has no priceable holdings.
+         */
+        get: operations["airs_model_portfolio_risk_windows_api_airs_model_portfolios__portfolio_id__risk_windows_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -848,6 +1426,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/portfolios/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Portfolios Overview
+         * @description Every AIRS book in one table: named by the Fixed portfolio it runs, valued by AIRS.
+         *
+         *     The Fixed side has the ISINs and your nickname and AIRS values none of it; the Dynamic side
+         *     has the money and no ISIN. Overlap between the two: zero. This is the pair, composed.
+         */
+        get: operations["airs_portfolios_overview_api_airs_portfolios_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/portfolios/{portefeuille}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Airs Portfolio Delete
+         * @description Delete ONE account's scraped rows — returns, holdings, mutations, model weights, its roster
+         *     entry and its model pairing — so a refresh can be watched rebuilding them.
+         *
+         *     ⚠ NOT THE WAY TO REMOVE AN UNWANTED ACCOUNT. The next scrape re-creates everything it can see,
+         *     so a delete achieves nothing there and costs history; `airs_account_hidden` records that
+         *     decision instead. This exists to prove the refresh refills a gap.
+         *
+         *     ⚠ IT LOSES ANYTHING OLDER THAN 1 JANUARY. A scan fetches `1 Jan → today`, so `airs_performance`
+         *     months before that are gone permanently — the UI says so before asking. CRM records and the
+         *     hidden-account decision are deliberately NOT touched (see `_DELETABLE_TABLES`).
+         */
+        delete: operations["airs_portfolio_delete_api_airs_portfolios__portefeuille__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/portfolios/{portefeuille}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Portfolio Refresh
+         * @description Re-scan ONE portfolio's AIRS Rendement + Vermogensoverzicht and store both — the per-row
+         *     Refresh on the overview table. Awaited (a few seconds: two downloads), so the client can
+         *     re-fetch the row on success. Serialized against the full scan via the module lock; returns
+         *     `{status: busy}` if a fleet refresh is in flight.
+         */
+        post: operations["airs_portfolio_refresh_api_airs_portfolios__portefeuille__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/scan": {
         parameters: {
             query?: never;
@@ -876,10 +1529,14 @@ export interface paths {
         put?: never;
         /**
          * Airs Vermogen Refresh
-         * @description Trigger the per-portfolio Vermogensoverzicht refresh now (the /airs-
-         *     portfolio "Refresh now" button). Re-discovers the live portfolio list, then
-         *     downloads + stores each portfolio's holdings. Runs in a daemon thread and
-         *     returns immediately; poll `/api/airs/vermogen/status` for progress.
+         * @description Trigger the fleet AIRS refresh now (the portfolios page "Refresh all" button). Re-discovers
+         *     the live portfolio list, then downloads + stores the four reports for each account that needs
+         *     them. Runs in a daemon thread and returns immediately; poll `/api/airs/vermogen/status`.
+         *
+         *     ⚠ INCREMENTAL. An account whose last pass got all four reports within `AIRS_FRESH_HOURS` is
+         *     skipped — 44 accounts × 4 downloads takes minutes, and re-fetching a report AIRS has not
+         *     republished buys nothing. Discovery itself is never skipped, so an account that is missing
+         *     (deleted, or new in AIRS) is always scanned. `?force=true` re-scans everything.
          */
         post: operations["airs_vermogen_refresh_api_airs_vermogen_refresh_post"];
         delete?: never;
@@ -931,6 +1588,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/alphalab": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alphalab
+         * @description AlphaLab IC scoreboard over a DEFINED universe of analysis instruments —
+         *     filtered by a liquidity floor (`min_adv_eur`), sector presence, and asset
+         *     class, capped at `max_assets` most-liquid. Each signal's cross-sectional
+         *     Information Coefficient (rank-corr vs next-month return) + t-stat / hit rate /
+         *     quintile spread. `preview=true` returns just the universe (size + sector
+         *     breakdown), cheaply. Cached ~30 min per filter-set (`refresh=true` recomputes).
+         */
+        get: operations["alphalab_api_asset_pipeline_alphalab_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/alphalab/regime": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alphalab Regime
+         * @description Bull/bear × calm/turbulent regime timeline of the equal-weight index, over
+         *     either the ADV/sector filters OR a saved `universe_id`'s members. bull = index ≥
+         *     its trailing 200-day mean; turbulent = 63-day vol above the median of its own
+         *     prior history. `exclude_sectors` drops weak sectors from the benchmark index.
+         *     Returns daily {dates, index, ma200, bull[], turb[], current}. The frontend
+         *     rebases the index to 100 at the window start. Cached ~30 min.
+         */
+        get: operations["alphalab_regime_api_asset_pipeline_alphalab_regime_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/alphalab/regime/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alphalab Regime Stream
+         * @description SSE variant of /alphalab/regime — emits `{stage}` frames as the compute
+         *     progresses (resolve → load prices → build index → score), then one final
+         *     `{stage:"done", result}`. Same 30-min cache as the plain endpoint (a cache
+         *     hit streams straight to `done`). Lets the UI show live stage progress.
+         */
+        get: operations["alphalab_regime_stream_api_asset_pipeline_alphalab_regime_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/alphalab/sectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alphalab Sectors
+         * @description Per-sector equal-weight price index of the universe — one {sector, size,
+         *     dates, index} entry per sector present, each index built over that sector's
+         *     own price history. Feeds the AlphaLab per-sector charts + risk/return tables.
+         *     Cached ~30 min.
+         */
+        get: operations["alphalab_sectors_api_asset_pipeline_alphalab_sectors_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/alphalab/sectors/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alphalab Sectors Stream
+         * @description SSE variant of /alphalab/sectors — emits `{stage}` progress, then one
+         *     `{topic:"sector", result}` frame PER sector as it's computed (largest first),
+         *     so the UI renders sector cards progressively instead of waiting for all of
+         *     them. `start`/`end` bound the window (with warm-up) like the benchmark stream,
+         *     and reuse the same cached price panel (no second COPY). Ends `{topic:"done"}`.
+         */
+        get: operations["alphalab_sectors_stream_api_asset_pipeline_alphalab_sectors_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/assets": {
         parameters: {
             query?: never;
@@ -953,6 +1730,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/assets/{analysis_id}/parquet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Asset Parquet
+         * @description A short-lived signed download URL for the asset's full-OHLCV parquet
+         *     archive (date/open/high/low/close/adj_close/volume/dividends/splits). 404
+         *     when the asset has no stored parquet yet.
+         */
+        get: operations["asset_parquet_api_asset_pipeline_assets__analysis_id__parquet_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/assets/{analysis_id}/series": {
         parameters: {
             query?: never;
@@ -962,15 +1761,484 @@ export interface paths {
         };
         /**
          * Asset Series
-         * @description The stored daily close+volume series for one analysis asset (for the
-         *     catalog chart). Paginated to defeat PostgREST's 1000-row cap, then
-         *     downsampled to ~`max_points` (stride, first+last kept) so a 10k-bar series
-         *     stays light to ship + render.
+         * @description The stored daily series for one analysis asset (for the dual chart).
+         *     Paginated to defeat PostgREST's 1000-row cap. `max_points` is a safety cap
+         *     only (stride downsample, first+last kept); the default (20k) is far above any
+         *     realistic series length (~7k daily bars since the 1998 cutoff, ~4k for 7-day
+         *     crypto), so FULL daily resolution is preserved — Lightweight Charts renders
+         *     the whole series fine. It only ever trips for a pathological outlier.
          *
-         *     `in_eur=true` converts each close to EUR (via the fx_rate table, GBp
-         *     handled); bars with no available FX rate come back with a null close.
+         *     Each bar carries BOTH the native `close`+`volume` (as Yahoo gives it) and
+         *     the EUR-converted `close_eur`+`volume_eur` — price via the fx_rate table
+         *     (minor units like GBp handled), and volume-in-EUR as turnover
+         *     (price×shares×fx) for equities/ETFs or notional×fx for crypto. Bars with
+         *     no FX rate get null *_eur.
          */
         get: operations["asset_series_api_asset_pipeline_assets__analysis_id__series_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/basket/owner-earnings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Basket Owner Earnings
+         * @description A weight-blended owner-earnings index (base 100) for a GROUP, from the holdings that have
+         *     owner earnings — the Fundamental → Owner-earnings tab for a sleeve. `note` states the covered
+         *     weight; `applicable=false` when nothing in the group has owner earnings.
+         */
+        post: operations["basket_owner_earnings_api_asset_pipeline_basket_owner_earnings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/basket/owner-earnings/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Basket Owner Earnings Stream
+         * @description SSE variant of the blended owner-earnings endpoint: emits `{type:'progress',done,total,isin,
+         *     status}` per holding, then `{type:'result',payload:<FinancialSeriesResponse>}`.
+         */
+        post: operations["basket_owner_earnings_stream_api_asset_pipeline_basket_owner_earnings_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/basket/performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Basket Performance
+         * @description Per-window returns + risk for a GROUP of holdings — the same 2/4/8-year metrics as the
+         *     single-instrument endpoint, computed off a value-weighted daily EUR index of the sleeve.
+         *     `coverage_pct` per window says how much of the group's weight is actually represented.
+         */
+        post: operations["basket_performance_api_asset_pipeline_basket_performance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/basket/price-series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Basket Price Series
+         * @description Monthly EUR value index of a GROUP for the price-steadiness chart (Fundamental → Stock
+         *     price). Value-weighted buy-and-hold of the sleeve, base 1.0.
+         */
+        post: operations["basket_price_series_api_asset_pipeline_basket_price_series_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/benchmark-risk/{label}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Risk
+         * @description The benchmark's own 2/4/8-year returns+risk — its investable ETF (SP500→SPY, ACWI→ISAC),
+         *     priced the same daily-EUR way, so the Analyse Risk table can sit a sleeve beside its
+         *     benchmark. 404 for a label with no mapped ETF.
+         */
+        get: operations["benchmark_risk_api_asset_pipeline_benchmark_risk__label__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/dividends/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dividend Coverage
+         * @description `{ISIN: {company_id, exchange, gf_unsubscribed, has_data}}` for every
+         *     company carrying an ISIN (~2.5k). The grid joins this on `isin` client-side —
+         *     an ISIN absent from this map has no GuruFocus company behind it at all, which
+         *     is the majority of the grid (ETFs, crypto, un-ingested equities).
+         */
+        get: operations["dividend_coverage_api_asset_pipeline_dividends_coverage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/dividends/isin/{isin}/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dividend Payments By Isin
+         * @description Payments for an ISIN through whichever bridge reaches it.
+         *
+         *     An ETF has no fiscal-period series (no `financials` blob), so this feed IS its
+         *     dividend history — there is no annual/quarterly cadence to fall back to.
+         */
+        get: operations["dividend_payments_by_isin_api_asset_pipeline_dividends_isin__isin__payments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/dividends/isin/{isin}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dividend Resolve Isin
+         * @description Resolve an ISIN to a GuruFocus listing WITHOUT a `company` row.
+         *
+         *     This is the second bridge, and the only one an ETF can cross: GuruFocus's
+         *     `isin/{ISIN}` -> [{symbol, exchange}] -> the one listing that IS this asset
+         *     (see `_gf_listing.pick_listing` for why choosing is the hard part).
+         *
+         *     ONE API call, cached in `gurufocus_listing` — including the misses, so an
+         *     ISIN GuruFocus can't resolve is never billed twice. `refresh=true` re-asks.
+         *
+         *     A company-backed ISIN short-circuits to its company entry: that bridge is
+         *     richer (fiscal-period series + payments) and costs nothing.
+         */
+        post: operations["dividend_resolve_isin_api_asset_pipeline_dividends_isin__isin__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/dividends/{company_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dividend Series
+         * @description The stored dividends-per-share series. Empty lists when nothing has been
+         *     fetched yet — the caller then POSTs to `/fetch`.
+         */
+        get: operations["dividend_series_api_asset_pipeline_dividends__company_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/dividends/{company_id}/fetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dividend Fetch
+         * @description Lazily pull this company's dividends from GuruFocus and persist ONLY the
+         *     two dividend codes (`metric_codes=DIVIDEND_METRIC_CODES`) — see the module
+         *     docstring for why the unrestricted parse is not an option here.
+         *
+         *     One GuruFocus call, and only when the Storage cache is stale. 403 for an
+         *     exchange outside the subscription, so the UI's UNSUBSCRIBED badge and this
+         *     endpoint agree.
+         */
+        post: operations["dividend_fetch_api_asset_pipeline_dividends__company_id__fetch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/dividends/{company_id}/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dividend Payments
+         * @description Every declared cash payment, with a trailing-twelve-month sum.
+         *
+         *     The fiscal-year series only gains a point when a fiscal year closes, so a
+         *     mid-year hike is invisible for up to a year (NVIDIA: $0.01 → $0.25 with an
+         *     ex-date of 2026-06-04, inside FY2027). This endpoint shows it immediately.
+         *
+         *     One GuruFocus call, and only when the Storage cache is stale for the payment
+         *     frequency. `refresh=true` forces it.
+         */
+        get: operations["dividend_payments_api_asset_pipeline_dividends__company_id__payments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/equity-sectors/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Equity Sector Backfill
+         * @description SSE: fill the REAL Yahoo sector on equities still stuck on the `equity`
+         *     fallback (the fast chart-resolver carries no sector). Fetches v10
+         *     assetProfile per symbol, normalizes onto the canonical taxonomy (Apple →
+         *     Technology, JPMorgan → Financials), and updates `asset_analysis.sector`.
+         *     Emits per-symbol progress + a final summary. Re-runnable; only touches
+         *     equity-class rows on the fallback. Admin-only.
+         */
+        post: operations["equity_sector_backfill_api_asset_pipeline_equity_sectors_backfill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/equity-sectors/stuck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Equity Sector Stuck
+         * @description Equities STILL on the `equity`/NULL sector fallback (Yahoo assetProfile had
+         *     no sector for them — foreign/holding/ADR names, delisted symbols, …). Returns
+         *     `{stuck:[{analysis_id, symbol, name, current_sector, guess}], sectors}` for
+         *     manual assignment (a name-based `guess` pre-fills the dropdown when it's
+         *     confident). Apply via POST /etf-sectors/apply.
+         */
+        get: operations["equity_sector_stuck_api_asset_pipeline_equity_sectors_stuck_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/etf-sectors/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Etf Sector Apply
+         * @description Commit confirmed ETF sector tags: set `asset_analysis.sector` +
+         *     `short_multiplier` per analysis_id. `sector` must be a category or a Short
+         *     sector, or null to CLEAR (reset to the plain asset_class, multiplier→null).
+         *     The multiplier is only kept for a `Short …` sector. Admin-only.
+         */
+        post: operations["etf_sector_apply_api_asset_pipeline_etf_sectors_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/etf-sectors/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Etf Sector Candidates
+         * @description Scan fund-like instruments (ETF/crypto/commodity/fx/index/bond) whose
+         *     sector is still the lazy asset-class fallback ('etf', …) and propose a REAL
+         *     category for each — the sector it'd have if held long (`Equity`, `Real Estate`,
+         *     `Bonds`, `Commodity`, `FX`, `Crypto`, …), or `Short <category>` + a leverage
+         *     multiplier for inverse products. Real Yahoo sectors + already-tagged rows are
+         *     left out. HEURISTIC → for human review: returns the proposal alongside the
+         *     current sector; nothing changes until POST /etf-sectors/apply.
+         */
+        get: operations["etf_sector_candidates_api_asset_pipeline_etf_sectors_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/existing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Existing
+         * @description Fast check: which of these ISINs are ALREADY ingested (status='ok', i.e.
+         *     what a batch would skip)? Returns the matching set + counts so the UI can show
+         *     new-vs-stored the instant a CSV is uploaded.
+         *
+         *     Loads the whole already-stored `ok` ISIN set ONCE and intersects (same as the
+         *     ingest skip). The stored set is small + bounded (~thousands), so this is a
+         *     couple of paginated round-trips regardless of how big the uploaded list is —
+         *     cheaper than a chunked `.in_()` that scales with the (large) input.
+         */
+        post: operations["existing_api_asset_pipeline_existing_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/financials/isin/{isin}/{item}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Financial Line By Isin
+         * @description One income-statement line (MILLIONS, listing currency + EUR) for any grid row.
+         *
+         *     `item` is a key of `_ITEMS` — `revenue`, `gross_profit`. Adding a column is adding an
+         *     entry there; there is no per-item endpoint to write.
+         *
+         *     One GuruFocus call, and only when the Storage cache is stale — shared with the
+         *     earnings pipeline's `financials.json`, so a company already pulled there is FREE, and
+         *     the second line item on the same company is free regardless (one blob, every line).
+         *
+         *     200 with `applicable=false` when the company's industry template has no such line (a
+         *     bank has no gross profit); 404 only when there is genuinely nothing to show.
+         */
+        get: operations["financial_line_by_isin_api_asset_pipeline_financials_isin__isin___item__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/fundamentals/isin/{isin}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fundamentals By Isin
+         * @description Everything the four soundness charts need, in ONE call off ONE cached blob.
+         *
+         *     Price vs fair value · yield · ROIC vs WACC · safety. Free for any company that already has a
+         *     financials column (the blob carries 262 line items; the charts are reads).
+         *
+         *     ⚠ The price line is yfinance daily, in EUR, and never GuruFocus's — /portfolios prices
+         *     everything from `asset_price`, and a second vendor on that page would compare two price
+         *     universes. Both legs of chart 1 are therefore EUR; see `_asset_fundamentals`.
+         */
+        get: operations["fundamentals_by_isin_api_asset_pipeline_fundamentals_isin__isin__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/grid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Grid
+         * @description The flat one-row-per-ISIN grid (from the `asset_grid` view): every input
+         *     ISIN — mapped OR unmapped — with the resolved yfinance-request fields
+         *     (symbol/exchange/currency), history + liquidity, Yahoo price coverage (span +
+         *     bar count), and its resolution status. Offset-paginated to beat PostgREST's
+         *     1000-row cap. Read-only.
+         */
+        get: operations["grid_api_asset_pipeline_grid_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1003,6 +2271,188 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/latest-close/isin/{isin}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Latest Close By Isin
+         * @description The newest yfinance close for one ISIN — native, EUR, and optionally converted into
+         *     `currency` (the caller's reporting currency).
+         *
+         *     404 when the ISIN has no priced Yahoo listing or no stored bars; the caller falls back to
+         *     whatever fiscal-year price it already had and must say that it did.
+         */
+        get: operations["latest_close_by_isin_api_asset_pipeline_latest_close_isin__isin__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/leonteq/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Leonteq Upload
+         * @description Upload a Leonteq (lynqs) CSV/Excel — columns id, ticker, name, productType,
+         *     ric, isin, currency. REPLACES the Leonteq-Verified set with the file's valid
+         *     ISINs + their name/currency/productType (so the grid badges + surfaces them),
+         *     and (unless `enqueue=false`) queues those ISINs for the background ingest so
+         *     unseen ones get resolved + priced. Returns row/member/queue counts.
+         */
+        post: operations["leonteq_upload_api_asset_pipeline_leonteq_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/owner-earnings/isin/{isin}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Owner Earnings By Isin
+         * @description Owner earnings (net income + D&A − capex) over time, in MILLIONS of the listing currency
+         *     and EUR — the one fundamental the /portfolios "Fundamental" panel charts.
+         *
+         *     COMPUTED from three GuruFocus lines across two statements, off the same cached `financials`
+         *     blob every other financial column reads, so it is free for any company already pulled.
+         *
+         *     200 with `applicable=false` when a component line does not exist for this template; 404 when
+         *     the ISIN reaches no financial statements at all (a fund, a dead OTC line).
+         */
+        get: operations["owner_earnings_by_isin_api_asset_pipeline_owner_earnings_isin__isin__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/price-series/isin/{isin}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Price Series By Isin
+         * @description Monthly split-adjusted close (native + EUR) for the price-steadiness chart — yfinance /
+         *     `asset_price` ONLY, the same source /portfolios prices everything else with.
+         *
+         *     404 when the ISIN has no priced Yahoo listing or no stored bars.
+         */
+        get: operations["price_series_by_isin_api_asset_pipeline_price_series_isin__isin__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enqueue
+         * @description Add ISINs to the async ingest queue as `pending` (instant — no Yahoo).
+         *     A single background worker drains them. Skips already-ingested (ok) ISINs.
+         *     Returns {queued, skipped_existing, input}.
+         */
+        post: operations["enqueue_api_asset_pipeline_queue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/queue/process": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue Process
+         * @description Manually run ONE worker slice (the scheduler runs this automatically).
+         *     Handy to kick the queue immediately or in envs with the scheduler disabled.
+         */
+        post: operations["queue_process_api_asset_pipeline_queue_process_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/queue/requeue-suspects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue Requeue Suspects
+         * @description Re-queue wrong-company mis-mapped rows for a clean worker pass (fixes the
+         *     throttle-corrupted re-resolutions).
+         */
+        post: operations["queue_requeue_suspects_api_asset_pipeline_queue_requeue_suspects_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/queue/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Queue Status
+         * @description Queue counts by status (pending / done / failed) — for the UI progress.
+         */
+        get: operations["queue_status_api_asset_pipeline_queue_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/resolve": {
         parameters: {
             query?: never;
@@ -1019,6 +2469,81 @@ export interface paths {
          *     Does NOT write to the DB — use /ingest for that.
          */
         get: operations["resolve_asset_api_asset_pipeline_resolve_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/risk/isin/{isin}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Risk By Isin
+         * @description Per-window returns + risk (CAGR + its log-fit R², annualized vol, Sharpe, Sortino, max
+         *     drawdown, % up days) over 2/4/8-year trailing windows, from the daily EUR price — the same
+         *     `asset_price` source /portfolios prices with. Comparing a metric across windows is a
+         *     distribution-drift probe. 404 when the ISIN has no priced listing or too few bars.
+         */
+        get: operations["risk_by_isin_api_asset_pipeline_risk_isin__isin__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/rows/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Row
+         * @description Fetch OpenFIGI + yfinance for ONE row and persist. Returns a per-source
+         *     outcome ({openfigi:{found,…}, yfinance:{found,…}, identity_status, status})
+         *     so the UI can show what got filled vs. what's missing. Never 502s on a plain
+         *     'not found' — that's a `found:false` result, not an error.
+         */
+        post: operations["refresh_row_api_asset_pipeline_rows_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/signal-lab": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Signal Lab
+         * @description Signal Lab — predictive-power research over the unified price/volume signal
+         *     panel. Per signal: cross-sectional rank IC vs next-month return, t-stat, hit
+         *     rate, quintile spread, decile monotonicity, PER-SECTOR + PER-REGIME IC, and the
+         *     monthly IC series. `start`/`end` = the train/test evaluation window. Pure
+         *     research (no portfolio). Cached ~30 min.
+         *
+         *     Each row carries a `cadence`: `month_end` for the lab's own battery, or
+         *     `daily_asof` for the signals the live /schedule strategy trades. Daily rows are
+         *     keyed by registry key (`daily.mom_12_1`) because the bare names collide and are
+         *     NOT the same measure — see `signal_engine.registry.PARITY`.
+         */
+        get: operations["signal_lab_api_asset_pipeline_signal_lab_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1058,11 +2583,161 @@ export interface paths {
         put?: never;
         /**
          * Store One
-         * @description Persist ONE identifier (from the single-ISIN view): resolve → upsert the
-         *     analysis asset + execution → store the analysis series' close+volume. Returns
-         *     what was stored, incl. the exact `stored_fields`.
+         * @description ADD one row by ISIN: resolve → upsert the analysis asset + execution → store the
+         *     analysis series' close+volume.
+         *
+         *     ⚠ IT REFUSES TO TOUCH AN ISIN THAT IS ALREADY IN THE GRID, and that guard is not
+         *     politeness — it is the difference between adding a row and CORRUPTING one.
+         *
+         *     `store_one` re-resolves from scratch, and resolution is not stable: it ranks Yahoo's
+         *     candidates by median traded value, but Yahoo answers a search with an EMPTY list under
+         *     load instead of a 429 (see `asset_pipeline/fast_resolve.py`). When the right listing is
+         *     missing from the candidate set, the ranking cannot pick it, and a thin foreign line wins
+         *     by default. Measured on Alphabet Class A (US02079K3059): a re-resolve repointed a row
+         *     from GOOGL (EUR 8.79bn median daily traded value, 5,502 bars back to 2004) to GOOA.VI —
+         *     VIENNA, EUR 76,634 ADV, 2,302 bars. A 75,000x thinner listing, silently, with no error.
+         *     That is the NVDA-on-Stuttgart failure mode (see `resolve.same_company`) reached by a
+         *     different road.
+         *
+         *     So: an existing ISIN returns 409 and is left ALONE. Re-resolving a row is a deliberate
+         *     act with its own control — the per-row "Resolve" action — not a side effect of trying to
+         *     add it again.
+         *
+         *     The other status codes matter too. When `store_one` cannot resolve a NEW ISIN it still
+         *     RECORDS it (`upsert_unmapped` → a not_found/bond row) and then raises; collapsing that
+         *     into a blanket 502 told the user "store failed" while the row had in fact been added.
+         *     It is now a 422 carrying the resolver's own reason.
          */
         post: operations["store_one_api_asset_pipeline_store_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/universe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Universe
+         * @description PREVIEW a large, LIQUID universe of UNIQUE yfinance tickers with price +
+         *     volume history, from the resolved grid. Read-only — tune the params, read the
+         *     `count`, then POST /universe/create to save it. `count_only=true` skips the
+         *     ticker list (cheap live preview).
+         */
+        get: operations["universe_api_asset_pipeline_universe_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/universe/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Universe
+         * @description Materialise + SAVE the filtered universe under `name`: computes the unique
+         *     tickers, replaces any same-named universe, stores membership. Returns
+         *     {id, name, ticker_count}.
+         */
+        post: operations["create_universe_api_asset_pipeline_universe_create_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/universes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Universes
+         * @description Saved universes (id, name, params, ticker_count, created_at), newest first.
+         */
+        get: operations["list_universes_api_asset_pipeline_universes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/universes/{universe_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Universe
+         * @description Delete a saved universe (members cascade).
+         */
+        delete: operations["delete_universe_api_asset_pipeline_universes__universe_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/universes/{universe_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Universe Members
+         * @description The member analysis_symbols of a saved universe (for the grid filter).
+         */
+        get: operations["universe_members_api_asset_pipeline_universes__universe_id__members_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/upload/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Scan
+         * @description Parse an uploaded CSV or Excel file and, per column, list the VALID ISINs
+         *     it contains (structure + check-digit) — so the frontend can show columns with
+         *     their ISIN counts and let the user pick which one to enqueue. Columns are
+         *     returned most-ISINs-first. No DB writes — the picked column's ISINs go through
+         *     the normal /queue enqueue.
+         */
+        post: operations["upload_scan_api_asset_pipeline_upload_scan_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1224,6 +2899,81 @@ export interface paths {
          * @description Create a benchmark and fetch its prices from GuruFocus.
          */
         post: operations["create_benchmark_api_benchmarks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/index/{label}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Reconstructed Index
+         * @description Cap-weighted YTD for a reconstructed index (`SP500`, `ACWI`, `AEX`), in EUR and local.
+         *
+         *     Weights are as of the START of the period. Weighting by TODAY's market cap would be
+         *     look-ahead bias — measured, it turns the S&P's +9.10% into +21.70%.
+         *
+         *     ⚠ THE ASSET PATH, NOT THE GURUFOCUS ONE (2026-07-16). This panel's whole claim is that its
+         *     numbers are comparable to the portfolios beside them — and those are priced from `asset_price`
+         *     (yfinance). Pricing the benchmark from GuruFocus instead compared two price universes and
+         *     called the difference alpha. It was also structurally unable to price two of the three
+         *     indices: GuruFocus is blind to 31.96% of the AEX (Shell, Unilever, RELX are LSE rows with no
+         *     GuruFocus market cap) and to ~7.8% of ACWI, and a cap-weighted rebuild redistributes that
+         *     weight rather than losing it — the GuruFocus AEX printed +14.80% against the true +12.12%,
+         *     and looked entirely plausible doing it. `_benchmark_index.compute_index` remains as the SPY
+         *     cross-check (+9.05% vs SPY's +9.02%), which validates the METHOD; it is not the basis.
+         */
+        get: operations["benchmark_reconstructed_index_api_benchmarks_index__label__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Benchmark Reset
+         * @description Delete the LIVE universe behind one reconstructed benchmark, so Fill can rebuild it.
+         *
+         *     The inverse of Fill's first step, for watching the whole path run: the benchmark drops to 0
+         *     members and the next Fill re-runs the label's template, re-enqueues what needs resolving and
+         *     re-caps what is already priced.
+         *
+         *     ⚠ MEMBERSHIP ONLY. Prices, the asset grid and market caps are shared with every other surface
+         *     and expensive to rebuild — see `reset_benchmark`, which also refuses a frozen snapshot, a
+         *     universe with derived children, and any label Fill has no template to rebuild (SP500).
+         *
+         *     422 carries the refusal's reason; it is always a sentence about this label, not a generic error.
+         */
+        delete: operations["benchmark_reset_api_benchmarks_index__label__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/index/{label}/fill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Benchmark Fill
+         * @description Close the asset-world gap behind a reconstructed index, and report what remains.
+         *
+         *     A benchmark reads 0 members when its constituents are not in the asset grid — the universe is
+         *     usually fine. This enqueues the unresolved ISINs for the single paced ingest worker and writes
+         *     market caps for the ones already resolved (a batched quote, ~1 call per 100 symbols).
+         *
+         *     ⚠ IT DOES NOT RESOLVE INLINE, and the response is therefore not a "done": Yahoo returns an
+         *     EMPTY result to an overloaded caller instead of a 429, so a second concurrent consumer is how
+         *     a constituent lands on a thin foreign listing. The counts say what was handed to the worker.
+         */
+        post: operations["benchmark_fill_api_benchmarks_index__label__fill_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1871,6 +3621,643 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/benchmark-margin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Margin
+         * @description A benchmark index's FCF-SBC margin per fiscal year: `(FCF − SBC) / Revenue` per constituent,
+         *     then a CAP-WEIGHTED AVERAGE across them.
+         *
+         *     ⚠ A WEIGHTED AVERAGE OF MARGINS, NOT Σ(FCF−SBC)/ΣRevenue. The constituents report in different
+         *     currencies (Shell $, RELX £, ASML €), so summing their euros/pounds/dollars would be
+         *     meaningless. Each margin is a pure ratio (currency-free), so averaging them — weighted by
+         *     market cap — is the currency-safe aggregate. SBC missing for a constituent is treated as 0
+         *     (many report none). Returns `{label, series:[{year, margin_pct}], members}`.
+         */
+        get: operations["benchmark_margin_api_earnings_benchmark_margin_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/benchmark-revenue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Revenue
+         * @description A benchmark index's revenue (or any `_METRIC_CODES` metric) as a GROWTH INDEX — its
+         *     constituents' figures blended the same
+         *     way a portfolio's is (a LEVEL → each rebased to 100 at its first year, then weighted).
+         *
+         *     ⚠ NOT A SUM OF ABSOLUTE REVENUES. AEX constituents report in different currencies (Shell/RELX/
+         *     Unilever in GBP), so a euro total would silently add pounds to euros. The level-blend sidesteps
+         *     that — it compares GROWTH, which is what the R² read on the /Long Equity tab needs — and drops
+         *     any year under the 60% coverage floor rather than drawing it thin.
+         *
+         *     Cap-weighted by `market_cap_eur` where known, else equal-weighted (a benchmark growth reference,
+         *     not a priced index). Returns `{label, series:[{year, value}], members, covered_pct}`.
+         */
+        get: operations["benchmark_revenue_api_earnings_benchmark_revenue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/benchmark-revenue-matrix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Revenue Matrix
+         * @description The audit grid behind the benchmark revenue line: every constituent's revenue at every year,
+         *     the blended footer that reconciles to the line, AND where each series comes from.
+         *
+         *     Same `blend_matrix` the Forward-P/E "All periods" grid uses (revenue is a LEVEL → each rebased
+         *     to a growth index, weighted), so the cells and footer are built from exactly what the line is.
+         *     Each row (and each excluded constituent) carries a `source` — `TICKER@EXCHANGE` — so a reader
+         *     sees which listing's GuruFocus figures fed it. Constituents with no revenue land in `excluded`
+         *     (reason `no_data`): that names the ones we simply have nothing for, which is half the answer.
+         */
+        get: operations["benchmark_revenue_matrix_api_earnings_benchmark_revenue_matrix_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/by-isin/{isin}/growth-estimates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Growth Estimates By Isin
+         * @description Analysts' 3–5 year growth-rate estimates for a company, from GuruFocus `keyratios`.
+         *
+         *     The figures a reverse DCF is judged against — the model says the price implies 24%/yr, and the
+         *     next question is what anyone actually forecasts.
+         *
+         *     ⚠ A LIVE FETCH, NOT A METRIC READ. These are scalars with no date, so they never reach
+         *     `metric_data` (the estimates parser only stores list-valued fields). Cached in Storage for a
+         *     week per listing; `force=true` re-asks. See `_growth_estimates`.
+         *
+         *     Returns `{symbol, fields: {eps_3_5y, eps_nri_3_5y, ocf_ps_3_5y, revenue_3_5y}, cached}` with the
+         *     rates as PERCENTS. A company with no analyst coverage returns nulls, not an error.
+         */
+        get: operations["growth_estimates_by_isin_api_earnings_by_isin__isin__growth_estimates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/by-isin/{isin}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Earnings Metrics By Isin
+         * @description Dashboard metrics for a company resolved BY ISIN — the /portfolios
+         *     Fundamental modal bridge (ISIN → `company.isin` → company_id, "Bridge A").
+         *
+         *     Only the ~13% of instruments backed by a `company` row have earnings
+         *     metrics; everything else (ETFs, structured products, foreign listings with
+         *     no company row) 404s here, and the modal falls back to its owner-earnings /
+         *     price tabs, which work for every ISIN. Returns
+         *     `{company_id, company_name, currency, metrics}` — `currency` is the
+         *     exchange's `currency_code` (the reporting/trading currency the FCF/share
+         *     chart converts to EUR), mirroring how `/api/companies` derives it.
+         */
+        get: operations["get_earnings_metrics_by_isin_api_earnings_by_isin__isin__metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/capex-margin-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Capex Margin Inputs
+         * @description The base inputs behind the Capex margin, per holding: Capex and Revenue per fiscal year, in
+         *     the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `|Capex| / Revenue` (capital intensity — the share of sales
+         *     reinvested in capex) is derived on the client from these two so the drill-down shows exactly
+         *     what it is computed from (2 rows per company). Capex is reported NEGATIVE (an outflow) — the
+         *     client takes its magnitude; a 0 is real (capital-light). Revenue ≤ 0 → the ratio is blank.
+         *     Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["capex_margin_inputs_api_earnings_capex_margin_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/cash-conversion-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cash Conversion Inputs
+         * @description The base inputs behind Cash conversion, per holding: Free Cash Flow and Net Income per
+         *     fiscal year, in the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `FCF / Net Income` is derived on the client from these two so
+         *     the drill-down shows exactly what it is computed from (2 rows per company).
+         *
+         *     ⚠ ABOVE 100% IS NORMAL AND GOOD, not an error — depreciation running ahead of capex converts
+         *     more cash than the accounts book as profit (ASML 2025: 11,027.3 / 9,609.4 = 114.8%).
+         *
+         *     ⚠ NET INCOME ≤ 0 → THE RATIO IS BLANK. A loss-making company with positive free cash flow
+         *     would otherwise print a NEGATIVE conversion, which reads as burning cash when the opposite is
+         *     happening. A negative FCF against positive earnings IS kept — earnings without cash is exactly
+         *     what this ratio exists to catch.
+         *
+         *     ⚠ NET INCOME IS THE SHAREHOLDERS' LINE while FCF is whole-company; see `_METRIC_CODES`.
+         *
+         *     Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["cash_conversion_inputs_api_earnings_cash_conversion_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/cash-return-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cash Return Inputs
+         * @description The base inputs behind Cash return on capital, per holding: Free Cash Flow, non-current
+         *     (long-term) liabilities and total equity per fiscal year, in the company's own reporting
+         *     currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `FCF / (non-current liabilities + total equity)` is derived on
+         *     the client from these three so the drill-down shows exactly what it is computed from (3 rows per
+         *     company). Non-current liabilities absent (a bank / Berkshire doesn't split current from
+         *     non-current) → the ratio is blank there, NOT computed against equity alone. Total equity is
+         *     incl. minority interest (see `_METRIC_CODES`). Deduped by ISIN, weight is the share of the whole
+         *     book, holdings with no company row omitted.
+         */
+        post: operations["cash_return_inputs_api_earnings_cash_return_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/debt-ratio-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Debt Ratio Inputs
+         * @description The base inputs behind the LTD / (Total Assets − Goodwill) ratio, per holding: Long-Term
+         *     Debt, Total Assets and Goodwill per fiscal year, in the company's own reporting currency
+         *     (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `LTD / (Total Assets − Goodwill)` is derived on the client from
+         *     these three so the drill-down shows exactly what it is computed from (3 rows per company). A
+         *     missing Goodwill is a genuine 0 (no acquisitions); a missing Long-Term Debt line is NOT — the
+         *     ratio is blank there (Berkshire has no such line). Deduped by ISIN, weight is the share of the
+         *     whole book, holdings with no company row omitted.
+         */
+        post: operations["debt_ratio_inputs_api_earnings_debt_ratio_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/dividend-yield-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dividend Yield Inputs
+         * @description The two base lines behind the dividend yield, per holding: Dividends per Share and the
+         *     fiscal year-end share price, per fiscal year, in the company's own reporting currency.
+         *
+         *     ⚠ THE YIELD IS THE PORTFOLIO-LEVEL PRIMITIVE; DIVIDENDS PER SHARE IS NOT. There is no portfolio
+         *     share to report a per-share amount of, the amounts are in different currencies, and a level
+         *     series that legitimately starts at 0.00 cannot be rebased to a growth index — which is exactly
+         *     why the portfolio's dividend card sat empty while every holding carried the line. `DPS / price`
+         *     is currency-free, so the weight-weighted average IS the book's yield (portfolio yield =
+         *     Σ value·yield ÷ Σ value, and the weights ARE value weights — the arithmetic mean is the
+         *     aggregate here, not an approximation of it).
+         *
+         *     ⚠ AN ABSENT DPS IS NOT A ZERO. GuruFocus files an explicit `0.00` for a company that pays
+         *     nothing — a real answer that belongs in the average and drags it down honestly. A MISSING line
+         *     is not that: reading it as zero would let un-ingested holdings quietly deflate the book's yield.
+         *     The client keeps them apart (`dividendYieldOf`), so the raw lines are returned untouched here.
+         *
+         *     Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["dividend_yield_inputs_api_earnings_dividend_yield_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fcf-sbc-yield-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fcf Sbc Yield Inputs
+         * @description The base inputs behind the FCF-SBC yield, per holding: Free Cash Flow, Stock-Based
+         *     Compensation and Market Cap per fiscal year, in the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `(FCF − SBC) / Market Cap` (the cash yield a buyer earns, net of
+         *     the non-cash stock comp) is derived on the client from these three so the drill-down shows
+         *     exactly what it is computed from (3 rows per company). SBC missing is treated as 0 (many report
+         *     none); FCF may be negative (yield goes negative); Market Cap must be present and positive.
+         *     Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["fcf_sbc_yield_inputs_api_earnings_fcf_sbc_yield_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fundamental-blend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fundamental Blend
+         * @description A portfolio's fundamentals, blended — with the rule that each metric actually requires.
+         *
+         *     ⚠ THREE RULES, NOT ONE. A multiple aggregates HARMONICALLY (a portfolio's P/E is aggregate
+         *     price over aggregate earnings; the arithmetic mean of 10 and 100 is 55 against a true 18.2),
+         *     a yield/margin arithmetically, and a level only after rebasing to an index. See
+         *     `_fundamental_blend` for why each alternative is wrong.
+         *
+         *     Coverage rides along and is a FLOOR: a date under it carries no honest value and is omitted
+         *     rather than drawn as a dip.
+         */
+        post: operations["fundamental_blend_api_earnings_fundamental_blend_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fundamental-blend-breakdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fundamental Blend Breakdown
+         * @description The holdings behind ONE point of a blended chart, and the ones missing from it.
+         *
+         *     ⚠ IT LOADS ONE METRIC, NOT THE SUITE. The blend endpoint reads every charted code for every
+         *     holding; a drill-down needs one code (plus, for a forecast, the actual it is anchored on), so
+         *     it is a small read on click rather than a large one on open.
+         *
+         *     ⚠ IT DECOMPOSES THROUGH `blend_breakdown`, WHICH SHARES `_prepare` WITH THE LINE ITSELF. The
+         *     alternative — recomputing the members "the same way" here — is a second copy of the
+         *     harmonic/ratio/level rules, and a drill-down that quietly disagrees with the chart above it
+         *     is worse than none: it is checked once and trusted from then on.
+         */
+        post: operations["fundamental_blend_breakdown_api_earnings_fundamental_blend_breakdown_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fundamental-blend-matrix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fundamental Blend Matrix
+         * @description The audit grid behind a blended line: every holding's value at every period, plus the
+         *     blended value + coverage per period.
+         *
+         *     ⚠ SAME LOADER AND SAME `_prepare` AS THE LINE AND THE PER-POINT DRILL-DOWN. It reads ONE
+         *     metric's rows per covered holding (+ the actual a forecast is anchored on) and hands them to
+         *     `blend_matrix`, so the grid a reader verifies against is built from exactly what the chart
+         *     drew — there is no second computation to disagree with.
+         */
+        post: operations["fundamental_blend_matrix_api_earnings_fundamental_blend_matrix_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fundamental-blend-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fundamental Blend Metrics
+         * @description The portfolio as ONE pseudo-company, in the exact shape `/by-isin/{isin}/metrics` returns.
+         *
+         *     Same payload, so the whole /earnings chart suite renders for a portfolio with no changes —
+         *     `{company_id, company_name, currency, metrics}` where `metrics` are blended across the covered
+         *     holdings, weighted by their portfolio weight.
+         *
+         *     ⚠ EVERY METRIC IS BLENDED BY THE RULE ITS OWN KIND REQUIRES (see `_fundamental_blend`): a
+         *     multiple harmonically, a ratio/margin arithmetically, and a LEVEL only after rebasing to an
+         *     index. Weighting Apple's revenue by 5% and ASML's by 3% is not a portfolio's revenue.
+         *
+         *     ⚠ `currency` IS NULL, DELIBERATELY. Members report in their own currencies, and a level series
+         *     has been rebased to an index anyway — there is no currency such a number could be in. The
+         *     charts' EUR conversion is driven off this field, so a currency here would relabel an index as
+         *     money. A null says "not a currency amount", which is the truth.
+         */
+        post: operations["fundamental_blend_metrics_api_earnings_fundamental_blend_metrics_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fundamental-blend-metrics/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fundamental Blend Metrics Stream
+         * @description SSE twin of `/fundamental-blend-metrics`: `{type:'progress',done,total,name}` per holding,
+         *     then `{type:'result',payload:<the identical response>}`.
+         *
+         *     It exists because opening the Fundamental modal on a whole portfolio is a per-company read and
+         *     the modal could only say "Loading…" — which does not distinguish a 40-name book from a hung
+         *     request. Same inputs, same blend, same envelope; only the arrival is different.
+         */
+        post: operations["fundamental_blend_metrics_stream_api_earnings_fundamental_blend_metrics_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fundamental-coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fundamental Coverage
+         * @description Which of a portfolio's holdings a fundamentals view can reach, BY WEIGHT, and why not.
+         *
+         *     ⚠ COVERAGE IS THE FIRST ANSWER, NOT A FOOTNOTE. Every holding that cannot be reached is weight
+         *     that drops out of any blend, and a blended figure over 61% of a book presented as the book's is
+         *     the same fabrication `MIN_COVERAGE_PCT` already guards against on the AIRS returns.
+         */
+        post: operations["fundamental_coverage_api_earnings_fundamental_coverage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fundamental-coverage/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Fundamental Coverage
+         * @description Fetch + load the GuruFocus fundamentals ONE uncovered holding is missing.
+         *
+         *     Handles both gaps the coverage table flags as ours to close: a `no_metrics` holding (a company
+         *     row exists — just fetch) and a `no_company` holding (resolve the ISIN to a listing, CREATE the
+         *     company, then fetch). Every other reason is refused with its own status, never as a failure —
+         *     see `_fundamental_ingest`.
+         *
+         *     ⚠ ADMIN-ONLY BY DEFAULT. This CREATES company rows and spends GuruFocus quota, so it is not in
+         *     the earnings-refresh user-write allow-list (the path carries no `/refresh`) and the auth gate
+         *     holds it to admins. The /management-dashboard portfolios page that surfaces it is admin-only.
+         *
+         *     The frontend calls this per row and, for "ingest all", once per distinct ingestable ISIN.
+         */
+        post: operations["ingest_fundamental_coverage_api_earnings_fundamental_coverage_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/gross-margin-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Gross Margin Inputs
+         * @description The base inputs behind the Gross margin, per holding: Gross Profit and Revenue per fiscal
+         *     year, in the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `Gross Profit / Revenue` is derived on the client from these
+         *     two so the drill-down shows exactly what it is computed from (2 rows per company). Revenue ≤ 0
+         *     → the ratio is blank.
+         *
+         *     ⚠ A BANK HAS NO GROSS PROFIT AND THAT IS AN ANSWER, NOT A GAP. GuruFocus's 'B' template has no
+         *     cost of goods sold, so the line is absent (JPMorgan) and the margin is blank there — never 0,
+         *     which would read as "sells at cost".
+         *
+         *     ⚠ DERIVED THOUGH GURUFOCUS PUBLISHES `Ratios__Gross Margin %`. It reproduces their figure
+         *     exactly (ASML 2025 52.83% vs 52.83; Apple 46.91 vs 46.905) and leaves two lines the drill-down
+         *     can show — a published ratio has no workings to check it against.
+         *
+         *     Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["gross_margin_inputs_api_earnings_gross_margin_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/interest-burden-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Interest Burden Inputs
+         * @description The base inputs behind the interest-burden ratio, per holding: Interest expense and
+         *     Operating income per fiscal year, in the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `|Interest expense| / Operating income` (the % of operating
+         *     profit spent servicing debt) is derived on the client from these two so the drill-down shows
+         *     exactly what it is computed from (2 rows per company). Interest expense is reported NEGATIVE (an
+         *     outflow) — the client takes its magnitude; a 0 is real (nets to nothing). Operating income ≤ 0
+         *     → the ratio is blank (a loss). "Operating profit" is `Operating Income`, NOT `EBIT`. Deduped by
+         *     ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["interest_burden_inputs_api_earnings_interest_burden_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/margin-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Margin Inputs
+         * @description The base inputs behind the FCF-SBC margin, per holding: Revenue, Free Cash Flow and Stock
+         *     Based Compensation per fiscal year, in the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. The margin `(FCF − SBC) / Revenue` is derived on the client
+         *     from these three so the drill-down shows exactly what it is computed from (3 rows per company).
+         *     Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
+         */
+        post: operations["margin_inputs_api_earnings_margin_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/portfolio-revenue-matrix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Portfolio Revenue Matrix
+         * @description Each equity the portfolio HOLDS: its weight, currency, and actual `metric` per fiscal year
+         *     (2015 onwards), in the company's own reporting currency.
+         *
+         *     ⚠ THE HOLDINGS, NOT AN INDEX. Members come from the portfolio (looked THROUGH any linked
+         *     certificate via `_load_and_expand_members`), deduped by ISIN (a name held twice is one row with
+         *     summed weight). Weight is the share of the WHOLE book (cash/bonds in the denominator, so the
+         *     shown companies sum to under 100%). Holdings with no company row / no revenue are omitted —
+         *     this lists the companies we can actually show revenue for.
+         */
+        post: operations["portfolio_revenue_matrix_api_earnings_portfolio_revenue_matrix_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/portfolios": {
         parameters: {
             query?: never;
@@ -1981,6 +4368,60 @@ export interface paths {
         get: operations["portfolio_metrics_api_earnings_portfolios__portfolio_id__metrics_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/relative-growth-breakdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Relative Growth Breakdown
+         * @description The holdings behind ONE year of the Share-Price-vs-Owner-Earnings chart: each holding's
+         *     price-growth index, its Owner-Earnings-growth index, and price ÷ OE (its multiple change).
+         *
+         *     ⚠ BOTH LINES ARE DECOMPOSED THROUGH THE SAME LEVEL `blend_breakdown` THE CHART IS BUILT FROM —
+         *     price and OE are month-end price and EPS-ex-NRI, both LEVELS, rebased to an index and weighted.
+         *     Merging the two per holding (`merge_relative_growth`) gives the price-vs-OE table without a
+         *     second copy of the growth rules.
+         */
+        post: operations["relative_growth_breakdown_api_earnings_relative_growth_breakdown_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/sbc-ocf-inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sbc Ocf Inputs
+         * @description The base inputs behind the SBC/OCF ratio, per holding: Stock-Based Compensation and
+         *     Operating Cash Flow per fiscal year, in the company's own reporting currency (millions).
+         *
+         *     ⚠ THE RAW LINES, NOT THE RATIO. `SBC / Operating Cash Flow` (the share of operating cash flow
+         *     that is non-cash stock comp) is derived on the client from these two so the drill-down shows
+         *     exactly what it is computed from (2 rows per company). SBC is an add-back, reported positive; a
+         *     0 is real (many report none). Operating cash flow ≤ 0 → the ratio is blank (a bank's OCF goes
+         *     negative). Deduped by ISIN, weight is the share of the whole book, holdings with no company row
+         *     omitted.
+         */
+        post: operations["sbc_ocf_inputs_api_earnings_sbc_ocf_inputs_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4491,6 +6932,553 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AirsAccount
+         * @description One AIRS account's YEAR, on AIRS's own numbers.
+         *
+         *     ⚠ EVERY MONEY FIELD HERE IS THE YEAR'S, SUMMED ACROSS AIRS'S MONTHLY ROWS. One ATT row is
+         *     one MONTH — reading the freshest as "the year" served AITopSelectie's July price result of
+         *     -130,063 where the year made +420,225: wrong sign, third of the size, beside a +42% YTD.
+         *     `_airs_accounts._year_perf` does the assembly; read it before adding a field here.
+         *
+         *     ⚠ `ytd_pct` IS `cumulatief_rendement` — AIRS's own, flow-aware, and never
+         *     `end_value_eur / begin_value_eur - 1`.
+         *
+         *     ⚠ `latest_month_pct` IS NOT A RIVAL YTD. It is AIRS's `rendement` off the newest row: the
+         *     latest month's return. It was once served as `value_ratio_pct` and described as "the wrong
+         *     number", on the theory that deposits inflated it — but AITopSelectie has zero deposits in
+         *     every month of 2026 and still reads -5.85% there against +46.12% for the year. Different
+         *     windows, both correct.
+         */
+        AirsAccount: {
+            /** Accrued Interest Change Eur */
+            accrued_interest_change_eur?: number | null;
+            /** As Of */
+            as_of?: string | null;
+            /** Begin Value Eur */
+            begin_value_eur?: number | null;
+            /** Costs Eur */
+            costs_eur?: number | null;
+            /** Deposits Eur */
+            deposits_eur?: number | null;
+            /** End Value Eur */
+            end_value_eur?: number | null;
+            /** Holdings */
+            holdings?: number | null;
+            /** Income Eur */
+            income_eur?: number | null;
+            /** Investment Result Eur */
+            investment_result_eur?: number | null;
+            /** Latest Month Pct */
+            latest_month_pct?: number | null;
+            /**
+             * Missing Reports
+             * @default []
+             */
+            missing_reports?: string[];
+            /** Months */
+            months?: number | null;
+            /** Periode */
+            periode?: string | null;
+            /** Portefeuille */
+            portefeuille: string;
+            /** Price Result Eur */
+            price_result_eur?: number | null;
+            /** Reconciles */
+            reconciles?: boolean | null;
+            /** Residual Eur */
+            residual_eur?: number | null;
+            /** Withdrawals Eur */
+            withdrawals_eur?: number | null;
+            /** Ytd Pct */
+            ytd_pct?: number | null;
+        };
+        /** AirsAccountDeleted */
+        AirsAccountDeleted: {
+            /**
+             * Deleted
+             * @default {}
+             */
+            deleted?: {
+                [key: string]: number;
+            };
+            /** Portefeuille */
+            portefeuille: string;
+            /**
+             * Total Rows
+             * @default 0
+             */
+            total_rows?: number;
+        };
+        /**
+         * AirsAccountDetail
+         * @description One account's freshest snapshot.
+         *
+         *     ⚠ THE ROWS DO NOT SUM TO `ytd_pct`, AND THAT IS CORRECT. Each row is a PRICE return (AIRS
+         *     restates `Beginwaarde lopend jaar` to the current quantity, so a purchase does not contaminate
+         *     it). The account's figure is flow-aware AND includes `income_eur`, which no price return
+         *     contains. The /portfolios MODEL view has the opposite property — its holdings weight exactly
+         *     to its total — so a reader arriving from there will expect these to tie.
+         */
+        AirsAccountDetail: {
+            /** As Of */
+            as_of?: string | null;
+            /** Dividend Sold Eur */
+            dividend_sold_eur?: number | null;
+            /** Dividend Sold Funds */
+            dividend_sold_funds?: string[] | null;
+            /** Dividend Sold Tax Eur */
+            dividend_sold_tax_eur?: number | null;
+            /** Income Eur */
+            income_eur?: number | null;
+            /** Portefeuille */
+            portefeuille: string;
+            /** Price Result Eur */
+            price_result_eur?: number | null;
+            /**
+             * Rows
+             * @default []
+             */
+            rows?: components["schemas"]["AirsAccountHolding"][];
+            /** Ytd Pct */
+            ytd_pct?: number | null;
+        };
+        /** AirsAccountHolding */
+        AirsAccountHolding: {
+            /** Airs Result Pct */
+            airs_result_pct?: number | null;
+            /** Airs Weight */
+            airs_weight?: number | null;
+            /** Cost Basis Local */
+            cost_basis_local?: number | null;
+            /** Currency */
+            currency?: string | null;
+            /** Current Price Local */
+            current_price_local?: number | null;
+            /** Current Value Eur */
+            current_value_eur?: number | null;
+            /** Dividend Eur */
+            dividend_eur?: number | null;
+            /** Dividend Payments */
+            dividend_payments?: number | null;
+            /** Dividend Tax Eur */
+            dividend_tax_eur?: number | null;
+            /** Fund Result Eur */
+            fund_result_eur?: number | null;
+            /** Fx Result Eur */
+            fx_result_eur?: number | null;
+            /** Holding Name */
+            holding_name: string;
+            /** Model Actual Pct */
+            model_actual_pct?: number | null;
+            /** Model Drift Pct */
+            model_drift_pct?: number | null;
+            /** Model Pct */
+            model_pct?: number | null;
+            /** Quantity */
+            quantity?: number | null;
+            /** Start Value Eur */
+            start_value_eur?: number | null;
+            /** Weight */
+            weight?: number | null;
+            /** Ytd Return Eur */
+            ytd_return_eur?: number | null;
+            /** Ytd Return Local Pct */
+            ytd_return_local_pct?: number | null;
+            /** Ytd Return Pct */
+            ytd_return_pct?: number | null;
+        };
+        /** AirsAccountIsins */
+        AirsAccountIsins: {
+            /** As Of */
+            as_of?: string | null;
+            /** Model Name */
+            model_name?: string | null;
+            /** Model Source */
+            model_source?: string | null;
+            /** Portefeuille */
+            portefeuille: string;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Rows
+             * @default []
+             */
+            rows?: components["schemas"]["AirsHoldingIsin"][];
+            /**
+             * Segments
+             * @default []
+             */
+            segments?: components["schemas"]["AirsHoldingSegment"][];
+            /**
+             * Unmatched Model Positions
+             * @default []
+             */
+            unmatched_model_positions?: components["schemas"]["AirsModelPositionLeftover"][];
+        };
+        /** AirsAccountLinkRequest */
+        AirsAccountLinkRequest: {
+            /** Model Portfolio Id */
+            model_portfolio_id?: number | null;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * AirsAccountModelLink
+         * @description One account, and the model it runs.
+         *
+         *     `source` says where the pairing came from and is the whole point of the row:
+         *       manual — a human decided (always wins, including a decision of "none")
+         *       guess  — an exact stem match, recomputed on every read, never stored
+         *       none   — nobody has decided and we will not guess
+         */
+        AirsAccountModelLink: {
+            /** Model Name */
+            model_name?: string | null;
+            /** Model Portfolio Id */
+            model_portfolio_id?: number | null;
+            /** Model Positions */
+            model_positions?: number | null;
+            /** Months */
+            months?: number | null;
+            /** Portefeuille */
+            portefeuille: string;
+            /** Reason */
+            reason?: string | null;
+            /** Source */
+            source: string;
+            /** Ytd Pct */
+            ytd_pct?: number | null;
+        };
+        /** AirsAccountModelLinks */
+        AirsAccountModelLinks: {
+            /** Accounts */
+            accounts: components["schemas"]["AirsAccountModelLink"][];
+            /** Models */
+            models: components["schemas"]["AirsModelChoice"][];
+        };
+        /**
+         * AirsHoldingIsin
+         * @description One account holding, with the ISIN we believe it is — and how much to believe it.
+         *
+         *     ⚠ `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.
+         *       ok             the implied price agrees with that ISIN's own close (FX-converted)
+         *       price_mismatch it does NOT — the ISIN is not what the book holds, or the book drifted
+         *       unpriced       we have no series for it, so there is NOTHING confirming the name match
+         *       unmatched      NO ISIN: the model has no position for this holding
+         *       cross_listed   the prices differ, and they are SUPPOSED to — this ISIN's execution row is
+         *                      deliberately served by another instrument (`asset_isin_alias`), e.g. an ADR
+         *                      priced from the main company's listing. Not a fault, and not a pass either. at all
+         *
+         *     `unpriced` is not a pass. The name matched and nothing checked it — which for a fund is
+         *     exactly where the Acc/Inc share-class trap lives.
+         *
+         *     ⚠ `unmatched` AND `price_mismatch` ARE OPPOSITE FINDINGS, NOT DEGREES OF ONE. A mismatch means
+         *     the row pairing is RIGHT and the ISIN on it is wrong (a share class, a venue) — a finding
+         *     about the model. `unmatched` means the pairing itself was refused: the name says a different
+         *     instrument and the price independently agrees, which is what a STALE model snapshot looks like
+         *     when the book has since swapped a position. `rejected_isin`/`rejected_fonds` name the leftover
+         *     we declined; re-scan the model portfolio to fix it.
+         */
+        AirsHoldingIsin: {
+            /** Bucket */
+            bucket?: string | null;
+            /** Bucket Overridden */
+            bucket_overridden?: boolean | null;
+            /** Continent */
+            continent?: string | null;
+            /** Country */
+            country?: string | null;
+            /** Currency */
+            currency?: string | null;
+            /** Current Value Eur */
+            current_value_eur?: number | null;
+            /** Holding Name */
+            holding_name: string;
+            /** Implied Price Eur */
+            implied_price_eur?: number | null;
+            /** Is Etf */
+            is_etf?: boolean | null;
+            /** Isin */
+            isin?: string | null;
+            /** Isin Overridden */
+            isin_overridden?: boolean | null;
+            /** Isin Override Note */
+            isin_override_note?: string | null;
+            /** Isin Source */
+            isin_source?: string | null;
+            /**
+             * Lines
+             * @default 1
+             */
+            lines?: number;
+            /** Link Confidence */
+            link_confidence?: number | null;
+            /** Link Reason */
+            link_reason?: string | null;
+            /** Link Source */
+            link_source?: string | null;
+            /** Linked Portfolio Id */
+            linked_portfolio_id?: number | null;
+            /** Linked Portfolio Name */
+            linked_portfolio_name?: string | null;
+            /** Our Instrument */
+            our_instrument?: string | null;
+            /** Our Price Date */
+            our_price_date?: string | null;
+            /** Our Price Eur */
+            our_price_eur?: number | null;
+            /** Price Lag Days */
+            price_lag_days?: number | null;
+            /** Price Ratio */
+            price_ratio?: number | null;
+            /** Quantity */
+            quantity?: number | null;
+            /** Region */
+            region?: string | null;
+            /** Sector */
+            sector?: string | null;
+            /** Served By */
+            served_by?: string | null;
+            /** Start Value Eur */
+            start_value_eur?: number | null;
+            /** Verdict */
+            verdict: string;
+            /** Weight */
+            weight?: number | null;
+            /** Ytd Return Eur */
+            ytd_return_eur?: number | null;
+        };
+        /**
+         * AirsHoldingSegment
+         * @description One asset class within a portfolio: the exposure, and what it returned.
+         *
+         *     ⚠ `return_pct` AND `weight_pct` DO NOT COVER THE SAME HOLDINGS. A holding with no opening
+         *     value has an undefined return but real exposure, so it counts in the weight and not in the
+         *     return — otherwise its whole value reads as gain (cash is exactly this, and so is a short:
+         *     Nestle India at -3,504 shares). `priced_value_eur` states how much the return spans.
+         *
+         *     ⚠ It is a PRICE return, like the rows it is built from: no income, not flow-aware. The
+         *     segments do not sum to the portfolio's own figure.
+         */
+        AirsHoldingSegment: {
+            /** Asset Class */
+            asset_class: string;
+            /** Etf Value Eur */
+            etf_value_eur?: number | null;
+            /** Fund Eur */
+            fund_eur?: number | null;
+            /** Fx Eur */
+            fx_eur?: number | null;
+            /** Gain Eur */
+            gain_eur?: number | null;
+            /** Holdings */
+            holdings: number;
+            /** Priced Value Eur */
+            priced_value_eur?: number | null;
+            /** Return Pct */
+            return_pct?: number | null;
+            /** Start Value Eur */
+            start_value_eur?: number | null;
+            /** Value Eur */
+            value_eur?: number | null;
+            /** Weight Pct */
+            weight_pct?: number | null;
+        };
+        /** AirsModelChoice */
+        AirsModelChoice: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Positions */
+            positions: number;
+        };
+        /** AirsModelPositionLeftover */
+        AirsModelPositionLeftover: {
+            /** Fonds */
+            fonds?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /** Percentage */
+            percentage?: number | null;
+        };
+        /**
+         * AirsPortfolioOverview
+         * @description A portfolio: your name for it, AIRS's numbers for it.
+         *
+         *     ⚠ `link_source` IS PART OF THE ROW, NOT A DETAIL. `name` comes from the Fixed portfolio this
+         *     book is paired with, and 27 of 28 pairings are an unconfirmed name match. A wrong pairing
+         *     puts a real book's money under another strategy's name, and — because the risk variants of a
+         *     strategy hold the SAME instruments — nothing else on the row would look wrong.
+         */
+        AirsPortfolioOverview: {
+            /** As Of */
+            as_of?: string | null;
+            /** Begin Value Eur */
+            begin_value_eur?: number | null;
+            /** Deposits Eur */
+            deposits_eur?: number | null;
+            /** Description */
+            description?: string | null;
+            /** Dynamic Portefeuille */
+            dynamic_portefeuille: string;
+            /** End Value Eur */
+            end_value_eur?: number | null;
+            /** Fixed Name */
+            fixed_name?: string | null;
+            /** Fixed Portfolio Id */
+            fixed_portfolio_id?: number | null;
+            /** Fixed Type */
+            fixed_type?: string | null;
+            /** Holdings */
+            holdings?: number | null;
+            /** Income Eur */
+            income_eur?: number | null;
+            /** Investment Result Eur */
+            investment_result_eur?: number | null;
+            /** Isins */
+            isins?: number | null;
+            /** Latest Month Pct */
+            latest_month_pct?: number | null;
+            /** Link Reason */
+            link_reason?: string | null;
+            /** Link Source */
+            link_source: string;
+            /**
+             * Missing Reports
+             * @default []
+             */
+            missing_reports?: string[];
+            /** Months */
+            months?: number | null;
+            /** Name */
+            name: string;
+            /** Periode */
+            periode?: string | null;
+            /** Price Result Eur */
+            price_result_eur?: number | null;
+            /** Reconciles */
+            reconciles?: boolean | null;
+            /** Residual Eur */
+            residual_eur?: number | null;
+            /** Withdrawals Eur */
+            withdrawals_eur?: number | null;
+            /** Ytd Pct */
+            ytd_pct?: number | null;
+        };
+        /** AssetBucketOverride */
+        AssetBucketOverride: {
+            /** Bucket */
+            bucket?: string | null;
+            /** Isin */
+            isin: string;
+        };
+        /** AssetGridResponse */
+        AssetGridResponse: {
+            /** Rows */
+            rows: components["schemas"]["AssetGridRow"][];
+        };
+        /**
+         * AssetGridRow
+         * @description One row of the flat per-ISIN grid (from the `asset_grid` view). The
+         *     resolved yahoo_symbol + exchange + currency are 'the info to request
+         *     yfinance'; price_from/to + bars are Yahoo coverage; status is the
+         *     resolution outcome (ok | bond | not_found | error).
+         */
+        AssetGridRow: {
+            /** Analysis Id */
+            analysis_id?: number | null;
+            /** Analysis Symbol */
+            analysis_symbol?: string | null;
+            /** Asset Class */
+            asset_class?: string | null;
+            /** Bars */
+            bars?: number | null;
+            /** Continent */
+            continent?: string | null;
+            /** Country */
+            country?: string | null;
+            /** Currency */
+            currency?: string | null;
+            /** Domicile Country */
+            domicile_country?: string | null;
+            /** Exchange */
+            exchange?: string | null;
+            /** Execution Id */
+            execution_id: number;
+            /** First Date */
+            first_date?: string | null;
+            /** Identity Status */
+            identity_status?: string | null;
+            /** Is Default */
+            is_default?: boolean | null;
+            /** Is Leveraged */
+            is_leveraged?: boolean | null;
+            /** Isin */
+            isin: string;
+            /** Leonteq Currency */
+            leonteq_currency?: string | null;
+            /** Leonteq Name */
+            leonteq_name?: string | null;
+            /** Leonteq Product Type */
+            leonteq_product_type?: string | null;
+            /**
+             * Leonteq Verified
+             * @default false
+             */
+            leonteq_verified?: boolean;
+            /** Listing Country */
+            listing_country?: string | null;
+            /** Market Cap Currency */
+            market_cap_currency?: string | null;
+            /** Market Cap Eur */
+            market_cap_eur?: number | null;
+            /** Med Adv Eur */
+            med_adv_eur?: number | null;
+            /** Msci Region */
+            msci_region?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Openfigi Exch */
+            openfigi_exch?: string | null;
+            /** Openfigi Figi */
+            openfigi_figi?: string | null;
+            /** Openfigi Name */
+            openfigi_name?: string | null;
+            /** Openfigi Ticker */
+            openfigi_ticker?: string | null;
+            /** Openfigi Type */
+            openfigi_type?: string | null;
+            /** Parquet Path */
+            parquet_path?: string | null;
+            /** Parquet Rows */
+            parquet_rows?: number | null;
+            /** Price From */
+            price_from?: string | null;
+            /** Price To */
+            price_to?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Sector */
+            sector?: string | null;
+            /** Short Multiplier */
+            short_multiplier?: number | null;
+            /** Status */
+            status: string;
+            /** Volume From */
+            volume_from?: string | null;
+            /** Volume To */
+            volume_to?: string | null;
+            /** Wrapper */
+            wrapper?: string | null;
+            /** Yahoo Symbol */
+            yahoo_symbol?: string | null;
+            /** Years */
+            years?: number | null;
+            /** Zero Vol Frac */
+            zero_vol_frac?: number | null;
+        };
         /** AssetWeight */
         AssetWeight: {
             /** Benchmark Id */
@@ -4508,6 +7496,106 @@ export interface components {
             name?: string | null;
             /** Weight */
             weight: number;
+        };
+        /** AttributionBucket */
+        AttributionBucket: {
+            /**
+             * Allocation Pct
+             * @default 0
+             */
+            allocation_pct?: number;
+            /**
+             * Benchmark Holdings
+             * @default []
+             */
+            benchmark_holdings?: components["schemas"]["AttributionName"][];
+            /**
+             * Benchmark Holdings Count
+             * @default 0
+             */
+            benchmark_holdings_count?: number;
+            /** Benchmark Return Pct */
+            benchmark_return_pct?: number | null;
+            /**
+             * Benchmark Weight Pct
+             * @default 0
+             */
+            benchmark_weight_pct?: number;
+            /** Bucket */
+            bucket: string;
+            /**
+             * Interaction Pct
+             * @default 0
+             */
+            interaction_pct?: number;
+            /**
+             * Portfolio Holdings
+             * @default []
+             */
+            portfolio_holdings?: components["schemas"]["AttributionName"][];
+            /** Portfolio Return Pct */
+            portfolio_return_pct?: number | null;
+            /**
+             * Portfolio Weight Pct
+             * @default 0
+             */
+            portfolio_weight_pct?: number;
+            /**
+             * Selection Pct
+             * @default 0
+             */
+            selection_pct?: number;
+            /**
+             * Total Pct
+             * @default 0
+             */
+            total_pct?: number;
+        };
+        /** AttributionExcluded */
+        AttributionExcluded: {
+            /** Bucket */
+            bucket: string;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Return Pct */
+            return_pct?: number | null;
+            /**
+             * Weight Pct
+             * @default 0
+             */
+            weight_pct?: number;
+        };
+        /** AttributionName */
+        AttributionName: {
+            /** Airs Name */
+            airs_name?: string | null;
+            /**
+             * Contribution Pct
+             * @default 0
+             */
+            contribution_pct?: number;
+            /**
+             * In Both
+             * @default false
+             */
+            in_both?: boolean;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Return Pct */
+            return_pct?: number | null;
+            /** Ticker */
+            ticker?: string | null;
+            /**
+             * Weight Pct
+             * @default 0
+             */
+            weight_pct?: number;
         };
         /** BacktestRequest */
         BacktestRequest: {
@@ -4667,6 +7755,26 @@ export interface components {
             /** Variant Key */
             variant_key?: string | null;
         };
+        /** BasketHolding */
+        BasketHolding: {
+            /** Isin */
+            isin: string;
+            /**
+             * Weight
+             * @default 0
+             */
+            weight?: number;
+        };
+        /** BasketRequest */
+        BasketRequest: {
+            /**
+             * Holdings
+             * @default []
+             */
+            holdings?: components["schemas"]["BasketHolding"][];
+            /** Label */
+            label?: string | null;
+        };
         /**
          * BenchmarkCompare
          * @description A comparison index/ETF measured over the portfolio's common window.
@@ -4699,6 +7807,112 @@ export interface components {
             /** Ytd */
             ytd?: number | null;
         };
+        /** BenchmarkFillResult */
+        BenchmarkFillResult: {
+            /**
+             * Capped
+             * @default 0
+             */
+            capped?: number;
+            /** Label */
+            label: string;
+            /**
+             * Needs Cap
+             * @default 0
+             */
+            needs_cap?: number;
+            /**
+             * Needs Resolve
+             * @default 0
+             */
+            needs_resolve?: number;
+            /**
+             * No Isin
+             * @default 0
+             */
+            no_isin?: number;
+            /**
+             * No Isin Names
+             * @default []
+             */
+            no_isin_names?: string[];
+            /** Note */
+            note?: string | null;
+            /**
+             * Price Failed
+             * @default 0
+             */
+            price_failed?: number;
+            /**
+             * Price Pending
+             * @default 0
+             */
+            price_pending?: number;
+            /**
+             * Queued
+             * @default 0
+             */
+            queued?: number;
+            /**
+             * Repriced
+             * @default 0
+             */
+            repriced?: number;
+            /**
+             * Skipped Existing
+             * @default 0
+             */
+            skipped_existing?: number;
+            /**
+             * Universe Built
+             * @default false
+             */
+            universe_built?: boolean;
+            /**
+             * Universe Members
+             * @default 0
+             */
+            universe_members?: number;
+            /**
+             * Usable
+             * @default 0
+             */
+            usable?: number;
+        };
+        /** BenchmarkResetResult */
+        BenchmarkResetResult: {
+            /**
+             * Caps Cleared
+             * @default 0
+             */
+            caps_cleared?: number;
+            /**
+             * Deleted
+             * @default false
+             */
+            deleted?: boolean;
+            /**
+             * Had Template
+             * @default false
+             */
+            had_template?: boolean;
+            /** Label */
+            label: string;
+            /**
+             * Members Deleted
+             * @default 0
+             */
+            members_deleted?: number;
+            /** Note */
+            note?: string | null;
+            /**
+             * Price Rows Deleted
+             * @default 0
+             */
+            price_rows_deleted?: number;
+            /** Prices From */
+            prices_from?: string | null;
+        };
         /** BenchmarkYear */
         BenchmarkYear: {
             /** Ret */
@@ -4707,6 +7921,11 @@ export interface components {
             vol?: number | null;
             /** Year */
             year: number;
+        };
+        /** Body_leonteq_upload_api_asset_pipeline_leonteq_upload_post */
+        Body_leonteq_upload_api_asset_pipeline_leonteq_upload_post: {
+            /** File */
+            file: string;
         };
         /** Body_parse_portfolio_api_portfolios_parse_post */
         Body_parse_portfolio_api_portfolios_parse_post: {
@@ -4717,6 +7936,64 @@ export interface components {
         Body_trigger_scheduled_refresh_api_ingest_scheduled_refresh_trigger_post: {
             /** Company Ids */
             company_ids?: number[] | null;
+        };
+        /** Body_upload_scan_api_asset_pipeline_upload_scan_post */
+        Body_upload_scan_api_asset_pipeline_upload_scan_post: {
+            /** File */
+            file: string;
+        };
+        /**
+         * BookHoldingDetail
+         * @description One paired-book position — every LONG line, priced or not.
+         *
+         *     ⚠ TWO WEIGHTS ON PURPOSE, AND THEY ARE NOT INTERCHANGEABLE.
+         *
+         *     `weight_pct` is the holding's OPENING value (beginwaarde) as a share of the PRICED book, so that
+         *     within ANY asset class, Σ (weight_pct / Σ_class weight_pct) · return_pct reproduces that class's
+         *     START-weighted return (Σnow/Σstart−1) exactly — the true value change, not the current-value
+         *     weighting that lets a big winner dominate. It is None where we could not price the position over
+         *     the window, which is why it is nullable: a 0% there would read as "held nothing", not "unknown".
+         *
+         *     `weight_now_pct` is the CURRENT value as a share of the WHOLE book — the very number the
+         *     allocation chart is drawn from, so per-class subtotals in the holdings table equal the chart's
+         *     slices to the decimal. Use this one for anything shown beside the chart; a table that disagrees
+         *     with the chart above it is read as a bug in both.
+         *
+         *     `currency` is the holding's quote currency (a fair first-order FX signal for a bond/ETF class —
+         *     NOT folded to Unclassified like the fund axes).
+         */
+        BookHoldingDetail: {
+            /** Bucket */
+            bucket: string;
+            /** Currency */
+            currency?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /**
+             * Own Return Estimated
+             * @default false
+             */
+            own_return_estimated?: boolean;
+            /** Own Return From */
+            own_return_from?: string | null;
+            /** Own Return Pct */
+            own_return_pct?: number | null;
+            /** Return Pct */
+            return_pct?: number | null;
+            /**
+             * Via Names
+             * @default []
+             */
+            via_names?: string[];
+            /**
+             * Weight Now Pct
+             * @default 0
+             */
+            weight_now_pct?: number;
+            /** Weight Pct */
+            weight_pct?: number | null;
         };
         /** BuildUniverseRequest */
         BuildUniverseRequest: {
@@ -4876,6 +8153,150 @@ export interface components {
             /** Ticker */
             ticker: string;
         };
+        /** DividendCoverageEntry */
+        DividendCoverageEntry: {
+            /** Company Id */
+            company_id?: number | null;
+            /** Exchange */
+            exchange?: string | null;
+            /**
+             * Gf Unsubscribed
+             * @default false
+             */
+            gf_unsubscribed?: boolean;
+            /** Gurufocus Ticker */
+            gurufocus_ticker?: string | null;
+            /**
+             * Has Data
+             * @default false
+             */
+            has_data?: boolean;
+            /** Has Financials */
+            has_financials?: boolean | null;
+            /** Has Payments */
+            has_payments?: boolean | null;
+            /**
+             * Is Home
+             * @default true
+             */
+            is_home?: boolean;
+            /**
+             * Kind
+             * @default company
+             */
+            kind?: string;
+            /**
+             * Status
+             * @default ok
+             */
+            status?: string;
+        };
+        /**
+         * DividendCoverageResponse
+         * @description `{ISIN: entry}` for every ISIN we can reach, by EITHER bridge. The grid holds
+         *     the ISINs; the frontend joins on them client-side. Keyed by ISIN rather than
+         *     execution_id so the payload is independent of the asset table's size.
+         *
+         *     An ISIN absent from this map has simply never been resolved — the UI offers a
+         *     Fetch. It does NOT mean "no dividend".
+         */
+        DividendCoverageResponse: {
+            /** By Isin */
+            by_isin: {
+                [key: string]: components["schemas"]["DividendCoverageEntry"];
+            };
+        };
+        /**
+         * DividendPayment
+         * @description One declared cash payment, from `stock/{sym}/dividend`.
+         *
+         *     GuruFocus retroactively split-adjusts these to today's share basis (NVIDIA's
+         *     2013 records read 0.001875 = $0.075 / 40x, for the 4:1 and 10:1 splits), so
+         *     they are directly comparable with the fiscal-year series above. Verified: the
+         *     per-fiscal-year sum equals `annuals__Per Share Data__Dividends per Share`
+         *     exactly, for every year of NVDA's history.
+         */
+        DividendPayment: {
+            /** Currency */
+            currency: string;
+            /** Date */
+            date: string;
+            /** Ex Date */
+            ex_date?: string | null;
+            /** Fx Rate */
+            fx_rate?: number | null;
+            /** Kind */
+            kind?: string | null;
+            /** Ttm */
+            ttm?: number | null;
+            /** Ttm Eur */
+            ttm_eur?: number | null;
+            /** Value */
+            value: number;
+            /** Value Eur */
+            value_eur?: number | null;
+        };
+        /**
+         * DividendPaymentsResponse
+         * @description The LIVE payment feed, which the fiscal-year series structurally cannot show.
+         *
+         *     `annuals__…__Dividends per Share` only gains a point once a fiscal year closes,
+         *     so a mid-year dividend hike is invisible for up to a year. NVIDIA raised its
+         *     quarterly dividend from $0.01 to $0.25 with an ex-date of 2026-06-04 — inside
+         *     FY2027, which does not close until 2027-01-31. The annual chart correctly shows
+         *     FY2026 = $0.04; this endpoint shows the $0.25 the day it is declared.
+         */
+        DividendPaymentsResponse: {
+            /** Company Id */
+            company_id?: number | null;
+            /** Currency */
+            currency?: string | null;
+            /**
+             * Fetched
+             * @default false
+             */
+            fetched?: boolean;
+            /** Fx From */
+            fx_from?: string | null;
+            /**
+             * Is Home
+             * @default true
+             */
+            is_home?: boolean;
+            /** Payments */
+            payments: components["schemas"]["DividendPayment"][];
+            /** Symbol */
+            symbol?: string | null;
+        };
+        /** DividendPoint */
+        DividendPoint: {
+            /** Date */
+            date: string;
+            /** Fx Rate */
+            fx_rate?: number | null;
+            /** Value */
+            value: number;
+            /** Value Eur */
+            value_eur?: number | null;
+        };
+        /** DividendSeriesResponse */
+        DividendSeriesResponse: {
+            /** Annual */
+            annual: components["schemas"]["DividendPoint"][];
+            /** Company Id */
+            company_id: number;
+            /** Currency */
+            currency?: string | null;
+            /**
+             * Fetched
+             * @default false
+             */
+            fetched?: boolean;
+            /** Fx From */
+            fx_from?: string | null;
+            /** Quarterly */
+            quarterly: components["schemas"]["DividendPoint"][];
+        };
         /** DrawdownInfo */
         DrawdownInfo: {
             /** Depth Pct */
@@ -4930,10 +8351,262 @@ export interface components {
             /** Transaction Bps */
             transaction_bps: number;
         };
+        /** FinancialPoint */
+        FinancialPoint: {
+            /** Date */
+            date: string;
+            /** Fx Rate */
+            fx_rate?: number | null;
+            /** Value */
+            value: number;
+            /** Value Eur */
+            value_eur?: number | null;
+        };
+        /**
+         * FinancialSeriesResponse
+         * @description One income-statement line, in MILLIONS of `currency` — the LISTING's trading
+         *     currency, because that is what GuruFocus converts the financials into (see the
+         *     module header).
+         */
+        FinancialSeriesResponse: {
+            /** Annual */
+            annual: components["schemas"]["FinancialPoint"][];
+            /**
+             * Applicable
+             * @default true
+             */
+            applicable?: boolean;
+            /** Company Id */
+            company_id?: number | null;
+            /** Currency */
+            currency?: string | null;
+            /**
+             * Fetched
+             * @default false
+             */
+            fetched?: boolean;
+            /** Fx From */
+            fx_from?: string | null;
+            /**
+             * Is Home
+             * @default true
+             */
+            is_home?: boolean;
+            /** Item */
+            item: string;
+            /** Label */
+            label: string;
+            /** Note */
+            note?: string | null;
+            /**
+             * Phrase
+             * @default
+             */
+            phrase?: string;
+            /** Quarterly */
+            quarterly: components["schemas"]["FinancialPoint"][];
+            /** Scalar Value */
+            scalar_value?: number | null;
+            /** Symbol */
+            symbol?: string | null;
+            /** Template */
+            template?: string | null;
+            /**
+             * Unit
+             * @default millions
+             */
+            unit?: string;
+        };
+        /**
+         * FundamentalBreakdownRequest
+         * @description One blended point to take apart: which metric, which fiscal year.
+         */
+        FundamentalBreakdownRequest: {
+            /** Holdings */
+            holdings?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Metric Code */
+            metric_code: string;
+            /** Period */
+            period: string;
+            /** Portfolio Id */
+            portfolio_id?: number | null;
+        };
+        /**
+         * FundamentalCoverageRequest
+         * @description Either a model portfolio's id, or an explicit basket of (isin, weight).
+         */
+        FundamentalCoverageRequest: {
+            /** Holdings */
+            holdings?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Portfolio Id */
+            portfolio_id?: number | null;
+        };
+        /**
+         * FundamentalIngestRequest
+         * @description One uncovered holding to try to ingest fundamentals for. `name` seeds the `company` row
+         *     when one must be created (a `no_company` holding); `force` re-asks GuruFocus past the cache.
+         */
+        FundamentalIngestRequest: {
+            /**
+             * Force
+             * @default false
+             */
+            force?: boolean;
+            /** Isin */
+            isin: string;
+            /** Name */
+            name?: string | null;
+        };
+        /**
+         * FundamentalMatrixRequest
+         * @description The whole blended line taken apart: which metric (every period, every holding).
+         */
+        FundamentalMatrixRequest: {
+            /** Holdings */
+            holdings?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Metric Code */
+            metric_code: string;
+            /** Portfolio Id */
+            portfolio_id?: number | null;
+        };
+        /** FundamentalPoint */
+        FundamentalPoint: {
+            /** Date */
+            date: string;
+            /** Value */
+            value: number;
+        };
+        /** FundamentalSeries */
+        FundamentalSeries: {
+            /**
+             * Dropped
+             * @default 0
+             */
+            dropped?: number;
+            /** Field */
+            field: string;
+            /** Label */
+            label: string;
+            /**
+             * Non Positive
+             * @default 0
+             */
+            non_positive?: number;
+            /**
+             * Period Count
+             * @default 0
+             */
+            period_count?: number;
+            /**
+             * Points
+             * @default []
+             */
+            points?: components["schemas"]["FundamentalPoint"][];
+        };
+        /**
+         * FundamentalsResponse
+         * @description The four soundness charts, off ONE cached blob plus one yfinance price read.
+         */
+        FundamentalsResponse: {
+            /**
+             * Cadence
+             * @default annuals
+             */
+            cadence?: string;
+            /** Company Id */
+            company_id?: number | null;
+            /** Currency */
+            currency?: string | null;
+            /**
+             * Fair Values Eur
+             * @default []
+             */
+            fair_values_eur?: components["schemas"]["FundamentalSeries"][];
+            /**
+             * Fetched
+             * @default false
+             */
+            fetched?: boolean;
+            /**
+             * Has Earnings Yield
+             * @default true
+             */
+            has_earnings_yield?: boolean;
+            /**
+             * Has Roic
+             * @default true
+             */
+            has_roic?: boolean;
+            /**
+             * Is Home
+             * @default true
+             */
+            is_home?: boolean;
+            /** Isin */
+            isin: string;
+            /**
+             * Period Count
+             * @default 0
+             */
+            period_count?: number;
+            /**
+             * Price Crosscheck Eur
+             * @default []
+             */
+            price_crosscheck_eur?: components["schemas"]["FundamentalPoint"][];
+            /** Price Currency */
+            price_currency?: string | null;
+            /**
+             * Price Eur
+             * @default []
+             */
+            price_eur?: components["schemas"]["FundamentalPoint"][];
+            /**
+             * Quality
+             * @default []
+             */
+            quality?: components["schemas"]["QualityMetric"][];
+            /**
+             * Returns
+             * @default []
+             */
+            returns?: components["schemas"]["FundamentalSeries"][];
+            /**
+             * Safety
+             * @default []
+             */
+            safety?: components["schemas"]["FundamentalSeries"][];
+            /** Symbol */
+            symbol: string;
+            /** Template */
+            template?: string | null;
+            /** Yahoo Symbol */
+            yahoo_symbol?: string | null;
+            /**
+             * Yields
+             * @default []
+             */
+            yields?: components["schemas"]["FundamentalSeries"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HoldingIsinOverride */
+        HoldingIsinOverride: {
+            /** Holding Name */
+            holding_name: string;
+            /** Isin */
+            isin?: string | null;
+            /** Note */
+            note?: string | null;
         };
         /** HoldingStateInfo */
         HoldingStateInfo: {
@@ -4958,6 +8631,35 @@ export interface components {
         ImpersonateRequest: {
             /** Target User Id */
             target_user_id: string;
+        };
+        /** IndexMember */
+        IndexMember: {
+            /** Company Id */
+            company_id: number;
+            /** Company Name */
+            company_name?: string | null;
+            /** Currency */
+            currency?: string | null;
+            /** End Date */
+            end_date: string;
+            /** End Price */
+            end_price: number;
+            /** Isin */
+            isin?: string | null;
+            /** Market Cap Eur */
+            market_cap_eur: number;
+            /** Return Eur Pct */
+            return_eur_pct: number;
+            /** Return Local Pct */
+            return_local_pct: number;
+            /** Start Date */
+            start_date: string;
+            /** Start Price */
+            start_price: number;
+            /** Ticker */
+            ticker?: string | null;
+            /** Weight Pct */
+            weight_pct: number;
         };
         /** IndicatorRequest */
         IndicatorRequest: {
@@ -5008,6 +8710,52 @@ export interface components {
             /** Unmatched Count */
             unmatched_count: number;
         };
+        /** LatestCloseResponse */
+        LatestCloseResponse: {
+            /** Close */
+            close: number;
+            /** Close Eur */
+            close_eur?: number | null;
+            /** Close In */
+            close_in?: number | null;
+            /** Currency */
+            currency: string;
+            /** Date */
+            date: string;
+            /** In Currency */
+            in_currency?: string | null;
+            /** Isin */
+            isin: string;
+            /**
+             * Stale Days
+             * @default 0
+             */
+            stale_days?: number;
+            /** Symbol */
+            symbol?: string | null;
+        };
+        /** LinkableContext */
+        LinkableContext: {
+            /** Excluded By Isin */
+            excluded_by_isin: {
+                [key: string]: number[];
+            };
+            /** Options */
+            options: components["schemas"]["LinkablePortfolio"][];
+        };
+        /** LinkablePortfolio */
+        LinkablePortfolio: {
+            /** Code */
+            code?: string | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Omschrijving */
+            omschrijving?: string | null;
+            /** Positions */
+            positions: number;
+        };
         /** LongEquitySaveUniverseRequest */
         LongEquitySaveUniverseRequest: {
             /** Description */
@@ -5031,6 +8779,456 @@ export interface components {
             isin?: string | null;
             /** Ticker */
             ticker?: string | null;
+        };
+        /**
+         * ModelPortfolioAnalysis
+         * @description A model portfolio's composition beside a benchmark's, on ONE set of buckets.
+         *
+         *     Both sides are classified from `asset_grid`'s yfinance attributes, joined by ISIN — the
+         *     portfolio lives in the ISIN world and the benchmark in the `company` world, and putting two
+         *     different sector taxonomies in one chart invents differences that are not there. (All 493
+         *     SP500 members are present in `asset_grid` with a sector, so nothing is lost.)
+         *
+         *     ⚠ FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's
+         *     listing tells you nothing about what it holds — 24 of the 26 held ETFs have a "sector" of
+         *     literally `etf` or `Equity`; an Amsterdam-listed MSCI World ETF is not European exposure; and
+         *     quoted in EUR it still holds mostly USD assets. So every fund folds into "Unclassified" on ALL
+         *     THREE axes — a 40%-ETF portfolio shows a 40% Unclassified bar meaning "we cannot see inside
+         *     this", true and more useful than a confident wrong split.
+         */
+        ModelPortfolioAnalysis: {
+            /**
+             * Allocation
+             * @default []
+             */
+            allocation?: components["schemas"]["PortfolioAllocationSlice"][];
+            /** As Of */
+            as_of?: string | null;
+            /**
+             * Axes
+             * @default []
+             */
+            axes?: components["schemas"]["PortfolioAnalysisAxis"][];
+            /** Benchmark */
+            benchmark: string;
+            /** Benchmark Coverage Pct */
+            benchmark_coverage_pct?: number | null;
+            /**
+             * Benchmark Covered Pct
+             * @default 0
+             */
+            benchmark_covered_pct?: number;
+            /**
+             * Benchmark Foreign Listings
+             * @default 0
+             */
+            benchmark_foreign_listings?: number;
+            /**
+             * Benchmark Members
+             * @default 0
+             */
+            benchmark_members?: number;
+            /**
+             * Benchmark Priced
+             * @default 0
+             */
+            benchmark_priced?: number;
+            /**
+             * Benchmark Universe Members
+             * @default 0
+             */
+            benchmark_universe_members?: number;
+            /**
+             * Book Holdings
+             * @default []
+             */
+            book_holdings?: components["schemas"]["BookHoldingDetail"][];
+            /**
+             * Covered Pct
+             * @default 0
+             */
+            covered_pct?: number;
+            /**
+             * Foreign Listings
+             * @default 0
+             */
+            foreign_listings?: number;
+            /**
+             * Holdings
+             * @default 0
+             */
+            holdings?: number;
+            /**
+             * Looked Through
+             * @default []
+             */
+            looked_through?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Looked Through Pct
+             * @default 0
+             */
+            looked_through_pct?: number;
+            /** Name */
+            name?: string | null;
+            /**
+             * Opaque Pct
+             * @default 0
+             */
+            opaque_pct?: number;
+            /** Portfolio Id */
+            portfolio_id?: number | null;
+            returns?: components["schemas"]["PortfolioAnalysisReturns"] | null;
+            /**
+             * Weight Basis
+             * @default model
+             */
+            weight_basis?: string;
+            /** Weight Note */
+            weight_note?: string | null;
+        };
+        /**
+         * ModelPortfolioAttribution
+         * @description WHY a model beat or lagged the index — Brinson-Fachler, plus the names that drove it.
+         *
+         *     An excess return is a fact, not an explanation: "-11.60% vs ACWI" says nothing about whether
+         *     the failed bet was the SECTORS chosen or the STOCKS chosen inside them. Those are different
+         *     mistakes with different fixes.
+         *
+         *         allocation  = (w_p - w_b) x (R_b,bucket - R_b_total)   the right buckets?
+         *         selection   =  w_b        x (R_p,bucket - R_b,bucket)  the right names inside them?
+         *         interaction = the cross term
+         *
+         *     ⚠ THE IDENTITY IS ASSERTED, NOT ASSUMED: sum(allocation + selection + interaction) == excess.
+         *     `residual_pct` and `reconciles` carry the proof. Three columns that do not sum to the excess
+         *     are not a decomposition of it.
+         *
+         *     ⚠ FUNDS AND CASH ARE EXCLUDED. An ETF has no sector — the benchmark's weight in the fund
+         *     bucket is zero, so Brinson would report holding a world tracker as a *sector bet*.
+         *     `attributable_pct` says how much of the model the table explains.
+         *
+         *     ⚠ `unpriced_pct` IS NOT THE SAME AS `excluded_pct`, AND IT IS THE DANGEROUS ONE. A fund is
+         *     excluded because it is not a sector bet. An UNPRICED equity is excluded because we failed to
+         *     price it — and its sector then reads as UNOWNED, so the allocation effect on that row is a
+         *     FALSE finding. (Measured: a model holding 6% Healthcare, unpriceable, was credited +1.73pp of
+         *     allocation for "avoiding" Healthcare.) `unpriced_buckets` names the rows to discount.
+         */
+        ModelPortfolioAttribution: {
+            /**
+             * Attributable Pct
+             * @default 0
+             */
+            attributable_pct?: number;
+            /**
+             * Attributed Pct
+             * @default 0
+             */
+            attributed_pct?: number;
+            /** Axis */
+            axis: string;
+            /** Benchmark */
+            benchmark: string;
+            /** Benchmark Coverage Pct */
+            benchmark_coverage_pct?: number | null;
+            /**
+             * Benchmark Return Pct
+             * @default 0
+             */
+            benchmark_return_pct?: number;
+            /**
+             * Excess Pct
+             * @default 0
+             */
+            excess_pct?: number;
+            /**
+             * Excluded
+             * @default []
+             */
+            excluded?: components["schemas"]["AttributionExcluded"][];
+            /**
+             * Excluded Pct
+             * @default 0
+             */
+            excluded_pct?: number;
+            /** Excluded Return Pct */
+            excluded_return_pct?: number | null;
+            /**
+             * Missed Winners
+             * @default []
+             */
+            missed_winners?: components["schemas"]["AttributionName"][];
+            /** Name */
+            name?: string | null;
+            /** Note */
+            note?: string | null;
+            /** Portfolio Id */
+            portfolio_id: number;
+            /**
+             * Portfolio Return Pct
+             * @default 0
+             */
+            portfolio_return_pct?: number;
+            /**
+             * Reconciles
+             * @default false
+             */
+            reconciles?: boolean;
+            /**
+             * Residual Pct
+             * @default 0
+             */
+            residual_pct?: number;
+            /**
+             * Rows
+             * @default []
+             */
+            rows?: components["schemas"]["AttributionBucket"][];
+            /**
+             * Source
+             * @default model
+             */
+            source?: string;
+            /** Start */
+            start?: string | null;
+            /**
+             * Top Contributors
+             * @default []
+             */
+            top_contributors?: components["schemas"]["AttributionName"][];
+            /**
+             * Top Detractors
+             * @default []
+             */
+            top_detractors?: components["schemas"]["AttributionName"][];
+            /**
+             * Unpriced Buckets
+             * @default []
+             */
+            unpriced_buckets?: string[];
+            /**
+             * Unpriced Pct
+             * @default 0
+             */
+            unpriced_pct?: number;
+            /** Window */
+            window: string;
+        };
+        /**
+         * ModelPortfolioPerformance
+         * @description One model portfolio's performance, in EUR: YTD, since-inception, Sharpe, Sortino.
+         *
+         *     ⚠ `ytd_pct` IS NOT ALWAYS A FULL YEAR. It is a buy-and-hold of the composition WE HOLD,
+         *     which is the CURRENT one — AIRS keeps only 2-3 snapshot dates and no monthly history, so
+         *     January's composition is not recoverable. The window therefore opens at
+         *     `max(Jan 1, inception)`, never before the weights existed, and `ytd_from` is that date:
+         *
+         *       * `model_changed_in_period` false (29 of 56) — the model has held these weights since
+         *         before Jan 1. `ytd_from` is Jan 1 and this is a true, full YTD.
+         *       * true (27 of 56) — the model is YOUNGER than the year, so `ytd_from` is its inception
+         *         and the figure covers a PARTIAL year. Realized, not backtested — but do not rank it
+         *         against a 12-month return without noticing (MoTopSelectie_FX has held its weights for
+         *         eight days: +0.51%. Priced back to Jan 1 it would read +75.85%, on a basket it never
+         *         held, and be the best portfolio in the list).
+         *
+         *     `since_model_pct` is the same composition's return over its WHOLE life (`model_effective` —
+         *     its inception), not clipped to this year. For a model younger than the year the two windows
+         *     coincide and the two numbers are equal, by construction.
+         *
+         *     `sharpe` / `sortino` ride that SAME window, annualized from the daily EUR curve at rf = 0.
+         *     A ratio is only as honest as the return underneath it, and a YTD-anchored one is a backtest
+         *     for half the list. They are NULL — not zero — below `MIN_STAT_DAYS` (20) daily returns: a
+         *     ratio off a model defined last week is noise with two decimals, and it would render in the
+         *     same column, same font, as one measured over two years. `stat_days` is how many it had.
+         *
+         *     `ytd_pct` is NULL when `low_coverage` — under 60% of the model's weight is priceable, so a
+         *     renormalised return would be an invention (TOPS_OFF_BEH once reported "+0.00%" off its 1%
+         *     cash line while 99% of it, in structured products, was silently dropped). The since-
+         *     inception figures carry their OWN floor (`since_covered_pct`), because a holding that had
+         *     not listed yet at inception is unpriceable there whatever its coverage at Jan 1 was.
+         */
+        ModelPortfolioPerformance: {
+            /** Ann Vol Pct */
+            ann_vol_pct?: number | null;
+            /** Cagr Pct */
+            cagr_pct?: number | null;
+            /**
+             * Cash Pct
+             * @default 0
+             */
+            cash_pct?: number;
+            /** Covered Pct */
+            covered_pct?: number | null;
+            /**
+             * Interpolated Holdings
+             * @default 0
+             */
+            interpolated_holdings?: number;
+            /**
+             * Low Coverage
+             * @default false
+             */
+            low_coverage?: boolean;
+            /**
+             * Model Changed In Period
+             * @default false
+             */
+            model_changed_in_period?: boolean;
+            /** Model Effective */
+            model_effective?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Partial Coverage
+             * @default false
+             */
+            partial_coverage?: boolean;
+            /** Portfolio Id */
+            portfolio_id: number;
+            /**
+             * Priced Holdings
+             * @default 0
+             */
+            priced_holdings?: number;
+            /**
+             * Resolved Holdings
+             * @default 0
+             */
+            resolved_holdings?: number;
+            /** Sharpe */
+            sharpe?: number | null;
+            /** Since Covered Pct */
+            since_covered_pct?: number | null;
+            /** Since Model Pct */
+            since_model_pct?: number | null;
+            /** Sortino */
+            sortino?: number | null;
+            sources?: components["schemas"]["PortfolioPerfSources"] | null;
+            /**
+             * Stat Days
+             * @default 0
+             */
+            stat_days?: number;
+            /**
+             * Unpriced Holdings
+             * @default 0
+             */
+            unpriced_holdings?: number;
+            /**
+             * Unresolved Holdings
+             * @default 0
+             */
+            unresolved_holdings?: number;
+            /** Years Running */
+            years_running?: number | null;
+            /** Ytd From */
+            ytd_from?: string | null;
+            /** Ytd Pct */
+            ytd_pct?: number | null;
+        };
+        /**
+         * ModelPortfolioPosition
+         * @description One row of the portfolio's XLS export. `isin` is the point of the whole exercise —
+         *     it is the exact join into `asset_execution`, and it's the identifier the AIRS
+         *     *holdings* sheet never gave us (that one only has a fund NAME).
+         *
+         *     The price marks are the ARITHMETIC BEHIND the portfolio's YTD, one holding at a time: each
+         *     is bought at its last close on or before `ytd_from` and held to its latest close, and
+         *     `return_pct` is exactly the quantity the portfolio figure weights together.
+         *
+         *     ⚠ `start_price_eur` / `end_price_eur` are in EUR, not the listing's currency, because
+         *     `return_pct` is an EUR return and carries the FX leg. Printing the native closes as the
+         *     arithmetic would show two numbers whose ratio is not the third — a USD holding can rise in
+         *     dollars and fall in euros. The native closes ride along (`*_price_local`, `currency`) for a
+         *     tooltip, never as the sum.
+         *
+         *     All of them are NULL for a holding with no price series (an unresolved ETF, a structured
+         *     product) and for the cash line — which has no ISIN, and is not an instrument.
+         */
+        ModelPortfolioPosition: {
+            /** Categorie */
+            categorie?: string | null;
+            /** Currency */
+            currency?: string | null;
+            /** End Date */
+            end_date?: string | null;
+            /** End Price Eur */
+            end_price_eur?: number | null;
+            /** End Price Local */
+            end_price_local?: number | null;
+            /** Fonds */
+            fonds?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /**
+             * Known Instrument
+             * @default false
+             */
+            known_instrument?: boolean;
+            /** Last Close */
+            last_close?: string | null;
+            /** Link Confidence */
+            link_confidence?: number | null;
+            /** Link Reason */
+            link_reason?: string | null;
+            /** Link Source */
+            link_source?: string | null;
+            /** Linked Portfolio Id */
+            linked_portfolio_id?: number | null;
+            /** Linked Portfolio Name */
+            linked_portfolio_name?: string | null;
+            /**
+             * Lookthrough
+             * @default false
+             */
+            lookthrough?: boolean;
+            /** Percentage */
+            percentage?: number | null;
+            /** Regio */
+            regio?: string | null;
+            /** Return Pct */
+            return_pct?: number | null;
+            /** Sector */
+            sector?: string | null;
+            /** Start Date */
+            start_date?: string | null;
+            /**
+             * Start Gap Days
+             * @default 0
+             */
+            start_gap_days?: number;
+            /**
+             * Start Interpolated
+             * @default false
+             */
+            start_interpolated?: boolean;
+            /** Start Price Eur */
+            start_price_eur?: number | null;
+            /** Start Price Local */
+            start_price_local?: number | null;
+            /** Valuta */
+            valuta?: string | null;
+        };
+        /** ModelPortfolioPositions */
+        ModelPortfolioPositions: {
+            /** Cached At */
+            cached_at?: string | null;
+            /** Dates */
+            dates: string[];
+            /** Datum */
+            datum?: string | null;
+            /** Matched */
+            matched: number;
+            /** Portfolio */
+            portfolio: string;
+            /** Portfolio Id */
+            portfolio_id: number;
+            /** Rows */
+            rows: components["schemas"]["ModelPortfolioPosition"][];
+            /** Unmatched */
+            unmatched: number;
+            /** Ytd From */
+            ytd_from?: string | null;
         };
         /** MonthStatInfo */
         MonthStatInfo: {
@@ -5128,6 +9326,209 @@ export interface components {
             /** Ytd Before */
             ytd_before?: number | null;
         };
+        /** PerformanceResponse */
+        PerformanceResponse: {
+            /** Currency */
+            currency?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /** Label */
+            label?: string | null;
+            /** Symbol */
+            symbol?: string | null;
+            /**
+             * Windows
+             * @default []
+             */
+            windows?: components["schemas"]["PerformanceWindow"][];
+        };
+        /** PerformanceWindow */
+        PerformanceWindow: {
+            /** Ann Vol Pct */
+            ann_vol_pct?: number | null;
+            /**
+             * Available
+             * @default false
+             */
+            available?: boolean;
+            /** Cagr Pct */
+            cagr_pct?: number | null;
+            /** Coverage Pct */
+            coverage_pct?: number | null;
+            /** From Date */
+            from_date?: string | null;
+            /** Max Drawdown Pct */
+            max_drawdown_pct?: number | null;
+            /** Pos 12M Pct */
+            pos_12m_pct?: number | null;
+            /** R2 */
+            r2?: number | null;
+            /** Sharpe */
+            sharpe?: number | null;
+            /** Sortino */
+            sortino?: number | null;
+            /** To Date */
+            to_date?: string | null;
+            /**
+             * Trading Days
+             * @default 0
+             */
+            trading_days?: number;
+            /** Up Days Pct */
+            up_days_pct?: number | null;
+            /** Years */
+            years: number;
+        };
+        /**
+         * PortfolioAllocationSlice
+         * @description One asset-class slice of the portfolio's OWN composition (no benchmark side).
+         *
+         *     AIRS's `categorie` says what a holding INVESTS IN (an equity ETF is AAND, a bond ETF is OBL);
+         *     the ETF flag is the orthogonal wrapper axis. So only EQUITY is split into direct vs ETF — a
+         *     bond ETF is Bonds, not "ETF Bonds". Buckets: Equity | ETF Equity | Bonds | Alternatives | Cash
+         *     (Real estate folds into Alternatives) | Unclassified.
+         */
+        PortfolioAllocationSlice: {
+            /** Bucket */
+            bucket: string;
+            /**
+             * Holdings
+             * @default 0
+             */
+            holdings?: number;
+            /** Pct */
+            pct: number;
+            /** Return Pct */
+            return_pct?: number | null;
+        };
+        /** PortfolioAnalysisAxis */
+        PortfolioAnalysisAxis: {
+            /** Axis */
+            axis: string;
+            /** Rows */
+            rows: components["schemas"]["PortfolioAnalysisRow"][];
+        };
+        /**
+         * PortfolioAnalysisReturns
+         * @description The model's EUR return beside the benchmark's — over the SAME windows, both times.
+         *
+         *     ⚠ A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER. A model's
+         *     "YTD" opens at `max(1 Jan, its inception)`, and for the 27 models younger than the year that
+         *     is NOT 1 January. Putting a 9-day portfolio return beside the index's full-year return and
+         *     calling the gap out-performance would be nonsense that looks exactly like a finding. So the
+         *     index is priced from the model's OWN `ytd_from`, and again from its OWN inception.
+         *
+         *     `ytd_is_since` is true when the model is younger than the year: the two windows coincide, so
+         *     the two rows are the same number by construction, and the UI says so.
+         */
+        PortfolioAnalysisReturns: {
+            /** Benchmark As Of */
+            benchmark_as_of?: string | null;
+            /** Benchmark Since Pct */
+            benchmark_since_pct?: number | null;
+            /** Benchmark Ytd Pct */
+            benchmark_ytd_pct?: number | null;
+            /** Book As Of */
+            book_as_of?: string | null;
+            /** Book Available */
+            book_available?: boolean | null;
+            /** Book Comparable */
+            book_comparable?: boolean | null;
+            /** Book Gap Pct */
+            book_gap_pct?: number | null;
+            /** Book Portefeuille */
+            book_portefeuille?: string | null;
+            /** Book Reason */
+            book_reason?: string | null;
+            /** Book Ytd Pct */
+            book_ytd_pct?: number | null;
+            /** Portfolio As Of */
+            portfolio_as_of?: string | null;
+            /** Portfolio Since Pct */
+            portfolio_since_pct?: number | null;
+            /** Portfolio Ytd Pct */
+            portfolio_ytd_pct?: number | null;
+            /** Since Excess Pct */
+            since_excess_pct?: number | null;
+            /** Since From */
+            since_from?: string | null;
+            /**
+             * Source
+             * @default model
+             */
+            source?: string;
+            /** Strategy Ytd Pct */
+            strategy_ytd_pct?: number | null;
+            /** Ytd Excess Pct */
+            ytd_excess_pct?: number | null;
+            /** Ytd From */
+            ytd_from?: string | null;
+            /**
+             * Ytd Is Since
+             * @default false
+             */
+            ytd_is_since?: boolean;
+        };
+        /** PortfolioAnalysisRow */
+        PortfolioAnalysisRow: {
+            /**
+             * Benchmark Pct
+             * @default 0
+             */
+            benchmark_pct?: number;
+            /** Bucket */
+            bucket: string;
+            /**
+             * Diff Pct
+             * @default 0
+             */
+            diff_pct?: number;
+            /**
+             * Portfolio Pct
+             * @default 0
+             */
+            portfolio_pct?: number;
+        };
+        /**
+         * PortfolioCorrelationMatrix
+         * @description Pairwise Pearson correlation of the LISTED model portfolios' daily EUR returns, for two
+         *     windows. Same return series the /portfolios YTD column is read off, correlated pairwise-
+         *     complete. Covers exactly the > 5-holding models the table shows by default ("42 of 95").
+         *
+         *     `ytd` / `trailing_12m` are NxN over `portfolio_ids` (row i = column i = `portfolio_ids[i]`,
+         *     `labels[i]`). A cell is `null` when the pair share fewer than `min_overlap_days` common daily
+         *     returns (or a side has no priceable series / zero variance). The diagonal is 1.0 where the
+         *     portfolio has enough of its own returns, else null. `*_obs` is each portfolio's daily-return
+         *     count in that window.
+         */
+        PortfolioCorrelationMatrix: {
+            /** As Of */
+            as_of: string;
+            /**
+             * Codes
+             * @default []
+             */
+            codes?: string[];
+            /** Labels */
+            labels: string[];
+            /** Min Overlap Days */
+            min_overlap_days: number;
+            /** Portfolio Ids */
+            portfolio_ids: number[];
+            /** Trailing 12M */
+            trailing_12m: (number | null)[][];
+            /** Trailing 12M Obs */
+            trailing_12m_obs: number[];
+            /**
+             * Variants
+             * @default []
+             */
+            variants?: (string | null)[];
+            /** Ytd */
+            ytd: (number | null)[][];
+            /** Ytd Obs */
+            ytd_obs: number[];
+        };
         /** PortfolioCreate */
         PortfolioCreate: {
             /**
@@ -5144,6 +9545,21 @@ export interface components {
             company_id: number;
             /** Weight */
             weight?: number | null;
+        };
+        /**
+         * PortfolioPerfSources
+         * @description As-of dates of the inputs behind this row's numbers — for per-value traceability on the
+         *     grid. Every field is an already-loaded date SURFACED, not recomputed: the model figures
+         *     (YTD / Since / Sharpe / Sortino) are a yfinance close series converted at FX, over a
+         *     composition we scraped from AIRS, so those three dates are what "as of when" means here.
+         */
+        PortfolioPerfSources: {
+            /** Fx */
+            fx?: string | null;
+            /** Model Scan */
+            model_scan?: string | null;
+            /** Yf Close */
+            yf_close?: string | null;
         };
         /** PortfolioSaveRequest */
         PortfolioSaveRequest: {
@@ -5211,6 +9627,29 @@ export interface components {
             /** Name */
             name?: string | null;
         };
+        /** PricePoint */
+        PricePoint: {
+            /** Date */
+            date: string;
+            /** Value */
+            value: number;
+            /** Value Eur */
+            value_eur?: number | null;
+        };
+        /** PriceSeriesResponse */
+        PriceSeriesResponse: {
+            /** Currency */
+            currency?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /**
+             * Points
+             * @default []
+             */
+            points?: components["schemas"]["PricePoint"][];
+            /** Symbol */
+            symbol?: string | null;
+        };
         /** PruneRequest */
         PruneRequest: {
             /** Drop Company Ids */
@@ -5227,10 +9666,102 @@ export interface components {
             /** Universe Label */
             universe_label: string;
         };
+        /**
+         * QualityMetric
+         * @description One of the four quality numbers, and its verdict.
+         *
+         *     ⚠ FOUR STATES, AND ONLY ONE OF THEM IS "BAD".
+         *         ok       measured, and it passes
+         *         fail     measured, and it does not
+         *         n_a      the LINE DOES NOT EXIST for this company. A bank has no ROIC and no gross margin
+         *                  at all (JPMorgan, template 'B' — structurally absent, not empty), so two of the
+         *                  four are inapplicable to one. That is an answer about the industry template.
+         *         unknown  the line exists but there is too little history to say — a 10y median off three
+         *                  points is not a median.
+         *     Collapsing `n_a` or `unknown` into `fail` marks every bank a bad business and every young
+         *     company a suspect one.
+         */
+        QualityMetric: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Note */
+            note?: string | null;
+            /**
+             * Periods
+             * @default 0
+             */
+            periods?: number;
+            /**
+             * Status
+             * @default unknown
+             */
+            status?: string;
+            /**
+             * Unit
+             * @default
+             */
+            unit?: string;
+            /** Value */
+            value?: number | null;
+        };
         /** RecomputeRequest */
         RecomputeRequest: {
             /** Universe Ids */
             universe_ids?: number[] | null;
+        };
+        /**
+         * ReconstructedIndex
+         * @description A cap-weighted index rebuilt from our own membership + prices + FX.
+         *
+         *     Validated against the real thing: for 2026 YTD this returns +9.10% in USD against SPY's
+         *     +9.02% — 8bp apart. It is NOT a replacement for SPY (which is exact); it exists so a
+         *     benchmark is computed the same way a portfolio is, and is therefore comparable to one.
+         */
+        ReconstructedIndex: {
+            /** As Of */
+            as_of?: string | null;
+            /** Label */
+            label: string;
+            /** Member Count */
+            member_count: number;
+            /**
+             * Members
+             * @default []
+             */
+            members?: components["schemas"]["IndexMember"][];
+            /** Note */
+            note?: string | null;
+            /** Priced Of Universe */
+            priced_of_universe?: string | null;
+            /**
+             * Split Adjusted
+             * @default []
+             */
+            split_adjusted?: components["schemas"]["SplitAdjustment"][];
+            /** Start Date */
+            start_date?: string | null;
+            /** Year */
+            year: number;
+            /** Ytd Eur Pct */
+            ytd_eur_pct?: number | null;
+            /** Ytd Local Pct */
+            ytd_local_pct?: number | null;
+        };
+        /**
+         * RelativeGrowthRequest
+         * @description One year of the Share-Price-vs-Owner-Earnings chart, decomposed per holding.
+         */
+        RelativeGrowthRequest: {
+            /** Holdings */
+            holdings?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Period */
+            period: string;
+            /** Portfolio Id */
+            portfolio_id?: number | null;
         };
         /** RenameBacktestRequest */
         RenameBacktestRequest: {
@@ -5382,6 +9913,20 @@ export interface components {
             /** Cash Pct */
             cash_pct: number;
         };
+        /** SetDisplayNameRequest */
+        SetDisplayNameRequest: {
+            /** Display Name */
+            display_name?: string | null;
+        };
+        /** SetLinkRequest */
+        SetLinkRequest: {
+            /** Fonds */
+            fonds: string;
+            /** Isin */
+            isin?: string | null;
+            /** Linked Portfolio Id */
+            linked_portfolio_id?: number | null;
+        };
         /** SetRoleRequest */
         SetRoleRequest: {
             /** Role */
@@ -5437,6 +9982,79 @@ export interface components {
             /** Variant Key */
             variant_key?: string | null;
         };
+        /**
+         * SplitAdjustment
+         * @description A price series we had to rescale. Surfaced, never applied silently.
+         */
+        SplitAdjustment: {
+            /** Company Name */
+            company_name?: string | null;
+            /** Factor */
+            factor: number;
+            /** Ticker */
+            ticker?: string | null;
+        };
+        /**
+         * StoredModelPortfolio
+         * @description A stored portfolio row. `holdings` is derived by the view from the positions, so it
+         *     cannot drift from them — and it keeps three absences apart that are NOT the same thing:
+         *
+         *       has_fixed_model=false   -> NO MODEL EXISTS (a `normaal`/`meervoudig` portfolio). AIRS
+         *                                  stores no composition at all; "0 holdings" would describe a
+         *                                  model that isn't there.
+         *       positions_scanned_at=None -> never counted. Unknown, not zero.
+         *       no_snapshot=true        -> we looked, and AIRS had no DATED composition: its date
+         *                                  dropdown held nothing but the empty "today" placeholder.
+         *                                  Measured on BUS_DUTD_DEF_AFS + EuropaTopSelect OFF FX, both
+         *                                  of which I first mis-reported as "0 holdings".
+         *       holdings=0              -> a real, EMPTY fixed model. Not currently observed on any
+         *                                  portfolio, but expressible — and it must stay distinct from
+         *                                  the three absences above.
+         *
+         *     `holdings` counts DISTINCT ISINs: a portfolio can list one instrument on two lines
+         *     (VTopSelectie OFF FX holds CapitaLand at 2% and again at 3%), and that is one instrument.
+         */
+        StoredModelPortfolio: {
+            /** Display Name */
+            display_name?: string | null;
+            /** Fixed Datum */
+            fixed_datum?: string | null;
+            /**
+             * Has Fixed Model
+             * @default false
+             */
+            has_fixed_model?: boolean;
+            /** Holdings */
+            holdings?: number | null;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /**
+             * No Snapshot
+             * @default false
+             */
+            no_snapshot?: boolean;
+            /** Omschrijving */
+            omschrijving?: string | null;
+            /** Portfolio Type */
+            portfolio_type?: string | null;
+            /** Positions Datum */
+            positions_datum?: string | null;
+            /** Positions Error */
+            positions_error?: string | null;
+            /** Positions Scanned At */
+            positions_scanned_at?: string | null;
+            /** Scanned At */
+            scanned_at?: string | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated?: boolean;
+            /** Variant */
+            variant?: string | null;
+        };
         /** StrategyStats */
         StrategyStats: {
             /** Ann Return */
@@ -5464,6 +10082,61 @@ export interface components {
         UniverseRenameRequest: {
             /** New Label */
             new_label: string;
+        };
+        /** UniverseResponse */
+        UniverseResponse: {
+            /** Count */
+            count: number;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Tickers */
+            tickers: components["schemas"]["UniverseTicker"][];
+        };
+        /**
+         * UniverseTicker
+         * @description One member of the liquid universe — a UNIQUE yfinance ticker (the analysis
+         *     instrument), backed by its most-liquid tradeable listing (execution).
+         */
+        UniverseTicker: {
+            /** Analysis Symbol */
+            analysis_symbol: string;
+            /** Asset Class */
+            asset_class?: string | null;
+            /** Bars */
+            bars?: number | null;
+            /** Currency */
+            currency?: string | null;
+            /** Exchange */
+            exchange?: string | null;
+            /** Execution Isin */
+            execution_isin?: string | null;
+            /** Execution Symbol */
+            execution_symbol?: string | null;
+            /** Leonteq Name */
+            leonteq_name?: string | null;
+            /** Leonteq Product Type */
+            leonteq_product_type?: string | null;
+            /** Market Cap Eur */
+            market_cap_eur?: number | null;
+            /** Med Adv Eur */
+            med_adv_eur?: number | null;
+            /**
+             * N Listings
+             * @default 1
+             */
+            n_listings?: number;
+            /** Name */
+            name?: string | null;
+            /** Price From */
+            price_from?: string | null;
+            /** Price To */
+            price_to?: string | null;
+            /** Sector */
+            sector?: string | null;
+            /** Zero Vol Frac */
+            zero_vol_frac?: number | null;
         };
         /** UpdateBenchmarkRequest */
         UpdateBenchmarkRequest: {
@@ -5547,6 +10220,50 @@ export interface components {
             /** Year */
             year: number;
         };
+        /** _CreateUniverseBody */
+        _CreateUniverseBody: {
+            /** Asset Class */
+            asset_class?: string | null;
+            /**
+             * Max Zero Vol
+             * @default 0.05
+             */
+            max_zero_vol?: number;
+            /**
+             * Min Adv Eur
+             * @default 1000000
+             */
+            min_adv_eur?: number;
+            /**
+             * Min Market Cap Eur
+             * @default 0
+             */
+            min_market_cap_eur?: number;
+            /** Name */
+            name: string;
+            /**
+             * Require Leonteq
+             * @default true
+             */
+            require_leonteq?: boolean;
+            /**
+             * Require Openfigi Match
+             * @default true
+             */
+            require_openfigi_match?: boolean;
+            /**
+             * Require Volume
+             * @default true
+             */
+            require_volume?: boolean;
+            /** Sectors */
+            sectors?: string[] | null;
+        };
+        /** _ExistingBody */
+        _ExistingBody: {
+            /** Identifiers */
+            identifiers: string[];
+        };
         /** _GfCompanyNameBody */
         _GfCompanyNameBody: {
             /** Exchange */
@@ -5592,6 +10309,25 @@ export interface components {
             company_id: number;
             /** Strategy Id */
             strategy_id?: number | null;
+        };
+        /** _RowRefreshBody */
+        _RowRefreshBody: {
+            /** Identifier */
+            identifier: string;
+        };
+        /** _SectorApplyBody */
+        _SectorApplyBody: {
+            /** Tags */
+            tags: components["schemas"]["_SectorTag"][];
+        };
+        /** _SectorTag */
+        _SectorTag: {
+            /** Analysis Id */
+            analysis_id: number;
+            /** Multiplier */
+            multiplier?: number | null;
+            /** Sector */
+            sector?: string | null;
         };
         /** _StoreBody */
         _StoreBody: {
@@ -6412,6 +11148,346 @@ export interface operations {
             };
         };
     };
+    airs_account_model_links_api_airs_account_model_links_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccountModelLinks"];
+                };
+            };
+        };
+    };
+    set_airs_account_model_link_api_airs_account_model_links__portefeuille__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AirsAccountLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_airs_account_model_link_api_airs_account_model_links__portefeuille__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_accounts_api_airs_accounts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccount"][];
+                };
+            };
+        };
+    };
+    airs_account_holdings_api_airs_accounts__portefeuille__holdings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccountDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_account_isins_api_airs_accounts__portefeuille__isins_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccountIsins"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_set_account_holding_link_api_airs_accounts__portefeuille__link_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_clear_account_holding_link_api_airs_accounts__portefeuille__link_delete: {
+        parameters: {
+            query?: {
+                isin?: string | null;
+                fonds?: string;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_account_linkable_portfolios_api_airs_accounts__portefeuille__linkable_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkableContext"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_asset_bucket_override_api_airs_asset_bucket_override_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssetBucketOverride"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_basket_analysis_api_airs_basket_analysis_post: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BasketRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPortfolioAnalysis"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_crm_relaties_api_airs_crm_relaties_get: {
         parameters: {
             query?: never;
@@ -6428,6 +11504,476 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    set_holding_isin_override_api_airs_holding_isin_override_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HoldingIsinOverride"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolios_stored_api_airs_model_portfolios_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredModelPortfolio"][];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_correlations_api_airs_model_portfolios_correlations_get: {
+        parameters: {
+            query?: {
+                year?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioCorrelationMatrix"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_performance_api_airs_model_portfolios_performance_get: {
+        parameters: {
+            query?: {
+                year?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPortfolioPerformance"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolios_scan_api_airs_model_portfolios_scan_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    airs_model_portfolio_analysis_api_airs_model_portfolios__portfolio_id__analysis_get: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                weight_by?: string;
+                source?: string;
+                bucket?: string | null;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPortfolioAnalysis"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_attribution_api_airs_model_portfolios__portfolio_id__attribution_get: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                window?: string;
+                axis?: string;
+                source?: string;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPortfolioAttribution"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_set_portfolio_display_name_api_airs_model_portfolios__portfolio_id__display_name_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetDisplayNameRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_set_portfolio_link_api_airs_model_portfolios__portfolio_id__link_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_clear_portfolio_link_api_airs_model_portfolios__portfolio_id__link_delete: {
+        parameters: {
+            query?: {
+                isin?: string | null;
+                fonds?: string;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_linkable_portfolios_api_airs_model_portfolios__portfolio_id__linkable_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkableContext"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_owner_earnings_stream_api_airs_model_portfolios__portfolio_id__owner_earnings_stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_positions_api_airs_model_portfolios__portfolio_id__positions_get: {
+        parameters: {
+            query?: {
+                datum?: string | null;
+                refresh?: boolean;
+                source?: string;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelPortfolioPositions"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_price_series_api_airs_model_portfolios__portfolio_id__price_series_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_risk_windows_api_airs_model_portfolios__portfolio_id__risk_windows_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PerformanceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -6487,6 +12033,88 @@ export interface operations {
             };
         };
     };
+    airs_portfolios_overview_api_airs_portfolios_overview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsPortfolioOverview"][];
+                };
+            };
+        };
+    };
+    airs_portfolio_delete_api_airs_portfolios__portefeuille__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccountDeleted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_refresh_api_airs_portfolios__portefeuille__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_scan_api_airs_scan_get: {
         parameters: {
             query?: never;
@@ -6509,7 +12137,9 @@ export interface operations {
     };
     airs_vermogen_refresh_api_airs_vermogen_refresh_post: {
         parameters: {
-            query?: never;
+            query?: {
+                force?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6523,6 +12153,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -6580,6 +12219,195 @@ export interface operations {
             };
         };
     };
+    alphalab_api_asset_pipeline_alphalab_get: {
+        parameters: {
+            query?: {
+                min_adv_eur?: number;
+                require_sector?: boolean;
+                asset_class?: string;
+                max_assets?: number;
+                preview?: boolean;
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    alphalab_regime_api_asset_pipeline_alphalab_regime_get: {
+        parameters: {
+            query?: {
+                min_adv_eur?: number;
+                require_sector?: boolean;
+                asset_class?: string;
+                max_assets?: number;
+                start?: string | null;
+                end?: string | null;
+                /** @description use a SAVED universe's members instead of the ADV/sector filters */
+                universe_id?: number | null;
+                /** @description comma-separated sectors to drop from the benchmark (e.g. 'commodity') */
+                exclude_sectors?: string | null;
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    alphalab_regime_stream_api_asset_pipeline_alphalab_regime_stream_get: {
+        parameters: {
+            query?: {
+                min_adv_eur?: number;
+                require_sector?: boolean;
+                asset_class?: string;
+                max_assets?: number;
+                start?: string | null;
+                end?: string | null;
+                universe_id?: number | null;
+                exclude_sectors?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    alphalab_sectors_api_asset_pipeline_alphalab_sectors_get: {
+        parameters: {
+            query?: {
+                min_adv_eur?: number;
+                require_sector?: boolean;
+                asset_class?: string;
+                max_assets?: number;
+                /** @description use a SAVED universe's members instead of the ADV/sector filters */
+                universe_id?: number | null;
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    alphalab_sectors_stream_api_asset_pipeline_alphalab_sectors_stream_get: {
+        parameters: {
+            query?: {
+                min_adv_eur?: number;
+                require_sector?: boolean;
+                asset_class?: string;
+                max_assets?: number;
+                universe_id?: number | null;
+                start?: string | null;
+                end?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_assets_api_asset_pipeline_assets_get: {
         parameters: {
             query?: never;
@@ -6600,11 +12428,41 @@ export interface operations {
             };
         };
     };
+    asset_parquet_api_asset_pipeline_assets__analysis_id__parquet_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analysis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     asset_series_api_asset_pipeline_assets__analysis_id__series_get: {
         parameters: {
             query?: {
                 max_points?: number;
-                in_eur?: boolean;
             };
             header?: never;
             path: {
@@ -6630,6 +12488,565 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    basket_owner_earnings_api_asset_pipeline_basket_owner_earnings_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BasketRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinancialSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    basket_owner_earnings_stream_api_asset_pipeline_basket_owner_earnings_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BasketRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    basket_performance_api_asset_pipeline_basket_performance_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BasketRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PerformanceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    basket_price_series_api_asset_pipeline_basket_price_series_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BasketRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_risk_api_asset_pipeline_benchmark_risk__label__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PerformanceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dividend_coverage_api_asset_pipeline_dividends_coverage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DividendCoverageResponse"];
+                };
+            };
+        };
+    };
+    dividend_payments_by_isin_api_asset_pipeline_dividends_isin__isin__payments_get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DividendPaymentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dividend_resolve_isin_api_asset_pipeline_dividends_isin__isin__resolve_post: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DividendCoverageEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dividend_series_api_asset_pipeline_dividends__company_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DividendSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dividend_fetch_api_asset_pipeline_dividends__company_id__fetch_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DividendSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dividend_payments_api_asset_pipeline_dividends__company_id__payments_get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DividendPaymentsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    equity_sector_backfill_api_asset_pipeline_equity_sectors_backfill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    equity_sector_stuck_api_asset_pipeline_equity_sectors_stuck_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    etf_sector_apply_api_asset_pipeline_etf_sectors_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_SectorApplyBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    etf_sector_candidates_api_asset_pipeline_etf_sectors_candidates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    existing_api_asset_pipeline_existing_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_ExistingBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    financial_line_by_isin_api_asset_pipeline_financials_isin__isin___item__get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                isin: string;
+                item: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinancialSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fundamentals_by_isin_api_asset_pipeline_fundamentals_isin__isin__get: {
+        parameters: {
+            query?: {
+                cadence?: string;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundamentalsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grid_api_asset_pipeline_grid_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetGridResponse"];
                 };
             };
         };
@@ -6667,11 +13084,356 @@ export interface operations {
             };
         };
     };
+    latest_close_by_isin_api_asset_pipeline_latest_close_isin__isin__get: {
+        parameters: {
+            query?: {
+                currency?: string | null;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LatestCloseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    leonteq_upload_api_asset_pipeline_leonteq_upload_post: {
+        parameters: {
+            query?: {
+                enqueue?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_leonteq_upload_api_asset_pipeline_leonteq_upload_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    owner_earnings_by_isin_api_asset_pipeline_owner_earnings_isin__isin__get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinancialSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    price_series_by_isin_api_asset_pipeline_price_series_isin__isin__get: {
+        parameters: {
+            query?: {
+                years?: number;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PriceSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enqueue_api_asset_pipeline_queue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_IngestBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    queue_process_api_asset_pipeline_queue_process_post: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    queue_requeue_suspects_api_asset_pipeline_queue_requeue_suspects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    queue_status_api_asset_pipeline_queue_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     resolve_asset_api_asset_pipeline_resolve_get: {
         parameters: {
             query: {
                 identifier: string;
                 id_type?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    risk_by_isin_api_asset_pipeline_risk_isin__isin__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PerformanceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_row_api_asset_pipeline_rows_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_RowRefreshBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    signal_lab_api_asset_pipeline_signal_lab_get: {
+        parameters: {
+            query?: {
+                min_adv_eur?: number;
+                require_sector?: boolean;
+                asset_class?: string;
+                max_assets?: number;
+                /** @description use a SAVED universe's members */
+                universe_id?: number | null;
+                /** @description evaluate IC from this month (train/test split) */
+                start?: string | null;
+                /** @description evaluate IC to this month */
+                end?: string | null;
+                /** @description also score the daily as-of signals /schedule trades (keys prefixed `daily.`). Off by default: `evaluate_panel` loops per entity, so on the 4,006-name 'liquid' universe it takes the call from ~31s to ~110s. */
+                include_daily?: boolean;
+                refresh?: boolean;
             };
             header?: never;
             path?: never;
@@ -6729,6 +13491,202 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["_StoreBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    universe_api_asset_pipeline_universe_get: {
+        parameters: {
+            query?: {
+                /** @description HYBRID fallback: min ADV (EUR) for tickers with NO market cap (ETFs/crypto) */
+                min_adv_eur?: number;
+                /** @description HYBRID primary: min market cap (EUR) for tickers that have one; 0 = no floor. Listing-independent */
+                min_market_cap_eur?: number;
+                /** @description max zero-volume bar fraction (illiquidity guard) */
+                max_zero_vol?: number;
+                /** @description require all 4 Leonteq columns (verified + name + currency + productType) */
+                require_leonteq?: boolean;
+                /** @description require OpenFIGI name + a 'verified' identity match */
+                require_openfigi_match?: boolean;
+                /** @description require stored traded-volume data */
+                require_volume?: boolean;
+                /** @description restrict to one asset class (equity/etf/crypto/commodity/…) */
+                asset_class?: string | null;
+                /** @description comma-separated sectors to include; omit = all */
+                sectors?: string | null;
+                /** @description return only the count (for the live create-universe preview) */
+                count_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UniverseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_universe_api_asset_pipeline_universe_create_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_CreateUniverseBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_universes_api_asset_pipeline_universes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    delete_universe_api_asset_pipeline_universes__universe_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                universe_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    universe_members_api_asset_pipeline_universes__universe_id__members_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                universe_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_scan_api_asset_pipeline_upload_scan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_scan_api_asset_pipeline_upload_scan_post"];
             };
         };
         responses: {
@@ -7025,6 +13983,101 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_reconstructed_index_api_benchmarks_index__label__get: {
+        parameters: {
+            query?: {
+                year?: number | null;
+            };
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconstructedIndex"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_reset_api_benchmarks_index__label__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BenchmarkResetResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_fill_api_benchmarks_index__label__fill_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BenchmarkFillResult"];
                 };
             };
             /** @description Validation Error */
@@ -7790,6 +14843,727 @@ export interface operations {
             };
         };
     };
+    benchmark_margin_api_earnings_benchmark_margin_get: {
+        parameters: {
+            query?: {
+                label?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_revenue_api_earnings_benchmark_revenue_get: {
+        parameters: {
+            query?: {
+                label?: string;
+                metric?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_revenue_matrix_api_earnings_benchmark_revenue_matrix_get: {
+        parameters: {
+            query?: {
+                label?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    growth_estimates_by_isin_api_earnings_by_isin__isin__growth_estimates_get: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_earnings_metrics_by_isin_api_earnings_by_isin__isin__metrics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    capex_margin_inputs_api_earnings_capex_margin_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cash_conversion_inputs_api_earnings_cash_conversion_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cash_return_inputs_api_earnings_cash_return_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    debt_ratio_inputs_api_earnings_debt_ratio_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dividend_yield_inputs_api_earnings_dividend_yield_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fcf_sbc_yield_inputs_api_earnings_fcf_sbc_yield_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fundamental_blend_api_earnings_fundamental_blend_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fundamental_blend_breakdown_api_earnings_fundamental_blend_breakdown_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalBreakdownRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fundamental_blend_matrix_api_earnings_fundamental_blend_matrix_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalMatrixRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fundamental_blend_metrics_api_earnings_fundamental_blend_metrics_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fundamental_blend_metrics_stream_api_earnings_fundamental_blend_metrics_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fundamental_coverage_api_earnings_fundamental_coverage_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_fundamental_coverage_api_earnings_fundamental_coverage_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalIngestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gross_margin_inputs_api_earnings_gross_margin_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    interest_burden_inputs_api_earnings_interest_burden_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    margin_inputs_api_earnings_margin_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    portfolio_revenue_matrix_api_earnings_portfolio_revenue_matrix_post: {
+        parameters: {
+            query?: {
+                metric?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_portfolios_api_earnings_portfolios_get: {
         parameters: {
             query?: never;
@@ -7990,6 +15764,72 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    relative_growth_breakdown_api_earnings_relative_growth_breakdown_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelativeGrowthRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sbc_ocf_inputs_api_earnings_sbc_ocf_inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
