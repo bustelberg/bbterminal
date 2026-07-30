@@ -129,11 +129,16 @@ function logSteps(log: ScanStep[], from: number): number {
  * that. The pairing is preferred where it exists (attribution and the bucket drill-downs are
  * id-only) but it is an upgrade, not a prerequisite — see `openModal`.
  *
- * So the remaining exclusions are the honest ones: a book with no holdings at all (the `_MV`
- * shells, the test books) has no composition to analyse in any sense.
+ * ⚠ AND UNDER `MIN_REAL_HOLDINGS` IS NOT A PORTFOLIO. The AIRS benchmarks carry exactly 1 holding
+ * and the `_MV` / `WTS test` shells carry none, against 10-29 for every real book — so the same
+ * threshold the backend now uses to skip them in the SCAN (`airs_vermogen.MIN_REAL_HOLDINGS`)
+ * decides whether they are worth a row here. One rule, both ends: a book the scan stops fetching
+ * must not keep a seat in the table.
  */
+const MIN_REAL_HOLDINGS = 5;
+
 const canAnalyse = (r: AirsPortfolioOverview) =>
-  r.fixed_portfolio_id != null || (r.holdings ?? 0) > 0;
+  r.fixed_portfolio_id != null || (r.holdings ?? 0) >= MIN_REAL_HOLDINGS;
 
 const REPORT_LABELS: Record<string, string> = {
   att: 'Rendement',
