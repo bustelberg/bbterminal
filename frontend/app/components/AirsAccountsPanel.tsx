@@ -271,9 +271,13 @@ function AccountPositions({ d, i }: { d?: AirsAccountDetail; i?: AirsAccountIsin
           title="Each ISIN is checked against that instrument's own close: a name cannot distinguish two share classes of one fund.">
           ISINs from{' '}
           <span className="font-mono text-fg-subtle">{i.model_name}</span>, price-checked.
+          {/* ⚠ A NAME MATCH IS THE NORMAL PAIRING, NOT AN EXCEPTION — it is how nearly every row
+              is paired, so flagging it amber warned about the software's ordinary behaviour and
+              trained the eye to skip the colour. The provenance stays in the sentence below; the
+              alarm does not. Override any pairing from the Dynamic → Fixed table. */}
           {i.model_source === 'guess' && (
-            <span className="text-warn-400" title="This Dynamic↔Fixed pairing is an unconfirmed name match. Confirm it in the Dynamic → Fixed table below.">
-              {' '}Pairing unconfirmed.
+            <span className="text-fg-faint" title="This Dynamic↔Fixed pairing was made by matching names. Set it explicitly in the Dynamic → Fixed table if it looks wrong.">
+              {' '}Paired by name.
             </span>
           )}
           {mismatches.length > 0 && (

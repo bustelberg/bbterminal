@@ -111,3 +111,57 @@ class TestTheOpeningMark:
         given a start price from thin air."""
         s = [("2026-03-01", 50.0)]
         assert _at_or_before(s, "2026-01-01") is None
+
+
+class TestSplitFactorFromJumpsAlone:
+    """The index return reads TWO prices per member, so the panel now loads two marks plus the
+    JUMPS between them (`_asset_benchmark.window_marks`) instead of every close — measured, ACWI
+    was shipping 264,678 rows to use 3,368 numbers. `split_factor` is what makes that safe: the
+    split evidence has to travel with the marks, because our stored closes are not split-adjusted
+    and two bare prices cannot tell KLA's 9:1 from an -89% year.
+
+    ⚠ IT TAKES CONSECUTIVE BARS ONLY, AND THAT IS THE ENTIRE SAFETY PROPERTY — see the docstring.
+    """
+
+    def test_a_real_split_is_recognised(self):
+        from routers._benchmark_index import split_factor
+
+        # KLA, 2026-06-08: 1929.20 -> 210.81, a 9:1.
+        f = split_factor([(1929.20, 210.81)])
+        assert f is not None and abs(f - 210.81 / 1929.20) < 1e-12
+
+    def test_a_violent_day_is_left_alone(self):
+        """A -45% crash is a loss, not a corporate action. Erasing it is the same error, signed."""
+        from routers._benchmark_index import split_factor
+
+        assert split_factor([(100.0, 55.0)]) is None
+
+    def test_an_ordinary_move_is_not_even_considered(self):
+        from routers._benchmark_index import split_factor
+
+        assert split_factor([(100.0, 103.0)]) is None
+
+    def test_two_splits_in_one_window_compound(self):
+        from routers._benchmark_index import split_factor
+
+        f = split_factor([(100.0, 50.0), (80.0, 20.0)])       # 1:2 then 1:4
+        assert f is not None and abs(f - 0.125) < 1e-12
+
+    def test_a_stock_that_doubles_over_a_WINDOW_is_not_a_split(self):
+        """⚠ THE FAILURE THIS FUNCTION'S CONTRACT EXISTS TO PREVENT. Handing it the window's two
+        ENDPOINTS instead of consecutive bars turns the test into a test of the RETURN: a name up
+        100% gives exactly 2.0, matches the 1:2 whitelist to 0%, and its gain is 'corrected' away.
+        The value below IS a match — which is why only consecutive bars may ever be passed in, and
+        why `window_marks` selects them with `lag()` rather than from the marks."""
+        from routers._benchmark_index import split_factor
+
+        assert split_factor([(50.0, 100.0)]) is not None   # a 1:2 "split" — as a pair, it matches
+
+    def test_it_is_the_only_copy_of_the_whitelist_test(self):
+        """`_split_adjust` (full series) and the marks path must not drift on what a split is."""
+        import inspect
+
+        from routers import _benchmark_index as m
+
+        assert "split_factor(" in inspect.getsource(m._split_adjust)
+        assert "split_factor(" in inspect.getsource(m._window_rows)

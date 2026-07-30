@@ -8,7 +8,14 @@
 //
 // `/` is the home page (any authenticated user); `/forbidden` renders the
 // no-access page without a redirect loop.
-export const USER_ALLOWED_PATHS: readonly string[] = ['/', '/earnings', '/schedule', '/forbidden'];
+//
+// ⚠ THE PAGE, NOT ITS BUTTONS. `/management-dashboard` is readable by users; every mutation on it
+// (Refresh, Delete, the Class/ISIN/Link overrides, the benchmark Fill) stays admin-only in BOTH
+// places — the API gate refuses them, and the components hide the controls via `useIsAdmin` so a
+// user is never shown a button that 403s.
+export const USER_ALLOWED_PATHS: readonly string[] = [
+  '/', '/earnings', '/schedule', '/management-dashboard', '/forbidden',
+];
 
 /**
  * True when a non-admin user may open `pathname`. Matches an entry exactly OR

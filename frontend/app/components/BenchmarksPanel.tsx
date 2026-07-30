@@ -3,6 +3,9 @@
 import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
+import { dialog } from '../../lib/dialog';
+import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
+import { Provenance } from '../../lib/provenance';
 import type { ReconstructedIndex } from '../../lib/types/api';
 
 /** The indices we rebuild from our own constituents.
@@ -15,10 +18,17 @@ import type { ReconstructedIndex } from '../../lib/types/api';
  * ACWI is still not FULLY priced (the published index has names we hold no series for), so its
  * coverage ratio is surfaced and it is called indicative rather than exact. AEX is fully covered
  * (25/25) and is the one index that CAPS: uncapped, ASML is 37.5% of it. */
+// ⚠ `rebuildable` = FILL CAN PUT IT BACK, mirroring the backend's `_benchmark_fill.rebuildable()`
+// — a registered `UniverseTemplate`, or SP500's Wikipedia reconstruction, which is deliberately
+// NOT in the template registry (registering it would stamp `template_key` on its universe row and
+// hide the index from the /sp500 page that owns it). All three are rebuildable today, so the flag
+// looks redundant; it is here so a fourth index added without a route back does not silently get a
+// one-way Delete. The backend refuses regardless (422 naming why), so a drift here can only hide a
+// button, never destroy anything.
 const INDICES = [
-  { label: 'SP500', name: 'S&P 500' },
-  { label: 'ACWI', name: 'ACWI' },
-  { label: 'AEX', name: 'AEX' },
+  { label: 'SP500', name: 'S&P 500', rebuildable: true },
+  { label: 'ACWI', name: 'ACWI', rebuildable: true },
+  { label: 'AEX', name: 'AEX', rebuildable: true },
 ];
 
 const pct = (v: number | null | undefined, dp = 2) =>
@@ -26,6 +36,12 @@ const pct = (v: number | null | undefined, dp = 2) =>
 
 const tone = (v: number | null | undefined) =>
   v == null ? 'text-fg-faint' : v >= 0 ? 'text-pos-400' : 'text-neg-400';
+
+/** A price in its listing's own currency — NO symbol, because the Ccy column names the unit and a
+ *  "€" glued to a JPY close is the kind of wrong that still looks like a number. Two decimals
+ *  everywhere so the column aligns; a ¥8,000 close and a €46.75 one read on the same scale. */
+const price = (v: number | null | undefined) =>
+  v == null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Benchmarks — a cap-weighted index rebuilt from OUR membership, prices and FX.
  *
@@ -46,6 +62,9 @@ type FillResult = {
   queued: number; skipped_existing: number; capped: number; note?: string | null;
   /** The template was run because no universe existed — AEX had none at all. */
   universe_built?: boolean;
+  /** Prices re-fetched this press, and how many constituents still have no mark in the window.
+   *  `price_pending` is not a failure — a press re-prices a bounded slice on purpose. */
+  repriced?: number; price_pending?: number; price_failed?: number;
 };
 
 /** One sentence saying what the press actually achieved — and, when nothing was queued, WHY.
@@ -60,6 +79,11 @@ function fillSummary(f: FillResult): string {
   if (f.universe_built) bits.push('built the universe from its template');
   if (f.queued) bits.push(`${f.queued} queued for ingest (a paced worker drains them — minutes to hours)`);
   if (f.capped) bits.push(`${f.capped} market caps written`);
+  if (f.repriced) bits.push(`${f.repriced} price series refilled`);
+  // ⚠ SAID EVERY TIME IT IS NON-ZERO. A press re-prices a bounded slice, so silence here would
+  // read as "finished" over a benchmark still missing 1,600 windows.
+  if (f.price_pending) bits.push(`${f.price_pending} still to refill — press again, or the 06:00 tick clears them`);
+  if (f.price_failed) bits.push(`${f.price_failed} could not be repriced (see the console)`);
   if (f.skipped_existing) bits.push(`${f.skipped_existing} already queued or ingested`);
   if (!bits.length) {
     // ⚠ ZERO MEMBERS IS NOT "EVERYTHING IS FINE". `usable === universe_members` is vacuously true
@@ -77,12 +101,19 @@ function fillSummary(f: FillResult): string {
 }
 
 export default function BenchmarksPanel() {
+  const isAdmin = useIsAdmin();
   const [data, setData] = useState<Record<string, ReconstructedIndex>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [filling, setFilling] = useState<Set<string>>(new Set());
   const [fillMsg, setFillMsg] = useState<{ text: string; kind: 'info' | 'warn' } | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  // ⚠ THE TABLE HAS TO RE-READ, OR THE WHOLE POINT IS LOST. Delete → Fill is a loop you watch:
+  // without a reload the row keeps showing the members it had before you deleted them, which reads
+  // as the button having done nothing.
+  const [reloadKey, setReloadKey] = useState(0);
+  const reload = () => setReloadKey((k) => k + 1);
 
   /** Fill one label, or every label in sequence.
    *
@@ -100,10 +131,65 @@ export default function BenchmarksPanel() {
         lines.push(`${label}: ${fillSummary((await r.json()) as FillResult)}`);
       }
       setFillMsg({ text: lines.join('  ·  '), kind: 'warn' });
+      // Caps are written inline, and a rebuilt universe lands immediately — both are visible now.
+      // (The RESOLVES are not: they went to the paced worker, which is what the amber says.)
+      reload();
     } catch (e) {
       setFillMsg({ text: e instanceof Error ? e.message : String(e), kind: 'warn' });
     } finally {
       setFilling(new Set());
+    }
+  };
+
+  /**
+   * Delete the live universe behind one benchmark, so Fill can be watched rebuilding it.
+   *
+   * ⚠ THE CONFIRM NAMES WHAT SURVIVES, NOT JUST WHAT GOES. "Delete SP500?" invites the reading
+   * that the prices and the market caps go with it; they do not, and knowing that is the
+   * difference between trying this and not daring to.
+   */
+  const del = async (label: string, members?: number) => {
+    const ok = await dialog.confirm(
+      `Reset ${label}?\n\n`
+      + `Deletes all three things Fill puts in place, so the whole button can be tested:\n`
+      + `  • its ${members ?? ''} membership rows\n`
+      + '  • its constituents’ market caps\n'
+      + '  • their closes from mid-November onward (the start-of-year mark and everything since)\n\n'
+      + 'The asset grid, the Yahoo symbol and the older history stay — so Fill re-fetches prices '
+      + 'for a KNOWN listing and nothing is ever re-resolved.\n\n'
+      + '⚠ Prices are shared: some of these constituents are also held in AIRS books, and '
+      + 'those portfolio figures will read short until the prices are refilled. One press of Fill '
+      + 'refills 50; the 06:00 price tick finishes the rest overnight.',
+    );
+    if (!ok) return;
+    setDeleting(label);
+    try {
+      const r = await apiFetch(`${API_URL}/api/benchmarks/index/${label}`, { method: 'DELETE' });
+      const b = (await r.json().catch(() => null)) as
+        { deleted?: boolean; members_deleted?: number; caps_cleared?: number;
+          price_rows_deleted?: number; prices_from?: string;
+          note?: string; detail?: string } | null;
+      if (!r.ok) {
+        // 422 carries a sentence about THIS label (no template, frozen, has children) — show it
+        // rather than a status code, because it names what to do instead.
+        console.warn(`[benchmarks] delete ${label} refused`, { status: r.status, body: b });
+        setFillMsg({ text: b?.detail ?? `${label}: delete failed — HTTP ${r.status}`, kind: 'warn' });
+        return;
+      }
+      setFillMsg({
+        text: b?.deleted
+          ? `${label}: reset — ${b.members_deleted ?? 0} members, ${b.caps_cleared ?? 0} market `
+            + `caps and ${(b.price_rows_deleted ?? 0).toLocaleString('en-US')} closes from `
+            + `${b.prices_from ?? 'the window open'}. Press Fill to rebuild all three.`
+          : b?.note ?? `${label}: nothing to delete.`,
+        kind: 'warn',
+      });
+      reload();
+    } catch (e) {
+      console.warn(`[benchmarks] delete ${label} threw`, e);
+      setFillMsg({ text: e instanceof Error ? e.message : String(e), kind: 'warn' });
+    } finally {
+      setDeleting(null);
     }
   };
 
@@ -131,7 +217,7 @@ export default function BenchmarksPanel() {
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadKey]);
 
   return (
     <section className="bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
@@ -143,12 +229,16 @@ export default function BenchmarksPanel() {
             Cap-weighted, rebuilt from our own constituents.
           </p>
         </div>
-        <button type="button" onClick={() => void fill(INDICES.map((i) => i.label))}
-          disabled={filling.size > 0}
-          title="For each index: queue its un-ingested constituents for the price worker and write market caps for the ones already resolved. Runs one index at a time — concurrent Yahoo callers are how a constituent lands on the wrong listing."
-          className="ml-auto text-[11px] px-2.5 py-1 rounded-lg bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-50">
-          {filling.size > 1 ? 'Filling…' : 'Fill all'}
-        </button>
+        {/* Ingesting constituents is admin work — hidden rather than left to 403. The index itself
+            reads the same for everyone. */}
+        {isAdmin && (
+          <button type="button" onClick={() => void fill(INDICES.map((i) => i.label))}
+            disabled={filling.size > 0}
+            title="For each index: queue its un-ingested constituents for the price worker and write market caps for the ones already resolved. Runs one index at a time — concurrent Yahoo callers are how a constituent lands on the wrong listing."
+            className="ml-auto text-[11px] px-2.5 py-1 rounded-lg bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-50">
+            {filling.size > 1 ? 'Filling…' : 'Fill all'}
+          </button>
+        )}
       </div>
 
       {fillMsg && (
@@ -204,12 +294,26 @@ export default function BenchmarksPanel() {
                       <td className="px-3 py-1.5 text-right">
                         {/* ⚠ `stopPropagation` — the whole row is the expand toggle, and a Fill
                             that also opened the detail would look like it had rendered a result. */}
-                        <button type="button" disabled={filling.size > 0}
-                          onClick={(e) => { e.stopPropagation(); void fill([ix.label]); }}
-                          title={`Queue ${ix.name}'s un-ingested constituents for the price worker and write market caps for the ones already resolved.`}
-                          className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
-                          {filling.has(ix.label) && filling.size === 1 ? 'Filling…' : 'Fill'}
-                        </button>
+                        {isAdmin && (
+                          <div className="inline-flex items-center gap-1">
+                            <button type="button" disabled={filling.size > 0 || deleting != null}
+                              onClick={(e) => { e.stopPropagation(); void fill([ix.label]); }}
+                              title={`Queue ${ix.name}'s un-ingested constituents for the price worker and write market caps for the ones already resolved.`}
+                              className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
+                              {filling.has(ix.label) && filling.size === 1 ? 'Filling…' : 'Fill'}
+                            </button>
+                            {/* Only where Fill can put it back — see `rebuildable`. */}
+                            {ix.rebuildable && (
+                              <button type="button" disabled={filling.size > 0 || deleting != null}
+                                onClick={(e) => { e.stopPropagation(); void del(ix.label, d?.member_count); }}
+                                title={`Delete the ${ix.name} universe so Fill can be watched rebuilding it. Membership only — prices and market caps are untouched.`}
+                                aria-label={`Delete the ${ix.name} universe`}
+                                className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-800/40 text-fg-faint hover:text-neg-400 hover:border-neg-500/40 disabled:opacity-50">
+                                {deleting === ix.label ? '…' : 'Delete'}
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                     {isOpen && (
@@ -264,7 +368,15 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
             <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
               <th className="px-3 py-1.5 font-medium text-left">Company</th>
               <th className="px-3 py-1.5 font-medium text-left">Ticker</th>
+              {/* ⚠ THE CURRENCY IS THE LISTING'S, AND IT IS WHAT MAKES THE TWO YTD COLUMNS
+                  DIFFERENT. Without it "YTD (local)" is a number in an unnamed unit, and the gap
+                  to "YTD (€)" — the FX leg — reads as an error rather than as the exchange rate. */}
+              <th className="px-3 py-1.5 font-medium text-left">Ccy</th>
               <th className="px-3 py-1.5 font-medium text-right">Weight</th>
+              {/* The arithmetic behind YTD (local): these two, in the listing's own currency.
+                  Their ratio IS that column, which is why they sit immediately before it. */}
+              <th className="px-3 py-1.5 font-medium text-right">Start</th>
+              <th className="px-3 py-1.5 font-medium text-right">Now</th>
               <th className="px-3 py-1.5 font-medium text-right">YTD (local)</th>
               <th className="px-3 py-1.5 font-medium text-right">YTD (€)</th>
               <th className="px-3 py-1.5 font-medium text-right">Mkt cap (€bn)</th>
@@ -275,7 +387,32 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
               <tr key={m.company_id} className="hover:bg-overlay/[0.02]">
                 <td className="px-3 py-1.5 text-fg-soft">{m.company_name ?? '—'}</td>
                 <td className="px-3 py-1.5 font-mono text-fg-muted">{m.ticker ?? '—'}</td>
+                <td className="px-3 py-1.5 font-mono text-fg-subtle">{m.currency ?? '—'}</td>
                 <td className="px-3 py-1.5 text-right font-mono text-fg">{m.weight_pct.toFixed(2)}%</td>
+                {/* ⚠ EACH MARK CARRIES ITS OWN DATE IN THE TOOLTIP, AND THEY ARE NOT THE SAME
+                    ACROSS ROWS. The opening mark is the last close ON OR BEFORE 1 January — 31
+                    December for most, earlier for a thin line — and the closing mark is that
+                    instrument's own latest close, so a name whose vendor lags a day is marked a
+                    day back. Two prices without their dates cannot be checked against anything. */}
+                <td className="px-3 py-1.5 text-right font-mono text-fg-muted"
+                  title={`Opening mark: the last close on or before the window opened (${m.start_date}).`}>
+                  {price(m.start_price)}
+                </td>
+                {/* ⚠ THE ICON IS PER ROW, NOT ON THE HEADER, BECAUSE THE ANSWER IS PER ROW. Every
+                    other cell in this column shares a definition; this one does not share a DATE.
+                    Each constituent is marked at its own latest close, so a Tokyo line sits a day
+                    behind a Paris one on any given afternoon, and a dormant listing can sit weeks
+                    behind — which is the difference between "this stock fell" and "we stopped
+                    hearing about it". A header tooltip can state the rule; only the cell can say
+                    which day this number is from. `asOf` also turns the icon amber when that date
+                    is genuinely stale, so the rows worth doubting mark themselves. */}
+                <td className="px-3 py-1.5 text-right font-mono text-fg-soft whitespace-nowrap">
+                  {price(m.end_price)}
+                  <Provenance source="benchmark" asOf={m.end_date} kind="copied"
+                    what={`What ${m.company_name ?? 'this constituent'} last closed at, in ${m.currency ?? 'its own currency'}.`}
+                    note={`close on ${m.end_date} — this listing's own latest, not the fleet's`}
+                    how={`the newest bar we hold for ${m.ticker ?? 'this listing'}. It is the closing mark of the YTD window: ${price(m.start_price)} on ${m.start_date} to ${price(m.end_price)} on ${m.end_date} is the ${pct(m.return_local_pct)} beside it. The euro column applies the FX rate of each of those two days, so it is a different number and not a conversion of this one.`} />
+                </td>
                 <td className={`px-3 py-1.5 text-right font-mono ${tone(m.return_local_pct)}`}>
                   {pct(m.return_local_pct)}
                 </td>

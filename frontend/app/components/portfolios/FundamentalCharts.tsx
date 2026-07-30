@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useDeferredValue } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { useFxToEur } from '../../../lib/hooks/useFxToEur';
+import { blendLoadingLabel, loadBlendMetrics, type BlendProgress } from './blendMetrics';
 import InfoTip from '../InfoTip';
 import { MC, type ChartCadence, type MetricRow } from '../earnings/types';
 import { SNAPSHOT_BAND_CHARTS } from '../earnings/snapshotBandCharts';
@@ -64,6 +65,9 @@ export default function FundamentalCharts({ isin, name, blend }: {
   blend?: { basket?: { holdings: { isin: string; weight: number; name?: string }[] }; portfolioId?: number };
 }) {
   const [state, setState] = useState<State>({ kind: 'loading' });
+  /** Portfolio only: how many holdings the blend has read. Null on a single company, which is one
+   *  request and has nothing to count. */
+  const [progress, setProgress] = useState<BlendProgress | null>(null);
   const [cadence, setCadence] = useState<ChartCadence>('annual');
   const [hideOutliers, setHideOutliers] = useState(false);
   /** The clicked point, or null. Portfolio-only — see `drill` below. */
@@ -78,18 +82,22 @@ export default function FundamentalCharts({ isin, name, blend }: {
     const ctrl = new AbortController();
     (async () => {
       setState({ kind: 'loading' });
+      setProgress(null);
       try {
         // ⚠ ONE payload shape, two sources. A portfolio is fetched as a blended pseudo-company so
-        // nothing downstream has to know which it is.
-        const r = blend
-          ? await apiFetch(`${API_URL}/api/earnings/fundamental-blend-metrics`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(blend.basket
-              ? { holdings: blend.basket.holdings.map((h) => ({ isin: h.isin, name: h.name, weight: h.weight })) }
-              : { portfolio_id: blend.portfolioId }),
-            signal: ctrl.signal,
-          })
-          : await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin ?? '')}/metrics`, { signal: ctrl.signal });
+        // nothing downstream has to know which it is. The portfolio path streams per-company
+        // progress (`loadBlendMetrics`) because it is a read per holding and can run for a minute;
+        // a single company is one request, so it stays a plain fetch.
+        if (blend) {
+          const out = await loadBlendMetrics<MetricsResponse>(
+            { basket: blend.basket, portfolioId: blend.portfolioId },
+            (p) => { if (!cancelled) setProgress(p); },
+            ctrl.signal,
+          );
+          if (!cancelled) setState(out);
+          return;
+        }
+        const r = await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin ?? '')}/metrics`, { signal: ctrl.signal });
         if (cancelled) return;
         if (r.status === 404) { setState({ kind: 'none' }); return; }
         const b = await r.json().catch(() => null);
@@ -112,7 +120,13 @@ export default function FundamentalCharts({ isin, name, blend }: {
   );
 
   if (state.kind === 'loading') {
-    return <p className="text-[11px] text-fg-subtle py-8 text-center">Loading fundamentals…</p>;
+    // ⚠ A COUNT, NOT A SPINNER, FOR A PORTFOLIO. The blend is a read per holding, so a 40-name
+    // book sits here for a minute — and "Loading…" for a minute is indistinguishable from hung.
+    return (
+      <p className="text-[11px] text-fg-subtle py-8 text-center">
+        {blend ? blendLoadingLabel(progress) : 'Loading fundamentals…'}
+      </p>
+    );
   }
   if (state.kind === 'none') {
     return (

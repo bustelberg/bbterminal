@@ -1832,8 +1832,19 @@ class AirsHoldingIsin(BaseModel):
     implied_price_eur: float | None = None
     our_price_eur: float | None = None
     price_ratio: float | None = None
+    # ok | price_mismatch | stale_price | cross_listed | unpriced.
+    # ⚠ `stale_price` IS NOT A SOFTER `price_mismatch`. The ratio is out of tolerance, but our close
+    # is more than a week from the day AIRS valued the book — and the refresh has already tried to
+    # fetch the gap, so Yahoo has nothing newer for this line. The two numbers describe different
+    # days, which makes the gap TIME and not identity: calling it a mismatch says "our listing is
+    # wrong" about a listing that may be perfect. Measured 2026-07-29: AMD fell 22% while our
+    # newest bar sat six days back, and every stored bar matched Yahoo to the cent.
     verdict: str
     our_instrument: str | None = None
+    # The date of the close on OUR side of the ratio, and how far it sits from `as_of`. A ratio
+    # without its two dates cannot be argued with.
+    our_price_date: str | None = None
+    price_lag_days: int | None = None
     # Set when this ISIN is deliberately served by ANOTHER ISIN's instrument (an ADR priced from
     # the main company's listing). ⚠ The two do not trade at the same number — TSMC is 1 ADR = 5
     # ordinary shares — so a price difference on such a row is expected, not a finding.

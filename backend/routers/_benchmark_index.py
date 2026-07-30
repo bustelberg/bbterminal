@@ -160,6 +160,35 @@ _SPLIT_RATIOS = sorted({*_SPLIT_FORWARD, *(1 / r for r in _SPLIT_FORWARD)})
 _SPLIT_TOL = 0.05          # within 5% of one of those -> a corporate action, not a market
 
 
+def split_factor(jumps: list[tuple[float, float]]) -> float | None:
+    """The cumulative rescaling a window's splits imply, from its CONSECUTIVE-BAR jumps alone.
+
+    `jumps` is `[(previous_close, close)]` for bars that actually sit next to each other. Returns
+    the factor to multiply every price BEFORE the jumps by, to put it on the latest basis — the
+    same `factor` `_split_adjust` returns, which is why that function now calls this one. There is
+    exactly one copy of the whitelist test, and both the full-series path and the two-mark path
+    reach it.
+
+    ⚠ THE PAIRS MUST BE CONSECUTIVE BARS, AND THAT IS THE WHOLE SAFETY PROPERTY. Hand it a pair
+    that merely brackets a window and the test becomes a test of the RETURN: a stock that doubles
+    over the year gives a ratio of exactly 2.0, matches the 1:2 whitelist entry to 0%, and its gain
+    is "corrected" away. A split is a one-DAY discontinuity; nothing else may be offered here.
+    """
+    factor: float | None = None
+    for prev_p, cur_p in jumps:
+        if prev_p <= 0:
+            continue
+        ratio = cur_p / prev_p
+        if _JUMP_LO <= ratio <= _JUMP_HI:
+            continue
+        inv = 1.0 / ratio
+        near = min(_SPLIT_RATIOS, key=lambda s: abs(s - inv))
+        if near <= 0 or abs(inv - near) / near > _SPLIT_TOL:
+            continue                      # a violent day, not a corporate action. Leave it.
+        factor = (factor or 1.0) * ratio
+    return factor
+
+
 def _split_adjust(series: list[tuple[str, float]]) -> tuple[list[tuple[str, float]], float | None]:
     """Put a price series back on ONE scale across an unadjusted split.
 
@@ -198,18 +227,12 @@ def _split_adjust(series: list[tuple[str, float]]) -> tuple[list[tuple[str, floa
 
     out = [list(p) for p in series]
     factor: float | None = None
-    # Walk backwards: everything BEFORE a split has to be scaled onto today's basis.
+    # Walk backwards: everything BEFORE a split has to be scaled onto today's basis. The test for
+    # "is this a split" is `split_factor`'s — ONE copy of the whitelist, shared with the marks path.
     for k in range(len(out) - 1, 0, -1):
-        prev_p, cur_p = out[k - 1][1], out[k][1]
-        if prev_p <= 0:
+        ratio = split_factor([(out[k - 1][1], out[k][1])])
+        if ratio is None:
             continue
-        ratio = cur_p / prev_p
-        if _JUMP_LO <= ratio <= _JUMP_HI:
-            continue
-        inv = 1.0 / ratio
-        near = min(_SPLIT_RATIOS, key=lambda s: abs(s - inv))
-        if near <= 0 or abs(inv - near) / near > _SPLIT_TOL:
-            continue                      # a violent day, not a corporate action. Leave it.
         for j in range(k):                # rescale every earlier close onto the new basis
             out[j][1] *= ratio
         factor = (factor or 1.0) * ratio
@@ -260,27 +283,52 @@ def _rate(fx: dict[str, dict[str, float]], ccy: str | None, when: str) -> float 
 
 def _window_rows(members: list[dict], closes: dict[int, list[tuple[str, float]]],
                  fx: dict[str, dict[str, float]],
-                 start_anchor: str) -> tuple[list[dict], list[dict]]:
+                 start_anchor: str,
+                 marks: dict[int, dict] | None = None) -> tuple[list[dict], list[dict]]:
     """Per-member return + start-of-window cap, for ONE window. Returns (rows, split_adjusted).
 
     Extracted so a caller can price SEVERAL windows off ONE price load — and, more importantly,
     so they all use the SAME weighting. A second copy of this loop is a second place for the
     look-ahead bias to creep back in.
+
+    ⚠ TWO WAYS IN, ONE LOOP. `closes` is the whole series per member; `marks` (when given) is just
+    what this window consumes — `{start:(d,p), end:(d,p), jumps:[(prev,cur)]}`, selected in
+    Postgres. The arithmetic below is identical either way, which is the point: the loader is an
+    optimisation and must never become a second definition of an index return.
+
+    ⚠ WHY THE SERIES WAS EVER LOADED WHOLE. This loop reads exactly TWO prices per member — but
+    `_split_adjust` reads all of them, because our stored closes are not split-adjusted and a split
+    is only visible as a one-day discontinuity between CONSECUTIVE bars. So the marks path has to
+    carry that evidence with it (`jumps`); two bare prices cannot tell a 9:1 split from a −89% year
+    and KLA would read −80.6% at a weight it never had. See `split_factor`.
     """
     rows: list[dict] = []
     adjusted: list[dict] = []
     for m in members:
-        s = closes.get(m["company_id"]) or []
-        # Our stored closes are NOT split-adjusted and never self-heal — see `_split_adjust`.
-        s, split = _split_adjust(s)
-        if split:
-            adjusted.append({"company_name": m.get("company_name"),
-                             "ticker": m.get("gurufocus_ticker"), "factor": split})
-        first = _at_or_before(s, start_anchor)
-        if not first or not s:
-            continue                        # no opening mark -> it was not in the basket
-        last_d, last_p = s[-1]
-        first_d, first_p = first
+        if marks is not None:
+            mk = marks.get(m["company_id"])
+            if not mk or not mk.get("start") or not mk.get("end"):
+                continue                    # no opening mark -> it was not in the basket
+            (first_d, first_p), (last_d, last_p) = mk["start"], mk["end"]
+            split = split_factor(mk.get("jumps") or [])
+            if split:
+                # The start sits before every jump in the window, so it alone needs rebasing —
+                # `_split_adjust` scales "every earlier close" by exactly this product.
+                first_p *= split
+                adjusted.append({"company_name": m.get("company_name"),
+                                 "ticker": m.get("gurufocus_ticker"), "factor": split})
+        else:
+            s = closes.get(m["company_id"]) or []
+            # Our stored closes are NOT split-adjusted and never self-heal — see `_split_adjust`.
+            s, split = _split_adjust(s)
+            if split:
+                adjusted.append({"company_name": m.get("company_name"),
+                                 "ticker": m.get("gurufocus_ticker"), "factor": split})
+            first = _at_or_before(s, start_anchor)
+            if not first or not s:
+                continue                    # no opening mark -> it was not in the basket
+            last_d, last_p = s[-1]
+            first_d, first_p = first
         if first_p <= 0 or last_d <= first_d:
             continue
 

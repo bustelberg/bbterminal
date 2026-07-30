@@ -33,9 +33,17 @@ _STATUS: dict = {
     "started_at": None,
     "finished_at": None,
     "status": None,            # None | running | ok | error
+    # ⚠ ONE SHORT LINE, and it is the WHOLE user-facing report — see `format_run_message`. The
+    # per-report breakdown that used to live here is in `detail`, for the log and the console.
     "message": None,
+    "detail": None,
     "triggered_by": None,
     "portfolios_found": 0,
+    # What the run did to our copy of the fleet, in the terms the page states it in.
+    "accounts_added": 0,
+    "accounts_updated": 0,
+    "accounts_up_to_date": 0,
+    "accounts_failed": 0,
     "rendement_stored": 0,     # portfolios whose Rendement (ATT) was stored
     "vermogen_stored": 0,      # portfolios whose Vermogensoverzicht (VOLK) was stored
     "holdings_rows": 0,        # total holding rows stored
@@ -299,6 +307,58 @@ def summarise_errors(errors: list[dict]) -> list[dict]:
     return sorted(groups.values(), key=lambda g: -g["count"])
 
 
+def count_outcomes(
+    skipped: list[str], known: set[str], outcomes: dict[str, list[str]],
+) -> dict[str, int]:
+    """What the run DID, in the four words an operator actually asks in: added, updated, already up
+    to date, failed. Pure — `outcomes` is `{scanned account: the reports that arrived}`.
+
+    ⚠ "NEW" IS DECIDED AGAINST THE ROSTER, NOT AGAINST AIRS. `known` is the accounts we already had
+    a roster row for BEFORE this run started (`_roster_verdicts`, read once, before the loop). An
+    account AIRS has always had but we have never scanned is genuinely *added* here — the sentence
+    is about our database, which is the thing the button changed.
+
+    ⚠ AND AN ACCOUNT THAT STORED NOTHING IS `failed`, NOT `updated`. Every report can fail while
+    the account is still visited; counting the visit as an update would report work that did not
+    happen, in the one number somebody reads to decide whether to press the button again. So the
+    test is `outcomes[name]` being non-empty — at least one report arrived and was written.
+
+    The four counts partition the discovered fleet exactly (`skipped + len(outcomes)`), so they can
+    be read as a whole without wondering where the missing accounts went.
+    """
+    added = updated = failed = 0
+    for name, ok in outcomes.items():
+        if not ok:
+            failed += 1
+        elif name in known:
+            updated += 1
+        else:
+            added += 1
+    return {"added": added, "updated": updated, "up_to_date": len(skipped), "failed": failed}
+
+
+def format_run_message(counts: dict[str, int]) -> str:
+    """The ONE line the page shows. Pure.
+
+    ⚠ THIS IS THE WHOLE USER-FACING REPORT, AND THAT IS THE POINT. It used to read "30/44 accounts
+    complete — 0 already current, 44 scanned: Rendement 44/44, Vermogensoverzicht 44/44 (710
+    holdings), Mutaties 972 rows, Model 699 rows; 14 report(s) failed" — five report names, six
+    ratios and two row counts, none of which answers "did it work". Per-report totals, per-cause
+    failure groups and the raw error list all still exist; they go to the log and to `detail`.
+
+    ⚠ `failed` IS THE ONE EXCEPTION AND IT STAYS. The banner turns amber when reports failed, and a
+    colour with no reason beside it is worse than no colour at all — the reader knows only that
+    something is wrong. One word ("2 failed") is not a report; it is what the amber means.
+
+    All three good counts show even at zero: a fixed shape is read at a glance, whereas a line that
+    drops its clauses has to be parsed before it can be understood.
+    """
+    a = counts["added"]
+    line = (f"{a} portfolio{'' if a == 1 else 's'} added, "
+            f"{counts['updated']} updated, {counts['up_to_date']} already up to date")
+    return line + (f", {counts['failed']} failed" if counts.get("failed") else "")
+
+
 def scan_one(name: str, van: str, tot: str) -> dict:
     """Fetch + store ONE account's four AIRS reports. THE only place that work is written.
 
@@ -498,8 +558,13 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             "finished_at": None,
             "status": "running",
             "message": "Discovering active portfolios…",
+            "detail": None,
             "triggered_by": triggered_by,
             "portfolios_found": 0,
+            "accounts_added": 0,
+            "accounts_updated": 0,
+            "accounts_up_to_date": 0,
+            "accounts_failed": 0,
             "rendement_stored": 0,
             "vermogen_stored": 0,
             "holdings_rows": 0,
@@ -521,8 +586,14 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         _STATUS["portfolios_found"] = len(names)
         # ⚠ THE SKIP IS DECIDED ONCE, BEFORE THE LOOP, AGAINST THE VERDICTS AS THEY WERE AT THE
         # START. Re-reading per account would let this run's own writes shorten its own worklist.
+        # ⚠ READ ONCE, HERE. `known` is which accounts we already had a roster row for BEFORE this
+        # run wrote any — that is what makes "added" mean anything. Re-reading it after the loop
+        # would find every account known (this run just recorded them all) and report 0 added for
+        # ever, including on the very first scan of a new book.
+        verdicts = _roster_verdicts()
+        known = set(verdicts)
         todo, current = accounts_to_scan(
-            names, _roster_verdicts(), datetime.now(timezone.utc), force=force)
+            names, verdicts, datetime.now(timezone.utc), force=force)
         _STATUS["skipped"] = len(current)
         _log.info("[airs_vermogen] %d discovered — %d to scan, %d already current%s",
                   len(names), len(todo), len(current), " (forced)" if force else "")
@@ -586,6 +657,21 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         # only the scanned ones would report "2/44 accounts complete" after a healthy no-op run,
         # which reads as catastrophic and is the exact opposite of what happened.
         complete = len(current) + sum(1 for ok in outcomes.values() if len(ok) == len(REPORTS))
+        counts = count_outcomes(current, known, outcomes)
+        # ⚠ EVERY REPORT THE JOB FETCHES IS NAMED — IN THE LOG. This string was the message, and it
+        # said "Rendement 44/44, Vermogensoverzicht 31/44 … 27 report(s) failed", where 44−31=13
+        # because `errors` also carried Mutaties and Model failures the message never mentioned:
+        # two numbers nobody could reconcile, printed at everyone who pressed Refresh. It is a
+        # developer's view of a scraper, so it goes where a developer looks. `detail` carries it to
+        # the browser console; the page shows `format_run_message`.
+        detail = (
+            f"{complete}/{len(names)} accounts complete — {len(current)} already current, "
+            f"{total} scanned"
+            + (f": Rendement {rendement_ok}/{total}, "
+               f"Vermogensoverzicht {vermogen_ok}/{total} ({holdings_total} holdings), "
+               f"Mutaties {mutaties_total} rows, Model {model_total} rows" if total else "")
+            + (f"; {len(_STATUS['errors'])} report(s) failed" if _STATUS["errors"] else "")
+        )
         _STATUS.update({
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "status": "ok" if any_stored else "error",
@@ -595,27 +681,15 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             "mutatie_rows": mutaties_total,
             "model_weight_rows": model_total,
             "complete_accounts": complete,
-            # ⚠ EVERY REPORT THE JOB FETCHES IS NAMED. It said "Rendement 44/44, Vermogensoverzicht
-            # 31/44 … 27 report(s) failed", and 44−31=13 — because `errors` also carried Mutaties
-            # and Model failures the message never mentioned, so the two numbers could not be
-            # reconciled by anyone reading them. Same flaw the CRM note above describes, one layer
-            # in. `complete` leads, because that is what the portfolios page will show.
-            "message": (
-                f"{complete}/{len(names)} accounts complete — "
-                # ⚠ THE RATIOS ARE OVER WHAT WAS SCANNED, AND SAY SO. "Rendement 3/44" after an
-                # incremental run would read as 41 failures when 41 were never asked for.
-                + (f"{len(current)} already current, {total} scanned"
-                   + (f": Rendement {rendement_ok}/{total}, "
-                      f"Vermogensoverzicht {vermogen_ok}/{total} ({holdings_total} holdings), "
-                      f"Mutaties {mutaties_total} rows, Model {model_total} rows" if total else "")
-                   if not force else
-                   f"Rendement {rendement_ok}/{total}, Vermogensoverzicht {vermogen_ok}/{total} "
-                   f"({holdings_total} holdings), Mutaties {mutaties_total} rows, "
-                   f"Model {model_total} rows")
-                + (f"; {len(_STATUS['errors'])} report(s) failed" if _STATUS["errors"] else "")
-            ),
+            "accounts_added": counts["added"],
+            "accounts_updated": counts["updated"],
+            "accounts_up_to_date": counts["up_to_date"],
+            "accounts_failed": counts["failed"],
+            "message": format_run_message(counts),
+            "detail": detail,
         })
-        _log.info("[airs_vermogen] %s refresh — %s", triggered_by, _STATUS["message"])
+        _log.info("[airs_vermogen] %s refresh — %s (%s)",
+                  triggered_by, _STATUS["message"], detail)
         return dict(_STATUS)
     finally:
         _STATUS["running"] = False

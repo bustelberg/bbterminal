@@ -2932,7 +2932,21 @@ export interface paths {
         get: operations["benchmark_reconstructed_index_api_benchmarks_index__label__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Benchmark Reset
+         * @description Delete the LIVE universe behind one reconstructed benchmark, so Fill can rebuild it.
+         *
+         *     The inverse of Fill's first step, for watching the whole path run: the benchmark drops to 0
+         *     members and the next Fill re-runs the label's template, re-enqueues what needs resolving and
+         *     re-caps what is already priced.
+         *
+         *     ⚠ MEMBERSHIP ONLY. Prices, the asset grid and market caps are shared with every other surface
+         *     and expensive to rebuild — see `reset_benchmark`, which also refuses a frozen snapshot, a
+         *     universe with derived children, and any label Fill has no template to rebuild (SP500).
+         *
+         *     422 carries the refusal's reason; it is always a sentence about this label, not a generic error.
+         */
+        delete: operations["benchmark_reset_api_benchmarks_index__label__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4043,6 +4057,31 @@ export interface paths {
          *     money. A null says "not a currency amount", which is the truth.
          */
         post: operations["fundamental_blend_metrics_api_earnings_fundamental_blend_metrics_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/fundamental-blend-metrics/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fundamental Blend Metrics Stream
+         * @description SSE twin of `/fundamental-blend-metrics`: `{type:'progress',done,total,name}` per holding,
+         *     then `{type:'result',payload:<the identical response>}`.
+         *
+         *     It exists because opening the Fundamental modal on a whole portfolio is a per-company read and
+         *     the modal could only say "Loading…" — which does not distinguish a 40-name book from a hung
+         *     request. Same inputs, same blend, same envelope; only the arrival is different.
+         */
+        post: operations["fundamental_blend_metrics_stream_api_earnings_fundamental_blend_metrics_stream_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7185,8 +7224,12 @@ export interface components {
             linked_portfolio_name?: string | null;
             /** Our Instrument */
             our_instrument?: string | null;
+            /** Our Price Date */
+            our_price_date?: string | null;
             /** Our Price Eur */
             our_price_eur?: number | null;
+            /** Price Lag Days */
+            price_lag_days?: number | null;
             /** Price Ratio */
             price_ratio?: number | null;
             /** Quantity */
@@ -7796,10 +7839,25 @@ export interface components {
             /** Note */
             note?: string | null;
             /**
+             * Price Failed
+             * @default 0
+             */
+            price_failed?: number;
+            /**
+             * Price Pending
+             * @default 0
+             */
+            price_pending?: number;
+            /**
              * Queued
              * @default 0
              */
             queued?: number;
+            /**
+             * Repriced
+             * @default 0
+             */
+            repriced?: number;
             /**
              * Skipped Existing
              * @default 0
@@ -7820,6 +7878,40 @@ export interface components {
              * @default 0
              */
             usable?: number;
+        };
+        /** BenchmarkResetResult */
+        BenchmarkResetResult: {
+            /**
+             * Caps Cleared
+             * @default 0
+             */
+            caps_cleared?: number;
+            /**
+             * Deleted
+             * @default false
+             */
+            deleted?: boolean;
+            /**
+             * Had Template
+             * @default false
+             */
+            had_template?: boolean;
+            /** Label */
+            label: string;
+            /**
+             * Members Deleted
+             * @default 0
+             */
+            members_deleted?: number;
+            /** Note */
+            note?: string | null;
+            /**
+             * Price Rows Deleted
+             * @default 0
+             */
+            price_rows_deleted?: number;
+            /** Prices From */
+            prices_from?: string | null;
         };
         /** BenchmarkYear */
         BenchmarkYear: {
@@ -13937,6 +14029,37 @@ export interface operations {
             };
         };
     };
+    benchmark_reset_api_benchmarks_index__label__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BenchmarkResetResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     benchmark_fill_api_benchmarks_index__label__fill_post: {
         parameters: {
             query?: never;
@@ -15176,6 +15299,39 @@ export interface operations {
         };
     };
     fundamental_blend_metrics_api_earnings_fundamental_blend_metrics_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fundamental_blend_metrics_stream_api_earnings_fundamental_blend_metrics_stream_post: {
         parameters: {
             query?: never;
             header?: never;

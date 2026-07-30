@@ -42,13 +42,17 @@ export default function OwnerEarningsModal({
   // render, and it is in the child's effect deps — so each fetch would set state, re-render, and
   // fetch again. The blend is an expensive multi-company query; this is not a micro-optimisation.
   const blend = useMemo(() => ({ basket, portfolioId }), [basket, portfolioId]);
-  const [tab, setTab] = useState<Tab>('fundamentals');
+  // ⚠ THE FIRST TAB, WHICH IS NO LONGER `fundamentals`. Demoting those charts to last and naming
+  // them "Old charts" while still opening on them would say two opposite things at once — and it
+  // is the one tab both an aggregate and a single company have, so the landing tab never depends
+  // on which the modal was opened for.
+  const [tab, setTab] = useState<Tab>('longequity');
   const hasInstrument = isAgg || !!isin;
   /**
    * ⚠ HOISTED OUT OF `LongEquityTab` SO IT CAN SIT IN THE TAB ROW. The setting belongs to that tab
    * and governs only its charts, but the row is the modal's — and the row is in the fixed head, so
    * putting the control there is what keeps it visible without any sticky positioning of its own.
-   * Rendered only on the tab it affects: a checkbox on screen while Fundamentals is open would
+   * Rendered only on the tab it affects: a checkbox on screen while Old charts is open would
    * claim to be doing something to charts it cannot reach.
    */
   const [sbcCorrection, setSbcCorrection] = useState(true);
@@ -93,9 +97,11 @@ export default function OwnerEarningsModal({
           <div className="flex items-center gap-3 mb-3 shrink-0 flex-wrap">
           <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 w-fit">
             {((isAgg
-              ? [['fundamentals', 'Fundamentals'], ['longequity', 'Long Equity']]
-              : [['fundamentals', 'Fundamentals'], ['longequity', 'Long Equity'],
-                ['quickval', 'Quick Valuation'], ['deepval', 'Deep Valuation']]
+              // ⚠ LAST, AND CALLED WHAT IT IS. These charts are superseded by the three reads to
+              // their left; keeping them first made the modal open on the oldest thing in it.
+              ? [['longequity', 'Long Equity'], ['fundamentals', 'Old charts']]
+              : [['longequity', 'Long Equity'], ['quickval', 'Quick Valuation'],
+                ['deepval', 'Deep Valuation'], ['fundamentals', 'Old charts']]
             ) as [Tab, string][]).map(([t, label]) => (
               <button key={t} type="button" onClick={() => setTab(t)}
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${

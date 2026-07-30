@@ -610,6 +610,103 @@ def _page_metrics(company_id: int, pattern: str, *, exact: bool = False) -> list
         start += _PAGE
 
 
+def _company_metric_rows(cid: int) -> list[dict]:
+    """Every charted metric row for ONE company — the unit of work the blend is slow in.
+
+    ⚠ Paged per company, never one wildcard over the lot: a company carries ~110 codes x ~28 years,
+    so twenty at once is ~60k rows against PostgREST's silent 1,000-row cap and the tail would come
+    back looking like companies with no data.
+
+    ⚠ THREE PATTERNS, THREE FEEDS. A statement line is `annuals__Section__Line`; an analyst estimate
+    is `annual_pettm_estimate` (SINGULAR, no section, no double underscore); and Forward P/E is
+    `indicator_q_forward_pe_ratio` — an INDICATOR, a third naming scheme again. Miss one and its
+    panels read "no data" while the rest of the suite fills in around them.
+
+    ⚠ AND NOT AN UNFILTERED FETCH EITHER. `close_price` alone is ~10k rows per company — a daily
+    series no blended fiscal-year chart uses, and enough to blow the cap on its own.
+
+    Raw strings: `_` escapes LIKE's single-char wildcard, and a plain "_" in a normal Python string
+    is an invalid escape sequence (a SyntaxWarning now, an error later).
+    """
+    rows: list[dict] = []
+    for pattern in (r"annuals__%", r"annual_%estimate", r"indicator%"):
+        rows += _page_metrics(cid, pattern)
+    return rows
+
+
+def _blend_rows(rows: list[dict], covered: list[dict]) -> dict:
+    """The blend itself, over rows already fetched. Pure of I/O, so the plain endpoint and the
+    streaming one cannot drift: they differ only in HOW the rows arrive."""
+    from routers._fundamental_blend import blend_series, explain_empty  # noqa: PLC0415
+
+    by_metric: dict[str, dict[int, dict[str, float]]] = {}
+    for r in rows:
+        if r.get("numeric_value") is None:
+            continue
+        (by_metric.setdefault(r["metric_code"], {})
+                  .setdefault(r["company_id"], {}))[str(r["target_date"])[:10]] = \
+            float(r["numeric_value"])
+
+    out: list[dict] = []
+    notes: dict[str, dict] = {}
+    for code, per_company in by_metric.items():
+        # ⚠ A FORECAST INHERITS THE ANCHOR OF THE ACTUAL IT CONTINUES. Both are the same quantity
+        # and the chart indexes them off ONE base, so rebasing them independently draws the forecast
+        # restarting at 100 beside an actual that has run to 1,808 — a ~94% earnings collapse that
+        # exists only in the arithmetic.
+        base_code = _FORECAST_BASE.get(code)
+        base_by_company = by_metric.get(base_code, {}) if base_code else {}
+        blend_members = [{"weight": r["weight_pct"],
+                          "points": per_company.get(r["company_id"], {}),
+                          "base_points": base_by_company.get(r["company_id"], {})}
+                         for r in covered]
+        s = blend_series(blend_members, code)
+        if not s["points"]:
+            # ⚠ AN EMPTY SERIES IS NOT AN EMPTY DATABASE, AND THE CHART CANNOT TELL. Measured on a
+            # real book's Dividends per Share: every holding carried the line and the card still
+            # read "No dividend/share ingested" — the level rebase drops a series that starts at
+            # 0.00. The reason travels with the (absent) series so the card states it instead of
+            # sending the reader to re-ingest data they already have.
+            why = explain_empty(blend_members, code)
+            if why is not None:
+                notes[code] = why
+        for p in s["points"]:
+            # The fiscal-year key becomes a date the charts can plot. 31 Dec is a convention here,
+            # not a claim about anyone's year-end — members close on different days, which is
+            # exactly why the blend aligns on the year in the first place.
+            out.append({"metric_code": code, "target_date": f"{p['period']}-12-31",
+                        "numeric_value": p["value"], "is_prediction": False})
+    return {"metrics": out, "codes": len(by_metric), "blend_notes": notes}
+
+
+def _blend_envelope(built: dict, covered: list[dict], cov: dict) -> dict:
+    """The response both endpoints return — one shape, written once."""
+    return {
+        "company_id": None,
+        "company_name": f"{len(covered)} holdings · {cov['covered_pct']:.0f}% of weight",
+        "currency": None,
+        "metrics": built["metrics"],
+        # Per metric_code, why a code with member data produced no line. Only codes that drew
+        # nothing appear; a code nobody reports is absent (that one IS "not ingested").
+        "blend_notes": built["blend_notes"],
+        "coverage": cov,
+    }
+
+
+async def _blend_inputs(body: FundamentalCoverageRequest) -> tuple[list[dict], dict]:
+    """The covered holdings and the coverage report, or the 404 that says why there are none."""
+    from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings to blend")
+    cov = await coverage_for_async(members)
+    covered = [r for r in cov["rows"] if r["reason"] == "covered" and r.get("company_id")]
+    if not covered:
+        raise HTTPException(status_code=404, detail="no holding has fundamentals to blend")
+    return covered, cov
+
+
 @router.post("/api/earnings/fundamental-blend-metrics")
 async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
     """The portfolio as ONE pseudo-company, in the exact shape `/by-isin/{isin}/metrics` returns.
@@ -627,92 +724,59 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
     charts' EUR conversion is driven off this field, so a currency here would relabel an index as
     money. A null says "not a currency amount", which is the truth.
     """
-    from routers._fundamental_blend import blend_series, explain_empty  # noqa: PLC0415
-    from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
-
-    members = await _load_and_expand_members(body)
-    if not members:
-        raise HTTPException(status_code=404, detail="no holdings to blend")
-
-    cov = await coverage_for_async(members)
-    covered = [r for r in cov["rows"] if r["reason"] == "covered" and r.get("company_id")]
-    if not covered:
-        raise HTTPException(status_code=404, detail="no holding has fundamentals to blend")
+    covered, cov = await _blend_inputs(body)
 
     def _build() -> dict:
-        ids = [r["company_id"] for r in covered]
         rows: list[dict] = []
-        # ⚠ Paged per company, never one wildcard over the lot: a company carries ~110 codes x
-        # ~28 years, so twenty at once is ~60k rows against PostgREST's silent 1,000-row cap and
-        # the tail would come back looking like companies with no data.
-        # ⚠ TWO PATTERNS, BECAUSE THE ESTIMATES ARE NOT NAMED LIKE THE STATEMENTS. A statement
-        # line is `annuals__Section__Line`; an analyst estimate is `annual_pettm_estimate` —
-        # SINGULAR, no section, no double underscore. Filtering on `annuals__%` alone silently
-        # dropped every estimate, which is exactly the set Forward P/E and the OE Estimate line
-        # are built from: those two panels read "no data" while the rest of the suite filled in.
-        #
-        # ⚠ AND NOT AN UNFILTERED FETCH EITHER. `close_price` alone is ~10k rows per company —
-        # a daily series that no blended fiscal-year chart uses and that would blow past
-        # PostgREST's cap on its own.
-        for cid in ids:
-            # Raw strings: _ escapes LIKE's single-char wildcard, and a plain "_" in a normal
-            # Python string is an invalid escape sequence (a SyntaxWarning now, an error later).
-            # ⚠ THREE PATTERNS, THREE FEEDS. A statement line is `annuals__Section__Line`; an
-            # analyst estimate is `annual_pettm_estimate` (SINGULAR, no section); and Forward P/E
-            # is `indicator_q_forward_pe_ratio` — an INDICATOR, a third naming scheme again. Miss
-            # one and its panels read "no data" while the rest of the suite fills in around them.
-            for pattern in (r"annuals__%", r"annual_%estimate", r"indicator%"):
-                rows += _page_metrics(cid, pattern)
-        by_metric: dict[str, dict[int, dict[str, float]]] = {}
-        for r in rows:
-            if r.get("numeric_value") is None:
-                continue
-            (by_metric.setdefault(r["metric_code"], {})
-                      .setdefault(r["company_id"], {}))[str(r["target_date"])[:10]] = \
-                float(r["numeric_value"])
+        for r in covered:
+            rows += _company_metric_rows(r["company_id"])
+        return _blend_rows(rows, covered)
 
-        out: list[dict] = []
-        notes: dict[str, dict] = {}
-        for code, per_company in by_metric.items():
-            # ⚠ A FORECAST INHERITS THE ANCHOR OF THE ACTUAL IT CONTINUES. Both are the same
-            # quantity and the chart indexes them off ONE base, so rebasing them independently
-            # draws the forecast restarting at 100 beside an actual that has run to 1,808 — a
-            # ~94% earnings collapse that exists only in the arithmetic.
-            base_code = _FORECAST_BASE.get(code)
-            base_by_company = by_metric.get(base_code, {}) if base_code else {}
-            blend_members = [{"weight": r["weight_pct"],
-                              "points": per_company.get(r["company_id"], {}),
-                              "base_points": base_by_company.get(r["company_id"], {})}
-                             for r in covered]
-            s = blend_series(blend_members, code)
-            if not s["points"]:
-                # ⚠ AN EMPTY SERIES IS NOT AN EMPTY DATABASE, AND THE CHART CANNOT TELL. Measured
-                # on a real book's Dividends per Share: every holding carried the line and the
-                # card still read "No dividend/share ingested" — the level rebase drops a series
-                # that starts at 0.00. The reason travels with the (absent) series so the card
-                # states it instead of sending the reader to re-ingest data they already have.
-                why = explain_empty(blend_members, code)
-                if why is not None:
-                    notes[code] = why
-            for p in s["points"]:
-                # The fiscal-year key becomes a date the charts can plot. 31 Dec is a convention
-                # here, not a claim about anyone's year-end — members close on different days,
-                # which is exactly why the blend aligns on the year in the first place.
-                out.append({"metric_code": code, "target_date": f"{p['period']}-12-31",
-                            "numeric_value": p["value"], "is_prediction": False})
-        return {"metrics": out, "codes": len(by_metric), "blend_notes": notes}
+    return _blend_envelope(await asyncio.to_thread(_build), covered, cov)
 
-    built = await asyncio.to_thread(_build)
-    return {
-        "company_id": None,
-        "company_name": f"{len(covered)} holdings · {cov['covered_pct']:.0f}% of weight",
-        "currency": None,
-        "metrics": built["metrics"],
-        # Per metric_code, why a code with member data produced no line. Only codes that drew
-        # nothing appear; a code nobody reports is absent (that one IS "not ingested").
-        "blend_notes": built["blend_notes"],
-        "coverage": cov,
-    }
+
+async def _blend_metrics_events(body: FundamentalCoverageRequest):
+    """Per-COMPANY progress, then the same payload the plain endpoint returns.
+
+    ⚠ THE UNIT OF PROGRESS IS THE UNIT OF WORK. The blend's cost is three paged reads per holding
+    (`_company_metric_rows`) — a 40-name book is 120 round trips — and everything after them is
+    arithmetic. So "3 of 40 companies" is a real fraction of the wait, not a guess dressed as one.
+    A spinner over that says only "still going", which on a minute-long open reads as broken.
+
+    ⚠ THE ERROR ARRIVES AS AN EVENT, NOT AS A STATUS. The stream's headers are long since sent by
+    the time a holding fails, so a raised `HTTPException` here cannot become a 404 the client can
+    read — it would truncate the body and surface as a network error. The two real 404s are raised
+    before the first byte, but a fault mid-loop has nowhere else to go.
+    """
+    from routers._asset_financials import _sse  # noqa: PLC0415
+
+    covered, cov = await _blend_inputs(body)     # before the first byte: a real 404 is still a 404
+    n = len(covered)
+    yield _sse({"type": "progress", "done": 0, "total": n})
+    rows: list[dict] = []
+    try:
+        for i, r in enumerate(covered):
+            rows += await asyncio.to_thread(_company_metric_rows, r["company_id"])
+            yield _sse({"type": "progress", "done": i + 1, "total": n, "name": r.get("name")})
+        built = await asyncio.to_thread(_blend_rows, rows, covered)
+    except Exception as e:  # noqa: BLE001 — see the docstring: there is no status code left to use
+        yield _sse({"type": "error", "detail": f"{type(e).__name__}: {e}"})
+        return
+    yield _sse({"type": "result", "payload": _blend_envelope(built, covered, cov)})
+
+
+@router.post("/api/earnings/fundamental-blend-metrics/stream")
+async def fundamental_blend_metrics_stream(body: FundamentalCoverageRequest):
+    """SSE twin of `/fundamental-blend-metrics`: `{type:'progress',done,total,name}` per holding,
+    then `{type:'result',payload:<the identical response>}`.
+
+    It exists because opening the Fundamental modal on a whole portfolio is a per-company read and
+    the modal could only say "Loading…" — which does not distinguish a 40-name book from a hung
+    request. Same inputs, same blend, same envelope; only the arrival is different.
+    """
+    from fastapi.responses import StreamingResponse  # noqa: PLC0415
+
+    return StreamingResponse(_blend_metrics_events(body), media_type="text/event-stream")
 
 
 class FundamentalBreakdownRequest(FundamentalCoverageRequest):

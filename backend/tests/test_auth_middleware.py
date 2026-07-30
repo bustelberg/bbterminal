@@ -132,9 +132,72 @@ class TestScheduleDetailResourceReads:
     def test_resource_read_still_needs_auth(self, monkeypatch):
         assert _run(monkeypatch, "GET", "/api/momentum/backtests/107", None) == (401, False)
 
-    def test_airs_read_now_admin_only(self, monkeypatch):
-        # The AIRS page is admin-only now, so its API left the user read tier.
+    def test_airs_scan_is_admin_only_even_though_airs_reads_are_not(self, monkeypatch):
+        # See TestManagementDashboardForUsers: /api/airs/ is a user read tier now, but `scan` is a
+        # GET that runs a Playwright scrape — the deny-list has to beat the prefix.
         assert _run(monkeypatch, "GET", "/api/airs/scan", "user") == (403, False)
+
+
+class TestManagementDashboardForUsers:
+    """The Management Dashboard is user-visible, so the API behind it must be readable — and
+    ONLY readable. Every mutation on that page stays admin-only."""
+
+    def test_the_page_s_reads_are_allowed(self, monkeypatch):
+        for path in ("/api/airs/portfolios/overview",
+                     "/api/airs/accounts/BUS_X/holdings",
+                     "/api/airs/model-portfolios/correlations",
+                     "/api/airs/model-portfolios/7/analysis",
+                     "/api/asset-pipeline/fundamentals/isin/US0378331005",
+                     "/api/asset-pipeline/latest-close/isin/US0378331005",
+                     "/api/asset-pipeline/risk/isin/US0378331005"):
+            assert _run(monkeypatch, "GET", path, "user") == (200, True), path
+
+    def test_a_read_that_arrives_as_post_is_allowed(self, monkeypatch):
+        """⚠ These POST because a basket of ISINs does not fit in a URL. They mutate nothing, and
+        the method-based write tier would 403 a user on a page they may open."""
+        for path in ("/api/airs/basket/analysis",
+                     "/api/asset-pipeline/basket/performance",
+                     "/api/earnings/margin-inputs",
+                     "/api/earnings/fundamental-blend-matrix",
+                     "/api/earnings/fundamental-coverage"):
+            assert _run(monkeypatch, "POST", path, "user") == (200, True), path
+
+    def test_the_ingest_sibling_one_segment_down_is_still_admin_only(self, monkeypatch):
+        """⚠ WHY THE POST-READ LIST IS EXACT-MATCH, NEVER PREFIX. `fundamental-coverage` reports
+        what we hold; `fundamental-coverage/ingest` spends GuruFocus quota to go and fetch it."""
+        assert _run(monkeypatch, "POST", "/api/earnings/fundamental-coverage/ingest",
+                    "user") == (403, False)
+
+    def test_scraping_airs_is_admin_only_by_every_route(self, monkeypatch):
+        """The two SSE scrapes are GETs; the refreshes are POSTs. Neither is a user's to fire."""
+        assert _run(monkeypatch, "GET", "/api/airs/model-portfolios/scan", "user") == (403, False)
+        assert _run(monkeypatch, "POST", "/api/airs/vermogen/refresh", "user") == (403, False)
+        assert _run(monkeypatch, "POST", "/api/airs/portfolios/BUS_X/refresh", "user") == (403, False)
+
+    def test_client_crm_records_stay_admin_only(self, monkeypatch):
+        """A genuine read, but of relations — a different subject from the portfolios page, and it
+        sits inside the now-readable /api/airs/ prefix."""
+        assert _run(monkeypatch, "GET", "/api/airs/crm-relaties", "user") == (403, False)
+
+    def test_deleting_an_account_is_admin_only(self, monkeypatch):
+        assert _run(monkeypatch, "DELETE", "/api/airs/portfolios/BUS_X", "user") == (403, False)
+
+    def test_the_three_pins_are_admin_only(self, monkeypatch):
+        """Class, ISIN and Link are data curation — one user's fix would move every book."""
+        assert _run(monkeypatch, "POST", "/api/airs/asset-bucket-override", "user") == (403, False)
+        assert _run(monkeypatch, "POST", "/api/airs/holding-isin-override", "user") == (403, False)
+        assert _run(monkeypatch, "PUT", "/api/airs/accounts/BUS_X/link", "user") == (403, False)
+        assert _run(monkeypatch, "PUT", "/api/airs/model-portfolios/7/display-name",
+                    "user") == (403, False)
+
+    def test_the_rest_of_asset_pipeline_is_not_opened_up(self, monkeypatch):
+        """Only the three by-ISIN reads the modals need — the instruments grid is admin's."""
+        assert _run(monkeypatch, "GET", "/api/asset-pipeline/grid", "user") == (403, False)
+        assert _run(monkeypatch, "POST", "/api/asset-pipeline/store", "user") == (403, False)
+
+    def test_these_reads_still_need_a_token(self, monkeypatch):
+        assert _run(monkeypatch, "GET", "/api/airs/portfolios/overview", None) == (401, False)
+        assert _run(monkeypatch, "POST", "/api/airs/basket/analysis", None) == (401, False)
 
 
 class TestH1_EarningsRefreshNeedsAuth:

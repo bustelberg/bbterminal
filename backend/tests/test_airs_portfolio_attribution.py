@@ -203,5 +203,8 @@ class TestTheBenchmarkWeightsAreTheSAMEONES:
         attribution that reconciles against a DIFFERENT weighting reconciles against nothing."""
         from routers import _asset_benchmark as ab
 
-        assert "_window_rows(mem, closes, fx, start)" in inspect.getsource(ab.index_rows)
+        # The CALL, not its argument list — `marks=` was added when the loader was narrowed to the
+        # two prices a window actually reads. What must not change is which function weights it.
+        assert "_window_rows(" in inspect.getsource(ab.index_rows)
+        assert "index_weights(" in inspect.getsource(ab.index_rows)
         assert "index_rows(benchmark_label, start)" in inspect.getsource(at.compute_attribution)

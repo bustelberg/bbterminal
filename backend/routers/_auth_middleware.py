@@ -4,21 +4,29 @@ EVERY `/api/*` request must carry a valid Supabase JWT, with one exception
 tier (public health/cron endpoints). Authorization is role-based:
 
   * admin  → any endpoint.
-  * user   → only the API behind the non-admin-visible pages
-             (/companies, /earnings, /airs-portfolio + the /earnings usage
-             badge), plus the two mutations those pages need (AIRS upload,
-             earnings refresh).
+  * user   → only the API behind the non-admin-visible pages (/companies,
+             /earnings, /schedule and the Management Dashboard), plus the few
+             mutations those pages need (earnings refresh).
   * anon   → nothing but the public tier → 401.
 
-Tiers (matched as `path.startswith(prefix)`):
+Tiers (matched as `path.startswith(prefix)` unless stated):
   _PUBLIC_PREFIXES     no auth at all — health/ping + the cron endpoints,
                        which verify their own `X-Cron-Secret`.
   _SELF_AUTH_PREFIXES  the endpoint verifies the caller's token itself
                        (login/self-service + admin user management); the gate
                        lets the request reach it untouched.
+  _ADMIN_ONLY_PREFIXES admin even though they sit inside a user-readable
+                       prefix — checked FIRST, before any allow.
   _USER_READ_PREFIXES  GET/HEAD allowed for any authenticated user.
   _USER_WRITE_PREFIXES writes allowed for any authenticated user.
+  _USER_POST_READ_PATHS  EXACT paths that compute-and-return over a POSTed
+                       basket — reads that cannot be GETs.
   everything else      admin only.
+
+⚠ THE METHOD IS NOT THE AUTHORITY ON WHETHER SOMETHING IS A READ. Both
+exceptions above exist because it lied in each direction: an SSE endpoint
+scrapes for minutes behind a GET, and a basket calculation POSTs because its
+input does not fit in a URL.
 
 Non-`/api/` paths (FastAPI's `/docs`, `/openapi.json`, `/`) pass through.
 
@@ -62,6 +70,10 @@ _SELF_AUTH_PREFIXES: tuple[str, ...] = ("/api/auth/",)
 # `/api/fx/` + `/api/benchmarks` are read-only reference data the read-only
 # /schedule strategy-detail card needs (EUR/FX conversion + the ETF overlay's
 # benchmark identity) — low-sensitivity reads, mutations stay admin-only.
+# `/api/airs` + the three `/api/asset-pipeline` by-ISIN reads are the Management Dashboard (the
+# portfolios table, the correlation matrix, the Analyse/Fundamental modals). The PAGE is
+# user-visible; every mutation on it stays admin-only, which is why none of these appear in the
+# write tier — see `_ADMIN_ONLY_PREFIXES` for the GETs that are really writes.
 _USER_READ_PREFIXES: tuple[str, ...] = (
     "/api/companies",
     "/api/earnings",
@@ -69,11 +81,58 @@ _USER_READ_PREFIXES: tuple[str, ...] = (
     "/api/scheduled-strategies",
     "/api/fx/",
     "/api/benchmarks",
+    "/api/airs/",
+    "/api/asset-pipeline/fundamentals/",
+    "/api/asset-pipeline/latest-close/",
+    "/api/asset-pipeline/risk/",
+)
+
+# ⚠ A GET IS NOT ALWAYS A READ, AND THIS IS CHECKED BEFORE THE READ TIER SO WIDENING ONE ABOVE
+# CANNOT QUIETLY RE-EXPOSE THEM. The two `scan` endpoints are GETs only because they stream (SSE);
+# each drives a live Playwright scrape of AirSPMS — minutes of work against a third-party system
+# that rate-limits and can lock the shared login out. Method is the wrong test for them.
+# `/api/airs/crm-relaties` IS a genuine read, of CLIENT RELATIONSHIP records — a different subject
+# from the portfolios this page is about, and it belongs to the admin-only /airs-portfolio page.
+_ADMIN_ONLY_PREFIXES: tuple[str, ...] = (
+    "/api/airs/scan",
+    "/api/airs/model-portfolios/scan",
+    "/api/airs/crm-relaties",
 )
 
 # Writes any AUTHENTICATED user may make — the mutations those pages need.
 # (Earnings refresh is handled separately by `_is_earnings_refresh`.)
 _USER_WRITE_PREFIXES: tuple[str, ...] = ()
+
+# ⚠ READS THAT ARRIVE AS POST. This gate splits on HTTP method, so a compute-and-return endpoint
+# whose input is a LIST OF ISINS — too long for a URL — lands in the write tier and 403s for a user
+# on a page they are allowed to open. Every path here mutates nothing; it takes a basket in and
+# returns figures.
+#
+# ⚠ MATCHED BY EXACT PATH, NEVER PREFIX. `/api/earnings/fundamental-coverage` computes what we
+# hold; `/api/earnings/fundamental-coverage/ingest`, one segment further down, spends GuruFocus
+# quota to go and fetch it. A prefix would hand a user the second along with the first.
+_USER_POST_READ_PATHS: frozenset[str] = frozenset({
+    "/api/airs/basket/analysis",
+    "/api/asset-pipeline/basket/performance",
+    "/api/earnings/capex-margin-inputs",
+    "/api/earnings/cash-conversion-inputs",
+    "/api/earnings/cash-return-inputs",
+    "/api/earnings/debt-ratio-inputs",
+    "/api/earnings/dividend-yield-inputs",
+    "/api/earnings/fcf-sbc-yield-inputs",
+    "/api/earnings/fundamental-blend",
+    "/api/earnings/fundamental-blend-breakdown",
+    "/api/earnings/fundamental-blend-matrix",
+    "/api/earnings/fundamental-blend-metrics",
+    "/api/earnings/fundamental-blend-metrics/stream",
+    "/api/earnings/fundamental-coverage",
+    "/api/earnings/gross-margin-inputs",
+    "/api/earnings/interest-burden-inputs",
+    "/api/earnings/margin-inputs",
+    "/api/earnings/portfolio-revenue-matrix",
+    "/api/earnings/relative-growth-breakdown",
+    "/api/earnings/sbc-ocf-inputs",
+})
 
 # Specific GET-by-id resources a non-admin may read so the read-only /schedule
 # strategy-detail panel loads its current portfolio + source backtest. These
@@ -149,8 +208,17 @@ async def enforce_api_auth(
         return await call_next(request)
 
     # Non-admin: only the allowed surface.
-    if request.method in _WRITE_METHODS:
-        allowed = _starts_with_any(path, _USER_WRITE_PREFIXES) or _is_earnings_refresh(path)
+    # ⚠ THE DENY IS FIRST. It covers endpoints that sit inside a user-readable prefix but are not
+    # reads (the SSE scrapes) or not this page's subject (CRM), so it must not be reachable by
+    # widening a prefix above.
+    if _starts_with_any(path, _ADMIN_ONLY_PREFIXES):
+        allowed = False
+    elif request.method in _WRITE_METHODS:
+        allowed = (
+            _starts_with_any(path, _USER_WRITE_PREFIXES)
+            or _is_earnings_refresh(path)
+            or (request.method == "POST" and path in _USER_POST_READ_PATHS)
+        )
     else:
         allowed = (
             _starts_with_any(path, _USER_READ_PREFIXES)

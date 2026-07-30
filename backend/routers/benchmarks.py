@@ -332,6 +332,12 @@ class BenchmarkFillResult(BaseModel):
     queued: int = 0
     skipped_existing: int = 0
     capped: int = 0
+    # Prices re-fetched this press, and how many constituents still have no mark in the window.
+    # `price_pending` is not a failure: one press re-prices a bounded slice on purpose, and the
+    # 06:00 asset-price tick clears the rest unattended.
+    repriced: int = 0
+    price_pending: int = 0
+    price_failed: int = 0
     # True when the label had NO universe row and its template was run to create one — AEX.
     universe_built: bool = False
     note: str | None = None
@@ -352,3 +358,40 @@ async def benchmark_fill(label: str):
     from routers._benchmark_fill import fill_benchmark  # noqa: PLC0415
 
     return await asyncio.to_thread(fill_benchmark, label)
+
+
+class BenchmarkResetResult(BaseModel):
+    label: str
+    deleted: bool = False
+    members_deleted: int = 0
+    # The other two thirds of Fill, undone so they can be watched running.
+    caps_cleared: int = 0
+    price_rows_deleted: int = 0
+    # The date the price deletion starts from — the window's lookback, not 1 January: the opening
+    # mark is the last close ON OR BEFORE the anchor, so 31 December is what a YTD actually opens at.
+    prices_from: str | None = None
+    # True when the deleted universe was template-managed — i.e. Fill will rebuild it.
+    had_template: bool = False
+    note: str | None = None
+
+
+@router.delete("/api/benchmarks/index/{label}", response_model=BenchmarkResetResult)
+async def benchmark_reset(label: str):
+    """Delete the LIVE universe behind one reconstructed benchmark, so Fill can rebuild it.
+
+    The inverse of Fill's first step, for watching the whole path run: the benchmark drops to 0
+    members and the next Fill re-runs the label's template, re-enqueues what needs resolving and
+    re-caps what is already priced.
+
+    ⚠ MEMBERSHIP ONLY. Prices, the asset grid and market caps are shared with every other surface
+    and expensive to rebuild — see `reset_benchmark`, which also refuses a frozen snapshot, a
+    universe with derived children, and any label Fill has no template to rebuild (SP500).
+
+    422 carries the refusal's reason; it is always a sentence about this label, not a generic error.
+    """
+    from routers._benchmark_fill import reset_benchmark  # noqa: PLC0415
+
+    try:
+        return await asyncio.to_thread(reset_benchmark, label)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e

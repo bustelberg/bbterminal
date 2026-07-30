@@ -127,3 +127,132 @@ class TestResolutionIsNeverRunInline:
         assert "_queue.enqueue" in src
         for forbidden in ("store_one", "resolve(", "fast_resolve"):
             assert forbidden not in src, forbidden
+
+
+class TestDeleteIsOnlyOfferedWhereFillCanUndoIt:
+    """⚠ THE DELETE EXISTS SO FILL CAN BE WATCHED REBUILDING — WHICH IS A PROMISE ABOUT THE LABEL.
+
+    `fill_benchmark`'s only route back is `_build_universe`. Offering Delete for a label it cannot
+    rebuild is a one-way door behind a button whose whole point is reversibility, so the guard and
+    the rebuild must never disagree about which labels those are: both ask `rebuildable()`.
+
+    SP500 is the case that forced this to be a function rather than `label in TEMPLATES`. It is NOT
+    a `UniverseTemplate` — and must not become one, because `/api/index-universe/indexes` excludes
+    any universe carrying a `template_key`, so registering it would delete the index from the
+    /sp500 page that owns it. Its route back is the Wikipedia reconstruction, wired into
+    `_build_universe` directly.
+    """
+
+    def test_every_benchmark_the_panel_offers_is_rebuildable(self):
+        """The three labels in `BenchmarksPanel.INDICES`. A Delete button on any of them is a
+        promise this function has to keep."""
+        from routers._benchmark_fill import rebuildable
+
+        for label in ("SP500", "ACWI", "AEX"):
+            assert rebuildable(label), label
+
+    def test_an_unknown_label_is_refused_before_it_touches_the_database(self):
+        import pytest
+
+        from routers._benchmark_fill import reset_benchmark
+
+        with pytest.raises(ValueError) as e:
+            reset_benchmark("not-a-benchmark")
+        assert "no way to rebuild" in str(e.value)
+        # The refusal names what IS rebuildable — one that leaves you stuck is half an answer.
+        assert "SP500" in str(e.value)
+
+    def test_sp500_is_rebuilt_without_being_registered_as_a_template(self):
+        """⚠ Registering it would stamp `template_key` on its universe row, and the /sp500 page's
+        own list excludes those — the index would vanish from its page as a side effect."""
+        from index_universe.templates import TEMPLATES
+        from routers._benchmark_fill import rebuildable
+
+        assert "SP500" not in TEMPLATES
+        assert rebuildable("SP500")
+
+    def test_the_guard_and_the_rebuild_ask_the_same_question(self):
+        """A second list of rebuildable labels is a second thing to keep true."""
+        import inspect
+
+        from routers import _benchmark_fill as m
+
+        assert "rebuildable(" in inspect.getsource(m.reset_benchmark)
+        assert "rebuildable(" in inspect.getsource(m._build_universe)
+
+    def test_the_sp500_rebuild_resolves_only_the_stored_month(self):
+        """⚠ The reconstruction walks back to 2000 — 852 tickers, 286 with no company row, each an
+        OpenFIGI lookup for a name delisted a decade ago. `store_index_membership` keeps only the
+        newest month anyway, so resolving the history buys nothing and costs the slowest part."""
+        import inspect
+
+        from routers._benchmark_fill import _rebuild_sp500
+
+        src = inspect.getsource(_rebuild_sp500)
+        assert "monthly[latest]" in src
+        # And the changelog is handed back, never emptied — store_index_membership OVERWRITES it.
+        assert "filtered_changes" in src
+
+
+class TestResetUndoesAllThreeOfFillsJobs:
+    """Deleting only the membership left two thirds of Fill untested: a constituent that is already
+    resolved and already capped goes straight into `usable`, so the cap backfill and the price
+    refill never run and the counts read like success without either having done anything.
+
+    The three deletions match Fill's three jobs one for one — and what is NOT deleted is what keeps
+    the refill safe.
+    """
+
+    def test_the_grid_row_and_the_symbol_are_never_touched(self):
+        """⚠ THE PROPERTY THAT STOPS THIS BEING DESTRUCTIVE. Every instrument keeps `status='ok'`,
+        its `analysis_id` and its Yahoo symbol, so Fill re-fetches prices for a KNOWN listing
+        (`extend_series`). Deleting the grid row or zeroing `bars` would push it into
+        `needs_resolve` instead — and a re-resolve is how Alphabet moved from GOOGL to a Vienna
+        line 75,000x thinner, because Yahoo answers an overloaded caller with an empty search."""
+        import inspect
+
+        from routers import _benchmark_fill as m
+
+        src = inspect.getsource(m.reset_benchmark) + inspect.getsource(m._drop_window_prices)
+        for table in ('table("asset_execution")', 'table("asset_grid")', 'table("asset_analysis").delete'):
+            assert table not in src, f"reset must not touch {table}"
+
+    def test_prices_are_deleted_as_a_TAIL_not_a_hole(self):
+        """⚠ WHY THIS IS SAFE TO OFFER AT ALL. Everything from the lookback forward goes, so each
+        series simply ENDS earlier — a state the fleet already repairs (the last close falls behind
+        the market anchor, `find_stale` sees it, `extend_series` fetches the gap). An interior
+        slice would leave the newest close untouched, no staleness check would ever fire, and the
+        hole would be permanent: `extend_series` appends after the last close, it cannot backfill."""
+        import inspect
+
+        src = inspect.getsource(__import__("routers._benchmark_fill", fromlist=["x"])._drop_window_prices)
+        assert '.gte("target_date"' in src
+        assert '.lte("target_date"' not in src, "an upper bound would carve a hole, not a tail"
+
+    def test_the_window_starts_at_the_lookback_not_at_new_year(self):
+        """The opening mark is the last close ON OR BEFORE 1 January — 31 December for most names.
+        Deleting from the anchor would leave it behind and the benchmark would still price."""
+        from routers._benchmark_fill import window_bounds
+
+        lookback, anchor = window_bounds(2026)
+        assert anchor == "2026-01-01"
+        assert lookback < "2025-12-31"
+
+    def test_the_refill_uses_the_known_symbol_and_never_the_resolve_queue(self):
+        import inspect
+
+        from routers._benchmark_fill import _refill_prices
+
+        src = inspect.getsource(_refill_prices)
+        assert "extend_series" in src
+        assert "enqueue" not in src, "re-resolving is the destructive path; the refill must not use it"
+
+    def test_the_refill_only_touches_constituents_with_no_mark_in_the_window(self):
+        """`window_marks` is the same selection the panel prices from, so "needs a price" means
+        exactly "the panel cannot price it" — and a press after a completed refill costs one query
+        and no Yahoo calls."""
+        import inspect
+
+        from routers._benchmark_fill import _refill_prices
+
+        assert "window_marks" in inspect.getsource(_refill_prices)

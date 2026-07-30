@@ -13,15 +13,70 @@ from __future__ import annotations
 
 import pytest
 
+from asset_pipeline.price_refresh import DEFAULT_STALE_DAYS
 from routers._airs_holding_isin import (
     BUCKET_ALTS,
     BUCKET_BONDS,
     BUCKET_CASH,
     BUCKET_EQUITY,
     BUCKET_EQUITY_ETF,
+    _CHECK_STALE_DAYS,
+    _MAX_CLOSE_LAG_DAYS,
+    _close_lag_days,
     _dedupe,
     classify_bucket,
 )
+
+
+class TestAStalePriceIsNotAWrongListing:
+    """⚠ THE CHECK IS ONLY AS GOOD AS THE PRICE UNDER IT. AIRS's implied price is compared with our
+    own close at a 15% tolerance — a band meant to catch share-class errors of 19x and 20x. A series
+    that merely STOPPED UPDATING drifts past 15% on any ordinary mover, and the row then reads
+    `price_mismatch`: "our listing is wrong" about a listing that is perfect. Measured 2026-07-29:
+    AMD went 552.33 -> 430.05 (-22%) with every stored bar matching Yahoo to the cent.
+
+    The lag is what separates the two, and it is measured against the day AIRS VALUED THE BOOK, not
+    against today — an account whose snapshot is a fortnight old is correctly compared with a
+    fortnight-old close.
+    """
+
+    def test_a_close_from_the_valuation_day_has_no_lag(self):
+        assert _close_lag_days({"date": "2026-07-29"}, "2026-07-29") == 0
+
+    def test_the_lag_is_against_the_valuation_date_not_today(self):
+        """Both sides a fortnight old is a MATCHED pair, not a stale one."""
+        assert _close_lag_days({"date": "2026-07-14"}, "2026-07-15") == 1
+
+    def test_a_weekend_gap_stays_inside_the_tolerance(self):
+        """Friday's close against a Monday valuation is the normal case, not a finding."""
+        assert _close_lag_days({"date": "2026-07-24"}, "2026-07-27") <= _MAX_CLOSE_LAG_DAYS
+
+    def test_the_measured_amd_gap_is_outside_it(self):
+        """Six days behind is what produced the false alarm this rule exists to stop."""
+        assert _close_lag_days({"date": "2026-07-22"}, "2026-07-29") == 7
+        assert _close_lag_days({"date": "2026-07-21"}, "2026-07-29") > _MAX_CLOSE_LAG_DAYS
+
+    def test_the_measured_amat_gap_is_inside_it_which_is_why_the_refresh_must_lead(self):
+        """⚠ THE LAG GUARD ALONE CANNOT SAVE THIS — AND THAT IS THE POINT OF `_CHECK_STALE_DAYS`.
+
+        Applied Materials, 2026-07-30: a flawless mapping (AMAT, NasdaqGS, USD) whose stored close
+        was 07-27 against a 07-30 valuation — THREE days, inside the guard, so the row was judged.
+        On that close the ratio was 0.846 and it read as a wrong listing; on 07-29's close it is
+        1.002. The only thing that prevents it is fetching the gap first, and the fleet's own
+        `stale_days=3` did not consider a two-day-old series worth fetching.
+        """
+        assert _close_lag_days({"date": "2026-07-27"}, "2026-07-30") <= _MAX_CLOSE_LAG_DAYS
+        assert _CHECK_STALE_DAYS < DEFAULT_STALE_DAYS
+
+    def test_a_missing_close_or_date_yields_no_lag(self):
+        """None must mean "no opinion" — those rows are already `unpriced`, and inventing a lag
+        would move them into a verdict about a price we do not have."""
+        assert _close_lag_days(None, "2026-07-29") is None
+        assert _close_lag_days({}, "2026-07-29") is None
+        assert _close_lag_days({"date": None}, "2026-07-29") is None
+
+    def test_an_unparseable_date_yields_no_lag_rather_than_raising(self):
+        assert _close_lag_days({"date": "not-a-date"}, "2026-07-29") is None
 
 
 class TestTheAccountBillsOneInstrumentOnSeveralLines:

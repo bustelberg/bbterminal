@@ -999,6 +999,17 @@
             ],
             "title": "Our Instrument"
           },
+          "our_price_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Our Price Date"
+          },
           "our_price_eur": {
             "anyOf": [
               {
@@ -1009,6 +1020,17 @@
               }
             ],
             "title": "Our Price Eur"
+          },
+          "price_lag_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Lag Days"
           },
           "price_ratio": {
             "anyOf": [
@@ -2892,9 +2914,24 @@
             ],
             "title": "Note"
           },
+          "price_failed": {
+            "default": 0,
+            "title": "Price Failed",
+            "type": "integer"
+          },
+          "price_pending": {
+            "default": 0,
+            "title": "Price Pending",
+            "type": "integer"
+          },
           "queued": {
             "default": 0,
             "title": "Queued",
+            "type": "integer"
+          },
+          "repriced": {
+            "default": 0,
+            "title": "Repriced",
             "type": "integer"
           },
           "skipped_existing": {
@@ -2922,6 +2959,66 @@
           "label"
         ],
         "title": "BenchmarkFillResult",
+        "type": "object"
+      },
+      "BenchmarkResetResult": {
+        "properties": {
+          "caps_cleared": {
+            "default": 0,
+            "title": "Caps Cleared",
+            "type": "integer"
+          },
+          "deleted": {
+            "default": false,
+            "title": "Deleted",
+            "type": "boolean"
+          },
+          "had_template": {
+            "default": false,
+            "title": "Had Template",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "members_deleted": {
+            "default": 0,
+            "title": "Members Deleted",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "price_rows_deleted": {
+            "default": 0,
+            "title": "Price Rows Deleted",
+            "type": "integer"
+          },
+          "prices_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prices From"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "BenchmarkResetResult",
         "type": "object"
       },
       "BenchmarkYear": {
@@ -15253,6 +15350,47 @@
       }
     },
     "/api/benchmarks/index/{label}": {
+      "delete": {
+        "description": "Delete the LIVE universe behind one reconstructed benchmark, so Fill can rebuild it.\n\nThe inverse of Fill's first step, for watching the whole path run: the benchmark drops to 0\nmembers and the next Fill re-runs the label's template, re-enqueues what needs resolving and\nre-caps what is already priced.\n\n\u26a0 MEMBERSHIP ONLY. Prices, the asset grid and market caps are shared with every other surface\nand expensive to rebuild \u2014 see `reset_benchmark`, which also refuses a frozen snapshot, a\nuniverse with derived children, and any label Fill has no template to rebuild (SP500).\n\n422 carries the refusal's reason; it is always a sentence about this label, not a generic error.",
+        "operationId": "benchmark_reset_api_benchmarks_index__label__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchmarkResetResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Benchmark Reset",
+        "tags": [
+          "benchmarks"
+        ]
+      },
       "get": {
         "description": "Cap-weighted YTD for a reconstructed index (`SP500`, `ACWI`, `AEX`), in EUR and local.\n\nWeights are as of the START of the period. Weighting by TODAY's market cap would be\nlook-ahead bias \u2014 measured, it turns the S&P's +9.10% into +21.70%.\n\n\u26a0 THE ASSET PATH, NOT THE GURUFOCUS ONE (2026-07-16). This panel's whole claim is that its\nnumbers are comparable to the portfolios beside them \u2014 and those are priced from `asset_price`\n(yfinance). Pricing the benchmark from GuruFocus instead compared two price universes and\ncalled the difference alpha. It was also structurally unable to price two of the three\nindices: GuruFocus is blind to 31.96% of the AEX (Shell, Unilever, RELX are LSE rows with no\nGuruFocus market cap) and to ~7.8% of ACWI, and a cap-weighted rebuild redistributes that\nweight rather than losing it \u2014 the GuruFocus AEX printed +14.80% against the true +12.12%,\nand looked entirely plausible doing it. `_benchmark_index.compute_index` remains as the SPY\ncross-check (+9.05% vs SPY's +9.02%), which validates the METHOD; it is not the basis.",
         "operationId": "benchmark_reconstructed_index_api_benchmarks_index__label__get",
@@ -16931,6 +17069,46 @@
           }
         },
         "summary": "Fundamental Blend Metrics",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/fundamental-blend-metrics/stream": {
+      "post": {
+        "description": "SSE twin of `/fundamental-blend-metrics`: `{type:'progress',done,total,name}` per holding,\nthen `{type:'result',payload:<the identical response>}`.\n\nIt exists because opening the Fundamental modal on a whole portfolio is a per-company read and\nthe modal could only say \"Loading\u2026\" \u2014 which does not distinguish a 40-name book from a hung\nrequest. Same inputs, same blend, same envelope; only the arrival is different.",
+        "operationId": "fundamental_blend_metrics_stream_api_earnings_fundamental_blend_metrics_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fundamental Blend Metrics Stream",
         "tags": [
           "earnings"
         ]

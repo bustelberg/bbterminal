@@ -1158,7 +1158,7 @@ export type LinkRow = {
   link_reason?: string | null;
 };
 
-export function LinkCell({ p, ctx, ownerId, linkBase, onSaved }: {
+export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
   p: LinkRow;
   ctx: LinkCtx | null;
   /** Excluded from the dropdown — a portfolio is not its own holding. For an ACCOUNT this is the
@@ -1171,6 +1171,10 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved }: {
    *  routing detail, never a second copy of the fact. */
   linkBase: string;
   onSaved: () => void;
+  /** ⚠ SHOW THE LINK, OFFER NO WAY TO CHANGE IT. Setting a link is admin-only at the API gate, so
+   *  a non-admin gets the ANSWER — which portfolio this certificate really is, the whole reason the
+   *  column exists — as text, rather than a dropdown that 403s on change. */
+  readOnly?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -1236,6 +1240,29 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved }: {
       setBusy(false);
     }
   };
+
+  if (readOnly) {
+    return (
+      <td className="px-3 py-1.5 whitespace-nowrap">
+        <span className="inline-flex items-center gap-1.5">
+          {linkedLabel
+            ? <span className="text-[11px] text-accent-400" title={linkedLabel}>{linkedLabel}</span>
+            : <span className="text-[11px] text-fg-faint">— not a portfolio —</span>}
+          {isGuess && (
+            <span title={`Automatic guess — ${(conf * 100).toFixed(0)}% confidence.${p.link_reason ? ` ${p.link_reason}` : ''}`}
+              className={`text-[9px] font-mono px-1 py-0.5 rounded border ${
+                conf >= 0.9
+                  ? 'bg-pos-500/15 text-pos-400 border-pos-500/25'
+                  : conf >= 0.7
+                    ? 'bg-warn-500/15 text-warn-300 border-warn-500/25'
+                    : 'bg-neg-500/10 text-neg-300 border-neg-500/25'}`}>
+              {(conf * 100).toFixed(0)}%
+            </span>
+          )}
+        </span>
+      </td>
+    );
+  }
 
   return (
     <td className="px-3 py-1.5 whitespace-nowrap">

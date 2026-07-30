@@ -49,6 +49,7 @@ WHERE EACH FIELD COMES FROM NOW
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from datetime import date, timedelta
 
@@ -58,6 +59,8 @@ from timeseries import load_series
 
 from ._airs_portfolio_links import link_key, resolve_links
 from ._benchmark_index import _fx_to_eur, _rate
+
+_log = logging.getLogger(__name__)
 
 # The cash line, which carries no ISIN and no category. Named explicitly: a blank category is NOT
 # by itself cash — the model also holds an ISIN-less `Brown & Brown` stub, and calling that cash
@@ -212,6 +215,87 @@ def _dedupe(holdings: list[dict]) -> list[dict]:
         else:
             agg[k] = {**h, "lines": 1}
     return list(agg.values())
+
+
+# How many of one account's instruments a single expand may fetch. The refresh is normally a
+# no-op — the 06:00 tick keeps held instruments current — so this only bites the first read after
+# an outage, where finishing 25 and saying so beats a two-minute page load.
+_ONDEMAND_REFRESH_LIMIT = 25
+
+# ⚠ ONE DAY BEHIND THE MARKET IS STALE **FOR THIS CALLER**, and the fleet default is not.
+# `DEFAULT_STALE_DAYS = 3` answers "is it worth a Yahoo call to top this series up", where clearing
+# a weekend cheaply matters over 6,000 instruments. It is the wrong question here. This check makes
+# an ACCUSATION — "our listing is wrong" — inside a 15% band calibrated for a same-day comparison,
+# and two sessions of an ordinary mover blow straight through 15%. Measured 2026-07-30: Applied
+# Materials (AMAT, NasdaqGS, USD, a flawless mapping) went 516.89 -> 436.45 over two sessions; our
+# close was 07-27 against a 07-29 anchor — TWO days, inside the fleet threshold, so nothing was
+# fetched — and the row read ratio 0.846 and a red mismatch. On the current close it is 1.002.
+# The anchor only advances when the market has actually published, so a weekend or a holiday still
+# flags nothing; "behind the anchor at all" is exactly the condition we want to fix before judging.
+_CHECK_STALE_DAYS = 1
+
+# Days our close may sit from the day AIRS valued the book before the check refuses to draw any
+# conclusion from it. `_freshen` runs first, so reaching this means Yahoo has nothing newer — a
+# dormant or delisted line. Four covers a weekend plus one holiday (Friday's close against a
+# Tuesday valuation) and nothing more: a 15% band cannot survive a longer gap on any real mover,
+# which is how a false accusation gets made.
+_MAX_CLOSE_LAG_DAYS = 4
+
+
+def _freshen(isins: list[str]) -> None:
+    """Fetch the GAP for any of this account's instruments whose close lags the market.
+
+    ⚠ THE CHECK IS ONLY AS GOOD AS THE PRICE UNDER IT, AND A STALE PRICE FAILS IT SILENTLY. The
+    comparison is AIRS's implied price against our own close, with a 15% tolerance meant to catch
+    share-class errors of 19x and 20x. A series that simply stopped updating drifts past 15% on any
+    ordinary mover and is then reported as `price_mismatch` — "our listing is wrong" about a listing
+    that is perfect. Measured 2026-07-29: AMD went 552.33 -> 430.05 (-22%) while our newest bar
+    anywhere sat six days back, and the row read as a wrong listing with every stored bar matching
+    Yahoo to the cent.
+
+    ⚠ IT STANDS DOWN WHILE THE INGEST WORKER IS LIVE, exactly as the 06:00 tick does. Yahoo answers
+    an overloaded caller with an EMPTY result rather than a 429, and an empty candidate set is how a
+    resolution lands on a thin foreign listing. A price check is never worth risking that.
+
+    ⚠ DETECTS BEFORE IT FETCHES. `refresh_stale` runs `find_stale` first — a few queries, one
+    grouped COPY and one canary probe — so the usual case, everything current, costs no per-symbol
+    Yahoo calls at all. Best effort throughout: a failed refresh leaves the old close in place, and
+    `_MAX_CLOSE_LAG_DAYS` then stops the check drawing a conclusion from it.
+    """
+    if not isins:
+        return
+    try:
+        from asset_pipeline import price_refresh, queue as _q  # noqa: PLC0415
+
+        if _q.is_worker_active():
+            _log.info("[airs price check] refresh SKIPPED — the ingest queue worker is live")
+            return
+        # ⚠ `stale_days=_CHECK_STALE_DAYS`, NOT the fleet default — see the constant. One detection
+        # pass, not two: `refresh_stale` finds them itself, so calling `find_stale` here as well
+        # would cost a second canary probe on every expand.
+        r = price_refresh.refresh_stale(isins=set(isins), stale_days=_CHECK_STALE_DAYS,
+                                        limit=_ONDEMAND_REFRESH_LIMIT)
+        if r.get("stale"):
+            _log.info("[airs price check] %d of %d instrument(s) behind %s — %d moved, %d had "
+                      "nothing newer, %d failed, %d over the per-read cap",
+                      r["stale"], r["considered"], r.get("global_latest"), r.get("moved", 0),
+                      r.get("unchanged", 0), r.get("failed", 0), r.get("skipped", 0))
+    except Exception as e:  # noqa: BLE001 — the holdings table must render without a refresh
+        _log.warning("[airs price check] refresh failed (%s: %s) — comparing against what we hold",
+                     type(e).__name__, e)
+
+
+def _close_lag_days(close: dict | None, as_of: str) -> int | None:
+    """Days between the close we hold and the day AIRS valued the book. None when either is absent.
+
+    Pure, so the one judgement the price check makes about time is unit-testable.
+    """
+    if not close or not close.get("date"):
+        return None
+    try:
+        return (date.fromisoformat(as_of) - date.fromisoformat(close["date"])).days
+    except ValueError:
+        return None
 
 
 def _last_closes(isins: list[str], as_of: str) -> dict[str, dict]:
@@ -448,6 +532,10 @@ def resolve_account_isins(portefeuille: str) -> dict:
 
     aliased = load_aliases()
     overrides = _load_bucket_overrides(isins)   # manual Class pins, keyed by ISIN — they win
+    # ⚠ BEFORE the closes are read, never after: the check below is a comparison, and half of it
+    # comes from here. See `_freshen` — a series that merely stopped updating reads as a wrong
+    # listing, which is the loudest finding this table can make.
+    _freshen(isins)
     closes = _last_closes(isins, as_of)
     ccys = {c["currency"] for c in closes.values() if c.get("currency")}
     fx = _fx_to_eur(ccys, (date.fromisoformat(as_of) - timedelta(days=21)).isoformat(), as_of) if ccys else {}
@@ -488,10 +576,20 @@ def resolve_account_isins(portefeuille: str) -> dict:
                 native_eur = c["close"] / r
 
         ratio = (implied / native_eur) if (implied and native_eur) else None
+        # How far our close sits from the day AIRS valued the book. ⚠ MEASURED AGAINST `as_of`, NOT
+        # AGAINST TODAY: the two sides of this comparison must describe the same day, and an account
+        # whose snapshot is a fortnight old is correctly compared with a fortnight-old close.
+        lag = _close_lag_days(c, as_of)
         if ratio is None:
             verdict = "unpriced"          # nothing to check it against; NOT a pass
         elif abs(ratio - 1.0) <= _PRICE_TOL:
             verdict = "ok"
+        elif lag is not None and lag > _MAX_CLOSE_LAG_DAYS:
+            # ⚠ A DISAGREEMENT BETWEEN TWO DIFFERENT DAYS IS NOT A DISAGREEMENT. `_freshen` has
+            # already tried to close the gap, so reaching here means Yahoo has nothing newer for
+            # this line — a delisted or dormant listing. Our price cannot answer the question, and
+            # saying `price_mismatch` would answer it wrongly: the gap is time, not identity.
+            verdict = "stale_price"
         else:
             verdict = "price_mismatch"
         # ⚠ NOT A MISMATCH, AND NOT 'ok' EITHER. This ISIN is served by another instrument on
@@ -536,6 +634,11 @@ def resolve_account_isins(portefeuille: str) -> dict:
             "price_ratio": round(ratio, 4) if ratio else None,
             "verdict": verdict,
             "our_instrument": (c or {}).get("name"),
+            # WHEN our side of the comparison is from. A ratio without its two dates cannot be
+            # argued with — and this is the field that distinguishes "wrong listing" from "old
+            # price", which look identical in the number alone.
+            "our_price_date": (c or {}).get("date"),
+            "price_lag_days": lag,
             # The model portfolio this holding IS, when it is one. `manual` is a human decision
             # and always wins; `auto` is a guess recomputed on every read, so it can never rot
             # against a renamed portfolio. A stored NULL is meaningful — "explicitly not a

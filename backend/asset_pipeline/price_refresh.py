@@ -56,18 +56,33 @@ def _days_between(a: str, b: str) -> int:
     return abs((date.fromisoformat(a) - date.fromisoformat(b)).days)
 
 
-def held_isins() -> set[str]:
-    """Every ISIN held by an AIRS model portfolio — the instruments whose staleness actually
-    surfaces, as a blank row on /portfolios."""
+def _paged_isins(table: str) -> set[str]:
     rows, off = [], 0
     while True:
-        b = (supabase.table("airs_model_portfolio_position").select("isin")
+        b = (supabase.table(table).select("isin")
              .not_.is_("isin", "null").range(off, off + _PAGE - 1).execute().data or [])
         rows += b
         if len(b) < _PAGE:
             break
         off += _PAGE
     return {r["isin"] for r in rows if r.get("isin")}
+
+
+def held_isins() -> set[str]:
+    """Every ISIN an AIRS model portfolio NAMES or an AIRS account actually HOLDS — the instruments
+    whose staleness surfaces to a reader.
+
+    ⚠ BOTH TABLES, BECAUSE THEY ARE NOT THE SAME SET, AND THE SECOND ONE IS WHERE THE PRICE CHECK
+    LOOKS. `airs_model_portfolio_position` is what a strategy SAYS to hold; `airs_holding` is what a
+    book DOES hold — a legacy position the model has since dropped, an instrument bought between
+    rebalances, a line the model never named. Refreshing only the first left exactly those
+    instruments ageing for ever, and the per-holding price check on /management-dashboard reads the
+    second: our months-old close against AIRS's current implied price is a >15% gap on any mover,
+    reported as `price_mismatch` — i.e. "our listing is wrong" about a listing that is perfect.
+    Same failure the market anchor fixed at the fleet level (`market_latest_close`), one level in:
+    a series nothing refreshes cannot be found stale by any anchor.
+    """
+    return _paged_isins("airs_model_portfolio_position") | _paged_isins("airs_holding")
 
 
 def _executions(isins: set[str] | None) -> list[dict]:
@@ -227,17 +242,23 @@ def newest_dated_close(chart_result: dict | None) -> str | None:
 
 def find_stale(held_only: bool = True,
                stale_days: int = DEFAULT_STALE_DAYS,
-               use_market_anchor: bool = True) -> tuple[list[dict], str | None, int]:
+               use_market_anchor: bool = True,
+               isins: set[str] | None = None) -> tuple[list[dict], str | None, int]:
     """Instruments whose last close lags the freshest close. Most stale first.
 
     Returns `(stale_rows, anchor, n_considered)` — the last two so a caller can say what it looked
     at, not just what it found.
 
+    `isins` narrows the worklist to one caller's instruments (one account's holdings, say) instead
+    of the whole held fleet; it overrides `held_only`. The ANCHOR is unchanged either way — it is a
+    fact about the market, not about the subset being asked, and computing it from the subset would
+    let a handful of instruments that all stopped together look current.
+
     ⚠ THE ANCHOR IS THE LATER OF WHAT WE HOLD AND WHAT THE MARKET HAS PUBLISHED (see
     `market_latest_close`). Our own maximum alone cannot detect a fleet that stopped updating as a
     block, because every row stays within `stale_days` of every other one.
     """
-    ex = _executions(held_isins() if held_only else None)
+    ex = _executions(isins if isins is not None else (held_isins() if held_only else None))
     latest_all = global_latest_close()
     if use_market_anchor:
         market = market_latest_close()
@@ -268,11 +289,15 @@ def refresh_stale(
     limit: int = 0,
     sleep_s: float = DEFAULT_SLEEP_S,
     on_progress: Callable[[str], None] | None = None,
+    isins: set[str] | None = None,
 ) -> dict:
-    """Detect stale series and fetch the gap. Returns a summary; never raises for one bad row."""
+    """Detect stale series and fetch the gap. Returns a summary; never raises for one bad row.
+
+    `isins` scopes it to one caller's instruments — see `find_stale`.
+    """
     from asset_pipeline import store  # noqa: PLC0415
 
-    stale, latest_all, considered = find_stale(held_only, stale_days)
+    stale, latest_all, considered = find_stale(held_only, stale_days, isins=isins)
     if latest_all is None:
         return {"considered": considered, "stale": 0, "moved": 0, "unchanged": 0, "failed": 0,
                 "skipped": 0, "global_latest": None}

@@ -42,7 +42,98 @@ import asyncio
 
 from deps import IN_CHUNK_SIZE, supabase
 from routers._airs_portfolio_perf import _closes as _asset_closes
-from routers._benchmark_index import INDEX_CAP_PCT, _fx_to_eur, _window_rows, index_weights
+from routers._benchmark_index import (
+    _JUMP_HI,
+    _JUMP_LO,
+    INDEX_CAP_PCT,
+    _fx_to_eur,
+    _window_rows,
+    index_weights,
+)
+
+
+def window_marks(analysis_ids: list[int], lookback: str, start_anchor: str,
+                 end: str) -> dict[int, dict]:
+    """Per instrument, ONLY what pricing one window needs: the opening mark, the closing mark, and
+    the consecutive-bar jumps between them. One `COPY`; the selection happens in Postgres.
+
+    ⚠ AN INDEX RETURN READS TWO PRICES PER MEMBER AND WE WERE SHIPPING THE WHOLE SERIES. Measured
+    2026-07-30 on the local DB: ACWI's YTD loaded **264,678 close rows** to use 3,368 numbers —
+    roughly 8 MB across the wire for 0.1% of it, on every panel load. SP500 loaded 77,567 for 978.
+    The window function below returns ~2 rows per member instead.
+
+    ⚠ IT IS NOT "JUST THE TWO PRICES", AND THAT IS THE WHOLE DESIGN. Our stored closes are NOT
+    split-adjusted and cannot self-heal (`_split_adjust`), and a split is visible ONLY as a one-day
+    discontinuity between CONSECUTIVE bars. Two bare marks cannot tell KLA's 9:1 from an −89% year
+    — and the bogus ratio would hit the index twice, because the start weight is backed out through
+    the same broken price. So the query also returns every consecutive pair whose ratio leaves the
+    `_JUMP_LO.._JUMP_HI` band, and `split_factor` applies the whitelist to those in Python. The
+    band is a cheap PRE-FILTER; the decision stays where the whitelist lives.
+
+    ⚠ `end` IS AN UPPER BOUND, NEVER "TODAY'S PRICE". The closing mark is the newest bar at or
+    before it, per member — a name whose vendor lags by a day is marked at its own last close, the
+    same rule the full-series path's `s[-1]` gave.
+
+    ⚠ AND THE SCAN MUST BEGIN AT `lookback`, NOT AT `start_anchor`. The opening mark is the last
+    close ON OR BEFORE the anchor — 31 December IS the 1 January mark, and no exchange prints a bar
+    on New Year's Day. Bounding the window at the anchor found an opening mark for nobody: measured,
+    every one of the 25 AEX members came back with `start: None` and the index priced zero
+    constituents. The caller passes the same 45-day lookback the series path always used.
+
+    ⚠ THE JUMPS ARE THE ONES AT OR AFTER EACH MEMBER'S OWN OPENING MARK — hence the join back to
+    `s`. A split BEFORE the opening mark has already been absorbed into it and must not be applied
+    again; one AFTER it must (`_split_adjust` rescales every close earlier than the split, which
+    the opening mark then is). Filtering on the anchor date instead would miss a split falling
+    between a 31 December mark and the first bar of January.
+
+    Returns `{}` when COPY is unavailable, so the caller falls back to the series path rather than
+    silently pricing an index off nothing.
+    """
+    if not analysis_ids:
+        return {}
+    from common.pg import _run_copy  # noqa: PLC0415
+
+    # psycopg placeholders are `%s`; `$1` parses as zero placeholders and degrades to no COPY.
+    sql = """
+COPY (
+  WITH w AS (
+    SELECT analysis_id, target_date, close,
+           lag(close)       OVER (PARTITION BY analysis_id ORDER BY target_date) AS prev_close,
+           lag(target_date) OVER (PARTITION BY analysis_id ORDER BY target_date) AS prev_date
+    FROM asset_price
+    WHERE analysis_id = ANY(%s) AND close IS NOT NULL AND close > 0
+      AND target_date >= %s AND target_date <= %s
+  ),
+  s AS (
+    SELECT DISTINCT ON (analysis_id) analysis_id, target_date, close
+      FROM w WHERE target_date <= %s
+     ORDER BY analysis_id, target_date DESC
+  )
+  SELECT 'start' AS kind, analysis_id, target_date::text, close, NULL::numeric FROM s
+  UNION ALL
+  SELECT 'end', analysis_id, target_date::text, close, NULL::numeric
+    FROM (SELECT DISTINCT ON (analysis_id) analysis_id, target_date, close
+            FROM w ORDER BY analysis_id, target_date DESC) e
+  UNION ALL
+  SELECT 'jump', w.analysis_id, w.target_date::text, w.close, w.prev_close
+    FROM w JOIN s ON s.analysis_id = w.analysis_id
+   WHERE w.prev_close IS NOT NULL AND w.prev_date >= s.target_date
+     AND (w.close / w.prev_close < %s OR w.close / w.prev_close > %s)
+) TO STDOUT WITH CSV
+"""
+    buf = _run_copy(sql, (list(analysis_ids), lookback, end, start_anchor,
+                          _JUMP_LO, _JUMP_HI))
+    if buf is None:
+        return {}
+    out: dict[int, dict] = {}
+    for line in buf.getvalue().decode().splitlines():
+        kind, aid, d, close, prev = line.split(",")
+        rec = out.setdefault(int(aid), {"start": None, "end": None, "jumps": []})
+        if kind == "jump":
+            rec["jumps"].append((float(prev), float(close)))
+        else:
+            rec[kind] = (d, float(close))
+    return out
 
 
 def _universe_company_ids(label: str) -> list[int]:
@@ -132,12 +223,18 @@ def index_returns(label: str, starts: list[str]) -> dict[str, dict]:
     lookback = (date.fromisoformat(earliest) - timedelta(days=45)).isoformat()
     today = date.today().isoformat()
 
-    closes = _asset_closes([m["company_id"] for m in mem], lookback, today)
+    ids = [m["company_id"] for m in mem]
     fx = _fx_to_eur({(m.get("currency") or "USD") for m in mem}, lookback, today)
+    # ⚠ MARKS PER WINDOW, ONE QUERY EACH — still far less than one whole-series load. Each window
+    # has its own opening mark and its own jump set, and a mark selected for January cannot answer
+    # for a since-inception start. `starts` is one or two dates in practice.
+    marks = {s: window_marks(ids, lookback, s, today) for s in sorted(set(starts))}
+    closes = ({} if all(marks.values()) or not mem
+              else _asset_closes(ids, lookback, today))   # COPY unavailable -> the series path
 
     out: dict[str, dict] = {}
     for s in sorted(set(starts)):
-        rows, _ = _window_rows(mem, closes, fx, s)
+        rows, _ = _window_rows(mem, closes, fx, s, marks=marks[s] or None)
         total = sum(r["start_cap_eur"] for r in rows)
         if not rows or total <= 0:
             out[s] = {"eur_pct": None, "local_pct": None, "members": 0,
@@ -169,11 +266,13 @@ def index_rows(label: str, start: str) -> tuple[list[dict], dict]:
     if not mem:
         return [], coverage
     lookback = (date.fromisoformat(start) - timedelta(days=45)).isoformat()
-    closes = _asset_closes([m["company_id"] for m in mem], lookback, date.today().isoformat())
-    fx = _fx_to_eur({(m.get("currency") or "USD") for m in mem}, lookback,
-                    date.today().isoformat())
+    today = date.today().isoformat()
+    ids = [m["company_id"] for m in mem]
+    fx = _fx_to_eur({(m.get("currency") or "USD") for m in mem}, lookback, today)
+    marks = window_marks(ids, lookback, start, today)
+    closes = {} if marks else _asset_closes(ids, lookback, today)
 
-    rows, _ = _window_rows(mem, closes, fx, start)
+    rows, _ = _window_rows(mem, closes, fx, start, marks=marks or None)
     total = sum(r["start_cap_eur"] for r in rows)
     if total <= 0:
         return [], coverage
@@ -227,14 +326,19 @@ def compute_index(label: str, year: int | None = None, start: str | None = None)
                 "ytd_eur_pct": None, "ytd_local_pct": None,
                 "note": f"No universe labelled {label!r}."}
 
-    closes = _asset_closes([m["company_id"] for m in mem], lookback, today)
+    ids = [m["company_id"] for m in mem]
     fx = _fx_to_eur({(m.get("currency") or "USD") for m in mem}, lookback, today)
+    # ⚠ ONLY THE MARKS THIS WINDOW USES — see `window_marks`. The panel was loading every close of
+    # every constituent (ACWI: 264,678 rows) to read two prices each. Falls back to the whole
+    # series when COPY is unavailable, which is the only way `window_marks` can return nothing.
+    marks = window_marks(ids, lookback, start_anchor, today)
+    closes = {} if marks else _asset_closes(ids, lookback, today)
 
     # `adjusted` is KEPT here, not dropped. Our stored closes are not split-adjusted and cannot
     # self-heal; a rescaled price is a CLAIM and the panel shows it. (The `index_returns` /
     # `index_rows` callers above discard it because their surfaces have nowhere to say so — this
     # one does.)
-    rows, adjusted = _window_rows(mem, closes, fx, start_anchor)
+    rows, adjusted = _window_rows(mem, closes, fx, start_anchor, marks=marks or None)
     if not rows or sum(r["start_cap_eur"] for r in rows) <= 0:
         return {"label": label, "year": year, "members": [], "member_count": 0,
                 "ytd_eur_pct": None, "ytd_local_pct": None,

@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { dialog } from '../../lib/dialog';
+import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { Provenance } from '../../lib/provenance';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
@@ -57,6 +58,20 @@ type FailureGroup = {
   report: string; error_type: string; message: string; count: number; accounts: string[];
 };
 
+/**
+ * ⚠ THE DETAIL GOES TO THE CONSOLE, NOT ONTO THE PAGE. The panel gets ONE short line saying what
+ * happened; everything needed to diagnose it — the HTTP status, the backend's own error list, the
+ * per-cause failure groups and which accounts hit them — is logged.
+ *
+ * This is not only a tidiness rule. The prose block that used to sit under the message explained
+ * the SCAN's failure modes ("every account it reached is listed; the ones short a report carry a
+ * ⚠…") and was gated on the amber colour alone — so a plain successful DELETE, which is amber
+ * because it leaves a gap, printed a paragraph about reports that were never fetched. An
+ * explanation attached to a colour rather than to an outcome will eventually explain the wrong one.
+ */
+const logDetail = (what: string, ...detail: unknown[]) =>
+  console.warn(`[AIRS portfolios] ${what}`, ...detail);
+
 const REPORT_LABELS: Record<string, string> = {
   att: 'Rendement',
   volk: 'Vermogensoverzicht',
@@ -78,6 +93,11 @@ function RefreshIcon({ spinning, size = 14 }: { spinning?: boolean; size?: numbe
 }
 
 export default function PortfolioOverviewPanel() {
+  // ⚠ THE TABLE IS FOR EVERYONE; CHANGING IT IS NOT. Scraping AIRS, deleting an account and
+  // pinning a Class / ISIN / Link are all admin-only at the API gate, so the controls are hidden
+  // rather than left to 403 — a button that only fails is worse than no button. Every FIGURE stays
+  // visible: a non-admin reads the same portfolios, holdings and returns an admin does.
+  const isAdmin = useIsAdmin();
   const [rows, setRows] = useState<AirsPortfolioOverview[] | null>(null);
   // Sort. Name ascending by default: the list is read to FIND a portfolio far more often than to
   // rank one, and alphabetical is the only order you can navigate without reading every row.
@@ -101,18 +121,21 @@ export default function PortfolioOverviewPanel() {
   // Refresh state: the fleet job is running; a status/error line; which single rows are re-scanning.
   const [refreshingAll, setRefreshingAll] = useState(false);
   /**
-   * ⚠ `partial` IS NOT `error`, AND CONFLATING THEM COST A DAY. The fleet refresh fetches FOUR
+   * ⚠ `warn` IS NOT `error`, AND CONFLATING THEM COST A DAY. The fleet refresh fetches FOUR
    * reports for each of ~44 accounts, so 27 individual failures out of ~176 attempts is a job that
    * WORKED and is incomplete for some accounts — the backend says `status: "ok"` and stored a
    * snapshot. Painting that red says "the scan failed", which sends you looking for a broken
    * session or missing credentials when the actual answer is "thirteen books had no valuation
    * yet". A partial result and a dead job need different colours because they need different
    * reactions: one is "look at which accounts", the other is "the scraper is down".
+   *
+   * ⚠ THE KIND IS A COLOUR, NOT A STORY. It was called `partial` and a block of scan-specific
+   * prose hung off that name, so every other amber outcome — a delete, most obviously — got the
+   * scan's explanation printed underneath it. The kinds now say only how loud the line is; what
+   * happened is in `text`, and the detail is in the console.
    */
   const [refreshMsg, setRefreshMsg] = useState<
-    { text: string; kind: 'info' | 'error' | 'partial' | 'ok' } | null>(null);
-  /** Why reports failed, grouped by cause. A count told the operator nothing actionable. */
-  const [failures, setFailures] = useState<FailureGroup[]>([]);
+    { text: string; kind: 'info' | 'error' | 'warn' | 'ok' } | null>(null);
   const [refreshingRows, setRefreshingRows] = useState<Set<string>>(new Set());
   const [deletingRows, setDeletingRows] = useState<Set<string>>(new Set());
 
@@ -138,19 +161,23 @@ export default function PortfolioOverviewPanel() {
       const b = (await r.json().catch(() => null)) as
         { total_rows?: number; deleted?: Record<string, number> } | null;
       if (!r.ok) {
+        logDetail(`delete ${portefeuille} failed`, { status: r.status, body: b });
         setRefreshMsg({ text: `${portefeuille}: delete failed — HTTP ${r.status}`, kind: 'error' });
       } else {
-        // Name the tables, so "it deleted nothing" and "it deleted 400 rows" are distinguishable.
-        const per = Object.entries(b?.deleted ?? {})
-          .filter(([, n]) => n !== 0).map(([t, n]) => `${t} ${n}`).join(', ');
+        // The row count and its per-table breakdown are what tell "it deleted nothing" from "it
+        // deleted 400 rows" — a diagnostic. A number of rows is not something the operator asked
+        // for or can act on: they deleted an account, and the only thing left to say is how to get
+        // it back. So the counts go to the console and the line says what happened and what next.
+        logDetail(`deleted ${portefeuille}`,
+          { total_rows: b?.total_rows ?? 0, per_table: b?.deleted ?? {} });
         setRefreshMsg({
-          text: `${portefeuille}: deleted ${b?.total_rows ?? 0} rows${per ? ` (${per})` : ''}. `
-            + 'Run Refresh all to rebuild it.',
-          kind: 'partial',
+          text: `${portefeuille}: deleted. Run Refresh all to rebuild it.`,
+          kind: 'warn',
         });
       }
       await loadOverview();
     } catch (e) {
+      logDetail(`delete ${portefeuille} threw`, e);
       setRefreshMsg({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
     } finally {
       setDeletingRows((s) => { const n = new Set(s); n.delete(portefeuille); return n; });
@@ -203,19 +230,22 @@ export default function PortfolioOverviewPanel() {
         { status?: string; errors?: string[]; as_of?: string; holdings_rows?: number;
           complete?: boolean } | null;
       if (!r.ok) {
+        logDetail(`refresh ${portefeuille} failed`, { status: r.status, body: b });
         setRefreshMsg({ text: `${portefeuille}: refresh failed — HTTP ${r.status}. Is the backend running with AIRS credentials?`, kind: 'error' });
       } else if (b?.status === 'busy') {
         setRefreshMsg({ text: 'A full refresh is already running — try again in a moment.', kind: 'info' });
       } else if (b?.status === 'error') {
-        setRefreshMsg({ text: `${portefeuille}: AIRS scan failed — ${b?.errors?.join('; ') || 'unknown error'}`, kind: 'error' });
+        logDetail(`refresh ${portefeuille}: AIRS scan failed`, b?.errors ?? b);
+        setRefreshMsg({ text: `${portefeuille}: AIRS scan failed — see the console for the reason.`, kind: 'error' });
       } else if (b?.complete === false) {
-        // ⚠ THE OUTCOME THIS BUTTON EXISTS FOR, so it has to say what it means. Some reports
-        // arrived and some did not, which is exactly why the account is not on the list — and
-        // "AIRS scan failed" (what this said before) sends you to check credentials that are fine.
+        // ⚠ THE OUTCOME THIS BUTTON EXISTS FOR, so it has to say what it means: some reports
+        // arrived and some did not. "AIRS scan failed" (what this said before) sends you to check
+        // credentials that are fine. WHICH reports, and why, is console detail — the row itself
+        // already carries a ⚠ naming them, so repeating them here said it twice and neither well.
+        logDetail(`refresh ${portefeuille} incomplete`, b?.errors ?? b);
         setRefreshMsg({
-          text: `${portefeuille}: partly refreshed — still missing ${
-            b?.errors?.join('; ') || 'a report'}. The account stays off the list until every report arrives.`,
-          kind: 'partial',
+          text: `${portefeuille}: partly refreshed — some reports did not arrive.`,
+          kind: 'warn',
         });
       } else {
         setRefreshMsg({ text: `${portefeuille}: refreshed — ${b?.holdings_rows ?? 0} holdings as of ${b?.as_of ?? 'today'}.`, kind: 'ok' });
@@ -227,6 +257,7 @@ export default function PortfolioOverviewPanel() {
       // "Loading holdings…" and stays there, because only a click re-requests — so re-fetch here.
       if (open === portefeuille) await loadDetail(portefeuille);
     } catch (e) {
+      logDetail(`refresh ${portefeuille} threw`, e);
       setRefreshMsg({ text: `${portefeuille}: ${e instanceof Error ? e.message : String(e)}`, kind: 'error' });
     } finally {
       setRefreshingRows((s) => { const n = new Set(s); n.delete(portefeuille); return n; });
@@ -249,6 +280,7 @@ export default function PortfolioOverviewPanel() {
       const started = await apiFetch(
         `${API_URL}/api/airs/vermogen/refresh${force ? '?force=true' : ''}`, { method: 'POST' });
       if (!started.ok) {
+        logDetail('fleet refresh could not start', { status: started.status });
         setRefreshMsg({ text: `Refresh failed — HTTP ${started.status}. Is the backend running with AIRS credentials?`, kind: 'error' });
         return;
       }
@@ -256,16 +288,28 @@ export default function PortfolioOverviewPanel() {
         await new Promise((res) => setTimeout(res, 2500));
         const s = await apiFetch(`${API_URL}/api/airs/vermogen/status`);
         const st = (await s.json().catch(() => null)) as
-          { running?: boolean; status?: string; message?: string; errors?: string[];
-            error_summary?: FailureGroup[] } | null;
-        setFailures(st?.error_summary ?? []);
+          { running?: boolean; status?: string; message?: string; detail?: string;
+            errors?: string[]; error_summary?: FailureGroup[] } | null;
         if (!st?.running) {
+          // ⚠ THE REASON, NOT THE COUNT — but in the CONSOLE. "27 report(s) failed" gives no
+          // handle on what; 27 individual lines are no better, because nobody reads 27 of them
+          // looking for the pattern. Grouped by cause, thirteen unvalued books and fourteen
+          // expired-session failures are visibly two different problems with two different fixes —
+          // and that is a developer's question, asked with devtools open, not a paragraph the
+          // panel prints at everyone who presses Refresh.
+          // The per-report breakdown the banner used to print — "Rendement 44/44,
+          // Vermogensoverzicht 44/44 (710 holdings), Mutaties 972 rows…". It answers "what did the
+          // scraper fetch", which is a developer's question; `message` answers "did it work".
+          if (st?.detail) logDetail('scan detail', st.detail);
+          const groups: FailureGroup[] = st?.error_summary ?? [];
+          if (groups.length) logDetail('reports that failed, grouped by cause', groups);
+          if (st?.errors?.length) logDetail('raw scan errors', st.errors);
           // ⚠ THE BACKEND'S OWN VERDICT DECIDES RED, NOT THE ERROR COUNT. `status` is "error" only
           // when NOTHING was stored — a genuinely failed scan. Anything else stored a snapshot,
           // so individual report failures are amber: real, worth reading, not a dead job.
           setRefreshMsg({
             text: st?.message ?? 'Refresh complete.',
-            kind: st?.status === 'error' ? 'error' : st?.errors?.length ? 'partial' : 'ok',
+            kind: st?.status === 'error' ? 'error' : st?.errors?.length ? 'warn' : 'ok',
           });
           break;
         }
@@ -282,6 +326,7 @@ export default function PortfolioOverviewPanel() {
       await loadOverview();
       if (open) await loadDetail(open);   // same trap as refreshOne — an open row must re-fetch
     } catch (e) {
+      logDetail('fleet refresh threw', e);
       setRefreshMsg({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
     } finally {
       setRefreshingAll(false);
@@ -327,7 +372,6 @@ export default function PortfolioOverviewPanel() {
     });
   })();
   const linked = (rows ?? []).filter((r) => !!r.fixed_name).length;
-  const unconfirmed = (rows ?? []).filter((r) => r.link_source === 'guess').length;
 
   return (
     <section className="bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
@@ -345,12 +389,14 @@ export default function PortfolioOverviewPanel() {
           {/* Scan every portfolio that NEEDS it — the backend skips an account whose last pass got
               all four reports within the last few hours, so a press after a full run is seconds
               rather than minutes. Shift-click forces a full re-scan. */}
-          <button type="button" onClick={(e) => void refreshAll(e.shiftKey)} disabled={refreshingAll}
-            title="Re-scan the AIRS reports for every portfolio that needs them — an account already scanned in the last few hours is skipped, and a missing one is always fetched. Shift-click to force a full re-scan of all 44 (minutes)."
-            className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors disabled:opacity-50 disabled:cursor-wait">
-            <RefreshIcon spinning={refreshingAll} size={12} />
-            {refreshingAll ? 'Refreshing…' : 'Refresh all'}
-          </button>
+          {isAdmin && (
+            <button type="button" onClick={(e) => void refreshAll(e.shiftKey)} disabled={refreshingAll}
+              title="Re-scan the AIRS reports for every portfolio that needs them — an account already scanned in the last few hours is skipped, and a missing one is always fetched. Shift-click to force a full re-scan of all 44 (minutes)."
+              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors disabled:opacity-50 disabled:cursor-wait">
+              <RefreshIcon spinning={refreshingAll} size={12} />
+              {refreshingAll ? 'Refreshing…' : 'Refresh all'}
+            </button>
+          )}
           {rows && (
             <label className="flex items-center gap-1.5 text-xs text-fg-subtle cursor-pointer whitespace-nowrap">
               <input type="checkbox" checked={onlyLinked}
@@ -371,50 +417,21 @@ export default function PortfolioOverviewPanel() {
       {refreshMsg && (
         <div className={`text-[11px] rounded-lg px-3 py-1.5 border ${
           refreshMsg.kind === 'error' ? 'text-neg-300 bg-neg-500/10 border-neg-500/20'
-            : refreshMsg.kind === 'partial' ? 'text-warn-300 bg-warn-500/10 border-warn-500/20'
+            : refreshMsg.kind === 'warn' ? 'text-warn-300 bg-warn-500/10 border-warn-500/20'
               : refreshMsg.kind === 'ok' ? 'text-pos-300 bg-pos-500/10 border-pos-500/20'
                 : 'text-fg-subtle bg-overlay/[0.03] border-neutral-800/40'}`}>
+          {/* ⚠ ONE LINE, AND NOTHING UNDER IT. What failed and why is `logDetail`'d — see the note
+              on it. The per-account detail is not lost from the PAGE either: a row short a report
+              still carries its own ⚠ badge naming which, right where you would act on it. */}
           {refreshMsg.text}
-          {refreshMsg.kind === 'partial' && (
-            <span className="block text-fg-muted mt-0.5">
-              The scan itself succeeded. Every account it reached is listed; the ones short a
-              report carry a ⚠ naming which — retry those with the row&apos;s Refresh.
-            </span>
-          )}
-          {/* ⚠ THE REASON, NOT THE COUNT. "27 report(s) failed" says something is wrong and gives
-              no handle on what; 27 individual lines are no better, because nobody reads 27 of them
-              looking for the pattern. Grouped by cause, thirteen unvalued books and fourteen
-              expired-session failures are visibly two different problems with two different
-              fixes. */}
-          {failures.length > 0 && (
-            <ul className="mt-1.5 space-y-0.5 border-t border-warn-500/20 pt-1.5">
-              {failures.map((f) => (
-                <li key={`${f.report}-${f.error_type}-${f.message}`} className="text-fg-soft">
-                  <span className="font-mono">{f.count}×</span>{' '}
-                  <span className="font-medium">{f.report}</span>
-                  {' — '}{f.message || f.error_type}
-                  {f.accounts.length > 0 && (
-                    <span className="text-fg-faint">
-                      {' ('}{f.accounts.join(', ')}{f.count > f.accounts.length ? ', …' : ''}{')'}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
       )}
 
-      {unconfirmed > 0 && rows && (
-        // Terse on screen, but the stake stays reachable on hover: a wrong pairing files a
-        // book's money under another strategy's name, and the risk variants hold the same
-        // instruments, so nothing else on the row would look wrong.
-        <p className="text-[11px] text-warn-400 bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-1.5"
-          title="A wrong pairing names a portfolio after a strategy it does not run. The risk variants of a strategy hold the same instruments, so no other column would reveal it.">
-          {unconfirmed} pairing{unconfirmed === 1 ? '' : 's'}{' '}unconfirmed — a name match
-          nobody has approved yet.
-        </p>
-      )}
+      {/* ⚠ NO "N PAIRINGS UNCONFIRMED" BANNER. A name match IS how a pairing is normally made —
+          it was firing on 27 of 28 rows, every session, with no action attached to it, which is a
+          warning about the software's ordinary behaviour rather than about this data. The guess is
+          still recomputed on every read (never frozen into the table), so it self-corrects when a
+          portfolio is renamed, and the Link control still overrides it per row. */}
 
       {!rows && !err && <p className="text-xs text-fg-subtle">Loading…</p>}
       {err && (
@@ -491,15 +508,17 @@ export default function PortfolioOverviewPanel() {
                           {/* Re-scan just this portfolio (a few seconds). stopPropagation so it does
                               not also toggle the row's holdings. `items-stretch` on the wrapper keeps
                               this exactly the height of the Analyse button beside it. */}
-                          <button
-                            onClick={(e) => { e.stopPropagation(); void refreshOne(r.dynamic_portefeuille); }}
-                            disabled={refreshingRows.has(r.dynamic_portefeuille)}
-                            title="Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."
-                            aria-label="Refresh this portfolio"
-                            className="inline-flex items-center justify-center px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 disabled:opacity-50 disabled:cursor-wait"
-                          >
-                            <RefreshIcon spinning={refreshingRows.has(r.dynamic_portefeuille)} size={12} />
-                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); void refreshOne(r.dynamic_portefeuille); }}
+                              disabled={refreshingRows.has(r.dynamic_portefeuille)}
+                              title="Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."
+                              aria-label="Refresh this portfolio"
+                              className="inline-flex items-center justify-center px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 disabled:opacity-50 disabled:cursor-wait"
+                            >
+                              <RefreshIcon spinning={refreshingRows.has(r.dynamic_portefeuille)} size={12} />
+                            </button>
+                          )}
                         </div>
                       </td>
                       <td className="px-3 py-1.5 text-fg whitespace-nowrap">
@@ -523,18 +542,20 @@ export default function PortfolioOverviewPanel() {
                         {(r.missing_reports?.length ?? 0) > 0 && (
                           <span className="ml-1.5 text-[10px] text-warn-300"
                             title={`This account's last scan did not retrieve: ${r.missing_reports!
-                              .map((c) => REPORT_LABELS[c] ?? c).join(', ')}. Its other figures are from the newer scan, so the row mixes dates — retry with the Refresh button on the left.`}>
+                              .map((c) => REPORT_LABELS[c] ?? c).join(', ')}. Its other figures are from the newer scan, so the row mixes dates — ${
+                              // Don't send a reader to a button their role does not render.
+                              isAdmin ? 'retry with the Refresh button on the left.'
+                                : 'the daily scan retries it automatically.'}`}>
                             ⚠ {r.missing_reports!.map((c) => REPORT_LABELS[c] ?? c).join(', ')}
                           </span>
                         )}
-                        {r.link_source === 'guess' && (
-                          <span className="text-warn-400 ml-1"
-                            title={`Unconfirmed: this book is paired with ${r.fixed_name} by a name match nobody has approved (${r.link_reason ?? ''}). The name above is that pairing's.`}>
-                            ⚠
-                          </span>
-                        )}
+                        {/* ⚠ NO BADGE FOR A GUESSED PAIRING. A name match is how nearly every row
+                            is paired, so an amber ⚠ on 27 of 28 of them marked the NORMAL case as
+                            exceptional — which is how a badge stops being read, and takes the ones
+                            that matter with it. The provenance below still states that the pairing
+                            is a name match; it is reachable, just not shouted. */}
                         {/* The name is the FIXED side's, reached through a pairing — so its card
-                            states the pairing, which for 27 of 28 rows is an unapproved guess. */}
+                            states the pairing and how it was made. */}
                         <Provenance source="airs_model" kind={r.fixed_name ? 'formula' : 'copied'}
                           what={r.fixed_name
                             ? 'The name of this account, taken from the model portfolio it is paired with.'
@@ -543,8 +564,8 @@ export default function PortfolioOverviewPanel() {
                           how={r.fixed_name
                             ? `${r.dynamic_portefeuille} paired with ${r.fixed_name}${
                               r.link_source === 'guess'
-                                ? ` by a name match nobody has approved (${trimStop(r.link_reason ?? 'name match')}) — ⚠ the risk variants of a strategy hold the same instruments, so no other column would reveal a wrong pairing`
-                                : ' by a confirmed link'}`
+                                ? ` by a name match (${trimStop(r.link_reason ?? 'name match')}). Set it explicitly from the Link control if it looks wrong — the risk variants of a strategy hold the same instruments, so no other column would reveal a wrong pairing.`
+                                : ' by a link somebody set explicitly'}`
                             : undefined} />
                       </td>
                       <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
@@ -571,6 +592,7 @@ export default function PortfolioOverviewPanel() {
                         {/* ⚠ stopPropagation — the row is the expand toggle, and a delete that also
                             opened the detail would leave a confirm sitting over a panel loading
                             data for a row about to disappear. */}
+                        {isAdmin && (
                         <button type="button" disabled={deletingRows.has(r.dynamic_portefeuille)}
                           onClick={(e) => { e.stopPropagation(); void deleteOne(r.dynamic_portefeuille); }}
                           title="Delete this account's scraped rows (returns, holdings, mutations, model weights) so a refresh can be watched rebuilding them."
@@ -580,13 +602,15 @@ export default function PortfolioOverviewPanel() {
                             } text-fg-faint hover:text-neg-400 px-1`}>
                           {deletingRows.has(r.dynamic_portefeuille) ? '…' : '🗑'}
                         </button>
+                        )}
                       </td>
                     </tr>
                     {isOpen && (
                       <tr>
                         <td colSpan={7} className="px-3 py-3 bg-inset">
                           <Holdings d={detail[r.dynamic_portefeuille]} i={isins[r.dynamic_portefeuille]}
-                            portefeuille={r.dynamic_portefeuille} onOverride={refreshIsins} />
+                            portefeuille={r.dynamic_portefeuille} onOverride={refreshIsins}
+                            canEdit={isAdmin} />
                         </td>
                       </tr>
                     )}
@@ -711,7 +735,12 @@ function isinHow(r: NonNullable<AirsAccountIsins['rows']>[number]): string {
     ? `Our own price series agrees: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} (ratio ${r.price_ratio}).`
     : r.verdict === 'price_mismatch'
       ? `⚠ Our own price series DISAGREES: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} for ${r.our_instrument ?? 'our instrument'} (ratio ${r.price_ratio}). The identity is AIRS's, so this points at OUR listing for it.`
-      : 'We hold no price series for it, so nothing cross-checks our side.';
+      // ⚠ NOT A SOFTER MISMATCH — a different question, unanswered. Our newest close for this line
+      // is from another day, and the refresh already tried to fetch a newer one, so the gap is time
+      // rather than identity.
+      : r.verdict === 'stale_price'
+        ? `Nothing to compare against: our newest close for ${r.our_instrument ?? 'this instrument'} is €${r.our_price_eur} from ${r.our_price_date}, ${r.price_lag_days} days before this valuation, and Yahoo has nothing newer. The prices differ (ratio ${r.price_ratio}) because they are from different days — that says nothing about the listing.`
+        : 'We hold no price series for it, so nothing cross-checks our side.';
   if (r.isin_overridden) {
     return `set by hand${r.isin_override_note ? ` — ${trimStop(r.isin_override_note)}` : ''}. AIRS gives this holding no ISIN, so one was supplied. ${checked}`;
   }
@@ -738,13 +767,18 @@ function IsinCell({ r, onPin }: {
   }
   const mismatch = r.verdict === 'price_mismatch';
   const unpriced = r.verdict === 'unpriced';
+  // ⚠ NOT RED. The ratio is out of tolerance, but the two prices are from different days and the
+  // refresh has already tried to close that gap — so this is "we cannot check it", not "the
+  // listing is wrong". Painting it like a mismatch is exactly the false alarm it exists to stop.
+  const stale = r.verdict === 'stale_price';
   // ⚠ NOT A WARNING. This ISIN's execution row is deliberately served by another instrument, so
   // the prices differ BY DESIGN (an ADR against the main company's listing — TSMC is 1 ADR = 5
   // ordinary shares). A red ⚠ here trains a reader to ignore the ones that mean something.
   const crossListed = r.verdict === 'cross_listed';
   return (
     <span className="font-mono whitespace-nowrap">
-      <span className={mismatch ? 'text-neg-400' : unpriced ? 'text-fg-muted' : 'text-fg-soft'}>
+      <span className={mismatch ? 'text-neg-400'
+        : unpriced || stale ? 'text-fg-muted' : 'text-fg-soft'}>
         {r.isin}
       </span>
       {/* A hand-supplied identity must never read like one AIRS stated. */}
@@ -761,6 +795,9 @@ function IsinCell({ r, onPin }: {
       )}
       {mismatch && (
         <span className="text-neg-400 ml-1" title={`⚠ OUR price series disagrees with this instrument. This holding implies €${r.implied_price_eur}/unit; ${r.isin} last closed at €${r.our_price_eur} (${r.our_instrument ?? 'our instrument'}) — a ratio of ${r.price_ratio}. The ISIN is AIRS's own, so this points at OUR listing for it, not at the identity.`}>⚠</span>
+      )}
+      {stale && (
+        <span className="text-fg-faint ml-1" title={`Not checked — our newest close for this instrument is from ${r.our_price_date}, ${r.price_lag_days} days before this valuation, and Yahoo has nothing newer. Two prices from different days cannot confirm or deny a listing.`}>⏱</span>
       )}
       {unpriced && (
         <span className="text-fg-faint ml-1" title="We hold no price series for this instrument, so nothing cross-checks our side of it.">?</span>
@@ -959,9 +996,12 @@ function FundamentalCell({ isin, name, onFundamental }: {
   );
 }
 
-function Holdings({ d, i, portefeuille, onOverride }: {
+function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
   d?: AirsAccountDetail; i?: AirsAccountIsins;
   portefeuille?: string; onOverride?: (p: string) => void | Promise<void>;
+  /** Admin. The three pins on this table (Class, ISIN, Link) are admin-only at the API gate, so a
+   *  non-admin sees each one's ANSWER as plain text and no control to change it. */
+  canEdit?: boolean;
 }) {
   const [fund, setFund] = useState<ModalTarget | null>(null);
   // Which column's weights the segment/Total returns are weighted by. "start" is the book’s own
@@ -1323,7 +1363,7 @@ function Holdings({ d, i, portefeuille, onOverride }: {
                     note="Fonds — the position's own name in the AIRS book" />
                 </td>
                 <td className="px-3 py-1.5">
-                  <IsinCell r={g} onPin={pinIsin} />
+                  <IsinCell r={g} onPin={canEdit ? pinIsin : undefined} />
                   {/* ⚠ The ISIN is the one column NOT read off a source — it is INFERRED (a name
                       match, then a price check), so its card carries both steps. */}
                   {g?.isin && (
@@ -1345,7 +1385,8 @@ function Holdings({ d, i, portefeuille, onOverride }: {
                     across its whole span, which would swallow the hover. */}
                 <td className="px-3 py-1.5">
                   <BucketBadge bucket={g?.bucket} isin={g?.isin}
-                    overridden={g?.bucket_overridden} onOverride={setBucket} />
+                    overridden={g?.bucket_overridden}
+                    onOverride={canEdit ? setBucket : undefined} />
                   {g?.bucket && (
                     <Provenance source="derived" kind="formula"
                       what={g.bucket_overridden
@@ -1363,7 +1404,7 @@ function Holdings({ d, i, portefeuille, onOverride }: {
                        link_source: g?.link_source,
                        link_confidence: g?.link_confidence,
                        link_reason: g?.link_reason }}
-                  ctx={linkCtx} ownerId={0}
+                  ctx={linkCtx} ownerId={0} readOnly={!canEdit}
                   linkBase={`/api/airs/accounts/${encodeURIComponent(portefeuille ?? '')}`}
                   onSaved={() => { if (portefeuille && onOverride) void onOverride(portefeuille); }} />
                 <td className="px-3 py-1.5 text-fg-subtle">

@@ -48,8 +48,21 @@ class TestTheWeightingIsREUSEDNotCopied:
     so this module supplies `members` + `closes` from a different source and calls the SAME
     `_benchmark_index._window_rows` that /benchmarks uses."""
 
-    def test_it_calls_the_shared_window_rows(self):
-        assert "_window_rows(mem, closes, fx, s)" in inspect.getsource(ab.index_returns)
+    def test_every_surface_calls_the_shared_window_rows(self):
+        """Not pinned to an argument list — `marks=` was added there and the point is the CALL."""
+        for fn in (ab.index_returns, ab.index_rows, ab.compute_index):
+            assert "_window_rows(" in inspect.getsource(fn), fn.__name__
+
+    def test_the_narrow_loader_selects_marks_and_does_not_price_them(self):
+        """⚠ `window_marks` may fetch less, never compute differently. The moment it grows a
+        return, a weight or an FX conversion there are two definitions of an index return and the
+        cheap one is the one nobody cross-checks."""
+        # The docstring EXPLAINS the weighting it must not do, so scan the code only.
+        src = inspect.getsource(ab.window_marks)
+        code = src.split('"""')[2] if src.count('"""') >= 2 else src
+        for forbidden in ("return_eur_pct", "return_local_pct", "weight_pct", "start_cap_eur",
+                          "market_cap", "_rate(", "index_weights"):
+            assert forbidden not in code, f"window_marks must only SELECT ({forbidden})"
 
     def test_it_does_not_reimplement_the_cap_rollback(self):
         src = inspect.getsource(ab)

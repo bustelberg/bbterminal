@@ -11,6 +11,7 @@ describe('isUserAllowedPath', () => {
     expect(isUserAllowedPath('/')).toBe(true)
     expect(isUserAllowedPath('/earnings')).toBe(true)
     expect(isUserAllowedPath('/schedule')).toBe(true)
+    expect(isUserAllowedPath('/management-dashboard')).toBe(true)
     expect(isUserAllowedPath('/forbidden')).toBe(true)
   })
 

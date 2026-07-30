@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
+import { blendLoadingLabel, loadBlendMetrics, type BlendProgress } from './blendMetrics';
 import MetricGrowthCard, { type MetricCfg } from './MetricGrowthCard';
 import MarginCard from './MarginCard';
 import CashReturnCard from './CashReturnCard';
@@ -77,6 +78,8 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
   // owns its own endpoint and refetches on a re-key — so bumping `reloadKey` to refresh one chart
   // reloads twelve. This one refetches the metrics only; nothing else moves.
   const [metricsKey, setMetricsKey] = useState(0);
+  /** Portfolio only: how many holdings the blend has read. Null on a single company. */
+  const [progress, setProgress] = useState<BlendProgress | null>(null);
 
   // ⚠ Memoised — it's a card/modal effect dep, so a fresh object each render would refetch forever.
   const holdingsTarget = useMemo(() => (isAgg
@@ -88,18 +91,23 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
   useEffect(() => {
     let alive = true;
     void (async () => {
-      setErr(null); setData(null);
+      setErr(null); setData(null); setProgress(null);
       try {
         // A single company is keyed by ISIN; a portfolio is the blended pseudo-company (each metric
-        // blends as a LEVEL → a growth index). Both return every metric code.
-        const r = isAgg
-          ? await apiFetch(`${API_URL}/api/earnings/fundamental-blend-metrics`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(basket
-              ? { holdings: basket.holdings.map((h) => ({ isin: h.isin, name: h.name, weight: h.weight })) }
-              : { portfolio_id: portfolioId }),
-          })
-          : await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin ?? '')}/metrics`);
+        // blends as a LEVEL → a growth index). Both return every metric code. The portfolio path
+        // streams per-company progress — it is a read per holding — via the SAME loader
+        // `FundamentalCharts` uses, so the two tabs cannot come to load the blend differently.
+        if (isAgg) {
+          const out = await loadBlendMetrics<MetricsResponse>(
+            { basket, portfolioId }, (p) => { if (alive) setProgress(p); },
+          );
+          if (!alive) return;
+          if (out.kind === 'none') { setData({ metrics: [] }); return; }
+          if (out.kind === 'error') { setErr(out.message); return; }
+          setData(out.data);
+          return;
+        }
+        const r = await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin ?? '')}/metrics`);
         if (r.status === 404) { if (alive) setData({ metrics: [] }); return; }
         const b = await r.json().catch(() => null);
         if (!alive) return;
@@ -113,6 +121,14 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
   }, [isin, isAgg, basket, portfolioId, reloadKey, metricsKey]);
 
   if (err) return <p className="text-xs text-neg-300 py-16 text-center">{err}</p>;
+
+  // ⚠ ONE COUNT FOR THE WHOLE GRID, NOT TWELVE. Every card below reads this one metrics fetch (or
+  // fires its own once it lands), so twelve boxes each saying "Loading…" showed a wait twelve times
+  // over and none of them could say how far along it was. While the blend is running the grid is a
+  // single line that can.
+  if (isAgg && !data) {
+    return <p className="text-xs text-fg-subtle py-16 text-center">{blendLoadingLabel(progress)}</p>;
+  }
 
   // Fixed order across the grid: Revenue, FCF/share, FCF-SBC margin, Cash return on capital,
   // Debt / assets ex-GW, Interest / op. profit, Shares outstanding, SBC / OCF, Invested capital,
