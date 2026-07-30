@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time as _time
 from datetime import date, datetime, timedelta, timezone
 
 from deps import supabase
@@ -60,6 +61,15 @@ _STATUS: dict = {
 # table in one pass.
 _MIN_ROSTER = 10
 
+# What the three Front-Office filters (Actieve / Interne / Zonder consolidatie) are known to
+# produce. Not enforced — AIRS's roster is allowed to change — but any other number is called out,
+# because the same symptom has two opposite causes and only the page's own count separates them.
+_EXPECTED_ROSTER = 44
+
+# Dates proved to have NO valuation during the current run — see `_vermogen_most_recent`. Cleared
+# at the start of every run: "unvalued" is true until AirSPMS's next end-of-day batch, not for ever.
+_UNVALUED_DATES: set[str] = set()
+
 
 def _discover_portfolios() -> list[str]:
     """Current live AirSPMS portfolio names, scraped fresh (Playwright)."""
@@ -72,6 +82,14 @@ def _discover_portfolios() -> list[str]:
             captured.extend(kw.get("data") or [])
         elif msg_type == "error":
             raise RuntimeError(kw.get("message") or "scan error")
+        elif msg_type == "progress" and kw.get("message"):
+            # ⚠ DISCOVERY USED TO NARRATE TO NOBODY. The scraper already emitted every step — which
+            # filters it sent, AIRS's own "N Items in selectie", the per-page row counts — and this
+            # sink threw all of it away, so the roster arrived as a bare number with no way to ask
+            # how it was arrived at. It is the one phase where the answer is a COUNT, and a count
+            # is exactly what cannot be checked after the fact.
+            _emit("discovery", step=kw.get("step"), declared=kw.get("declared"),
+                  message=f"  {kw['message']}")
 
     result = scan_portfolios_sync(_sink)
     rows = result if result else captured
@@ -159,7 +177,48 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
 # so re-downloading four reports for an account we fully scanned this morning buys nothing and
 # costs ~44× that. Env-tunable; the daily job's interval is far longer, so it still scans the fleet
 # once a day exactly as before — this only collapses the repeat presses in between.
-AIRS_FRESH_HOURS = float(os.environ.get("AIRS_FRESH_HOURS", "12"))
+# ⚠ 20, NOT 12 — AIRS VALUES ONCE A DAY. The window only has to be shorter than the gap between
+# two valuations; at 12h a mid-afternoon press re-downloaded the whole fleet for a valuation that
+# had not moved since the morning. 20h still guarantees the daily job (a fixed 10:00 Amsterdam
+# tick, ~24h apart) never skips a real one, and collapses every repeat press in between.
+AIRS_FRESH_HOURS = float(os.environ.get("AIRS_FRESH_HOURS", "20"))
+
+# Fewer holdings than this and a book is not a portfolio: the AIRS benchmarks carry exactly 1 and
+# the `_MV` / `WTS test` shells carry none, against 10-29 for every real book. Same threshold the
+# model-portfolios table uses, so "too small to be real" means one thing across the app.
+MIN_REAL_HOLDINGS = int(os.environ.get("AIRS_MIN_REAL_HOLDINGS", "5"))
+
+
+def bogus_accounts(counts: dict[str, int], verdicts: dict[str, dict]) -> set[str]:
+    """Accounts too small to be portfolios, lower-cased. Pure.
+
+    `counts` is the last known holdings per account (`_holding_counts`); `verdicts` is the roster's
+    record of which reports each account last yielded (`_roster_verdicts`).
+
+    ⚠ IT IS DECIDED ON THE PREVIOUS SCAN, WHICH IS THE ONLY THING AVAILABLE. Holdings are what the
+    Vermogensoverzicht returns, so a book's size cannot be known before fetching it. Using the last
+    known count means the first scan of an account always happens; from then on a shell costs
+    nothing.
+
+    ⚠ ZERO AND UNKNOWN LOOK IDENTICAL IN `counts`, AND CONFLATING THEM BREAKS IT IN ONE DIRECTION
+    OR THE OTHER. A book that stores no holdings has no rows in `airs_holding`, so it is simply
+    ABSENT — indistinguishable from one that has never been scanned. Treating absence as bogus would
+    skip a brand-new account for ever (it could never acquire the holdings that would rescue it);
+    treating it as unknown misses the emptiest books, which are exactly the `_MV` shells worth
+    skipping. The roster settles it: `volk` in `reports_ok` means we DID fetch the
+    Vermogensoverzicht, so absent-and-fetched is a measured zero.
+
+    Measured 2026-07-30: 15 of 46 books qualify — 5 benchmarks at 1 holding, 10 shells at 0 — which
+    is 60 downloads a run spent on books nobody looks at. `force` re-checks everything regardless.
+    """
+    out: set[str] = set()
+    for name, v in verdicts.items():
+        key = (name or "").strip().lower()
+        if "volk" not in set(v.get("reports_ok") or ()):
+            continue                      # never fetched its holdings — unknown, not empty
+        if counts.get(name, counts.get(key, 0)) < MIN_REAL_HOLDINGS:
+            out.add(key)
+    return out
 
 
 def _emit(kind: str, **fields) -> None:
@@ -444,10 +503,18 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
                 pass
 
     def _step(code: str, label: str, fn) -> None:
+        # ⚠ EVERY REPORT TIMED. A scan is 4 downloads x N books behind a headless browser and it is
+        # not obvious which of the four is slow — Vermogensoverzicht walks back over unvalued dates,
+        # the others are one request. Naming the seconds is what turns "can we speed it up" into a
+        # question with an answer.
+        t0 = _time.perf_counter()
+
+        def _ms() -> str:
+            return f"{_time.perf_counter() - t0:.1f}s"
         try:
             fn()
             ok.append(code)
-            _say(label, "ok", _step_detail(code))
+            _say(label, "ok", f"{_step_detail(code)} ({_ms()})")
         except AirsNoData as e:
             # ⚠ RETRIEVED, AND EMPTY. AIRS answered; this book simply has no such report — 14 of
             # 44 have no fixed MODEL because they are benchmarks, `meervoudig` books or test
@@ -455,12 +522,12 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
             # it wearing a permanent ⚠ and being re-scanned on every run for ever. See `AirsNoData`
             # for why this is safe to distinguish from a dead session.
             ok.append(code)
-            _say(label, "no_data", "AIRS has no such report for this book")
+            _say(label, "no_data", f"AIRS has no such report for this book ({_ms()})")
             _log.info("[airs_vermogen] %s %s: no data — %s", name, label, e)
         except Exception as e:  # noqa: BLE001 — one report failing must not lose the others
             errors.append({"account": name, "report": label,
                            "error_type": type(e).__name__, "message": str(e)})
-            _say(label, "failed", f"{type(e).__name__}: {e}")
+            _say(label, "failed", f"{type(e).__name__}: {e} ({_ms()})")
             _log.warning("[airs_vermogen] %s %s failed: %s: %s", name, label, type(e).__name__, e)
 
     def _att() -> None:
@@ -637,6 +704,12 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             "error_summary": [],
             "log": [],
         })
+        # ⚠ PER RUN, NOT PER PROCESS. "This date has no valuation" is true until AirSPMS's next
+        # end-of-day batch; caching it beyond one run would make a scan an hour later skip the very
+        # date that has since been valued.
+        _UNVALUED_DATES.clear()
+        _STATUS.update({
+        })
 
         try:
             names = _discover_portfolios()
@@ -655,6 +728,17 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         # discovery picked the Interne/actief/no-consolidation population and not some other one.
         _emit("discovered", count=len(names), names=names,
               message=f"AIRS lists {len(names)} portfolios")
+        # ⚠ THE EXPECTED COUNT IS 44, AND ANYTHING ELSE IS WORTH SAYING OUT LOUD. The three filters
+        # (Actieve / Interne / Zonder consolidatie) define exactly that population; a different
+        # number means either a filter stopped applying or AIRS's own roster changed, and those need
+        # opposite responses. The scraper's own "N Items in selectie" comparison, emitted just
+        # above, says which.
+        if len(names) != _EXPECTED_ROSTER:
+            _emit("roster_unexpected", count=len(names), expected=_EXPECTED_ROSTER,
+                  message=(f"⚠ EXPECTED {_EXPECTED_ROSTER} portfolios, got {len(names)}. If AIRS's "
+                           f"own 'Items in selectie' above also says {len(names)}, the roster "
+                           f"genuinely changed; if it says {_EXPECTED_ROSTER}, a filter or the "
+                           f"pager is wrong."))
         # ⚠ THE SKIP IS DECIDED ONCE, BEFORE THE LOOP, AGAINST THE VERDICTS AS THEY WERE AT THE
         # START. Re-reading per account would let this run's own writes shorten its own worklist.
         # ⚠ READ ONCE, HERE. `known` is which accounts we already had a roster row for BEFORE this
@@ -665,6 +749,27 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         known = set(verdicts)
         todo, current = accounts_to_scan(
             names, verdicts, datetime.now(timezone.utc), force=force)
+        # ⚠ THE SECOND SKIP, AND IT IS ABOUT THE BOOK RATHER THAN THE CLOCK. `accounts_to_scan`
+        # answers "is this account's data fresh"; this answers "is this account worth fetching at
+        # all". A benchmark with one holding and a `_MV` shell with none are re-downloaded four
+        # times each, every run, for ever — and they are precisely the books that can never be
+        # complete, so the freshness skip never catches them either. `force` re-checks everything.
+        from routers._airs_accounts import _holding_counts  # noqa: PLC0415
+
+        bogus: set[str] = set()
+        if not force:
+            try:
+                counts, _ = _holding_counts()
+                bogus = bogus_accounts(counts, verdicts)
+            except Exception as e:  # noqa: BLE001 — a failed lookup must scan MORE, never less
+                _log.warning("[airs_vermogen] could not read holdings counts (%s: %s) — scanning "
+                             "every account", type(e).__name__, e)
+            skipped_bogus = [n for n in todo if n.strip().lower() in bogus]
+            if skipped_bogus:
+                todo = [n for n in todo if n.strip().lower() not in bogus]
+                _emit("plan_bogus", accounts=skipped_bogus, threshold=MIN_REAL_HOLDINGS,
+                      message=(f"{len(skipped_bogus)} book(s) skipped as too small to be portfolios "
+                               f"(< {MIN_REAL_HOLDINGS} holdings): {', '.join(skipped_bogus)}"))
         _STATUS["skipped"] = len(current)
         _emit("plan", to_scan=len(todo), skipped=len(current), todo=todo, current=current,
               forced=force,
@@ -687,11 +792,20 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         # never be skipped. The operator saw "3/14" against a list of 44 and had no way to tell
         # whether discovery had broken or the worklist was short on purpose. Walking all 44 and
         # SAYING which are skipped makes the two legible, and the number matches AIRS's own count.
+        # ⚠ THE LOOP WALKS THE ROSTER, SO IT NEEDS EVERY SKIP REASON — not just the freshness one.
+        # `todo` is filtered above, but iterating `names` is what makes the counter read n/44, so a
+        # book removed from `todo` would otherwise be scanned here anyway.
         skipped_set = set(current)
+        todo_set = set(todo)
         for i, name in enumerate(names, 1):
             if name in skipped_set:
                 _emit("account_skipped", i=i, n=len(names), account=name,
                       message=f"[{i}/{len(names)}] {name}: skipped — all reports current")
+                continue
+            if name not in todo_set:
+                _emit("account_skipped", i=i, n=len(names), account=name, reason="too_small",
+                      message=(f"[{i}/{len(names)}] {name}: skipped — under "
+                               f"{MIN_REAL_HOLDINGS} holdings, not a portfolio"))
                 continue
             _STATUS["message"] = f"{i}/{len(names)}: {name}…"
             _emit("account_start", i=i, n=len(names), account=name,
@@ -809,17 +923,31 @@ def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
     So walk back from today and take the first date that returns a real file. That date IS the
     snapshot's as_of — the holdings are valued as of THEN, not today (matching what the AirSPMS UI
     shows, which also defaults to the last valued date, e.g. Friday's on a Monday).
+
+    ⚠ AND THE WALK IS SHARED ACROSS THE RUN, BECAUSE VALUATION IS FLEET-WIDE. AirSPMS values in one
+    end-of-day batch, so a date that has no valuation has none for ANY book — yet every account
+    re-discovered that from scratch, starting at today. Measured 2026-07-30: today's valuation had
+    not run, so all ~25 books with holdings paid one wasted request before landing on the 29th; on
+    a Monday it is three (Mon, Sun, Sat) before Friday. `_UNVALUED_DATES` remembers the misses for
+    the duration of a run and skips them, which removes 44-130 round trips from a full scan.
+
+    ⚠ ONLY MISSES ARE CACHED, NEVER HITS. A book valued monthly legitimately sits weeks behind a
+    daily-valued one, so "this date worked for account A" says nothing about account B and caching
+    it would hand B a stale snapshot. A date that returned NOTHING is the only fleet-wide fact here.
     """
     from airs_scanner import download_vermogensoverzicht_sync  # noqa: PLC0415
 
     last_err: Exception | None = None
     for back in range(0, 7):
         tot = (date.today() - timedelta(days=back)).isoformat()
+        if tot in _UNVALUED_DATES:
+            continue                      # another account already proved this day has no valuation
         try:
             return tot, download_vermogensoverzicht_sync(name, van, tot)
         except RuntimeError as e:
             # Unvalued date → empty body / error page. Try the day before. A real auth failure
             # returns the same on EVERY date, exhausts the loop, and is raised below.
+            _UNVALUED_DATES.add(tot)
             last_err = e
     raise RuntimeError(f"no valued Vermogensoverzicht in the last 7 days ({last_err})")
 

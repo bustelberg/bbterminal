@@ -122,3 +122,180 @@ class TestAirsNoDataIsAnAnswerNotAFailure:
         branch = src.split("except AirsNoData")[1].split("except Exception")[0]
         assert "ok.append(code)" in branch
         assert "errors.append" not in branch
+
+
+class TestTheRosterIsCheckedAgainstAirsOwnCount:
+    """⚠ THE THREE FILTERS ARE SENT AND NOTHING CONFIRMS THEY APPLIED.
+
+    `actief=actief&portefeuilleIntern=1&metConsolidatie=0` defines the Front-Office population, and
+    the response to a wrong combination is a perfectly normal table with the wrong rows in it. The
+    only independent check is the count AIRS itself prints — "44 Items in selectie". Measured
+    2026-07-30 the scan reported 46 and there was no way to tell whether a filter had stopped
+    applying, the pager had walked into another selection, or AIRS's roster had genuinely grown.
+    Reading the page's own number makes those three separable.
+    """
+
+    def test_it_reads_the_count_airs_prints(self):
+        from airs_scanner import _SELECTIE_RE
+
+        assert _SELECTIE_RE.search("44 Items in selectie").group(1) == "44"
+
+    def test_a_thousands_separator_survives(self):
+        from airs_scanner import _SELECTIE_RE
+
+        assert _SELECTIE_RE.search("1.234 Items in selectie").group(1) == "1.234"
+
+    def test_it_does_not_invent_a_count(self):
+        """None must mean "the page did not say", never a guess — an unreadable count has to leave
+        the scrape alone rather than veto it."""
+        from airs_scanner import _SELECTIE_RE
+
+        for text in ("Item in selectie", "geen items", "", "Items in selectie"):
+            assert _SELECTIE_RE.search(text) is None, text
+
+    def test_the_scraper_dedupes_and_stops_when_a_page_adds_nothing(self):
+        """⚠ AirSPMS CLAMPS an out-of-range page instead of returning nothing — the trap the
+        model-portfolio list already documents. A pager that trusts the "next" arrow re-reads the
+        last page, and appending without dedupe turns that into extra portfolios rather than an
+        error."""
+        import inspect
+
+        import airs_scanner
+
+        src = inspect.getsource(airs_scanner.scan_portfolios_sync)
+        assert "seen" in src and "dupes" in src
+        assert "len(portfolios) == before" in src, "must stop when a page adds no new names"
+
+
+class TestTheValuationDateIsDiscoveredOncePerRun:
+    """⚠ EVERY ACCOUNT RE-DISCOVERED THE SAME FLEET-WIDE FACT, FROM SCRATCH, STARTING AT TODAY.
+
+    AirSPMS values end-of-day and in ONE batch, so a date with no valuation has none for any book.
+    `_vermogen_most_recent` still walked back from today for each account: measured 2026-07-30 the
+    day's valuation had not run, so all ~25 books with holdings paid a wasted request before landing
+    on the 29th — and on a Monday it is three (Mon, Sun, Sat) before Friday. Over 44 accounts that
+    is 44 to 130 round trips through a headless browser, for information the first account already
+    had.
+
+    ⚠ ONLY MISSES ARE SHARED, NEVER HITS. A book valued monthly legitimately sits weeks behind a
+    daily-valued one, so "this date worked for A" says nothing about B — caching that would hand B
+    a stale snapshot. "This date has no valuation" is the only fleet-wide fact available.
+    """
+
+    def _patch(self, monkeypatch, unvalued_from: str):
+        import airs_scanner
+        import airs_vermogen
+
+        calls: list[tuple[str, str]] = []
+
+        def fake(name, van, tot):
+            calls.append((name, tot))
+            if tot >= unvalued_from:
+                raise RuntimeError("Response too small")
+            return b"ok"
+
+        monkeypatch.setattr(airs_scanner, "download_vermogensoverzicht_sync", fake)
+        airs_vermogen._UNVALUED_DATES.clear()
+        return calls
+
+    def test_a_proven_unvalued_date_is_not_re_tried_by_the_next_account(self, monkeypatch):
+        import airs_vermogen
+        from datetime import date
+
+        today = date.today().isoformat()
+        calls = self._patch(monkeypatch, unvalued_from=today)
+        for acct in ("A", "B", "C"):
+            airs_vermogen._vermogen_most_recent(acct, "2026-01-01")
+        # A pays for the discovery; B and C skip straight to the valued day.
+        assert [c for c in calls if c[1] == today] == [("A", today)]
+        assert len(calls) == 4, calls
+
+    def test_every_account_still_gets_its_OWN_valued_date(self, monkeypatch):
+        """The memo must not pin the fleet to one answer — only rule dates OUT."""
+        import airs_vermogen
+        from datetime import date
+
+        today = date.today().isoformat()
+        self._patch(monkeypatch, unvalued_from=today)
+        dates = {a: airs_vermogen._vermogen_most_recent(a, "2026-01-01")[0] for a in ("A", "B")}
+        assert dates["A"] == dates["B"] < today
+
+    def test_the_memo_is_cleared_per_run(self):
+        """"Unvalued" is true until the next end-of-day batch, not for ever — a scan an hour later
+        must be able to find a date that has since been valued."""
+        import inspect
+
+        import airs_vermogen
+
+        assert "_UNVALUED_DATES.clear()" in inspect.getsource(
+            airs_vermogen.run_airs_vermogen_refresh_sync)
+
+
+class TestBooksTooSmallToBePortfoliosAreNotRescanned:
+    """⚠ THE FLEET SPENT 60 DOWNLOADS A RUN ON BOOKS NOBODY LOOKS AT. Of 46 accounts, 5 are AIRS
+    benchmarks carrying exactly 1 holding and 10 are `_MV` / `WTS test` shells carrying none —
+    against 10-29 for every real book. Each cost four reports on every pass, and because several
+    could never be complete the freshness skip never caught them either: they were the ONLY
+    accounts an incremental scan ever visited.
+
+    ⚠ THE HARD PART IS THAT ZERO AND UNKNOWN LOOK IDENTICAL. A book storing no holdings has no rows
+    in `airs_holding`, so it is simply absent from the counts — exactly like one never scanned.
+    Treating absence as bogus would strand a brand-new account for ever (it could never acquire the
+    holdings that would rescue it); treating it as unknown misses the emptiest books, which are the
+    ones worth skipping. The roster's `reports_ok` settles it: `volk` present means we DID fetch the
+    Vermogensoverzicht, so absent-and-fetched is a MEASURED zero.
+    """
+
+    def _verdicts(self, **got):
+        return {name: {"reports_ok": list(reports)} for name, reports in got.items()}
+
+    def test_a_measured_small_count_is_bogus(self):
+        from airs_vermogen import bogus_accounts
+
+        v = self._verdicts(BM_1=("att", "volk", "mut", "model"))
+        assert bogus_accounts({"BM_1": 1}, v) == {"bm_1"}
+
+    def test_a_measured_ZERO_is_bogus_even_though_it_has_no_rows(self):
+        """The `_MV` shells: fetched, and the Vermogensoverzicht was empty."""
+        from airs_vermogen import bogus_accounts
+
+        v = self._verdicts(BUS_Neutraal_Kl_MV=("att", "volk", "mut", "model"))
+        assert bogus_accounts({}, v) == {"bus_neutraal_kl_mv"}
+
+    def test_an_account_whose_holdings_were_NEVER_FETCHED_is_not_bogus(self):
+        """⚠ THE ONE THAT WOULD BE PERMANENT. Skipping it means never fetching it, which means it
+        can never stop being skipped."""
+        from airs_vermogen import bogus_accounts
+
+        v = self._verdicts(BrandNew=("att",))       # no `volk` yet
+        assert bogus_accounts({}, v) == set()
+
+    def test_a_real_book_is_never_bogus(self):
+        from airs_vermogen import bogus_accounts
+
+        v = self._verdicts(AITopSelectie=("att", "volk", "mut", "model"))
+        assert bogus_accounts({"AITopSelectie": 21}, v) == set()
+
+    def test_the_threshold_boundary_is_inclusive_of_real(self):
+        from airs_vermogen import MIN_REAL_HOLDINGS, bogus_accounts
+
+        v = self._verdicts(Edge=("volk",))
+        assert bogus_accounts({"Edge": MIN_REAL_HOLDINGS}, v) == set()
+        assert bogus_accounts({"Edge": MIN_REAL_HOLDINGS - 1}, v) == {"edge"}
+
+    def test_force_bypasses_it_entirely(self):
+        """A forced re-scan must re-check every book, or a mis-classification is unfixable."""
+        import inspect
+
+        import airs_vermogen
+
+        src = inspect.getsource(airs_vermogen.run_airs_vermogen_refresh_sync)
+        assert "if not force:" in src
+        assert "bogus_accounts(" in src
+
+    def test_the_freshness_window_clears_a_daily_valuation(self):
+        """AIRS values once a day and the job ticks ~24h apart; the window only has to be shorter
+        than that gap, and longer than the interval between two presses."""
+        from airs_vermogen import AIRS_FRESH_HOURS
+
+        assert 12 < AIRS_FRESH_HOURS < 24
