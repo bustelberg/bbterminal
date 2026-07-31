@@ -213,16 +213,17 @@ function Chip({ label, value, valueClass, hint }: {
   );
 }
 
-function Chart({ axis, rows, basis, positions, attributablePct, unpricedPct, excluded, benchmark,
+function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
   name, onBucket, selected }: {
   axis: string;
   rows: Row[];
   /** The denominator in words, and how many positions it spans — from the server, per axis. */
   basis?: string | null;
   positions?: number | null;
-  /** How much of the book has a bucket on this axis. The remainder is mostly funds/bonds/cash. */
-  attributablePct?: number | null;
-  /** The part of that remainder which is a genuine hole — held, but unpriceable. */
+  /** The weight held but unpriceable — a genuine hole in the bars, unlike funds/cash.
+   *  ⚠ `attributable_pct` is deliberately NOT read here: a coverage figure phrased as an absence
+   *  ("87% of the book has a sector") is heard as a data-quality problem with the stocks, when the
+   *  remainder is funds and cash. The line below names the holdings instead. */
   unpricedPct?: number | null;
   excluded?: Axis['excluded'];
   benchmark: string;
@@ -237,6 +238,12 @@ function Chart({ axis, rows, basis, positions, attributablePct, unpricedPct, exc
   // Sector is an EQUITY-only view; a non-equity selection leaves it with no portfolio side, so say
   // so rather than draw the benchmark's sectors beside an empty portfolio.
   const sectorEmpty = axis === 'sector' && rows.every((r) => (r.portfolio_pct ?? 0) === 0);
+  // Weight the chart legitimately leaves out. ⚠ Only the not-a-bucket kind — an unpriced holding
+  // is a different fact with its own warning above, and adding the two would put a real gap and a
+  // definitional one behind one number.
+  const excludedWeight = (excluded ?? [])
+    .filter((e) => e.reason !== 'unpriced')
+    .reduce((s, e) => s + (e.weight_pct ?? 0), 0);
   // Largest share first — a reader scans a ranked list, not the server's order.
   // ⚠ Filtered to buckets with weight on AT LEAST ONE side, never "where the portfolio holds
   // something": a bucket the book does not own but the benchmark does is an unowned region/sector,
@@ -268,16 +275,21 @@ function Chart({ axis, rows, basis, positions, attributablePct, unpricedPct, exc
           ⚠ {unpricedPct!.toFixed(1)}% held but unpriceable — missing from these bars
         </p>
       )}
-      {/* Stated, not warned: how much of the book has a {axis} at all. */}
-      {attributablePct != null && attributablePct < 99.95 && (
+      {/* ⚠ NAME WHAT THE REMAINDER *IS*, NEVER WHAT IT LACKS. This read "87% of the book has a
+          sector", which is true of the book and reads — under a Stocks-only chart — as a claim
+          that 13% of the STOCKS are unclassified. They were not: they were five ETFs and a cash
+          line. A percentage phrased as an absence gets heard as a data-quality problem, so the
+          line now says which holdings they are and why they are legitimately absent. */}
+      {excludedWeight > 0.005 && (
         <p className="text-[11px] text-fg-faint mt-0.5"
-          title="The rest is funds, bonds and cash, which have no sector — see the allocation chart above. Open Data for the names.">
-          {attributablePct.toFixed(0)}% of the book has a {AXIS_LABEL[axis]?.toLowerCase() ?? axis}
+          title="Funds, bonds and cash have no sector of their own — they are their own slices of the allocation chart above. Open Data for the names.">
+          Excludes {excludedWeight.toFixed(1)}% in funds, bonds and cash — no{' '}
+          {AXIS_LABEL[axis]?.toLowerCase() ?? axis} to place
         </p>
       )}
       {showData && (
         <CompositionDataModal axis={axis} rows={rows} basis={basis} positions={positions}
-          attributablePct={attributablePct} unpricedPct={unpricedPct} excluded={excluded}
+          unpricedPct={unpricedPct} excluded={excluded}
           benchmark={benchmark} name={name} onClose={() => setShowData(false)} />
       )}
       {sectorEmpty ? (
@@ -898,8 +910,7 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                   {(data.axes ?? []).map((a) => (
                     <Chart key={a.axis} axis={a.axis} rows={a.rows}
                       basis={a.basis} positions={a.positions} name={name}
-                      attributablePct={a.attributable_pct} unpricedPct={a.unpriced_pct}
-                      excluded={a.excluded}
+                      unpricedPct={a.unpriced_pct} excluded={a.excluded}
                       benchmark={data.benchmark ?? 'SP500'}
                       onBucket={(axis, b) => { if (isBasket) return; setWhy(null); setBucket(
                         (prev) => prev && prev.axis === axis && prev.bucket === b ? null : { axis, bucket: b }); }}

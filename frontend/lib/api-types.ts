@@ -7659,6 +7659,11 @@ export interface components {
                 [key: string]: number;
             } | null;
             /**
+             * Daily Months Back
+             * @default 0
+             */
+            daily_months_back?: number;
+            /**
              * Daily Timing
              * @default false
              */

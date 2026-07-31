@@ -2416,6 +2416,11 @@
             ],
             "title": "Category Weights"
           },
+          "daily_months_back": {
+            "default": 0,
+            "title": "Daily Months Back",
+            "type": "integer"
+          },
           "daily_timing": {
             "default": false,
             "title": "Daily Timing",

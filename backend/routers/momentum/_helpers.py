@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
 
 from deps import supabase
@@ -222,6 +222,77 @@ def persist_daily_picks(hash_: str, config: dict, daily_picks: list[dict]) -> No
         supabase.table("current_picks_day").upsert(
             rows, on_conflict="strategy_hash,target_date"
         ).execute()
+
+
+# ⚠ THE MOST RECENT DAYS ARE NEVER SERVED FROM CACHE, AND THIS IS NOT PARANOIA.
+# A day's selection is a function of the closes known BEFORE it, and those keep
+# arriving: GuruFocus publishes some closes days late and `ingest/prices.py` writes
+# them with their true (earlier) target_date, so a selection computed on Monday for
+# last Friday can legitimately change by Wednesday (Bayer's 2026-07-03 close landed
+# 2026-07-06). Five trading days covers the observed lag with slack; older days have
+# settled. This is the difference between a cache and a wrong answer that never
+# corrects itself.
+DAILY_HOLDINGS_TAIL_DAYS = 5
+
+# The columns a cached selection has to carry for the daily loop to rebuild the day
+# without re-scoring. Everything else on a holding (prices, weight, returns) is
+# re-derived per run — see the migration.
+# ⚠ THE CATEGORY SCORES ARE IN HERE FOR A REASON. The daily-holdings table shows a
+# price and a volume score per company, and those come off `score_price` /
+# `score_volume` on the scored frame. Leave them out of the cache and a REUSED day
+# renders them blank while a freshly computed one fills them — which reads as "we
+# only score some days" rather than "the cache dropped two columns".
+_CACHED_SELECTION_COLS = (
+    "company_id", "gurufocus_ticker", "company_name", "sector",
+    "momentum_score", "score_price", "score_volume", "sector_rank", "company_rank",
+)
+
+
+def fetch_daily_holdings_cache(hash_: str, start: str, end: str) -> dict[str, dict]:
+    """Cached day → `{"holdings": [...], "sector_scores": [...]}` for `hash_` in the window.
+
+    Best-effort: a missing table or a failed read returns `{}`, which costs a
+    recompute and nothing else. A cache that can fail the feature is worse than no
+    cache."""
+    try:
+        resp = (supabase.table("daily_holdings_cache")
+                .select("target_date, holdings, sector_scores")
+                .eq("strategy_hash", hash_)
+                .gte("target_date", start).lte("target_date", end)
+                .execute())
+    except Exception as e:  # noqa: BLE001
+        logging.getLogger(__name__).warning(
+            "daily-holdings cache read failed: %s: %s", type(e).__name__, e)
+        return {}
+    return {str(r["target_date"]): {"holdings": r.get("holdings") or [],
+                                    "sector_scores": r.get("sector_scores") or []}
+            for r in (resp.data or [])}
+
+
+def persist_daily_holdings_cache(hash_: str, days: dict[str, dict]) -> None:
+    """Store freshly computed days (selection + sector scores). Best-effort — see above.
+
+    ⚠ THIS IS NOT `current_picks_day` AND MUST NEVER BE POINTED AT IT. Both are keyed
+    (strategy_hash, target_date); that one records what the pipeline DECIDED with the
+    data it had, this one records a RECALCULATION on today's data. An upsert into the
+    wrong table replaces the decision with the recalculation and the original is gone.
+    """
+    if not days:
+        return
+    rows = [{"strategy_hash": hash_, "target_date": d,
+             "holdings": v.get("holdings") or [],
+             "sector_scores": v.get("sector_scores") or [],
+             "computed_at": datetime.now(timezone.utc).isoformat()}
+            for d, v in days.items() if v.get("holdings")]
+    if not rows:
+        return
+    try:
+        supabase.table("daily_holdings_cache").upsert(
+            rows, on_conflict="strategy_hash,target_date"
+        ).execute()
+    except Exception as e:  # noqa: BLE001
+        logging.getLogger(__name__).warning(
+            "daily-holdings cache write failed: %s: %s", type(e).__name__, e)
 
 
 def fetch_daily_picks_history(hash_: str) -> list[dict]:

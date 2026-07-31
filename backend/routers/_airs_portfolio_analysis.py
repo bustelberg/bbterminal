@@ -267,6 +267,12 @@ def _basis_axes(portfolio_id: int, source: str, effective: str | None,
     legs = portfolio_legs(source, portfolio_id, effective, start)
     if not legs:
         return None
+    # ⚠ A CLASS FILTER WE CANNOT APPLY IS A REFUSAL, NOT A NO-OP. Only the book legs carry an asset
+    # class; the model path has none. Ignoring the filter there would chart every class's sectors
+    # under a "Stocks" selection, and applying it would empty the chart — so hand back to the
+    # caller's fallback, which classifies from its own loader and can filter honestly.
+    if bucket_filter and not any(leg.get("asset_class") for leg in legs):
+        return None
 
     grid = _grid(sorted({leg["isin"] for leg in legs if leg.get("isin")}))
     codes = _country_by_code()
@@ -275,8 +281,19 @@ def _basis_axes(portfolio_id: int, source: str, effective: str | None,
         attributable, excluded, total_w = split_legs(legs, idx, grid, codes)
         # ⚠ THE CLASS FILTER NARROWS THE NUMERATOR AND THE DENOMINATOR TOGETHER, or the bars stop
         # summing to 100 and every one of them silently means something else.
+        #
+        # ⚠ AND IT MUST NARROW `total_w` AND `excluded` TOO. It did not, and the ratio that came
+        # out was a MIXED one: Stocks-with-a-sector over the WHOLE book. With Stocks selected the
+        # card then read "87% of the book has a sector" — true of the book, but presented under a
+        # Stocks-only chart, where it reads as an accusation that 13% of the STOCKS are
+        # unclassified. Every stock in the measured portfolio has a sector; the 13% was five ETFs
+        # and a cash line, which are not stocks and were never candidates for this chart. Filtered
+        # consistently, the same portfolio reports 100% and the notice disappears, which is the
+        # honest answer.
         if bucket_filter:
             attributable = [i for i in attributable if i.get("asset_class") == bucket_filter]
+            excluded = [i for i in excluded if i.get("asset_class") == bucket_filter]
+            total_w = sum(i["weight_pct"] for i in (*attributable, *excluded))
         denom = renormalise(attributable)
         if denom <= 0:
             out[axis] = {"weights": {}, "holdings": {}, "excluded": excluded,

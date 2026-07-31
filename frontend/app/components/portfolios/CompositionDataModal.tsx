@@ -103,17 +103,18 @@ function ExcludedTable({ rows, title, note, axisWord, p2, tone }: {
 }
 
 export default function CompositionDataModal({
-  axis, rows, basis, positions, attributablePct, unpricedPct, excluded = [], benchmark, name,
-  onClose,
+  axis, rows, basis, positions, unpricedPct, excluded = [], benchmark, name, onClose,
 }: {
   axis: string;
   rows: Row[];
   /** The denominator, in words — computed server-side, because it differs PER AXIS. */
   basis?: string | null;
   positions?: number | null;
-  /** How much of the book has a bucket here. Null on the fallback basis (nothing excluded). */
-  attributablePct?: number | null;
-  /** The part of the remainder that is a genuine hole rather than an answer. */
+  /** The part of the remainder that is a genuine hole rather than an answer.
+   *  ⚠ There is deliberately no `attributablePct` prop. A coverage percentage phrased as an
+   *  absence ("87% of the book has a sector") reads as a data-quality problem with the stocks; the
+   *  holdings behind it are funds and cash. The excluded rows below say which, and that is the
+   *  whole of what a reader needs. */
   unpricedPct?: number | null;
   /** The holdings this basis cannot weigh, and why — shown, never inferred from a total. */
   excluded?: Excluded[];
@@ -182,13 +183,16 @@ export default function CompositionDataModal({
               are. Named at the bottom.
             </div>
           )}
-          {attributablePct != null && attributablePct < 99.95 && (
+          {/* ⚠ SAY WHAT IS EXCLUDED, NOT WHAT THE REST "LACKS". Phrased as a coverage percentage
+              this read as a data-quality problem with the stocks; the holdings involved are funds
+              and cash, which have no {axisWord} by nature. */}
+          {naWeight > 0.005 && (
             <p className="text-[11px] text-fg-faint">
-              These bars cover the {attributablePct.toFixed(1)}% of the book that has a {axisWord}.
-              The remaining <span className="font-mono">{naWeight.toFixed(2)}%</span> is funds,
-              bonds and cash — not Stocks, and nothing with a {axisWord} to place. A position bought
-              after the window opened has no start value and carries no weight here either, so it is
-              on neither list.
+              The bars exclude <span className="font-mono">{naWeight.toFixed(2)}%</span> held in
+              funds, bonds and cash — those have no {axisWord} of their own and are their own
+              slices of the allocation chart. Everything else on this basis is on a bar. A position
+              bought after the window opened has no start value, so it carries no weight here and
+              is on neither list.
             </p>
           )}
 

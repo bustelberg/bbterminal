@@ -12,6 +12,7 @@ import { usePollingFetch } from '../../../lib/hooks/usePollingFetch';
 import { useEventStream } from '../../../lib/hooks/useEventStream';
 import { watchRun, type RunRow } from '../../../lib/watchRun';
 import CollapsibleCard from '../momentum/CollapsibleCard';
+import DailyHoldingsSection from './DailyHoldingsSection';
 import { PriceRefreshPanel, useStockRefresh } from './priceRefresh';
 import { relTime, formatExecAt, countdownLeft, formatDur } from './utils';
 import type {
@@ -243,6 +244,10 @@ export default function SmartPipelineActivity() {
             universeRefreshRunning={running('universe_price_refresh')}
             nowMs={nowMs}
           />
+          {/* Not a pipeline operation — an on-demand question ABOUT one. It sits
+              here because it is read from the same place the operations are, but
+              it has no schedule, no run row and writes nothing. */}
+          <DailyHoldingsSection strategies={strategies} />
         </>
       )}
     </div>

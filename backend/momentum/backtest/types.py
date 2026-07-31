@@ -379,6 +379,11 @@ class DailyPick:
     turnover_pct: float                    # turnover_abs / max(len(today), len(prev)) * 100
     portfolio_return_pct: float | None = None
     next_day_return_pct: float | None = None
+    # Per-SECTOR momentum / price / volume score for this day, over the same pool
+    # the sector ranking was computed on — every sector, not only the chosen ones,
+    # so the one that just missed the cut is visible. Empty on the paths that
+    # don't compute it (the pipeline's own daily picks predate it).
+    sector_scores: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -425,6 +430,7 @@ class CurrentPortfolio:
                     "turnover_pct": d.turnover_pct,
                     "portfolio_return_pct": d.portfolio_return_pct,
                     "next_day_return_pct": d.next_day_return_pct,
+                    "sector_scores": d.sector_scores,
                     "holdings": [
                         {
                             "company_id": h.company_id,

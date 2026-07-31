@@ -386,6 +386,42 @@ class TestTheBarsAreTheAttributionWeights:
         axes = pa._basis_axes(1, "book", None, "Equity")
         assert axes["sector"]["weights"] == {"Technology": pytest.approx(100.0)}
 
+    def test_a_class_filter_makes_coverage_a_STOCKS_ratio_not_a_BOOK_one(self, monkeypatch):
+        """⚠ THE MIXED RATIO. `total_w` and `excluded` were left un-filtered, so with Stocks
+        selected the card divided stocks-with-a-sector by the WHOLE book and reported "87% of the
+        book has a sector" — under a Stocks-only chart, where it reads as a claim that 13% of the
+        STOCKS are unclassified. They were five ETFs and a cash line. Every stock had a sector, and
+        the honest figure for that selection is 100%."""
+        legs = [
+            {"isin": "US1", "weight_pct": 60.0, "return_pct": 10.0, "airs_name": "Alpha",
+             "is_cash": False, "asset_class": "Equity"},
+            {"isin": "US2", "weight_pct": 27.0, "return_pct": 5.0, "airs_name": "Beta",
+             "is_cash": False, "asset_class": "Equity"},
+            {"isin": "IE9", "weight_pct": 12.9, "return_pct": 3.0, "airs_name": "Tracker",
+             "is_cash": False, "asset_class": "Equity ETF"},
+            {"isin": None, "weight_pct": 0.1, "return_pct": None, "airs_name": "Liquiditeiten",
+             "is_cash": True, "asset_class": "Cash"},
+        ]
+        self._patch(monkeypatch, legs)
+        stocks = pa._basis_axes(1, "book", None, "Equity")["sector"]
+        assert stocks["attributable_pct"] == pytest.approx(100.0), \
+            "every stock has a sector — the notice must disappear entirely"
+        assert stocks["excluded"] == [], "a fund is not excluded FROM THE STOCKS, it is not one"
+        # Unfiltered, the same book legitimately reports the fund + cash as having no sector.
+        whole = pa._basis_axes(1, "book", None, None)["sector"]
+        assert whole["attributable_pct"] == pytest.approx(87.0)
+        assert {e["isin"] for e in whole["excluded"]} == {"IE9", None}
+
+    def test_a_class_filter_we_cannot_apply_refuses_rather_than_empties(self, monkeypatch):
+        """Model legs carry no asset class. Ignoring the filter would chart every class's sectors
+        under a Stocks selection; applying it would empty the chart. Neither is acceptable, so the
+        caller's own (classifiable) fallback is used instead."""
+        legs = [{"isin": "US1", "weight_pct": 100.0, "return_pct": 10.0, "airs_name": "Alpha",
+                 "is_cash": False}]
+        self._patch(monkeypatch, legs)
+        assert pa._basis_axes(1, "model", None, "Equity") is None
+        assert pa._basis_axes(1, "model", None, None) is not None
+
     def test_no_book_means_no_basis_rather_than_an_empty_chart(self, monkeypatch):
         from routers import _airs_attribution_basis as basis
 

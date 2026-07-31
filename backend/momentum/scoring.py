@@ -198,6 +198,73 @@ def score_universe(
     return compute_category_scores(signals_df, signal_weights, category_weights, signal_defs)
 
 
+def selection_pool(
+    scored: pd.DataFrame,
+    *,
+    direction: SelectionDirection = "top",
+    min_price_score: float | None = None,
+    backfill_below_min_score: bool = False,
+) -> pd.DataFrame:
+    """The rows the sector ranking is computed over — `scored` after the
+    `min_price_score` hard floor, when that floor applies.
+
+    ⚠ EXTRACTED SO THE SECTOR SCORES SHOWN TO A READER ARE AGGREGATED OVER THE
+    SAME ROWS THE SELECTION RANKED. Recomputing "the pool" beside the selector
+    is a second definition of it: the floor is skipped for `direction="bottom"`
+    and softened to a preference under `backfill_below_min_score`, so a copy
+    drifts the moment either is touched, and the sector table would then explain
+    a choice that was made over a different set of companies.
+    """
+    has_min = (
+        direction == "top" and min_price_score is not None and "score_price" in scored.columns
+    )
+    if has_min and not backfill_below_min_score:
+        mask = scored["score_price"].notna() & (scored["score_price"] >= min_price_score)
+        if not mask.all():
+            return scored[mask]
+    return scored
+
+
+def sector_pool_scores(pool: pd.DataFrame) -> list[dict]:
+    """Per-sector momentum / price / volume score over `pool`, best momentum first.
+
+    ⚠ EVERY PILLAR GOES THROUGH `aggregate_to_sector`, THE FUNCTION THE SELECTION
+    RANKS WITH. It averages (a `mean()`), and that choice is load-bearing — the
+    golden-master test exists partly because switching it to `median()` changes
+    which sectors get picked and nothing else fails. A second aggregation here
+    would let the table disagree with the ranking it is meant to explain.
+
+    ⚠ EVERY SECTOR IN THE POOL, NOT ONLY THE CHOSEN ONES. The sector that just
+    missed the cut is the most informative row on the table; showing only the
+    picked ones answers "what did we hold" a second time instead of "why".
+    """
+    if pool.empty or "sector" not in pool.columns:
+        return []
+    base = aggregate_to_sector(pool)                      # momentum_score, ranked
+    counts = pool.groupby("sector").size()
+    by_cat: dict[str, pd.Series] = {}
+    for col in pool.columns:
+        if isinstance(col, str) and col.startswith("score_"):
+            agg = aggregate_to_sector(pool, score_col=col)
+            by_cat[col[len("score_"):]] = agg.set_index("sector")[col]
+    out: list[dict] = []
+    for rank, row in enumerate(base.itertuples(index=False), start=1):
+        sector = row.sector
+        scores = {
+            cat: (round(float(s.get(sector)), 1) if pd.notna(s.get(sector)) else None)
+            for cat, s in by_cat.items()
+        }
+        out.append({
+            "sector": sector,
+            "rank": rank,
+            "momentum_score": round(float(row.momentum_score), 2)
+            if pd.notna(row.momentum_score) else None,
+            "category_scores": scores,
+            "companies": int(counts.get(sector, 0)),
+        })
+    return out
+
+
 def select_from_scored(
     scored: pd.DataFrame,
     *,
@@ -234,13 +301,29 @@ def select_from_scored(
     has_min = (
         direction == "top" and min_price_score is not None and "score_price" in scored.columns
     )
-    pool = scored
-    if has_min and not backfill_below_min_score:
-        mask = scored["score_price"].notna() & (scored["score_price"] >= min_price_score)
-        if not mask.all():
-            pool = scored[mask]
+    # The COMPANY pool — the floor applies here, and only here.
+    pool = selection_pool(
+        scored,
+        direction=direction,
+        min_price_score=min_price_score,
+        backfill_below_min_score=backfill_below_min_score,
+    )
 
-    sector_scores = aggregate_to_sector(pool)
+    # ⚠ SECTORS ARE RANKED OVER EVERY SCORED COMPANY, NOT OVER THE FLOOR-FILTERED POOL
+    # (2026-07-31, deliberate change). `min_price_score` is a rule about which COMPANIES are worth
+    # buying; ranking sectors on the survivors made it a rule about which SECTORS exist. The
+    # difference is not subtle: a sector whose names all sit below the floor did not rank badly, it
+    # VANISHED — measured on the live strategies (floor 30), Consumer Cyclical ranked 3rd on
+    # 11 June, disappeared entirely on the 12th and 15th, and came back 8th on the 16th. Judging a
+    # sector on its best few survivors also flatters exactly the sectors with the fewest of them.
+    #
+    # The floor still decides every company that gets bought, three lines down.
+    #
+    # ⚠ CONSEQUENCE, ACCEPTED AND NOT PAPERED OVER: a sector can now be chosen and then contribute
+    # NOTHING, because none of its companies clear the floor. The portfolio is smaller that period
+    # rather than silently sliding to the next-best sector — substituting one would be a different
+    # strategy, chosen here by accident.
+    sector_scores = aggregate_to_sector(scored)
     if direction == "top":
         chosen_sectors = sector_scores.head(top_n_sectors)["sector"].tolist()
         ascending_within = False

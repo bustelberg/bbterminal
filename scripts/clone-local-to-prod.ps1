@@ -21,7 +21,17 @@
        companies whose price data changed are re-copied. Unchanged -> zero rows
        cross the wire. recorded_at is intentionally excluded from the signature
        (prod fetches the same prices independently with different timestamps;
-       including it would force a full re-copy every run).
+       including it would force a full re-copy every run). Each batch stages into
+       clone_stg.md_batch and then UPSERTs + deletes-missing, like every other
+       table -- NOT a blanket DELETE + COPY into the live table, which aborts the
+       whole batch if prod's own ingest writes a row mid-scan (see step [6]).
+
+  SAFE TO RUN WHILE PROD IS LIVE. The scheduled ingest keeps writing metric_data
+  (daily 05:00 UTC price update; the month-end full refresh at 12:00 UTC on the
+  last few days of the month), and a batch takes minutes. The upsert absorbs
+  those writes. The one thing it cannot absorb is a row prod adds for an in-chunk
+  company that local does not have at all: it survives the batch, step [8] flags
+  the count mismatch, and a re-run clears it.
     5. Verifies row counts + the metric_data signature afterwards.
 
   Storage: the `backtest-results` bucket is mirrored too (objects missing on
@@ -255,7 +265,39 @@ if (-not $running) {
     exit 1
 }
 Write-Host "[1] Verifying prod connection..."
-$probe = Invoke-Prod "SELECT current_database();"
+# !! RETRIED, BECAUSE THE COMMON FAILURE HERE IS TRANSIENT AND THE RAW ERROR IS MISLEADING.
+# Supabase's pooler answers with
+#   FATAL: Failed to connect to database: authentication did not complete within 15000ms
+# when it accepted the TCP connection but could not reach the underlying Postgres in time.
+# That is NOT a bad password (which says "password authentication failed") and NOT a bad
+# host (which never connects at all) -- it means the database is paused, still waking, or
+# out of connection slots. A single attempt turning into a PowerShell stack trace sends
+# you looking at PROD_DB_URL for a problem that is usually gone in thirty seconds.
+$probe = $null
+for ($attempt = 1; $attempt -le 3; $attempt++) {
+    try {
+        $probe = Invoke-Prod "SELECT current_database();"
+        break
+    } catch {
+        if ($attempt -eq 3) {
+            Write-Host ""
+            Write-Host "ERROR: could not reach prod after 3 attempts." -ForegroundColor Red
+            Write-Host "  The pooler accepted the connection but the database did not complete auth." -ForegroundColor Yellow
+            Write-Host "  That is a database-availability problem, not a credentials one. Check, in order:" -ForegroundColor Yellow
+            Write-Host "    1. Supabase dashboard -- is the project ACTIVE (free-tier projects auto-pause)?" -ForegroundColor Yellow
+            Write-Host "    2. Is something already hammering it? A month-end full price refresh, a" -ForegroundColor Yellow
+            Write-Host "       previous clone that died mid-run, or the Railway backend's pool can fill" -ForegroundColor Yellow
+            Write-Host "       the connection slots. Wait for it to finish, then re-run." -ForegroundColor Yellow
+            Write-Host "    3. Only if both look fine, re-check PROD_DB_URL in scripts/.env.local." -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "  This script is idempotent -- re-running picks up wherever it left off." -ForegroundColor Cyan
+            exit 1
+        }
+        $wait = 5 * $attempt
+        Write-Host "  attempt $attempt failed; retrying in ${wait}s..." -ForegroundColor Yellow
+        Start-Sleep -Seconds $wait
+    }
+}
 Write-Host "  OK: prod db = $probe" -ForegroundColor Green
 
 # ---- schema metadata (discovered from LOCAL, applied to both) ---------------
@@ -550,6 +592,32 @@ $prodOnly = @($prodSig.Keys  | Where-Object { -not $localSig.ContainsKey($_) })
 Write-Host "  $($resync.Count) companies to re-copy, $($prodOnly.Count) prod-only to delete."
 
 $mdCols = ($colsByTable['metric_data'] -join ', ')
+# Upsert plumbing for the metric_data batches, discovered like every other table's.
+$mdPk       = $pkByTable['metric_data']
+$mdPkList   = ($mdPk -join ', ')
+$mdNonPk    = @($colsByTable['metric_data'] | Where-Object { $mdPk -notcontains $_ })
+$mdConflict = if ($mdNonPk.Count -gt 0) {
+    "ON CONFLICT ($mdPkList) DO UPDATE SET " + (($mdNonPk | ForEach-Object { "$_ = EXCLUDED.$_" }) -join ', ')
+} else { "ON CONFLICT ($mdPkList) DO NOTHING" }
+$mdKeyMatch = (($mdPk | ForEach-Object { "s.$_ = p.$_" }) -join ' AND ')
+# !! UNCHANGED ROWS MUST NOT BE REWRITTEN, AND THIS IS THE DIFFERENCE BETWEEN A SYNC
+# AND A DISK-FILLING EVENT. Postgres is MVCC: an UPDATE that sets a column to the value
+# it already holds still writes a NEW tuple, marks the old one dead, updates every index
+# and WAL-logs all of it. The differential picks companies whose SIGNATURE changed, but
+# inside such a company only the newest few days are actually new -- the other ~11,000
+# rows are identical. Rewriting them turned a batch of 300 companies into ~3.3M dead
+# tuples plus the WAL to match, and three batches of that is what bloated prod.
+#
+# So the UPDATE is gated on the row genuinely differing. `recorded_at` is EXCLUDED from
+# the comparison on purpose: prod fetches the same prices independently and stamps its
+# own timestamp, so including it makes every row "different" and the guard does nothing
+# -- the same reason it is excluded from the per-company signature.
+$mdCompare = @($colsByTable['metric_data'] | Where-Object { $mdPk -notcontains $_ -and $_ -ne 'recorded_at' })
+if ($mdNonPk.Count -gt 0 -and $mdCompare.Count -gt 0) {
+    $tgt = (($mdCompare | ForEach-Object { "public.metric_data.$_" }) -join ', ')
+    $inc = (($mdCompare | ForEach-Object { "EXCLUDED.$_" }) -join ', ')
+    $mdConflict = "$mdConflict WHERE ($tgt) IS DISTINCT FROM ($inc)"
+}
 $done = 0
 $nChunks = [math]::Ceiling($resync.Count / $CompanyChunk)
 $ci = 0
@@ -560,7 +628,48 @@ for ($i = 0; $i -lt $resync.Count; $i += $CompanyChunk) {
     $arr = $chunk -join ','
     docker exec $Container psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "\copy (SELECT $mdCols FROM metric_data WHERE company_id = ANY('{$arr}'::int[])) TO '/tmp/clone_md.dat'"
     if ($LASTEXITCODE -ne 0) { throw "local metric_data dump failed." }
-    $sql = "SET statement_timeout = 0;`nBEGIN;`nDELETE FROM public.metric_data WHERE company_id = ANY('{$arr}'::int[]);`n\copy public.metric_data ($mdCols) FROM '/tmp/clone_md.dat'`nCOMMIT;`n"
+    # Stage -> delete-missing -> UPSERT, exactly like steps [4]/[5] do for every
+    # other table. metric_data was the one table that COPYed straight into the live
+    # table after a blanket DELETE, and that is not safe against a concurrent writer:
+    #
+    #   PROD WRITES TO metric_data WHILE THIS RUNS. Under READ COMMITTED the DELETE
+    #   fixes its snapshot when the statement STARTS, then scans ~3M rows for several
+    #   minutes. Any row prod's own ingest commits during that scan is invisible to
+    #   the DELETE, so it survives -- and the COPY that follows takes a FRESH snapshot,
+    #   sees it, and aborts the whole batch on metric_data_pkey. Observed 2026-07-31:
+    #   "duplicate key (4676, close_price, gurufocus, 2026-07-30)" ~3.2M rows into a
+    #   3.3M-row batch. ALLWYN AG's close was written by prod's own month-end full
+    #   price refresh (scheduler.py, 12:00 UTC on the last MONTH_END_WINDOW_DAYS+1
+    #   days -- and the clone was run on 31 July), on top of the daily 05:00 UTC
+    #   price update. The local file was NOT the problem: local carries the same PK
+    #   and has zero duplicate keys.
+    #
+    #   An upsert cannot hit that: a row prod inserted under us is simply overwritten
+    #   with local's copy. The delete-missing is an anti-join against the staging
+    #   table rather than a blanket wipe, so it still removes rows local no longer
+    #   has. Residual, and deliberately left: a row prod commits for a company in this
+    #   chunk that local does NOT have, AFTER the anti-join's snapshot, survives the
+    #   batch. Step [8]'s count check flags it and a re-run (idempotent) clears it --
+    #   a soft, self-healing miss instead of a hard abort 5 minutes into a batch.
+    #
+    # The PK on the staging table is what keeps the anti-join and the ON CONFLICT
+    # probe from degrading into hashes of a 3M-row table on a small prod instance.
+    $sql = @"
+SET statement_timeout = 0;
+DROP TABLE IF EXISTS clone_stg.md_batch;
+CREATE TABLE clone_stg.md_batch (LIKE public.metric_data INCLUDING DEFAULTS);
+\copy clone_stg.md_batch ($mdCols) FROM '/tmp/clone_md.dat'
+ALTER TABLE clone_stg.md_batch ADD PRIMARY KEY ($mdPkList);
+BEGIN;
+DELETE FROM public.metric_data p
+ WHERE p.company_id = ANY('{$arr}'::int[])
+   AND NOT EXISTS (SELECT 1 FROM clone_stg.md_batch s WHERE $mdKeyMatch);
+INSERT INTO public.metric_data ($mdCols)
+SELECT $mdCols FROM clone_stg.md_batch
+$mdConflict;
+COMMIT;
+DROP TABLE clone_stg.md_batch;
+"@
     Invoke-ProdScript $sql
     $done += $chunk.Count
     Write-Host ("    batch {0}/{1}: re-copied {2}/{3} companies ({4:N1}s)" -f $ci, $nChunks, $done, $resync.Count, $swBatch.Elapsed.TotalSeconds)

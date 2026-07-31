@@ -13,7 +13,14 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from ..scoring import extract_category_scores, score_and_select, signal_defs_for_mode
+from ..scoring import (
+    extract_category_scores,
+    score_and_select,
+    score_universe,
+    sector_pool_scores,
+    select_from_scored,
+    signal_defs_for_mode,
+)
 from ..signals import compute_signals_panel
 from .dates import _first_weekday_on_or_after
 from .indices import (
@@ -108,6 +115,9 @@ def run_current_portfolio(
     prices_local_df: pd.DataFrame | None = None,
     company_currency: dict[int, str | None] | None = None,
     today: date | None = None,
+    daily_from: date | None = None,
+    cached_selections: dict[date, pd.DataFrame] | None = None,
+    cached_sector_scores: dict[date, list[dict]] | None = None,
 ) -> CurrentPortfolio:
     """Compute the strategy's portfolio for the current month with MTD returns.
 
@@ -122,6 +132,29 @@ def run_current_portfolio(
 
     Random selection mode is not supported here — picking randomly for "what
     should I hold today" has no useful interpretation.
+
+    `daily_from` widens ONLY the daily-picks walk, back to that date — "what would
+    this strategy have held on each trading day since then". Everything else is
+    untouched: the rebalance anchor, the locked month-start holdings and their MTD
+    are still the CURRENT period's, because those are the of-record decision and a
+    retrospective question must not be able to move them. Default None = the current
+    period only, which is what the pipeline runs.
+
+    ⚠ THE DAYS IT PRODUCES ARE A CALCULATION, NOT A DECISION, AND MUST NOT BE
+    PERSISTED. `current_picks_day` is the record of what the pipeline actually
+    decided each day; writing a recomputed past into it would overwrite decisions
+    that were made on the data available AT THE TIME with ones made on the data we
+    hold now. Closed months are read-only for exactly that reason. The recalculation
+    has its OWN store (`daily_holdings_cache`) — see the caller.
+
+    `cached_selections` supplies an already-computed SELECTION for a date, so its
+    signals + score/select are skipped. ⚠ IT SHORT-CIRCUITS ONLY THAT STEP. Entry and
+    exit prices, forward returns, turnover and the chain-linked cumulative are still
+    derived here, every run, from the live price index — every one of them is a
+    property of the WINDOW (turnover is measured against the previous day IN IT, the
+    cumulative is chained from ITS first day), so a stored value would be wrong the
+    moment a different window is asked for. What is reused is the part that is both
+    expensive and window-independent: which companies, at what score.
     """
     if config.selection_mode == "random":
         raise ValueError("run_current_portfolio does not support random selection mode")
@@ -234,8 +267,15 @@ def run_current_portfolio(
     )
     volume_index = _build_volume_index(volumes_df) if volumes_df is not None and not volumes_df.empty else None
 
-    # Trading dates that fall inside the current month, derived from prices_df.
+    # Trading dates that fall inside the current month, derived from prices_df —
+    # or back to `daily_from` when the caller asked for a retrospective walk.
     # Built up front so the signal panel can compute every cutoff in one pass.
+    #
+    # ⚠ THE FLOOR NEVER MOVES FORWARD. `min(daily_from, month_start)` — a
+    # `daily_from` INSIDE the current period would otherwise silently truncate the
+    # live daily-picks panel the /schedule card reads, turning a read-only question
+    # into a change of what the pipeline reports.
+    daily_floor = min(daily_from, month_start) if daily_from else month_start
     trading_dates_set: set[date] = set()
     for raw_d in prices_df["target_date"].unique():
         if isinstance(raw_d, date) and not isinstance(raw_d, pd.Timestamp):
@@ -250,7 +290,7 @@ def run_current_portfolio(
                 dd = pd.Timestamp(raw_d).date()
             except Exception:
                 continue
-        if month_start <= dd <= today_d:
+        if daily_floor <= dd <= today_d:
             trading_dates_set.add(dd)
     trading_dates = sorted(trading_dates_set)
 
@@ -258,7 +298,15 @@ def run_current_portfolio(
     # so the daily loop below is a cheap dict lookup. Includes month_start so
     # the locked-at-start holdings use the same code path.
     t_panel = time.perf_counter()
-    panel_cutoffs: list[date] = sorted({month_start, *trading_dates})
+    # ⚠ THE CACHED DAYS ARE DROPPED FROM THE CUTOFFS, WHICH IS WHERE THE SAVING IS.
+    # The panel is the expensive step (signals for every company at every cutoff);
+    # skipping a day's cutoff is what makes a re-run cost one day instead of forty.
+    # `month_start` is NEVER skipped — it is the locked basket the pipeline reports,
+    # not part of the retrospective walk, and it is not cacheable against a window.
+    _cached = cached_selections or {}
+    panel_cutoffs: list[date] = sorted(
+        {month_start, *(d for d in trading_dates if d not in _cached)}
+    )
     panel = compute_signals_panel(
         month_universe_df, panel_cutoffs,
         price_index=price_index,
@@ -382,23 +430,43 @@ def run_current_portfolio(
             pct = 85 + round(15 * (i + 1) / max(1, len(trading_dates)))
             send_event("progress", month=month_key, pct=pct, message=f"Daily picks {i + 1}/{len(trading_dates)}: {d.isoformat()}")
 
-        t_signals = time.perf_counter()
-        daily_signals = panel.get(d, pd.DataFrame())
-        t_daily_signals_total += time.perf_counter() - t_signals
-        if daily_signals.empty:
-            continue
-        t_select = time.perf_counter()
-        daily_selected = score_and_select(
-            daily_signals,
-            config.signal_weights,
-            top_n_sectors=config.top_n_sectors,
-            top_n_per_sector=config.top_n_per_sector,
-            category_weights=config.category_weights,
-            min_price_score=config.min_price_score,
-            backfill_below_min_score=config.backfill_below_min_score,
-            signal_defs=signal_defs_for_mode(config.selection_mode),
-        )
-        t_daily_select_total += time.perf_counter() - t_select
+        # A cached day skips signals + score/select entirely — that is the saving.
+        # Everything below (prices, returns, turnover, cumulative) still runs on it,
+        # because all of that is a property of the window rather than of the day.
+        cached_sel = _cached.get(d)
+        day_sector_scores: list[dict] = []
+        if cached_sel is not None:
+            daily_selected = cached_sel
+            day_sector_scores = (cached_sector_scores or {}).get(d) or []
+        else:
+            t_signals = time.perf_counter()
+            daily_signals = panel.get(d, pd.DataFrame())
+            t_daily_signals_total += time.perf_counter() - t_signals
+            if daily_signals.empty:
+                continue
+            t_select = time.perf_counter()
+            # ⚠ SCORED ONCE, THEN SELECTED AND AGGREGATED FROM THE SAME FRAME. Calling
+            # `score_and_select` and then re-scoring for the sector table would pay the
+            # scoring cost twice AND let the two answers drift apart — the sector scores
+            # are meant to explain THIS day's pick, not a parallel computation of it.
+            scored = score_universe(
+                daily_signals,
+                config.signal_weights,
+                config.category_weights,
+                signal_defs_for_mode(config.selection_mode),
+            )
+            daily_selected = select_from_scored(
+                scored,
+                top_n_sectors=config.top_n_sectors,
+                top_n_per_sector=config.top_n_per_sector,
+                min_price_score=config.min_price_score,
+                backfill_below_min_score=config.backfill_below_min_score,
+            )
+            # ⚠ OVER `scored`, THE SAME ROWS `select_from_scored` NOW RANKS SECTORS ON — not over
+            # the floor-filtered pool. Aggregating these two differently is how the table stops
+            # explaining the selection it sits beside.
+            day_sector_scores = sector_pool_scores(scored)
+            t_daily_select_total += time.perf_counter() - t_select
         if daily_selected.empty:
             continue
         t_holdings = time.perf_counter()
@@ -513,6 +581,7 @@ def run_current_portfolio(
             turnover_abs=turnover_abs,
             turnover_pct=turnover_pct,
             portfolio_return_pct=port_mtd,
+            sector_scores=day_sector_scores,
         ))
         prev_ids = today_ids
         prev_d_ts = day_ts

@@ -129,13 +129,23 @@ async def _momentum_backtest_stream(req: BacktestRequest):
     # without requiring the caller to pick the right window.
     if req.mode == "current_portfolio":
         _today = date.today()
-        req.start_date = (_today - timedelta(days=14 * 31)).isoformat()
+        # ⚠ THE LOAD WINDOW HAS TO REACH BEHIND THE WALK, NOT JUST BEHIND TODAY. The
+        # signals need ~12 months before the EARLIEST cutoff, so a retrospective
+        # walk needs its months added on top — otherwise the oldest days in the
+        # window silently score on a short history and select a different basket.
+        _lookback_days = 14 * 31 + max(0, req.daily_months_back) * 31
+        req.start_date = (_today - timedelta(days=_lookback_days)).isoformat()
         req.end_date = _today.isoformat()
 
         # Cache hit short-circuit. Same strategy clicked twice in the same
         # month → serve the stored snapshot, no recompute. Recompute button
         # passes force_recompute=True to bypass.
-        if not req.force_recompute:
+        #
+        # ⚠ AND A RETROSPECTIVE WALK CAN NEVER BE SERVED FROM IT. The cache holds
+        # the CURRENT month's snapshot + its daily picks; answering "what would we
+        # have held over the last two months" with it would return this month's days
+        # under a two-month heading, which looks like a correct, complete answer.
+        if not req.force_recompute and req.daily_months_back <= 0:
             try:
                 hash_ = _strategy_hash(req)
                 month_start = date(_today.year, _today.month, 1).isoformat()
