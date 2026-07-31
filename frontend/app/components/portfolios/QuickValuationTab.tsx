@@ -616,7 +616,8 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     {/* Bottom-right, by auto-flow. Handed the computed series, never the ISIN — same rule as the
         drill-down modal, so it cannot disagree with the charts above about what the company earned. */}
     <MultipleHistoryChart height={CHART_HEIGHT} basis={b} currency={currency}
-      forward={forwardHistory} trailing={trailingHistory} fromYear={MULTIPLE_FROM_YEAR} />
+      forward={forwardHistory} trailing={trailingHistory} fromYear={MULTIPLE_FROM_YEAR}
+      name={name} isin={isin} />
 
     {/* Top-right, but LAST IN THE DOM — see the grid note above. The only non-chart card, so it
         fills a cell sized by the chart beside it: a flex column with its CAGR footer pinned to the

@@ -8034,6 +8034,25 @@ export interface components {
          *     slices to the decimal. Use this one for anything shown beside the chart; a table that disagrees
          *     with the chart above it is read as a bug in both.
          *
+         *     `weight_start_pct` is the THIRD weight, and it is the one that reconciles this table with the
+         *     composition charts. ⚠ THREE WEIGHTS, ONE POSITION, ALL CORRECT:
+         *
+         *       weight_now_pct    current EUR value ÷ the WHOLE book — what is held today.
+         *       weight_start_pct  Beginwaarde ÷ the WHOLE book at the window's open. It is GRAFTED ON from
+         *                         the very legs the sector/region/currency bars are built from, never
+         *                         recomputed, so the table and the chart cannot disagree about January.
+         *       the bar itself    `weight_start_pct` ÷ that axis's `attributable_pct` — a bar is a share of
+         *                         the holdings that HAVE a bucket, not of the book.
+         *
+         *     Measured on Bustelberg Offensief: ASML 7.02% now, ~5.00% at the start, 5.75% on the Technology
+         *     bar. Dividing the FIRST by the Stocks slice and expecting the THIRD is the trap this column
+         *     closes — ASML outgrew the book by ~40% over the window, so its current share is much the larger.
+         *
+         *     ⚠ `weight_start_pct` IS NOT `weight_pct`. Same numerator, different denominator: `weight_pct`
+         *     divides by the PRICED book (so a class's contribution reconciles), this divides by the whole
+         *     book (so it sits honestly beside `weight_now_pct`). A `0.0` is a fact — bought after the window
+         *     opened; `None` means no ISIN to join on (cash), never "zero".
+         *
          *     `currency` is the holding's quote currency (a fair first-order FX signal for a bond/ETF class —
          *     NOT folded to Unclassified like the fund axes).
          */
@@ -8069,6 +8088,8 @@ export interface components {
             weight_now_pct?: number;
             /** Weight Pct */
             weight_pct?: number | null;
+            /** Weight Start Pct */
+            weight_start_pct?: number | null;
         };
         /** BuildUniverseRequest */
         BuildUniverseRequest: {
@@ -8086,6 +8107,66 @@ export interface components {
             max_companies?: number;
             /** Start Month */
             start_month: string;
+        };
+        /**
+         * CompositionExcluded
+         * @description A holding this axis does not weigh, and why. `cash` · `unpriced` · `unclassified`.
+         *
+         *     ⚠ TWO OF THESE THREE ARE ANSWERS, NOT GAPS. A fund, a bond and a cash line have no sector by
+         *     definition — they are not Stocks in our own classification and already have their own slice of
+         *     the allocation chart. Only `unpriced` is a real hole: a stock we hold, in a real sector, that
+         *     we cannot price, so its bucket reads lower than it is. `asset_class` rides along precisely so
+         *     the first kind can be shown as "this was never a stock" rather than as missing weight.
+         */
+        CompositionExcluded: {
+            /** Asset Class */
+            asset_class?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Weight Pct
+             * @default 0
+             */
+            weight_pct?: number;
+        };
+        /**
+         * CompositionHolding
+         * @description One holding behind a composition bar, at the weight that bar counted it at.
+         *
+         *     ⚠ `weight_pct` IS A SHARE OF THE AXIS TOTAL, NOT OF THE PORTFOLIO — Σ over a bucket IS that
+         *     bucket's `portfolio_pct`, exactly. The sector axis divides by the equity sleeve and the other
+         *     two by every long position, so the SAME holding carries different weights on different axes and
+         *     that is correct. See `_airs_portfolio_analysis._axis_holdings`.
+         *
+         *     ⚠ IT IS ALSO NOT THE ATTRIBUTION TABLE'S WEIGHT, AND THE TWO ARE BOTH RIGHT. Attribution drops
+         *     funds, cash and anything it could not price, then renormalises what remains to 100% and weights
+         *     it by the position's value when the window OPENED. Measured on Bustelberg Offensief:
+         *     Technology reads 36% here and 39.1% there. Neither is a rounding error and neither is wrong —
+         *     they are shares of different denominators, which is precisely what this list exists to show.
+         */
+        CompositionHolding: {
+            /** Asset Class */
+            asset_class?: string | null;
+            /** Classified As */
+            classified_as?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /**
+             * Via Names
+             * @default []
+             */
+            via_names?: string[];
+            /**
+             * Weight Pct
+             * @default 0
+             */
+            weight_pct?: number;
         };
         /** CorrelationRequest */
         CorrelationRequest: {
@@ -9478,10 +9559,23 @@ export interface components {
         };
         /** PortfolioAnalysisAxis */
         PortfolioAnalysisAxis: {
+            /** Attributable Pct */
+            attributable_pct?: number | null;
             /** Axis */
             axis: string;
+            /** Basis */
+            basis?: string | null;
+            /**
+             * Excluded
+             * @default []
+             */
+            excluded?: components["schemas"]["CompositionExcluded"][];
+            /** Positions */
+            positions?: number | null;
             /** Rows */
             rows: components["schemas"]["PortfolioAnalysisRow"][];
+            /** Unpriced Pct */
+            unpriced_pct?: number | null;
         };
         /**
          * PortfolioAnalysisReturns
@@ -9558,6 +9652,11 @@ export interface components {
              * @default 0
              */
             diff_pct?: number;
+            /**
+             * Holdings
+             * @default []
+             */
+            holdings?: components["schemas"]["CompositionHolding"][];
             /**
              * Portfolio Pct
              * @default 0

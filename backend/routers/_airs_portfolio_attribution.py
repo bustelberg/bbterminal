@@ -51,8 +51,13 @@ from routers._airs_portfolio_analysis import (
     _country_by_code,
     _grid,
 )
-from routers._airs_portfolio_perf import compute_holding_marks, ytd_anchor_for
+from routers._airs_portfolio_perf import ytd_anchor_for
 from routers._asset_benchmark import index_rows
+
+# ⚠ THE WEIGHTING BASIS IS SHARED WITH THE COMPOSITION CHARTS, NOT DUPLICATED HERE. Both read
+# `portfolio_legs` + `split_legs`, which is what makes a sector bar and its Brinson row the same
+# number. See `_airs_attribution_basis` for what that basis is and what it excludes.
+from ._airs_attribution_basis import portfolio_legs, split_legs  # noqa: E402
 
 # Buckets that are NOT a sector bet and must never be decomposed as one.
 _NON_ATTRIBUTABLE = {FUND_BUCKET, CASH_BUCKET, UNKNOWN_BUCKET}
@@ -64,102 +69,6 @@ def _weighted(rows: list[tuple[float, float]]) -> float:
     """Weighted return of (weight, return_pct) pairs, renormalised over the weights given."""
     w = sum(x[0] for x in rows)
     return sum(x[0] * x[1] for x in rows) / w if w > 0 else 0.0
-
-
-def _model_holdings(portfolio_id: int, eff: str | None, start: str) -> list[dict]:
-    """The model's NOMINAL composition as attribution legs: weight = the design percentage,
-    return = the yfinance EUR return over `start` (`compute_holding_marks`)."""
-    pos = (supabase.table("airs_model_portfolio_position")
-           .select("isin,fonds,percentage,datum")
-           .eq("portfolio_id", portfolio_id).execute().data or [])
-    if eff:
-        pos = [r for r in pos if r.get("datum") == eff]
-
-    # ⚠ THE SAME EXPANSION THE COMPOSITION CHART USES, from the same function. A certificate has
-    # no price series, so unexpanded it lands in `unpriced_pct` — and an unpriced EQUITY is the
-    # dangerous exclusion this module already warns about: its sectors read as UNOWNED, and the
-    # allocation column then credits the model for avoiding a sector it holds 44% of.
-    from ._airs_lookthrough import expand_positions  # noqa: PLC0415
-
-    pos, _lt = expand_positions(portfolio_id, eff, pos)
-    held = sorted({r["isin"] for r in pos if r.get("isin")})
-    marks = compute_holding_marks(held, start)
-    out: list[dict] = []
-    for r in pos:
-        isin = r.get("isin")
-        m = marks.get(isin) if isin else None
-        out.append({
-            "isin": isin,
-            "weight_pct": float(r.get("percentage") or 0),
-            "return_pct": None if not isin else (m or {}).get("return_pct"),
-            "airs_name": r.get("fonds"),
-            "is_cash": not isin,
-        })
-    return out
-
-
-def _book_holdings(portfolio_id: int) -> list[dict] | None:
-    """The paired AIRS BOOK as attribution legs: weight = the START-of-window EUR value (as a % of
-    the book), return = the VOLK start->current EUR PRICE return. None when no book is paired.
-
-    ⚠ THE WEIGHT IS THE BEGINWAARDE, NOT THE HUIDIGE WAARDE. Weighting a window's return by the
-    CURRENT value overweights the winners (a holding that doubled now carries ~2x the share it
-    started with), which retroactively inflates the portfolio return — the same look-ahead bias
-    the benchmark avoids with start-of-window cap weights. Measured on AITopSelectie: current-
-    weighting read +58.75% against the book's true +44.99% price return. Start-weighting reproduces
-    the realised return exactly (Sigma start_i*ret_i / Sigma start_i = (Sigma cur - Sigma start) /
-    Sigma start). A holding with no Beginwaarde was not held when the window opened (bought during
-    the year), so it has weight 0 and drops out — correct for a 1 Jan-anchored attribution.
-
-    The per-holding return is a price return (no income) — which is exactly what makes it
-    comparable to the benchmark's price return in the Brinson identity. The book's flow-aware
-    `cumulatief_rendement` is the headline (the Return tile), NOT the attributable sleeve, so the
-    two deliberately differ (`attributable_pct` / `excluded_return_pct` already say by how much).
-    ISIN comes from the price-gated name matcher (`resolve_account_isins`) — the same bridge the
-    book weight-bars use — so a holding that fails to resolve drops out here exactly as it does there.
-    """
-    from routers._airs_account_links import list_account_links  # noqa: PLC0415
-    from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
-
-    link = next((a for a in list_account_links()["accounts"]
-                 if a.get("model_portfolio_id") == portfolio_id), None)
-    if not link:
-        return None
-    rows = resolve_account_isins(link["portefeuille"]).get("rows") or []
-
-    # ⚠ THE SAME EXPANSION THE COMPOSITION CHART APPLIES TO THIS SIDE. The modal drives BOTH from
-    # `source='book'`, so leaving this unexpanded put the two straight into contradiction: the
-    # sector bar read Technology 35% while clicking it listed ZERO holdings, because the book is
-    # nine certificates and none of them is a technology stock. A chart and its own drill-down
-    # disagreeing is worse than either being wrong alone — it tells the reader one of them is
-    # lying and gives them no way to tell which.
-    from ._airs_portfolio_analysis import _expand_book_rows  # noqa: PLC0415  (cycle at import)
-
-    rows = _expand_book_rows(rows)
-    total = sum(float(r.get("start_value_eur") or 0) for r in rows) or 1.0
-    out: list[dict] = []
-    for r in rows:
-        start_val = float(r.get("start_value_eur") or 0)
-        cur = float(r.get("current_value_eur") or 0)
-        is_cash = r.get("asset_class") == "Cash" or not r.get("isin")
-        ret = None
-        if not is_cash and start_val > 0:
-            ret = (cur / start_val - 1.0) * 100.0
-        out.append({
-            "isin": r.get("isin"),
-            "weight_pct": start_val / total * 100.0,    # START-of-window (Beginwaarde) weight
-            "return_pct": ret,
-            "airs_name": r.get("holding_name"),
-            "is_cash": is_cash,
-        })
-    return out
-
-
-def _portfolio_holdings(source: str, portfolio_id: int, eff: str | None,
-                        start: str) -> list[dict] | None:
-    """Attribution legs from the chosen source. None only when `source=book` and no book is paired."""
-    return (_book_holdings(portfolio_id) if source == "book"
-            else _model_holdings(portfolio_id, eff, start))
 
 
 def _display_name(row: dict | None, source_name: str | None) -> str | None:
@@ -240,7 +149,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     if not start:
         return {}
 
-    holdings = _portfolio_holdings(source, portfolio_id, eff, start)
+    holdings = portfolio_legs(source, portfolio_id, eff, start)
     if holdings is None:
         return {"portfolio_id": portfolio_id, "name": p["name"], "benchmark": benchmark_label,
                 "window": window, "axis": axis, "start": start, "source": source, "rows": [],
@@ -252,47 +161,15 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     codes = _country_by_code()
 
     # --- the portfolio: split into attributable and not ---------------------------------
-    attributable: list[dict] = []
-    excluded: list[dict] = []
-    total_w = 0.0
-    for h in holdings:
-        w = h["weight_pct"]
-        if w <= 0:
-            continue
-        total_w += w
-        isin = h.get("isin")
-        is_cash = h.get("is_cash", not isin)
-        row = grid.get(isin) if isin else None
-        bucket = _buckets(row, is_cash=is_cash, isin=isin, codes=codes)[idx]
-        # Cash returns a flat 0% — its drag is a FACT, so it is carried, not dropped.
-        ret = 0.0 if is_cash else h.get("return_pct")
-
-        # ⚠ TWO KINDS OF EXCLUSION, AND THEY ARE NOT THE SAME FACT.
-        #
-        #   fund / cash  — genuinely NOT a sector bet. An ETF has no sector; the benchmark's
-        #                  weight in the fund bucket is zero, so Brinson would score a world
-        #                  tracker as a sector bet. Excluding it is right and costs nothing.
-        #
-        #   UNPRICED     — a real equity, in a real sector, that we cannot price. Dropping it
-        #                  makes its sector read as UNOWNED: this model holds 6% Healthcare and,
-        #                  with that holding dropped, the table credited it +1.73pp of allocation
-        #                  for "avoiding" Healthcare. That is a false finding, not a missing one.
-        #                  It still has to be excluded (there is no return to attribute), so it is
-        #                  flagged LOUDLY instead — `unpriced_pct` + the affected buckets.
-        reason = ("cash" if bucket == CASH_BUCKET
-                  else "unpriced" if ret is None
-                  else "unclassified" if bucket == UNKNOWN_BUCKET   # funds fold in here now
-                  else None)
-        # `name` is the CANONICAL label (asset_grid, joined by ISIN) so this table and the index's
-        # speak one vocabulary; `airs_name` keeps AIRS's own label, which is what you see in AIRS
-        # itself and is the row's identity there. Display only — see `_display_name`.
-        item = {"isin": isin, "name": _display_name(row, h.get("airs_name")),
-                "airs_name": h.get("airs_name"), "weight_pct": w,
-                "return_pct": ret, "bucket": bucket, "reason": reason}
-        if reason:
-            excluded.append(item)
-        else:
-            attributable.append(item)
+    # ⚠ THE LADDER LIVES IN `_airs_attribution_basis`, NOT HERE. The composition charts build their
+    # bars from the SAME call, which is the only reason the two panels agree — see that module's
+    # header for what "attributable" means and what it costs.
+    attributable, excluded, total_w = split_legs(holdings, idx, grid, codes)
+    # `name` is the CANONICAL label (asset_grid, joined by ISIN) so this table and the index's
+    # speak one vocabulary; `airs_name` keeps AIRS's own label, which is what you see in AIRS
+    # itself and is the row's identity there. Display only — see `_display_name`.
+    for i in (*attributable, *excluded):
+        i["name"] = _display_name(i.get("grid_row"), i.get("airs_name"))
 
     # --- the benchmark ------------------------------------------------------------------
     bench, coverage = index_rows(benchmark_label, start)

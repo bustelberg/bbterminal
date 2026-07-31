@@ -11,6 +11,7 @@ import { Provenance } from '../../../lib/provenance';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
 import BucketDetailPanel from './BucketDetailPanel';
+import CompositionDataModal from './CompositionDataModal';
 import { type Basket } from './PerformanceModal';
 
 /**
@@ -41,8 +42,13 @@ const AXIS_LABEL: Record<string, string> = {
   currency: 'Currency',
 };
 
+/** ⚠ THE BASIS CHANGED (2026-07-31) AND SO DID THESE. The bars are weighted by each position's
+ *  value when the window OPENED, over the holdings that can be attributed — the same weights the
+ *  Attribution table shows, so a bar equals its own Brinson row. They are no longer "what we hold
+ *  now": a stock bought mid-window has no start value and is absent. The `Data` button states the
+ *  denominator and names everything the basis leaves out. */
 const AXIS_NOTE: Record<string, string> = {
-  sector: 'Equity holdings only. Bonds, cash and funds have no sector.',
+  sector: 'Start-of-window weights. Cash, funds and unpriced holdings have no sector.',
   region: "The issuer's domicile, else its ISIN country. Not the listing venue.",
   currency: 'The reporting currency of the company. Not the listing currency.',
 };
@@ -207,13 +213,27 @@ function Chip({ label, value, valueClass, hint }: {
   );
 }
 
-function Chart({ axis, rows, benchmark, onBucket, selected }: {
+function Chart({ axis, rows, basis, positions, attributablePct, unpricedPct, excluded, benchmark,
+  name, onBucket, selected }: {
   axis: string;
   rows: Row[];
+  /** The denominator in words, and how many positions it spans — from the server, per axis. */
+  basis?: string | null;
+  positions?: number | null;
+  /** How much of the book has a bucket on this axis. The remainder is mostly funds/bonds/cash. */
+  attributablePct?: number | null;
+  /** The part of that remainder which is a genuine hole — held, but unpriceable. */
+  unpricedPct?: number | null;
+  excluded?: Axis['excluded'];
   benchmark: string;
+  name: string;
   onBucket: (axis: string, bucket: string) => void;
   selected: string | null;
 }) {
+  // ⚠ A HEADER BUTTON, NOT A CLICK ON THE CHART BODY. The bars are ALREADY a click target — they
+  // open the per-bucket attribution panel — so making the surface around them open a second thing
+  // would put two different drill-downs a few pixels apart.
+  const [showData, setShowData] = useState(false);
   // Sector is an EQUITY-only view; a non-equity selection leaves it with no portfolio side, so say
   // so rather than draw the benchmark's sectors beside an empty portfolio.
   const sectorEmpty = axis === 'sector' && rows.every((r) => (r.portfolio_pct ?? 0) === 0);
@@ -227,8 +247,39 @@ function Chart({ axis, rows, benchmark, onBucket, selected }: {
   return (
     <section className={`bg-card border rounded-xl p-4 ${
       selected ? 'border-accent-500/40' : 'border-neutral-800/40'}`}>
-      <h4 className="text-sm font-semibold text-fg-strong">{AXIS_LABEL[axis] ?? axis}</h4>
+      <div className="flex items-baseline gap-2">
+        <h4 className="text-sm font-semibold text-fg-strong">{AXIS_LABEL[axis] ?? axis}</h4>
+        <button type="button" onClick={() => setShowData(true)}
+          title="Show every holding behind these bars, at the weight each bar counted it at — and what the percentages are a share of."
+          className="ml-auto text-[10px] px-1.5 py-0.5 rounded-md border border-neutral-800/40 text-fg-faint hover:text-accent-300 hover:border-accent-500/50 transition-colors">
+          Data
+        </button>
+      </div>
       <p className="text-[11px] text-fg-faint mt-0.5">{AXIS_NOTE[axis]}</p>
+      {/* ⚠ ONLY THE UNPRICED HOLDINGS GET A WARNING, AND THIS IS THE WHOLE DISTINCTION. A fund, a
+          bond and a cash line have no sector by definition — they are not Stocks in our own
+          classification and have their own slice of the allocation chart, so counting them as
+          weight this chart "cannot handle" turned a perfectly ordinary 13% in ETFs into what
+          looked like a defect. An unpriced STOCK is the real hole: it is missing from a bucket
+          that should contain it, which makes that bucket read low. */}
+      {(unpricedPct ?? 0) > 0.005 && (
+        <p className="text-[11px] text-warn-300 mt-0.5"
+          title="Real holdings, in real buckets, that we have no price series for. They are absent from the bars, so the buckets they belong to read lower than they are. Open Data for the names.">
+          ⚠ {unpricedPct!.toFixed(1)}% held but unpriceable — missing from these bars
+        </p>
+      )}
+      {/* Stated, not warned: how much of the book has a {axis} at all. */}
+      {attributablePct != null && attributablePct < 99.95 && (
+        <p className="text-[11px] text-fg-faint mt-0.5"
+          title="The rest is funds, bonds and cash, which have no sector — see the allocation chart above. Open Data for the names.">
+          {attributablePct.toFixed(0)}% of the book has a {AXIS_LABEL[axis]?.toLowerCase() ?? axis}
+        </p>
+      )}
+      {showData && (
+        <CompositionDataModal axis={axis} rows={rows} basis={basis} positions={positions}
+          attributablePct={attributablePct} unpricedPct={unpricedPct} excluded={excluded}
+          benchmark={benchmark} name={name} onClose={() => setShowData(false)} />
+      )}
       {sectorEmpty ? (
         <p className="text-[11px] text-fg-subtle py-8 text-center">
           Nothing to show — the current selection holds no equity, and sector is an equity-only view.
@@ -312,7 +363,7 @@ type BookHolding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
  *
  *  NO CLASS RETURN IN THE GROUP HEADER. Two returns for one class, a few points apart and both
  *  correct, is exactly the pair a reader cannot arbitrate. */
-type HoldingSortKey = 'name' | 'weight' | 'return';
+type HoldingSortKey = 'name' | 'weight' | 'weightStart' | 'return';
 
 /** Weights and returns to TWO decimals, always — including the trailing zero. A 0.4% and a 0.44%
  *  position round to the same "0.4%", and in a 172-row table that is where the small holdings live.
@@ -345,8 +396,10 @@ function PortfolioHoldings({ holdings, slices, asOf }: {
       const c = (a.name ?? '').localeCompare(b.name ?? '');
       return dir === 'asc' ? c : -c;
     }
-    const av = sortKey === 'weight' ? (a.weight_now_pct ?? 0) : a.own_return_pct;
-    const bv = sortKey === 'weight' ? (b.weight_now_pct ?? 0) : b.own_return_pct;
+    const pick = (h: BookHolding) => (sortKey === 'weight' ? (h.weight_now_pct ?? 0)
+      : sortKey === 'weightStart' ? h.weight_start_pct : h.own_return_pct);
+    const av = pick(a);
+    const bv = pick(b);
     if (av == null && bv == null) return 0;
     if (av == null) return 1;          // an unpriced holding always sorts last, both directions
     if (bv == null) return -1;
@@ -398,8 +451,24 @@ function PortfolioHoldings({ holdings, slices, asOf }: {
                     + 'same stock can be reached through several certificates, and the weights '
                     + 'shown are the sum of all of them.'} />
               </th>
+              {/* ⚠ THE COLUMN THAT RECONCILES THIS TABLE WITH THE SECTOR CHARTS. Those bars are
+                  weighted at the window's OPEN; this table was current-value only, so dividing a
+                  7.02% here by the Stocks slice and expecting the chart's 5.75% never worked —
+                  and the gap looks exactly like a bug. Both numbers now sit side by side, and the
+                  difference between them IS what the position did. */}
+              <th className={`text-right w-24 ${th}`} onClick={() => click('weightStart')}>
+                Weight (start){caret('weightStart')}
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what={'The share of the portfolio held in this instrument when the window '
+                    + 'opened — the same weight the Sector / Region / Currency charts use.'}
+                  how={'The position’s Beginwaarde ÷ the portfolio’s total Beginwaarde. Taken '
+                    + 'from the very rows those charts are built from, not recomputed. A bar on '
+                    + 'those charts is this number divided by the share of the book that has a '
+                    + 'bucket at all, since a bar excludes funds, cash and unpriced holdings. '
+                    + '0.00% means the position was bought after the window opened.'} />
+              </th>
               <th className={`text-right w-24 ${th}`} onClick={() => click('weight')}>
-                Weight{caret('weight')}
+                Weight (now){caret('weight')}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what={'The share of the portfolio held in this instrument, right now.'}
                   how={'The position’s current EUR value ÷ the portfolio’s total current EUR '
@@ -433,6 +502,11 @@ function PortfolioHoldings({ holdings, slices, asOf }: {
                     {g.rows.length}
                   </span>
                 </td>
+                {/* The class at the window's open — the denominator a reader needs to check a bar
+                    against. Summed from the rows, since the pie carries only the current figure. */}
+                <td className="py-2 text-right font-mono text-[11px] font-semibold text-fg-muted">
+                  {num2(g.rows.reduce((s, h) => s + (h.weight_start_pct ?? 0), 0))}%
+                </td>
                 <td className="py-2 text-right font-mono text-[11px] font-semibold text-fg-strong">
                   {num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}%
                 </td>
@@ -449,6 +523,15 @@ function PortfolioHoldings({ holdings, slices, asOf }: {
                   <td className="py-1.5 pr-3 font-mono text-[10px] text-fg-faint">{h.isin ?? '—'}</td>
                   <td className="py-1.5 pr-3">
                     <ViaChips names={h.via_names ?? []} />
+                  </td>
+                  {/* ⚠ A BLANK IS NOT A ZERO HERE. `null` = no ISIN to join on (cash); `0.00%` =
+                      a real fact, the position was bought after the window opened and therefore
+                      carries no weight on ANY of the composition charts. */}
+                  <td className="py-1.5 text-right font-mono text-fg-muted tabular-nums"
+                    title={h.weight_start_pct === 0
+                      ? 'Bought after the window opened — no start weight, so it is absent from the Sector / Region / Currency charts.'
+                      : undefined}>
+                    {h.weight_start_pct == null ? '—' : `${num2(h.weight_start_pct)}%`}
                   </td>
                   <td className="py-1.5 text-right font-mono text-fg tabular-nums">
                     {num2(h.weight_now_pct ?? 0)}%
@@ -814,6 +897,9 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                 <div className="grid gap-4 lg:grid-cols-3">
                   {(data.axes ?? []).map((a) => (
                     <Chart key={a.axis} axis={a.axis} rows={a.rows}
+                      basis={a.basis} positions={a.positions} name={name}
+                      attributablePct={a.attributable_pct} unpricedPct={a.unpriced_pct}
+                      excluded={a.excluded}
                       benchmark={data.benchmark ?? 'SP500'}
                       onBucket={(axis, b) => { if (isBasket) return; setWhy(null); setBucket(
                         (prev) => prev && prev.axis === axis && prev.bucket === b ? null : { axis, bucket: b }); }}

@@ -57,6 +57,23 @@ export const REPORT_LAG_DAYS = 75;
 
 export type Point = { t: number; value: number };   // t = epoch ms
 
+/**
+ * A trailing point WITH the two numbers it was divided from.
+ *
+ * ⚠ THE INPUTS RIDE ALONG RATHER THAN BEING RE-DERIVED. The drill-down has to show what the
+ * multiple was computed from, and the tempting alternative — hand it the closes and the reported
+ * series and let it re-run `reportedAt` — is a second computation of the lag rule that can
+ * disagree with the line it claims to explain. Whatever `trailingMultiples` actually divided is
+ * what the table prints. Same rule as `QuickValuationInputsModal` being handed its series.
+ */
+export type TrailingPoint = Point & {
+  /** The close this point was priced off. */
+  price: number;
+  /** The per-share figure last PUBLISHED at that date — after the reporting lag, never the row
+   *  stamped with the period end. */
+  perShare: number;
+};
+
 const ms = (iso: string) => new Date(`${iso}T00:00:00Z`).getTime();
 
 /** Rows for the first code that returns anything, oldest first. A priority list, never a union —
@@ -115,11 +132,13 @@ export function trailingMultiples(
   closes: { date: string; value: number }[],
   reported: { date: string; value: number }[],
   lagDays = REPORT_LAG_DAYS,
-): Point[] {
-  const out: Point[] = [];
+): TrailingPoint[] {
+  const out: TrailingPoint[] = [];
   for (const c of closes) {
     const v = reportedAt(reported, c.date, lagDays);
-    if (v != null && v > 0 && c.value > 0) out.push({ t: ms(c.date), value: c.value / v });
+    if (v != null && v > 0 && c.value > 0) {
+      out.push({ t: ms(c.date), value: c.value / v, price: c.value, perShare: v });
+    }
   }
   return out;
 }
@@ -138,19 +157,23 @@ export function forwardSeries(metrics: MetricRow[]): Point[] {
  * pays for every one. Weekly is past the point where the line changes shape. ⚠ It KEEPS the last
  * point unconditionally — dropping it would end the chart days short of today, which on a
  * valuation chart reads as the multiple having stopped moving.
+ *
+ * Generic over the point type so a `TrailingPoint` keeps its `price`/`perShare` through the thin —
+ * it returns the SAME objects, and typing it to `Point[]` would erase fields that are still there.
  */
-export function thin(points: Point[], everyDays = 7): Point[] {
+export function thin<T extends Point>(points: T[], everyDays = 7): T[] {
   if (points.length < 2) return points;
   const step = everyDays * 86_400_000;
-  const out: Point[] = [points[0]];
+  const out: T[] = [points[0]];
   for (const p of points) if (p.t - out[out.length - 1].t >= step) out.push(p);
   const last = points[points.length - 1];
   if (out[out.length - 1].t !== last.t) out.push(last);
   return out;
 }
 
-/** Points from `fromYear` onward — the window the panel advertises. */
-export function since(points: Point[], fromYear: number): Point[] {
+/** Points from `fromYear` onward — the window the panel advertises. Generic for the same reason
+ *  as `thin`: a filter must not narrow the type of what it lets through. */
+export function since<T extends Point>(points: T[], fromYear: number): T[] {
   const cutoff = Date.UTC(fromYear, 0, 1);
   return points.filter((p) => p.t >= cutoff);
 }

@@ -166,12 +166,15 @@ class TestBothConsumersUseIt:
     def test_analysis_and_attribution_both_call_it(self):
         import inspect
 
+        from routers import _airs_attribution_basis as basis
         from routers import _airs_portfolio_analysis, _airs_portfolio_attribution
 
         assert "expand_positions" in inspect.getsource(
             _airs_portfolio_analysis.compute_portfolio_analysis)
-        assert "expand_positions" in inspect.getsource(
-            _airs_portfolio_attribution._model_holdings)
+        # The attribution legs moved to the shared basis module (2026-07-31) — the composition
+        # charts read the same loader now, so this guard follows the code rather than the file.
+        assert _airs_portfolio_attribution.portfolio_legs is basis.portfolio_legs
+        assert "expand_positions" in inspect.getsource(basis.model_legs)
 
 
 class TestTheBookSideIsExpandedToo:
@@ -255,24 +258,28 @@ class TestEveryPathThatReadsAPortfolioExpandsIt:
     def test_all_four_loaders_expand(self):
         import inspect
 
+        from routers import _airs_attribution_basis as basis
         from routers import _airs_portfolio_analysis as A
-        from routers import _airs_portfolio_attribution as B
 
-        # The two composition paths.
+        # The two composition paths. ⚠ The sector/region/currency AXES now weigh through the
+        # shared basis loader (2026-07-31), so they expand by reading the same function the
+        # attribution table does; `_book_port_items` still backs the allocation pie + the
+        # holdings table and expands on its own.
         assert "expand_positions" in inspect.getsource(A.compute_portfolio_analysis)
         assert "_expand_book_rows" in inspect.getsource(A._book_port_items)
-        # The two attribution paths — the drill-down behind a clicked sector bar.
-        assert "expand_positions" in inspect.getsource(B._model_holdings)
-        assert "_expand_book_rows" in inspect.getsource(B._book_holdings)
+        # The two attribution paths — the drill-down behind a clicked sector bar, and now the
+        # bars themselves.
+        assert "expand_positions" in inspect.getsource(basis.model_legs)
+        assert "_expand_book_rows" in inspect.getsource(basis.book_legs)
 
     def test_the_book_expansion_has_ONE_definition(self):
-        """Attribution imports the composition's expander rather than carrying its own — two
+        """The basis module imports the composition's expander rather than carrying its own — two
         implementations of 'what does this book hold' is how the chart and the table drift."""
         import inspect
 
-        from routers import _airs_portfolio_attribution as B
+        from routers import _airs_attribution_basis as basis
 
-        src = inspect.getsource(B._book_holdings)
+        src = inspect.getsource(basis.book_legs)
         assert "from ._airs_portfolio_analysis import _expand_book_rows" in src
 
 

@@ -31,6 +31,31 @@ import asyncio
 from deps import supabase
 
 
+def _nicknames() -> dict[str, str]:
+    """The human-chosen name per account (lower-cased key) — `{}` when we cannot read them.
+
+    ⚠ A NICKNAME IS A DECORATION; A MISSING ONE MUST NOT COST THE WHOLE PAGE. `airs_account_display_name`
+    is the NEWEST table this endpoint touches, and the hosted databases are migrated by hand
+    (`npx supabase db push`), so there is always a window where deployed code is ahead of the
+    schema it reads. Unguarded, that window turned the entire portfolios overview into a 500 —
+    and, because an unhandled exception escapes the CORS middleware (see
+    `_error_middleware.cors_safe_errors`), the browser reported it as *"No 'Access-Control-Allow-Origin'
+    header"*, which sends you looking at CORS config for a schema problem.
+
+    Every other recently-added read on this path already fails open for exactly this reason —
+    `_airs_accounts._hidden_accounts`, `_live_accounts`, `_missing_reports`. This was the one
+    holdout. Falling back costs the nicknames only: the name chain drops to the model's
+    `display_name`, then AIRS's own code, which is what every row showed before this table existed.
+    """
+    try:
+        rows = (supabase.table("airs_account_display_name")
+                .select("portefeuille,display_name").limit(2000).execute().data or [])
+    except Exception:  # noqa: BLE001 — a missing table must not blank the page
+        return {}
+    return {(r["portefeuille"] or "").strip().lower(): r["display_name"]
+            for r in rows if r.get("display_name")}
+
+
 def list_overview() -> list[dict]:
     """One row per AIRS Dynamic portfolio, named by the Fixed portfolio it runs."""
     from ._airs_account_links import list_account_links  # noqa: PLC0415  (circular at import)
@@ -40,10 +65,7 @@ def list_overview() -> list[dict]:
     # ⚠ THE ACCOUNT'S OWN NICKNAME BEATS THE MODEL'S. A human typed it for THIS book; the model's
     # `display_name` names a different object and is only borrowed when nothing better exists —
     # which is also why a book paired with no model could not be named at all before.
-    nicknames = {(r["portefeuille"] or "").strip().lower(): r["display_name"]
-                 for r in (supabase.table("airs_account_display_name")
-                           .select("portefeuille,display_name").limit(2000).execute().data or [])
-                 if r.get("display_name")}
+    nicknames = _nicknames()
     models = {m["id"]: m for m in (supabase.table("airs_model_portfolio")
                                    .select("id,name,display_name,omschrijving,portfolio_type")
                                    .limit(500).execute().data or [])}

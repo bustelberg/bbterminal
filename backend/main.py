@@ -51,6 +51,7 @@ from routers import (
     universe_templates as _universe_templates_router,
 )
 from routers._auth_middleware import enforce_api_auth as _enforce_api_auth
+from routers._error_middleware import cors_safe_errors as _cors_safe_errors
 from routers.momentum._helpers import register_startup_hooks as _register_momentum_hooks
 from scheduler import register_scheduler as _register_scheduler
 
@@ -63,6 +64,17 @@ app = FastAPI()
 # call, so this is invisible to logged-in users. See routers/_auth_middleware.
 # Registered BEFORE CORS on purpose — see the CORS note below.
 app.middleware("http")(_enforce_api_auth)
+
+# Unhandled-exception → 500 RESPONSE, so the layer above can put CORS headers on it. Registered
+# AFTER the auth gate and BEFORE CORS, i.e. it wraps the gate as well as every route.
+#
+# ⚠ ORDERING ALONE CANNOT SOLVE THIS ONE, which is why it is a separate layer from the note below.
+# `CORSMiddleware` decorates a response; an exception is the absence of one, so it sails past CORS
+# to Starlette's outermost `ServerErrorMiddleware` and the 500 ships with no
+# `Access-Control-Allow-Origin`. The browser then reports a CORS block for an allow-listed origin
+# and the investigation starts in this file instead of in the handler that actually broke. See
+# routers/_error_middleware.
+app.middleware("http")(_cors_safe_errors)
 
 # CORS — added AFTER the auth gate so it is the OUTERMOST middleware. Starlette
 # runs the last-added middleware outermost, so this guarantees that an auth

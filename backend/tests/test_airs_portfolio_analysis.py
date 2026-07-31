@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import inspect
 
+import pytest
+
 from routers import _airs_portfolio_analysis as pa
 
 
@@ -211,6 +213,266 @@ class TestTheAxesAreComparable:
 
     def test_an_empty_side_does_not_divide_by_zero(self):
         assert pa._weigh([]) == {"sector": {}, "region": {}, "currency": {}}
+
+
+class TestTheBarsAreTheAttributionWeights:
+    """⚠ THE COMPOSITION BARS AND THE BRINSON ROWS ARE ONE NUMBER (2026-07-31, on request).
+
+    They used to be two. The chart divided TODAY's value by the whole equity sleeve; attribution
+    divided the value at the window's OPEN by the attributable holdings alone. Measured on
+    Bustelberg Offensief: Technology 36% against 39.1%, and ASML 7.30% against 5.75% — both
+    correct, which is precisely why it was unreadable. A reader cannot arbitrate two right answers.
+
+    The fix is structural, not arithmetic: ONE ladder (`split_legs`) and ONE denominator
+    (`renormalise`), read by both panels. These tests pin the identity and the ladder, because a
+    second implementation of "attributable" would restore the divergence silently.
+    """
+
+    GRID = {
+        # A real sector + a domicile ⇒ attributable on every axis.
+        "US1": {"isin": "US1", "name": "Alpha Tech", "sector": "Technology",
+                "domicile_country": "United States", "market_cap_currency": "USD",
+                "currency": "USD", "asset_class": "equity"},
+        "US2": {"isin": "US2", "name": "Beta Health", "sector": "Healthcare",
+                "domicile_country": "United States", "market_cap_currency": "USD",
+                "currency": "USD", "asset_class": "equity"},
+        # A FUND — folds to Unclassified on all three axes, so the ladder drops it.
+        "IE9": {"isin": "IE9", "name": "World Tracker", "sector": "etf",
+                "domicile_country": "Ireland", "market_cap_currency": "EUR",
+                "currency": "EUR", "asset_class": "etf"},
+    }
+
+    def _legs(self):
+        return [
+            {"isin": "US1", "weight_pct": 40.0, "return_pct": 10.0, "airs_name": "Alpha",
+             "is_cash": False},
+            {"isin": "US2", "weight_pct": 30.0, "return_pct": 5.0, "airs_name": "Beta",
+             "is_cash": False},
+            # A fund: real weight, dropped by the ladder — the bulk of the old 36-vs-39.1 gap.
+            {"isin": "IE9", "weight_pct": 20.0, "return_pct": 3.0, "airs_name": "Tracker",
+             "is_cash": False},
+            # Cash: carried at a flat 0% by attribution, never a sector bet.
+            {"isin": None, "weight_pct": 10.0, "return_pct": None, "airs_name": "Cash",
+             "is_cash": True},
+        ]
+
+    def _patch(self, monkeypatch, legs=None):
+        from routers import _airs_attribution_basis as basis
+
+        monkeypatch.setattr(pa, "_grid", lambda isins: self.GRID)
+        monkeypatch.setattr(pa, "_country_by_code", lambda: {"US": "United States"})
+        monkeypatch.setattr(basis, "portfolio_legs",
+                            lambda *a, **k: (legs if legs is not None else self._legs()))
+        monkeypatch.setattr(basis, "window_start", lambda *a, **k: "2026-01-01")
+
+    def test_a_bucket_weight_equals_what_brinson_would_compute(self, monkeypatch):
+        """The identity, expressed the way ATTRIBUTION expresses it (its own `p_by_bucket` lines)
+        rather than by calling the same helper twice."""
+        from routers._airs_attribution_basis import renormalise, split_legs
+
+        self._patch(monkeypatch)
+        axes = pa._basis_axes(1, "book", None, None)
+
+        for axis, idx in (("sector", 0), ("region", 1), ("currency", 2)):
+            attributable, _excluded, _total = split_legs(
+                self._legs(), idx, self.GRID, {"US": "United States"})
+            p_w_total = renormalise(attributable)
+            expected: dict[str, float] = {}
+            for i in attributable:
+                expected[i["bucket"]] = expected.get(i["bucket"], 0.0) + \
+                    i["weight_pct"] / p_w_total * 100.0
+            assert axes[axis]["weights"] == pytest.approx(expected)
+
+    def test_the_fund_and_the_cash_are_gone_and_the_rest_is_renormalised(self, monkeypatch):
+        """40 + 30 of 70 attributable, not of 100 — which is exactly why the sector bar rises when
+        it adopts this basis."""
+        self._patch(monkeypatch)
+        axes = pa._basis_axes(1, "book", None, None)
+        w = axes["sector"]["weights"]
+        assert w["Technology"] == pytest.approx(40.0 / 70.0 * 100.0)
+        assert w["Healthcare"] == pytest.approx(30.0 / 70.0 * 100.0)
+        assert sum(w.values()) == pytest.approx(100.0)
+
+    def test_the_dropped_weight_is_REPORTED_not_swallowed(self, monkeypatch):
+        """⚠ THE COST OF THIS BASIS, MADE VISIBLE. The fund and the cash are 30% of the book and
+        they are not on the chart. A percentage that quietly loses weight is the failure the
+        coverage floors elsewhere exist to stop, so the axis carries both the share it speaks for
+        and the names behind the gap."""
+        self._patch(monkeypatch)
+        axes = pa._basis_axes(1, "book", None, None)
+        assert axes["sector"]["attributable_pct"] == pytest.approx(70.0)
+        reasons = {e["isin"]: e["reason"] for e in axes["sector"]["excluded"]}
+        assert reasons == {"IE9": "unclassified", None: "cash"}
+
+    def test_a_fund_or_a_cash_line_is_NOT_counted_as_a_gap(self, monkeypatch):
+        """⚠ THE DISTINCTION THAT KEEPS THE WARNING MEANINGFUL. A fund has no sector BY DEFINITION
+        and is not a stock in our own classification; so does cash. Counting them as weight the
+        chart 'cannot handle' put an alarm on a perfectly ordinary 13%-in-ETFs portfolio, which is
+        how a warning stops being read. `unpriced_pct` counts only the real hole."""
+        self._patch(monkeypatch)          # 20% fund + 10% cash, nothing unpriced
+        axes = pa._basis_axes(1, "book", None, None)
+        assert axes["sector"]["unpriced_pct"] == pytest.approx(0.0)
+        assert axes["sector"]["attributable_pct"] == pytest.approx(70.0)
+
+    def test_only_an_unpriced_holding_raises_the_gap(self, monkeypatch):
+        legs = [
+            {"isin": "US1", "weight_pct": 60.0, "return_pct": 10.0, "airs_name": "Alpha",
+             "is_cash": False},
+            {"isin": "US2", "weight_pct": 25.0, "return_pct": None, "airs_name": "Beta",
+             "is_cash": False},
+            {"isin": "IE9", "weight_pct": 15.0, "return_pct": 3.0, "airs_name": "Tracker",
+             "is_cash": False},
+        ]
+        self._patch(monkeypatch, legs)
+        axes = pa._basis_axes(1, "book", None, None)
+        # The 15% fund is an answer; only the 25% unpriced equity is a hole.
+        assert axes["sector"]["unpriced_pct"] == pytest.approx(25.0)
+        assert axes["sector"]["attributable_pct"] == pytest.approx(60.0)
+
+    def test_the_excluded_rows_carry_the_class_we_already_store(self, monkeypatch):
+        """So a fund can be shown as "Equity ETF — has no sector" rather than as the ladder's own
+        word "unclassified", which reads as our data having failed."""
+        legs = [{"isin": "US1", "weight_pct": 60.0, "return_pct": 10.0, "airs_name": "Alpha",
+                 "is_cash": False},
+                {"isin": "IE9", "weight_pct": 40.0, "return_pct": 3.0, "airs_name": "Tracker",
+                 "is_cash": False, "asset_class": "Equity ETF"}]
+        self._patch(monkeypatch, legs)
+        axes = pa._basis_axes(1, "book", None, None)
+        assert [(e["isin"], e["asset_class"]) for e in axes["sector"]["excluded"]] \
+            == [("IE9", "Equity ETF")]
+
+    def test_an_unpriceable_holding_is_excluded_and_NAMED(self, monkeypatch):
+        """⚠ THE DANGEROUS EXCLUSION. A real equity in a real sector that we cannot price vanishes
+        from the bar, and its sector then reads as UNOWNED — a false finding, not a missing one.
+        It has to go (there is no return), so it must be named."""
+        legs = [
+            {"isin": "US1", "weight_pct": 60.0, "return_pct": 10.0, "airs_name": "Alpha",
+             "is_cash": False},
+            {"isin": "US2", "weight_pct": 40.0, "return_pct": None, "airs_name": "Beta",
+             "is_cash": False},
+        ]
+        self._patch(monkeypatch, legs)
+        axes = pa._basis_axes(1, "book", None, None)
+        assert axes["sector"]["weights"] == {"Technology": pytest.approx(100.0)}
+        assert [(e["isin"], e["reason"]) for e in axes["sector"]["excluded"]] == [("US2", "unpriced")]
+        assert axes["sector"]["attributable_pct"] == pytest.approx(60.0)
+
+    def test_a_midwindow_purchase_carries_no_weight_and_is_not_called_an_exclusion(self, monkeypatch):
+        """A holding bought during the window has no Beginwaarde, so its weight is 0. It is absent
+        from the chart — the sharp edge of this basis — but it is NOT listed as excluded weight,
+        because there is no percentage that was taken away from the reader."""
+        legs = [
+            {"isin": "US1", "weight_pct": 100.0, "return_pct": 10.0, "airs_name": "Alpha",
+             "is_cash": False},
+            {"isin": "US2", "weight_pct": 0.0, "return_pct": 5.0, "airs_name": "Bought in March",
+             "is_cash": False},
+        ]
+        self._patch(monkeypatch, legs)
+        axes = pa._basis_axes(1, "book", None, None)
+        assert axes["sector"]["weights"] == {"Technology": pytest.approx(100.0)}
+        assert axes["sector"]["excluded"] == []
+        assert axes["sector"]["attributable_pct"] == pytest.approx(100.0)
+
+    def test_the_class_filter_narrows_numerator_and_denominator_together(self, monkeypatch):
+        """Filtering one and not the other stops the bars summing to 100, and every bar then
+        silently means something else."""
+        legs = [
+            {"isin": "US1", "weight_pct": 40.0, "return_pct": 10.0, "airs_name": "Alpha",
+             "is_cash": False, "asset_class": "Equity"},
+            {"isin": "US2", "weight_pct": 30.0, "return_pct": 5.0, "airs_name": "Beta",
+             "is_cash": False, "asset_class": "Bonds"},
+        ]
+        self._patch(monkeypatch, legs)
+        axes = pa._basis_axes(1, "book", None, "Equity")
+        assert axes["sector"]["weights"] == {"Technology": pytest.approx(100.0)}
+
+    def test_no_book_means_no_basis_rather_than_an_empty_chart(self, monkeypatch):
+        from routers import _airs_attribution_basis as basis
+
+        monkeypatch.setattr(basis, "portfolio_legs", lambda *a, **k: None)
+        monkeypatch.setattr(basis, "window_start", lambda *a, **k: "2026-01-01")
+        assert pa._basis_axes(1, "book", None, None) is None
+
+
+class TestTheHoldingsTableReconcilesWithTheBars:
+    """⚠ THE THIRD WEIGHT, AND WHY IT HAD TO EXIST.
+
+    The Holdings table showed ASML at 7.02% (current value, whole book) while the Technology bar
+    showed 5.75% (Beginwaarde, attributable holdings). The natural check — divide 7.02 by the
+    84.94% Stocks slice and expect the bar — gives 8.26% and fails, and a failed check on two
+    correct numbers reads exactly like a bug. ASML had simply outgrown the book by ~40%.
+
+    `weight_start_pct` closes it by being the SAME NUMERATOR the bars use, lifted off the same
+    legs. Recomputing it "the same way" is the one thing that would reopen the gap.
+    """
+
+    def test_the_start_weight_comes_from_the_axes_own_legs(self):
+        src = inspect.getsource(pa._basis_axes)
+        assert '"_start_weights"' in src
+        assert 'leg["weight_pct"] for leg in legs' in src, \
+            "must be lifted off the legs, never recomputed from the book rows"
+
+    def test_it_is_joined_by_isin_onto_the_holdings(self):
+        holdings = [{"isin": "US1", "weight_now_pct": 7.02},
+                    {"isin": "US2", "weight_now_pct": 3.0}]
+        out = pa._with_start_weights(holdings, {"US1": 5.0, "US2": 2.5})
+        assert [h["weight_start_pct"] for h in out] == [5.0, 2.5]
+        assert [h["weight_now_pct"] for h in out] == [7.02, 3.0], "the now-weight is untouched"
+
+    def test_a_row_with_no_isin_gets_None_not_zero(self):
+        """Cash HAS a start value; we simply have no key to reach it by. A 0.00% would state
+        something false about a real position — and 0.00% already means something else here."""
+        out = pa._with_start_weights([{"isin": None, "weight_now_pct": 0.14}], {"US1": 5.0})
+        assert out[0]["weight_start_pct"] is None
+
+    def test_a_midwindow_purchase_keeps_its_meaningful_zero(self, monkeypatch):
+        """0.00% is a FACT: bought after the window opened, so it carries no weight on any
+        composition chart. It must survive the join rather than being nulled with the cash rows."""
+        out = pa._with_start_weights([{"isin": "US2", "weight_now_pct": 8.0}], {"US2": 0.0})
+        assert out[0]["weight_start_pct"] == 0.0
+
+
+class TestTheDrillDownSumsToItsBar:
+    """`_axis_holdings` is what makes a composition bar checkable, and its whole value is ONE
+    identity: the rows behind a bucket add up to that bucket's `portfolio_pct`, exactly.
+
+    ⚠ THE REASON THIS MATTERS IS A MEASURED CONFUSION, NOT A HYPOTHETICAL. Technology reads 36% on
+    this chart and 39.1% in the Brinson table for the same portfolio, because attribution drops
+    funds/cash/unpriced names and renormalises what is left. Both are right. But the composition
+    chart shipped aggregates only, so a reader could inspect the attribution number and not this
+    one — and an un-inspectable figure beside an inspectable one that disagrees reads as a bug.
+
+    A drill-down that lands NEAR its bar would be worse than none: it turns one unexplained number
+    into two. So the division happens once, here, and the rows are handed out already divided.
+    """
+
+    ITEMS = [(50.0, ("Tech", "NA", "USD")), (25.0, ("Tech", "EU", "EUR")),
+             (25.0, ("Health", "NA", "USD"))]
+    LABELS = [{"name": "A", "isin": "US1"}, {"name": "B", "isin": "NL2"},
+              {"name": "C", "isin": "US3"}]
+
+    def test_every_bucket_sums_to_its_own_weigh_percentage(self):
+        weighed = pa._weigh(self.ITEMS)
+        detail = pa._axis_holdings(self.ITEMS, self.LABELS)
+        for axis in ("sector", "region", "currency"):
+            for bucket, pct in weighed[axis].items():
+                assert abs(sum(h["weight_pct"] for h in detail[axis][bucket]) - pct) < 1e-9
+
+    def test_the_same_holding_carries_a_different_weight_per_axis_only_when_the_total_differs(self):
+        """One `items` list ⇒ one total ⇒ the same holding weighs the same on all three axes.
+        The axes diverge only because the CALLER passes a different list for `sector` (the equity
+        sleeve) than for region/currency (every long position)."""
+        d = pa._axis_holdings(self.ITEMS, self.LABELS)
+        assert d["sector"]["Health"][0]["weight_pct"] == d["region"]["EU"][0]["weight_pct"] == 25.0
+
+    def test_identity_rides_along_and_the_bucket_is_named(self):
+        d = pa._axis_holdings(self.ITEMS, self.LABELS)
+        tech = d["sector"]["Tech"]
+        assert [h["isin"] for h in tech] == ["US1", "NL2"]      # sorted by weight, largest first
+        assert {h["classified_as"] for h in tech} == {"Tech"}
+
+    def test_an_empty_side_does_not_divide_by_zero(self):
+        assert pa._axis_holdings([], []) == {"sector": {}, "region": {}, "currency": {}}
 
 
 class TestBookWeighting:

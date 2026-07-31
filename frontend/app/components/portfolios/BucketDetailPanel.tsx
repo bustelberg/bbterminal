@@ -47,6 +47,16 @@ const SORT_VAL: Record<SortKey, (h: Name) => number | string | null> = {
   contrib: (h) => h.contribution_pct ?? null,
 };
 
+/** ⚠ NAMED, BECAUSE A BARE "Weight" INVITES THE WRONG COMPARISON — and because this one used to be
+ *  a genuinely different number. Until 2026-07-31 the composition chart divided TODAY's value by
+ *  the whole equity sleeve while this panel divided the START-of-window value by the attributable
+ *  holdings: Technology read 36% there and 39.1% here, ASML 7.30% against 5.75%. Both correct,
+ *  which is what made it unarbitrable. The composition now adopts this basis, so the two agree —
+ *  the label stays because the basis is still not self-evident from a percentage. */
+const WEIGHT_HINT = 'Share of the attributable holdings (funds, cash and unpriced names removed, '
+  + 'the rest renormalised to 100%), weighted by each position\'s value when the window OPENED. '
+  + 'The composition chart is weighted the same way, so a bucket total here equals its bar.';
+
 function Holdings({ rows }: { rows: Name[] }) {
   // Sortable — click a header to toggle direction. Default: weight, largest first. Each table sorts
   // on its OWN state (your names and the index's are independent lists).
@@ -85,7 +95,9 @@ function Holdings({ rows }: { rows: Name[] }) {
               only mean "sort by the current sort". It renumbers whenever the sort changes. */}
           <th className="pr-1 text-right font-normal">#</th>
           <th className={`${th} pr-2 text-left`} onClick={() => click('name')}>Name{caret('name')}</th>
-          <th className={`${th} px-1 text-right`} onClick={() => click('weight')}>Weight{caret('weight')}</th>
+          <th className={`${th} px-1 text-right`} onClick={() => click('weight')} title={WEIGHT_HINT}>
+            Weight <span className="normal-case text-fg-subtle">(start)</span>{caret('weight')}
+          </th>
           <th className={`${th} px-1 text-right`} onClick={() => click('return')}>Return{caret('return')}</th>
           <th className={`${th} pl-1 text-right`} onClick={() => click('contrib')}>Contrib.{caret('contrib')}</th>
         </tr>
@@ -110,7 +122,7 @@ function Holdings({ rows }: { rows: Name[] }) {
                 <span className={`truncate ${h.in_both ? 'text-fg-strong font-medium' : 'text-fg-soft'}`}>{h.name ?? '—'}</span>
               </span>
             </td>
-            <td className="py-1 px-1 text-right font-mono text-fg">{(h.weight_pct ?? 0).toFixed(2)}%</td>
+            <td className="py-1 px-1 text-right font-mono text-fg" title={WEIGHT_HINT}>{(h.weight_pct ?? 0).toFixed(2)}%</td>
             <td className="py-1 px-1 text-right font-mono"><Num v={h.return_pct} /></td>
             {/* Contribution = weight × return — percentage POINTS of the basket's return, not %. */}
             <td className="py-1 pl-1 text-right font-mono"><Num v={h.contribution_pct} pp /></td>
