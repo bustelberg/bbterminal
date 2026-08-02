@@ -22,6 +22,49 @@ THE TWO FIXTURES
         observable. This is the only fixture that can catch a lookahead
         regression end-to-end.
 
+RE-BASELINED 2026-08-02 — DELIBERATELY: THE ENTRY-STALENESS GUARD
+    `expected_holdings_json` in `snapshot_829` was regenerated with
+    `capture_golden_rebalance.py --rebaseline` (frozen inputs untouched — same prices, universe,
+    volumes, config and `today`; only the engine's output moved). `trading_day` was unaffected.
+
+    A basket enters at the DECIDING BAR — the trading day strictly before the rebalance (first
+    Monday ⇒ the preceding Friday). `_price_on_or_before` will happily walk back weeks to find a
+    company its last close, so a name whose series stopped earlier was entered at a stale price and
+    every session between that close and the anchor was booked as return the strategy never earned
+    (measured live: entry 140.90 on 2026-07-28, mark 143.83 on 07-31, +2.08% on a position opened
+    on the 31st). Such a name is now dropped from selection — `MAX_ENTRY_GAP_SESSIONS = 1`, counted
+    in SESSIONS so a single-day market closure is forgiven and three missed sessions are not.
+
+    Effect on this fixture: ONE candidate of 1,478 — EchoStar Corp, last close 2026-06-30, three
+    sessions behind the 2026-07-03 anchor — and it moved 6 of 24 holdings and swapped a whole
+    sector (Technology → Capital Goods).
+
+    ⚠ THAT LEVERAGE IS THE FINDING, NOT A BUG IN THE GUARD. Scores are min-max normalized ACROSS
+    THE POOL and sector ranks are means of them, so one extreme outlier rescales every company's
+    score. A stale, unbuyable name was setting the scale that chose the sectors. Note the anchor
+    here is Fri 2026-07-03, the US Independence Day observance: the whole US market has gap=1 (921
+    of 1,479 names) and is correctly kept — this fixture is the strictest test of the tolerance.
+
+RE-BASELINED 2026-07-31 — DELIBERATELY, AND HERE IS THE REASON
+    `expected_holdings_json` in BOTH fixtures was regenerated. The frozen INPUTS were not touched:
+    same prices, same universe, same volumes, same config, same `today`. Only the engine's output
+    changed, because the engine changed.
+
+    Sector ranking moved off the `min_price_score`-filtered pool onto every scored company.
+    `min_price_score` is a rule about which COMPANIES are worth buying; ranking sectors on the
+    survivors made it a rule about which SECTORS exist — and a biased one. On this fixture the
+    floor of 30 leaves 250 of 1,464 names, and a sector's survivor-mean rises the FEWER survivors
+    it has: Services ranked 3rd on 17 survivors of 247 (7%), against 10th of 11 over all its
+    names; Consumer Cyclical had 4 of 101. The bias is largest exactly where the sample is
+    thinnest, which is the wrong way round.
+
+    Effect on this fixture: 18 of 24 holdings change and three of four sectors change
+    (Capital Goods, Healthcare, Services, Technology -> Financial, Technology, Transportation,
+    Utilities). That size IS the distortion that was being removed, not evidence of a mistake.
+
+    ⚠ `shipped_holdings_json` was NOT re-baselined and must not be. It is the record of what
+    actually reached production under the old ranking; see `TestShippedSnapshot`.
+
 WHY A FIXTURE AND NOT THE DB
     The engine cannot be replayed off the live database. GuruFocus publishes
     some closes late, and `ingest/prices.py` writes them with their true
@@ -297,32 +340,53 @@ class TestStrictCutoff:
 class TestShippedSnapshot:
     """What actually reached the user, versus what the engine computes now.
 
-    The company SET must still match — that is the load-bearing claim, and it is
-    what a refactor could plausibly break. Intra-sector ordering is allowed to
-    drift, because late-arriving price bars legitimately change scores (see the
-    module docstring). This test documents that boundary rather than hiding it.
+    ⚠ THESE NO LONGER MATCH, BY DESIGN (2026-07-31). Until then the engine reproduced the shipped
+    snapshot exactly bar one explained drift (Bayer's late 2026-07-03 bar swapping its intra-sector
+    rank with Sartorius), and that equivalence was this class's whole point.
+
+    Then sector RANKING was moved off the `min_price_score`-filtered pool onto every scored
+    company. The floor is a rule about which COMPANIES are worth buying; ranking sectors on the
+    survivors made it a rule about which SECTORS exist — and worse, a biased one. Measured on this
+    fixture: the floor of 30 leaves 250 of 1,464 names, and the mean of a sector's survivors gets
+    HIGHER the fewer of them there are. Services was ranked 3rd on the mean of 17 survivors out of
+    247 names (7%); over all 247 it ranks 10th of 11. Consumer Cyclical: 4 survivors of 101.
+
+    So the shipped snapshot is now a record of the PRE-change strategy. It cannot be reproduced by
+    the current engine and asserting otherwise would be asserting the change never happened. What
+    it still buys us is a pinned, explained account of exactly HOW they diverge — a silent return
+    to the old sector ranking, or a further unintended change in selection, both fail here.
+
+    The equivalence guard returns on its own once a rebalance ships under the new engine and
+    `scripts/capture_golden_rebalance.py` captures it.
     """
 
-    def test_shipped_company_set_still_reproduces(self, shipped_case):
-        golden, replayed = shipped_case
-        assert _by_cid(replayed).keys() == _by_cid(golden["shipped"]).keys()
+    # Sectors the PRE-change (survivor-biased) ranking chose for snapshot 829, and the ones the
+    # unbiased ranking chooses instead. Both are recorded so the swap is legible without a rerun.
+    _PRE_CHANGE_SECTORS = {"Capital Goods", "Healthcare", "Services", "Technology"}
 
-    def test_shipped_weights_match_at_persisted_precision(self, shipped_case):
+    def test_the_shipped_snapshot_is_pre_change_and_no_longer_reproduces(self, shipped_case):
+        """The divergence is real and expected — if this ever passes as 'identical' again, the
+        sector-ranking change has been reverted without anyone saying so."""
         golden, replayed = shipped_case
-        got = _by_cid(replayed)
-        for cid, h in _by_cid(golden["shipped"]).items():
-            assert round(got[cid]["weight"], _SHIPPED_WEIGHT_DP) == h["weight"]
+        assert _by_cid(replayed).keys() != _by_cid(golden["shipped"]).keys()
 
-    def test_known_drift_is_confined_to_bayer_and_its_rank_partner(self, shipped_case):
-        """Pin the ONE explained discrepancy so a new, unexplained one fails."""
+    def test_the_shipped_snapshot_still_shows_the_survivor_biased_sectors(self, shipped_case):
+        """The historical record itself is unchanged — this pins the fixture, not the engine."""
+        golden, _replayed = shipped_case
+        assert {h["sector"] for h in golden["shipped"]} == self._PRE_CHANGE_SECTORS
+
+    def test_the_engine_no_longer_picks_on_the_filtered_pool(self, shipped_case):
+        """The specific claim behind the change: the sectors chosen now differ from the ones the
+        floor-filtered ranking chose. A revert makes these equal again and fails."""
+        _golden, replayed = shipped_case
+        assert {h["sector"] for h in replayed} != self._PRE_CHANGE_SECTORS
+
+    def test_the_portfolio_shape_is_unchanged(self, shipped_case):
+        """Whatever moved, it moved WITHIN the strategy's shape: still 4 sectors, still the same
+        holding count and equal weights. A change that also altered the shape would be a different
+        (unrequested) change hiding inside this one."""
         golden, replayed = shipped_case
-        got, shipped = _by_cid(replayed), _by_cid(golden["shipped"])
-        drifted = {
-            cid for cid in shipped
-            if got[cid]["score"] != shipped[cid]["score"]
-            or got[cid]["company_rank"] != shipped[cid]["company_rank"]
-        }
-        # 3463 = Bayer AG (late 2026-07-03 bar), 5025 = the name it swapped with.
-        assert drifted == {3463, 5025}, (
-            f"unexplained drift vs the shipped snapshot: {sorted(drifted - {3463, 5025})}"
-        )
+        assert len(replayed) == len(golden["shipped"])
+        assert len({h["sector"] for h in replayed}) == len(self._PRE_CHANGE_SECTORS)
+        weights = {round(h["weight"], _SHIPPED_WEIGHT_DP) for h in replayed}
+        assert len(weights) == 1, f"holdings are no longer equal-weighted: {weights}"

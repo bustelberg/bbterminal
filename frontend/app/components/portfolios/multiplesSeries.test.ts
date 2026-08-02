@@ -103,6 +103,44 @@ describe('trailingMultiples', () => {
   it('emits nothing before the first report — a gap, not a guess', () => {
     expect(trailingMultiples([{ date: '2015-06-01', value: 100 }], fy)).toEqual([]);
   });
+
+  // The drill-down prints these two columns beside the multiple. They are carried rather than
+  // re-derived precisely so the table cannot compute a different denominator than the line did.
+  it('carries the close and the per-share figure it divided by', () => {
+    const out = trailingMultiples(closes, fy);
+    expect(out.map((p) => [p.price, p.perShare])).toEqual([[100, 10], [120, 10]]);
+  });
+
+  it('⚠ the carried per-share is the LAGGED one, not the row stamped at that date', () => {
+    // FY2016 closes 2016-12-31 but is not public until ~75 days later, so a close on 2017-01-05
+    // must still divide by — and REPORT — the FY2015 figure. A drill-down that showed the newer
+    // number beside the older multiple would look like an arithmetic bug in the chart.
+    const out = trailingMultiples(
+      [{ date: '2017-01-05', value: 100 }],
+      [{ date: '2015-12-31', value: 10 }, { date: '2016-12-31', value: 20 }],
+    );
+    expect(out).toEqual([{ t: Date.UTC(2017, 0, 5), value: 10, price: 100, perShare: 10 }]);
+  });
+});
+
+describe('thin / since keep the carried inputs', () => {
+  // Both are pass-through filters over the same objects; typing them to `Point[]` would erase
+  // fields that are still on the values at runtime, and the drill-down reads them AFTER both.
+  const pts = trailingMultiples(
+    [{ date: '2016-01-04', value: 100 }, { date: '2016-01-05', value: 110 },
+      { date: '2016-03-01', value: 120 }],
+    [{ date: '2015-06-30', value: 10 }],
+  );
+
+  it('thin', () => {
+    expect(thin(pts).every((p) => p.price != null && p.perShare != null)).toBe(true);
+  });
+
+  it('since', () => {
+    const kept = since(pts, 2016);
+    expect(kept.length).toBe(pts.length);
+    expect(kept[0].perShare).toBe(10);
+  });
 });
 
 describe('forwardSeries — published, not computed', () => {

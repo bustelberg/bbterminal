@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 from deps import supabase
 
-from .runlog import _Throttle, _now_utc_iso, _update_run
+from .runlog import _Throttle, _now_utc_iso, _update_run, log_step
 
 
 def _run_momentum_phase(
@@ -148,6 +148,12 @@ def _run_momentum_phase(
                 f"{'rebalancing' if do_rebalance else 'price-updating'}: {strategy_name}…"
             ),
         )
+        log_step(
+            run_id,
+            f"[{idx}/{total}] {strategy_name} — {kind} "
+            f"(frequency {frequency or '—'}, next_due {str(next_due_iso)[:10] or '—'})",
+            phase="momentum",
+        )
 
         entry: dict = {
             "strategy_id": strategy_id,
@@ -207,6 +213,13 @@ def _run_momentum_phase(
                         entry["snapshot_id"] = snapshot_id
                         entry["holdings_count"] = len(pu.get("holdings") or [])
                         entry["latest_price_date"] = pu.get("latest_price_date")
+                        log_step(
+                            run_id,
+                            f"  re-priced {entry['holdings_count']} held position(s) through "
+                            f"{pu.get('latest_price_date')} → snapshot #{snapshot_id}",
+                            phase="momentum",
+                        )
+                        _log_holdings(run_id, strategy_name, snapshot_id)
                 # Bump last_run_at (but NOT next_due_at — the strategy
                 # didn't actually rebalance, it just got re-priced).
                 supabase.table("scheduled_strategy").update({
@@ -223,6 +236,8 @@ def _run_momentum_phase(
                     "[pipeline.momentum] run_id=%s strategy=%s price_update failed: %s\n%s",
                     run_id, strategy_name, msg, tb,
                 )
+                log_step(run_id, f"  {strategy_name} price-update FAILED: {msg}",
+                         level="error", phase="momentum")
 
             summaries.append(entry)
             _update_run(run_id, momentum_summary=summaries)
@@ -264,6 +279,16 @@ def _run_momentum_phase(
             latest_price_date: str | None = None
 
             base_hash = _sel_hash(req)
+            log_step(
+                run_id,
+                f"  config: universe={req.universe_label or req.index_universe or '—'}, "
+                f"weekday={getattr(req, 'rebalance_weekday', 0)}, "
+                f"top {req.top_n_sectors} sectors × {req.top_n_per_sector} per sector, "
+                f"max {req.max_companies}, selection={req.selection_mode}, "
+                f"etf_overlay={'yes' if cfg.get('etf_overlay') else 'no'}, "
+                f"cash={float(cfg.get('cash_pct') or 0.0):.0%}, selection hash {base_hash}",
+                phase="momentum",
+            )
             if base_hash in base_by_hash:
                 # Another due strategy this run already computed this exact
                 # selection (they differ only by ETF overlay / cash). Clone its
@@ -279,6 +304,13 @@ def _run_momentum_phase(
                 _update_run(run_id, current_message=(
                     f"Strategy {idx} of {total} · reusing shared selection for "
                     f"{strategy_name} (same picks as another strategy)…"))
+                log_step(
+                    run_id,
+                    f"  reusing the selection already computed this run for hash {base_hash} "
+                    f"({holdings_count} holdings) — identical signal/universe config, only the "
+                    "ETF overlay + cash differ, and those are applied per-strategy below",
+                    phase="momentum",
+                )
             else:
                 msg_throttle = _Throttle()
 
@@ -294,19 +326,39 @@ def _run_momentum_phase(
                         t = evt.get("type")
                         if t == "progress":
                             m = evt.get("message")
+                            # The run ROW is throttled (~1/s, one overwritten
+                            # field); the transcript is not — every computation
+                            # step the engine announces lands in it, which is the
+                            # difference between "Running…" and knowing which
+                            # stage a slow rebalance is actually in.
+                            if m:
+                                log_step(run_id, f"    {m}", phase="momentum")
                             if m and msg_throttle.should_write():
                                 await asyncio.to_thread(
                                     _update_run,
                                     run_id,
                                     current_message=f"[{idx}/{total} {strategy_name}] {m}",
                                 )
+                        elif t == "warning":
+                            wm = evt.get("message")
+                            if wm:
+                                log_step(run_id, f"    ⚠ {wm}", level="warn", phase="momentum")
                         elif t == "current_portfolio":
                             payload = evt.get("data") or {}
                             snapshot_id = payload.get("snapshot_id")
                             holdings_count = len(payload.get("holdings") or [])
                             latest_price_date = payload.get("latest_price_date")
+                            log_step(
+                                run_id,
+                                f"  selected {holdings_count} holdings as of "
+                                f"{payload.get('as_of_date')} (prices through "
+                                f"{latest_price_date}), snapshot #{snapshot_id}",
+                                phase="momentum",
+                            )
                         elif t == "error":
                             stream_err = evt.get("message") or "unknown error"
+                            log_step(run_id, f"  ERROR: {stream_err}", level="error",
+                                     phase="momentum")
 
                 asyncio.run(_drain())
 
@@ -375,36 +427,26 @@ def _run_momentum_phase(
                     run_id, strategy_name, type(e).__name__, e,
                 )
 
-            # Blended variant: append the ETF overlay holdings (negative
-            # company_id) to the freshly-rebalanced stock picks, scale the
-            # stock weights to the strategy sleeve, and recompute the
-            # blended period return. The daily price_update job re-prices
-            # both companies and ETFs thereafter.
-            if cfg.get("etf_overlay"):
+            # Sleeves: scale the freshly-rebalanced stock picks to the strategy's
+            # share of the book, append one ETF holding (negative company_id) per
+            # overlay entry and the flat 0%-return cash holding, and recompute the
+            # blended period return. ONE writer, shared with the hand edit
+            # (`PATCH …/sleeves`), so a rebalance and an edit cannot produce two
+            # different books from the same config. The daily price_update job
+            # re-prices companies and ETFs thereafter.
+            cash_pct = float(cfg.get("cash_pct") or 0.0)
+            if cfg.get("etf_overlay") or cash_pct > 0:
                 try:
-                    new_count = _apply_etf_overlay_to_snapshot(
-                        int(snapshot_id), cfg["etf_overlay"]
+                    new_count = _apply_sleeves_to_snapshot(
+                        int(snapshot_id),
+                        etf_overlay=cfg.get("etf_overlay") or [],
+                        cash_pct=cash_pct,
                     )
                     if new_count is not None:
                         holdings_count = new_count
                 except Exception as e:
                     log.warning(
-                        "[pipeline.momentum] run_id=%s strategy=%s ETF overlay failed: %s: %s",
-                        run_id, strategy_name, type(e).__name__, e,
-                    )
-
-            # Cash sleeve: scale every holding (stocks + any ETF overlay) by
-            # (1-cash) and append a flat 0%-return cash holding, so the reported
-            # weights + return pick up the cash drag. Sits on top of the overlay.
-            cash_pct = float(cfg.get("cash_pct") or 0.0)
-            if cash_pct > 0:
-                try:
-                    n_cash = _apply_cash_to_snapshot(int(snapshot_id), cash_pct)
-                    if n_cash is not None:
-                        holdings_count = n_cash
-                except Exception as e:
-                    log.warning(
-                        "[pipeline.momentum] run_id=%s strategy=%s cash sleeve failed: %s: %s",
+                        "[pipeline.momentum] run_id=%s strategy=%s sleeves failed: %s: %s",
                         run_id, strategy_name, type(e).__name__, e,
                     )
 
@@ -416,6 +458,10 @@ def _run_momentum_phase(
                 "[pipeline.momentum] run_id=%s strategy=%s snapshot=%s holdings=%s",
                 run_id, strategy_name, snapshot_id, holdings_count,
             )
+            # THE ANSWER THE RUN EXISTS TO PRODUCE — itemised, after the ETF
+            # overlay and the cash sleeve, i.e. the book as it will actually be
+            # held. A count ("24 holdings") is a receipt, not a result.
+            _log_holdings(run_id, strategy_name, snapshot_id)
         except Exception as e:
             msg = f"{type(e).__name__}: {e}"
             tb = _traceback.format_exc()
@@ -426,6 +472,7 @@ def _run_momentum_phase(
                 "[pipeline.momentum] run_id=%s strategy=%s failed: %s\n%s",
                 run_id, strategy_name, msg, tb,
             )
+            log_step(run_id, f"  {strategy_name} FAILED: {msg}", level="error", phase="momentum")
 
         summaries.append(entry)
         # Persist incremental progress so the UI sees each strategy
@@ -435,6 +482,54 @@ def _run_momentum_phase(
     if errors:
         raise RuntimeError(
             f"{len(errors)} of {total} strategies failed: " + " | ".join(errors[:3])
+        )
+
+
+def _log_holdings(run_id: int, strategy_name: str, snapshot_id: int | None) -> None:
+    """Itemise a finished snapshot's book into the run transcript.
+
+    Read back from the SNAPSHOT rather than from the in-memory selection: the ETF
+    overlay and the cash sleeve rewrite the weights after the compute returns, so
+    the selection the engine handed back is NOT the book that got stored. Printing
+    the earlier one would be a transcript of a portfolio nobody holds.
+
+    Best-effort — never let a display read fail the strategy that succeeded."""
+    if snapshot_id is None:
+        return
+    try:
+        r = (
+            supabase.table("current_picks_snapshot")
+            .select("as_of_date, period_return_pct, holdings")
+            .eq("snapshot_id", snapshot_id).limit(1).execute()
+        )
+        row = (r.data or [{}])[0]
+        holdings = row.get("holdings") or []
+        log_step(
+            run_id,
+            f"  ▶ {strategy_name} — final book for {row.get('as_of_date')}: "
+            f"{len(holdings)} position(s), snapshot #{snapshot_id}",
+            phase="holdings",
+        )
+        for h in sorted(holdings, key=lambda x: -(x.get("weight") or 0)):
+            name = h.get("ticker") or h.get("company_name") or "?"
+            weight = (h.get("weight") or 0) * 100
+            score = h.get("score")
+            entry = h.get("entry_price_eur")
+            bits = [f"{weight:5.2f}%  {name}"]
+            if h.get("company_name") and h.get("ticker"):
+                bits.append(str(h["company_name"]))
+            if h.get("sector"):
+                bits.append(str(h["sector"]))
+            if score is not None:
+                bits.append(f"score {score}")
+            if entry is not None:
+                bits.append(f"entry €{entry}")
+            log_step(run_id, "      " + " · ".join(bits), phase="holdings")
+    except Exception as e:
+        log_step(
+            run_id,
+            f"  (could not itemise snapshot #{snapshot_id}: {type(e).__name__}: {e})",
+            level="warn", phase="holdings",
         )
 
 
@@ -485,140 +580,22 @@ def _clone_rebalance_snapshot(
     return int(ins.data[0]["snapshot_id"])
 
 
-def _apply_cash_to_snapshot(snapshot_id: int, cash_pct: float) -> int | None:
-    """Apply a cash sleeve to a stored snapshot's holdings IN PLACE: strip any
-    existing cash, scale the rest by (1-cash), append the flat 0%-return cash
-    holding, and recompute `period_return_pct` off the single source of truth.
-    Returns the new holdings count (None if the snapshot is gone). Idempotent."""
-    from momentum.portfolio_math import (  # noqa: PLC0415
-        apply_cash_allocation,
-        portfolio_eur_return_pct,
+def _apply_sleeves_to_snapshot(
+    snapshot_id: int, *, etf_overlay: list[dict], cash_pct: float,
+) -> int | None:
+    """Apply the strategy's ETF + cash sleeves to a freshly-rebalanced snapshot.
+
+    Thin delegate — the writer lives in `routers._schedule_snapshots`, beside the
+    price-update re-pricer, so the rebalance, the daily re-price and the hand
+    edit (`PATCH /api/scheduled-strategies/{id}/sleeves`) all weight the book
+    through ONE implementation. It used to be two functions here (overlay, then
+    cash) and neither renormalized the stock sleeve first, so applying them to a
+    book that already carried sleeves compounded the shrink."""
+    from routers._schedule_snapshots import apply_sleeves_to_snapshot  # noqa: PLC0415
+
+    return apply_sleeves_to_snapshot(
+        snapshot_id, etf_overlay=etf_overlay, cash_pct=cash_pct,
     )
-    snap = (
-        supabase.table("current_picks_snapshot")
-        .select("holdings")
-        .eq("snapshot_id", snapshot_id)
-        .limit(1)
-        .execute()
-    ).data
-    if not snap:
-        return None
-    holdings = apply_cash_allocation(snap[0].get("holdings") or [], cash_pct)
-    supabase.table("current_picks_snapshot").update({
-        "holdings": holdings,
-        "period_return_pct": portfolio_eur_return_pct(holdings),
-    }).eq("snapshot_id", snapshot_id).execute()
-    return len(holdings)
-
-
-def _apply_etf_overlay_to_snapshot(snapshot_id: int, etf_overlay: list[dict]) -> int | None:
-    """Rewrite a freshly-rebalanced snapshot's holdings to the BLEND: scale the
-    momentum stock picks to the strategy sleeve and append one ETF holding
-    (negative company_id) per overlay entry, priced from `benchmark_price`
-    (entry at the rebalance `as_of_date`, exit at `latest_price_date`). Recompute
-    `period_return_pct` as the weighted blend. Returns the new holdings count
-    (None if there's nothing to do)."""
-    import bisect  # noqa: PLC0415
-
-    from momentum.blend_backtest import make_etf_holding, scale_stock_weights  # noqa: PLC0415
-
-    overlay = [o for o in (etf_overlay or []) if o.get("benchmark_id")]
-    if not overlay:
-        return None
-    snap_resp = (
-        supabase.table("current_picks_snapshot")
-        .select("holdings, as_of_date, latest_price_date")
-        .eq("snapshot_id", snapshot_id)
-        .limit(1)
-        .execute()
-    )
-    if not snap_resp.data:
-        return None
-    snap = snap_resp.data[0]
-    # Already blended (idempotent) — bail if any ETF holding is present.
-    stock_holdings = [h for h in (snap.get("holdings") or []) if (h.get("company_id") or 0) >= 0]
-    as_of = str(snap.get("as_of_date") or "")[:10]
-    latest = str(snap.get("latest_price_date") or as_of)[:10]
-    # ETF entry must anchor to the SAME bar the stock sleeve entered on — the
-    # prior trading day's close the picks are anchored to (`run_current_portfolio`
-    # enters stocks at `_price_on_or_before(rebalance_date − 1)`), NOT the raw
-    # `as_of`. `as_of` is the nominal rebalance grid date, which can be a FUTURE
-    # Monday when the tick fires early (Saturday, for the upcoming Monday). Using
-    # it stamped a future ETF entry_date and priced entry against a not-yet-real
-    # (or corrupt future) benchmark bar — the SPMO +277% incident. Take the stock
-    # sleeve's actual entry_date (they all share the prior-trading-day anchor);
-    # fall back to `latest` (the freshest real close, never the future) for a
-    # pure-ETF strategy with no stock holdings.
-    stock_entry_dates = [
-        str(h.get("entry_date"))[:10] for h in stock_holdings if h.get("entry_date")
-    ]
-    entry_ref = min(stock_entry_dates) if stock_entry_dates else latest
-    if latest and entry_ref > latest:
-        entry_ref = latest  # never price entry past the latest real close
-
-    bids = [int(o["benchmark_id"]) for o in overlay]
-    meta_resp = (
-        supabase.table("benchmark")
-        .select("benchmark_id, ticker, name, sector, currency")
-        .in_("benchmark_id", bids)
-        .execute()
-    )
-    meta = {m["benchmark_id"]: m for m in (meta_resp.data or [])}
-
-    # Daily benchmark closes per id, for as-of (last-on-or-before) lookups.
-    px: dict[int, tuple[list[str], list[float]]] = {}
-    for bid in bids:
-        rows = (
-            supabase.table("benchmark_price")
-            .select("target_date, price")
-            .eq("benchmark_id", bid)
-            .lte("target_date", latest or as_of)
-            .order("target_date")
-            .execute()
-        ).data or []
-        if rows:
-            px[bid] = ([str(r["target_date"])[:10] for r in rows], [float(r["price"]) for r in rows])
-
-    def _asof(bid: int, day: str) -> float | None:
-        pair = px.get(bid)
-        if not pair or not day:
-            return None
-        ds, ps = pair
-        i = bisect.bisect_right(ds, day) - 1
-        return ps[i] if i >= 0 else None
-
-    total_etf_pct = sum(float(o.get("weight_pct") or 0.0) for o in overlay)
-    strat_w = max(0.0, 1.0 - total_etf_pct / 100.0)
-
-    etf_holdings: list[dict] = []
-    for o in overlay:
-        bid = int(o["benchmark_id"])
-        m = meta.get(bid) or {}
-        etf_holdings.append(make_etf_holding(
-            benchmark_id=bid,
-            ticker=m.get("ticker") or f"BM{bid}",
-            name=m.get("name") or m.get("ticker") or f"Benchmark {bid}",
-            sector=m.get("sector"),
-            weight=float(o.get("weight_pct") or 0.0) / 100.0,
-            entry_price=_asof(bid, entry_ref),
-            exit_price=_asof(bid, latest),
-            entry_date=entry_ref or None,
-            exit_date=latest or None,
-            currency=m.get("currency"),
-        ))
-
-    merged = scale_stock_weights(stock_holdings, strat_w) + etf_holdings
-
-    # Blended period return via the SINGLE source of truth (weighted per-holding
-    # `forward_return_pct`) — identical basis to compute_and_save_price_update.
-    from momentum.portfolio_math import portfolio_eur_return_pct  # noqa: PLC0415
-    period_return = portfolio_eur_return_pct(merged)
-
-    supabase.table("current_picks_snapshot").update({
-        "holdings": merged,
-        "period_return_pct": period_return,
-    }).eq("snapshot_id", snapshot_id).execute()
-    return len(merged)
 
 
 def _price_update_marks_sig(holdings: list[dict] | None) -> tuple:

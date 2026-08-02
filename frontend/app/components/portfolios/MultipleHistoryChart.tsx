@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
@@ -9,7 +10,8 @@ import InfoTip from '../InfoTip';
 import { Stat } from './MetricGrowthCard';
 import { paddedDomain } from './marginData';
 import { medianOf, type BASIS } from './quickValuation';
-import { align, type Point } from './multiplesSeries';
+import { align, type Point, type TrailingPoint } from './multiplesSeries';
+import MultipleHistoryModal from './MultipleHistoryModal';
 
 /**
  * THE MULTIPLE THROUGH TIME — a decade of it, at the resolution the price moves.
@@ -62,18 +64,22 @@ const FORWARD_COLOR = chartTheme.warn;         // series B — EPS basis only
 const MEDIAN_COLOR = chartTheme.axisTick;
 
 export default function MultipleHistoryChart({
-  basis: b, forward, trailing, currency, fromYear, height = 320, className = '',
+  basis: b, forward, trailing, currency, fromYear, name, isin, height = 320, className = '',
 }: {
   basis: (typeof BASIS)[keyof typeof BASIS];
   /** The vendor's published forward multiple. Empty on the FCF basis, by nature. */
   forward: Point[];
-  /** price ÷ last reported figure. */
-  trailing: Point[];
+  /** price ÷ last reported figure, each point carrying the two numbers it was divided from. */
+  trailing: TrailingPoint[];
   currency?: string | null;
   fromYear: number;
+  name?: string | null;
+  isin: string;
   height?: number;
   className?: string;
 }) {
+  // Click-to-inspect, the same affordance the two charts beside it carry.
+  const [showData, setShowData] = useState(false);
   const hasForward = forward.length > 0;
   const tVals = trailing.map((p) => p.value);
   const median = medianOf(tVals);
@@ -150,7 +156,8 @@ export default function MultipleHistoryChart({
         ) : (
           <>
             <ResponsiveContainer width="100%" height={height}>
-              <ComposedChart data={data} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}>
+              <ComposedChart data={data} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
+                style={{ cursor: 'pointer' }} onClick={() => setShowData(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
                 {/* Time, not fiscal years: the whole point of this chart is what happened BETWEEN
                     the reporting dates. Ticked at 1 January so the labels stay years. */}
@@ -206,6 +213,15 @@ export default function MultipleHistoryChart({
           </>
         )}
       </div>
+
+      {showData && (
+        // ⚠ HANDED `data` — the exact rows plotted above — plus the trailing points carrying their
+        // own inputs. Nothing is recomputed, so the table cannot disagree with the line that
+        // opened it. Same rule as `QuickValuationInputsModal`.
+        <MultipleHistoryModal rows={data} trailing={trailing} basis={b} median={median}
+          currency={currency} name={name} isin={isin} hasForward={hasForward}
+          fromYear={fromYear} onClose={() => setShowData(false)} />
+      )}
     </div>
   );
 }

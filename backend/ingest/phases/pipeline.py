@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from .acquisition import _run_acquisition_phase
 from .momentum import _run_momentum_phase, _run_smart_momentum_phase
@@ -33,7 +33,7 @@ from .prices import (
     universe_freshness,
 )
 from .prune import _run_dedupe_phase, _run_delisting_phase, _run_prune_phase
-from .runlog import _now_utc_iso, _update_run
+from .runlog import _now_utc_iso, _update_run, log_step
 from .templates import _run_templates_phase, templates_needing_refresh
 
 # Global serializer for the split pipeline. The price-update and rebalance
@@ -61,6 +61,139 @@ def _serialized(run_id: int):
         yield
     finally:
         _PIPELINE_LOCK.release()
+
+
+def _deciding_bar_for(due, today: date | None = None) -> date:
+    """The newest close the DUE strategies need in hand before they can rebalance.
+
+    Each strategy's rebalance lands on the first `rebalance_weekday` of the
+    period and is decided on the trading day STRICTLY BEFORE it — a first-Monday
+    strategy on the preceding Friday, a first-Wednesday one on the Tuesday. So
+    the requirement across a mixed set is the LATEST of their deciding bars;
+    fetching to that satisfies every one.
+
+    ONE definition of that bar, shared with the engine (`momentum.backtest.dates`)
+    and with the compute's pre-flight gate. A pipeline that fetched to a
+    different date than the gate demands would fetch diligently and still be
+    rejected."""
+    # Function-local: `momentum.backtest.dates` pulls pandas, and this module is
+    # imported at boot by `routers/ingest_runs`.
+    from momentum.backtest.dates import (  # noqa: PLC0415
+        current_rebalance_date,
+        deciding_bar,
+    )
+
+    t = today or date.today()
+    weekdays = [int(getattr(sp, "rebalance_weekday", 0) or 0) for sp in due] or [0]
+    return max(deciding_bar(current_rebalance_date(t, w)) for w in weekdays)
+
+
+def _maybe_full_refetch(run_id: int, cids: list[int], accumulated_errors: list[str]) -> None:
+    """Re-read the due universe's FULL history from the vendor, once a month,
+    before anything is selected from it.
+
+    ⚠ THE NORMAL PIPELINE CANNOT CORRECT THE PAST. It writes only bars newer than
+    what it holds, so a vendor re-scale — a split, a reverse split, a free share
+    attribution — leaves our history on the old basis for ever while new bars
+    arrive on the new one. Measured on Leonteq 2026-08-02: 173 of 1,479 companies
+    had wrong close history and 887 had wrong volume history, and one of them
+    (Worldline, 1-for-40) was sitting in the live book on a +1142% momentum for a
+    stock that had fallen 69%.
+
+    ⚠ AND A DETECTOR IS NOT ENOUGH, WHICH IS WHY THIS IS UNCONDITIONAL. Worldline's
+    seam was a 40× overnight jump — findable. Air Liquide's 1-for-10 attribution
+    re-scales by 10/11 and looks like a −9.1% day; no threshold separates it from
+    an ordinary move. The only reliable question is "vendor, what do you say every
+    bar is?", asked on a schedule.
+
+    ONCE PER CALENDAR MONTH, keyed off the DATA rather than a flag: an old bar can
+    only have a recent `recorded_at` if a full refetch wrote it (see
+    `ingest.refetch_history`). So a monthly strategy pays it on its rebalance, a
+    weekly one pays it on the first rebalance of the month, and a Force
+    re-rebalance doesn't pay it again. `REBALANCE_FULL_REFETCH=0` disables it;
+    `=force` runs it regardless of the month guard.
+
+    Never fatal: a failed refetch leaves the previously-stored history in place
+    and the rebalance proceeds on it — degraded, and said out loud, rather than
+    skipped."""
+    import os  # noqa: PLC0415
+
+    mode = os.environ.get("REBALANCE_FULL_REFETCH", "1").strip().lower()
+    if mode in ("0", "off", "false", "no"):
+        log_step(run_id, "Phase: refetch — DISABLED via REBALANCE_FULL_REFETCH",
+                 level="warn", phase="refetch")
+        return
+    try:
+        from ingest.refetch_history import refetch_full_history, refetched_this_month  # noqa: PLC0415
+
+        if mode != "force" and refetched_this_month(cids):
+            log_step(
+                run_id,
+                "Phase: refetch — skipped, a full history refetch already ran this calendar "
+                "month (set REBALANCE_FULL_REFETCH=force to re-run)",
+                phase="refetch",
+            )
+            return
+        _update_run(run_id, current_phase="refetch",
+                    current_message=f"Re-reading full price/volume history for {len(cids)} companies…")
+        log_step(
+            run_id,
+            f"Phase: refetch — asking GuruFocus for EVERY bar of {len(cids)} companies "
+            "(the only way a vendor correction to the past reaches us); writing back only "
+            "what moved",
+            phase="refetch",
+        )
+        refetch_full_history(
+            cids, apply=True,
+            on_step=lambda m, lvl: log_step(run_id, m, level=lvl, phase="refetch"),
+        )
+    except Exception as e:
+        msg = f"Full history refetch failed: {type(e).__name__}: {e}"
+        logging.getLogger(__name__).warning("[rebalance] run_id=%s %s", run_id, msg)
+        log_step(run_id, msg + " — rebalancing on the history we already hold",
+                 level="error", phase="refetch")
+        accumulated_errors.append(msg)
+
+
+def _log_universe_freshness(run_id: int, companies: list[dict], *, when: str) -> None:
+    """Transcribe how far a company set is from the deciding bar, BEFORE and AFTER
+    a fetch — the difference is the only proof the fetch achieved anything.
+
+    Names the laggards (capped, with the overflow stated), because "1,431 stale"
+    tells you to refresh and "these 2 are still stale" tells you WHICH vendor gaps
+    you are living with. Best-effort: a diagnostic must never fail the refresh."""
+    try:
+        from momentum.data._pg import load_latest_metric_dates_via_copy  # noqa: PLC0415
+
+        cids = [int(c["cid"]) for c in companies if c.get("cid") is not None]
+        required = _deciding_bar_for([])
+        close = load_latest_metric_dates_via_copy(cids, "close_price") or {}
+        vol = load_latest_metric_dates_via_copy(cids, "volume") or {}
+        if not close:
+            log_step(run_id, f"  ({when}) freshness probe unavailable — no COPY path configured",
+                     level="warn", phase="freshness")
+            return
+        by_ticker = {int(c["cid"]): f"{c.get('exchange') or '?'}:{c.get('ticker') or '?'}"
+                     for c in companies if c.get("cid") is not None}
+        anchor = required.isoformat()
+        behind = [
+            (cid, close.get(cid), vol.get(cid)) for cid in cids
+            if (close.get(cid) or "") < anchor or (vol.get(cid) or "") < anchor
+        ]
+        log_step(
+            run_id,
+            f"  ({when} the fetch) {len(cids) - len(behind)} of {len(cids)} companies have BOTH "
+            f"price and volume through {anchor}; {len(behind)} short",
+            level="info" if not behind else "warn", phase="freshness",
+        )
+        for cid, p, v in sorted(behind, key=lambda r: (r[1] or ""))[:40]:
+            log_step(run_id, f"      {by_ticker.get(cid, cid)} price={p or '—'} volume={v or '—'}",
+                     level="warn", phase="freshness")
+        if len(behind) > 40:
+            log_step(run_id, f"      … and {len(behind) - 40} more", level="warn", phase="freshness")
+    except Exception as e:  # noqa: BLE001
+        log_step(run_id, f"  ({when}) freshness probe failed: {type(e).__name__}: {e}",
+                 level="warn", phase="freshness")
 
 
 def _run_is_manual(run_id: int) -> bool:
@@ -387,17 +520,28 @@ def _run_price_update_pipeline_sync(run_id: int) -> None:
         # ── Phase: prices — held companies only ────────────────────
         held_count = 0
         _update_run(run_id, current_phase="prices", current_message="Collecting held companies…")
+        log_step(run_id, "Price-update op starting — scope is the HELD companies only", phase="start")
         try:
             held = _collect_held_companies(run_id)
             held_count = len(held)
             if held:
                 _update_run(run_id, current_message=f"Refreshing {held_count} held companies…")
+                log_step(
+                    run_id,
+                    f"Phase: prices — {held_count} held companies across the enabled strategies: "
+                    + ", ".join(f"{c.get('exchange')}:{c.get('ticker')}" for c in held[:40])
+                    + (f" … +{held_count - 40} more" if held_count > 40 else ""),
+                    phase="prices",
+                )
                 _run_prices_phase(run_id, accumulated_errors, companies_override=held)
             else:
                 _update_run(run_id, current_message="No held companies yet — nothing to price.")
+                log_step(run_id, "No held companies yet — nothing to price", level="warn",
+                         phase="prices")
         except Exception as e:
             msg = f"Held-price phase failed: {type(e).__name__}: {e}"
             log.warning("[price_update] run_id=%s %s", run_id, msg)
+            log_step(run_id, msg, level="error", phase="prices")
             accumulated_errors.append(msg)
 
         # ── Phase: benchmarks — held ETF overlays ──────────────────
@@ -409,13 +553,22 @@ def _run_price_update_pipeline_sync(run_id: int) -> None:
             n_bm = refresh_held_benchmarks(run_id)
             if n_bm:
                 _update_run(run_id, current_message=f"Refreshed {n_bm} held ETF benchmark(s).")
+            log_step(
+                run_id,
+                f"Phase: benchmarks — refreshed {n_bm} held ETF overlay series "
+                "(without this an overlay's exit price goes stale against the stocks beside it)",
+                phase="benchmarks",
+            )
         except Exception as e:
             msg = f"Held-benchmark refresh failed: {type(e).__name__}: {e}"
             log.warning("[price_update] run_id=%s %s", run_id, msg)
+            log_step(run_id, msg, level="error", phase="benchmarks")
             accumulated_errors.append(msg)
 
         # ── Phase: momentum — price-update only (no rebalances) ────
         _update_run(run_id, current_phase="momentum", current_message="Re-pricing open positions…")
+        log_step(run_id, "Phase: momentum — re-pricing each strategy's open positions (no "
+                         "rebalance; the rebalance op owns that)", phase="momentum")
         try:
             _run_momentum_phase(
                 run_id,
@@ -425,6 +578,7 @@ def _run_price_update_pipeline_sync(run_id: int) -> None:
         except Exception as e:
             msg = f"Momentum price-update phase failed: {type(e).__name__}: {e}"
             log.warning("[price_update] run_id=%s %s", run_id, msg)
+            log_step(run_id, msg, level="error", phase="momentum")
             accumulated_errors.append(msg)
 
     _finalize_run(run_id, accumulated_errors, log, tag="price_update")
@@ -449,13 +603,27 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
     """Operation 2 of the split pipeline — rebalance the DUE scheduled
     strategies (re-select holdings from the current universe).
 
-    For each strategy whose `next_due_at` has arrived: run the momentum rebalance
-    calculation against the prices ALREADY in the DB. It deliberately does NOT
-    fetch prices — that's the price-update op's / the month-end refresh's job —
-    so a rebalance just runs the calculation and can't hang on GuruFocus. A
-    cheap, NON-BLOCKING freshness probe surfaces a warning when some universe
-    prices are stale, but the rebalance always computes and the engine's 30-day
-    staleness guard drops anything too old.
+    For each strategy whose `next_due_at` has arrived: bring the strategy's
+    UNIVERSE up to the deciding bar, then run the momentum rebalance calculation
+    off the DB.
+
+    ⚠ ONCE A MONTH IT FIRST RE-READS THE UNIVERSE'S ENTIRE HISTORY from the vendor
+    (`_maybe_full_refetch`). The normal fetch can only ever ADD newer bars, so a
+    split or a free-share attribution leaves our past on the old basis — and the
+    small ones are indistinguishable from an ordinary day's move, so nothing but
+    asking finds them. A rebalance decides on 12 months of history; it is the one
+    moment that history has to be right.
+
+    ⚠ THE PRICES COME FIRST, AND THEY ARE THE UNIVERSE'S, NOT THE HOLDINGS'. The
+    price-update op keeps the ~24 held names current daily and never touches the
+    ~1,455 other candidates — which are exactly the ones a rebalance ranks. On
+    stale prices the failure is silent, not loud: the engine's 30-day staleness
+    guard DROPS those names, so the selection is made from whatever subset
+    happened to be fresh. The target is the deciding bar (the close strictly
+    before the rebalance date — first Monday → the preceding Friday), the only
+    bar the `<` cutoff ever reads, and the fetch is scoped to the names behind
+    it. Whatever is still behind afterwards (holiday, publication lag) is a
+    warning: the rebalance always computes.
 
     PER-PERIOD LOCK: a strategy is only rebalanced when it's actually DUE, so a
     period that was already decided is NOT re-decided on newer/revised data —
@@ -471,16 +639,28 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
     log = logging.getLogger(__name__)
     accumulated_errors: list[str] = []
 
+    log_step(run_id, f"Rebalance op starting (force={force})", phase="start")
     with _serialized(run_id):
         # ── Phase: plan — which strategies are due ─────────────────
         _update_run(run_id, current_phase="plan", current_message="Checking which strategies are due…")
+        log_step(run_id, "Phase: plan — deciding which strategies are due", phase="plan")
         plan = None
         try:
             plan = build_plan(datetime.now(timezone.utc))
             _update_run(run_id, plan_summary=plan.to_summary())
+            for sp in plan.strategies:
+                log_step(
+                    run_id,
+                    f"  {sp.strategy_name}: {'DUE' if sp.is_due else 'locked'} "
+                    f"({sp.due_reason}; next due {str(sp.next_due_at)[:10] or '—'}; "
+                    f"{sp.frequency or '—'} on weekday {sp.rebalance_weekday}; "
+                    f"universe {sp.label or sp.resolved_template_key or '—'})",
+                    phase="plan",
+                )
         except Exception as e:
             msg = f"Plan phase failed: {type(e).__name__}: {e}"
             log.warning("[rebalance] run_id=%s %s", run_id, msg)
+            log_step(run_id, msg, level="error", phase="plan")
             accumulated_errors.append(msg)
 
         is_manual = _run_is_manual(run_id)
@@ -506,8 +686,15 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
                     + ". Use ‘Force re-rebalance’ to re-decide the current period now."
                 )
             _update_run(run_id, current_message=msg)
+            log_step(run_id, msg, level="warn", phase="plan")
             _finalize_run(run_id, accumulated_errors, log, tag="rebalance")
             return
+        log_step(
+            run_id,
+            f"{len(due_plans)} strategy(ies) to rebalance: "
+            + ", ".join(sp.strategy_name for sp in due_plans),
+            phase="plan",
+        )
 
         # Template universes the due strategies select from (+ parents for
         # derived templates), so each re-selects from current membership. A
@@ -531,12 +718,29 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
                 run_id, current_phase="templates",
                 current_message=f"Refreshing {len(needed_keys)} universe(s) for rebalance…",
             )
+            log_step(
+                run_id,
+                f"Phase: templates — re-scraping {len(needed_keys)} universe(s): "
+                + ", ".join(sorted(needed_keys)),
+                phase="templates",
+            )
             try:
                 templates_refreshed = _run_templates_phase(run_id, only_keys=needed_keys)
+                log_step(run_id, f"  {templates_refreshed} template(s) rebuilt", phase="templates")
             except Exception as e:
                 msg = f"Templates phase failed: {type(e).__name__}: {e}"
                 log.warning("[rebalance] run_id=%s %s", run_id, msg)
+                log_step(run_id, msg, level="error", phase="templates")
                 accumulated_errors.append(msg)
+        else:
+            log_step(
+                run_id,
+                "Phase: templates — SKIPPED (manual run: recompute from the membership "
+                "already in the DB; refresh from /acwi · /leonteq to re-scrape)"
+                if is_manual else
+                "Phase: templates — nothing to refresh (no template-managed universe)",
+                phase="templates",
+            )
 
         # ── Phase: dedupe — only when a template actually rebuilt ──
         if templates_refreshed:
@@ -548,14 +752,29 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
                 log.warning("[rebalance] run_id=%s %s", run_id, msg)
                 accumulated_errors.append(msg)
 
-        # ── Freshness WARNING (non-blocking) ──────────────────────
-        # The rebalance deliberately does NOT fetch prices — it runs the momentum
-        # calculation against whatever's already in the DB (fetching is the
-        # price_update op's / month-end refresh's job). We only run a CHEAP
-        # freshness probe (DB reads, no GuruFocus) to surface a warning when some
-        # of the universe's prices are out of date; the rebalance ALWAYS computes.
+        # ── Phase: prices — the universe, up to the DECIDING BAR ──
+        # ⚠ A REBALANCE PICKS FROM THE WHOLE UNIVERSE, SO THE WHOLE UNIVERSE HAS
+        # TO BE PRICED. The price-update op keeps the ~24 HELD names current
+        # daily; the other ~1,455 candidates it never touches, and they are the
+        # ones being ranked. Selecting on prices weeks old doesn't fail loudly —
+        # signals.py's 30-day guard silently DROPS the stale names, so the pick
+        # is made from whatever subset happened to be fresh, which is a different
+        # strategy than the one that was configured.
+        #
+        # The target is the DECIDING BAR — the close strictly before the
+        # rebalance date (first Monday → the preceding Friday). That, and not
+        # "today", is the only bar a rebalance needs; the engine's `<` cutoff
+        # never looks past it.
+        #
+        # This used to be a warning only, on the reasoning that a rebalance must
+        # not hang on ~1,479 GuruFocus calls. It still doesn't in the normal
+        # case: the fetch is scoped to the names actually BEHIND the bar and
+        # GuruFocus fetches only the missing dates, so a second run is nearly
+        # free. And it runs only when a strategy is genuinely due — a few times
+        # a month, not every tick.
         universe_count = 0
         freshness_warning: str | None = None
+        universe_cids: list[int] = []
         try:
             _update_run(run_id, current_phase="freshness",
                         current_message="Checking price freshness…")
@@ -563,20 +782,105 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
             universe_count = len(universe_companies)
             universe_cids = [c["cid"] for c in universe_companies]
             if universe_cids:
+                required = _deciding_bar_for(due_plans)
+                _maybe_full_refetch(run_id, universe_cids, accumulated_errors)
                 report = universe_freshness(universe_cids)  # cheap DB read, no fetch
+                log_step(
+                    run_id,
+                    f"Phase: prices — {universe_count} companies in the due strategies' "
+                    f"universe; need the {required.isoformat()} deciding bar; universe's "
+                    f"freshest close is {report.global_latest}; "
+                    f"{len(report.fresh)} fresh, {len(report.lagging)} lagging, "
+                    f"{len(report.missing)} with no prices, {len(report.excluded)} excluded "
+                    f"(delisted/out-of-scope/illiquid/unsubscribed)",
+                    phase="prices",
+                )
+                # Names behind their exchange peers, PLUS — when nothing in the
+                # universe has reached the deciding bar yet — everyone: a
+                # peer-anchored probe can only see relative lag, and a universe
+                # uniformly a week old looks perfectly "fresh" to it.
+                behind = set(report.to_fetch)
+                if report.global_latest is None or report.global_latest < required:
+                    behind |= set(report.fresh)
+                    log_step(
+                        run_id,
+                        f"  the WHOLE universe is behind the {required.isoformat()} bar "
+                        "(peer-relative freshness can't see that — nobody is behind anybody), "
+                        "so every active company is in the fetch set",
+                        level="warn", phase="prices",
+                    )
+                to_fetch = [c for c in universe_companies if c["cid"] in behind]
+                if to_fetch:
+                    _update_run(
+                        run_id, current_phase="prices",
+                        current_message=(
+                            f"Fetching prices for {len(to_fetch)} of {universe_count} universe "
+                            f"companies (need the {required.isoformat()} close)…"
+                        ),
+                    )
+                    log.warning(
+                        "[rebalance] run_id=%s fetching %s of %s universe companies up to the "
+                        "%s deciding bar (universe latest: %s)",
+                        run_id, len(to_fetch), universe_count, required, report.global_latest,
+                    )
+                    log_step(
+                        run_id,
+                        f"  fetching {len(to_fetch)} of {universe_count} companies from "
+                        "GuruFocus (only the dates each one is missing)…",
+                        phase="prices",
+                    )
+                    _run_prices_phase(run_id, accumulated_errors, companies_override=to_fetch)
+                    log_step(run_id, "  price fetch complete", phase="prices")
+                else:
+                    log.info(
+                        "[rebalance] run_id=%s universe already priced through the %s deciding "
+                        "bar — no fetch needed", run_id, required)
+                    log_step(
+                        run_id,
+                        f"  every company is already priced through {required.isoformat()} — "
+                        "no fetch needed", phase="prices",
+                    )
+        except Exception as e:
+            msg = f"Universe price refresh failed: {type(e).__name__}: {e}"
+            log.warning("[rebalance] run_id=%s %s", run_id, msg)
+            log_step(run_id, msg, level="error", phase="prices")
+            accumulated_errors.append(msg)
+
+        # Re-probe AFTER the fetch: what's still behind is what GuruFocus could
+        # not supply (a market holiday its peers didn't trade either, a
+        # publication lag, an unsubscribed venue). That is a warning, not a
+        # blocker — the rebalance always computes, and the engine's staleness
+        # guard decides what it can still rank.
+        if universe_cids:
+            try:
+                _update_run(run_id, current_phase="freshness",
+                            current_message="Re-checking price freshness…")
+                report = universe_freshness(universe_cids)
                 stale = len(report.to_fetch)
                 if stale:
                     freshness_warning = (
-                        f"{stale} of {report.active_total} universe companies have "
-                        "stale/missing prices — used their last close (refresh prices to update)")
+                        f"{stale} of {report.active_total} universe companies are STILL behind "
+                        "after the price refresh — used their last close")
                     log.warning("[rebalance] run_id=%s %s", run_id, freshness_warning)
-        except Exception as e:
-            log.warning(
-                "[rebalance] run_id=%s freshness probe failed (non-blocking): %s: %s",
-                run_id, type(e).__name__, e)
+                    log_step(run_id, freshness_warning, level="warn", phase="freshness")
+                else:
+                    log_step(
+                        run_id,
+                        f"All {report.active_total} active universe companies are caught up "
+                        f"(freshest close {report.global_latest})", phase="freshness",
+                    )
+            except Exception as e:
+                log.warning(
+                    "[rebalance] run_id=%s freshness re-probe failed (non-blocking): %s: %s",
+                    run_id, type(e).__name__, e)
 
         # ── Phase: momentum — rebalance the due strategies (always) ────
         _update_run(run_id, current_phase="momentum", current_message="Running the rebalance calculation…")
+        log_step(
+            run_id,
+            f"Phase: momentum — computing new holdings for {len(due_plans)} strategy(ies)",
+            phase="momentum",
+        )
         try:
             _run_momentum_phase(
                 run_id,
@@ -586,6 +890,7 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
         except Exception as e:
             msg = f"Momentum rebalance phase failed: {type(e).__name__}: {e}"
             log.warning("[rebalance] run_id=%s %s", run_id, msg)
+            log_step(run_id, msg, level="error", phase="momentum")
             accumulated_errors.append(msg)
 
         # Enrich the persisted plan with what actually happened, for the UI.
@@ -601,14 +906,22 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
             n = len(due_plans)
             noun = "strategy" if n == 1 else "strategies"
             done_msg = (
-                f"{'Force-rebalanced' if force else 'Rebalanced'} {n} {noun} from the "
-                "DB (prices not refreshed — run a price update if you want fresher data)."
+                f"{'Force-rebalanced' if force else 'Rebalanced'} {n} {noun} "
+                f"({universe_count} universe companies, priced through the "
+                f"{_deciding_bar_for(due_plans).isoformat()} deciding bar)."
             )
             if force:
                 done_msg += " Re-decided the current period; the original decision is kept in the run history."
             if freshness_warning:
                 done_msg += f" ⚠ {freshness_warning}"
             _update_run(run_id, current_message=done_msg)
+            log_step(run_id, done_msg, phase="done")
+        else:
+            log_step(
+                run_id,
+                "Rebalance op finished with errors: " + " | ".join(accumulated_errors[:5]),
+                level="error", phase="done",
+            )
 
     _finalize_run(run_id, accumulated_errors, log, tag="rebalance")
 
@@ -635,6 +948,8 @@ def _run_full_price_refresh_pipeline_sync(run_id: int) -> None:
             run_id, current_phase="prices",
             current_message="Computing remaining monthly API budget…",
         )
+        log_step(run_id, "Month-end FULL price refresh starting — EVERY company, most-stale "
+                         "first, bounded by the monthly quota", phase="start")
         try:
             budget = remaining_budget(supabase)
             _update_run(
@@ -645,10 +960,18 @@ def _run_full_price_refresh_pipeline_sync(run_id: int) -> None:
                     "Refreshing all companies, most-stale first…"
                 ),
             )
+            log_step(
+                run_id,
+                f"Phase: prices — monthly GuruFocus budget left: USA {budget.get('usa', 0)}, "
+                f"EU {budget.get('europe', 0)}, Asia {budget.get('asia', 0)}. A region that hits "
+                "0 SKIPS its remaining companies (counted as budget_skipped, not errors).",
+                phase="prices",
+            )
             _run_prices_phase(run_id, accumulated_errors, budget_by_region=budget)
         except Exception as e:
             msg = f"Full price refresh failed: {type(e).__name__}: {e}"
             log.warning("[full_price_refresh] run_id=%s %s", run_id, msg)
+            log_step(run_id, msg, level="error", phase="prices")
             accumulated_errors.append(msg)
 
     _finalize_run(run_id, accumulated_errors, log, tag="full_price_refresh")
@@ -674,12 +997,13 @@ def _run_universe_price_refresh_pipeline_sync(run_id: int, universe_label: str) 
             run_id, current_phase="prices",
             current_message=f"Collecting {universe_label} companies…",
         )
+        log_step(run_id, f"Universe price refresh starting — {universe_label!r}", phase="start")
         try:
             companies = collect_universe_companies_by_label(universe_label)
             if not companies:
-                accumulated_errors.append(
-                    f"Universe {universe_label!r} resolved to no companies to refresh"
-                )
+                msg = f"Universe {universe_label!r} resolved to no companies to refresh"
+                log_step(run_id, msg, level="error", phase="prices")
+                accumulated_errors.append(msg)
             else:
                 budget = remaining_budget(supabase)
                 _update_run(
@@ -690,13 +1014,24 @@ def _run_universe_price_refresh_pipeline_sync(run_id: int, universe_label: str) 
                         f"Asia {budget.get('asia', 0)}…"
                     ),
                 )
+                log_step(
+                    run_id,
+                    f"Phase: prices — {len(companies)} companies in {universe_label}; monthly "
+                    f"GuruFocus budget left: USA {budget.get('usa', 0)}, EU "
+                    f"{budget.get('europe', 0)}, Asia {budget.get('asia', 0)}. A company already "
+                    "current short-circuits without an API call.",
+                    phase="prices",
+                )
+                _log_universe_freshness(run_id, companies, when="before")
                 _run_prices_phase(
                     run_id, accumulated_errors,
                     companies_override=companies, budget_by_region=budget,
                 )
+                _log_universe_freshness(run_id, companies, when="after")
         except Exception as e:
             msg = f"Universe price refresh failed: {type(e).__name__}: {e}"
             log.warning("[universe_price_refresh] run_id=%s %s", run_id, msg)
+            log_step(run_id, msg, level="error", phase="prices")
             accumulated_errors.append(msg)
 
     _finalize_run(run_id, accumulated_errors, log, tag="universe_price_refresh")

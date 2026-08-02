@@ -5182,6 +5182,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ingest/runs/{run_id}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ingest Run Log
+         * @description The run's STEP TRANSCRIPT from `after` — every phase, every company the
+         *     price refresh touched, every strategy computed, and the holdings each one
+         *     produced. Tailed into the browser console by the /schedule Run-now buttons.
+         *
+         *     Why a cursor poll and not SSE: this is a PULL of an append-only log, and the
+         *     cursor is what makes a reconnect exact — an SSE drop would silently skip the
+         *     lines emitted while it was down, which for a transcript is the one thing that
+         *     must not happen. It runs only while the user's own run is live and stops at
+         *     its terminal status.
+         *
+         *     In-memory (see `ingest.phases.runlog`), so an empty `entries` for an old run
+         *     means the buffer was recycled, not that the run did nothing — `latest` says
+         *     how many steps that run actually emitted.
+         */
+        get: operations["get_ingest_run_log_api_ingest_runs__run_id__log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ingest/runs/{run_id}/stream": {
         parameters: {
             query?: never;
@@ -6269,10 +6301,12 @@ export interface paths {
         head?: never;
         /**
          * Set Strategy Cash
-         * @description Set a strategy's CASH allocation (0..1). Cash scales every other holding's
-         *     weight by (1-cash) and adds a flat 0%-return cash sleeve, so the reported
-         *     weights + the return pick up the cash drag. Re-prices the strategy
-         *     immediately so the new weighting shows at once (no wait for the daily tick).
+         * @description Set a strategy's CASH allocation (0..1), leaving its ETF sleeves alone.
+         *
+         *     Cash scales every other holding's weight by (1-cash) and adds a flat
+         *     0%-return cash sleeve, so the reported weights + the return pick up the cash
+         *     drag. Re-prices immediately. See `PATCH …/sleeves` to set cash and the ETF
+         *     overlay together.
          *
          *     Admin-only: the API gate blocks all non-admin writes here, so read-only users
          *     can see the cash allocation but can't change it.
@@ -6300,6 +6334,46 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/scheduled-strategies/{strategy_id}/sleeves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set Strategy Sleeves
+         * @description Set a strategy's CASH and ETF sleeves by hand; the stock picks take the rest.
+         *
+         *     ⚠ THE INPUT IS ABSOLUTE, THE STORAGE IS INVESTED-RELATIVE, AND THE DIFFERENCE
+         *     IS NOT COSMETIC. What you type is each sleeve's share of the whole portfolio
+         *     (10% cash + 20% ETF ⇒ 70% stocks). What `config.etf_overlay[].weight_pct`
+         *     means — set by the diversifier, consumed by the blended backtest — is a share
+         *     of the INVESTED book, i.e. after cash is taken out. Storing 20 there with 10%
+         *     cash would hold 18%, not the 20% you asked for. Converted here
+         *     (`weight_pct = absolute / (1 − cash)`) so both readers stay correct and no
+         *     stored convention changes.
+         *
+         *     The stock weights are re-derived from the underlying strategy's selection —
+         *     the stored sleeve-scaled weights are renormalized to sum-1 before the new
+         *     sleeves are applied (`momentum.portfolio_math.apply_sleeves`), so repeated
+         *     edits can't compound the shrink.
+         *
+         *     ⚠ IT RESTATES THE OPEN PERIOD, it does not open a new one: the ETF sleeves are
+         *     priced from the same entry bar the stock sleeve entered on, so the period's
+         *     return stays measured over one window. The next rebalance re-selects normally.
+         *
+         *     Admin-only (the API gate blocks non-admin writes).
+         */
+        patch: operations["set_strategy_sleeves_api_scheduled_strategies__strategy_id__sleeves_patch"];
         trace?: never;
     };
     "/api/static-universes": {
@@ -7659,6 +7733,11 @@ export interface components {
                 [key: string]: number;
             } | null;
             /**
+             * Daily Months Back
+             * @default 0
+             */
+            daily_months_back?: number;
+            /**
              * Daily Timing
              * @default false
              */
@@ -8034,6 +8113,25 @@ export interface components {
          *     slices to the decimal. Use this one for anything shown beside the chart; a table that disagrees
          *     with the chart above it is read as a bug in both.
          *
+         *     `weight_start_pct` is the THIRD weight, and it is the one that reconciles this table with the
+         *     composition charts. ⚠ THREE WEIGHTS, ONE POSITION, ALL CORRECT:
+         *
+         *       weight_now_pct    current EUR value ÷ the WHOLE book — what is held today.
+         *       weight_start_pct  Beginwaarde ÷ the WHOLE book at the window's open. It is GRAFTED ON from
+         *                         the very legs the sector/region/currency bars are built from, never
+         *                         recomputed, so the table and the chart cannot disagree about January.
+         *       the bar itself    `weight_start_pct` ÷ that axis's `attributable_pct` — a bar is a share of
+         *                         the holdings that HAVE a bucket, not of the book.
+         *
+         *     Measured on Bustelberg Offensief: ASML 7.02% now, ~5.00% at the start, 5.75% on the Technology
+         *     bar. Dividing the FIRST by the Stocks slice and expecting the THIRD is the trap this column
+         *     closes — ASML outgrew the book by ~40% over the window, so its current share is much the larger.
+         *
+         *     ⚠ `weight_start_pct` IS NOT `weight_pct`. Same numerator, different denominator: `weight_pct`
+         *     divides by the PRICED book (so a class's contribution reconciles), this divides by the whole
+         *     book (so it sits honestly beside `weight_now_pct`). A `0.0` is a fact — bought after the window
+         *     opened; `None` means no ISIN to join on (cash), never "zero".
+         *
          *     `currency` is the holding's quote currency (a fair first-order FX signal for a bond/ETF class —
          *     NOT folded to Unclassified like the fund axes).
          */
@@ -8069,6 +8167,8 @@ export interface components {
             weight_now_pct?: number;
             /** Weight Pct */
             weight_pct?: number | null;
+            /** Weight Start Pct */
+            weight_start_pct?: number | null;
         };
         /** BuildUniverseRequest */
         BuildUniverseRequest: {
@@ -8086,6 +8186,66 @@ export interface components {
             max_companies?: number;
             /** Start Month */
             start_month: string;
+        };
+        /**
+         * CompositionExcluded
+         * @description A holding this axis does not weigh, and why. `cash` · `unpriced` · `unclassified`.
+         *
+         *     ⚠ TWO OF THESE THREE ARE ANSWERS, NOT GAPS. A fund, a bond and a cash line have no sector by
+         *     definition — they are not Stocks in our own classification and already have their own slice of
+         *     the allocation chart. Only `unpriced` is a real hole: a stock we hold, in a real sector, that
+         *     we cannot price, so its bucket reads lower than it is. `asset_class` rides along precisely so
+         *     the first kind can be shown as "this was never a stock" rather than as missing weight.
+         */
+        CompositionExcluded: {
+            /** Asset Class */
+            asset_class?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Weight Pct
+             * @default 0
+             */
+            weight_pct?: number;
+        };
+        /**
+         * CompositionHolding
+         * @description One holding behind a composition bar, at the weight that bar counted it at.
+         *
+         *     ⚠ `weight_pct` IS A SHARE OF THE AXIS TOTAL, NOT OF THE PORTFOLIO — Σ over a bucket IS that
+         *     bucket's `portfolio_pct`, exactly. The sector axis divides by the equity sleeve and the other
+         *     two by every long position, so the SAME holding carries different weights on different axes and
+         *     that is correct. See `_airs_portfolio_analysis._axis_holdings`.
+         *
+         *     ⚠ IT IS ALSO NOT THE ATTRIBUTION TABLE'S WEIGHT, AND THE TWO ARE BOTH RIGHT. Attribution drops
+         *     funds, cash and anything it could not price, then renormalises what remains to 100% and weights
+         *     it by the position's value when the window OPENED. Measured on Bustelberg Offensief:
+         *     Technology reads 36% here and 39.1% there. Neither is a rounding error and neither is wrong —
+         *     they are shares of different denominators, which is precisely what this list exists to show.
+         */
+        CompositionHolding: {
+            /** Asset Class */
+            asset_class?: string | null;
+            /** Classified As */
+            classified_as?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /**
+             * Via Names
+             * @default []
+             */
+            via_names?: string[];
+            /**
+             * Weight Pct
+             * @default 0
+             */
+            weight_pct?: number;
         };
         /** CorrelationRequest */
         CorrelationRequest: {
@@ -9478,10 +9638,23 @@ export interface components {
         };
         /** PortfolioAnalysisAxis */
         PortfolioAnalysisAxis: {
+            /** Attributable Pct */
+            attributable_pct?: number | null;
             /** Axis */
             axis: string;
+            /** Basis */
+            basis?: string | null;
+            /**
+             * Excluded
+             * @default []
+             */
+            excluded?: components["schemas"]["CompositionExcluded"][];
+            /** Positions */
+            positions?: number | null;
             /** Rows */
             rows: components["schemas"]["PortfolioAnalysisRow"][];
+            /** Unpriced Pct */
+            unpriced_pct?: number | null;
         };
         /**
          * PortfolioAnalysisReturns
@@ -9558,6 +9731,11 @@ export interface components {
              * @default 0
              */
             diff_pct?: number;
+            /**
+             * Holdings
+             * @default []
+             */
+            holdings?: components["schemas"]["CompositionHolding"][];
             /**
              * Portfolio Pct
              * @default 0
@@ -10007,6 +10185,19 @@ export interface components {
             /** Role */
             role: string;
         };
+        /** SetSleevesRequest */
+        SetSleevesRequest: {
+            /**
+             * Cash Pct
+             * @default 0
+             */
+            cash_pct?: number;
+            /**
+             * Etfs
+             * @default []
+             */
+            etfs?: components["schemas"]["SleeveEtf"][];
+        };
         /** SignalBreakdownRequest */
         SignalBreakdownRequest: {
             /** As Of Date */
@@ -10056,6 +10247,18 @@ export interface components {
             risk_free_rate_pct?: number;
             /** Variant Key */
             variant_key?: string | null;
+        };
+        /** SleeveEtf */
+        SleeveEtf: {
+            /**
+             * Band Pct
+             * @default 0
+             */
+            band_pct?: number;
+            /** Benchmark Id */
+            benchmark_id: number;
+            /** Weight Pct */
+            weight_pct: number;
         };
         /**
          * SplitAdjustment
@@ -16949,6 +17152,40 @@ export interface operations {
             };
         };
     };
+    get_ingest_run_log_api_ingest_runs__run_id__log_get: {
+        parameters: {
+            query?: {
+                after?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     stream_ingest_run_api_ingest_runs__run_id__stream_get: {
         parameters: {
             query?: never;
@@ -18440,6 +18677,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_strategy_sleeves_api_scheduled_strategies__strategy_id__sleeves_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSleevesRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

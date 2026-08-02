@@ -313,6 +313,139 @@ def compute_and_save_price_update(
     return int(ins.data[0]["snapshot_id"])
 
 
+def apply_sleeves_to_snapshot(
+    snapshot_id: int,
+    *,
+    etf_overlay: list[dict] | None,
+    cash_pct: float | None,
+) -> int | None:
+    """Rewrite a stored snapshot's book to `etf_overlay` + `cash_pct`, IN PLACE.
+
+    ONE writer for both callers — the rebalance (which applies the strategy's
+    saved sleeves to a freshly-computed selection) and the hand edit (which
+    applies newly-typed ones to the open period). Two writers would be two
+    chances for the live book to disagree with what the config says it is.
+
+    The stock sleeve is always rebuilt from the snapshot's own stock holdings,
+    renormalized to sum-1 first (see `apply_sleeves`), so the weights are
+    re-derived from the UNDERLYING STRATEGY's selection every time rather than
+    compounded onto whatever the last edit left behind.
+
+    `etf_overlay` entries are `{benchmark_id, weight_pct}` where `weight_pct` is
+    a share of the INVESTED (non-cash) book — the convention the diversifier
+    writes and the backtest blend assumes. Returns the new holdings count, or
+    None when the snapshot is gone.
+    """
+    import bisect  # noqa: PLC0415
+
+    from momentum.blend_backtest import make_etf_holding  # noqa: PLC0415
+    from momentum.portfolio_math import (  # noqa: PLC0415
+        apply_sleeves,
+        portfolio_eur_return_pct,
+        split_book,
+    )
+
+    snap_resp = (
+        supabase.table("current_picks_snapshot")
+        .select("holdings, as_of_date, latest_price_date")
+        .eq("snapshot_id", snapshot_id)
+        .limit(1)
+        .execute()
+    )
+    if not snap_resp.data:
+        return None
+    snap = snap_resp.data[0]
+    stock_holdings, prior_etfs, _prior_cash = split_book(snap.get("holdings") or [])
+
+    overlay = [o for o in (etf_overlay or []) if o.get("benchmark_id")]
+    as_of = str(snap.get("as_of_date") or "")[:10]
+    latest = str(snap.get("latest_price_date") or as_of)[:10]
+
+    # ⚠ ETF ENTRY MUST ANCHOR TO THE SAME BAR THE STOCK SLEEVE ENTERED ON — the
+    # prior trading day's close the picks are anchored to
+    # (`run_current_portfolio` enters stocks at
+    # `_price_on_or_before(rebalance_date − 1)`), NOT the raw `as_of`. `as_of` is
+    # the nominal rebalance grid date, which can be a FUTURE Monday when the tick
+    # fires early (Saturday, for the upcoming Monday). Using it stamped a future
+    # ETF entry_date and priced entry against a not-yet-real (or corrupt future)
+    # benchmark bar — the SPMO +277% incident. Take the stock sleeve's actual
+    # entry_date (they all share the prior-trading-day anchor); fall back to
+    # `latest` (the freshest real close, never the future) for a pure-ETF
+    # strategy with no stock holdings.
+    stock_entry_dates = [
+        str(h.get("entry_date"))[:10] for h in stock_holdings if h.get("entry_date")
+    ]
+    entry_ref = min(stock_entry_dates) if stock_entry_dates else latest
+    if latest and entry_ref > latest:
+        entry_ref = latest  # never price entry past the latest real close
+
+    etf_holdings: list[dict] = []
+    if overlay:
+        bids = [int(o["benchmark_id"]) for o in overlay]
+        meta_resp = (
+            supabase.table("benchmark")
+            .select("benchmark_id, ticker, name, sector, currency")
+            .in_("benchmark_id", bids)
+            .execute()
+        )
+        meta = {m["benchmark_id"]: m for m in (meta_resp.data or [])}
+
+        # Daily benchmark closes per id, for as-of (last-on-or-before) lookups.
+        px: dict[int, tuple[list[str], list[float]]] = {}
+        for bid in bids:
+            rows = (
+                supabase.table("benchmark_price")
+                .select("target_date, price")
+                .eq("benchmark_id", bid)
+                .lte("target_date", latest or as_of)
+                .order("target_date")
+                .execute()
+            ).data or []
+            if rows:
+                px[bid] = (
+                    [str(r["target_date"])[:10] for r in rows],
+                    [float(r["price"]) for r in rows],
+                )
+
+        def _asof(bid: int, day: str) -> float | None:
+            pair = px.get(bid)
+            if not pair or not day:
+                return None
+            ds, ps = pair
+            i = bisect.bisect_right(ds, day) - 1
+            return ps[i] if i >= 0 else None
+
+        for o in overlay:
+            bid = int(o["benchmark_id"])
+            m = meta.get(bid) or {}
+            etf_holdings.append(make_etf_holding(
+                benchmark_id=bid,
+                ticker=m.get("ticker") or f"BM{bid}",
+                name=m.get("name") or m.get("ticker") or f"Benchmark {bid}",
+                sector=m.get("sector"),
+                weight=float(o.get("weight_pct") or 0.0) / 100.0,
+                entry_price=_asof(bid, entry_ref),
+                exit_price=_asof(bid, latest),
+                entry_date=entry_ref or None,
+                exit_date=latest or None,
+                currency=m.get("currency"),
+            ))
+
+    if not etf_holdings and not prior_etfs and not float(cash_pct or 0.0) and not _prior_cash:
+        return None  # nothing to apply and nothing to strip — leave the row alone
+
+    merged = apply_sleeves(stock_holdings, etf_holdings, cash_pct)
+    supabase.table("current_picks_snapshot").update({
+        "holdings": merged,
+        # The blended period return via the SINGLE source of truth (weighted
+        # per-holding `forward_return_pct`) — identical basis to
+        # `compute_and_save_price_update`, so the card's Total cannot disagree
+        # with the header MTD.
+        "period_return_pct": portfolio_eur_return_pct(merged),
+    }).eq("snapshot_id", snapshot_id).execute()
+    return len(merged)
+
+
 def _coerce_as_of_date(raw: str | None) -> str:
     """Backtest period dates are YYYY-MM strings; current_picks_snapshot
     expects YYYY-MM-DD. Convert by appending '-01'."""

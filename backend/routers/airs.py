@@ -458,16 +458,83 @@ async def airs_model_portfolio_correlations(year: int | None = None):
     return await compute_portfolio_correlations_async(year)
 
 
+class CompositionHolding(BaseModel):
+    """One holding behind a composition bar, at the weight that bar counted it at.
+
+    ⚠ `weight_pct` IS A SHARE OF THE AXIS TOTAL, NOT OF THE PORTFOLIO — Σ over a bucket IS that
+    bucket's `portfolio_pct`, exactly. The sector axis divides by the equity sleeve and the other
+    two by every long position, so the SAME holding carries different weights on different axes and
+    that is correct. See `_airs_portfolio_analysis._axis_holdings`.
+
+    ⚠ IT IS ALSO NOT THE ATTRIBUTION TABLE'S WEIGHT, AND THE TWO ARE BOTH RIGHT. Attribution drops
+    funds, cash and anything it could not price, then renormalises what remains to 100% and weights
+    it by the position's value when the window OPENED. Measured on Bustelberg Offensief:
+    Technology reads 36% here and 39.1% there. Neither is a rounding error and neither is wrong —
+    they are shares of different denominators, which is precisely what this list exists to show.
+    """
+
+    name: str | None = None
+    isin: str | None = None
+    # Share of THIS axis's total. Σ over a bucket == that bucket's `portfolio_pct`.
+    weight_pct: float = 0.0
+    # The asset class (Equity / Bonds / Cash / …) — which is what decides whether a holding is in
+    # the sector axis's denominator at all.
+    asset_class: str | None = None
+    # The bucket it was classified into, so a surprising placement can be seen rather than guessed.
+    classified_as: str | None = None
+    # The strategies it is reached through, when it came out of a looked-through certificate.
+    via_names: list[str] = []
+
+
 class PortfolioAnalysisRow(BaseModel):
     bucket: str
     portfolio_pct: float = 0.0
     benchmark_pct: float = 0.0
     diff_pct: float = 0.0              # the TILT — the reason the two are side by side
+    # The rows the bar is the sum of. Empty for a bucket only the benchmark holds — an unowned
+    # sector is a finding, not missing data.
+    holdings: list[CompositionHolding] = []
+
+
+class CompositionExcluded(BaseModel):
+    """A holding this axis does not weigh, and why. `cash` · `unpriced` · `unclassified`.
+
+    ⚠ TWO OF THESE THREE ARE ANSWERS, NOT GAPS. A fund, a bond and a cash line have no sector by
+    definition — they are not Stocks in our own classification and already have their own slice of
+    the allocation chart. Only `unpriced` is a real hole: a stock we hold, in a real sector, that
+    we cannot price, so its bucket reads lower than it is. `asset_class` rides along precisely so
+    the first kind can be shown as "this was never a stock" rather than as missing weight.
+    """
+
+    name: str | None = None
+    isin: str | None = None
+    # Its share of the whole book on the same basis — i.e. the weight the chart above does NOT show.
+    weight_pct: float = 0.0
+    # The Class it carries in our own system: Equity ETF, Bonds, Cash, Alternatives…
+    asset_class: str | None = None
+    reason: str | None = None
 
 
 class PortfolioAnalysisAxis(BaseModel):
     axis: str                          # sector | region | currency
     rows: list[PortfolioAnalysisRow]
+    # ⚠ THE DENOMINATOR, IN WORDS — and it is now the ATTRIBUTION basis (start-of-window value over
+    # the attributable holdings), so a bar equals its own Brinson row. Stated rather than implied,
+    # because a percentage whose base is unstated is how two correct numbers read as a
+    # contradiction. Says so explicitly when a portfolio falls back to the current-value basis.
+    basis: str | None = None
+    # How many positions that denominator spans.
+    positions: int | None = None
+    # ⚠ HOW MUCH OF THE BOOK THESE BARS SPEAK FOR. Never assumed to be 100. Most of the remainder
+    # is normally funds, bonds and cash, which have no sector BY DEFINITION — informative, not a
+    # fault. None on the fallback basis, where nothing is excluded.
+    attributable_pct: float | None = None
+    # ⚠ THE PART THAT IS ACTUALLY A GAP: real holdings, in real buckets, that we cannot price — so
+    # their bucket reads lower than it is. This is what deserves a warning; `attributable_pct`
+    # alone made a routine 13% in ETFs look like the same kind of problem.
+    unpriced_pct: float | None = None
+    # The holdings behind both, named — so the missing weight is visible, not inferred.
+    excluded: list[CompositionExcluded] = []
 
 
 class PortfolioAnalysisReturns(BaseModel):
@@ -558,6 +625,25 @@ class BookHoldingDetail(BaseModel):
     slices to the decimal. Use this one for anything shown beside the chart; a table that disagrees
     with the chart above it is read as a bug in both.
 
+    `weight_start_pct` is the THIRD weight, and it is the one that reconciles this table with the
+    composition charts. ⚠ THREE WEIGHTS, ONE POSITION, ALL CORRECT:
+
+      weight_now_pct    current EUR value ÷ the WHOLE book — what is held today.
+      weight_start_pct  Beginwaarde ÷ the WHOLE book at the window's open. It is GRAFTED ON from
+                        the very legs the sector/region/currency bars are built from, never
+                        recomputed, so the table and the chart cannot disagree about January.
+      the bar itself    `weight_start_pct` ÷ that axis's `attributable_pct` — a bar is a share of
+                        the holdings that HAVE a bucket, not of the book.
+
+    Measured on Bustelberg Offensief: ASML 7.02% now, ~5.00% at the start, 5.75% on the Technology
+    bar. Dividing the FIRST by the Stocks slice and expecting the THIRD is the trap this column
+    closes — ASML outgrew the book by ~40% over the window, so its current share is much the larger.
+
+    ⚠ `weight_start_pct` IS NOT `weight_pct`. Same numerator, different denominator: `weight_pct`
+    divides by the PRICED book (so a class's contribution reconciles), this divides by the whole
+    book (so it sits honestly beside `weight_now_pct`). A `0.0` is a fact — bought after the window
+    opened; `None` means no ISIN to join on (cash), never "zero".
+
     `currency` is the holding's quote currency (a fair first-order FX signal for a bond/ETF class —
     NOT folded to Unclassified like the fund axes).
     """
@@ -571,6 +657,7 @@ class BookHoldingDetail(BaseModel):
     via_names: list[str] = []
     weight_pct: float | None = None
     weight_now_pct: float = 0.0
+    weight_start_pct: float | None = None
     return_pct: float | None = None
     # ⚠ THE INSTRUMENT'S OWN EUR RETURN — NOT `return_pct`, AND THE DIFFERENCE IS THE WHOLE POINT.
     # `return_pct` is the book's value change, and the book does not know what NVIDIA did: it knows

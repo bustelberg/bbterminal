@@ -6,9 +6,14 @@ import CellInfoTip from '../momentum/CellInfoTip';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { useApiData } from '../../../lib/hooks/useApiData';
-import { useBenchmarkCurrencyMap, useBenchmarkIsinMap, useCompanyExchangeMap, useCompanyIsinMap } from '../../../lib/hooks/apiData';
+import { useBenchmarkCurrencyMap, useBenchmarkIsinMap, useBenchmarks, useCompanyExchangeMap, useCompanyIsinMap } from '../../../lib/hooks/apiData';
+import { fmtSleevePct, parsePct, stockSleevePct, validateSleeves, type SleeveEtfDraft } from './sleeveMath';
 import { displayExchange, EXCHANGE_NAMES, fmtPct, fmtPrice, guruFocusUrl } from '../momentum/utils';
 import TableDownloadButton from '../TableDownloadButton';
+// ⚠ THE SAME MODAL THE DAILY-HOLDINGS TABLE OPENS, not a second one. It reads
+// `POST /api/momentum/signal-breakdown` — one endpoint, one renderer, so "why
+// this was picked" cannot have two answers.
+import BreakdownModal, { type BreakdownTarget } from '../momentum/BreakdownModal';
 import { PriceRefreshPanel, useStockRefresh } from './priceRefresh';
 import type { Column } from '../../../lib/tableExport';
 import type { Holding } from '../../../lib/stores/momentum';
@@ -21,6 +26,11 @@ type SnapshotResponse = {
   // The card DISPLAYS this — it does not recompute a portfolio return.
   period_return_pct: number | null;
   holdings: Holding[];
+  // The config the picks were MADE with (universe, signal + category weights).
+  // ⚠ The snapshot's own, not the strategy's current one: the strategy config is
+  // editable (cash %, ETF sleeves) and the "why was this picked" screen has to
+  // explain the decision as it was taken, not as the settings look today.
+  config?: Record<string, unknown> | null;
 };
 
 /** Hover info icon showing a value's "as of" date (the trading date the
@@ -35,59 +45,189 @@ function AsOfTip({ date }: { date: string | null }) {
   );
 }
 
-/** Cash-allocation control. Admins set the portfolio's cash % (0–100), which
- * scales every other holding's weight and re-prices the strategy; read-only
- * users see a static chip (or nothing when there's no cash). */
-function CashControl({ strategyId, currentPct, canEdit, onChanged }: {
+/** Sleeve control — the portfolio's cash % and ETF overlay, set by hand; the
+ * stock picks take whatever is left, at the RELATIVE weights the underlying
+ * strategy chose (the backend renormalizes them, so editing twice can't
+ * compound). Admins get the editor; read-only users get a static chip.
+ *
+ * The percentages here are ABSOLUTE — shares of the whole portfolio, i.e. the
+ * weights the holdings table below actually shows. */
+function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: {
   strategyId?: number;
-  currentPct: number;   // 0..100
+  cashPct: number;                                        // 0..100, absolute
+  etfSleeves: { benchmarkId: number; pct: number }[];     // absolute, as held
   canEdit: boolean;
   onChanged?: () => void | Promise<void>;
 }) {
-  const [value, setValue] = useState<string>(String(Math.round(currentPct)));
+  const { data: benchmarks } = useBenchmarks();
+  const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [cash, setCash] = useState<string>(fmtSleevePct(cashPct));
+  const [etfs, setEtfs] = useState<SleeveEtfDraft[]>([]);
 
-  if (!canEdit || strategyId == null) {
-    if (currentPct <= 0) return null;
-    return (
-      <span className="text-xs" title="Cash allocation (scales the other holdings)">
-        <span className="text-fg-subtle">Cash </span>
-        <span className="font-mono text-fg-soft">{currentPct.toFixed(0)}%</span>
-      </span>
-    );
-  }
+  const nameFor = useCallback((id: number) => {
+    const b = (benchmarks ?? []).find((x) => x.benchmark_id === id);
+    return b ? (b.ticker || b.name || `#${id}`) : `#${id}`;
+  }, [benchmarks]);
+
+  // Open = adopt the CURRENT book as the draft. Deriving it from what's held
+  // (rather than from the saved config) means the editor always opens on the
+  // numbers in the table beneath it.
+  const openEditor = () => {
+    setCash(fmtSleevePct(cashPct));
+    setEtfs(etfSleeves.map((e) => ({ benchmarkId: e.benchmarkId, weightPct: fmtSleevePct(e.pct) })));
+    setErr(null);
+    setOpen(true);
+  };
+
+  const stocksPct = stockSleevePct(parsePct(cash), etfs);
+  const invalid = validateSleeves(parsePct(cash), etfs);
 
   const save = async () => {
-    const pct = Math.min(100, Math.max(0, Number(value) || 0));
+    if (invalid || strategyId == null) return;
     setSaving(true);
+    setErr(null);
     try {
-      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/${strategyId}/cash`, {
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/${strategyId}/sleeves`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cash_pct: pct / 100 }),
+        body: JSON.stringify({
+          cash_pct: parsePct(cash) / 100,
+          etfs: etfs.map((e) => ({ benchmark_id: e.benchmarkId, weight_pct: parsePct(e.weightPct) })),
+        }),
       });
-      if (r.ok) await onChanged?.();
+      if (!r.ok) {
+        // Full diagnostic to the console; one short line in the UI.
+        const detail = await r.json().catch(() => null);
+        console.warn('[sleeves] save failed', r.status, detail);
+        setErr(typeof detail?.detail === 'string' ? detail.detail : `Save failed (HTTP ${r.status})`);
+        return;
+      }
+      setOpen(false);
+      await onChanged?.();
+    } catch (e) {
+      console.warn('[sleeves] save failed', e);
+      setErr('Save failed — see the console.');
     } finally {
       setSaving(false);
     }
   };
 
-  const dirty = (Number(value) || 0) !== Math.round(currentPct);
+  const summary = [
+    cashPct > 0 ? `Cash ${fmtSleevePct(cashPct)}%` : null,
+    ...etfSleeves.map((e) => `${nameFor(e.benchmarkId)} ${fmtSleevePct(e.pct)}%`),
+  ].filter(Boolean).join(' · ');
+
+  if (!canEdit || strategyId == null) {
+    if (!summary) return null;
+    return (
+      <span className="text-xs" title="Cash + ETF sleeves (the stock picks take the rest)">
+        <span className="font-mono text-fg-soft">{summary}</span>
+      </span>
+    );
+  }
+
   return (
-    <span className="flex items-center gap-1 text-xs" title="Set cash % — scales every other holding's weight by (100−cash)% and re-prices the strategy">
-      <span className="text-fg-subtle">Cash</span>
-      <input
-        type="number" min={0} max={100} step={1} value={value}
-        onChange={(e) => setValue(e.target.value)} disabled={saving}
-        className="w-14 bg-page border border-neutral-700 rounded px-1.5 py-0.5 text-right font-mono text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 disabled:opacity-50"
-      />
-      <span className="text-fg-faint">%</span>
+    <span className="relative flex items-center gap-2 text-xs">
+      {summary && <span className="font-mono text-fg-soft">{summary}</span>}
       <button
-        type="button" onClick={() => void save()} disabled={saving || !dirty}
-        className="text-[11px] px-2 py-0.5 rounded bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        type="button" onClick={() => (open ? setOpen(false) : openEditor())}
+        title="Set the cash % and ETF sleeves by hand — the stock picks take the rest, re-weighted from the strategy's own selection"
+        className="text-[11px] px-2 py-0.5 rounded border border-neutral-700 text-fg-soft hover:bg-overlay/5 transition-colors"
       >
-        {saving ? 'Saving…' : 'Set'}
+        {open ? 'Close' : summary ? 'Edit sleeves' : 'Add cash / ETFs'}
       </button>
+
+      {open && (
+        <div className="absolute left-0 top-6 z-20 w-[26rem] bg-popover border border-neutral-800/60 rounded-xl p-3 shadow-lg">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-fg-strong font-semibold">Sleeves</span>
+            <span className="text-fg-faint">% of the whole portfolio</span>
+          </div>
+
+          <div className="flex items-center gap-2 mb-2">
+            <span className="w-28 text-fg-subtle">Cash</span>
+            <input
+              type="number" min={0} max={100} step={0.5} value={cash}
+              onChange={(e) => setCash(e.target.value)} disabled={saving}
+              className="w-20 bg-page border border-neutral-700 rounded px-1.5 py-0.5 text-right font-mono text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 disabled:opacity-50"
+            />
+            <span className="text-fg-faint">%</span>
+          </div>
+
+          {etfs.map((e, i) => (
+            <div key={i} className="flex items-center gap-2 mb-2">
+              <select
+                value={e.benchmarkId ?? ''} disabled={saving}
+                onChange={(ev) => setEtfs(etfs.map((x, j) => (
+                  j === i ? { ...x, benchmarkId: ev.target.value ? Number(ev.target.value) : null } : x
+                )))}
+                className="w-28 flex-1 bg-page border border-neutral-700 rounded px-1.5 py-0.5 text-fg focus:border-accent-500 disabled:opacity-50"
+              >
+                <option value="">Pick an ETF…</option>
+                {(benchmarks ?? []).map((b) => (
+                  <option key={b.benchmark_id} value={b.benchmark_id}>
+                    {b.ticker ? `${b.ticker} — ` : ''}{b.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number" min={0} max={100} step={0.5} value={e.weightPct}
+                onChange={(ev) => setEtfs(etfs.map((x, j) => (j === i ? { ...x, weightPct: ev.target.value } : x)))}
+                disabled={saving}
+                className="w-20 bg-page border border-neutral-700 rounded px-1.5 py-0.5 text-right font-mono text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 disabled:opacity-50"
+              />
+              <span className="text-fg-faint">%</span>
+              <button
+                type="button" onClick={() => setEtfs(etfs.filter((_, j) => j !== i))} disabled={saving}
+                title="Remove this ETF" className="text-fg-faint hover:text-neg-400 px-1"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+
+          <button
+            type="button" disabled={saving}
+            onClick={() => setEtfs([...etfs, { benchmarkId: null, weightPct: '0' }])}
+            className="text-[11px] text-accent-400 hover:underline mb-2"
+          >
+            + Add ETF
+          </button>
+
+          <div className="flex items-center gap-2 border-t border-neutral-800/40 pt-2 mb-2">
+            <span className="w-28 text-fg-subtle">Stock picks</span>
+            <span className={`w-20 text-right font-mono ${stocksPct < 0 ? 'text-neg-400' : 'text-fg'}`}>
+              {fmtSleevePct(stocksPct)}
+            </span>
+            <span className="text-fg-faint">%</span>
+            <span className="text-fg-faint ml-1">— the strategy&apos;s own weights, re-scaled</span>
+          </div>
+
+          {(invalid || err) && (
+            <div className="text-neg-400 mb-2">{err ?? invalid}</div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <span className="text-fg-faint">Restates the open period + re-prices.</span>
+            <span className="flex gap-2">
+              <button
+                type="button" onClick={() => setOpen(false)} disabled={saving}
+                className="text-[11px] px-2 py-0.5 rounded border border-neutral-700 text-fg-soft hover:bg-overlay/5"
+              >
+                Cancel
+              </button>
+              <button
+                type="button" onClick={() => void save()} disabled={saving || !!invalid}
+                className="text-[11px] px-2 py-0.5 rounded bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </span>
+          </div>
+        </div>
+      )}
     </span>
   );
 }
@@ -119,6 +259,9 @@ export default function CurrentPortfolioCard({
   // Per-stock refresh (admin only): fetch one holding's price from GuruFocus
   // now and show the request/response inline. Reloading the detail after a
   // success surfaces the freshly-loaded close (+ re-priced basket).
+  // "Why was this picked" — the same modal the Daily-holdings table opens, from
+  // the same endpoint. Null = closed.
+  const [breakdown, setBreakdown] = useState<BreakdownTarget | null>(null);
   const { refreshing, results: refreshResults, refresh, clear: clearRefresh } = useStockRefresh(onCashChanged);
   const refreshOne = useCallback((companyId: number) => refresh(companyId, strategyId), [refresh, strategyId]);
   const staleSet = useMemo(() => new Set(staleCompanyIds ?? []), [staleCompanyIds]);
@@ -236,8 +379,14 @@ export default function CurrentPortfolioCard({
   // whose latest close (End date) lags this is stale (GuruFocus publish lag /
   // an illiquid name) and gets flagged orange in the As-of column.
   const referenceDate = snap.latest_price_date ? String(snap.latest_price_date).slice(0, 10) : null;
-  // Current cash % = the cash holding's weight (0 when none).
+  // The sleeves AS HELD, straight off the snapshot: cash is the cash holding's
+  // weight, each ETF is its own (negative company_id = -benchmark_id). Read from
+  // the holdings rather than the config so the editor always opens on the
+  // numbers in the table below it.
   const currentCashPct = ((snap.holdings ?? []).find((h) => h.is_cash)?.weight ?? 0) * 100;
+  const currentEtfSleeves = (snap.holdings ?? [])
+    .filter((h) => !h.is_cash && (h.company_id ?? 0) < 0)
+    .map((h) => ({ benchmarkId: -(h.company_id ?? 0), pct: (h.weight ?? 0) * 100 }));
   // "Held since" = the earliest holding entry date — the actual price date the
   // return is measured FROM ("…since it was entered"), which is the close before
   // the rebalance day (e.g. Friday 05-29 for a first-Monday 06-01 rebalance).
@@ -252,7 +401,13 @@ export default function CurrentPortfolioCard({
       <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-baseline gap-3 flex-wrap">
           <h3 className="text-sm font-semibold text-fg-strong">Current portfolio</h3>
-          <CashControl strategyId={strategyId} currentPct={currentCashPct} canEdit={canEditCash} onChanged={onCashChanged} />
+          <SleeveControl
+            strategyId={strategyId}
+            cashPct={currentCashPct}
+            etfSleeves={currentEtfSleeves}
+            canEdit={canEditCash}
+            onChanged={onCashChanged}
+          />
           {totalReturn != null && (
             <span className="text-sm" title="Weighted EUR return of the held portfolio since it was entered">
               <span className="text-fg-subtle text-xs">Total (€) </span>
@@ -388,8 +543,30 @@ export default function CurrentPortfolioCard({
                     )}
                   </td>
                   <td className="py-2 px-2 font-mono text-fg-muted whitespace-nowrap">{isin || '—'}</td>
+                  {/* The name opens the arithmetic behind the pick. ⚠ ONLY for a
+                      real company: an ETF sleeve and the cash row were never
+                      SELECTED by the engine — they were set by hand — so there is
+                      no signal breakdown to show and a clickable name there would
+                      promise an explanation that cannot exist. The GuruFocus link
+                      is unaffected; it lives on the Ticker cell to the left. */}
                   <td className="py-2 px-2 truncate max-w-[220px]">
-                    <a href={href} target="_blank" rel="noopener noreferrer" className="text-fg-soft hover:text-accent-300 hover:underline">{h.company_name}</a>
+                    {(h.company_id ?? 0) > 0 && !h.is_cash ? (
+                      <button
+                        type="button"
+                        onClick={() => setBreakdown({
+                          companyId: h.company_id,
+                          date: snap.as_of_date,
+                          name: h.company_name ?? '',
+                          ticker: h.ticker ?? null,
+                        })}
+                        title={`Why was ${h.company_name} picked? — signals, normalisation and the category blend as of ${snap.as_of_date}`}
+                        className="text-fg-soft hover:text-accent-300 hover:underline text-left truncate max-w-full"
+                      >
+                        {h.company_name}
+                      </button>
+                    ) : (
+                      <span className="text-fg-soft">{h.company_name}</span>
+                    )}
                   </td>
                   <td className="py-2 px-2 text-fg-subtle">{h.sector}</td>
                   <td className="py-2 px-2 text-right font-mono text-fg-muted">{target.toFixed(1)}%</td>
@@ -433,7 +610,18 @@ export default function CurrentPortfolioCard({
       <p className="text-xs text-fg-subtle mt-3 leading-relaxed">
         Sorted by current weight. <span className="font-medium">Target</span> is the last-rebalance weight; <span className="font-medium">Current</span> is the drifted weight, renormalized to 100%. <span className="font-medium">Start/End</span> are entry and latest-close prices in local currency. <span className="font-medium">Return (€)</span> and <span className="font-medium">Total</span> are the engine&apos;s figures (per-holding and weighted portfolio return), matching the headline MTD. <span className="font-medium">Start/End (€)</span>{' '}are the engine&apos;s EUR marks — &quot;—&quot; until priced (ETFs self-heal on the next price update).
         {canEditCash && <> A stale (<span className="text-warn-400">orange</span>) close date shows a <span className="text-warn-400">↻</span> to refresh that holding from GuruFocus, with the request and response inline.</>}
+        {' '}Click a <span className="font-medium">company name</span> for the arithmetic behind its selection.
       </p>
+      {breakdown && (
+        <BreakdownModal
+          target={breakdown}
+          // The snapshot's own config — the universe + weights the pick was made
+          // with. `{}` only when a legacy snapshot stored none; the endpoint then
+          // falls back to its own defaults rather than failing.
+          config={(snap.config ?? {}) as Record<string, unknown>}
+          onClose={() => setBreakdown(null)}
+        />
+      )}
     </div>
   );
 }

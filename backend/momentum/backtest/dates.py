@@ -49,6 +49,95 @@ def _first_monday_on_or_after(d: date) -> date:
     return _first_weekday_on_or_after(d, 0)
 
 
+# ── Decidability: which close a rebalance is DECIDED on ────────────
+# Largest calendar gap (days) we'll treat as a market HOLIDAY rather than
+# stale/missing data when forgiving an un-traded deciding bar. Covers the worst
+# single-closure case — a Monday holiday (MLK/Presidents/Memorial/Labor Day),
+# whose prior real bar is the preceding Friday (Fri→Mon = 3 days) — with a day
+# of slack. A wider gap means we're genuinely missing bars (an outage), not a
+# holiday, so we DON'T forgive.
+_MAX_HOLIDAY_GAP_DAYS = 4
+
+
+def _prior_trading_day(d: date) -> date:
+    """Last weekday strictly before `d` (skips Sat/Sun). Holidays aren't
+    modelled here — `is_decidable` layers holiday-awareness on top (a weekday
+    that never traded is forgiven only once it's actually in the past)."""
+    p = d - timedelta(days=1)
+    while p.weekday() >= 5:  # 5=Sat, 6=Sun
+        p -= timedelta(days=1)
+    return p
+
+
+def current_rebalance_date(today: date, weekday: int = 0) -> date:
+    """The rebalance date of `today`'s period — the first `weekday` of its
+    month (Mon=0..Sun=6). For August 2026 with weekday=0: Monday the 3rd."""
+    return _first_weekday_on_or_after(date(today.year, today.month, 1), weekday)
+
+
+def deciding_bar(rebalance_date: date) -> date:
+    """THE CLOSE A REBALANCE IS DECIDED ON — the trading day strictly before it.
+
+    The signal cutoff is strict `<` on the rebalance date (never train on the
+    bar we trade), so a first-Monday rebalance is decided on the preceding
+    Friday's close and enters at Monday's. That Friday bar is the *only* price
+    data a rebalance needs: a first-Monday August rebalance is fully decidable
+    on the Friday of July.
+    """
+    return _prior_trading_day(rebalance_date)
+
+
+def sessions_between(earlier: date, later: date) -> int:
+    """Weekdays strictly after `earlier`, up to and including `later` — how many
+    trading sessions a bar dated `earlier` has MISSED as of `later`. 0 when they
+    are the same day (or `later` precedes `earlier`).
+
+    Mon–Fri only, holiday-agnostic. Calendar days can't answer this question: a
+    Thursday bar and a Tuesday bar are both "3 days" from the following Friday
+    and Monday respectively, while one has missed a single session and the other
+    has missed three."""
+    if later <= earlier:
+        return 0
+    n = 0
+    d = earlier + timedelta(days=1)
+    while d <= later:
+        if d.weekday() < 5:
+            n += 1
+        d += timedelta(days=1)
+    return n
+
+
+def is_decidable(
+    rebalance_date: date,
+    *,
+    today: date,
+    latest_data_date: date | None,
+    max_holiday_gap_days: int = _MAX_HOLIDAY_GAP_DAYS,
+) -> bool:
+    """Has `rebalance_date`'s deciding bar settled into the data we hold?
+
+    ⚠ THE TEST IS AGAINST THE TRADING CALENDAR, NEVER THE CALENDAR MONTH. "Do we
+    have a close dated inside the current month?" is unsatisfiable on the 1st and
+    2nd of a month that opens on a weekend: August 2026 begins on a Saturday, so
+    the newest close in existence on Sunday the 2nd is Friday 31 July — correct,
+    current data, and a month-anchored gate rejects it as two days stale while
+    the first Monday's rebalance is already fully decidable from it.
+
+    `_prior_trading_day` is holiday-UNAWARE: it can land on a weekday that never
+    traded (the US July-4th observance on Fri 07-03, whose real deciding bar is
+    Thu 07-02; any Monday holiday whose real bar is the prior Friday). So a
+    calendar deciding bar that has already PASSED and sits only a holiday-sized
+    gap beyond our data is forgiven — but NOT one that simply hasn't occurred yet
+    (a future bar we must wait for), nor a wide gap, which signals genuinely
+    stale data (an outage) rather than a holiday.
+    """
+    ldd = today if latest_data_date is None else min(today, latest_data_date)
+    dbar = deciding_bar(rebalance_date)
+    if dbar <= ldd:
+        return True
+    return dbar < today and (dbar - ldd).days <= max_holiday_gap_days
+
+
 def _months_since_anchor(d: date) -> int:
     return (d.year - _ANCHOR_YEAR) * 12 + (d.month - _ANCHOR_MONTH)
 

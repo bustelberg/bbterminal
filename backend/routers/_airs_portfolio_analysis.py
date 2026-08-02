@@ -219,6 +219,173 @@ def _weigh(items: list[tuple[float, tuple[str, str, str]]]) -> dict[str, dict[st
     return out
 
 
+def _with_start_weights(holdings: list[dict], start_weights: dict[str, float]) -> list[dict]:
+    """Attach each holding's START-of-window weight, taken from the legs the charts are built on.
+
+    ⚠ JOINED BY ISIN, AND THE JOIN IS SAFE BECAUSE BOTH SIDES ARE ALREADY MERGED BY ISIN. Both
+    `_book_port_items` and `book_legs` run `_expand_book_rows`, which ends in `merge_by_isin` — so
+    each ISIN is one row on each side and this cannot fan out.
+
+    ⚠ `None` FOR A ROW WITH NO ISIN (cash) — not 0.0. Cash genuinely has a start value; we simply
+    have no key to reach it by here, and a 0 would state something false about a real position.
+    A 0.0 that DOES arrive is meaningful: bought after the window opened.
+    """
+    return [{**h, "weight_start_pct": start_weights.get(h.get("isin") or "")} for h in holdings]
+
+
+def _basis_axes(portfolio_id: int, source: str, effective: str | None,
+                bucket_filter: str | None) -> dict | None:
+    """The three composition axes on the ATTRIBUTION BASIS — the same weights the Brinson table
+    shows, from the same function.
+
+    ⚠ THIS IS A DELIBERATE CHANGE OF QUESTION (2026-07-31), MADE ON REQUEST. These bars used to be
+    "what do we hold now": today's EUR value over the whole equity sleeve. They are now "what did
+    we hold when the window opened, among the holdings we can attribute" — Beginwaarde over the
+    attributable legs, renormalised to 100%. The two differ by more than rounding (Technology 36%
+    → 39.1%; ASML 7.30% → 5.75%) and the second is what the attribution table has always shown.
+
+    ⚠ WHAT THAT COSTS, RETURNED SO IT CAN BE SHOWN RATHER THAN DISCOVERED. A holding bought during
+    the window has no Beginwaarde and is absent; an unpriceable one has no return and is absent.
+    `excluded` + `attributable_pct` carry both, per axis, and the UI puts them on screen. Weight
+    that silently leaves a percentage is the failure the coverage floors elsewhere exist to stop.
+
+    ⚠ ONE RULE DECIDES MEMBERSHIP, NOT TWO. The sector axis used to restrict to the
+    {Equity, Equity ETF} sleeve AND let the classifier fold the rest into Unclassified. Two
+    overlapping rules for one question is how the panels diverged; the ladder in `split_legs` is
+    now the only one, so the bar matches its Brinson row by construction.
+
+    Returns None when nothing can be weighed on this basis — the caller falls back rather than
+    drawing an empty chart as though the portfolio held nothing.
+    """
+    from ._airs_attribution_basis import (  # noqa: PLC0415  (cycle at module import)
+        AXIS_IDX, portfolio_legs, renormalise, split_legs, window_start,
+    )
+
+    start = window_start(source, "ytd", effective)
+    if not start:
+        return None
+    legs = portfolio_legs(source, portfolio_id, effective, start)
+    if not legs:
+        return None
+    # ⚠ A CLASS FILTER WE CANNOT APPLY IS A REFUSAL, NOT A NO-OP. Only the book legs carry an asset
+    # class; the model path has none. Ignoring the filter there would chart every class's sectors
+    # under a "Stocks" selection, and applying it would empty the chart — so hand back to the
+    # caller's fallback, which classifies from its own loader and can filter honestly.
+    if bucket_filter and not any(leg.get("asset_class") for leg in legs):
+        return None
+
+    grid = _grid(sorted({leg["isin"] for leg in legs if leg.get("isin")}))
+    codes = _country_by_code()
+    out: dict[str, dict] = {}
+    for axis, idx in AXIS_IDX.items():
+        attributable, excluded, total_w = split_legs(legs, idx, grid, codes)
+        # ⚠ THE CLASS FILTER NARROWS THE NUMERATOR AND THE DENOMINATOR TOGETHER, or the bars stop
+        # summing to 100 and every one of them silently means something else.
+        #
+        # ⚠ AND IT MUST NARROW `total_w` AND `excluded` TOO. It did not, and the ratio that came
+        # out was a MIXED one: Stocks-with-a-sector over the WHOLE book. With Stocks selected the
+        # card then read "87% of the book has a sector" — true of the book, but presented under a
+        # Stocks-only chart, where it reads as an accusation that 13% of the STOCKS are
+        # unclassified. Every stock in the measured portfolio has a sector; the 13% was five ETFs
+        # and a cash line, which are not stocks and were never candidates for this chart. Filtered
+        # consistently, the same portfolio reports 100% and the notice disappears, which is the
+        # honest answer.
+        if bucket_filter:
+            attributable = [i for i in attributable if i.get("asset_class") == bucket_filter]
+            excluded = [i for i in excluded if i.get("asset_class") == bucket_filter]
+            total_w = sum(i["weight_pct"] for i in (*attributable, *excluded))
+        denom = renormalise(attributable)
+        if denom <= 0:
+            out[axis] = {"weights": {}, "holdings": {}, "excluded": excluded,
+                         "attributable_pct": 0.0, "positions": 0}
+            continue
+        weights: dict[str, float] = defaultdict(float)
+        holdings: dict[str, list[dict]] = {}
+        for i in attributable:
+            w = i["weight_pct"] / denom * 100.0
+            weights[i["bucket"]] += w
+            holdings.setdefault(i["bucket"], []).append({
+                "name": (i.get("grid_row") or {}).get("name") or i.get("airs_name"),
+                "isin": i.get("isin"),
+                "weight_pct": w,
+                "asset_class": i.get("asset_class"),
+                "classified_as": i["bucket"],
+                "via_names": i.get("via_names") or [],
+            })
+        for legs_ in holdings.values():
+            legs_.sort(key=lambda h: -h["weight_pct"])
+        out[axis] = {
+            "weights": dict(weights),
+            "holdings": holdings,
+            "excluded": excluded,
+            # How much of the whole book this axis actually speaks for. NOT assumed to be 100.
+            "attributable_pct": (denom / total_w * 100.0) if total_w > 0 else 0.0,
+            # ⚠ THE ONLY EXCLUSION THAT IS A GAP. An ETF has no sector and a cash line is not a
+            # sector bet — those are answers, and they already have their own slice in the
+            # allocation chart. An UNPRICED holding is different in kind: a real position, in a
+            # real sector, absent from the bars — so its sector reads lower than it is, and
+            # elsewhere that exact hole credited a model +1.73pp for "avoiding" a sector it held
+            # 6% of. Reported separately because only this one deserves a warning; lumping the two
+            # made a perfectly ordinary 13% in ETFs look like a defect.
+            "unpriced_pct": (sum(e["weight_pct"] for e in excluded if e["reason"] == "unpriced")
+                             / total_w * 100.0) if total_w > 0 else 0.0,
+            "positions": len(attributable),
+        }
+    out["_start"] = start
+    # ⚠ THE SAME NUMERATOR THE BARS USE, KEYED BY ISIN — so the Holdings table can print the start
+    # weight beside the current one and the reader's own division actually works. `book_legs`
+    # already expresses `weight_pct` as Beginwaarde ÷ Σ Beginwaarde over the WHOLE book, which is
+    # the right denominator here: it makes the column directly comparable to `weight_now_pct` (also
+    # whole-book) and leaves exactly one documented step to a bar — divide by `attributable_pct`.
+    #
+    # ⚠ A 0.0 HERE IS A FACT, NOT A BLANK: the position was bought after the window opened, so it
+    # has no start value. That is the one case where "now" and "start" cannot be reconciled at all,
+    # and the table has to say so rather than print an empty cell.
+    out["_start_weights"] = {leg["isin"]: leg["weight_pct"] for leg in legs if leg.get("isin")}
+    return out
+
+
+def _axis_holdings(items: list[tuple[float, tuple[str, str, str]]],
+                   labels: list[dict]) -> dict[str, dict[str, list[dict]]]:
+    """The rows behind every bar: per axis, per bucket, the holdings and their weights.
+
+    ⚠ NORMALISED BY THE AXIS TOTAL — THE SAME DIVISION `_weigh` DOES, SO Σ OVER A BUCKET **IS**
+    THAT BAR. That identity is the entire purpose of this function: a drill-down whose rows sum to
+    something near-but-not-equal to the number that opened it converts one unexplained figure into
+    two. It is computed here rather than in the UI for the same reason the sibling drill-downs are
+    handed their series — a second implementation of the denominator is a second denominator.
+
+    ⚠ AND THE DENOMINATOR IS PER AXIS, NOT PER PORTFOLIO. `sector` is weighed over the EQUITY
+    sleeve while `region`/`currency` are weighed over every long position, so the caller passes a
+    different `items` list for each and the same holding legitimately carries two different
+    weights. Sharing one total across the three would make two of the axes wrong.
+
+    Why this exists at all: the attribution table has always shipped its own per-bucket holdings
+    (`rows[].portfolio_holdings`, rebased to ITS denominator), so it is self-verifying, while the
+    composition chart shipped aggregates only. The two answer the same-sounding question —
+    "how much Technology do we hold" — over different denominators and different weight bases, and
+    with only one side inspectable a reader had no way to discover that. Measured on Bustelberg
+    Offensief: 36% here against 39.1% there, both correct.
+    """
+    out: dict[str, dict[str, list[dict]]] = {"sector": {}, "region": {}, "currency": {}}
+    total = sum(w for w, _b in items)
+    if total <= 0:
+        return out
+    for (w, buckets), lab in zip(items, labels):
+        for axis, bucket in zip(("sector", "region", "currency"), buckets):
+            out[axis].setdefault(bucket, []).append({
+                **lab,
+                "weight_pct": w / total * 100.0,
+                # The raw classification value, so a reader can see WHY a holding landed in this
+                # bucket rather than having to trust that it did.
+                "classified_as": bucket,
+            })
+    for axis in out:
+        for legs in out[axis].values():
+            legs.sort(key=lambda h: -h["weight_pct"])
+    return out
+
+
 def _apply_book_source(result: dict, benchmark_label: str) -> None:
     """Swap the PRIMARY portfolio return for AIRS's own book number (`cumulatief_rendement`), and
     re-price the benchmark over the book's window — the calendar year, 1 Jan -> today.
@@ -512,6 +679,10 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
 
     grid = _grid(sorted({r["isin"] for r in rows if r.get("isin")}))
     items: list[tuple[float, tuple[str, str, str]]] = []
+    # Who each item IS — parallel to `items` (same loop, same order), so the composition drill-down
+    # can name the rows behind a bar. Identity only; the weight is `items`', because there must be
+    # exactly one place a weight comes from.
+    labels: list[dict] = []
     alloc_items: list[tuple[float, str]] = []
     # (row, current EUR value, class) for every LONG position — the whole-portfolio holdings table.
     raw_positions: list[tuple[dict, float, str]] = []
@@ -535,6 +706,9 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         if grow and _foreign_listing(grow):
             foreign += 1
         items.append((w, b))
+        labels.append({"name": r.get("holding_name"), "isin": isin,
+                       "asset_class": r.get("bucket") or UNKNOWN_BUCKET,
+                       "via_names": r.get("via_names") or []})
         # The book row is already classified by resolve_account_isins (the shared classifier).
         alloc_items.append((w, r.get("bucket") or UNKNOWN_BUCKET))
         raw_positions.append((r, w, r.get("bucket") or UNKNOWN_BUCKET))
@@ -618,7 +792,8 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             "own_return_estimated": bool(mk.get("start_interpolated")) if mk else False,
         })
     bucket_returns = {b: (v[1] / v[0] - 1) * 100.0 for b, v in bucket_agg.items() if v[0]}
-    return {"items": items, "alloc_items": alloc_items, "bucket_returns": bucket_returns,
+    return {"items": items, "labels": labels,
+            "alloc_items": alloc_items, "bucket_returns": bucket_returns,
             "holdings_detail": holdings_detail,
             "classified_w": classified_w, "total_w": total_w, "foreign": foreign,
             "holdings": holdings, "portefeuille": link["portefeuille"]}
@@ -671,6 +846,8 @@ def compute_portfolio_analysis(portfolio_id: int,
     overrides = _load_bucket_overrides(held)   # manual Class pins win, so the bar matches the column
     grid = _grid(held)
     port_items: list[tuple[float, tuple[str, str, str]]] = []
+    # Identity per item, parallel to `port_items` — see `_axis_holdings`.
+    port_labels: list[dict] = []
     alloc_items: list[tuple[float, str]] = []
     classified_w = total_w = 0.0
     port_foreign = 0
@@ -693,6 +870,8 @@ def compute_portfolio_analysis(portfolio_id: int,
         is_etf = bool(row) and (row.get("asset_class") or "").lower() in _FUND_CLASSES
         bucket = overrides.get(isin or "") or classify_bucket(ac, is_etf, isin, r.get("fonds"), row)
         alloc_items.append((w, bucket))
+        port_labels.append({"name": r.get("fonds"), "isin": isin, "asset_class": bucket,
+                            "via_names": r.get("via_names") or []})
 
     # --- the benchmark side -------------------------------------------------------------
     # Deduped, one row per company (the GOOGL/GOOG double-count is 11.3% of the index), and drawn
@@ -728,6 +907,7 @@ def compute_portfolio_analysis(portfolio_id: int,
     if weight_by == "book":
         if book:
             port_items = book["items"]
+            port_labels = book["labels"]
             alloc_items = book["alloc_items"]
             classified_w, total_w = book["classified_w"], book["total_w"]
             port_foreign, port_holdings = book["foreign"], book["holdings"]
@@ -747,8 +927,12 @@ def compute_portfolio_analysis(portfolio_id: int,
     # should — sector is not relevant there).
     _EQUITY = {"Equity", "Equity ETF"}
     general_items = port_items
+    general_labels = port_labels
     if bucket_filter:
-        general_items = [pi for pi, ai in zip(port_items, alloc_items) if ai[1] == bucket_filter]
+        keep = [(pi, lb) for pi, ai, lb in zip(port_items, alloc_items, port_labels)
+                if ai[1] == bucket_filter]
+        general_items = [pi for pi, _lb in keep]
+        general_labels = [lb for _pi, lb in keep]
     # ⚠ THE SECTOR DENOMINATOR IS THE EQUITY SLEEVE, AND SELECTING A CLASS MUST NOT MOVE IT.
     # This used to intersect with `bucket_filter` as well, so picking "Stocks" dropped Equity ETFs
     # out of the denominator and every sector percentage rose: Technology 34.41% -> 35.88% on
@@ -766,25 +950,94 @@ def compute_portfolio_analysis(portfolio_id: int,
     # equity sector chart standing — sector is not a question about a bond, and showing the
     # stocks' sectors under a "Bonds" selection would attribute them to the wrong sleeve. So the
     # filter still decides WHETHER the chart is drawn; it just no longer decides its denominator.
-    sector_items = (
-        [] if (bucket_filter and bucket_filter not in _EQUITY)
-        else [pi for pi, ai in zip(port_items, alloc_items) if ai[1] in _EQUITY])
+    sector_keep = ([] if (bucket_filter and bucket_filter not in _EQUITY)
+                   else [(pi, lb) for pi, ai, lb in zip(port_items, alloc_items, port_labels)
+                         if ai[1] in _EQUITY])
+    sector_items = [pi for pi, _lb in sector_keep]
+    sector_labels = [lb for _pi, lb in sector_keep]
     pw_general, pw_sector = _weigh(general_items), _weigh(sector_items)
     bw = _weigh(bench_items)
+    # The rows behind the bars, on each axis's OWN denominator — see `_axis_holdings`.
+    dd_general = _axis_holdings(general_items, general_labels)
+    dd_sector = _axis_holdings(sector_items, sector_labels)
+
+    # ⚠ NAMED, NOT INFERRED. The sector axis divides by the equity sleeve and the other two by
+    # every long position, so "our weight" means a different denominator per chart. The drill-down
+    # prints this sentence rather than leaving a reader to reverse-engineer which total a bar is a
+    # share of — the exact question that made the composition's 36% look inconsistent with the
+    # attribution table's 39.1% for the same sector.
+    _basis_note = {
+        "sector": "the equity sleeve (shares and equity ETFs)",
+        "region": "every long position",
+        "currency": "every long position",
+    }
+    weight_field = ("each position's current EUR value" if weight_basis == "book"
+                    else "the model's stated percentage")
+
+    # ⚠ THE BARS ARE WEIGHED ON THE ATTRIBUTION BASIS (2026-07-31) — see `_basis_axes`. The
+    # current-value path above still runs: it feeds the allocation pie and the holdings table,
+    # which are point-in-time views of what is held and must NOT move to a January basis. Only
+    # these three axes changed, and only so a sector bar equals its own Brinson row.
+    basis_axes = _basis_axes(portfolio_id, source, p.get("positions_datum"), bucket_filter)
 
     axes = []
     for axis in ("sector", "region", "currency"):
-        pw = pw_sector if axis == "sector" else pw_general
-        keys = set(pw[axis]) | set(bw[axis])
+        ba = (basis_axes or {}).get(axis)
+        if ba and ba["weights"]:
+            pw_axis, dd_axis = ba["weights"], ba["holdings"]
+            note = (f"Share of the attributable holdings on the {axis} axis, by each position's "
+                    f"value on {basis_axes['_start']} (Beginwaarde) — the SAME weights the "
+                    f"Attribution table uses.")
+            positions, excluded = ba["positions"], ba["excluded"]
+            attributable_pct, unpriced_pct = ba["attributable_pct"], ba["unpriced_pct"]
+        else:
+            # ⚠ FALLBACK, AND IT IS A DIFFERENT QUESTION — SO IT SAYS SO. No paired book (or
+            # nothing attributable) means there is no Beginwaarde to weigh by. Drawing an empty
+            # chart would claim the portfolio holds nothing; drawing the current-value bars
+            # without a word would put a differently-based number under the same heading.
+            pw = pw_sector if axis == "sector" else pw_general
+            dd = dd_sector if axis == "sector" else dd_general
+            pw_axis, dd_axis = pw[axis], dd[axis]
+            note = (f"Share of {_basis_note[axis]}, by {weight_field}. "
+                    f"⚠ Not the Attribution basis — no start-of-window values are available here.")
+            positions = len(sector_items if axis == "sector" else general_items)
+            excluded, attributable_pct, unpriced_pct = [], None, None
+        keys = set(pw_axis) | set(bw[axis])
         rows = [{
             "bucket": k,
-            "portfolio_pct": pw[axis].get(k, 0.0),
+            "portfolio_pct": pw_axis.get(k, 0.0),
             "benchmark_pct": bw[axis].get(k, 0.0),
             # The tilt. It is the whole point of putting the two side by side.
-            "diff_pct": pw[axis].get(k, 0.0) - bw[axis].get(k, 0.0),
+            "diff_pct": pw_axis.get(k, 0.0) - bw[axis].get(k, 0.0),
+            # ⚠ THE ROWS SUM TO `portfolio_pct` EXACTLY — same division, done once. A bucket the
+            # portfolio does not hold (an unowned sector the benchmark has) is an empty list, which
+            # is a finding rather than missing data.
+            "holdings": dd_axis.get(k, []),
         } for k in keys]
         rows.sort(key=lambda r: -max(r["portfolio_pct"], r["benchmark_pct"]))
-        axes.append({"axis": axis, "rows": rows})
+        axes.append({
+            "axis": axis,
+            "rows": rows,
+            "basis": note,
+            "positions": positions,
+            # ⚠ WHAT THE BASIS LEAVES OUT, PER AXIS. Named, weighted and reasoned, because this
+            # basis drops a mid-window purchase and an unpriceable holding entirely — neither can
+            # be expressed on it, and a percentage that quietly loses weight is the one failure
+            # this whole module is written to avoid.
+            #
+            # ⚠ BUT NOT EVERY EXCLUSION IS A LOSS. A fund, a bond and a cash line have no sector
+            # BY DEFINITION and are not Stocks in the first place — they are their own slices of
+            # the allocation chart, and presenting them as weight the sector chart "cannot handle"
+            # made an ordinary 13% in ETFs read as a defect. `unpriced_pct` is the one that is.
+            "attributable_pct": attributable_pct,
+            "unpriced_pct": unpriced_pct,
+            "excluded": [{"name": (e.get("grid_row") or {}).get("name") or e.get("airs_name"),
+                          "isin": e.get("isin"), "weight_pct": e["weight_pct"],
+                          # The Class it already carries in our own system — which is what makes
+                          # "this was never a stock" visible instead of implied.
+                          "asset_class": e.get("asset_class"),
+                          "reason": e["reason"]} for e in excluded],
+        })
 
     return {
         "portfolio_id": portfolio_id,
@@ -835,7 +1088,15 @@ def compute_portfolio_analysis(portfolio_id: int,
         # Per-holding book detail (bucket / currency / start-weight / return) — the source for a
         # non-equity sleeve's contribution + currency view, where sector-vs-SP500 says nothing.
         # Empty when no book is paired (a model with no book has no per-holding returns).
-        "book_holdings": book["holdings_detail"] if book else [],
+        #
+        # ⚠ `weight_start_pct` IS GRAFTED ON FROM THE AXES' OWN LEGS, NOT RECOMPUTED. It is the
+        # numerator the sector bars are built from, so the table and the chart cannot disagree
+        # about what a position weighed in January — which is the entire reason the column exists.
+        # Both weight columns are whole-book shares, so they sit beside each other honestly:
+        # ASML 5.00% at the start against 7.02% now IS the story, and a bar is that start weight
+        # divided by the axis's `attributable_pct`.
+        "book_holdings": _with_start_weights(book["holdings_detail"] if book else [],
+                                             (basis_axes or {}).get("_start_weights") or {}),
     }
 
 
@@ -918,11 +1179,13 @@ def _basket_returns(holdings, benchmark_label: str) -> dict:
 
 
 def _classify_items(holdings, codes):
-    """(port_items, classified_w, total_w, foreign, holding_count) for a basket — the portfolio
-    side of the composition, built exactly like `compute_portfolio_analysis` does for a model."""
+    """(port_items, labels, classified_w, total_w, foreign, holding_count) for a basket — the
+    portfolio side of the composition, built exactly like `compute_portfolio_analysis` does for a
+    model. `labels` is parallel to `items` and carries identity only (see `_axis_holdings`)."""
     held = sorted({h.isin for h in holdings if h.isin})
     grid = _grid(held)
     items: list[tuple[float, tuple[str, str, str]]] = []
+    labels: list[dict] = []
     classified = total = 0.0
     foreign = count = 0
     for h in holdings:
@@ -939,7 +1202,11 @@ def _classify_items(holdings, codes):
         if h.isin:
             count += 1
         items.append((w, b))
-    return items, classified, total, foreign, count
+        # A basket carries no asset-class sleeve — every leg is in every axis's denominator, which
+        # is why the basket path has no sector/general split below.
+        labels.append({"name": (row or {}).get("name") or getattr(h, "name", None) or h.isin,
+                       "isin": h.isin, "asset_class": None, "via_names": []})
+    return items, labels, classified, total, foreign, count
 
 
 def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: str | None = None) -> dict:
@@ -947,7 +1214,8 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
     the benchmark — the same shape `compute_portfolio_analysis` returns, so ONE Analyse view serves
     a stock (a basket of one) and a portfolio alike. yfinance only: a basket has no AIRS book."""
     codes = _country_by_code()
-    port_items, classified_w, total_w, port_foreign, port_holdings = _classify_items(holdings, codes)
+    (port_items, port_labels, classified_w, total_w,
+     port_foreign, port_holdings) = _classify_items(holdings, codes)
 
     bench, bench_coverage = _members(benchmark_label)
     bench_isins = sorted({m["isin"] for m in bench if m.get("isin")})
@@ -969,14 +1237,20 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
         bench_items.append((cap, b))
 
     pw, bw = _weigh(port_items), _weigh(bench_items)
+    dd = _axis_holdings(port_items, port_labels)
     axes = []
     for axis in ("sector", "region", "currency"):
         keys = set(pw[axis]) | set(bw[axis])
         rows = [{"bucket": k, "portfolio_pct": pw[axis].get(k, 0.0),
                  "benchmark_pct": bw[axis].get(k, 0.0),
-                 "diff_pct": pw[axis].get(k, 0.0) - bw[axis].get(k, 0.0)} for k in keys]
+                 "diff_pct": pw[axis].get(k, 0.0) - bw[axis].get(k, 0.0),
+                 "holdings": dd[axis].get(k, [])} for k in keys]
         rows.sort(key=lambda r: -max(r["portfolio_pct"], r["benchmark_pct"]))
-        axes.append({"axis": axis, "rows": rows})
+        # ⚠ ONE DENOMINATOR ON ALL THREE AXES HERE, unlike a model portfolio: a basket has no
+        # asset-class sleeve to divide by, so every leg is in every axis's total.
+        axes.append({"axis": axis, "rows": rows,
+                     "basis": "Share of the whole basket, by each holding's stated weight.",
+                     "positions": len(port_items)})
 
     return {
         "portfolio_id": None, "name": name, "as_of": None,

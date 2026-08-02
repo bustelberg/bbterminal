@@ -14,8 +14,16 @@ latest session) is caught by a lenient global-latest sanity bound.
 This module is split into a PURE classifier (`classify_universe_freshness`,
 unit-tested with synthetic dates) and a thin DB wrapper (`universe_freshness`,
 in `ingest/phases/prices.py`) that gathers its inputs. The rebalance op uses the
-report's `to_fetch`/`active_total` to WARN when some of the universe's prices are
-out of date — it never blocks the rebalance on freshness.
+report's `to_fetch` to pick which names to FETCH before it computes, then
+re-probes and WARNS about whatever is still behind — it never blocks the
+rebalance on freshness.
+
+⚠ THE REPORT IS RELATIVE, SO IT NEEDS AN ABSOLUTE PARTNER. Every judgement here
+is "behind your peers" / "behind the global latest" — a universe uniformly a week
+old is unanimously `fresh`, because nobody is behind anybody. The caller
+therefore also compares `global_latest` against the date it actually needs (the
+rebalance's deciding bar) and treats the whole active set as behind when the
+universe as a whole has not reached it.
 """
 from __future__ import annotations
 

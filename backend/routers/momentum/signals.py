@@ -24,7 +24,7 @@ from fastapi import APIRouter, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from deps import supabase
+from deps import fetch_in_chunks, supabase
 from momentum.data import load_all_prices, load_all_volumes, load_universe
 from momentum.signals import EXTRA_SIGNAL_DEFS, PRICE_SIGNAL_DEFS, TREND_SIGNAL_DEFS
 from routers._cache_headers import CACHE_STATIC
@@ -435,10 +435,34 @@ async def _signal_breakdown_stream(req: SignalBreakdownRequest):
         if monthly_eligible is not None:
             eligible = monthly_eligible.get(target_month_key) or {}
             if not eligible:
+                # ⚠ A FROZEN UNIVERSE HAS EXACTLY ONE MONTH, AND IT IS ALMOST NEVER
+                # THE MONTH YOU ARE ASKING ABOUT. `LEONTEQ (as of 2026-06-17)` is
+                # stamped 2026-06 and is what the August book selected from — the
+                # engine broadcasts that single snapshot across history
+                # (`broadcast_constant`) and `run_current_portfolio` falls back to
+                # the latest available month with a warning. This path did neither,
+                # so "why was this picked" failed with what reads like a data
+                # error — but only on a COLD cache, because a warm
+                # `monthly_eligible` from a backtest run is already broadcast.
+                # Failing for one caller and not the other, on a screen whose whole
+                # job is to explain a decision, is the worst of both.
                 available = sorted(monthly_eligible.keys())
-                hint = f" (available range: {available[0]} … {available[-1]})" if available else ""
-                yield _emit({"type": "error", "message": f"No companies in {label!r} for {target_month_key}{hint}"})
-                return
+                if not available:
+                    yield _emit({"type": "error", "message": f"No universe data for label {label!r}"})
+                    return
+                fallback_key = available[-1]
+                eligible = monthly_eligible.get(fallback_key) or {}
+                if not eligible:
+                    yield _emit({"type": "error", "message": f"No companies in {label!r} for {target_month_key}"})
+                    return
+                yield _emit({
+                    "type": "warning", "scope": "universe",
+                    "message": (
+                        f"No {label!r} membership for {target_month_key}; using the latest "
+                        f"available snapshot ({fallback_key}) — the same fallback the engine "
+                        "applies when it selects."
+                    ),
+                })
             eligible_ids = set(eligible.keys())
             universe_df = (
                 universe_df[universe_df["company_id"].isin(eligible_ids)]
@@ -568,14 +592,57 @@ async def _signal_breakdown_stream(req: SignalBreakdownRequest):
     volume_index = await asyncio.to_thread(_build_volume_index, co_volumes_df) if not co_volumes_df.empty else None
 
     # 5. Per-signal universe min/max (what 0-100 normalization saw).
+    #
+    # ⚠ AND WHICH COMPANY SITS AT EACH END. The normalization is
+    # `(raw − min) / (max − min)`, so those two names set the scale for all ~1,500
+    # others — one corrupt series at an extreme silently compresses everyone
+    # else's score toward the middle. An unnamed range is unfalsifiable: "max
+    # 5,221.78%" reads as a fact about the universe, while "max 5,221.78% —
+    # <ticker>" is a claim you can check in one click. Measured on the day this
+    # was added: Worldline's 12-1M read +1,142% because a 1-for-40 reverse split
+    # was never re-read into our history, and nothing on screen pointed at it.
     yield _emit({"type": "progress", "pct": 88, "message": "Computing universe-wide signal min/max..."})
     signal_keys = [s["key"] for s in PRICE_SIGNAL_DEFS]
     universe_minmax: dict[str, dict[str, float | None]] = {}
+    minmax_names: dict[str, dict[str, str | int | None]] = {}
+    # company_id → display label, for whoever lands on an extreme.
+    _panel_ids = (
+        panel_df["company_id"].astype(int).tolist() if "company_id" in panel_df.columns else []
+    )
+    # Identity, not just a ticker: "high SNDK" is a hint, while the ticker WITH
+    # its exchange, the ISIN and a link is something the reader can actually go
+    # and check — which is the entire point of naming the extremes.
+    _labels: dict[int, dict] = {}
+    if _panel_ids:
+        for r in fetch_in_chunks(
+            _panel_ids,
+            lambda chunk: supabase.table("company")
+            .select("company_id, company_name, gurufocus_ticker, isin, "
+                    "gurufocus_exchange:gurufocus_exchange(exchange_code)")
+            .in_("company_id", chunk).execute(),
+        ):
+            cid_i = int(r["company_id"])
+            _labels[cid_i] = {
+                "company_id": cid_i,
+                "ticker": r.get("gurufocus_ticker"),
+                "exchange": (r.get("gurufocus_exchange") or {}).get("exchange_code"),
+                "company_name": r.get("company_name"),
+                "isin": r.get("isin"),
+            }
     for k in signal_keys:
         if k in panel_df.columns:
             col = pd.to_numeric(panel_df[k], errors="coerce")
             if col.notna().any():
                 universe_minmax[k] = {"min": float(col.min()), "max": float(col.max())}
+                try:
+                    lo_cid = int(panel_df.loc[col.idxmin(), "company_id"])
+                    hi_cid = int(panel_df.loc[col.idxmax(), "company_id"])
+                    minmax_names[k] = {
+                        "min_company": _labels.get(lo_cid) or {"company_id": lo_cid},
+                        "max_company": _labels.get(hi_cid) or {"company_id": hi_cid},
+                    }
+                except Exception:  # noqa: BLE001 — a label must not break the breakdown
+                    minmax_names[k] = {}
             else:
                 universe_minmax[k] = {"min": None, "max": None}
         else:
@@ -640,6 +707,8 @@ async def _signal_breakdown_stream(req: SignalBreakdownRequest):
             "components": exp["components"],
             "universe_min": sig_min,
             "universe_max": sig_max,
+            # WHO is at each end of the range that normalizes this signal.
+            **(minmax_names.get(key) or {}),
             "normalized_score": normalized,
             "weight": sig_weights.get(key, 0),
         })

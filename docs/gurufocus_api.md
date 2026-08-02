@@ -19,6 +19,46 @@ sub-path it doesn't recognise. Probed naively, `stock/AAPL/news` looks like a wo
 endpoint. Every probe below is compared against a canary sub-path that cannot exist;
 anything matching it (or any all-zero series) is listed as a fallback, not an endpoint.
 
+## The date filter: `?start_date=&end_date=` (undocumented, real)
+
+`stock/{sym}/price` and `stock/{sym}/volume` accept a date range. Verified 2026-08-02
+against `AAPL`, `XPAR:WLN` and `WBO:VER`, on both endpoints — the returned values are
+identical to the unfiltered series, and a range returns exactly the bars in it.
+
+| request | bars | bytes |
+|---|---|---|
+| `stock/AAPL/price` | 11,501 | 268,703 |
+| `…/price?start_date=2026-07-31&end_date=2026-07-31` | 1 | **23** |
+
+An 11,682× cut. It powers the daily gap fetch (`ingest/prices.py`) and the drift probe
+(`ingest/history_drift.py`).
+
+**⚠ Only this spelling filters.** `?from=&to=`, `?start=&end=`, `?date=`, `?limit=`,
+`?last=`, `?period=`, `?range=`, `?days=` all return **HTTP 200 and the full series** —
+no error, no hint. Send one of those and you get an 11,501-bar answer to a one-day
+question: it parses fine and is wrong about what you asked.
+
+**⚠ It does not save quota.** `api_usage` counts REQUESTS (`MONTHLY_API_LIMIT` =
+20,000/region), so a one-day fetch costs the same single call as the whole history.
+The win is time and bandwidth. When you need the full series, ask for it in ONE
+unfiltered request — never walk it in windows, which multiplies the only scarce thing.
+
+**⚠ `end_date` = today makes the API INVENT a bar.** Measured on Sunday 2026-08-02:
+
+```
+?start_date=2026-07-29&end_date=2026-07-31  -> 3 real bars
+?start_date=2026-07-29&end_date=2026-08-02  -> the same 3, PLUS 2026-08-02 = 308.91
+                                               (Friday's close, repeated)
+?start_date=2026-08-01&end_date=2026-08-01  -> []        (a past non-trading day)
+```
+
+That extra row is the live-quote line, dated today, carrying the last close whenever
+today has not settled. The **unfiltered** endpoint never does this — it stops at the
+newest settled close — so a windowed fetch can manufacture phantom bars on weekends and
+holidays that a full fetch would not. `ingest/prices.py::_settled_through` therefore
+never asks beyond yesterday, and clamps to the real today so a caller's future-dated
+`data_cutoff` can't reinstate it.
+
 ## Real endpoints (22)
 
 | path | shape | note |

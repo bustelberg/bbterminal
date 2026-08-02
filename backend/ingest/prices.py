@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -217,12 +217,41 @@ def _upload_to_storage(supabase: Client, path: str, data: list) -> None:
             )
 
 
-def _fetch_indicator_from_api(ticker: str, exchange: str, indicator: str = "price", timeout: int = 30) -> tuple[list | None, str, int | None]:
+def _fetch_indicator_from_api(
+    ticker: str,
+    exchange: str,
+    indicator: str = "price",
+    timeout: int = 30,
+    *,
+    start_date: date | str | None = None,
+    end_date: date | str | None = None,
+) -> tuple[list | None, str, int | None]:
     """Fetch an indicator from GuruFocus API. Returns (raw_data, log_message, http_status).
 
     Uses curl_cffi with Chrome120 impersonation to bypass GuruFocus's
     Cloudflare TLS-fingerprint check (urllib's fingerprint gets
-    blocked). Falls back to urllib only when curl_cffi can't import."""
+    blocked). Falls back to urllib only when curl_cffi can't import.
+
+    ⚠ `start_date`/`end_date` USE THE ONE SPELLING THAT ACTUALLY FILTERS.
+    Undocumented, verified 2026-08-02 against AAPL / XPAR:WLN / WBO:VER on both
+    the price and volume endpoints: `?start_date=&end_date=` returns exactly that
+    range and the values are identical to the unfiltered series. It is a real
+    saving — one day of Apple is **23 bytes against 268,703**, an 11,682× cut —
+    and an empty `[]` for a non-trading day, which is also the cheapest phantom
+    detector there is.
+
+    ⚠ EVERY OTHER SPELLING IS SILENTLY IGNORED. `?from=&to=`, `?start=&end=`,
+    `?date=`, `?limit=`, `?period=`, `?days=` all return HTTP 200 and the FULL
+    series — no error, no hint. Sending one and trusting the result gives you an
+    11,501-bar answer to a one-day question, which parses fine and is wrong about
+    what you asked. Do not "simplify" these parameter names.
+
+    ⚠ IT DOES NOT SAVE QUOTA. `api_usage` counts REQUESTS, not bytes
+    (`MONTHLY_API_LIMIT` = 20,000/region), so a one-day fetch and a full-history
+    fetch cost exactly the same one call. The win is time and bandwidth. Where
+    the whole series is genuinely needed, ask for it in ONE unfiltered request —
+    never walk it in windows, which multiplies the only thing that is scarce.
+    """
     base_url = os.environ.get("GURUFOCUS_BASE_URL", "")
     api_key = os.environ.get("GURUFOCUS_API_KEY", "")
     if not base_url:
@@ -236,6 +265,10 @@ def _fetch_indicator_from_api(ticker: str, exchange: str, indicator: str = "pric
 
     symbol = _build_symbol(ticker, exchange)
     url = f"{base}/public/user/{api_key}/stock/{quote(symbol, safe=':')}/{indicator}"
+    if start_date is not None or end_date is not None:
+        lo = start_date.isoformat() if isinstance(start_date, date) else (start_date or "1900-01-01")
+        hi = end_date.isoformat() if isinstance(end_date, date) else (end_date or date.today().isoformat())
+        url += f"?start_date={lo}&end_date={hi}"
     masked_url = url.replace(api_key, api_key[:4] + "***")
 
     if _cf_is_available():
@@ -284,12 +317,45 @@ def _fetch_price_from_api(ticker: str, exchange: str, timeout: int = 30) -> tupl
     return _fetch_indicator_from_api(ticker, exchange, "price", timeout)
 
 
+def _settled_through(data_cutoff: date | None = None) -> date:
+    """The last date a windowed fetch may ask for: YESTERDAY, never today.
+
+    ⚠ `end_date = today` MAKES THE API INVENT A BAR. Measured 2026-08-02 (a
+    Sunday) on AAPL:
+
+        ?start_date=2026-07-29&end_date=2026-07-31  → 3 real bars
+        ?start_date=2026-07-29&end_date=2026-08-02  → the same 3, PLUS
+                                                      2026-08-02 = 308.91
+                                                      (Friday's close, repeated)
+
+    That extra row is the live-quote line, dated today, carrying the last close
+    whenever today has not settled. The UNFILTERED endpoint never does this — it
+    stops at the newest settled close — so a windowed fetch can manufacture
+    phantom bars that a full fetch would not, on exactly the weekend/holiday days
+    we just spent a repair removing (VERBUND, GFI, 00883, BEKE).
+
+    Asking only through yesterday costs nothing real: the daily tick runs at
+    05:00 UTC hunting the PRIOR session's close, and a same-day close published
+    later is simply picked up by tomorrow's run — one request later, never wrong.
+    """
+    # ⚠ CLAMPED TO THE REAL TODAY. `data_cutoff` is the caller's notion of "now"
+    # (a backfill replaying a past date, a test); the synthesised live row is tied
+    # to GuruFocus's clock, not ours. Trusting a cutoff in the FUTURE would ask
+    # for a window that still contains the real today and reinstate the phantom —
+    # which is exactly how this was caught.
+    real_today = date.today()
+    asof = min(data_cutoff, real_today) if data_cutoff else real_today
+    return asof - timedelta(days=1)
+
+
 def _try_with_fallbacks(
     ticker: str,
     exchange: str,
     indicator: str,
     *,
     on_log=None,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> tuple[list | None, str, int | None, str]:
     """Fetch (ticker, exchange) on GuruFocus, falling through to entries
     in `FALLBACK_EXCHANGES[exchange]` when the primary returns 404
@@ -303,7 +369,8 @@ def _try_with_fallbacks(
     def _log(msg: str):
         if on_log:
             on_log(msg)
-    data, api_log, status = _fetch_indicator_from_api(ticker, exchange, indicator)
+    data, api_log, status = _fetch_indicator_from_api(
+        ticker, exchange, indicator, start_date=start_date, end_date=end_date)
     if data is not None:
         return data, api_log, status, exchange
     not_found = bool(api_log and "stock not found" in api_log.lower())
@@ -322,7 +389,8 @@ def _try_with_fallbacks(
 
     for alt in FALLBACK_EXCHANGES.get(exchange, []):
         _log(f"{exchange}:{ticker} 404 — trying fallback {alt}:{ticker}")
-        d2, l2, s2 = _fetch_indicator_from_api(ticker, alt, indicator)
+        d2, l2, s2 = _fetch_indicator_from_api(
+            ticker, alt, indicator, start_date=start_date, end_date=end_date)
         if d2 is not None:
             _log(f"  fallback {alt}:{ticker} succeeded (status {s2})")
             # Combine logs so the caller sees both attempts in the
@@ -573,6 +641,29 @@ def ensure_volume_for_company(
             result.source = "cache"
             return result
 
+        # Gap fetch — same reasoning as the price path: one request either way,
+        # but a window instead of the whole history. Storage is bypassed so the
+        # cached FULL series is never overwritten with a slice of itself.
+        gap_start = db_max + timedelta(days=1)
+        data, api_log, http_status, used_exchange = _try_with_fallbacks(
+            ticker, exchange, "volume",
+            on_log=lambda m: result.logs.append(m), start_date=gap_start,
+            end_date=_settled_through(data_cutoff),
+        )
+        track_api_call(supabase, used_exchange)
+        result.api_calls += 1
+        result.logs.append(api_log)
+        if data is not None:
+            parsed = _parse_price_series(data)
+            result.source = "api_gap"
+            result.total_prices = len(parsed)
+            if used_exchange != exchange:
+                result.resolved_exchange = used_exchange
+            if parsed:
+                result.rows_loaded = load_volume_into_db(supabase, company_id, parsed)
+            return result
+        result.logs.append("volume gap fetch failed — falling back to the full series")
+
     # 1. Check cache
     cached = _fetch_from_storage(supabase, path)
     if cached is not None:
@@ -662,6 +753,7 @@ def ensure_prices_for_company(
     # Fast path: if the DB's latest row is already fresh we skip Storage
     # entirely. Without this, cache hits still pay for a multi-hundred-KB JSON
     # download + full reparse per company before discovering nothing to write.
+    db_max: date | None = None
     if not force_refresh:
         db_max = _db_max_date(supabase, company_id, "close_price")
         if db_max is not None:
@@ -670,6 +762,47 @@ def ensure_prices_for_company(
                 result.source = "cache"
                 _log(f"DB fresh ({reason}) — skipping Storage")
                 return result
+
+    # ── GAP FETCH ──────────────────────────────────────────────────
+    # ⚠ WE HOLD EVERYTHING UP TO `db_max`, SO ASK FOR WHAT COMES AFTER IT. The
+    # unfiltered endpoint hands back the entire history to add one bar — 268,703
+    # bytes of Apple for 23 bytes of news. `?start_date=` costs the same single
+    # API request (the quota counts requests, not bytes) but turns the daily
+    # refresh from hundreds of megabytes into a rounding error.
+    #
+    # ⚠ AND IT DELIBERATELY BYPASSES STORAGE. The cached blob is the FULL series;
+    # merging a window into it, or worse overwriting it with the window, would
+    # quietly truncate the one copy of the history we keep outside the DB. A gap
+    # fetch therefore reads no cache and writes none — the cache stays a valid
+    # full history as of its own date, and any path that needs the whole thing
+    # (`force_refresh`, a company with no rows yet) still takes the full route
+    # below and refreshes it.
+    if db_max is not None and not force_refresh:
+        gap_start = db_max + timedelta(days=1)
+        data, api_log, http_status, used_exchange = _try_with_fallbacks(
+            ticker, exchange, "price", on_log=_log,
+            start_date=gap_start, end_date=_settled_through(data_cutoff),
+        )
+        track_api_call(supabase, used_exchange)
+        result.api_calls += 1
+        result.http_status = http_status
+        result.logs.append(api_log)
+        if data is not None:
+            parsed = _parse_price_series(data)
+            result.source = "api_gap"
+            result.total_prices = len(parsed)
+            if used_exchange != exchange:
+                result.resolved_exchange = used_exchange
+            if parsed:
+                result.rows_loaded = load_prices_into_db(supabase, company_id, parsed)
+                _log(f"gap fetch from {gap_start}: {len(parsed)} bar(s), "
+                     f"{result.rows_loaded} loaded")
+            else:
+                _log(f"gap fetch from {gap_start}: no new bars")
+            return result
+        # A 403/404/network failure falls through to the full path below, which
+        # knows how to classify forbidden/delisted and how to fall back to cache.
+        _log(f"gap fetch failed ({api_log[:120]}) — falling back to the full series")
 
     # 1. Check cache
     if not force_refresh:

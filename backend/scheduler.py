@@ -86,6 +86,78 @@ _price_retry_lock = threading.Lock()
 # key (today's) on each schedule so it never grows.
 _price_retry_counts: dict[str, int] = {}
 
+# ── PostgREST cold start ───────────────────────────────────────────
+# ⚠ A STARTUP PROBE CAN BEAT THE DATABASE TO READINESS, AND THE FAILURE LOOKS LIKE A FAULT.
+# PostgREST answers nothing until it has loaded its schema cache; until then EVERY query — a
+# one-row `limit(1)` included — comes back as
+#
+#     APIError: {'code': 'PGRST002', 'message': 'Could not query the database for the
+#                schema cache. Retrying.'}
+#
+# which is PostgREST saying *it* is retrying, not that our query was wrong. The backend and the
+# Supabase stack boot in parallel (locally `npx supabase start`, in prod a redeploy restarting
+# both), so a catch-up that fires on startup races the schema cache and loses. Swallowed by the
+# job's `except`, it logs a traceback and the boot's catch-up is gone until the next daily tick —
+# and the startup catch-up exists precisely to repair the gap a daily tick CANNOT. So a warming
+# database is waited out, not reported as a failure.
+_DB_WARMUP_ATTEMPTS = int(os.environ.get("DB_WARMUP_ATTEMPTS", "6"))
+_DB_WARMUP_DELAY_SECONDS = float(os.environ.get("DB_WARMUP_DELAY_SECONDS", "5"))
+
+
+def _is_db_warming(exc: BaseException) -> bool:
+    """Is PostgREST still BOOTING (wait for it), or did the query genuinely fail (report it)?
+
+    Matched on the PostgREST error CODE, never on its prose: PGRST002 = the schema cache is not
+    loaded yet, PGRST001 = it cannot reach the database at all. Both are states a booting stack
+    passes THROUGH. Every other code is a real answer about our query and must surface — a
+    substring match on "Retrying." would swallow those too.
+    """
+    code = str(getattr(exc, "code", "") or "")
+    if code in {"PGRST001", "PGRST002"}:
+        return True
+    # postgrest's APIError carries the raw dict in `str(exc)`; keep a fallback in case the
+    # attribute moves, but stay anchored on the codes.
+    text = str(exc)
+    return "PGRST001" in text or "PGRST002" in text
+
+
+def _await_db_ready(what: str) -> bool:
+    """Block (on a daemon thread) until PostgREST serves a trivial read, or give up saying so.
+
+    ⚠ THIS IS A GATE, NOT A RETRY WRAPPER AROUND THE WORK. It spends one tiny query per attempt;
+    wrapping the job itself would re-spend whatever the job had already done (the asset-price
+    refresh costs ~1.5s of Yahoo per instrument). Once the gate opens, the job runs exactly once
+    and any later error is a real one.
+
+    Returns True when the database answered, False when it never did — the caller then logs one
+    clear line instead of a traceback that reads like a bug in the job.
+    """
+    import time  # noqa: PLC0415
+
+    from deps import supabase  # noqa: PLC0415
+
+    for attempt in range(1, _DB_WARMUP_ATTEMPTS + 1):
+        try:
+            supabase.table("asset_analysis").select("analysis_id").limit(1).execute()
+            return True
+        except Exception as e:  # noqa: BLE001
+            if not _is_db_warming(e):
+                return True  # a real error — let the job hit it and report it properly
+            if attempt == _DB_WARMUP_ATTEMPTS:
+                _log.warning(
+                    "[scheduler] %s: the database was still warming up after %s attempt(s) "
+                    "(%s) — standing down; the daily tick is the fallback.",
+                    what, _DB_WARMUP_ATTEMPTS, e,
+                )
+                return False
+            _log.info(
+                "[scheduler] %s: database still warming up (%s), retrying in %ss [%s/%s]",
+                what, getattr(e, "code", type(e).__name__),
+                _DB_WARMUP_DELAY_SECONDS, attempt, _DB_WARMUP_ATTEMPTS,
+            )
+            time.sleep(_DB_WARMUP_DELAY_SECONDS)
+    return False
+
 
 def _reap_orphan_runs() -> None:
     """Mark EVERY `ingest_run` row still in `status='running'` as errored.
@@ -204,10 +276,16 @@ def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
     from ingest.phases.planner import build_plan  # noqa: PLC0415 — avoid import cycle
 
     reasons: list[str] = []
+    # ⚠ "NO REASONS" AND "WE COULD NOT TELL" ARE NOT THE SAME ANSWER. Both probes below run on
+    # startup, racing the Supabase stack (PGRST002 until PostgREST's schema cache loads), and a
+    # failed probe leaves `reasons` empty — which used to log "everything current", a claim we
+    # had no basis for, about the exact state the kickstart exists to detect.
+    probe_failed = False
 
     try:
         plan = build_plan(datetime.now(timezone.utc))
     except Exception as e:
+        probe_failed = True
         _log.warning("[scheduler] kickstart: plan build failed: %s: %s", type(e).__name__, e)
         plan = None
     if plan is not None and plan.strategies:
@@ -217,10 +295,17 @@ def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
             if _held_prices_stale():
                 reasons.append("held prices stale")
         except Exception as e:
+            probe_failed = True
             _log.warning("[scheduler] kickstart: price-staleness probe failed: %s: %s", type(e).__name__, e)
 
     if not reasons:
-        _log.info("[scheduler] kickstart: everything current — no-op")
+        if probe_failed:
+            _log.warning(
+                "[scheduler] kickstart: could NOT determine whether catch-up is needed — a probe "
+                "failed (database still booting?); not firing. The 05:00 UTC tick is the fallback.",
+            )
+        else:
+            _log.info("[scheduler] kickstart: everything current — no-op")
         return
     if _pipeline_already_running():
         _log.info("[scheduler] kickstart: needed (%s) but a pipeline is already running — skipping", reasons)
@@ -567,6 +652,13 @@ def _run_asset_price_refresh(trigger: str) -> None:
     try:
         from asset_pipeline import price_refresh, queue as _q  # noqa: PLC0415
 
+        # ⚠ FIRST, WAIT FOR THE DATABASE — this fires on startup, in parallel with the Supabase
+        # stack coming up, and every query below (the queue heartbeat is simply the first) fails
+        # with PGRST002 until PostgREST has loaded its schema cache. Losing the catch-up to a
+        # boot race costs a whole day of stale held prices; see `_await_db_ready`.
+        if not _await_db_ready(f"asset price refresh ({trigger})"):
+            return
+
         if _q.is_worker_active():
             _log.info(
                 "[scheduler] asset price refresh (%s) SKIPPED — the ingest queue worker is live "
@@ -623,6 +715,40 @@ def _maybe_kickstart_asset_prices() -> None:
         target=_run_asset_price_refresh, args=("startup catch-up",),
         name="asset-price-kickstart", daemon=True,
     ).start()
+
+
+def _fire_history_drift_check() -> None:
+    """Daily: probe 1/5th of the universe for a vendor rewrite of PAST bars.
+
+    ⚠ THE ONE FAILURE THE PIPELINE IS BLIND TO. Prices are only ever appended
+    (`d > existing_max`), so a split or a free-share attribution leaves our
+    history on the old basis indefinitely — Worldline sat in the live book on a
+    +1142% momentum for a stock that had fallen 69%.
+
+    Cheap because of the undocumented `?start_date=&end_date=` filter: a probe is
+    ~23 bytes against a 268 KB full series. It is NOT cheap on quota (requests are
+    what's metered, and a probe costs the same one as a full fetch), which is why
+    it walks a fifth of the universe a day — every name inside a week at ~300
+    requests/day — instead of all of it.
+
+    Own daemon thread; never raises into the scheduler."""
+    def _run() -> None:
+        try:
+            from ingest.history_drift import daily_drift_check  # noqa: PLC0415
+
+            res = daily_drift_check(
+                on_step=lambda m, lvl: (
+                    _log.warning if lvl in ("warn", "error") else _log.info
+                )("[drift] %s", m),
+            )
+            if res.get("drifted"):
+                _log.warning(
+                    "[scheduler] history drift: %s of %s probed companies had rewritten "
+                    "history and were refetched", len(res["drifted"]), res.get("probed"),
+                )
+        except Exception as e:
+            _log.exception("[scheduler] history drift check failed: %s: %s", type(e).__name__, e)
+    threading.Thread(target=_run, daemon=True, name="history-drift").start()
 
 
 def _fire_fx_sync() -> None:
@@ -806,6 +932,18 @@ def register_scheduler(app) -> None:
             _fire_asset_price_refresh,
             CronTrigger(day_of_week="mon-sun", hour=6, minute=0, timezone="UTC"),
             id="asset_price_refresh",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+            misfire_grace_time=3600,
+        )
+        # Daily history-drift probe — the early warning between monthly full
+        # refetches. 07:00 UTC: after the 05:00 pipeline sequence and the 06:00
+        # asset-price refresh, so it never competes with them for GuruFocus.
+        sched.add_job(
+            _fire_history_drift_check,
+            CronTrigger(day_of_week="mon-fri", hour=7, minute=0, timezone="UTC"),
+            id="history_drift_check",
             replace_existing=True,
             coalesce=True,
             max_instances=1,

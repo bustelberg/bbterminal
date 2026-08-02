@@ -118,6 +118,19 @@ class BacktestRequest(BaseModel):
     sector_etfs: dict[str, int] | None = None
     mode: Literal["backtest", "current_portfolio"] = "backtest"
     force_recompute: bool = False  # ignore cached result and recompute (applies to backtest + current_portfolio)
+    # Retrospective daily-picks walk: "what would this strategy have held on each
+    # trading day over the last N months". 0 (default) = the current period only,
+    # which is what the pipeline and the cron run.
+    #
+    # ⚠ NON-ZERO MAKES THE WHOLE REQUEST READ-ONLY. It answers a question ABOUT the
+    # past; it is not a decision, so it must not become one. With it set, the run
+    # persists NOTHING — no `current_picks_snapshot`, no `current_picks_day` — and
+    # bypasses the cached-snapshot short-circuit (that cache holds the current
+    # month, which is not what was asked for). `current_picks_day` is the record of
+    # what the pipeline DECIDED on the data available at the time; recomputing a
+    # closed month on today's prices and writing it back would silently replace
+    # those decisions with hindsight, which is why closed months are read-only.
+    daily_months_back: int = 0
     # When true (the default for the user-facing buttons), the compute uses
     # only data already in the DB — no GuruFocus / ECB API calls to fill in
     # gaps. The cron and the explicit "Recompute" button override this so
