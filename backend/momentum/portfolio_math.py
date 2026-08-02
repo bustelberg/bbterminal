@@ -86,6 +86,73 @@ def apply_cash_allocation(holdings: list[dict], cash_pct: float | None) -> list[
     return out
 
 
+def split_book(holdings: list[dict]) -> tuple[list[dict], list[dict], float]:
+    """Take a stored book apart into `(stocks, etfs, cash_pct)`.
+
+    The engine-wide id convention IS the discriminator: a real company has a
+    POSITIVE `company_id`, an ETF overlay sleeve a NEGATIVE one (`-benchmark_id`),
+    and cash the sentinel 0 (`is_cash`). Reading the sleeves back out of the
+    holdings — rather than off the config — is what lets a hand edit rebuild the
+    book from what is actually held."""
+    stocks = [h for h in holdings if not h.get("is_cash") and int(h.get("company_id") or 0) > 0]
+    etfs = [h for h in holdings if not h.get("is_cash") and int(h.get("company_id") or 0) < 0]
+    cash = sum(float(h.get("weight") or 0.0) for h in holdings if h.get("is_cash"))
+    return stocks, etfs, cash
+
+
+def apply_sleeves(
+    stock_holdings: list[dict],
+    etf_holdings: list[dict],
+    cash_pct: float | None,
+) -> list[dict]:
+    """THE definition of how a scheduled strategy's book is weighted.
+
+    Three sleeves, assembled in one place so a hand edit, a rebalance and the
+    daily re-pricer cannot produce three different books:
+
+        cash    `cash_pct` of the whole portfolio (0..1)
+        ETFs    each `weight` is INVESTED-relative — a share of the non-cash
+                book, the same convention `config.etf_overlay[].weight_pct/100`
+                and the diversifier's normalization already use. Final weight is
+                `weight × (1 − cash)`.
+        stocks  whatever is left: `(1 − Σ etf) × (1 − cash)`, spread over the
+                stock sleeve RENORMALIZED to sum-1.
+
+    ⚠ THE RENORMALIZE IS THE WHOLE POINT, AND IT IS WHAT MAKES THIS IDEMPOTENT.
+    The stored stock weights are already scaled by whatever cash + ETF sleeves
+    were applied last time (0.7 × 0.9 = 0.63 of the book). Scaling THOSE by a new
+    sleeve compounds the shrink — set 10% cash three times and the stocks quietly
+    drain away. Normalizing the stock sleeve back to sum-1 first recovers the
+    underlying strategy's own start weights, so every edit is computed from the
+    strategy's selection rather than from the last edit's output.
+
+    Pure — pricing the ETF sleeves is the caller's job (see
+    `routers/_schedule_snapshots.apply_sleeves_to_snapshot`)."""
+    cash = min(max(float(cash_pct or 0.0), 0.0), 1.0)
+    invested = 1.0 - cash
+    etf_total = sum(float(h.get("weight") or 0.0) for h in etf_holdings)
+    # A book cannot be more than fully allocated. Clamping instead of raising
+    # keeps a bad stored config from bricking a rebalance; the endpoint that
+    # accepts hand input validates up front and refuses with a message.
+    etf_total = min(max(etf_total, 0.0), 1.0)
+    stock_sleeve = max(0.0, 1.0 - etf_total)
+
+    wsum = sum(float(h.get("weight") or 0.0) for h in stock_holdings)
+    norm = (1.0 / wsum) if wsum > 0 else 0.0
+    out: list[dict] = []
+    for h in stock_holdings:
+        nh = dict(h)
+        nh["weight"] = float(h.get("weight") or 0.0) * norm * stock_sleeve * invested
+        out.append(nh)
+    for h in etf_holdings:
+        nh = dict(h)
+        nh["weight"] = float(h.get("weight") or 0.0) * invested
+        out.append(nh)
+    if cash > 0.0:
+        out.append(make_cash_holding(cash))
+    return out
+
+
 def portfolio_eur_return_pct(holdings: list[dict]) -> float | None:
     """A basket's weighted EUR return — THE value stored as a snapshot's
     `period_return_pct`. Uses each holding's stored `forward_return_pct` (which

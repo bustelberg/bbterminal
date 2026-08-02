@@ -8570,6 +8570,25 @@
         "title": "SetRoleRequest",
         "type": "object"
       },
+      "SetSleevesRequest": {
+        "properties": {
+          "cash_pct": {
+            "default": 0.0,
+            "title": "Cash Pct",
+            "type": "number"
+          },
+          "etfs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SleeveEtf"
+            },
+            "title": "Etfs",
+            "type": "array"
+          }
+        },
+        "title": "SetSleevesRequest",
+        "type": "object"
+      },
       "SignalBreakdownRequest": {
         "properties": {
           "as_of_date": {
@@ -8707,6 +8726,29 @@
           "holdings"
         ],
         "title": "SimulateRequest",
+        "type": "object"
+      },
+      "SleeveEtf": {
+        "properties": {
+          "band_pct": {
+            "default": 0.0,
+            "title": "Band Pct",
+            "type": "number"
+          },
+          "benchmark_id": {
+            "title": "Benchmark Id",
+            "type": "integer"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "benchmark_id",
+          "weight_pct"
+        ],
+        "title": "SleeveEtf",
         "type": "object"
       },
       "SplitAdjustment": {
@@ -19465,6 +19507,67 @@
         ]
       }
     },
+    "/api/ingest/runs/{run_id}/log": {
+      "get": {
+        "description": "The run's STEP TRANSCRIPT from `after` \u2014 every phase, every company the\nprice refresh touched, every strategy computed, and the holdings each one\nproduced. Tailed into the browser console by the /schedule Run-now buttons.\n\nWhy a cursor poll and not SSE: this is a PULL of an append-only log, and the\ncursor is what makes a reconnect exact \u2014 an SSE drop would silently skip the\nlines emitted while it was down, which for a transcript is the one thing that\nmust not happen. It runs only while the user's own run is live and stops at\nits terminal status.\n\nIn-memory (see `ingest.phases.runlog`), so an empty `entries` for an old run\nmeans the buffer was recycled, not that the run did nothing \u2014 `latest` says\nhow many steps that run actually emitted.",
+        "operationId": "get_ingest_run_log_api_ingest_runs__run_id__log_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 2000,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ingest Run Log",
+        "tags": [
+          "ingest"
+        ]
+      }
+    },
     "/api/ingest/runs/{run_id}/stream": {
       "get": {
         "description": "SSE push of one `ingest_run` row until it reaches a terminal status \u2014 for\nthe transient 'watch this job to completion' UIs (market-cap / OpenFIGI /\nstale-price / per-universe refresh). Replaces their 2s polling; closes itself\nonce the run finishes.",
@@ -21352,7 +21455,7 @@
     },
     "/api/scheduled-strategies/{strategy_id}/cash": {
       "patch": {
-        "description": "Set a strategy's CASH allocation (0..1). Cash scales every other holding's\nweight by (1-cash) and adds a flat 0%-return cash sleeve, so the reported\nweights + the return pick up the cash drag. Re-prices the strategy\nimmediately so the new weighting shows at once (no wait for the daily tick).\n\nAdmin-only: the API gate blocks all non-admin writes here, so read-only users\ncan see the cash allocation but can't change it.",
+        "description": "Set a strategy's CASH allocation (0..1), leaving its ETF sleeves alone.\n\nCash scales every other holding's weight by (1-cash) and adds a flat\n0%-return cash sleeve, so the reported weights + the return pick up the cash\ndrag. Re-prices immediately. See `PATCH \u2026/sleeves` to set cash and the ETF\noverlay together.\n\nAdmin-only: the API gate blocks all non-admin writes here, so read-only users\ncan see the cash allocation but can't change it.",
         "operationId": "set_strategy_cash_api_scheduled_strategies__strategy_id__cash_patch",
         "parameters": [
           {
@@ -21447,6 +21550,57 @@
           }
         },
         "summary": "List Strategy Runs",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/scheduled-strategies/{strategy_id}/sleeves": {
+      "patch": {
+        "description": "Set a strategy's CASH and ETF sleeves by hand; the stock picks take the rest.\n\n\u26a0 THE INPUT IS ABSOLUTE, THE STORAGE IS INVESTED-RELATIVE, AND THE DIFFERENCE\nIS NOT COSMETIC. What you type is each sleeve's share of the whole portfolio\n(10% cash + 20% ETF \u21d2 70% stocks). What `config.etf_overlay[].weight_pct`\nmeans \u2014 set by the diversifier, consumed by the blended backtest \u2014 is a share\nof the INVESTED book, i.e. after cash is taken out. Storing 20 there with 10%\ncash would hold 18%, not the 20% you asked for. Converted here\n(`weight_pct = absolute / (1 \u2212 cash)`) so both readers stay correct and no\nstored convention changes.\n\nThe stock weights are re-derived from the underlying strategy's selection \u2014\nthe stored sleeve-scaled weights are renormalized to sum-1 before the new\nsleeves are applied (`momentum.portfolio_math.apply_sleeves`), so repeated\nedits can't compound the shrink.\n\n\u26a0 IT RESTATES THE OPEN PERIOD, it does not open a new one: the ETF sleeves are\npriced from the same entry bar the stock sleeve entered on, so the period's\nreturn stays measured over one window. The next rebalance re-selects normally.\n\nAdmin-only (the API gate blocks non-admin writes).",
+        "operationId": "set_strategy_sleeves_api_scheduled_strategies__strategy_id__sleeves_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSleevesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Strategy Sleeves",
         "tags": [
           "schedule"
         ]

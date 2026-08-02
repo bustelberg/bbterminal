@@ -5,7 +5,7 @@ The whole point of the module is that a snapshot's return is computed in ONE
 place and every surface (the /schedule header MTD, the current-portfolio card,
 the run-history rows) DISPLAYS the stored value rather than recomputing — so
 they can never disagree. These tests pin the contract the writers
-(`compute_and_save_price_update`, `_apply_etf_overlay_to_snapshot`) rely on:
+(`compute_and_save_price_update`, `apply_sleeves_to_snapshot`) rely on:
 
   * a holding's return IS its EUR ratio `exit_eur/entry_eur − 1`;
   * the snapshot's `period_return_pct` IS the weighted mean of those per-row

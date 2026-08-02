@@ -14,6 +14,7 @@ import { watchRun, type RunRow } from '../../../lib/watchRun';
 import CollapsibleCard from '../momentum/CollapsibleCard';
 import DailyHoldingsSection from './DailyHoldingsSection';
 import { PriceRefreshPanel, useStockRefresh } from './priceRefresh';
+import { tailRunToConsole } from './runConsole';
 import { relTime, formatExecAt, countdownLeft, formatDur } from './utils';
 import type {
   ScheduleUpcoming,
@@ -254,6 +255,32 @@ export default function SmartPipelineActivity() {
   );
 }
 
+/** Fire the trigger endpoint and tail the run's step transcript into the
+ * browser console: every phase, every company the price refresh touched, every
+ * computation, and the holdings each strategy ends up with. The card keeps its
+ * one-line status; the detail goes where detail belongs.
+ *
+ * Fire-and-forget by design — the tail is a VIEW of the run, so a closed tab or
+ * a failed poll must not touch the pipeline, which is running server-side
+ * regardless. */
+function startRun(url: string, label: string): void {
+  void (async () => {
+    try {
+      const r = await apiFetch(url, { method: 'POST' });
+      const body = (await r.json().catch(() => null)) as { run_id?: number } | null;
+      if (!body?.run_id) {
+        console.warn(`[${label}] trigger returned no run_id (HTTP ${r.status}) — nothing to tail`);
+        return;
+      }
+      await tailRunToConsole(body.run_id, `${label} #${body.run_id}`);
+    } catch (e) {
+      // The polling card still surfaces the run (or its absence); the console
+      // gets the diagnostic.
+      console.warn(`[${label}] could not start or tail the run:`, e);
+    }
+  })();
+}
+
 /** Trigger one split-pipeline operation via its Run-now button. `universe`
  * (a label) is appended for the per-universe price refresh. */
 function useRunNow(job: string, busy: boolean, universe?: string) {
@@ -263,9 +290,7 @@ function useRunNow(job: string, busy: boolean, universe?: string) {
     setPending(true);
     try {
       const u = universe ? `&universe=${encodeURIComponent(universe)}` : '';
-      await apiFetch(`${API_URL}/api/ingest/scheduled-refresh/trigger?job_name=${job}${u}`, { method: 'POST' });
-    } catch {
-      // Polling surfaces the run (or its absence) — no inline error needed.
+      startRun(`${API_URL}/api/ingest/scheduled-refresh/trigger?job_name=${job}${u}`, job);
     } finally {
       // Leave a brief window so the run row appears before re-enabling.
       setTimeout(() => setPending(false), 1500);
@@ -309,9 +334,10 @@ function ForceRebalanceButton({ busy }: { busy: boolean }) {
     if (!ok) return;
     setPending(true);
     try {
-      await apiFetch(`${API_URL}/api/ingest/scheduled-refresh/trigger?job_name=rebalance&force=true`, { method: 'POST' });
-    } catch {
-      // Polling surfaces the run (or its absence) — no inline error needed.
+      startRun(
+        `${API_URL}/api/ingest/scheduled-refresh/trigger?job_name=rebalance&force=true`,
+        'rebalance (forced)',
+      );
     } finally {
       setTimeout(() => setPending(false), 1500);
     }

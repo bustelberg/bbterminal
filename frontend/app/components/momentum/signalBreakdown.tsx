@@ -15,6 +15,8 @@
  * engine that made the pick.
  */
 
+import { guruFocusUrl } from './utils';
+
 export type SignalComponent = { label: string; value_str?: string };
 export type SignalBreakdown = {
   key: string;
@@ -25,8 +27,25 @@ export type SignalBreakdown = {
   components: SignalComponent[];
   universe_min: number | null;
   universe_max: number | null;
+  // Who sits at each end of that range — the two companies whose values scale
+  // everyone else's 0-100 on this signal. Absent on a signal with no usable
+  // values (and on responses from a backend older than 2026-08-02).
+  min_company?: ExtremeCompany | null;
+  max_company?: ExtremeCompany | null;
   normalized_score: number | null;
   weight: number;
+};
+
+/** The company at one end of a signal's universe range. Ticker + exchange +
+ * ISIN + a GuruFocus link, because a bare ticker is a hint and this needs to be
+ * checkable — an unverifiable extreme is how a corrupted series sets the scale
+ * for 1,478 other companies without anyone noticing. */
+export type ExtremeCompany = {
+  company_id: number;
+  ticker?: string | null;
+  exchange?: string | null;
+  company_name?: string | null;
+  isin?: string | null;
 };
 export type CategoryScore = {
   category: string;
@@ -99,8 +118,17 @@ export function BreakdownView({ data }: { data: BreakdownData }) {
                   </span>
                 </div>
               </div>
-              <div className="text-[11px] text-fg-subtle mt-0.5">
-                Universe range: <span className="font-mono">{rangeStr}</span>
+              {/* ⚠ NAME THE TWO COMPANIES THAT SET THE SCALE. Normalisation is
+                  (raw − min) / (max − min), so these two decide every other
+                  company's 0-100 on this signal. An unnamed range is
+                  unfalsifiable — "max 5221.78" reads as a fact about the market,
+                  while "max 5221.78 — WLN" is a claim you can go and check.
+                  (That is exactly how a 1-for-40 reverse split that our price
+                  history never re-read was found.) */}
+              <div className="text-[11px] text-fg-subtle mt-0.5 flex flex-wrap items-baseline gap-x-2">
+                <span>Universe range: <span className="font-mono">{rangeStr}</span></span>
+                {s.min_company && <ExtremeRef label="low" c={s.min_company} value={s.universe_min} />}
+                {s.max_company && <ExtremeRef label="high" c={s.max_company} value={s.universe_max} />}
               </div>
               <NormStep s={s} />
               <ul className="mt-1.5 space-y-0.5">
@@ -173,6 +201,44 @@ export function BreakdownView({ data }: { data: BreakdownData }) {
  *  - min == max (no spread) → engine substitutes 50 for everyone.
  *  - normal → render the substituted formula and the result.
  */
+/**
+ * One end of a signal's universe range, named and checkable.
+ *
+ * ⚠ THESE TWO COMPANIES SET THE 0-100 SCALE FOR EVERY OTHER NAME
+ * (`(raw − min) / (max − min)`), so a single corrupted series at an extreme
+ * silently compresses the whole universe toward the middle. Worldline read
+ * +1142% on a 1-for-40 reverse split our history never re-read; VERBUND's
+ * volume-trend of 39,211,500 came from zero-volume phantom bars and flattened
+ * every other company's volume score to ~0. Both were invisible until the range
+ * named who was in it, and neither is checkable from a bare ticker — hence the
+ * exchange, the ISIN and the link out.
+ */
+function ExtremeRef({ label, c, value }: {
+  label: string; c: ExtremeCompany; value: number | null;
+}) {
+  const tic = c.ticker || c.company_name || `#${c.company_id}`;
+  const href = c.ticker ? guruFocusUrl(c.ticker, c.exchange ?? '') : null;
+  const title = [
+    c.company_name,
+    c.exchange ? `${c.exchange}:${c.ticker}` : c.ticker,
+    c.isin ? `ISIN ${c.isin}` : null,
+    value != null ? `${label} = ${value}` : null,
+  ].filter(Boolean).join(' · ');
+  return (
+    <span className="text-fg-faint whitespace-nowrap" title={title}>
+      · {label}{' '}
+      {href ? (
+        <a href={href} target="_blank" rel="noopener noreferrer"
+          className="font-mono text-accent-400 hover:text-accent-300 hover:underline">{tic}</a>
+      ) : (
+        <span className="font-mono text-fg-muted">{tic}</span>
+      )}
+      {c.exchange && <span className="text-fg-faint"> ({c.exchange})</span>}
+      {c.isin && <span className="font-mono text-fg-subtle"> {c.isin}</span>}
+    </span>
+  );
+}
+
 function NormStep({ s }: { s: SignalBreakdown }) {
   // 4-decimal default matches the rest of the breakdown modal so the
   // numbers in the formula line up visually with `raw` and `Universe range`.

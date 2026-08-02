@@ -23,7 +23,7 @@ from datetime import date
 from deps import fetch_in_chunks, supabase
 
 from ..staleness import trading_days_between
-from .runlog import _now_utc_iso, _update_run
+from .runlog import _now_utc_iso, _update_run, log_step
 
 # Concurrency cap — same as self_heal. GuruFocus is rate-limit-sensitive
 # and the ensure_* helpers short-circuit on fresh DB rows, so the bound
@@ -208,6 +208,14 @@ def _run_prices_phase(
         current_message=f"Refreshing 0 of {total} companies (concurrency {_MAX_WORKERS})…",
     )
 
+    def _step(msg: str, *, level: str = "info", done: int | None = None) -> None:
+        """One line in the run's console transcript. `current_message` is a
+        single overwritten status field — it can say "refreshing 812/1479" but
+        never WHICH 812, and the answer to "did this company actually get
+        Friday's close" is the whole point of a price phase."""
+        prefix = f"[{done}/{total}] " if done is not None else ""
+        log_step(run_id, f"{prefix}{msg}", level=level, phase="prices")
+
     def _refresh_one(c: dict) -> None:
         cid = c["cid"]
         ticker = c["ticker"]
@@ -227,32 +235,40 @@ def _run_prices_phase(
         # API call).
         if budget_by_region is not None:
             skip = False
+            done_at = 0
             with lock:
                 if region_remaining.get(region, 0) <= 0:
                     counters["processed"] += 1
                     counters["budget_skipped"] += 1
                     skip = True
+                    done_at = counters["processed"]
                     if counters["processed"] % _CHECKPOINT_EVERY == 0:
                         checkpoint = dict(counters)
             if checkpoint:
                 _checkpoint(run_id, checkpoint, total)
                 checkpoint = None
             if skip:
+                _step(f"{exch}:{ticker} — SKIPPED, {region} monthly quota exhausted",
+                      level="warn", done=done_at)
                 return
 
         # Short-circuit on known-forbidden exchanges. Same pattern as
         # `momentum.data.self_heal`: a single 403 marks the exchange so
         # the next ~80 companies on it skip the API call entirely.
+        done_at = 0
         with lock:
             if exch in forbidden_exchanges:
                 counters["processed"] += 1
                 counters["forbidden"] += 1
+                done_at = counters["processed"]
                 if counters["processed"] % _CHECKPOINT_EVERY == 0:
                     checkpoint = dict(counters)
             if checkpoint:
                 _checkpoint(run_id, checkpoint, total)
                 checkpoint = None
         if exch in forbidden_exchanges:
+            _step(f"{exch}:{ticker} — skipped, {exch} already returned 403 this run",
+                  done=done_at)
             return
 
         try:
@@ -261,6 +277,7 @@ def _run_prices_phase(
             with lock:
                 counters["processed"] += 1
                 counters["errors"] += 1
+                done_at = counters["processed"]
                 if len(error_examples) < 5:
                     error_examples.append(
                         f"cid={cid} ({exch}:{ticker}) price: {type(e).__name__}: {e}"
@@ -269,6 +286,8 @@ def _run_prices_phase(
                     checkpoint = dict(counters)
             if checkpoint:
                 _checkpoint(run_id, checkpoint, total)
+            _step(f"{exch}:{ticker} — price fetch FAILED: {type(e).__name__}: {e}",
+                  level="error", done=done_at)
             return
 
         if r_p.is_forbidden:
@@ -276,23 +295,29 @@ def _run_prices_phase(
                 forbidden_exchanges.add(exch)
                 counters["processed"] += 1
                 counters["forbidden"] += 1
+                done_at = counters["processed"]
                 if budget_by_region is not None:
                     region_remaining[region] = region_remaining.get(region, 0) - r_p.api_calls
                 if counters["processed"] % _CHECKPOINT_EVERY == 0:
                     checkpoint = dict(counters)
             if checkpoint:
                 _checkpoint(run_id, checkpoint, total)
+            _step(f"{exch}:{ticker} — 403 unsubscribed region; skipping the rest of {exch}",
+                  level="warn", done=done_at)
             return
         if r_p.is_delisted:
             with lock:
                 counters["processed"] += 1
                 counters["delisted"] += 1
+                done_at = counters["processed"]
                 if budget_by_region is not None:
                     region_remaining[region] = region_remaining.get(region, 0) - r_p.api_calls
                 if counters["processed"] % _CHECKPOINT_EVERY == 0:
                     checkpoint = dict(counters)
             if checkpoint:
                 _checkpoint(run_id, checkpoint, total)
+            _step(f"{exch}:{ticker} — delisted/no data; marked delisted_at",
+                  level="warn", done=done_at)
             # Persist the delisted-at marker so the next run + the audit
             # path can short-circuit instead of re-probing. Best-effort —
             # a transient blip here just means we re-probe next run.
@@ -340,6 +365,7 @@ def _run_prices_phase(
             with lock:
                 counters["processed"] += 1
                 counters["errors"] += 1
+                done_at = counters["processed"]
                 if r_p.rows_loaded > 0:
                     counters["prices"] += 1
                 if budget_by_region is not None:
@@ -352,10 +378,15 @@ def _run_prices_phase(
                     checkpoint = dict(counters)
             if checkpoint:
                 _checkpoint(run_id, checkpoint, total)
+            _step(
+                f"{exch}:{ticker} — prices +{r_p.rows_loaded} ({r_p.source}), but volume fetch "
+                f"FAILED: {type(e).__name__}: {e}", level="error", done=done_at,
+            )
             return
 
         with lock:
             counters["processed"] += 1
+            done_at = counters["processed"]
             if r_p.rows_loaded > 0:
                 counters["prices"] += 1
             if r_v.rows_loaded > 0:
@@ -366,6 +397,19 @@ def _run_prices_phase(
                 checkpoint = dict(counters)
         if checkpoint:
             _checkpoint(run_id, checkpoint, total)
+        # The per-company payoff line: what came back, from where, at what cost.
+        # `+0` is an ANSWER (already current, no new bars published), not a
+        # failure — the distinction is invisible in the aggregate counters.
+        moved = "already current" if (r_p.rows_loaded + r_v.rows_loaded) == 0 else (
+            f"prices +{r_p.rows_loaded}, volumes +{r_v.rows_loaded}")
+        repointed = (
+            f", exchange repointed {exch}→{r_p.resolved_exchange}"
+            if r_p.resolved_exchange and r_p.resolved_exchange != exch else "")
+        _step(
+            f"{effective_exch}:{ticker} — {moved} (source {r_p.source or '—'}, "
+            f"{r_p.api_calls + r_v.api_calls} API call(s)){repointed}",
+            done=done_at,
+        )
 
     # Collapse the workers' per-company max-date reads (close_price + volume)
     # into ONE grouped query per metric up front — thousands of concurrent
@@ -468,6 +512,23 @@ def _run_prices_phase(
         run_id, counters["processed"], counters["prices"], counters["volumes"],
         counters["forbidden"], counters["delisted"], counters["errors"],
     )
+    # The closing line every op that uses this phase inherits. `processed` minus
+    # `prices` is NOT a failure count — it is the companies that were already
+    # current, which is the number you want when asking "did this run do
+    # anything?"; the error and forbidden tallies are stated separately so the
+    # three cannot be confused for one another.
+    _step(
+        f"Prices phase done — {counters['processed']} of {total} processed · "
+        f"{counters['prices']} price / {counters['volumes']} volume series updated · "
+        f"{counters['processed'] - counters['prices']} already current · "
+        f"{counters['forbidden']} forbidden, {counters['delisted']} delisted, "
+        f"{counters['errors']} errors"
+        + (f" · {counters['budget_skipped']} SKIPPED (monthly budget reached)"
+           if counters["budget_skipped"] else ""),
+        level="error" if counters["errors"] else "info",
+    )
+    for ex in error_examples[:5]:
+        _step(f"  error: {ex}", level="error")
 
 
 def _checkpoint(run_id: int, snap: dict, total: int | None = None) -> None:

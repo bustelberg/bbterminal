@@ -31,6 +31,11 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from deps import supabase
+from momentum.backtest.dates import (
+    current_rebalance_date as _current_rebalance_date,
+    deciding_bar as _deciding_bar,
+    is_decidable as _is_decidable,
+)
 from momentum.data import load_universe
 
 from .._helpers import (
@@ -261,20 +266,43 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             yield _emit({"type": "error", "message": "DB has no price data — run an ingest first"})
             return
         if req.mode == "current_portfolio":
+            # ⚠ THE GATE IS THE TRADING CALENDAR, NEVER THE CALENDAR MONTH.
+            # A rebalance is decided on the close STRICTLY BEFORE its date (the
+            # engine's `<` cutoff), so the first Monday of August is decidable
+            # from the Friday of July — and "is there a close dated inside the
+            # current month?" is a question that CANNOT be answered yes on the
+            # 1st and 2nd of a month that opens on a weekend. August 2026 opens
+            # on a Saturday: on Sunday the 2nd the newest close in existence was
+            # Friday 31 July, and this gate rejected all three strategies as "2
+            # days behind today" over data that was perfectly current. It would
+            # have rejected the 05:00 UTC Monday tick too — before Monday's own
+            # close exists, the deciding bar is still that Friday — so the
+            # month's scheduled rebalance was going to fail as well.
             _today = date.today()
-            month_start = date(_today.year, _today.month, 1)
-            if latest_price_date < month_start:
-                lag_days = (_today - latest_price_date).days
+            _weekday = int(getattr(req, "rebalance_weekday", 0) or 0)
+            _rebal = _current_rebalance_date(_today, _weekday)
+            if not _is_decidable(_rebal, today=_today, latest_data_date=latest_price_date):
+                _needed = _deciding_bar(_rebal)
                 yield _emit({
                     "type": "error",
                     "message": (
-                        f"Cannot compute current picks for {month_start.isoformat()[:7]}: "
-                        f"latest price in DB is {latest_price_date.isoformat()} "
-                        f"({lag_days} days behind today). "
+                        f"Cannot compute current picks for {_rebal.isoformat()[:7]}: the "
+                        f"{_rebal.isoformat()} rebalance is decided on the "
+                        f"{_needed.isoformat()} close, but the latest price in the DB is "
+                        f"{latest_price_date.isoformat()}. "
                         f"Use 'Recompute' to fetch fresh data, or run an ingest first."
                     ),
                 })
                 return
+            # ...and say so when it PASSES too. A gate that only speaks when it
+            # refuses leaves you unable to tell "the check ran and was happy" from
+            # "the check never ran", which is the first thing you want to know
+            # when the holdings come out anchored to a date you didn't expect.
+            yield _emit({"type": "progress", "pct": 6, "message": (
+                f"Pre-flight OK: {_rebal.isoformat()} rebalance decides on the "
+                f"{_deciding_bar(_rebal).isoformat()} close; DB has prices through "
+                f"{latest_price_date.isoformat()}"
+            )})
         else:
             req_end = date.fromisoformat(req.end_date)
             if latest_price_date < req_end:

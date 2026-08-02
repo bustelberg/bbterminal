@@ -22,6 +22,29 @@ THE TWO FIXTURES
         observable. This is the only fixture that can catch a lookahead
         regression end-to-end.
 
+RE-BASELINED 2026-08-02 — DELIBERATELY: THE ENTRY-STALENESS GUARD
+    `expected_holdings_json` in `snapshot_829` was regenerated with
+    `capture_golden_rebalance.py --rebaseline` (frozen inputs untouched — same prices, universe,
+    volumes, config and `today`; only the engine's output moved). `trading_day` was unaffected.
+
+    A basket enters at the DECIDING BAR — the trading day strictly before the rebalance (first
+    Monday ⇒ the preceding Friday). `_price_on_or_before` will happily walk back weeks to find a
+    company its last close, so a name whose series stopped earlier was entered at a stale price and
+    every session between that close and the anchor was booked as return the strategy never earned
+    (measured live: entry 140.90 on 2026-07-28, mark 143.83 on 07-31, +2.08% on a position opened
+    on the 31st). Such a name is now dropped from selection — `MAX_ENTRY_GAP_SESSIONS = 1`, counted
+    in SESSIONS so a single-day market closure is forgiven and three missed sessions are not.
+
+    Effect on this fixture: ONE candidate of 1,478 — EchoStar Corp, last close 2026-06-30, three
+    sessions behind the 2026-07-03 anchor — and it moved 6 of 24 holdings and swapped a whole
+    sector (Technology → Capital Goods).
+
+    ⚠ THAT LEVERAGE IS THE FINDING, NOT A BUG IN THE GUARD. Scores are min-max normalized ACROSS
+    THE POOL and sector ranks are means of them, so one extreme outlier rescales every company's
+    score. A stale, unbuyable name was setting the scale that chose the sectors. Note the anchor
+    here is Fri 2026-07-03, the US Independence Day observance: the whole US market has gap=1 (921
+    of 1,479 names) and is correctly kept — this fixture is the strictest test of the tolerance.
+
 RE-BASELINED 2026-07-31 — DELIBERATELY, AND HERE IS THE REASON
     `expected_holdings_json` in BOTH fixtures was regenerated. The frozen INPUTS were not touched:
     same prices, same universe, same volumes, same config, same `today`. Only the engine's output

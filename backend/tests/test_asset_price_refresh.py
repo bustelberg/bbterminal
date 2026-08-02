@@ -228,6 +228,105 @@ class TestTheAnchorQueryMustNotSCAN:
         assert src.index("asset_analysis") < src.index("_run_copy(")
 
 
+class TestTheBootRace:
+    """⚠ THE STARTUP CATCH-UP RACES THE DATABASE IT READS, AND THE LOSS LOOKS LIKE A BUG.
+
+        postgrest.exceptions.APIError: {'message': 'Could not query the database for the schema
+                   cache. Retrying.', 'code': 'PGRST002'}      <- _run_asset_price_refresh, on boot
+
+    PostgREST serves nothing until its schema cache is loaded, so on a cold start EVERY query
+    fails this way — the queue heartbeat is merely the first one attempted. "Retrying." is
+    PostgREST describing ITSELF; our query was fine. The backend and the Supabase stack boot in
+    parallel, so this is a normal state to pass through, not a fault — but the job's `except`
+    turned it into a traceback and dropped the whole catch-up, and a catch-up is exactly what
+    cannot wait for the next daily tick: the tick keeps prices current going FORWARD, it never
+    repairs the past. A boot that lands in the race serves blank /portfolios rows until 06:00.
+    """
+
+    def test_a_warming_database_is_recognised_by_CODE(self):
+        import scheduler
+        from postgrest.exceptions import APIError
+
+        warming = APIError({
+            "message": "Could not query the database for the schema cache. Retrying.",
+            "code": "PGRST002", "hint": None, "details": None,
+        })
+        assert scheduler._is_db_warming(warming)
+        assert scheduler._is_db_warming(APIError({"message": "no connection", "code": "PGRST001"}))
+
+    def test_a_REAL_error_is_never_mistaken_for_a_warm_up(self):
+        """The whole point of matching the code and not the prose. A statement timeout or a
+        missing GRANT is an answer about OUR query — waiting five more seconds cannot fix it, and
+        swallowing it into a retry loop is how a real fault becomes a silent one."""
+        import scheduler
+        from postgrest.exceptions import APIError
+
+        assert not scheduler._is_db_warming(
+            APIError({"message": "canceling statement due to statement timeout", "code": "57014"}))
+        assert not scheduler._is_db_warming(
+            APIError({"message": "permission denied for table asset_price", "code": "42501"}))
+        assert not scheduler._is_db_warming(RuntimeError("boom"))
+
+    def test_it_waits_the_database_out_and_then_proceeds(self, monkeypatch):
+        import scheduler
+        from postgrest.exceptions import APIError
+
+        calls = {"n": 0}
+
+        class _Q:
+            def select(self, *_a, **_k): return self
+            def limit(self, *_a, **_k): return self
+            def execute(self):
+                calls["n"] += 1
+                if calls["n"] < 3:
+                    raise APIError({"message": "schema cache", "code": "PGRST002"})
+                return type("R", (), {"data": []})()
+
+        class _Sb:
+            def table(self, _name): return _Q()
+
+        monkeypatch.setattr("deps.supabase", _Sb())
+        monkeypatch.setattr("time.sleep", lambda _s: None)
+        assert scheduler._await_db_ready("test") is True
+        assert calls["n"] == 3
+
+    def test_it_gives_up_with_ONE_line_rather_than_hanging_or_crashing(self, monkeypatch):
+        """A database that never comes up is a fact to state once, not a traceback per boot and
+        not an unbounded wait inside a scheduler thread."""
+        import scheduler
+        from postgrest.exceptions import APIError
+
+        class _Q:
+            def select(self, *_a, **_k): return self
+            def limit(self, *_a, **_k): return self
+            def execute(self): raise APIError({"message": "schema cache", "code": "PGRST002"})
+
+        monkeypatch.setattr("deps.supabase", type("S", (), {"table": lambda _s, _n: _Q()})())
+        monkeypatch.setattr("time.sleep", lambda _s: None)
+        assert scheduler._await_db_ready("test") is False
+
+    def test_the_gate_comes_BEFORE_every_probe_the_job_makes(self):
+        import scheduler
+
+        src = inspect.getsource(scheduler._run_asset_price_refresh)
+        gate = src.index("_await_db_ready(")
+        assert gate < src.index("_q.is_worker_active()")
+        assert gate < src.index("find_stale(held_only=True)")
+        # ...and a database that never answers ends the job, rather than falling through into
+        # queries that are all guaranteed to fail.
+        assert "return" in src.split("_await_db_ready(", 1)[1][:200]
+
+    def test_the_gate_is_a_GATE_not_a_retry_around_the_work(self):
+        """Retrying the JOB would re-spend what it had already done — ~1.5s of Yahoo per
+        instrument, over ~220 held rows. The gate spends one `limit(1)` per attempt; after it
+        opens, the refresh runs exactly once and any further error is a real one."""
+        import scheduler
+
+        src = inspect.getsource(scheduler._run_asset_price_refresh)
+        assert src.count("refresh_stale(held_only=True)") == 1
+        assert "for attempt" not in src
+
+
 class TestACapMustSayItCapped:
     def test_a_limited_run_reports_what_it_skipped(self):
         """"6 refreshed" over a silent 197 reads like a clean bill of health."""

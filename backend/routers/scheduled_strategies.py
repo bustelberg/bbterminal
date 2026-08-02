@@ -611,12 +611,85 @@ class SetCashRequest(BaseModel):
     cash_pct: float
 
 
+class SleeveEtf(BaseModel):
+    benchmark_id: int
+    # ⚠ ABSOLUTE — this ETF's share of the WHOLE portfolio, in percent, the
+    # number the user typed. Stored invested-relative (see `set_strategy_sleeves`).
+    weight_pct: float
+    band_pct: float = 0.0
+
+
+class SetSleevesRequest(BaseModel):
+    # Cash as a fraction 0..1; ETFs as absolute percentages of the whole book.
+    cash_pct: float = 0.0
+    etfs: list[SleeveEtf] = []
+
+
+def _write_sleeves(strategy_id: int, cash: float, overlay: list[dict]) -> dict:
+    """Store the sleeves on the strategy config, restate the OPEN period's book,
+    and re-price — the shared body of the cash-only and full-sleeve endpoints.
+
+    Order is load-bearing: the rebalance snapshot is restated FIRST, because
+    `compute_and_save_price_update` derives the priced book from it. Re-pricing
+    first would re-price the old sleeves and then be overwritten."""
+    row = (
+        supabase.table("scheduled_strategy")
+        .select("id, config")
+        .eq("id", strategy_id)
+        .limit(1)
+        .execute()
+    ).data
+    if not row:
+        raise HTTPException(404, f"Scheduled strategy #{strategy_id} not found")
+    cfg = dict(row[0].get("config") or {})
+    cfg["cash_pct"] = cash
+    cfg["etf_overlay"] = overlay
+    supabase.table("scheduled_strategy").update(
+        {"config": cfg, "updated_at": datetime.now(timezone.utc).isoformat()}
+    ).eq("id", strategy_id).execute()
+
+    # Restate the open period + re-price so the new weighting shows at once (no
+    # wait for the daily tick). Best-effort: a strategy with no rebalance yet
+    # just picks the sleeves up on its first one.
+    try:
+        from routers._schedule_snapshots import (  # noqa: PLC0415
+            apply_sleeves_to_snapshot,
+            compute_and_save_price_update,
+        )
+        rebal = (
+            supabase.table("current_picks_snapshot")
+            .select("snapshot_id")
+            .eq("scheduled_strategy_id", strategy_id)
+            .eq("kind", "rebalance")
+            .order("as_of_date", desc=True)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        ).data
+        if rebal:
+            apply_sleeves_to_snapshot(
+                int(rebal[0]["snapshot_id"]), etf_overlay=overlay, cash_pct=cash,
+            )
+        compute_and_save_price_update(strategy_id, ingest_run_id=None, cash_pct=cash)
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "[sleeves] re-price after sleeve change failed for strategy %s: %s: %s",
+            strategy_id, type(e).__name__, e,
+        )
+    updated = (
+        supabase.table("scheduled_strategy").select("*").eq("id", strategy_id).execute()
+    )
+    return _hydrate(updated.data)[0]
+
+
 @router.patch("/api/scheduled-strategies/{strategy_id}/cash")
 async def set_strategy_cash(strategy_id: int, body: SetCashRequest):
-    """Set a strategy's CASH allocation (0..1). Cash scales every other holding's
-    weight by (1-cash) and adds a flat 0%-return cash sleeve, so the reported
-    weights + the return pick up the cash drag. Re-prices the strategy
-    immediately so the new weighting shows at once (no wait for the daily tick).
+    """Set a strategy's CASH allocation (0..1), leaving its ETF sleeves alone.
+
+    Cash scales every other holding's weight by (1-cash) and adds a flat
+    0%-return cash sleeve, so the reported weights + the return pick up the cash
+    drag. Re-prices immediately. See `PATCH …/sleeves` to set cash and the ETF
+    overlay together.
 
     Admin-only: the API gate blocks all non-admin writes here, so read-only users
     can see the cash allocation but can't change it."""
@@ -625,35 +698,103 @@ async def set_strategy_cash(strategy_id: int, body: SetCashRequest):
     def _apply() -> dict:
         row = (
             supabase.table("scheduled_strategy")
-            .select("id, config")
-            .eq("id", strategy_id)
-            .limit(1)
-            .execute()
+            .select("config").eq("id", strategy_id).limit(1).execute()
         ).data
         if not row:
             raise HTTPException(404, f"Scheduled strategy #{strategy_id} not found")
-        cfg = dict(row[0].get("config") or {})
-        cfg["cash_pct"] = cash
-        supabase.table("scheduled_strategy").update(
-            {"config": cfg, "updated_at": datetime.now(timezone.utc).isoformat()}
-        ).eq("id", strategy_id).execute()
-        # Re-price now so the new cash weighting is reflected immediately.
-        # Best-effort: a strategy with no rebalance yet just picks cash up on its
-        # first rebalance / price-update.
-        try:
-            from routers._schedule_snapshots import (  # noqa: PLC0415
-                compute_and_save_price_update,
-            )
-            compute_and_save_price_update(strategy_id, ingest_run_id=None, cash_pct=cash)
-        except Exception as e:
-            logging.getLogger(__name__).warning(
-                "[cash] re-price after cash change failed for strategy %s: %s: %s",
-                strategy_id, type(e).__name__, e,
-            )
-        updated = (
-            supabase.table("scheduled_strategy").select("*").eq("id", strategy_id).execute()
+        overlay = list((row[0].get("config") or {}).get("etf_overlay") or [])
+        return _write_sleeves(strategy_id, cash, overlay)
+    return await asyncio.to_thread(_apply)
+
+
+@router.patch("/api/scheduled-strategies/{strategy_id}/sleeves")
+async def set_strategy_sleeves(strategy_id: int, body: SetSleevesRequest):
+    """Set a strategy's CASH and ETF sleeves by hand; the stock picks take the rest.
+
+    ⚠ THE INPUT IS ABSOLUTE, THE STORAGE IS INVESTED-RELATIVE, AND THE DIFFERENCE
+    IS NOT COSMETIC. What you type is each sleeve's share of the whole portfolio
+    (10% cash + 20% ETF ⇒ 70% stocks). What `config.etf_overlay[].weight_pct`
+    means — set by the diversifier, consumed by the blended backtest — is a share
+    of the INVESTED book, i.e. after cash is taken out. Storing 20 there with 10%
+    cash would hold 18%, not the 20% you asked for. Converted here
+    (`weight_pct = absolute / (1 − cash)`) so both readers stay correct and no
+    stored convention changes.
+
+    The stock weights are re-derived from the underlying strategy's selection —
+    the stored sleeve-scaled weights are renormalized to sum-1 before the new
+    sleeves are applied (`momentum.portfolio_math.apply_sleeves`), so repeated
+    edits can't compound the shrink.
+
+    ⚠ IT RESTATES THE OPEN PERIOD, it does not open a new one: the ETF sleeves are
+    priced from the same entry bar the stock sleeve entered on, so the period's
+    return stays measured over one window. The next rebalance re-selects normally.
+
+    Admin-only (the API gate blocks non-admin writes)."""
+    cash = min(max(float(body.cash_pct), 0.0), 1.0)
+    etfs = [e for e in body.etfs if (e.weight_pct or 0) > 0]
+
+    seen: set[int] = set()
+    for e in etfs:
+        if e.weight_pct < 0:
+            raise HTTPException(422, f"Benchmark {e.benchmark_id}: weight can't be negative")
+        if e.benchmark_id in seen:
+            raise HTTPException(422, f"Benchmark {e.benchmark_id} is listed twice")
+        seen.add(e.benchmark_id)
+
+    etf_total = sum(float(e.weight_pct) for e in etfs) / 100.0
+    # Round-trip float noise (0.1+0.2) must not reject a book the user typed as
+    # exactly 100 — but a genuine over-allocation is refused, never silently
+    # scaled down to fit, because scaling would hold weights nobody chose.
+    if etf_total + cash > 1.0 + 1e-9:
+        raise HTTPException(
+            422,
+            f"Cash ({cash * 100:.2f}%) + ETFs ({etf_total * 100:.2f}%) = "
+            f"{(cash + etf_total) * 100:.2f}% of the portfolio — over 100%. "
+            "The stock sleeve takes what's left, so these must sum to at most 100.",
         )
-        return _hydrate(updated.data)[0]
+    invested = 1.0 - cash
+    if etfs and invested <= 1e-9:
+        raise HTTPException(422, "100% cash leaves nothing to hold an ETF with — remove the ETFs or lower cash.")
+
+    def _apply() -> dict:
+        if etfs:
+            bids = sorted(seen)
+            known = {
+                b["benchmark_id"]
+                for b in (
+                    supabase.table("benchmark").select("benchmark_id")
+                    .in_("benchmark_id", bids).execute()
+                ).data or []
+            }
+            missing = [b for b in bids if b not in known]
+            if missing:
+                raise HTTPException(422, f"Unknown benchmark id(s): {missing}")
+            # A benchmark with no price history would be held at its weight and
+            # contribute NO return — the weighted aggregate would silently be
+            # over the priced part only, which reads as a real number.
+            unpriced = [
+                b for b in bids
+                if not (
+                    supabase.table("benchmark_price").select("target_date")
+                    .eq("benchmark_id", b).limit(1).execute()
+                ).data
+            ]
+            if unpriced:
+                raise HTTPException(
+                    422,
+                    f"Benchmark id(s) {unpriced} have no price history — they can't be "
+                    "weighted into a portfolio whose return is priced daily.",
+                )
+        overlay = [
+            {
+                "benchmark_id": int(e.benchmark_id),
+                # absolute % of the book → % of the invested book
+                "weight_pct": round(float(e.weight_pct) / invested, 6),
+                "band_pct": float(e.band_pct or 0.0),
+            }
+            for e in etfs
+        ]
+        return _write_sleeves(strategy_id, cash, overlay)
     return await asyncio.to_thread(_apply)
 
 

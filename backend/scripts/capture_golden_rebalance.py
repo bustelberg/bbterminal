@@ -392,10 +392,114 @@ def report_cutoff_coverage(box: dict) -> bool:
     return on_cutoff > 0
 
 
+def rebaseline(path: Path) -> int:
+    """Recompute a fixture's `expected_holdings_json` from its OWN frozen inputs.
+
+    ⚠ THIS IS THE DELIBERATE RE-BASELINE, AND IT IS NOT THE SAME ACT AS A
+    RE-CAPTURE. A re-capture reads the live DB, so the INPUTS move too — and the
+    price table is append-only in `recorded_at`, not in `target_date`, so a bar
+    can appear inside a window a past rebalance already computed over (Bayer's
+    2026-07-03 close, written 07-06). Re-capturing to explain an engine change
+    would therefore mix two causes and prove neither.
+
+    This rewrites ONE key. Same prices, same universe, same volumes, same config,
+    same `today`; only the engine's output moves, so the diff printed below is
+    attributable to the code change and nothing else. `shipped_holdings_json` is
+    NEVER touched — it is the record of what actually reached a user.
+
+    Requires no database. It is still a deliberate act: read the diff, and say
+    in the commit message why the new answer is the right one."""
+    import io as _io
+
+    if not path.exists():
+        raise SystemExit(f"no such fixture: {path}")
+    with np.load(path, allow_pickle=False) as z:
+        keys = list(z.files)
+        data = {k: z[k] for k in keys}
+
+    def _text(k: str) -> str:
+        return bytes(data[f"{k}__utf8"]).decode("utf-8")
+
+    def _frame(k: str):
+        raw = data[f"{k}__parquet"]
+        return None if raw.size == 0 else pd.read_parquet(_io.BytesIO(bytes(raw)), engine="pyarrow")
+
+    from momentum.backtest import BacktestConfig, run_current_portfolio  # noqa: PLC0415
+
+    cfg = json.loads(_text("config_json"))
+    for k in ("start_date", "end_date"):
+        if isinstance(cfg.get(k), str):
+            cfg[k] = date.fromisoformat(cfg[k])
+    prev = json.loads(_text("expected_holdings_json"))
+    meta = json.loads(_text("meta_json"))
+
+    result = run_current_portfolio(
+        BacktestConfig(**cfg),
+        _frame("prices_df"),
+        _frame("universe_df"),
+        volumes_df=_frame("volumes_df"),
+        prices_local_df=_frame("prices_local_df"),
+        company_currency={int(k): v for k, v in json.loads(_text("company_currency_json")).items()},
+        monthly_eligible={
+            m: {int(c): s for c, s in sec.items()}
+            for m, sec in json.loads(_text("monthly_eligible_json")).items()
+        },
+        today=date.fromisoformat(_text("today")),
+    )
+    new = _as_dicts(result.holdings)
+
+    if result.as_of_date != meta.get("as_of_date"):
+        # The anchor itself moved — that is a different (and much larger) change
+        # than "the selection moved", and re-baselining would bury it.
+        raise SystemExit(
+            f"ABORT: replay drifted to as_of={result.as_of_date}, fixture recorded "
+            f"{meta.get('as_of_date')} — the rebalance anchor changed; nothing written."
+        )
+
+    old_ids = {int(h["company_id"]): h for h in prev}
+    new_ids = {int(h["company_id"]): h for h in new}
+    print("=" * 74)
+    print(f"RE-BASELINE {path.name}  (as_of {result.as_of_date}, inputs untouched)")
+    print("=" * 74)
+    for cid in sorted(set(old_ids) - set(new_ids)):
+        h = old_ids[cid]
+        print(f"  OUT  {cid:6d}  {h.get('company_name', '')[:34]:36s} {h.get('sector')}")
+    for cid in sorted(set(new_ids) - set(old_ids)):
+        h = new_ids[cid]
+        print(f"  IN   {cid:6d}  {h.get('company_name', '')[:34]:36s} {h.get('sector')}")
+    changed = [
+        cid for cid in sorted(set(old_ids) & set(new_ids))
+        if any(old_ids[cid].get(f) != new_ids[cid].get(f)
+               for f in ("weight", "score", "sector", "sector_rank", "company_rank", "entry_date"))
+    ]
+    for cid in changed:
+        print(f"  MOVED{cid:6d}  {new_ids[cid].get('company_name', '')[:34]:36s} "
+              f"rank {old_ids[cid].get('company_rank')}→{new_ids[cid].get('company_rank')}, "
+              f"score {old_ids[cid].get('score')}→{new_ids[cid].get('score')}")
+    print(f"\n  sectors: {sorted({h.get('sector') for h in prev})}")
+    print(f"        →  {sorted({h.get('sector') for h in new})}")
+    print(f"  {len(set(old_ids) - set(new_ids))} of {len(prev)} holdings replaced, "
+          f"{len(changed)} moved")
+    if not (set(old_ids) ^ set(new_ids)) and not changed:
+        print("\n  identical — nothing to re-baseline.")
+        return 0
+
+    data["expected_holdings_json__utf8"] = _pack_text(json.dumps(new, default=str))
+    np.savez_compressed(path, **data)
+    print(f"\nwritten: {path} ({path.stat().st_size / 2**20:.2f} MB) — "
+          "expected_holdings_json only; shipped_holdings_json untouched.")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
-    p.add_argument("--strategy-id", type=int, required=True)
-    p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--strategy-id", type=int, help="required except with --rebaseline")
+    p.add_argument("--out", type=Path, help="required except with --rebaseline")
+    p.add_argument(
+        "--rebaseline", type=Path,
+        help="recompute an EXISTING fixture's expected holdings from its own frozen "
+             "inputs (no DB); use after a deliberate engine change",
+    )
     p.add_argument("--snapshot-id", type=int, help="snapshot mode: anchor to a real rebalance")
     p.add_argument("--today", type=date.fromisoformat, help="historical mode: pin date.today()")
     p.add_argument("--price-through", type=date.fromisoformat, help="historical mode: last bar to load")
@@ -403,6 +507,10 @@ def main() -> int:
     p.add_argument("--skip-lookback-check", action="store_true")
     a = p.parse_args()
 
+    if a.rebaseline is not None:
+        return rebaseline(a.rebaseline)
+    if a.strategy_id is None or a.out is None:
+        raise SystemExit("--strategy-id and --out are required (or use --rebaseline)")
     if (a.snapshot_id is None) == (a.today is None):
         raise SystemExit("give exactly one of --snapshot-id or (--today + --price-through)")
 

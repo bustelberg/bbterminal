@@ -396,11 +396,23 @@ class CurrentPortfolio:
     latest_price_date: str | None  # most recent price date observed across the portfolio
     holdings: list[PeriodHolding]
     daily_picks: list[DailyPick] = field(default_factory=list)
+    # The bar the basket was ENTERED at — the trading day strictly before
+    # `as_of_date` (first Monday ⇒ the preceding Friday). Stated rather than
+    # inferred: a holding's `entry_date` can legitimately differ from it (an
+    # exchange that was shut that day), and the only way to tell that apart from
+    # a stale price is to publish the date the book was supposed to enter on.
+    entry_anchor_date: str | None = None
+    # Candidates dropped for having no close within `MAX_ENTRY_GAP_DAYS` of the
+    # anchor. A rebalance that quietly selected from 900 of 1,479 names because
+    # the rest were stale looks exactly like one that selected from all of them.
+    excluded_stale_count: int = 0
 
     def to_dict(self) -> dict:
         return {
             "as_of_date": self.as_of_date,
             "latest_price_date": self.latest_price_date,
+            "entry_anchor_date": self.entry_anchor_date,
+            "excluded_stale_count": self.excluded_stale_count,
             "holdings": [
                 {
                     "company_id": h.company_id,

@@ -143,31 +143,11 @@ export default function ScheduledStrategiesCard({ sched, readOnly = false }: { s
                                 .join(' · ')}
                             </span>
                           )}
-                          {(s.last_snapshot.ytd_return_pct != null
-                            || s.last_snapshot.since_inception_pct != null) && (
-                            <span className="text-fg-faint">|</span>
-                          )}
-                          {s.last_snapshot.ytd_return_pct != null && (
-                            <span>
-                              <span className="text-fg-subtle">YTD </span>
-                              <span className={s.last_snapshot.ytd_return_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}>
-                                {s.last_snapshot.ytd_return_pct >= 0 ? '+' : ''}
-                                {s.last_snapshot.ytd_return_pct.toFixed(2)}%
-                              </span>
-                            </span>
-                          )}
-                          {s.last_snapshot.since_inception_pct != null && (
-                            <span>
-                              <span className="text-fg-subtle">Since inception </span>
-                              <span className={s.last_snapshot.since_inception_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}>
-                                {s.last_snapshot.since_inception_pct >= 0 ? '+' : ''}
-                                {s.last_snapshot.since_inception_pct.toFixed(2)}%
-                              </span>
-                              {s.last_snapshot.inception_date && (
-                                <span className="text-fg-faint"> (since {s.last_snapshot.inception_date})</span>
-                              )}
-                            </span>
-                          )}
+                          {/* YTD + Since-inception removed from the row header
+                              (2026-08-02). The API still returns them on
+                              `last_snapshot` — they back the expanded detail and
+                              the admin performance endpoint — this header just
+                              no longer shows them. */}
                           {s.last_snapshot.as_of_date && (
                             <span className="text-fg-faint">
                               (as of {s.last_snapshot.as_of_date})

@@ -15,16 +15,26 @@
     2. Stages every small/medium table's local rows into a clone_stg schema on
        prod (one transfer; ~140k rows total -> seconds).
     3. UPSERTs them parent->child (insert + update by PK), then DELETEs prod rows
-       whose PK is gone from local child->parent. True mirror, no schema drop.
-    4. metric_data (26M rows) is synced DIFFERENTIALLY: a per-company signature
-       (count, sum(value), min/max date) is compared on both sides and only the
-       companies whose price data changed are re-copied. Unchanged -> zero rows
-       cross the wire. recorded_at is intentionally excluded from the signature
+       whose PK is gone from local child->parent. True mirror, no schema drop --
+       EXCEPT the airs_* tables, which are ADDITIVE (see `$additiveTables`): prod
+       scrapes those itself from a live AirSPMS, so local is only ever a subset
+       and deleting prod-only rows would destroy scraped history. They are still
+       upserted, never pruned.
+    4. The BIG tables -- metric_data (30M rows, keyed per company_id) and
+       asset_price (39M rows, per analysis_id) -- are synced DIFFERENTIALLY by one
+       shared implementation driven by `$diffSpecs`: a per-key signature (count,
+       sum of every value column, min/max date) is compared on both sides and only
+       the keys whose data changed are re-copied. Unchanged -> zero rows cross the
+       wire. recorded_at is intentionally excluded from metric_data's signature
        (prod fetches the same prices independently with different timestamps;
        including it would force a full re-copy every run). Each batch stages into
        clone_stg.md_batch and then UPSERTs + deletes-missing, like every other
        table -- NOT a blanket DELETE + COPY into the live table, which aborts the
        whole batch if prod's own ingest writes a row mid-scan (see step [6]).
+       !! asset_price joined this list on 2026-08-02, after a clone died on a
+       statement timeout 34M rows into COPYing it through the small-table lane.
+       A table over a few hundred thousand rows belongs in `$diffSpecs`, not in
+       the staging pass -- the staging pass rewrites every row it touches.
 
   SAFE TO RUN WHILE PROD IS LIVE. The scheduled ingest keeps writing metric_data
   (daily 05:00 UTC price update; the month-end full refresh at 12:00 UTC on the
@@ -406,8 +416,89 @@ while ($upsertOrder.Count -lt $allTables.Count) {
     if (++$guard -gt 100) { break }
 }
 $deleteOrder = @($upsertOrder.ToArray()); [array]::Reverse($deleteOrder)
-# metric_data is synced differentially, not via the staging passes.
-$stagedTables = @($upsertOrder.ToArray() | Where-Object { $_ -ne 'metric_data' })
+
+# ---- tables synced DIFFERENTIALLY (not via the staging passes) ---------------
+# !! A TABLE BELONGS HERE ONCE IT IS TOO BIG TO REWRITE WHOLESALE, AND asset_price
+# EARNED ITS PLACE THE HARD WAY. On 2026-08-02 a clone died with
+#
+#   psql:<stdin>:2: ERROR: canceling statement due to statement timeout
+#   CONTEXT: COPY asset_price, line 34063937
+#
+# because asset_price (39,460,548 rows / 3,653 MB -- larger than metric_data) was
+# still travelling through the "small/medium tables" lane this script documents as
+# "~140k rows total -> seconds". Even with the timeout disabled that lane would
+# UPSERT all 39.5M rows and then anti-join 39.5M against 39.5M, rewriting every
+# row whether or not it changed -- the exact MVCC bloat the metric_data comments
+# below were written about, at twelve times the scale.
+#
+#   Table   the table
+#   Key     the grouping column whose signature is compared (the analogue of a
+#           "company"): only keys whose signature differs are re-copied
+#   Sums    numeric columns summed into the signature. !! EVERY value column
+#           belongs here: asset_price carries close AND volume, and 2026-08-02
+#           found 887 companies whose VOLUME history had drifted while the price
+#           was fine -- a close-only signature would call those in sync.
+#   Exclude columns kept out of the change comparison because both sides write
+#           them independently (see the recorded_at note in step [6]).
+$diffSpecs = @(
+    @{ Table = 'metric_data'; Key = 'company_id';  Sums = @('numeric_value');   Exclude = @('recorded_at') },
+    @{ Table = 'asset_price'; Key = 'analysis_id'; Sums = @('close', 'volume'); Exclude = @() }
+)
+$diffTables   = @($diffSpecs | ForEach-Object { $_.Table })
+$stagedTables = @($upsertOrder.ToArray() | Where-Object { $diffTables -notcontains $_ })
+
+# ---- ADDITIVE tables: upsert local rows, NEVER delete prod-only ones ---------
+# !! PROD IS THE AUTHOR OF THESE TABLES, NOT LOCAL. Everything named airs_* is
+# written by prod's own scrapers -- the daily Vermogensoverzicht refresh, the CRM
+# 'Alle relaties' export, the model-portfolio scan -- against a live AirSPMS that
+# a dev machine does not continuously poll. So local holds a SUBSET, and the usual
+# mirror semantics read that subset as "everything else was deleted". Measured on
+# the 2026-08-02 dry run, a plain mirror would have destroyed:
+#
+#   airs_holding                  14,143 prod ->  9,846 local  = 4,297 rows gone
+#   airs_model_portfolio_position  1,903      ->    919        =   984
+#   airs_mutatie                   1,946      ->    974        =   972
+#   airs_performance               1,610      ->  1,245        =   365
+#
+# Scraped history, deleted to make prod agree with a laptop. These tables are
+# therefore ADDITIVE: local rows are still inserted/updated by PK (so a local fix
+# propagates), but step [7]'s delete-missing skips them entirely.
+#
+# !! THE UNIQUE-COLLISION CLEAR IN STEP [5] STILL APPLIES. That one removes a prod
+# row whose secondary UNIQUE key collides with an incoming local row under a
+# different PK; leaving it would make the INSERT fail outright. It resolves a key
+# conflict rather than pruning prod-only data, so additive tables need it too.
+#
+# Prefix-matched on purpose: every airs_* table has the same author (prod), so a
+# table added later inherits the right behaviour instead of silently getting the
+# mirror semantics on its first clone.
+#
+# The named tables below are the same story without the shared prefix -- prod
+# writes them on its own schedule, so a prod-only row means "prod knows something
+# local doesn't", never "local deleted this":
+#
+#   current_picks_snapshot  THE RECORD OF WHAT THE STRATEGIES ACTUALLY HELD. Prod
+#       rebalances on its own scheduler; on 2026-08-02 it held 88 snapshots local
+#       had never seen. They are not regenerable -- a snapshot is a decision taken
+#       on the data available at that moment, and re-deriving it later gives a
+#       different answer (that is the whole reason the golden-master fixture
+#       exists). Deleting them to match a laptop is the worst trade in this file.
+#   fx_rate  Prod runs its own ECB sync (weekdays 16:30 CET) and had 493 rates
+#       local lacked. Dropping them leaves prod converting EUR on stale rates
+#       until its next sync -- for reference data both sides fetch independently.
+#   asset_ingest_queue  Prod's own worker owns this queue's state; local's copy is
+#       a dev artifact.
+#
+# !! ADDITIVE IS THE SAFE DIRECTION, AND THAT ASYMMETRY IS WHY THIS LIST CAN GROW
+# WITHOUT CEREMONY. Marking a table additive can only fail to delete; it can never
+# destroy a row. The cost is the mirror-purity one: a row deleted LOCALLY survives
+# on prod. For append-only history (snapshots, rates, scrapes) that is exactly
+# what you want; for a config table where a deletion is meaningful, it is not --
+# so keep those out.
+$additiveTables = @($upsertOrder.ToArray() | Where-Object {
+    $_ -like 'airs_*' -or
+    $_ -in @('current_picks_snapshot', 'fx_rate', 'asset_ingest_queue')
+})
 Write-Host "  $($allTables.Count) tables; upsert order resolved." -ForegroundColor Green
 
 # Per-company signature for metric_data (price data only; recorded_at excluded).
@@ -416,11 +507,14 @@ Write-Host "  $($allTables.Count) tables; upsert order resolved." -ForegroundCol
 # it can exceed the default timeout. Done inline (not just via PGOPTIONS) because
 # a managed pooler may ignore startup options. The `SET` emits a "SET" status line
 # that ConvertTo-MdSignatureMap skips (it isn't a pipe-delimited data row).
-$mdSigSql = @"
+function Get-SignatureSql([hashtable]$spec) {
+    $sums = (($spec.Sums | ForEach-Object { "coalesce(sum($_),0)::text" }) -join ', ')
+    return @"
 SET statement_timeout = 0;
-SELECT company_id, count(*), coalesce(sum(numeric_value),0)::text, coalesce(max(target_date)::text,''), coalesce(min(target_date)::text,'')
-FROM metric_data GROUP BY company_id
+SELECT $($spec.Key), count(*), $sums, coalesce(max(target_date)::text,''), coalesce(min(target_date)::text,'')
+FROM $($spec.Table) GROUP BY $($spec.Key)
 "@
+}
 function ConvertTo-MdSignatureMap([string[]]$lines) {
     $map = @{}
     foreach ($r in $lines) {
@@ -428,7 +522,10 @@ function ConvertTo-MdSignatureMap([string[]]$lines) {
         if ($p.Length -lt 5) { continue }            # skip the 'SET' tag + blank lines
         $cid = 0
         if (-not [int]::TryParse($p[0], [ref]$cid)) { continue }
-        $map[$cid] = "$($p[1])|$($p[2])|$($p[3])|$($p[4])"
+        # Everything after the key IS the signature -- joined rather than indexed,
+        # so a spec with two sum columns (asset_price: close + volume) needs no
+        # change here and metric_data's four-part signature is byte-identical.
+        $map[$cid] = ($p[1..($p.Length - 1)] -join '|')
     }
     return $map
 }
@@ -438,43 +535,63 @@ function ConvertTo-MdSignatureMap([string[]]$lines) {
 # the dominant cost of the whole clone. Background jobs run docker in a separate
 # process; we check each job's exit code, then parse the raw output in-runspace.
 # Returns @{ Local = <sig map>; Prod = <sig map> }.
-function Get-MdSignaturesParallel {
+function Get-MdSignaturesParallel([hashtable]$spec) {
+    $sql = Get-SignatureSql $spec
     $localJob = Start-Job -ScriptBlock {
         param($Container, $sql)
         $out = docker exec $Container psql -U postgres -d postgres -tA -F'|' -c $sql
         [pscustomobject]@{ Out = @($out); Code = $LASTEXITCODE }
-    } -ArgumentList $Container, $mdSigSql
+    } -ArgumentList $Container, $sql
     $prodJob = Start-Job -ScriptBlock {
         param($Container, $prodEnv, $prodUrlNoPw, $sql)
         $out = docker exec @prodEnv $Container psql $prodUrlNoPw -tA -F'|' -c $sql
         [pscustomobject]@{ Out = @($out); Code = $LASTEXITCODE }
-    } -ArgumentList $Container, $prodEnv, $prodUrlNoPw, $mdSigSql
+    } -ArgumentList $Container, $prodEnv, $prodUrlNoPw, $sql
     # Both jobs are already running; -Wait on each just collects (max, not sum).
     $lr = Receive-Job -Job $localJob -Wait -AutoRemoveJob
     $pr = Receive-Job -Job $prodJob  -Wait -AutoRemoveJob
-    if ($lr.Code -ne 0) { throw "local metric_data signature scan failed:`n$($lr.Out -join "`n")" }
-    if ($pr.Code -ne 0) { throw "prod metric_data signature scan failed:`n$($pr.Out -join "`n")" }
+    if ($lr.Code -ne 0) { throw "local $($spec.Table) signature scan failed:`n$($lr.Out -join "`n")" }
+    if ($pr.Code -ne 0) { throw "prod $($spec.Table) signature scan failed:`n$($pr.Out -join "`n")" }
     return @{ Local = (ConvertTo-MdSignatureMap $lr.Out); Prod = (ConvertTo-MdSignatureMap $pr.Out) }
 }
 
 # ---- DRY RUN ----------------------------------------------------------------
 if ($DryRun) {
     Write-Host "[3] DRY RUN -- comparing local vs prod (read-only)..." -ForegroundColor Yellow
+    $wouldDelete = 0
     foreach ($t in $upsertOrder) {
         $lc = [int](Invoke-Local "SELECT count(*) FROM public.$t")
         $pc = [int](Invoke-Prod "SELECT count(*) FROM public.$t")
-        $flag = if ($lc -ne $pc) { "  <-- differs" } else { "" }
-        Write-Host ("  {0,-28} local={1,-10} prod={2,-10}{3}" -f $t, $lc, $pc, $flag)
+        # !! SAY WHAT WOULD ACTUALLY HAPPEN, NOT JUST THAT THE NUMBERS DIFFER.
+        # "<-- differs" reads the same whether prod is about to gain rows or lose
+        # 4,297 scraped ones, which is the difference between a sync and a data
+        # loss. Additive tables are marked so their surplus stops looking alarming.
+        $flag = ''; $colour = 'Gray'
+        if ($additiveTables -contains $t) {
+            if ($pc -gt $lc) { $flag = "  <-- additive: prod keeps +$($pc - $lc)"; $colour = 'DarkGray' }
+            elseif ($lc -ne $pc) { $flag = "  <-- $($lc - $pc) to add"; $colour = 'Gray' }
+        } elseif ($pc -gt $lc) {
+            $flag = "  <-- WOULD DELETE $($pc - $lc) prod-only row(s)"; $colour = 'Yellow'
+            $wouldDelete += ($pc - $lc)
+        } elseif ($lc -ne $pc) {
+            $flag = "  <-- $($lc - $pc) to add"
+        }
+        Write-Host ("  {0,-28} local={1,-10} prod={2,-10}{3}" -f $t, $lc, $pc, $flag) -ForegroundColor $colour
     }
-    Write-Host "  computing metric_data per-company signatures (both sides, concurrent)..."
-    $sigs = Get-MdSignaturesParallel
-    $localSig = $sigs.Local; $prodSig = $sigs.Prod
-    $resync = @($localSig.Keys | Where-Object { $prodSig[$_] -ne $localSig[$_] })
-    $prodOnly = @($prodSig.Keys | Where-Object { -not $localSig.ContainsKey($_) })
-    Write-Host ("  metric_data: {0} companies local, {1} prod; {2} need re-copy, {3} prod-only to delete." -f $localSig.Count, $prodSig.Count, $resync.Count, $prodOnly.Count) -ForegroundColor Cyan
-    if ($resync.Count -gt 0) {
-        $est = [int](Invoke-Local ("SELECT count(*) FROM metric_data WHERE company_id = ANY('{{{0}}}'::int[])" -f ($resync -join ',')))
-        Write-Host "  ~ $est metric_data rows would transfer." -ForegroundColor Cyan
+    if ($wouldDelete -gt 0) {
+        Write-Host "  ~$wouldDelete prod-only row(s) would be DELETED by the mirror (additive tables excluded)." -ForegroundColor Yellow
+    }
+    foreach ($spec in $diffSpecs) {
+        Write-Host "  computing $($spec.Table) per-$($spec.Key) signatures (both sides, concurrent)..."
+        $sigs = Get-MdSignaturesParallel $spec
+        $localSig = $sigs.Local; $prodSig = $sigs.Prod
+        $resync = @($localSig.Keys | Where-Object { $prodSig[$_] -ne $localSig[$_] })
+        $prodOnly = @($prodSig.Keys | Where-Object { -not $localSig.ContainsKey($_) })
+        Write-Host ("  {0}: {1} keys local, {2} prod; {3} need re-copy, {4} prod-only to delete." -f $spec.Table, $localSig.Count, $prodSig.Count, $resync.Count, $prodOnly.Count) -ForegroundColor Cyan
+        if ($resync.Count -gt 0) {
+            $est = [int](Invoke-Local ("SELECT count(*) FROM {0} WHERE {1} = ANY('{{{2}}}'::int[])" -f $spec.Table, $spec.Key, ($resync -join ',')))
+            Write-Host "  ~ $est $($spec.Table) rows would transfer." -ForegroundColor Cyan
+        }
     }
     Write-Host "  storage (backtest-results bucket):"
     Invoke-StorageMirror -DryRunOnly
@@ -487,8 +604,9 @@ if (-not $Force) {
     Write-Host ""
     Write-Host "About to make prod an EXACT clone of local (differential):" -ForegroundColor Yellow
     Write-Host "  - apply any missing migrations + align the tracker"
-    Write-Host "  - upsert + delete-missing on $($stagedTables.Count) tables"
-    Write-Host "  - differentially re-copy only changed-company metric_data rows"
+    Write-Host "  - upsert + delete-missing on $($stagedTables.Count - $additiveTables.Count) tables"
+    Write-Host "  - upsert ONLY (prod-only rows kept) on $($additiveTables.Count) additive tables: $($additiveTables -join ', ')"
+    Write-Host "  - differentially re-copy only changed rows of $($diffTables -join ', ')"
     Write-Host "  - mirror the backtest-results Storage bucket$(if (-not $StorageSyncEnabled) { ' (SKIPPED -- no prod service key)' })"
     Write-Host "  (auth.users / API keys are NOT touched)"
     Write-Host ""
@@ -535,7 +653,18 @@ foreach ($t in $stagedTables) {
     docker exec $Container psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "\copy (SELECT $collist FROM public.$t) TO '$datfile'"
     if ($LASTEXITCODE -ne 0) { throw "local dump of $t failed." }
     # Create staging clone + load it on prod.
-    $loadSql = "CREATE TABLE clone_stg.$t (LIKE public.$t INCLUDING DEFAULTS);`n\copy clone_stg.$t ($collist) FROM '$datfile'`n"
+    # !! THE LEADING `SET statement_timeout = 0;` IS LOAD-BEARING, AND ITS ABSENCE
+    # IS WHAT KILLED A CLONE ON 2026-08-02:
+    #
+    #   psql:<stdin>:2: ERROR: canceling statement due to statement timeout
+    #   CONTEXT: COPY asset_price, line 34063937
+    #
+    # `<stdin>:2` is this very \copy -- statement 1 is the CREATE TABLE above it.
+    # Every other prod statement in this script sets the timeout inline; this one
+    # relied on the PGOPTIONS startup option alone, and the managed session pooler
+    # does not forward it (which the PGOPTIONS comment already warned was possible).
+    # So a table big enough to outlast the default timeout could never be staged.
+    $loadSql = "SET statement_timeout = 0;`nCREATE TABLE clone_stg.$t (LIKE public.$t INCLUDING DEFAULTS);`n\copy clone_stg.$t ($collist) FROM '$datfile'`n"
     Invoke-ProdScript $loadSql
 }
 Write-Host "  staged." -ForegroundColor Green
@@ -580,22 +709,29 @@ foreach ($t in $stagedTables) {
 }
 Write-Host "  all $nStaged tables upserted." -ForegroundColor Green
 
-# ---- [6] metric_data differential -------------------------------------------
-Write-Host "[6] Diffing metric_data per company (full scan both sides)..."
-Write-Host "  scanning LOCAL + PROD signatures concurrently (full ~26M-row GROUP BYs)... " -NoNewline
+# ---- [6] differential tables (metric_data, asset_price) ---------------------
+# One implementation, driven by `$diffSpecs`. Every comment below was written for
+# metric_data and applies unchanged to any table in the list -- the concurrent-
+# writer hazard, the MVCC rewrite guard and the per-key chunking are properties of
+# "a huge table synced while prod is live", not of metric_data specifically.
+$stepNo = 6
+foreach ($spec in $diffSpecs) {
+$tbl = $spec.Table; $keyCol = $spec.Key
+Write-Host "[$stepNo] Diffing $tbl per $keyCol (full scan both sides)..."
+Write-Host "  scanning LOCAL + PROD signatures concurrently (full-table GROUP BYs)... " -NoNewline
 $swSig = [System.Diagnostics.Stopwatch]::StartNew()
-$sigs = Get-MdSignaturesParallel
+$sigs = Get-MdSignaturesParallel $spec
 $localSig = $sigs.Local; $prodSig = $sigs.Prod
-Write-Host ("done (local {0}, prod {1} companies, {2:N0}s wall)" -f $localSig.Count, $prodSig.Count, $swSig.Elapsed.TotalSeconds) -ForegroundColor Green
+Write-Host ("done (local {0}, prod {1} keys, {2:N0}s wall)" -f $localSig.Count, $prodSig.Count, $swSig.Elapsed.TotalSeconds) -ForegroundColor Green
 $resync   = @($localSig.Keys | Where-Object { $prodSig[$_] -ne $localSig[$_] })
 $prodOnly = @($prodSig.Keys  | Where-Object { -not $localSig.ContainsKey($_) })
-Write-Host "  $($resync.Count) companies to re-copy, $($prodOnly.Count) prod-only to delete."
+Write-Host "  $($resync.Count) $keyCol values to re-copy, $($prodOnly.Count) prod-only to delete."
 
-$mdCols = ($colsByTable['metric_data'] -join ', ')
-# Upsert plumbing for the metric_data batches, discovered like every other table's.
-$mdPk       = $pkByTable['metric_data']
+$mdCols = ($colsByTable[$tbl] -join ', ')
+# Upsert plumbing for the batches, discovered like every other table's.
+$mdPk       = $pkByTable[$tbl]
 $mdPkList   = ($mdPk -join ', ')
-$mdNonPk    = @($colsByTable['metric_data'] | Where-Object { $mdPk -notcontains $_ })
+$mdNonPk    = @($colsByTable[$tbl] | Where-Object { $mdPk -notcontains $_ })
 $mdConflict = if ($mdNonPk.Count -gt 0) {
     "ON CONFLICT ($mdPkList) DO UPDATE SET " + (($mdNonPk | ForEach-Object { "$_ = EXCLUDED.$_" }) -join ', ')
 } else { "ON CONFLICT ($mdPkList) DO NOTHING" }
@@ -612,9 +748,9 @@ $mdKeyMatch = (($mdPk | ForEach-Object { "s.$_ = p.$_" }) -join ' AND ')
 # the comparison on purpose: prod fetches the same prices independently and stamps its
 # own timestamp, so including it makes every row "different" and the guard does nothing
 # -- the same reason it is excluded from the per-company signature.
-$mdCompare = @($colsByTable['metric_data'] | Where-Object { $mdPk -notcontains $_ -and $_ -ne 'recorded_at' })
+$mdCompare = @($colsByTable[$tbl] | Where-Object { $mdPk -notcontains $_ -and $spec.Exclude -notcontains $_ })
 if ($mdNonPk.Count -gt 0 -and $mdCompare.Count -gt 0) {
-    $tgt = (($mdCompare | ForEach-Object { "public.metric_data.$_" }) -join ', ')
+    $tgt = (($mdCompare | ForEach-Object { "public.$tbl.$_" }) -join ', ')
     $inc = (($mdCompare | ForEach-Object { "EXCLUDED.$_" }) -join ', ')
     $mdConflict = "$mdConflict WHERE ($tgt) IS DISTINCT FROM ($inc)"
 }
@@ -626,8 +762,8 @@ for ($i = 0; $i -lt $resync.Count; $i += $CompanyChunk) {
     $swBatch = [System.Diagnostics.Stopwatch]::StartNew()
     $chunk = $resync[$i..([math]::Min($i + $CompanyChunk - 1, $resync.Count - 1))]
     $arr = $chunk -join ','
-    docker exec $Container psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "\copy (SELECT $mdCols FROM metric_data WHERE company_id = ANY('{$arr}'::int[])) TO '/tmp/clone_md.dat'"
-    if ($LASTEXITCODE -ne 0) { throw "local metric_data dump failed." }
+    docker exec $Container psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "\copy (SELECT $mdCols FROM $tbl WHERE $keyCol = ANY('{$arr}'::int[])) TO '/tmp/clone_md.dat'"
+    if ($LASTEXITCODE -ne 0) { throw "local $tbl dump failed." }
     # Stage -> delete-missing -> UPSERT, exactly like steps [4]/[5] do for every
     # other table. metric_data was the one table that COPYed straight into the live
     # table after a blanket DELETE, and that is not safe against a concurrent writer:
@@ -657,14 +793,14 @@ for ($i = 0; $i -lt $resync.Count; $i += $CompanyChunk) {
     $sql = @"
 SET statement_timeout = 0;
 DROP TABLE IF EXISTS clone_stg.md_batch;
-CREATE TABLE clone_stg.md_batch (LIKE public.metric_data INCLUDING DEFAULTS);
+CREATE TABLE clone_stg.md_batch (LIKE public.$tbl INCLUDING DEFAULTS);
 \copy clone_stg.md_batch ($mdCols) FROM '/tmp/clone_md.dat'
 ALTER TABLE clone_stg.md_batch ADD PRIMARY KEY ($mdPkList);
 BEGIN;
-DELETE FROM public.metric_data p
- WHERE p.company_id = ANY('{$arr}'::int[])
+DELETE FROM public.$tbl p
+ WHERE p.$keyCol = ANY('{$arr}'::int[])
    AND NOT EXISTS (SELECT 1 FROM clone_stg.md_batch s WHERE $mdKeyMatch);
-INSERT INTO public.metric_data ($mdCols)
+INSERT INTO public.$tbl ($mdCols)
 SELECT $mdCols FROM clone_stg.md_batch
 $mdConflict;
 COMMIT;
@@ -672,21 +808,27 @@ DROP TABLE clone_stg.md_batch;
 "@
     Invoke-ProdScript $sql
     $done += $chunk.Count
-    Write-Host ("    batch {0}/{1}: re-copied {2}/{3} companies ({4:N1}s)" -f $ci, $nChunks, $done, $resync.Count, $swBatch.Elapsed.TotalSeconds)
+    Write-Host ("    batch {0}/{1}: re-copied {2}/{3} $keyCol values ({4:N1}s)" -f $ci, $nChunks, $done, $resync.Count, $swBatch.Elapsed.TotalSeconds)
 }
 if ($prodOnly.Count -gt 0) {
     for ($i = 0; $i -lt $prodOnly.Count; $i += $CompanyChunk) {
         $chunk = $prodOnly[$i..([math]::Min($i + $CompanyChunk - 1, $prodOnly.Count - 1))]
-        Invoke-Prod "SET statement_timeout = 0; DELETE FROM public.metric_data WHERE company_id = ANY('{$($chunk -join ',')}'::int[]);" | Out-Null
+        Invoke-Prod "SET statement_timeout = 0; DELETE FROM public.$tbl WHERE $keyCol = ANY('{$($chunk -join ',')}'::int[]);" | Out-Null
     }
-    Write-Host "    deleted prod-only metric_data for $($prodOnly.Count) companies."
+    Write-Host "    deleted prod-only $tbl for $($prodOnly.Count) $keyCol values."
 }
-Write-Host "  metric_data in sync." -ForegroundColor Green
+Write-Host "  $tbl in sync." -ForegroundColor Green
+$stepNo++
+}
 
 # ---- [7] DELETE prod rows gone from local (child->parent) --------------------
 Write-Host "[7] Deleting rows removed locally (mirror)..."
 foreach ($t in $deleteOrder) {
-    if ($t -eq 'metric_data') { continue }
+    # The differential tables were never staged, so there is no clone_stg copy to
+    # anti-join against -- their prod-only rows are deleted inside step [6].
+    if ($diffTables -contains $t) { continue }
+    # Additive tables keep whatever prod scraped that local never saw.
+    if ($additiveTables -contains $t) { continue }
     $pk = $pkByTable[$t]
     $cond = (($pk | ForEach-Object { "s.$_ = p.$_" }) -join ' AND ')
     Invoke-Prod "SET statement_timeout = 0; DELETE FROM public.$t p WHERE NOT EXISTS (SELECT 1 FROM clone_stg.$t s WHERE $cond);" | Out-Null
@@ -717,11 +859,26 @@ Invoke-StorageMirror
 # ---- [8] verify -------------------------------------------------------------
 Write-Host "[8] Verifying..."
 $mismatch = 0
+$surplus  = 0
 foreach ($t in $upsertOrder) {
     $lc = [int](Invoke-Local "SELECT count(*) FROM public.$t")
     $pc = [int](Invoke-Prod "SELECT count(*) FROM public.$t")
+    if ($additiveTables -contains $t) {
+        # !! EQUALITY IS THE WRONG TEST HERE. An additive table is expected to hold
+        # MORE on prod (rows its own scrapers wrote); the failure mode is prod
+        # holding FEWER, which would mean local rows did not land.
+        if ($pc -lt $lc) {
+            Write-Host "  MISSING  $t : local=$lc prod=$pc (additive: prod should be >= local)" -ForegroundColor Red
+            $mismatch++
+        } elseif ($pc -gt $lc) {
+            Write-Host ("  additive $t : local={0} prod={1} (+{2} prod-only rows kept)" -f $lc, $pc, ($pc - $lc)) -ForegroundColor DarkGray
+            $surplus++
+        }
+        continue
+    }
     if ($lc -ne $pc) { Write-Host "  MISMATCH $t : local=$lc prod=$pc" -ForegroundColor Red; $mismatch++ }
 }
+if ($surplus -gt 0) { Write-Host "  $surplus additive table(s) kept prod-only rows (by design)." -ForegroundColor DarkGray }
 if ($mismatch -eq 0) {
     Write-Host "  all $($upsertOrder.Count) tables match." -ForegroundColor Green
     Write-Host ""

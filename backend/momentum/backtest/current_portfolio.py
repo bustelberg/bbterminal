@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from ..scoring import (
+from ..scoring import (  # noqa: F401 — sector_pool_scores backs the ranking transcript
     extract_category_scores,
     score_and_select,
     score_universe,
@@ -22,7 +22,12 @@ from ..scoring import (
     signal_defs_for_mode,
 )
 from ..signals import compute_signals_panel
-from .dates import _first_weekday_on_or_after
+from .dates import (
+    _first_weekday_on_or_after,
+    deciding_bar,
+    is_decidable,
+    sessions_between,
+)
 from .indices import (
     _build_price_index,
     _build_volume_index,
@@ -32,24 +37,35 @@ from .types import BacktestConfig, CurrentPortfolio, DailyPick, PeriodHolding
 
 _logger = logging.getLogger(__name__)
 
-# Largest calendar gap (days) we'll treat as a market HOLIDAY rather than
-# stale/missing data when forgiving an un-traded deciding bar (see
-# `run_current_portfolio`). Covers the worst single-closure case — a Monday
-# holiday (MLK/Presidents/Memorial/Labor Day), whose prior real bar is the
-# preceding Friday (Fri→Mon = 3 days) — with a day of slack. A wider gap means
-# we're genuinely missing bars (an outage), not a holiday, so we DON'T forgive.
-_MAX_HOLIDAY_GAP_DAYS = 4
+# `_MAX_HOLIDAY_GAP_DAYS` + `_prior_trading_day` now live in `.dates`, beside
+# `is_decidable` — so the pipeline's pre-flight gate can test decidability with
+# the SAME rule this walk uses instead of a second, disagreeing one.
 
-
-def _prior_trading_day(d: date) -> date:
-    """Last weekday strictly before `d` (skips Sat/Sun). Holidays aren't
-    modelled here — the decidability check in `run_current_portfolio` layers
-    holiday-awareness on top (a weekday that never traded is forgiven only once
-    it's actually in the past)."""
-    p = d - timedelta(days=1)
-    while p.weekday() >= 5:  # 5=Sat, 6=Sun
-        p -= timedelta(days=1)
-    return p
+# ⚠ HOW MANY SESSIONS A COMPANY'S LAST CLOSE MAY BE BEHIND THE DECIDING BAR AND
+# STILL BE BOUGHT. The basket enters at the deciding bar — the trading day before
+# the rebalance (first Monday ⇒ the preceding Friday). A company whose series
+# stops earlier gets entered at an OLDER close, and every session between that
+# close and the deciding bar is then booked as return the strategy never earned:
+# measured, a name entered at its 2026-07-28 close of 140.90 and marked at the
+# 07-31 close of 143.83 reported +2.08% on a position that opened on the 31st.
+#
+# So a stale name is DROPPED FROM THE SELECTION rather than entered at a stale
+# price — you cannot buy at a price you do not have.
+#
+# ONE session of tolerance, not zero, because exchange calendars genuinely
+# differ: a Tokyo name whose market was shut that Friday has its last close a
+# session earlier, and that IS its most recent datapoint. Counted in SESSIONS,
+# not calendar days — a Tuesday bar and a Thursday bar are both three calendar
+# days from the following Friday while one has missed three sessions and the
+# other one. A market shut for two-plus consecutive sessions while the world
+# trades will drop those names; the count is reported (`excluded_stale_count`)
+# rather than silent, and the rebalance now fetches prices to this exact bar
+# BEFORE computing, so a name still short of it is a data gap, not a calendar.
+#
+# `signal_engine.daily.MAX_STALENESS_DAYS` (30) stays where it is and means
+# something different: a SIGNAL may be computed from a slightly older bar; a
+# PURCHASE may not.
+MAX_ENTRY_GAP_SESSIONS = 1
 
 
 def _next_month_start(d: date) -> date:
@@ -198,39 +214,51 @@ def run_current_portfolio(
 
     def _decidable(rebal: date) -> bool:
         """Has `rebal`'s deciding bar — the prior trading day's close its signals
-        + entry anchor to — already settled? Decidable once that bar is within
-        our loaded data (`<= ldd`). But `_prior_trading_day` is holiday-UNAWARE:
-        it can land on a market holiday that never traded (e.g. the US July-4th
-        observance on Fri 07-03, when the real deciding bar is Thu 07-02, or any
-        Monday holiday whose real bar is the prior Friday). Across a mixed-market
-        universe this skewed the anchor — pinning a rebalance to an upcoming grid
-        date or, in a single-calendar universe, stranding it a period behind. So
-        forgive a calendar deciding bar that has already PASSED (`< today`) and
-        sits only a holiday-sized gap beyond our data — but NOT one that simply
-        hasn't occurred yet (a future bar we must wait for), nor a wide gap that
-        signals genuinely stale/missing data (an outage) rather than a holiday."""
-        dbar = _prior_trading_day(rebal)
-        if dbar <= ldd:
-            return True
-        return dbar < today_d and (dbar - ldd).days <= _MAX_HOLIDAY_GAP_DAYS
+        + entry anchor to — already settled?
+
+        ONE definition, in `.dates`: the pipeline's pre-flight gate must admit
+        exactly the runs this walk can decide, or it rejects work the engine was
+        about to do correctly (which is precisely what a calendar-month gate
+        did: August 2026 opens on a Saturday, so on Sunday the 2nd the newest
+        close in existence is Friday 31 July — and the first Monday's rebalance
+        is fully decidable from it)."""
+        return is_decidable(rebal, today=today_d, latest_data_date=ldd)
 
     rebalance_date = _first_weekday_on_or_after(
         date(today_d.year, today_d.month, 1), weekday
     )
+    _walk: list[str] = [f"start {rebalance_date} ({'decidable' if _decidable(rebalance_date) else 'not yet'})"]
     while True:
         nxt = _first_weekday_on_or_after(_next_month_start(rebalance_date), weekday)
         if _decidable(nxt):
+            _walk.append(f"forward → {nxt} (its {deciding_bar(nxt)} bar has settled)")
             rebalance_date = nxt
         else:
             break
     while not _decidable(rebalance_date):
-        rebalance_date = _first_weekday_on_or_after(_prev_month_start(rebalance_date), weekday)
+        prev = _first_weekday_on_or_after(_prev_month_start(rebalance_date), weekday)
+        _walk.append(f"back → {prev} ({deciding_bar(rebalance_date)} has not settled)")
+        rebalance_date = prev
     # The signal-cutoff + entry anchor for the locked-at-start holdings.
     month_start = rebalance_date
     month_key = rebalance_date.isoformat()[:7]
 
+    # ⚠ THE FIRST THING TO CHECK WHEN A REBALANCE LOOKS WRONG: which date did it
+    # decide FOR, off which bar, from how much data. Every downstream number —
+    # signals, entry prices, the period the return is measured over — hangs off
+    # these three, and none of them is visible in the holdings table afterwards.
+    _logger.info(
+        "[current_portfolio] rebalance=%s (weekday %s) · deciding bar=%s · today=%s · "
+        "latest loaded close=%s · walk: %s",
+        rebalance_date, weekday, deciding_bar(rebalance_date), today_d, latest_data_date,
+        " | ".join(_walk),
+    )
     if send_event:
-        send_event("progress", month=month_key, pct=10, message=f"Computing signals as of {rebalance_date.isoformat()}...")
+        send_event("progress", month=month_key, pct=10, message=(
+            f"Rebalance {rebalance_date.isoformat()} (weekday {weekday}) decided on the "
+            f"{deciding_bar(rebalance_date).isoformat()} close · today {today_d.isoformat()} · "
+            f"latest loaded close {latest_data_date} · walk: {' | '.join(_walk)}"
+        ))
 
     # Filter universe for this month if snapshot-based — same logic as the
     # backtest loop, just for one month.
@@ -257,6 +285,15 @@ def run_current_portfolio(
                 universe_df["company_id"].isin(eligible_ids)
             ].copy().reset_index(drop=True)
             month_universe_df["sector"] = month_universe_df["company_id"].map(sector_map)
+
+    # The FUNNEL, stated up front. Every later count is a subset of this one, and
+    # a rebalance that quietly ran on 900 of 1,479 names looks exactly like one
+    # that ran on all of them once you are only reading the holdings table.
+    if send_event:
+        send_event("progress", month=month_key, pct=12, message=(
+            f"Universe: {len(universe_df)} loaded → {len(month_universe_df)} eligible for "
+            f"{month_key} across {month_universe_df['sector'].nunique() if 'sector' in month_universe_df else 0} sectors"
+        ))
 
     # Build price/volume indices once
     price_index = _build_price_index(prices_df)
@@ -322,8 +359,75 @@ def run_current_portfolio(
             send_event("progress", month=month_key, pct=100, message="No companies had enough data for signals")
         return CurrentPortfolio(as_of_date=month_start.isoformat(), latest_price_date=None, holdings=[])
 
+    # ── The deciding bar, enforced ────────────────────────────────
+    # ⚠ EVERY NAME IN THE BASKET MUST BE PRICED AT THE BAR THE BASKET ENTERS ON.
+    # `_price_on_or_before` will happily walk back weeks to find a company its
+    # last close, which prices the entry at a date the portfolio did not exist —
+    # see `MAX_ENTRY_GAP_DAYS`. Filtering HERE, before scoring, is what keeps the
+    # book at its configured size: dropping the stale names afterwards would
+    # simply hold fewer than `top_n_per_sector × top_n_sectors`.
+    entry_anchor = deciding_bar(month_start)
+    anchor_ts = pd.Timestamp(entry_anchor)
+    candidates = signals_df["company_id"].astype(int).tolist()
+    stale_ids: list[int] = []
+    for cid in candidates:
+        s = price_index.get(cid)
+        # No series at all, or nothing on/before the anchor → unpriceable HERE.
+        # (A name with no bar before the anchor cannot be entered at any price.)
+        pair = _price_on_or_before(s, anchor_ts) if s is not None else None
+        if pair is None or sessions_between(pair[1].date(), entry_anchor) > MAX_ENTRY_GAP_SESSIONS:
+            stale_ids.append(cid)
+    if stale_ids:
+        # NAME them, capped, with the overflow stated. "37 excluded" tells you to
+        # refresh; "these 2 are excluded, at these dates" tells you WHICH vendor
+        # gaps you are living with — and that is the question every one of these
+        # investigations actually ends on.
+        by_cid = {}
+        if "company_id" in month_universe_df.columns:
+            for _, r in month_universe_df.iterrows():
+                by_cid[int(r["company_id"])] = str(
+                    r.get("gurufocus_ticker") or r.get("company_name") or r["company_id"]
+                )
+        detail = []
+        for cid in stale_ids[:25]:
+            s = price_index.get(cid)
+            pair = _price_on_or_before(s, anchor_ts) if s is not None else None
+            last = pair[1].date().isoformat() if pair is not None else "no bar"
+            detail.append(f"{by_cid.get(cid, cid)}@{last}")
+        more = f" …+{len(stale_ids) - 25} more" if len(stale_ids) > 25 else ""
+
+        signals_df = signals_df[~signals_df["company_id"].astype(int).isin(stale_ids)]
+        _logger.warning(
+            "[current_portfolio] %s of %s candidates dropped — last close more than %s "
+            "session(s) before the %s deciding bar (they could only be entered at a stale "
+            "price): %s%s", len(stale_ids), len(candidates), MAX_ENTRY_GAP_SESSIONS,
+            entry_anchor, ", ".join(detail), more,
+        )
+        if send_event:
+            send_event(
+                "warning", scope="data", month=month_key,
+                message=(
+                    f"{len(stale_ids)} of {len(candidates)} candidate(s) had no close at the "
+                    f"{entry_anchor.isoformat()} deciding bar and were excluded from selection "
+                    f"— refresh prices to bring them back: {', '.join(detail)}{more}"
+                ),
+            )
+    if signals_df.empty:
+        if send_event:
+            send_event("progress", month=month_key, pct=100, message=(
+                f"No company is priced at the {entry_anchor.isoformat()} deciding bar"))
+        return CurrentPortfolio(
+            as_of_date=month_start.isoformat(), latest_price_date=None, holdings=[],
+            entry_anchor_date=entry_anchor.isoformat(), excluded_stale_count=len(stale_ids),
+        )
+
     if send_event:
-        send_event("progress", month=month_key, pct=60, message=f"Scoring {len(signals_df)} companies...")
+        send_event("progress", month=month_key, pct=60, message=(
+            f"Scoring {len(signals_df)} companies (of {len(candidates)} with signals, "
+            f"{len(month_universe_df)} in the universe) — picking top {config.top_n_sectors} "
+            f"sector(s) × {config.top_n_per_sector} name(s)"
+            + (f", min price score {config.min_price_score}" if config.min_price_score else "")
+        ))
 
     # Score and select — same path as backtest momentum mode
     t_month_start_select = time.perf_counter()
@@ -339,24 +443,65 @@ def run_current_portfolio(
     )
     t_month_start_select_elapsed = time.perf_counter() - t_month_start_select
 
+    # ⚠ THE SECTOR RANKING IS WHERE A REBALANCE MOST OFTEN SURPRISES YOU, and it
+    # is invisible afterwards: the holdings table shows the sectors that WON, never
+    # the ones that lost or by how little. Scores are min-max normalized across the
+    # pool and the sector score is a mean of them, so one outlier entering or
+    # leaving the pool can flip a boundary (measured: one stale name swapped
+    # Technology for Capital Goods across 6 of 24 holdings).
+    if send_event and not selected.empty:
+        try:
+            # ⚠ AGGREGATED OVER `scored` — EVERY SCORED COMPANY, WHICH IS THE POOL
+            # `score_and_select` RANKS SECTORS ON. Not `selection_pool(...)`: the
+            # `min_price_score` floor decides which COMPANIES are bought, not
+            # which SECTORS exist, and ranking on the survivors flatters exactly
+            # the sectors with the fewest of them (that bias was removed on
+            # 2026-07-31 and this table must not quietly reintroduce it).
+            # Re-scoring here costs a vectorized pass over ~1.5k rows; it must be
+            # given the SAME arguments, or the table explains a ranking that
+            # never happened.
+            scored_for_log = score_universe(
+                signals_df, config.signal_weights,
+                category_weights=config.category_weights,
+                signal_defs=signal_defs_for_mode(config.selection_mode),
+            )
+            ranked = sector_pool_scores(scored_for_log)
+            chosen = set(selected["sector"].tolist())
+            line = " | ".join(
+                f"{'*' if r['sector'] in chosen else ''}{r['sector']} "
+                f"{r['momentum_score']} (n={r['companies']})"
+                for r in ranked[:12]
+            )
+            send_event("progress", month=month_key, pct=80, message=(
+                f"Sector ranking (* = picked, top {config.top_n_sectors}): {line}"
+            ))
+        except Exception as e:  # noqa: BLE001 — a diagnostic must not fail the rebalance
+            _logger.warning("[current_portfolio] sector-ranking log failed: %s: %s",
+                            type(e).__name__, e)
+
     if selected.empty:
         if send_event:
             send_event("progress", month=month_key, pct=100, message="No companies passed selection")
-        return CurrentPortfolio(as_of_date=month_start.isoformat(), latest_price_date=None, holdings=[])
+        return CurrentPortfolio(
+            as_of_date=month_start.isoformat(), latest_price_date=None, holdings=[],
+            entry_anchor_date=entry_anchor.isoformat(), excluded_stale_count=len(stale_ids),
+        )
 
     if send_event:
         send_event("progress", month=month_key, pct=85, message="Computing MTD returns...")
 
     n_holdings = len(selected)
     weight = 1.0 / n_holdings
-    # Entry at the PRIOR trading day's close — the last bar STRICTLY BEFORE the
-    # rebalance date, which is the same bar the signals are computed from and
-    # where run_backtest enters. Anchoring here (not the rebalance-day close)
-    # makes the picks fully determined by that prior close, so the rebalance can
-    # be computed the moment it lands (Friday's close → fire Saturday) and the
-    # live entry matches the backtest's. `_price_on_or_before(rebalance_date − 1)`
-    # = the last close on/before the day before the rebalance = that prior bar.
-    prior_anchor = pd.Timestamp(month_start) - pd.Timedelta(days=1)
+    # Entry at the DECIDING BAR — the trading day strictly before the rebalance
+    # date (first Monday ⇒ the preceding Friday), which is the same bar the
+    # signals are computed from and where run_backtest enters. Anchoring here
+    # (not the rebalance-day close) makes the picks fully determined by that
+    # prior close, so the rebalance can be computed the moment it lands (Friday's
+    # close → fire Saturday) and the live entry matches the backtest's.
+    # ONE definition, shared with the pipeline's pre-flight gate and its price
+    # fetch (`momentum.backtest.dates.deciding_bar`) — the date the prices are
+    # fetched TO must be the date the book is entered AT.
+    prior_anchor = anchor_ts
 
     holdings: list[PeriodHolding] = []
     latest_observed: pd.Timestamp | None = None
@@ -612,4 +757,6 @@ def run_current_portfolio(
         latest_price_date=latest_observed.strftime("%Y-%m-%d") if latest_observed is not None else None,
         holdings=holdings,
         daily_picks=daily_picks,
+        entry_anchor_date=entry_anchor.isoformat(),
+        excluded_stale_count=len(stale_ids),
     )

@@ -5182,6 +5182,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ingest/runs/{run_id}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Ingest Run Log
+         * @description The run's STEP TRANSCRIPT from `after` — every phase, every company the
+         *     price refresh touched, every strategy computed, and the holdings each one
+         *     produced. Tailed into the browser console by the /schedule Run-now buttons.
+         *
+         *     Why a cursor poll and not SSE: this is a PULL of an append-only log, and the
+         *     cursor is what makes a reconnect exact — an SSE drop would silently skip the
+         *     lines emitted while it was down, which for a transcript is the one thing that
+         *     must not happen. It runs only while the user's own run is live and stops at
+         *     its terminal status.
+         *
+         *     In-memory (see `ingest.phases.runlog`), so an empty `entries` for an old run
+         *     means the buffer was recycled, not that the run did nothing — `latest` says
+         *     how many steps that run actually emitted.
+         */
+        get: operations["get_ingest_run_log_api_ingest_runs__run_id__log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ingest/runs/{run_id}/stream": {
         parameters: {
             query?: never;
@@ -6269,10 +6301,12 @@ export interface paths {
         head?: never;
         /**
          * Set Strategy Cash
-         * @description Set a strategy's CASH allocation (0..1). Cash scales every other holding's
-         *     weight by (1-cash) and adds a flat 0%-return cash sleeve, so the reported
-         *     weights + the return pick up the cash drag. Re-prices the strategy
-         *     immediately so the new weighting shows at once (no wait for the daily tick).
+         * @description Set a strategy's CASH allocation (0..1), leaving its ETF sleeves alone.
+         *
+         *     Cash scales every other holding's weight by (1-cash) and adds a flat
+         *     0%-return cash sleeve, so the reported weights + the return pick up the cash
+         *     drag. Re-prices immediately. See `PATCH …/sleeves` to set cash and the ETF
+         *     overlay together.
          *
          *     Admin-only: the API gate blocks all non-admin writes here, so read-only users
          *     can see the cash allocation but can't change it.
@@ -6300,6 +6334,46 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/scheduled-strategies/{strategy_id}/sleeves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set Strategy Sleeves
+         * @description Set a strategy's CASH and ETF sleeves by hand; the stock picks take the rest.
+         *
+         *     ⚠ THE INPUT IS ABSOLUTE, THE STORAGE IS INVESTED-RELATIVE, AND THE DIFFERENCE
+         *     IS NOT COSMETIC. What you type is each sleeve's share of the whole portfolio
+         *     (10% cash + 20% ETF ⇒ 70% stocks). What `config.etf_overlay[].weight_pct`
+         *     means — set by the diversifier, consumed by the blended backtest — is a share
+         *     of the INVESTED book, i.e. after cash is taken out. Storing 20 there with 10%
+         *     cash would hold 18%, not the 20% you asked for. Converted here
+         *     (`weight_pct = absolute / (1 − cash)`) so both readers stay correct and no
+         *     stored convention changes.
+         *
+         *     The stock weights are re-derived from the underlying strategy's selection —
+         *     the stored sleeve-scaled weights are renormalized to sum-1 before the new
+         *     sleeves are applied (`momentum.portfolio_math.apply_sleeves`), so repeated
+         *     edits can't compound the shrink.
+         *
+         *     ⚠ IT RESTATES THE OPEN PERIOD, it does not open a new one: the ETF sleeves are
+         *     priced from the same entry bar the stock sleeve entered on, so the period's
+         *     return stays measured over one window. The next rebalance re-selects normally.
+         *
+         *     Admin-only (the API gate blocks non-admin writes).
+         */
+        patch: operations["set_strategy_sleeves_api_scheduled_strategies__strategy_id__sleeves_patch"];
         trace?: never;
     };
     "/api/static-universes": {
@@ -10111,6 +10185,19 @@ export interface components {
             /** Role */
             role: string;
         };
+        /** SetSleevesRequest */
+        SetSleevesRequest: {
+            /**
+             * Cash Pct
+             * @default 0
+             */
+            cash_pct?: number;
+            /**
+             * Etfs
+             * @default []
+             */
+            etfs?: components["schemas"]["SleeveEtf"][];
+        };
         /** SignalBreakdownRequest */
         SignalBreakdownRequest: {
             /** As Of Date */
@@ -10160,6 +10247,18 @@ export interface components {
             risk_free_rate_pct?: number;
             /** Variant Key */
             variant_key?: string | null;
+        };
+        /** SleeveEtf */
+        SleeveEtf: {
+            /**
+             * Band Pct
+             * @default 0
+             */
+            band_pct?: number;
+            /** Benchmark Id */
+            benchmark_id: number;
+            /** Weight Pct */
+            weight_pct: number;
         };
         /**
          * SplitAdjustment
@@ -17053,6 +17152,40 @@ export interface operations {
             };
         };
     };
+    get_ingest_run_log_api_ingest_runs__run_id__log_get: {
+        parameters: {
+            query?: {
+                after?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     stream_ingest_run_api_ingest_runs__run_id__stream_get: {
         parameters: {
             query?: never;
@@ -18544,6 +18677,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_strategy_sleeves_api_scheduled_strategies__strategy_id__sleeves_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSleevesRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -473,6 +473,26 @@ async def stream_ingest_run(run_id: int, request: Request):
     return run_detail_stream_response(request, _build)
 
 
+@router.get("/api/ingest/runs/{run_id}/log")
+async def get_ingest_run_log(run_id: int, after: int = 0, limit: int = 2000):
+    """The run's STEP TRANSCRIPT from `after` — every phase, every company the
+    price refresh touched, every strategy computed, and the holdings each one
+    produced. Tailed into the browser console by the /schedule Run-now buttons.
+
+    Why a cursor poll and not SSE: this is a PULL of an append-only log, and the
+    cursor is what makes a reconnect exact — an SSE drop would silently skip the
+    lines emitted while it was down, which for a transcript is the one thing that
+    must not happen. It runs only while the user's own run is live and stops at
+    its terminal status.
+
+    In-memory (see `ingest.phases.runlog`), so an empty `entries` for an old run
+    means the buffer was recycled, not that the run did nothing — `latest` says
+    how many steps that run actually emitted."""
+    from ingest.phases.runlog import read_log  # noqa: PLC0415
+
+    return {"run_id": run_id, **read_log(run_id, after=max(0, after), limit=max(1, min(5000, limit)))}
+
+
 @router.get("/api/ingest/runs/{run_id}/templates/{template_key}/membership")
 async def get_template_membership_for_run(
     run_id: int, template_key: str, q: str = "", limit: int = 500,
