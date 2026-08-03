@@ -345,7 +345,7 @@ def compute_average_rsi(
     Each is averaged across every company into a single universe gauge.
 
     Returns None when no company has enough history (< `period`+1 closes).
-    Surfaced as a separate time series on /regime-detector."""
+    Surfaced as a separate time series by MarketHealthCard."""
     # Wilder smoothing converges within a few `period`s; an 8×`period`
     # trailing window is plenty and keeps the per-company cost bounded.
     win = max(period * 8, period + 1)
@@ -388,8 +388,8 @@ def compute_market_health_components(signals_df: pd.DataFrame) -> dict[str, floa
     """Per-component breakdown of the composite market-health score —
     `{trend, momentum, drawdown, composite}` (only the components that are
     computable). Display-only sibling of `compute_market_health`: it
-    surfaces WHICH sub-signal is driving the regime read so the
-    /regime-detector page can chart each one and you can see which leads a
+    surfaces WHICH sub-signal is driving the regime read so
+    MarketHealthCard can chart each one and you can see which leads a
     crisis. `composite` is the mean of the present components (the same
     quantity `compute_market_health` returns, modulo display rounding).
     Returns None when no component is computable."""

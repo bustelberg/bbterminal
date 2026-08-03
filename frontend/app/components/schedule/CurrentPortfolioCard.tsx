@@ -17,6 +17,10 @@ import BreakdownModal, { type BreakdownTarget } from '../momentum/BreakdownModal
 import { PriceRefreshPanel, useStockRefresh } from './priceRefresh';
 import type { Column } from '../../../lib/tableExport';
 import type { Holding } from '../../../lib/stores/momentum';
+import type { components } from '../../../lib/api-types';
+
+/** The reprice endpoint's payload — see `ReloadPrices`. */
+type ReloadResult = components['schemas']['RepriceResult'];
 
 type SnapshotResponse = {
   snapshot_id: number;
@@ -42,6 +46,81 @@ function AsOfTip({ date }: { date: string | null }) {
       <div className="text-fg-muted">As of</div>
       <div className="font-mono text-fg">{date}</div>
     </CellInfoTip>
+  );
+}
+
+/**
+ * Reload this strategy's PRICES — start and end, local and converted.
+ *
+ * ⚠ IT DOES NOT RE-SELECT, AND THAT IS THE WHOLE DISTINCTION. Re-running the selection for a
+ * past date is "Force re-rebalance" on the pipeline card, and it is not a repair: `metric_data`
+ * is not append-only in `target_date` (vendors publish late closes stamped with their true
+ * earlier date), so a past basket cannot be reproduced from the live database and re-deciding it
+ * would silently rewrite what the strategy held. This reloads the marks on the holdings that are
+ * already there.
+ *
+ * ⚠ AND IT RUNS THE NIGHTLY TICK'S OWN FUNCTION, not a second implementation. What the button
+ * buys is timing — the correction lands now rather than at 05:00 UTC.
+ *
+ * The detail goes to the console (which holdings moved, and in which fields); the chip says only
+ * how many, because "did it change anything?" is the one thing you need at a glance.
+ */
+function ReloadPrices({ strategyId, canEdit, onDone }: {
+  strategyId?: number;
+  canEdit?: boolean;
+  onDone?: () => void | Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  if (!canEdit || strategyId == null) return null;
+
+  const run = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/${strategyId}/reprice`,
+        { method: 'POST' });
+      const b = (await r.json().catch(() => null)) as ReloadResult | null;
+      if (!r.ok || !b) {
+        console.warn('[reprice] failed', r.status, b);
+        setMsg(`failed (HTTP ${r.status})`);
+        return;
+      }
+      const moved = (b.holdings ?? []).filter((h) => (h.changed ?? []).length);
+      console.groupCollapsed(
+        `[reprice] strategy ${strategyId} — ${b.changed_holdings ?? 0} of `
+        + `${(b.holdings ?? []).length} holding(s) changed`);
+      if (moved.length) {
+        console.table(moved.map((h) => ({
+          ticker: h.ticker, etf: h.is_etf,
+          'start (local)': h.entry_price_local, 'start (€)': h.entry_price_eur,
+          'end (local)': h.exit_price_local, 'end (€)': h.exit_price_eur,
+          'return %': h.forward_return_pct, changed: (h.changed ?? []).join(', '),
+        })));
+      } else {
+        console.log(b.note ?? 'every price was already current');
+      }
+      console.log('full payload', b);
+      console.groupEnd();
+      setMsg(b.changed_holdings ? `${b.changed_holdings} updated` : 'already current');
+      await onDone?.();
+    } catch (e) {
+      console.warn('[reprice] threw', e);
+      setMsg('failed — see the console');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <span className="flex items-baseline gap-1.5">
+      <button type="button" onClick={() => void run()} disabled={busy}
+        title="Reload this portfolio's prices — start and end, local and converted — from their sources. Does NOT re-pick the holdings; that is Force re-rebalance. Runs the same function the nightly tick does, so the correction lands now instead of at 05:00 UTC."
+        className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
+        {busy ? 'Reloading…' : 'Reload prices'}
+      </button>
+      {msg && <span className="text-[10px] text-fg-faint">{msg}</span>}
+    </span>
   );
 }
 
@@ -408,6 +487,7 @@ export default function CurrentPortfolioCard({
             canEdit={canEditCash}
             onChanged={onCashChanged}
           />
+          <ReloadPrices strategyId={strategyId} canEdit={canEditCash} onDone={onCashChanged} />
           {totalReturn != null && (
             <span className="text-sm" title="Weighted EUR return of the held portfolio since it was entered">
               <span className="text-fg-subtle text-xs">Total (€) </span>

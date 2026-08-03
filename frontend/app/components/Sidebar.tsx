@@ -29,7 +29,6 @@ const navItems: NavEntry[] = [
   { href: '/earnings', label: 'Earnings Dashboard' },
   { href: '/backtest', label: 'Backtest' },
   { href: '/diversifier', label: 'Diversifier' },
-  { href: '/regime-detector', label: 'Regime Detector' },
   {
     label: 'Universe Overview',
     href: '/universe',

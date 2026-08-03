@@ -306,13 +306,13 @@ class PeriodRecord:
     # fees so the (net) figures reflect the daily churn cost.
     daily_timing_swaps: int = 0
     # Per-component breakdown of `market_health` — {trend, momentum,
-    # drawdown, composite}. Display-only; lets the /regime-detector page
-    # chart each sub-signal so you can see which one leads a crisis.
+    # drawdown, composite}. Display-only; lets MarketHealthCard chart each
+    # sub-signal so you can see which one leads a crisis.
     # Populated alongside `market_health` (regime filter active) else None.
     market_health_components: dict | None = None
     # Average RSI(14) across the eligible universe this period, two ways —
     # {"simple": 0..100, "wilder": 0..100}. A momentum-breadth gauge
-    # charted separately on /regime-detector. Populated alongside
+    # charted by MarketHealthCard. Populated alongside
     # `market_health` (regime filter active) else None.
     universe_rsi: dict | None = None
 

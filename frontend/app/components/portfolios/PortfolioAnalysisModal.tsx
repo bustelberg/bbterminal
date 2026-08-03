@@ -8,6 +8,7 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { formatPct, visibleBuckets } from './composition';
 import { allocColor, bucketLabel } from './allocationColors';
 import { Provenance } from '../../../lib/provenance';
+import { trace, traceError } from '../../../lib/debugTrace';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
 import BucketDetailPanel from './BucketDetailPanel';
@@ -888,8 +889,18 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
         const b = await r.json().catch(() => null);
         if (cancelled) return;
         if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
+        // ⚠ WHERE THE WAIT WENT. `apiFetch` already logs the round-trip total, but this endpoint
+        // is one request covering eight different loads — so a 5-second "Loading composition…"
+        // told you only that it was slow, never which load. The server now reports per phase and
+        // this prints it, the same way the AIRS expand has always done.
+        const t = (b as ModelPortfolioAnalysis)?.timings_ms;
+        if (t && Object.keys(t).length) {
+          const total = Object.values(t).reduce((s, v) => s + (v ?? 0), 0);
+          trace('analyse', `server phases (ms) — ${total} total`, t);
+        }
         setData(b as ModelPortfolioAnalysis);
       } catch (e) {
+        traceError('analyse', 'the composition could not be loaded', e);
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
     })();
