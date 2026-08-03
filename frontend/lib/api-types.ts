@@ -1416,6 +1416,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/{portfolio_id}/ytd-explain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Ytd Explain
+         * @description The full derivation behind ONE model's YTD — for diffing two deployments.
+         *
+         *     Same figure as the grid, by construction: it INSTRUMENTS `compute_portfolio_performance`
+         *     rather than recomputing, and asserts that the per-leg contributions sum to the YTD
+         *     (`portfolio.reconciles`). Returns three levels, and they are ordered by how far upstream the
+         *     cause of a discrepancy would be:
+         *
+         *       `load`      — what this deployment fetched: price transport (COPY vs paged PostgREST),
+         *                     the price/FX windows, and the freshest close anywhere in the load. A whole
+         *                     environment being a week stale is ONE date here, not 24 leg rows.
+         *       `portfolio` — the composition's effective date, the anchor it implies, the weight that
+         *                     could be priced, and the coverage the return was renormalised over.
+         *       `legs`      — one row per composition line, by contribution: weight, the mark it was
+         *                     bought at (date + EUR price, flagged if interpolated), the close it is
+         *                     marked to, its EUR return and its contribution in percentage points.
+         *
+         *     Untyped on purpose — it is a debug surface, so the payload can gain fields without a
+         *     regenerated contract. Read-only: it prices the fleet exactly as the grid does and writes
+         *     nothing.
+         */
+        get: operations["airs_model_portfolio_ytd_explain_api_airs_model_portfolios__portfolio_id__ytd_explain_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/portfolio/{portfolio_name}": {
         parameters: {
             query?: never;
@@ -12278,6 +12316,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PerformanceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_ytd_explain_api_airs_model_portfolios__portfolio_id__ytd_explain_get: {
+        parameters: {
+            query?: {
+                year?: number | null;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

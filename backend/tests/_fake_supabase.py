@@ -46,7 +46,9 @@ class _Query:
         # `rows` is the live backing list (table mode) or a static snapshot (rpc).
         self._rows = rows if rows is not None else store.tables.setdefault(table, [])
         self._filters: list[Callable[[dict], bool]] = []
-        self._order: tuple[str, bool] | None = None
+        # A LIST, because PostgREST composes `.order(a).order(b)` into a compound sort key and
+        # code that pages depends on that key being unique — see `FakeSupabase(max_rows=...)`.
+        self._order: list[tuple[str, bool]] = []
         self._range: tuple[int, int] | None = None
         self._limit: int | None = None
         self._mode = "select"
@@ -96,13 +98,31 @@ class _Query:
         # PostgREST `.not_.is_(col, "null")` → keep rows where col IS NOT NULL.
         return _NotQuery(self)
 
+    # Range filters. Comparison is whatever Python's `>=` does on the stored value, which for
+    # the ISO date strings this project stores everywhere is the same ordering Postgres uses.
+    def gte(self, col: str, val: Any) -> "_Query":
+        self._filters.append(lambda r: r.get(col) is not None and r[col] >= val)
+        return self
+
+    def lte(self, col: str, val: Any) -> "_Query":
+        self._filters.append(lambda r: r.get(col) is not None and r[col] <= val)
+        return self
+
+    def gt(self, col: str, val: Any) -> "_Query":
+        self._filters.append(lambda r: r.get(col) is not None and r[col] > val)
+        return self
+
+    def lt(self, col: str, val: Any) -> "_Query":
+        self._filters.append(lambda r: r.get(col) is not None and r[col] < val)
+        return self
+
     def in_(self, col: str, vals: list) -> "_Query":
         allowed = set(vals)
         self._filters.append(lambda r: r.get(col) in allowed)
         return self
 
     def order(self, col: str, desc: bool = False) -> "_Query":
-        self._order = (col, desc)
+        self._order.append((col, desc))
         return self
 
     def range(self, start: int, end: int) -> "_Query":
@@ -138,14 +158,19 @@ class _Query:
 
         # select
         rows = matched
-        if self._order is not None:
-            col, desc = self._order
-            rows = sorted(rows, key=lambda r: (r.get(col) is None, r.get(col)), reverse=desc)
+        # Applied last-key-first so the FIRST `.order()` call is the primary sort, matching
+        # PostgREST. A stable sort makes the composition exact.
+        for col, desc in reversed(self._order):
+            rows = sorted(rows, key=lambda r, c=col: (r.get(c) is None, r.get(c)), reverse=desc)
         if self._range is not None:
             start, end = self._range
             rows = rows[start : end + 1]
         if self._limit is not None:
             rows = rows[: self._limit]
+        # ⚠ THE ROW CAP, and it is SILENT — exactly as PostgREST's is. A caller that does not
+        # page gets a short answer with nothing to distinguish it from a complete one.
+        if self._store.max_rows is not None:
+            rows = rows[: self._store.max_rows]
         return _Result([dict(r) for r in rows])
 
 
@@ -154,7 +179,14 @@ class FakeSupabase:
         self,
         tables: dict[str, list[dict]] | None = None,
         rpc_results: dict[str, list[dict]] | None = None,
+        max_rows: int | None = None,
     ):
+        # PostgREST's response cap, off by default. Set it to reproduce the failure mode this
+        # project keeps rediscovering: the cap is 1,000 on Supabase cloud and 10,000 locally,
+        # a response is truncated SILENTLY, and so a loader that does not page returns a
+        # different (and differently WRONG) answer in each environment. A test that wants to
+        # prove a reader pages has to be able to cut it off.
+        self.max_rows = max_rows
         self.tables: dict[str, list[dict]] = {
             name: [dict(r) for r in rows] for name, rows in (tables or {}).items()
         }

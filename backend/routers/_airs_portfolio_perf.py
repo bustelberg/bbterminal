@@ -117,6 +117,11 @@ _MARK_GAP_TOLERANCE_DAYS = 7
 # support is worse than a blank, because a blank cannot be traded on.)
 _MAX_INTERP_SPAN_DAYS = 400
 
+# Rows requested per PostgREST page. Matches Supabase cloud's own response cap, so a full page
+# costs one round-trip and no more. The paged readers never ASSUME the server honours it — see
+# `_fx` — they advance by what actually came back.
+_PAGE = 1000
+
 
 def _executions(isins: list[str]) -> dict[str, dict]:
     """ISIN -> its priceable execution row. The bridge between the AIRS world and ours."""
@@ -144,18 +149,30 @@ def _closes_paged(analysis_ids: list[int], start: str, end: str,
             # rows — an unpaged read here returns 1% of the data and computes a confident,
             # wrong number off it. (I hit exactly this while probing coverage: it reported 102
             # priced holdings when the answer is 221.)
+            #
+            # ⚠ THE SORT KEY MUST BE UNIQUE OR THE PAGING SILENTLY LOSES ROWS. `target_date`
+            # alone is not: ~220 holdings share every trading day, so almost every 1,000-row
+            # page boundary falls INSIDE a date. Postgres makes no promise about the order of
+            # tied rows between two separate LIMIT/OFFSET queries, so a row can be served on
+            # both pages or on neither — and a dropped opening bar re-marks a holding at a
+            # different price, changing the portfolio return with no error anywhere. This path
+            # only runs where COPY is unconfigured (`SUPABASE_DB_URL` absent), which is exactly
+            # the local-vs-production asymmetry that makes such a bug show up in one and not
+            # the other. `(target_date, analysis_id)` IS unique in `asset_price`.
             batch = (supabase.table("asset_price")
                      .select("analysis_id,target_date,close")
                      .in_("analysis_id", chunk)
                      .gte("target_date", start).lte("target_date", end)
-                     .order("target_date").range(off, off + 999).execute().data or [])
+                     .order("target_date").order("analysis_id")
+                     .range(off, off + _PAGE - 1).execute().data or [])
+            if not batch:
+                break
             for r in batch:
                 if r["close"] is not None:
                     out.setdefault(r["analysis_id"], []).append(
                         (r["target_date"], float(r["close"])))
-            if len(batch) < 1000:
-                break
-            off += 1000
+            # Advance by what came back, not by what was asked for — see `_fx`.
+            off += len(batch)
     for s in out.values():
         s.sort()
     return out
@@ -194,17 +211,55 @@ def _closes(analysis_ids: list[int], start: str, end: str) -> dict[int, list[tup
 def _fx(currencies: set[str], start: str, end: str) -> dict[str, dict[str, float]]:
     """Rates keyed by MAJOR currency — `_rate` resolves a minor unit (GBp) to its base and
     applies the divisor. Asking `fx_rate` for "GBp" returns nothing at all: pence is a quoting
-    convention, not a currency, and 343 of our rows are quoted in it."""
+    convention, not a currency, and 343 of our rows are quoted in it.
+
+    ⚠ THIS READ MUST PAGE, AND IT IS THE READ WHERE TRUNCATION IS INVISIBLE.
+        PostgREST caps a response and truncates SILENTLY — at 1,000 rows on Supabase cloud and
+        10,000 locally. This window spans every currency our holdings quote in, back to the
+        oldest bar in the price load: measured 2026-08-03, that is 19,037 rows over 27
+        currencies. Unpaged, it came back with exactly 10,000 of them locally — and there is
+        NOTHING in the result that says so.
+
+        What a missing rate does is worse than a missing price, because it is silent twice
+        over. `_eur_series` drops any close with no rate on or before it, so a currency whose
+        early rows were cut simply has no EUR series before the cut: the holding then has no
+        mark at the anchor, is classed unpriceable, drops out of the basket, and the return is
+        renormalised over the rest. No error, no gap in the table — a confident number computed
+        over a different portfolio.
+
+        Measured on AITopSelectie OFF FX: the truncated read returned TWD as 20 rows starting
+        2026-05-27 (its real history goes back to 2014), so Taiwan Semiconductor — 5% of the
+        model, with 6,606 price bars — silently left the basket and the YTD was renormalised
+        over the other 19 names. THE CAP IS 10x TIGHTER IN PRODUCTION, so the two environments
+        cut different currencies and reported different YTDs for the same model on the same
+        code. That is the whole discrepancy: not a pricing difference, a paging bug that only
+        one row limit at a time makes visible.
+
+        `(rate_date, currency_code)` is the sort key because a page boundary that falls inside
+        a tie can serve a row twice or never — see `_closes_paged`, same trap. And the loop
+        advances by WHAT CAME BACK rather than by what it asked for: "a short page is the last
+        page" is only true while the server's cap is at least the page size, which is the very
+        assumption that just failed. Advancing by `len(rows)` and stopping on empty is correct
+        under any cap, at the cost of one extra empty request per chunk.
+    """
     out: dict[str, dict[str, float]] = {}
     cur = sorted({SUBUNIT.get(c, (c, 1.0))[0] for c in currencies if c and c != "EUR"})
     for i in range(0, len(cur), IN_CHUNK_SIZE):
-        rows = (supabase.table("fx_rate")
-                .select("currency_code,rate_date,rate")
-                .in_("currency_code", cur[i:i + IN_CHUNK_SIZE])
-                .gte("rate_date", start).lte("rate_date", end).execute().data or [])
-        for r in rows:
-            if r["rate"]:
-                out.setdefault(r["currency_code"], {})[r["rate_date"]] = float(r["rate"])
+        chunk = cur[i:i + IN_CHUNK_SIZE]
+        off = 0
+        while True:
+            rows = (supabase.table("fx_rate")
+                    .select("currency_code,rate_date,rate")
+                    .in_("currency_code", chunk)
+                    .gte("rate_date", start).lte("rate_date", end)
+                    .order("rate_date").order("currency_code")
+                    .range(off, off + _PAGE - 1).execute().data or [])
+            if not rows:
+                break
+            for r in rows:
+                if r["rate"]:
+                    out.setdefault(r["currency_code"], {})[r["rate_date"]] = float(r["rate"])
+            off += len(rows)
     return out
 
 
@@ -514,9 +569,21 @@ def ytd_anchor_for(effective: str | None, year: int | None = None) -> str:
     return effective if (effective and effective > jan1) else jan1
 
 
-def compute_portfolio_performance(year: int | None = None) -> list[dict]:
+def compute_portfolio_performance(year: int | None = None, *,
+                                  trace_portfolio_id: int | None = None,
+                                  trace_out: dict | None = None) -> list[dict]:
     """Per-portfolio YTD (EUR), plus the return / Sharpe / Sortino since the composition's own
-    effective date — the window in which its weights were actually held."""
+    effective date — the window in which its weights were actually held.
+
+    `trace_portfolio_id` + `trace_out` INSTRUMENT this function rather than reproducing it.
+    When both are given, `trace_out` is filled with every input and intermediate behind that one
+    portfolio's number: the load fingerprint, the anchor, and one row per leg with the mark it
+    was bought at, the close it is marked to, its EUR return and its contribution in percentage
+    points. The contributions sum to `ytd_pct` exactly (`reconciles`), because they are read off
+    the very legs `_index` weights — a diagnostic that computed the number a second way could
+    agree with itself while disagreeing with the grid, which is the one thing it must not do.
+    Tracing costs a few dicts and changes nothing about the result.
+    """
     year = year or date.today().year
     jan1 = f"{year}-01-01"
     today = date.today().isoformat()
@@ -575,6 +642,30 @@ def compute_portfolio_performance(year: int | None = None) -> list[dict]:
         for e in ex.values() if closes.get(e["analysis_id"])
     }
 
+    if trace_out is not None:
+        # The SHARED inputs — what this process actually loaded, before any one portfolio is
+        # priced. Two deployments computing different numbers off the same code differ HERE
+        # first: a different price transport, a shorter FX history, a stale `asset_price`.
+        from common.pg import copy_path_enabled  # noqa: PLC0415
+        trace_out["load"] = {
+            "server_today": today,
+            "year": year,
+            "price_transport": "copy" if copy_path_enabled() else "postgrest-paged",
+            "price_window": {"from": lookback, "to": today},
+            "fx_window": {"from": fx_from, "to": today},
+            "isins_in_all_compositions": len(isins),
+            "isins_with_execution": len(ex),
+            "analysis_ids": len(ids),
+            "series_loaded": sum(1 for s in closes.values() if s),
+            # The freshest close ANYWHERE in the load. A whole-fleet staleness gap between two
+            # environments shows up as this one date, not as 220 leg rows.
+            "latest_close_loaded": max((s[-1][0] for s in closes.values() if s), default=None),
+            "fx_currencies": {
+                c: {"n": len(r), "from": min(r), "to": max(r)}
+                for c, r in sorted(fx.items()) if r
+            },
+        }
+
     out: list[dict] = []
     for p in ports:
         rows = by_pf.get(p["id"], [])
@@ -610,6 +701,12 @@ def compute_portfolio_performance(year: int | None = None) -> list[dict]:
         # count travels with the number rather than living only in the expanded row.
         interpolated: set[str] = set()
 
+        # One dict per composition row, recorded ONLY for the portfolio being traced. Populated
+        # from the same branches that build `legs`, so a leg that is missing here is a leg the
+        # return does not have either.
+        tracing = trace_out is not None and p["id"] == trace_portfolio_id
+        leg_trace: list[dict] = []
+
         # Which of this portfolio's rows are certificates wrapping another model — resolved off
         # the shared context, so a dead certificate row can be priced by looking THROUGH it.
         links = resolve_links(supabase, p["id"],
@@ -619,6 +716,9 @@ def compute_portfolio_performance(year: int | None = None) -> list[dict]:
         for r in rows:
             w = float(r.get("percentage") or 0)
             if w <= 0:
+                if tracing:
+                    leg_trace.append({"isin": r.get("isin"), "fonds": r.get("fonds"),
+                                      "weight": w, "status": "zero_weight"})
                 continue
             total_w += w
             isin = r.get("isin")
@@ -630,9 +730,13 @@ def compute_portfolio_performance(year: int | None = None) -> list[dict]:
                 cash_w += w
                 has_cash = True
                 legs.append((w, None))
+                if tracing:
+                    leg_trace.append({"isin": None, "fonds": r.get("fonds"), "weight": w,
+                                      "status": "cash", "return_pct": 0.0})
                 continue
             e = ex.get(isin)
             s = eur.get(e["analysis_id"]) if e else None
+            lookthrough = False
             # No Yahoo series, but the row may be a certificate wrapping ANOTHER model — price it
             # by looking through to that model's basket. Anchor-independent, so the one series
             # marks correctly at both `ytd_anchor` and `eff` below.
@@ -644,17 +748,54 @@ def compute_portfolio_performance(year: int | None = None) -> list[dict]:
                         lookthrough_cache[tgt] = _lookthrough_series(
                             by_pf.get(tgt, []), ex, eur)
                     s = lookthrough_cache[tgt] or None
+                    lookthrough = s is not None
             # No opening mark at the anchor = not held there. `ytd_anchor >= eff` always, so a
             # holding with no mark HERE has none at inception either: it is priceable in neither
             # window and drops out of both.
             mark = _mark_at(s, ytd_anchor) if s else None
             if not s or not mark:
                 unresolved.add(isin)
+                if tracing:
+                    leg_trace.append({
+                        "isin": isin, "fonds": r.get("fonds"), "weight": w,
+                        "analysis_id": e["analysis_id"] if e else None,
+                        "yahoo_symbol": e.get("yahoo_symbol") if e else None,
+                        "currency": e.get("currency") if e else None,
+                        # Three different failures that all render as a missing row: no bridge
+                        # into our instrument grid at all, a bridge with no price series behind
+                        # it, and a series that simply does not reach back to the anchor.
+                        "status": ("no_execution" if not e
+                                   else "no_price_series" if not s
+                                   else "no_mark_at_anchor"),
+                        "series_bars": len(s) if s else 0,
+                        "series_first": s[0][0] if s else None,
+                        "series_last": s[-1][0] if s else None,
+                    })
                 continue
             resolved.add(isin)
             if mark[2]:
                 interpolated.add(isin)
             legs.append((w, s))
+            if tracing:
+                _d1, _p1 = s[-1]
+                leg_trace.append({
+                    "isin": isin, "fonds": r.get("fonds"), "weight": w,
+                    "analysis_id": None if lookthrough else (e["analysis_id"] if e else None),
+                    "yahoo_symbol": None if lookthrough else (e.get("yahoo_symbol") if e else None),
+                    "currency": None if lookthrough else (e.get("currency") if e else None),
+                    "status": "priced",
+                    "lookthrough": lookthrough,
+                    "series_bars": len(s),
+                    "series_first": s[0][0],
+                    "series_last": _d1,
+                    "start_date": mark[0],
+                    "start_price_eur": mark[1],
+                    "start_interpolated": mark[2],
+                    "start_gap_days": mark[3],
+                    "end_date": _d1,
+                    "end_price_eur": _p1,
+                    "return_pct": (_p1 / mark[1] - 1.0) * 100.0,
+                })
 
         # TWO curves, ONE builder, and every figure below is read off them — a cumulative return
         # is a curve's last point and the ratios are its daily steps. Computing a return a second
@@ -688,6 +829,52 @@ def compute_portfolio_performance(year: int | None = None) -> list[dict]:
         # recomputed, for the per-value ⓘ on the grid.
         yf_asof = max((s[-1][0] for _, s in legs if s), default=None)
         scanned = p.get("positions_scanned_at")
+
+        if tracing:
+            # THE ARITHMETIC, not a re-derivation of it. `_index`'s end value is
+            # Σ wᵢ·(Pᵢ(T)/Pᵢ(anchor)) / Σwᵢ, so each priced leg's contribution in percentage
+            # points is its own EUR return scaled by the weight it holds AFTER renormalisation
+            # over what could be priced. `reconciles` asserts that: three columns that don't sum
+            # to the number they explain are not an explanation of it.
+            for leg in leg_trace:
+                leg["weight_pct_of_priced"] = (
+                    leg["weight"] / ytd_w * 100.0
+                    if ytd_w > 0 and leg["status"] in ("priced", "cash") else None)
+                leg["contribution_pp"] = (
+                    leg["weight"] / ytd_w * leg.get("return_pct", 0.0)
+                    if ytd_w > 0 and leg["status"] in ("priced", "cash") else None)
+            contrib = sum(leg["contribution_pp"] or 0.0 for leg in leg_trace)
+            leg_trace.sort(key=lambda x: -(x["contribution_pp"] or 0.0))
+            trace_out["portfolio"] = {
+                "portfolio_id": p["id"],
+                "name": p["name"],
+                # The composition's effective date — AIRS's own, and the thing most likely to
+                # differ between two environments that have scanned at different times. It
+                # decides the anchor, which decides the whole window.
+                "positions_datum": eff,
+                "positions_scanned_at": str(scanned) if scanned else None,
+                "jan1": jan1,
+                "ytd_anchor": ytd_anchor,
+                "anchor_is_inception": bool(eff and eff > jan1),
+                "composition_rows": len(rows),
+                "total_weight": total_w,
+                "priced_weight": ytd_w,
+                "covered_pct": covered,
+                "low_coverage": not enough,
+                "cash_pct": cash_w,
+                "resolved_holdings": len(resolved),
+                "unresolved_holdings": len(unresolved),
+                "interpolated_holdings": len(interpolated),
+                "ytd_pct": ytd_pct,
+                "ytd_curve_points": len(ytd_curve),
+                "since_model_pct": since_pct,
+                "since_covered_pct": since_covered,
+                "stat_days": len(rets),
+                "latest_close_in_portfolio": yf_asof,
+                "sum_of_contributions_pp": contrib,
+                "reconciles": ytd_pct is not None and abs(contrib - ytd_pct) < 1e-6,
+            }
+            trace_out["legs"] = leg_trace
 
         out.append({
             "portfolio_id": p["id"],
@@ -759,6 +946,40 @@ def compute_portfolio_performance(year: int | None = None) -> list[dict]:
 
 async def compute_portfolio_performance_async(year: int | None = None) -> list[dict]:
     return await asyncio.to_thread(compute_portfolio_performance, year)
+
+
+def explain_portfolio_ytd(portfolio_id: int, year: int | None = None) -> dict:
+    """Everything behind ONE portfolio's YTD, for diffing two environments against each other.
+
+    The whole fleet is priced, not just this portfolio — deliberately. The price window reaches
+    back to the OLDEST inception across all models and the FX window to the oldest bar that load
+    returned, so a single-portfolio load would read a shorter window than the grid does and could
+    answer differently for reasons that have nothing to do with the discrepancy being chased. A
+    diagnostic that does not reproduce the number it is explaining is worse than none.
+
+    Read it top-down: `load` is what this deployment fetched (transport, windows, freshest close);
+    `portfolio` is the window and the coverage; `legs` is one row per composition line, ordered by
+    contribution, each carrying the mark it was bought at and the close it is marked to. Diff two
+    environments in that order — the first level that differs is the cause, and the levels below
+    it are consequences.
+    """
+    trace: dict = {}
+    rows = compute_portfolio_performance(
+        year, trace_portfolio_id=portfolio_id, trace_out=trace)
+    if "portfolio" not in trace:
+        # Either no such portfolio, or it has no `positions_datum` (never scanned a composition)
+        # and is filtered out of the fleet before pricing. Say which.
+        exists = (supabase.table("airs_model_portfolio").select("id,name,positions_datum")
+                  .eq("id", portfolio_id).limit(1).execute().data or [])
+        trace["portfolio"] = None
+        trace["error"] = ("no such model portfolio" if not exists
+                          else "no composition stored (positions_datum is null) — nothing to price")
+    trace["row"] = next((r for r in rows if r["portfolio_id"] == portfolio_id), None)
+    return trace
+
+
+async def explain_portfolio_ytd_async(portfolio_id: int, year: int | None = None) -> dict:
+    return await asyncio.to_thread(explain_portfolio_ytd, portfolio_id, year)
 
 
 def compute_holding_marks(isins: list[str], anchor: str,
