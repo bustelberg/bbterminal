@@ -121,14 +121,37 @@ def guess_model(account: str, models: list[dict]) -> tuple[dict | None, str]:
 
 def _models() -> list[dict]:
     """The models a link may point at: the ones with a composition. A model with no positions
-    is not a strategy an account can be running — it is a row we scraped and nothing more."""
+    is not a strategy an account can be running — it is a row we scraped and nothing more.
+
+    ⚠⚠ THE POSITION READ MUST PAGE, AND A TRUNCATION HERE SILENTLY UNPAIRS PORTFOLIOS.
+        `.limit(20000)` is not a bound the server honours — `db-max-rows` is, and it is **1,000
+        on Supabase cloud** against 10,000 locally. Every model whose position rows fall past
+        the cut counts as ZERO positions, is dropped by the filter on the last line, and then
+        matches no account: `guess_model` reports "no stem match", the pairing vanishes, and
+        Analyse silently falls back to an unpaired basket for a book that is perfectly fine.
+        Nothing raises; the page just quietly loses features per portfolio, and WHICH ones
+        depends on row order.
+
+        Measured 2026-08-03: this table holds **919** rows — under the cloud cap, but 92% of the
+        way to it, and it grows by ~20 rows every time a model is scanned. It is the same trap
+        that made `_year_perf` serve June's return in production while local served July's, one
+        table over, waiting for the next scan to trip it.
+    """
     rows = (supabase.table("airs_model_portfolio").select("id,name,portfolio_type")
             .limit(500).execute().data or [])
-    pos = (supabase.table("airs_model_portfolio_position").select("portfolio_id")
-           .limit(20000).execute().data or [])
     counts: dict[int, int] = {}
-    for p in pos:
-        counts[p["portfolio_id"]] = counts.get(p["portfolio_id"], 0) + 1
+    off = 0
+    while True:
+        # Advance by what came back and stop on an empty page — correct under any cap. Ordered
+        # on the primary key so a page boundary cannot serve a row twice or skip it.
+        page = (supabase.table("airs_model_portfolio_position").select("portfolio_id,isin")
+                .order("portfolio_id").order("isin")
+                .range(off, off + 999).execute().data or [])
+        if not page:
+            break
+        for p in page:
+            counts[p["portfolio_id"]] = counts.get(p["portfolio_id"], 0) + 1
+        off += len(page)
     return [{**m, "positions": counts.get(m["id"], 0)} for m in rows if counts.get(m["id"], 0)]
 
 

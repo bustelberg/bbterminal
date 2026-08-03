@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { trace } from '../../../lib/debugTrace';
 import { type Basket } from './PerformanceModal';
 import FundamentalCharts from './FundamentalCharts';
 import FundamentalCoverage from './FundamentalCoverage';
@@ -47,6 +48,23 @@ export default function OwnerEarningsModal({
   // is the one tab both an aggregate and a single company have, so the landing tab never depends
   // on which the modal was opened for.
   const [tab, setTab] = useState<Tab>('longequity');
+  /** Which tabs have been opened at least once — the mount set. A tab enters it on first visit
+   *  and never leaves, so its data survives every subsequent switch. Seeded with the landing tab
+   *  so it mounts on open like it always did. */
+  const [visited, setVisited] = useState<Set<Tab>>(() => new Set<Tab>(['longequity']));
+  const openTab = (t: Tab) => {
+    setVisited((v) => {
+      if (v.has(t)) {
+        // Nothing refetches. Traced so the difference is visible rather than inferred from how
+        // long the tab took — which is exactly how the repeated loading went unnoticed.
+        trace('fundamental', `tab "${t}" already mounted — shown from memory, no refetch`);
+        return v;
+      }
+      trace('fundamental', `tab "${t}" first visit — mounting and loading it`);
+      return new Set(v).add(t);
+    });
+    setTab(t);
+  };
   const hasInstrument = isAgg || !!isin;
   /**
    * ⚠ HOISTED OUT OF `LongEquityTab` SO IT CAN SIT IN THE TAB ROW. The setting belongs to that tab
@@ -103,7 +121,7 @@ export default function OwnerEarningsModal({
               : [['longequity', 'Long Equity'], ['quickval', 'Quick Valuation'],
                 ['deepval', 'Deep Valuation'], ['fundamentals', 'Old charts']]
             ) as [Tab, string][]).map(([t, label]) => (
-              <button key={t} type="button" onClick={() => setTab(t)}
+              <button key={t} type="button" onClick={() => openTab(t)}
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                   tab === t ? 'bg-accent-600 text-fg-strong'
                     : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}>
@@ -137,34 +155,69 @@ export default function OwnerEarningsModal({
         {/* The ONLY scrolling region. A tab that wants its own always-visible controls makes
             them `sticky top-0` inside here — see LongEquityTab. */}
         <div className="flex-1 min-h-0 overflow-auto">
-        {tab === 'quickval' && !isAgg && isin ? (
-          <QuickValuationTab isin={isin} name={name} />
-        ) : tab === 'deepval' && !isAgg && isin ? (
-          // Keyed on the ISIN: the panel reads its saved assumptions in a state initialiser, so a
-          // different instrument has to remount to pick up its own overrides.
-          <DeepValuationTab key={isin} isin={isin} name={name} />
-        ) : tab === 'longequity' && hasInstrument ? (
-          <LongEquityTab isin={isin} name={title} basket={basket} portfolioId={portfolioId}
-            sbcCorrection={sbcCorrection} />
-        ) : /* An aggregate gets the SAME chart suite, blended across its holdings, with the coverage
-              breakdown beneath it — how much of the book those charts actually span, and which
-              holdings are missing. */
-          isAgg ? (
-            // ⚠ THE SAME COMPONENT AS A SINGLE COMPANY. The portfolio is fetched as a blended
-            // pseudo-company in the identical payload shape, so this is the same screen — not a
-            // second, parallel implementation that would drift from it.
-            <>
-              <FundamentalCharts key={blendKey} blend={blend} name={title} />
-              <div className="mt-6 pt-5 border-t border-neutral-800/40">
-                <FundamentalCoverage basket={basket} portfolioId={portfolioId}
-                  onIngested={() => setBlendKey((k) => k + 1)} />
-              </div>
-            </>
-          ) : isin ? (
-            <FundamentalCharts isin={isin} name={name} />
-          ) : (
-            <p className="text-sm text-fg-subtle py-16 text-center">No instrument to look up.</p>
-          )}
+        {/* ⚠ A VISITED TAB STAYS MOUNTED. This was a conditional chain, so switching tabs
+            UNMOUNTED the previous one and threw away everything it had: its fetches, its parsed
+            series, its toggles, its scroll position. Switching back re-ran every request from
+            scratch, so flipping between two tabs paid for both of them again on every flip — and
+            a Deep Valuation is several seconds of work to rebuild something the browser had a
+            moment ago.
+
+            Mounted on FIRST VISIT and hidden thereafter, never mounted up front: pre-mounting all
+            four would move the cost to modal-open, which is the one moment the reader is
+            definitely waiting. So the first visit to a tab costs what it always did, and every
+            visit after it is instant.
+
+            ⚠ `hidden`, NOT A ZERO-HEIGHT WRAPPER. `display:none` takes the tab out of layout
+            entirely, so a hidden tab cannot contribute scroll height to the shared container or
+            steal a click. Each chart therefore MOUNTS while visible and measures correctly;
+            recharts' ResponsiveContainer re-measures on the resize that showing it fires. */}
+        {(visited.has('quickval') && !isAgg && isin) && (
+          <div className={tab === 'quickval' ? undefined : 'hidden'}>
+            <QuickValuationTab isin={isin} name={name} />
+          </div>
+        )}
+        {(visited.has('deepval') && !isAgg && isin) && (
+          <div className={tab === 'deepval' ? undefined : 'hidden'}>
+            {/* Keyed on the ISIN: the panel reads its saved assumptions in a state initialiser, so
+                a different instrument has to remount to pick up its own overrides. */}
+            <DeepValuationTab key={isin} isin={isin} name={name} />
+          </div>
+        )}
+        {(visited.has('longequity') && hasInstrument) && (
+          <div className={tab === 'longequity' ? undefined : 'hidden'}>
+            <LongEquityTab isin={isin} name={title} basket={basket} portfolioId={portfolioId}
+              sbcCorrection={sbcCorrection} />
+          </div>
+        )}
+        {visited.has('fundamentals') && (
+          <div className={tab === 'fundamentals' ? undefined : 'hidden'}>
+            {/* An aggregate gets the SAME chart suite, blended across its holdings, with the
+                coverage breakdown beneath it — how much of the book those charts actually span,
+                and which holdings are missing. */}
+            {isAgg ? (
+              // ⚠ THE SAME COMPONENT AS A SINGLE COMPANY. The portfolio is fetched as a blended
+              // pseudo-company in the identical payload shape, so this is the same screen — not a
+              // second, parallel implementation that would drift from it.
+              <>
+                <FundamentalCharts key={blendKey} blend={blend} name={title} />
+                <div className="mt-6 pt-5 border-t border-neutral-800/40">
+                  <FundamentalCoverage basket={basket} portfolioId={portfolioId}
+                    onIngested={() => setBlendKey((k) => k + 1)} />
+                </div>
+              </>
+            ) : isin ? (
+              <FundamentalCharts isin={isin} name={name} />
+            ) : (
+              <p className="text-sm text-fg-subtle py-16 text-center">No instrument to look up.</p>
+            )}
+          </div>
+        )}
+        {/* The selected tab has nothing to render at all — an aggregate on a single-company tab,
+            or no instrument. Kept as its own branch so the empty case cannot be confused with a
+            tab that simply has not been visited yet. */}
+        {!hasInstrument && !isin && (
+          <p className="text-sm text-fg-subtle py-16 text-center">No instrument to look up.</p>
+        )}
         </div>
       </div>
     </div>
