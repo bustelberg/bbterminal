@@ -567,13 +567,6 @@ def resolve_account_isins(portefeuille: str) -> dict:
                 grid[g["isin"]] = g
 
     # ⚠ AN EXECUTION ROW IS PRICED FROM ITS *ANALYSIS* INSTRUMENT, WHICH CAN BE A DIFFERENT
-    # LISTING. That is the design, not a fault: an ADR's execution row is deliberately served by
-    # the main company's instrument (`asset_isin_alias`), and the two do not trade at the same
-    # number — TSMC is 1 ADR = 5 ordinary shares, plus an ADR premium. The price check below would
-    # call that a `price_mismatch` on every such holding, which is a false alarm on a link we
-    # made on purpose. Those rows get their own verdict instead.
-    served_by = _load_isin_overrides.__self__ if False else None  # (placeholder)
-    # ⚠ AN EXECUTION ROW IS PRICED FROM ITS *ANALYSIS* INSTRUMENT, WHICH CAN BE A DIFFERENT
     # LISTING — that is the design, not a fault. An ADR's execution row is deliberately served by
     # the main company's instrument (`asset_isin_alias`), and the two do not trade at the same
     # number: TSMC is 1 ADR = 5 ordinary shares, plus an ADR premium. The price check below would

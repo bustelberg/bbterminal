@@ -13,7 +13,7 @@ import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
 import BucketDetailPanel from './BucketDetailPanel';
 import CompositionDataModal from './CompositionDataModal';
-import { type Basket } from './PerformanceModal';
+import { type Basket } from './types';
 
 /**
  * A model portfolio's composition — sector / region / currency — beside the SP500 benchmark's.

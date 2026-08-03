@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { trace } from '../../../lib/debugTrace';
-import { type Basket } from './PerformanceModal';
+import { type Basket } from './types';
 import FundamentalCharts from './FundamentalCharts';
 import FundamentalCoverage from './FundamentalCoverage';
 import LongEquityTab from './LongEquityTab';

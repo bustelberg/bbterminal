@@ -33,6 +33,24 @@ from __future__ import annotations
 import pytest
 
 
+def pytest_collection_modifyitems(items):
+    """Give every unmarked test the `fast` tier.
+
+    ⚠ THE DEFAULT IS `fast`, NOT "UNTIERED", AND THAT DIRECTION IS THE WHOLE POINT. Requiring an
+    explicit `@pytest.mark.fast` on 2,100 tests would mean a new test written without one is
+    silently absent from the loop that is supposed to be everybody's default — a test that never
+    runs, which is worse than no test because it reads as coverage. Inverting it makes the failure
+    mode loud instead: forget to mark a slow test and the fast tier gets slower, which somebody
+    notices the same day.
+
+    A test opts OUT by carrying `slow` (see pyproject's `markers` for what earns it) — so
+    `-m fast` and `-m "not fast"` partition the suite with nothing falling between them.
+    """
+    for item in items:
+        if not any(item.get_closest_marker(m) for m in ("fast", "integration", "slow")):
+            item.add_marker(pytest.mark.fast)
+
+
 @pytest.fixture(autouse=True)
 def _no_live_supabase(monkeypatch, request):
     """Turn "reaches the database" from an environment-dependent pass into a hard failure."""

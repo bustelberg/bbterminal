@@ -26,10 +26,55 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+# ⚠ `--dist loadfile` IS NOT A TUNING KNOB — THE DEFAULT `load` MAKES THIS SUITE SLOWER.
+# `test_golden_rebalance.py` replays the real engine over 1,479 companies behind TWO
+# module-scoped fixtures (~7.5s each). Plain `load` scatters that module's 35 tests across
+# workers, and each worker that receives one re-pays the replay from scratch. Measured:
+# `-n auto` (14 workers, default dist) = 42.7s, i.e. the whole benefit of parallelism spent
+# recomputing one fixture. `loadfile` keeps a file on one worker, so the replay happens twice
+# in total, as it does serially.
+#
+# ⚠ AND MORE WORKERS IS NOT FASTER HERE. Every worker re-imports pandas + FastAPI + all
+# routers (~4s), and the suite's critical path is that same golden module at ~20s, which no
+# amount of parallelism divides. Measured full-suite wall: serial 40.1s · 3 workers 26.6s ·
+# 4 workers 28.5s · 6 workers 29.5s · 14 workers 37.3s. Past ~4 the import cost outruns the
+# gain, so `--maxprocesses` caps it while `-n auto` still steps DOWN on a 2-core CI runner.
+#
+# ⚠ TIME THESE INTERLEAVED, NOT IN BLOCKS. Measured back to back, `-n auto --maxprocesses=4`
+# looked a consistent 3s slower than a hardcoded `-n 4` over three runs each — and it was an
+# artefact of the machine warming under the benchmarking itself. Interleaved (a, b, a, b, a, b)
+# the two are indistinguishable, as they should be: both spawn 4/4 workers. Run-to-run spread
+# here is ~15%, which is wide enough to invent a difference that is not there.
+#
+# ⚠ THIS COSTS ~2s ON A SINGLE-FILE RUN (2.6s -> 4.8s for tests/test_scoring.py) — worker
+# startup that a 35-test file never earns back. When iterating on one file, pass `-n 0`.
+addopts = "-n auto --dist loadfile --maxprocesses=4"
+
+# THE THREE TIERS (see tests/conftest.py for how a test acquires one).
+#
+# ⚠ `integration` HAS NO MEMBERS AND MUST NOT ACQUIRE ANY. It is declared so the word has one
+# fixed meaning if it is ever proposed, and that meaning is BANNED here: the box at the top of
+# CLAUDE.md forbids any test that boots a database, hits the network, or needs a seeded fixture,
+# and tests/conftest.py enforces the first of those at runtime. A marker is a vocabulary, not a
+# permission — registering it does not license writing one, and `-m integration` selecting zero
+# tests is the correct, permanent answer.
+#
+# ⚠ `slow` IS NOT "PLAYWRIGHT AND SCRAPER TESTS" EITHER — there are none (the e2e suite was
+# deleted 2026-07-23; playwright is a runtime dep of airs_scanner.py that no test touches).
+# Measured, this suite does ZERO I/O: re-running it with every non-loopback socket connect
+# raised gave byte-identical results. So `slow` means the only thing that is actually slow here
+# — CPU. A test earns it by costing more than roughly a second of engine replay.
+markers = [
+    "fast: no I/O and cheap; the default local loop (`uv run pytest -m fast`). Unmarked tests land here automatically.",
+    "integration: reaches a database or a live API. DELIBERATELY EMPTY — see the warning above; do not populate.",
+    "slow: seconds of CPU (frozen-input engine replays). Correct and kept, just too expensive per keystroke.",
+]
 
 # ⚠ THE RULE SET IS DECLARED, NOT INHERITED — CI RUNS `uvx ruff check .`, WHICH IS UNPINNED.
 # With no config, ruff picks its own default, and that default is not a constant: ruff 0.16.0

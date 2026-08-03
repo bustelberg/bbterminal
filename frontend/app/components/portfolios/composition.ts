@@ -42,18 +42,3 @@ export function visibleBuckets<T extends CompositionRow>(rows: T[]): T[] {
   return rows.filter((r) => (r.portfolio_pct ?? 0) >= DISPLAY_EPSILON
     || (r.benchmark_pct ?? 0) >= DISPLAY_EPSILON);
 }
-
-/** How much weight the hidden rows accounted for, per side.
- *
- * ⚠ RETURNED SO THE CALLER CAN SAY SO. Hiding rows makes the visible bars stop summing to 100%,
- * and a reader who adds them up and lands on 99.7% has found a discrepancy we created. It is
- * always sub-0.1% by construction, but "small" is a reason to state it plainly, not to omit it.
- */
-export function hiddenWeight<T extends CompositionRow>(rows: T[]): { portfolio: number; benchmark: number } {
-  const shown = new Set(visibleBuckets(rows));
-  const hidden = rows.filter((r) => !shown.has(r));
-  return {
-    portfolio: hidden.reduce((s, r) => s + (r.portfolio_pct ?? 0), 0),
-    benchmark: hidden.reduce((s, r) => s + (r.benchmark_pct ?? 0), 0),
-  };
-}

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   addYears, BASIS, cagrBetween, cagrOf, EPS_EST_CODES, EPS_PS_CODES, FCF_PS_CODES, forwardEstimates,
-  forwardFigures, latestDateOf, medianOf, multipleOf, priceAtYield, priceTarget, priceVsMetric,
+  latestDateOf, medianOf, priceAtYield, priceTarget, priceVsMetric,
   rebase, yearsBetween, yieldOf, type MetricRow,
 } from './quickValuation';
 
@@ -111,27 +111,6 @@ describe('BASIS — the two bases the tab switches between', () => {
   });
 });
 
-describe('multipleOf — the forward chart', () => {
-  it('is the reciprocal of the yield, times 100', () => {
-    expect(multipleOf(100, 8)).toBeCloseTo(12.5, 6);
-    expect(multipleOf(100, 8) as number).toBeCloseTo(100 / (yieldOf(8, 100) as number), 9);
-  });
-
-  it('⚠ REFUSES a non-positive denominator — the opposite rule to yieldOf, on purpose', () => {
-    // −5% is a real, plottable yield. The same year as a multiple is −20×, which sorts below
-    // every cheap year on any axis and reads as the bargain of the decade.
-    expect(yieldOf(-2, 40)).toBeCloseTo(-5);      // kept
-    expect(multipleOf(40, -2)).toBeNull();        // dropped
-    expect(multipleOf(40, 0)).toBeNull();
-  });
-
-  it('needs a positive price too', () => {
-    expect(multipleOf(null, 8)).toBeNull();
-    expect(multipleOf(0, 8)).toBeNull();
-    expect(multipleOf(100, null)).toBeNull();
-  });
-});
-
 describe('forwardEstimates', () => {
   const est = (code: string, year: number, v: number): MetricRow =>
     ({ metric_code: code, target_date: `${year}-12-31`, numeric_value: v });
@@ -171,29 +150,6 @@ describe('forwardEstimates', () => {
 // consensus or it is NOTHING. A trend fit shipped there briefly and was removed — it drew at the
 // same weight, with the same decimals, on the same axis as a consensus, and a reader has no way to
 // tell a house extrapolation from what the market actually expects.
-describe('forwardFigures — nothing on the multiple chart is predicted by us', () => {
-  const est = (year: number, v: number): MetricRow =>
-    ({ metric_code: EPS_EST_CODES[0], target_date: `${year}-12-31`, numeric_value: v });
-  const rows = [est(2026, 12.09), est(2027, 12.75)];
-
-  it('returns the consensus on a basis that has one', () => {
-    expect(forwardFigures(rows, BASIS.eps, 2025)).toEqual([
-      { year: 2026, value: 12.09 }, { year: 2027, value: 12.75 },
-    ]);
-  });
-
-  it('⚠ returns NOTHING on FCF — even with estimate rows sitting right there', () => {
-    // The rows above are EPS estimates and would happily divide into a price. Reaching for them,
-    // or for the fitted trend, is how the chart grows a forecast nobody published.
-    expect(forwardFigures(rows, BASIS.fcf, 2025)).toEqual([]);
-  });
-
-  it('returns nothing for a company analysts do not cover, on either basis', () => {
-    expect(forwardFigures([], BASIS.eps, 2025)).toEqual([]);
-    expect(forwardFigures([], BASIS.fcf, 2025)).toEqual([]);
-  });
-});
-
 describe('medianOf', () => {
   it('takes the middle, and averages the middle pair on an even count', () => {
     expect(medianOf([10, 30, 20])).toBe(20);
@@ -402,4 +358,3 @@ describe('priceTarget — one computation, two readers', () => {
     expect(t.cagr).toBeNull();
   });
 });
-

@@ -245,23 +245,6 @@ export function yieldOf(value: number | null, price: number | null): number | nu
 }
 
 /**
- * Price ÷ a per-share amount — the multiple. `100 / yieldOf(value, price)`, and the reciprocal is
- * the point: nobody quotes a stock at "a 4.5% earnings yield" in a meeting.
- *
- * ⚠ A NON-POSITIVE DENOMINATOR RETURNS NULL, AND THIS IS THE OPPOSITE RULE TO `yieldOf`. That is
- * not an inconsistency, it is exactly why both exist. A loss year is a real, plottable −5% yield;
- * as a multiple it is −20×, which on any axis sorts BELOW every cheap year and reads as the
- * bargain of the decade. The ratio inverts as it crosses zero and there is no arrangement of a
- * multiple chart that survives it — so the year has no multiple, and the caller counts what it
- * dropped rather than drawing a line straight through the gap.
- */
-export function multipleOf(price: number | null, value: number | null): number | null {
-  if (price == null || value == null) return null;
-  if (!(value > 0) || !(price > 0)) return null;
-  return price / value;
-}
-
-/**
  * The consensus for the fiscal years still AHEAD of `after`, oldest first.
  *
  * ⚠ FIRST CODE THAT ANSWERS WINS — it is a priority list, never a union (see `EPS_EST_CODES`).
@@ -281,24 +264,6 @@ export function forwardEstimates(
     if (rows.length) return rows;
   }
   return [];
-}
-
-/**
- * The forecast per-share figures the forward multiple divides today's price by — for a basis that
- * HAS a published consensus, and an empty list for one that does not.
- *
- * ⚠ THE WHOLE POINT OF THIS FUNCTION IS THE `[]`. It would be one line inline; it is here so that
- * "the forward half of the chart is observed data or it does not exist" is a rule with a test on
- * it rather than a habit. Every plausible way to fill that gap — the fitted trend, the operating
- * cash-flow consensus — produces a line indistinguishable from a real forecast, and the reader has
- * no way to tell which one they are looking at.
- */
-export function forwardFigures(
-  metrics: MetricRow[], basis: (typeof BASIS)[keyof typeof BASIS], lastValueYear: number | null,
-): { year: number; value: number }[] {
-  return basis.estimateCodes
-    ? forwardEstimates(metrics, basis.estimateCodes, lastValueYear)
-    : [];
 }
 
 /**

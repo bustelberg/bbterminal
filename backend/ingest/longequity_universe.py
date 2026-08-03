@@ -66,25 +66,6 @@ def _excluded_company_ids(supabase: Client) -> set[int]:
         return set()
 
 
-def _company_ids_with_longequity_metrics(supabase: Client) -> set[int]:
-    """Every company_id that has at least one `metric_data` row with
-    `source_code='longequity'`. This is the source-of-truth for "ever
-    appeared in a LongEquity snapshot" — the universe_membership table
-    is derived from this, not the other way around."""
-    out: set[int] = set()
-    for r in paginate(
-        lambda lo, hi: supabase.table('metric_data')
-        .select('company_id')
-        .eq('source_code', 'longequity')
-        .range(lo, hi)
-        .execute()
-    ):
-        cid = r.get('company_id')
-        if cid is not None:
-            out.add(int(cid))
-    return out
-
-
 def _membership_by_month(supabase: Client) -> dict[str, set[int]]:
     """True point-in-time membership: `{YYYY-MM: {company_id, ...}}` from the
     actual monthly LongEquity reports (`metric_data` source `longequity`),
@@ -137,17 +118,6 @@ def _latest_sector_per_company(supabase: Client, cids: set[int]) -> dict[int, st
         if sec and (cid not in latest_month or m > latest_month[cid]):
             latest_month[cid] = m
             out[cid] = sec
-    return out
-
-
-def _months_from(start: date, end: date) -> list[str]:
-    """`YYYY-MM` strings for every month in [start, end], inclusive."""
-    out: list[str] = []
-    cur = date(start.year, start.month, 1)
-    end_m = date(end.year, end.month, 1)
-    while cur <= end_m:
-        out.append(cur.strftime('%Y-%m'))
-        cur = date(cur.year + 1, 1, 1) if cur.month == 12 else date(cur.year, cur.month + 1, 1)
     return out
 
 

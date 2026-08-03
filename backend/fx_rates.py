@@ -377,11 +377,6 @@ _EXCHANGE_TO_CURRENCY: dict[str, str] = {
 }
 
 
-def exchange_to_currency(exchange: str) -> str | None:
-    """Map an iShares exchange name to its local trading currency."""
-    return _EXCHANGE_TO_CURRENCY.get(exchange)
-
-
 _COVERAGE_CACHE: dict | None = None
 _COVERAGE_CACHE_KEY: float | None = None
 

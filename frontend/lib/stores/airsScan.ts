@@ -111,9 +111,3 @@ export function startAirsScan(callbacks: {
     })
     .finally(() => { if (abort === controller) abort = null; });
 }
-
-export function cancelAirsScan(): void {
-  abort?.abort();
-  abort = null;
-  airsScanStore.set({ scanning: false });
-}

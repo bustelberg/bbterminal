@@ -37,6 +37,17 @@ function sourceFiles(dir: string): string[] {
 
 const FILES = ROOTS.flatMap((r) => sourceFiles(join(process.cwd(), r)));
 
+/** Read once, scan many. The three source-scanning checks below used to call `readFileSync` over
+ *  the whole tree each — ~500 files × 3 — which made this the slowest file in the suite by an
+ *  order of magnitude (650ms of the 1.3s the entire 535-test run spends executing assertions).
+ *  Nothing about what is checked changes: same files, same patterns, same offender list. */
+const SOURCES: readonly (readonly [path: string, text: string])[] =
+  FILES.map((f) => [f, readFileSync(f, 'utf8')] as const);
+
+/** Files whose text satisfies `hit`, reported repo-relative the way the assertions expect. */
+const offendersWhere = (hit: (text: string) => boolean): string[] =>
+  SOURCES.filter(([, text]) => hit(text)).map(([f]) => f.replace(process.cwd(), ''));
+
 describe('there is exactly one info icon', () => {
   it('finds source files to scan at all', () => {
     // ⚠ Without this, a broken path makes every assertion below pass over an EMPTY list — a
@@ -48,9 +59,7 @@ describe('there is exactly one info icon', () => {
     ['a round bordered "i" (the old outlined style)', /rounded-full border border-neutral-600/],
     ['a hand-rolled accent circle', /rounded-full[^`"']*bg-accent-500\/10/],
   ])('no file hand-rolls %s', (_label, pattern) => {
-    const offenders = FILES.filter((f) => pattern.test(readFileSync(f, 'utf8')))
-      .map((f) => f.replace(process.cwd(), ''));
-    expect(offenders).toEqual([]);
+    expect(offendersWhere((text) => pattern.test(text))).toEqual([]);
   });
 
   it('no file hand-rolls the tooltip CARD shell either', () => {
@@ -62,9 +71,7 @@ describe('there is exactly one info icon', () => {
     // while finding nothing. A vacuous green guard is worse than no guard: it is a claim that
     // something is checked.
     const SHELL = 'space-y-2 min-w-[13rem]';
-    const offenders = FILES.filter((f) => readFileSync(f, 'utf8').includes(SHELL))
-      .map((f) => f.replace(process.cwd(), ''));
-    expect(offenders).toEqual([]);
+    expect(offendersWhere((text) => text.includes(SHELL))).toEqual([]);
   });
 
   it('...and that shell string is the one tipCard actually uses', () => {

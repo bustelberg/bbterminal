@@ -1012,22 +1012,3 @@ class LeonteqTemplate(UniverseTemplate):
             except Exception:
                 pass
         return created
-
-    def _previous_captured_month(
-        self, supabase: Client, universe_id: int, this_month: str,
-    ) -> str | None:
-        """Most recent target_month for this universe that's strictly
-        before `this_month`. Used as the diff baseline. Returns None
-        when this is the very first refresh."""
-        resp = (
-            supabase.table("universe_membership")
-            .select("target_month")
-            .eq("universe_id", universe_id)
-            .lt("target_month", this_month)
-            .order("target_month", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if not resp.data:
-            return None
-        return resp.data[0].get("target_month")

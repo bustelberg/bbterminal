@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
-import { type Basket } from './PerformanceModal';
+import { type Basket } from './types';
 
 /**
  * What a portfolio-level fundamentals view can and cannot reach — BY WEIGHT.

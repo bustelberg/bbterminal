@@ -53,13 +53,6 @@ async function _getToken(): Promise<string | null> {
   }
 }
 
-/** Invalidate the cached token — useful right after sign-out so the
- * next call doesn't reuse a dead token. */
-export function clearApiFetchTokenCache(): void {
-  _cachedToken = null;
-  _cachedTokenExpiresAt = 0;
-}
-
 /** True when the admin "view as regular user" preview is active (the
  * `view_as=user` cookie set by the Sidebar toggle). The cookie lives on the
  * frontend origin and isn't sent cross-origin to the backend, so we forward

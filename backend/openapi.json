@@ -20167,25 +20167,6 @@
         ]
       }
     },
-    "/api/items": {
-      "get": {
-        "operationId": "get_items_api_items_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Get Items",
-        "tags": [
-          "system"
-        ]
-      }
-    },
     "/api/leonteq/equities": {
       "get": {
         "description": "Every equity in the latest Leonteq scrape. Newest scrape only \u2014\nthe table is replace-all on every refresh.",

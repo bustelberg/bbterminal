@@ -12,7 +12,7 @@ import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 import OwnerEarningsModal from './portfolios/OwnerEarningsModal';
-import { type Basket } from './portfolios/PerformanceModal';
+import { type Basket } from './portfolios/types';
 import { allocColor, bucketLabel, BUCKET_ORDER } from './portfolios/allocationColors';
 import {
   aggregateGroups, combineWeighted, groupStats, holdingTotalReturn, startBasis, weightedReturn,

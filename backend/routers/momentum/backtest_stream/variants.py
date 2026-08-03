@@ -526,7 +526,7 @@ async def run_variants_sweep(
 
     sweep_queue: _queue.Queue = _queue.Queue()
 
-    def _run_one_variant(vspec_inner, v_idx_inner):
+    def _run_one_variant(vspec_inner):
         """Thread worker: computes one variant end-to-end and pushes
         every lifecycle event for it to `sweep_queue`. Always emits
         exactly one terminal (`variant_result` or `variant_error`)
@@ -714,7 +714,7 @@ async def run_variants_sweep(
     n_completed = 0
     last_yield = time.monotonic()
     for v_idx, vspec in enumerate(req.variants):
-        await asyncio.to_thread(_run_one_variant, vspec, v_idx)
+        await asyncio.to_thread(_run_one_variant, vspec)
         # Drain whatever the worker put on the queue for this variant.
         while True:
             try:

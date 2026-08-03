@@ -239,20 +239,6 @@ class UniverseTemplate(ABC):
         ).execute()
         return [(r.get("target_month") or "")[:7] for r in (resp.data or []) if r.get("target_month")]
 
-    def membership_at(
-        self, supabase: Client, target_month: str,
-    ) -> list[dict]:
-        """Returns all holdings active in `target_month` (format
-        'YYYY-MM'), each row joined with company info so the caller can
-        render ticker / name / exchange / sector / GuruFocus link
-        without an extra fetch.
-
-        Cached: repeat calls for the same month return the cached list
-        with no DB roundtrip until the next `refresh()` (or 60s TTL
-        expiry, whichever fires first)."""
-        result = self.membership_at_with_meta(supabase, target_month)
-        return result[1]
-
     def membership_at_with_meta(
         self, supabase: Client, target_month: str,
     ) -> tuple[str | None, list[dict]]:

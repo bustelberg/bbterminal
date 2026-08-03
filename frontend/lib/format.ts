@@ -20,13 +20,6 @@ const dateTimeFmt = new Intl.DateTimeFormat(undefined, {
   minute: '2-digit',
 });
 
-// e.g. "Mon, 14:30"
-const clockFmt = new Intl.DateTimeFormat(undefined, {
-  weekday: 'short',
-  hour: '2-digit',
-  minute: '2-digit',
-});
-
 /**
  * Format an ISO timestamp as a short date-time. `null`/empty → "—"; an
  * unparseable value falls back to the raw string.
@@ -37,22 +30,5 @@ export function fmtTimestamp(iso: string | null | undefined): string {
     return dateTimeFmt.format(new Date(iso));
   } catch {
     return iso;
-  }
-}
-
-/** Same format as {@link fmtTimestamp} for an already-parsed `Date`. */
-export function fmtDateTime(d: Date): string {
-  return dateTimeFmt.format(d);
-}
-
-/**
- * Weekday + clock, e.g. "Mon, 14:30". `null`/empty/unparseable → "".
- */
-export function fmtClock(iso: string | null | undefined): string {
-  if (!iso) return '';
-  try {
-    return clockFmt.format(new Date(iso));
-  } catch {
-    return '';
   }
 }
