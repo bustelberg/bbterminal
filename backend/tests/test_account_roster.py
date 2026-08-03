@@ -125,16 +125,26 @@ class TestRecordingReportsMustNotRedefineTheLiveSet:
     the incremental scan is exactly what makes them differ.
     """
 
-    def test_it_writes_reports_at_and_not_last_seen_at(self):
-        import inspect
-
+    def test_it_writes_reports_at_and_not_last_seen_at(self, monkeypatch):
         import airs_vermogen
 
-        src = inspect.getsource(airs_vermogen._record_reports)
-        rows = src.split("rows = [")[1].split("]")[0]
-        assert "reports_at" in rows
-        assert "reports_ok" in rows
-        assert "last_seen_at" not in rows, "discovery owns last_seen_at — see the docstring"
+        fake = FakeSupabase({"airs_account_roster": [
+            {"portefeuille": "LIVE_A", "last_seen_at": NEW},
+        ]})
+        monkeypatch.setattr(airs_vermogen, "supabase", fake)
+
+        airs_vermogen._record_reports({"LIVE_A": ["att", "volk"]}, NEW)
+
+        written = [w for w in fake.writes if w[0] == "insert"]
+        assert written, "the outcome was not recorded at all"
+        payload = written[-1][2] if written[-1][2] is not None else None
+        # The fake echoes the upserted batch back through `.data`; read the row it stored.
+        row = next(r for r in fake.tables["airs_account_roster"]
+                   if r["portefeuille"] == "LIVE_A" and "reports_ok" in r)
+        assert row["reports_ok"] == ["att", "volk"]
+        assert row["reports_at"] == NEW
+        assert "last_seen_at" not in row, "discovery owns last_seen_at — see the docstring"
+        assert payload is None or "last_seen_at" not in str(payload)
 
     def test_discovery_still_owns_last_seen_at(self):
         """The other half of the invariant: something must still stamp it, or nothing is ever live."""
@@ -143,3 +153,78 @@ class TestRecordingReportsMustNotRedefineTheLiveSet:
         import airs_vermogen
 
         assert "last_seen_at" in inspect.getsource(airs_vermogen._record_roster)
+
+
+class TestAnUndiscoveredAccountIsNeverINSERTED:
+    """⚠ MEASURED IN PRODUCTION 2026-08-03, REFRESHING ONE ACCOUNT:
+
+        null value in column "last_seen_at" of relation "airs_account_roster" violates not-null
+        constraint — Failing row contains (AITopSelectie OFF DYN, null, ...)
+
+    PostgREST's `upsert` is INSERT ... ON CONFLICT, so a portefeuille with no roster row took the
+    INSERT branch — without `last_seen_at`, which is NOT NULL and deliberately has no default
+    (the live set IS `last_seen_at = max(...)`; a default would let this function redefine it).
+
+    ⚠ AND THE DAMAGE IS NOT THE MISSING ROW. The upsert is BATCHED, so one unseen account fails
+    the outcomes of every account in its batch — all 44 on a full scan. That table is what marks a
+    row "att did not arrive", so the crash silences the exact warning it should have raised:
+    `AITopSelectie OFF DYN` went on showing +55.20% (June's `cumulatief_rendement`) while July's
+    −11.96% sat unfetched, and the row looked perfectly healthy.
+    """
+
+    def test_an_unknown_account_does_not_take_the_batch_down_with_it(self, monkeypatch):
+        import airs_vermogen
+
+        fake = FakeSupabase({"airs_account_roster": [
+            {"portefeuille": "KNOWN_A", "last_seen_at": NEW},
+            {"portefeuille": "KNOWN_B", "last_seen_at": NEW},
+        ]})
+        monkeypatch.setattr(airs_vermogen, "supabase", fake)
+
+        airs_vermogen._record_reports(
+            {"KNOWN_A": ["att"], "UNSEEN": ["att"], "KNOWN_B": ["att", "volk"]}, NEW)
+
+        recorded = {r["portefeuille"] for r in fake.tables["airs_account_roster"]
+                    if r.get("reports_at")}
+        assert recorded == {"KNOWN_A", "KNOWN_B"}, (
+            "the two known accounts must still get their outcomes — one unseen account used to "
+            "fail the whole batch")
+
+    def test_it_never_creates_a_roster_row(self, monkeypatch):
+        """Existence is discovery's fact to state. Inserting here would also make the new row the
+        newest `last_seen_at` and collapse the live set to it."""
+        import airs_vermogen
+
+        fake = FakeSupabase({"airs_account_roster": []})
+        monkeypatch.setattr(airs_vermogen, "supabase", fake)
+
+        airs_vermogen._record_reports({"UNSEEN": ["att"]}, NEW)
+
+        assert fake.tables["airs_account_roster"] == []
+
+    def test_it_names_what_it_skipped(self, monkeypatch, caplog):
+        """A silent skip is how the missing report goes unnoticed a second time. The operator has
+        to be told which accounts, and that only a full discovery can fix it."""
+        import logging
+
+        import airs_vermogen
+
+        fake = FakeSupabase({"airs_account_roster": []})
+        monkeypatch.setattr(airs_vermogen, "supabase", fake)
+
+        with caplog.at_level(logging.WARNING):
+            airs_vermogen._record_reports({"AITopSelectie OFF DYN": ["att"]}, NEW)
+
+        assert "AITopSelectie OFF DYN" in caplog.text
+        assert "discovery" in caplog.text.lower()
+
+    def test_a_roster_read_failure_records_nothing_rather_than_guessing(self, monkeypatch):
+        """If we cannot tell which accounts exist, writing anyway is how the INSERT happens."""
+        import airs_vermogen
+
+        class _Boom:
+            def table(self, _n):
+                raise RuntimeError("roster unreadable")
+
+        monkeypatch.setattr(airs_vermogen, "supabase", _Boom())
+        airs_vermogen._record_reports({"KNOWN_A": ["att"]}, NEW)   # must not raise

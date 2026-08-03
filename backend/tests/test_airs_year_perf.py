@@ -49,10 +49,20 @@ def perf(monkeypatch):
     """Point `_year_perf` at a fixed row set instead of Supabase."""
     def _install(rows):
         class _Q:
+            def __init__(self): self._range = None
             def select(self, *a, **k): return self
             def order(self, *a, **k): return self
             def limit(self, *a, **k): return self
-            def execute(self): return type("R", (), {"data": rows})()
+            # ⚠ THE READ IS PAGED NOW, and a stub that ignored `.range()` would hand the whole
+            # table back on every page — an infinite loop, not a passing test. `_year_perf` was
+            # reading `airs_performance` unpaged and production silently got the first 1,000 rows
+            # of an ASCENDING scan, i.e. everything except the newest months (see `_paged`).
+            def range(self, start, end):
+                self._range = (start, end)
+                return self
+            def execute(self):
+                out = rows if self._range is None else rows[self._range[0]:self._range[1] + 1]
+                return type("R", (), {"data": out})()
         monkeypatch.setattr(_airs_accounts, "supabase",
                             type("S", (), {"table": staticmethod(lambda n: _Q())})())
         return _airs_accounts._year_perf()

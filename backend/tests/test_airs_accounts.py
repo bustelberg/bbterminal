@@ -118,10 +118,32 @@ class TestTheSnapshotIsTheFreshestOnly:
     """`airs_holding` accumulates a row per day. Mixing two snapshot dates into one position list
     would double-count every holding and silently double the account."""
 
-    def test_holdings_are_filtered_to_one_as_of(self):
-        src = code(acc.account_holdings)
-        assert 'as_of = max(str(r["as_of_date"]) for r in rows)' in src
-        assert 'if str(r["as_of_date"]) == as_of' in src
+    def test_holdings_are_filtered_to_one_as_of(self, monkeypatch):
+        """Asserted by BEHAVIOUR, not by matching the source. It used to pin the exact line
+        `as_of = max(...) for r in rows`, which stopped being true when the snapshot started
+        being asked for by date instead of filtered out of the whole history — a change made
+        because reading every snapshot under `.limit(2000)` is silently truncated to 1,000 in
+        production, and `max()` over an arbitrary surviving subset names an OLD snapshot. The
+        invariant ("one date, never mixed") is unchanged; only where it is enforced moved."""
+        from tests._fake_supabase import FakeSupabase
+
+        def _h(date_, name):
+            return {"portefeuille": "P", "as_of_date": date_, "holding_name": name,
+                    "quantity": 1, "currency": "EUR", "weight": 1, "start_value_eur": 1,
+                    "current_value_eur": 1, "ytd_return_eur": 0, "ytd_return_pct": 0,
+                    "ytd_return_local_pct": 0, "cost_basis_local": 1,
+                    "current_price_local": 1, "airs_weight": 1, "fund_result_eur": 0,
+                    "fx_result_eur": 0, "airs_result_pct": 0}
+
+        monkeypatch.setattr(acc, "supabase", FakeSupabase({
+            "airs_holding": [_h("2026-06-30", "STALE"), _h("2026-08-01", "FRESH")],
+            "airs_mutatie": [], "airs_model_weight": [], "airs_performance": [],
+        }))
+
+        got = acc.account_holdings("P")
+
+        assert got["as_of"] == "2026-08-01"
+        assert [r["holding_name"] for r in got["rows"]] == ["FRESH"]
 
     def test_the_year_is_assembled_from_every_month_not_the_freshest_row(self):
         """The freshest ATT row is JULY, not the year — taking it served a price result of
