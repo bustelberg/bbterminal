@@ -415,6 +415,35 @@ async def airs_model_portfolio_performance(year: int | None = None):
     return await compute_portfolio_performance_async(year)
 
 
+@router.get("/api/airs/model-portfolios/{portfolio_id}/ytd-explain")
+async def airs_model_portfolio_ytd_explain(portfolio_id: int, year: int | None = None):
+    """The full derivation behind ONE model's YTD — for diffing two deployments.
+
+    Same figure as the grid, by construction: it INSTRUMENTS `compute_portfolio_performance`
+    rather than recomputing, and asserts that the per-leg contributions sum to the YTD
+    (`portfolio.reconciles`). Returns three levels, and they are ordered by how far upstream the
+    cause of a discrepancy would be:
+
+      `load`      — what this deployment fetched: price transport (COPY vs paged PostgREST),
+                    the price/FX windows, and the freshest close anywhere in the load. A whole
+                    environment being a week stale is ONE date here, not 24 leg rows.
+      `portfolio` — the composition's effective date, the anchor it implies, the weight that
+                    could be priced, and the coverage the return was renormalised over.
+      `legs`      — one row per composition line, by contribution: weight, the mark it was
+                    bought at (date + EUR price, flagged if interpolated), the close it is
+                    marked to, its EUR return and its contribution in percentage points.
+
+    Untyped on purpose — it is a debug surface, so the payload can gain fields without a
+    regenerated contract. Read-only: it prices the fleet exactly as the grid does and writes
+    nothing.
+    """
+    from routers._airs_portfolio_perf import (  # noqa: PLC0415
+        explain_portfolio_ytd_async,
+    )
+
+    return await explain_portfolio_ytd_async(portfolio_id, year)
+
+
 class PortfolioCorrelationMatrix(BaseModel):
     """Pairwise Pearson correlation of the LISTED model portfolios' daily EUR returns, for two
     windows. Same return series the /portfolios YTD column is read off, correlated pairwise-

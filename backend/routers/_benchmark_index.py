@@ -128,6 +128,14 @@ def _fx_to_eur(currencies: set[str], start: str, end: str) -> dict[str, dict[str
     Direction matters: `rate` is units of the currency PER EUR, so EUR = price / rate (this
     mirrors `momentum/data/fx.py`, which divides). Getting it upside down would invert every
     FX move.
+
+    ⚠ IT MUST PAGE — see `_airs_portfolio_perf._fx`, which is this function's twin and where
+    the failure was measured. A benchmark spans dozens of currencies over years, which is tens
+    of thousands of `fx_rate` rows; PostgREST caps a response at 1,000 (cloud) / 10,000 (local)
+    and truncates SILENTLY. A currency whose rows are cut has no EUR series before the cut, so
+    its constituents drop out of the index and the weights renormalise over the rest — no
+    error, a different index, and a DIFFERENT ONE IN EACH ENVIRONMENT because the two caps
+    differ tenfold.
     """
     out: dict[str, dict[str, float]] = {}
     # Ask for the MAJOR currency. `fx_rate` has GBP; it has never had `GBp`, because pence is a
@@ -137,13 +145,25 @@ def _fx_to_eur(currencies: set[str], start: str, end: str) -> dict[str, dict[str
     cur = sorted({SUBUNIT.get(c, (c, 1.0))[0]
                   for c in currencies if c and c != "EUR"})
     for i in range(0, len(cur), IN_CHUNK_SIZE):
-        rows = (supabase.table("fx_rate")
-                .select("currency_code,rate_date,rate")
-                .in_("currency_code", cur[i:i + IN_CHUNK_SIZE])
-                .gte("rate_date", start).lte("rate_date", end).execute().data or [])
-        for r in rows:
-            if r["rate"]:
-                out.setdefault(r["currency_code"], {})[r["rate_date"]] = float(r["rate"])
+        chunk = cur[i:i + IN_CHUNK_SIZE]
+        off = 0
+        while True:
+            # `(rate_date, currency_code)` — a unique key, so a page boundary landing inside a
+            # tie cannot serve a row twice or skip it. The loop advances by what came back
+            # rather than by the page size: "a short page is the last page" only holds while
+            # the server's cap is at least the page size, and that assumption is the bug.
+            rows = (supabase.table("fx_rate")
+                    .select("currency_code,rate_date,rate")
+                    .in_("currency_code", chunk)
+                    .gte("rate_date", start).lte("rate_date", end)
+                    .order("rate_date").order("currency_code")
+                    .range(off, off + 999).execute().data or [])
+            if not rows:
+                break
+            for r in rows:
+                if r["rate"]:
+                    out.setdefault(r["currency_code"], {})[r["rate_date"]] = float(r["rate"])
+            off += len(rows)
     return out
 
 

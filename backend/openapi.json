@@ -12376,6 +12376,63 @@
         ]
       }
     },
+    "/api/airs/model-portfolios/{portfolio_id}/ytd-explain": {
+      "get": {
+        "description": "The full derivation behind ONE model's YTD \u2014 for diffing two deployments.\n\nSame figure as the grid, by construction: it INSTRUMENTS `compute_portfolio_performance`\nrather than recomputing, and asserts that the per-leg contributions sum to the YTD\n(`portfolio.reconciles`). Returns three levels, and they are ordered by how far upstream the\ncause of a discrepancy would be:\n\n  `load`      \u2014 what this deployment fetched: price transport (COPY vs paged PostgREST),\n                the price/FX windows, and the freshest close anywhere in the load. A whole\n                environment being a week stale is ONE date here, not 24 leg rows.\n  `portfolio` \u2014 the composition's effective date, the anchor it implies, the weight that\n                could be priced, and the coverage the return was renormalised over.\n  `legs`      \u2014 one row per composition line, by contribution: weight, the mark it was\n                bought at (date + EUR price, flagged if interpolated), the close it is\n                marked to, its EUR return and its contribution in percentage points.\n\nUntyped on purpose \u2014 it is a debug surface, so the payload can gain fields without a\nregenerated contract. Read-only: it prices the fleet exactly as the grid does and writes\nnothing.",
+        "operationId": "airs_model_portfolio_ytd_explain_api_airs_model_portfolios__portfolio_id__ytd_explain_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Year"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Portfolio Ytd Explain",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/portfolio/{portfolio_name}": {
       "get": {
         "description": "Return performance data. Serves from DB cache unless refresh=true or no cache.",

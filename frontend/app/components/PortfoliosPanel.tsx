@@ -12,6 +12,7 @@ import type {
 } from '../../lib/types/api';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 import FundamentalsModal from './portfolios/FundamentalsModal';
+import { logYtdExplain, type ExplainTrace } from './portfolios/ytdExplain';
 
 type StoredPortfolio = StoredModelPortfolio;
 
@@ -219,6 +220,38 @@ export default function PortfoliosPanel() {
       setPos((p) => ({ ...p, [id]: { loading: false, source: src, data: b as ModelPortfolioPositions } }));
     } catch (e) {
       setPos((p) => ({ ...p, [id]: { loading: false, source: src, error: e instanceof Error ? e.message : String(e) } }));
+    }
+  };
+
+  /** Print one model's full YTD derivation to the console — the tool for "this reads 36.64%
+   *  here and 44.14% in production". It prices the whole fleet server-side (the same load the
+   *  grid's YTD column does, so the figure is the grid's figure and not a second opinion), so
+   *  it takes a few seconds and is never fired by merely expanding a row.
+   *
+   *  Its own YTD is refetched with it: the grid's column was filled on page load, and a
+   *  derivation printed beside a number computed minutes earlier explains the wrong thing. */
+  const [explaining, setExplaining] = useState<number | null>(null);
+  const explainYtd = async (id: number) => {
+    setExplaining(id);
+    try {
+      const r = await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/ytd-explain`);
+      const b = (await r.json().catch(() => null)) as ExplainTrace | null;
+      if (!r.ok || !b) {
+        // The UI gets one short line; the console gets the diagnostic.
+        console.warn('[ytd-explain] failed', r.status, b);
+        setError(`Could not build the YTD derivation (HTTP ${r.status}) — see the console.`);
+        return;
+      }
+      logYtdExplain(b);
+      // The row's own YTD may have moved since page load (fresher prices, a rescanned
+      // composition). Take the recomputed one so the grid agrees with what was just printed.
+      const fresh = b.row as Perf | null | undefined;
+      if (fresh) setRows((prev) => prev?.map((p) => (p.id === id ? { ...p, perf: fresh } : p)) ?? prev);
+    } catch (e) {
+      console.warn('[ytd-explain] failed', e);
+      setError('Could not build the YTD derivation — see the console.');
+    } finally {
+      setExplaining(null);
     }
   };
 
@@ -525,6 +558,8 @@ export default function PortfoliosPanel() {
                         // A link edit re-reads from OUR cache, never from AIRS: the composition
                         // did not change, only what we say one of its rows is.
                         onLinkSaved={() => void loadPositions(r.id)}
+                        onExplainYtd={() => void explainYtd(r.id)}
+                        explaining={explaining === r.id}
                       />
                     </td>
                   </tr>
@@ -1324,13 +1359,17 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
  * The ISIN is the whole point: it's an EXACT join into `asset_execution`, where the AIRS
  * holdings sheet only ever gave us a fund name ("Alphabet - C", "L` Oreal") that no amount
  * of fuzzy matching resolves safely. */
-function Positions({ state, source, onSource, onPickDate, onRefresh, onLinkSaved }: {
+function Positions({ state, source, onSource, onPickDate, onRefresh, onLinkSaved,
+                     onExplainYtd, explaining }: {
   state?: PosState;
   source: 'model' | 'book';
   onSource: (s: 'model' | 'book') => void;
   onPickDate: (datum: string) => void;
   onRefresh: () => void;
   onLinkSaved: () => void;
+  /** Print the full YTD derivation to the console — see `ytdExplain.ts`. */
+  onExplainYtd: () => void;
+  explaining: boolean;
 }) {
   const isBook = source === 'book';
   const pid = state?.data?.portfolio_id;
@@ -1456,6 +1495,15 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, onLinkSaved
             <button type="button" onClick={onRefresh}
               className="text-[11px] px-2 py-1 rounded-lg hover:bg-overlay/5 text-accent-400 transition-colors">
               Refresh from AIRS
+            </button>
+            {/* The YTD's own arithmetic, printed to the console — for diffing this deployment
+                against another when the same model reads two different numbers. It re-prices
+                the fleet server-side (a few seconds), so it is a deliberate click, never
+                something an expand triggers. */}
+            <button type="button" onClick={onExplainYtd} disabled={explaining}
+              title="Print the full YTD derivation (load fingerprint, window, per-holding marks and contributions) to the browser console, then diff it against the other environment."
+              className="text-[11px] px-2 py-1 rounded-lg hover:bg-overlay/5 text-fg-muted transition-colors disabled:opacity-50">
+              {explaining ? 'Explaining…' : 'Explain YTD → console'}
             </button>
           </span>
         )}
