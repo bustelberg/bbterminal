@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import defaultdict
 from datetime import date
 
@@ -1032,7 +1033,22 @@ def compute_portfolio_analysis(portfolio_id: int,
     # the benchmark and the classification stay exactly as they were.
     # The paired book drives book-weighting (if asked) AND the per-bucket returns for the pie —
     # a return is a property of the held instruments, not the weighting basis. Loaded once.
+    # ⚠ PHASE TIMING, RETURNED TO THE CLIENT. This endpoint is seconds long and the browser could
+    # only see the total — "Loading composition…" for 5s with nothing saying which of its eight
+    # loads was responsible. The AIRS expand has carried per-phase timings for exactly this reason;
+    # this had none. Measured, the split is flat (no single hotspot), which is itself the finding —
+    # and only visible once it is reported.
+    _t: dict[str, int] = {}
+    _t0 = time.perf_counter()
+
+    def _phase(name: str) -> None:
+        nonlocal _t0
+        now = time.perf_counter()
+        _t[name] = int((now - _t0) * 1000)
+        _t0 = now
+
     book = _book_port_items(portfolio_id, codes)
+    _phase("book_holdings")
     # ⚠ SAY WHY THERE IS NO BOOK, HERE, EVERY TIME — not only when book WEIGHTS were asked for.
     # The holdings table is empty whenever `book` is None regardless of `weight_by`, and it was
     # the one surface with no explanation attached. WARNING level because uvicorn leaves the root
@@ -1122,6 +1138,7 @@ def compute_portfolio_analysis(portfolio_id: int,
     # which are point-in-time views of what is held and must NOT move to a January basis. Only
     # these three axes changed, and only so a sector bar equals its own Brinson row.
     basis_axes = _basis_axes(portfolio_id, source, p.get("positions_datum"), bucket_filter)
+    _phase("axes")
 
     axes = []
     for axis in ("sector", "region", "currency"):
@@ -1200,6 +1217,8 @@ def compute_portfolio_analysis(portfolio_id: int,
         "holdings": port_holdings,
         # Which side the portfolio bars describe: the model's nominal weights, or the book's
         # actual EUR holdings. `weight_note` is set only when "book" was asked for and refused.
+        # Milliseconds per phase, so the browser can say WHERE the wait went — see .
+        "timings_ms": _t,
         "weight_basis": weight_basis,
         "weight_note": weight_note,
         # Why the holdings table is empty, when it is. Null when there IS a book view.
@@ -1223,7 +1242,8 @@ def compute_portfolio_analysis(portfolio_id: int,
         "benchmark_universe_members": bench_coverage.get("universe_members") or 0,
         "benchmark_priced": bench_coverage.get("priced") or 0,
         "benchmark_coverage_pct": bench_coverage.get("covered_pct"),
-        "returns": _returns(portfolio_id, p.get("positions_datum"), benchmark_label, source),
+        "returns": _returns_timed(portfolio_id, p.get("positions_datum"), benchmark_label,
+                                  source, _phase),
         # ⚠ THE COMPOSITION WAS EXPANDED, AND THAT MUST BE VISIBLE. These charts are drawn over
         # the stocks BEHIND the certificates, not over the twelve lines AIRS stores. Without
         # this the reader cannot tell a portfolio that genuinely holds 22 names from one that
@@ -1299,6 +1319,14 @@ def compute_portfolio_risk_windows(portfolio_id: int):
 
 async def compute_portfolio_risk_windows_async(portfolio_id: int):
     return await asyncio.to_thread(compute_portfolio_risk_windows, portfolio_id)
+
+
+def _returns_timed(portfolio_id, effective, benchmark_label, source, phase):
+    """`_returns`, with its cost reported. It is the single most expensive phase of the modal
+    (the benchmark index plus this portfolio's own performance), and it was invisible."""
+    out = _returns(portfolio_id, effective, benchmark_label, source)
+    phase("returns_and_benchmark")
+    return out
 
 
 def _basket_returns(holdings, benchmark_label: str) -> dict:

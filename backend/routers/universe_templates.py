@@ -437,11 +437,11 @@ def _freeze_done_message(result: dict) -> str:
     used to compose client-side."""
     label = result.get("label", "snapshot")
     if result.get("created") is False:
-        return f'Already frozen: "{label}" — selectable in /backtest + /regime-detector.'
+        return f'Already frozen: "{label}" — selectable in /backtest.'
     copied = result.get("members_copied", 0)
     msg = (
         f'Froze "{label}" — {copied} constituents held constant. '
-        f"Now selectable in /backtest + /regime-detector."
+        f"Now selectable in /backtest."
     )
     missing = result.get("missing_market_cap")
     if missing:

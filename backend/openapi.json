@@ -5651,6 +5651,14 @@
               }
             ]
           },
+          "timings_ms": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "default": {},
+            "title": "Timings Ms",
+            "type": "object"
+          },
           "weight_basis": {
             "default": "model",
             "title": "Weight Basis",
@@ -8110,6 +8118,174 @@
           "ordered_ids"
         ],
         "title": "ReorderRequest",
+        "type": "object"
+      },
+      "RepriceResult": {
+        "description": "The outcome of reloading one strategy's prices \u2014 see the endpoint's docstring.",
+        "properties": {
+          "changed_holdings": {
+            "default": 0,
+            "title": "Changed Holdings",
+            "type": "integer"
+          },
+          "holdings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RepricedHolding"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "strategy_id"
+        ],
+        "title": "RepriceResult",
+        "type": "object"
+      },
+      "RepricedHolding": {
+        "description": "One holding's four price marks after a reload, plus what moved.",
+        "properties": {
+          "changed": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed",
+            "type": "array"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "entry_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Date"
+          },
+          "entry_price_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Price Eur"
+          },
+          "entry_price_local": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Price Local"
+          },
+          "exit_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Date"
+          },
+          "exit_price_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Price Eur"
+          },
+          "exit_price_local": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Price Local"
+          },
+          "forward_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forward Return Pct"
+          },
+          "is_etf": {
+            "default": false,
+            "title": "Is Etf",
+            "type": "boolean"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          }
+        },
+        "title": "RepricedHolding",
         "type": "object"
       },
       "ResolveNameResponse": {
@@ -21599,6 +21775,49 @@
           }
         },
         "summary": "Set Strategy Cash",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/scheduled-strategies/{strategy_id}/reprice": {
+      "post": {
+        "description": "Reload one strategy's PRICES. It does not re-select, and that distinction is the point.\n\n\u26a0 IT NEVER RE-DECIDES WHAT IS HELD. Re-running the selection for a past date is \"Force\nre-rebalance\", and it is not a repair: `metric_data` is NOT append-only in `target_date` \u2014\nGuruFocus publishes late closes stamped with their true earlier date \u2014 so a past basket\ncannot be reproduced from the live database and re-selecting would silently rewrite what the\nstrategy held. (That is the failure the golden-master test exists to catch.) This reloads the\nmarks on the holdings that ARE there: start and end, local and converted.\n\n\u26a0 IT IS THE SAME FUNCTION THE NIGHTLY TICK RUNS \u2014 `compute_and_save_price_update` \u2014 not a\nsecond implementation of it. A button that priced a book its own way would be a new source of\ntruth that agrees with the pipeline right up until it doesn't. What the button buys is the\ntiming: the fix lands now instead of at 05:00 UTC.\n\nCorrects, on every run:\n  * `exit_price_local` + `exit_date` from the latest close, for every holding;\n  * `exit_price_eur`, converted at that date's rate;\n  * `entry_price_eur` \u2014 always for an ETF, and for anyone else whose EUR mark is missing;\n  * `entry_price_local` for an ETF, re-derived from `benchmark_price` as of its own entry\n    date. That last one is what repairs the truncated-read corruption (an SPMO entry of\n    40.18, a 2019 close, sitting beside a correct 143.83 exit on the same day).\n\nA company's `entry_price_local` is deliberately NOT re-derived \u2014 see above; that is history,\nnot a cache.",
+        "operationId": "reprice_scheduled_strategy_api_scheduled_strategies__strategy_id__reprice_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepriceResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reprice Scheduled Strategy",
         "tags": [
           "schedule"
         ]

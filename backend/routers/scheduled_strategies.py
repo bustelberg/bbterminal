@@ -1032,3 +1032,127 @@ async def list_strategy_runs(strategy_id: int, request: Request, limit: int = 50
         }
 
     return await asyncio.to_thread(_query)
+
+
+class RepricedHolding(BaseModel):
+    """One holding's four price marks after a reload, plus what moved."""
+
+    ticker: str | None = None
+    company_name: str | None = None
+    is_etf: bool = False
+    entry_date: str | None = None
+    entry_price_local: float | None = None
+    entry_price_eur: float | None = None
+    exit_date: str | None = None
+    exit_price_local: float | None = None
+    exit_price_eur: float | None = None
+    forward_return_pct: float | None = None
+    # ⚠ WHAT ACTUALLY CHANGED, per field. A reload that reports only the new numbers cannot be
+    # told apart from one that did nothing — and "did it fix it?" is the entire reason the button
+    # exists. Field names, e.g. ["entry_price_local", "forward_return_pct"]; empty = untouched.
+    changed: list[str] = []
+
+
+class RepriceResult(BaseModel):
+    """The outcome of reloading one strategy's prices — see the endpoint's docstring."""
+
+    strategy_id: int
+    snapshot_id: int | None = None
+    holdings: list[RepricedHolding] = []
+    changed_holdings: int = 0
+    note: str | None = None
+
+
+@router.post("/api/scheduled-strategies/{strategy_id}/reprice",
+             response_model=RepriceResult)
+async def reprice_scheduled_strategy(strategy_id: int):
+    """Reload one strategy's PRICES. It does not re-select, and that distinction is the point.
+
+    ⚠ IT NEVER RE-DECIDES WHAT IS HELD. Re-running the selection for a past date is "Force
+    re-rebalance", and it is not a repair: `metric_data` is NOT append-only in `target_date` —
+    GuruFocus publishes late closes stamped with their true earlier date — so a past basket
+    cannot be reproduced from the live database and re-selecting would silently rewrite what the
+    strategy held. (That is the failure the golden-master test exists to catch.) This reloads the
+    marks on the holdings that ARE there: start and end, local and converted.
+
+    ⚠ IT IS THE SAME FUNCTION THE NIGHTLY TICK RUNS — `compute_and_save_price_update` — not a
+    second implementation of it. A button that priced a book its own way would be a new source of
+    truth that agrees with the pipeline right up until it doesn't. What the button buys is the
+    timing: the fix lands now instead of at 05:00 UTC.
+
+    Corrects, on every run:
+      * `exit_price_local` + `exit_date` from the latest close, for every holding;
+      * `exit_price_eur`, converted at that date's rate;
+      * `entry_price_eur` — always for an ETF, and for anyone else whose EUR mark is missing;
+      * `entry_price_local` for an ETF, re-derived from `benchmark_price` as of its own entry
+        date. That last one is what repairs the truncated-read corruption (an SPMO entry of
+        40.18, a 2019 close, sitting beside a correct 143.83 exit on the same day).
+
+    A company's `entry_price_local` is deliberately NOT re-derived — see above; that is history,
+    not a cache.
+    """
+    def _run() -> dict:
+        from routers._schedule_snapshots import (  # noqa: PLC0415
+            compute_and_save_price_update,
+        )
+
+        def _latest() -> dict | None:
+            rows = (
+                supabase.table("current_picks_snapshot")
+                .select("snapshot_id, holdings")
+                .eq("scheduled_strategy_id", strategy_id)
+                .order("as_of_date", desc=True)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            ).data
+            return rows[0] if rows else None
+
+        # BEFORE, so the response can say what moved rather than only what it now is.
+        before = {
+            str(h.get("ticker") or h.get("company_id")): h
+            for h in ((_latest() or {}).get("holdings") or [])
+        }
+
+        snapshot_id = compute_and_save_price_update(strategy_id, ingest_run_id=None)
+        after = _latest()
+        if not after:
+            return {"strategy_id": strategy_id, "snapshot_id": snapshot_id, "holdings": [],
+                    "changed_holdings": 0,
+                    "note": ("Nothing to re-price — this strategy has no stored holdings yet. "
+                             "It needs a rebalance first.")}
+
+        watched = ("entry_price_local", "entry_price_eur", "exit_price_local",
+                   "exit_price_eur", "entry_date", "exit_date", "forward_return_pct")
+        out: list[dict] = []
+        n_changed = 0
+        for h in (after.get("holdings") or []):
+            key = str(h.get("ticker") or h.get("company_id"))
+            prev = before.get(key) or {}
+            changed = [f for f in watched if prev.get(f) != h.get(f)] if prev else []
+            if changed:
+                n_changed += 1
+            cid = h.get("company_id")
+            out.append({
+                "ticker": h.get("ticker"),
+                "company_name": h.get("company_name"),
+                "is_etf": cid is not None and cid < 0,
+                "entry_date": h.get("entry_date"),
+                "entry_price_local": h.get("entry_price_local"),
+                "entry_price_eur": h.get("entry_price_eur"),
+                "exit_date": h.get("exit_date"),
+                "exit_price_local": h.get("exit_price_local"),
+                "exit_price_eur": h.get("exit_price_eur"),
+                "forward_return_pct": h.get("forward_return_pct"),
+                "changed": changed,
+            })
+        # WARNING, not info: uvicorn hides `info` in production, and this line is the record that
+        # somebody re-priced a book by hand and what it moved.
+        logging.getLogger(__name__).warning(
+            "[reprice] strategy %s -> snapshot %s: %d of %d holding(s) changed",
+            strategy_id, snapshot_id, n_changed, len(out))
+        return {"strategy_id": strategy_id, "snapshot_id": snapshot_id, "holdings": out,
+                "changed_holdings": n_changed,
+                "note": None if n_changed else "Every price was already current."}
+
+    return await asyncio.to_thread(_run)

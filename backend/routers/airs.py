@@ -860,6 +860,10 @@ class ModelPortfolioAnalysis(BaseModel):
     # scanned, or it was opened as an unpaired basket. Different remedies, and none of them was
     # on screen. Null when there IS a book view.
     book_note: str | None = None
+    # Milliseconds per phase of this request. The modal is seconds long and the browser could
+    # only ever see the total — "Loading composition…" with nothing saying which of its eight
+    # loads was responsible. Logged to the console on every open.
+    timings_ms: dict[str, int] = {}
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/analysis",

@@ -174,7 +174,7 @@ export default function AcwiCanonicalView() {
 
   // Freeze the currently-selected month into a fixed-basket static universe
   // (D's constituents held constant across all months). It then shows up in
-  // the /backtest + /regime-detector universe dropdowns, pipeline-immune.
+  // the /backtest universe dropdown, pipeline-immune.
   // Streams SSE progress (same event shape as the refresh stream) so the user
   // sees real per-step updates — reading membership, copying in chunks, done —
   // instead of an opaque "Freezing…" spinner.

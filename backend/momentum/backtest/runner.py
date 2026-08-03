@@ -422,7 +422,7 @@ def run_backtest(
             pd.Timestamp(next_period) if is_open_iter else _prev_trading_ts(next_period)
         )
         # Universe-average RSI(14) — a momentum-breadth gauge surfaced
-        # next to the health signal on /regime-detector. Computed only
+        # next to the health signal in MarketHealthCard. Computed only
         # when the regime filter is active (same gate as market_health) so
         # it never costs a normal backtest. Causal: prices on-or-before the
         # prior-trading-day cutoff.

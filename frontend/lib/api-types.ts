@@ -6400,6 +6400,49 @@ export interface paths {
         patch: operations["set_strategy_cash_api_scheduled_strategies__strategy_id__cash_patch"];
         trace?: never;
     };
+    "/api/scheduled-strategies/{strategy_id}/reprice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reprice Scheduled Strategy
+         * @description Reload one strategy's PRICES. It does not re-select, and that distinction is the point.
+         *
+         *     ⚠ IT NEVER RE-DECIDES WHAT IS HELD. Re-running the selection for a past date is "Force
+         *     re-rebalance", and it is not a repair: `metric_data` is NOT append-only in `target_date` —
+         *     GuruFocus publishes late closes stamped with their true earlier date — so a past basket
+         *     cannot be reproduced from the live database and re-selecting would silently rewrite what the
+         *     strategy held. (That is the failure the golden-master test exists to catch.) This reloads the
+         *     marks on the holdings that ARE there: start and end, local and converted.
+         *
+         *     ⚠ IT IS THE SAME FUNCTION THE NIGHTLY TICK RUNS — `compute_and_save_price_update` — not a
+         *     second implementation of it. A button that priced a book its own way would be a new source of
+         *     truth that agrees with the pipeline right up until it doesn't. What the button buys is the
+         *     timing: the fix lands now instead of at 05:00 UTC.
+         *
+         *     Corrects, on every run:
+         *       * `exit_price_local` + `exit_date` from the latest close, for every holding;
+         *       * `exit_price_eur`, converted at that date's rate;
+         *       * `entry_price_eur` — always for an ETF, and for anyone else whose EUR mark is missing;
+         *       * `entry_price_local` for an ETF, re-derived from `benchmark_price` as of its own entry
+         *         date. That last one is what repairs the truncated-read corruption (an SPMO entry of
+         *         40.18, a 2019 close, sitting beside a correct 143.83 exit on the same day).
+         *
+         *     A company's `entry_price_local` is deliberately NOT re-derived — see above; that is history,
+         *     not a cache.
+         */
+        post: operations["reprice_scheduled_strategy_api_scheduled_strategies__strategy_id__reprice_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scheduled-strategies/{strategy_id}/runs": {
         parameters: {
             query?: never;
@@ -9121,6 +9164,13 @@ export interface components {
             portfolio_id?: number | null;
             returns?: components["schemas"]["PortfolioAnalysisReturns"] | null;
             /**
+             * Timings Ms
+             * @default {}
+             */
+            timings_ms?: {
+                [key: string]: number;
+            };
+            /**
              * Weight Basis
              * @default model
              */
@@ -10041,6 +10091,62 @@ export interface components {
         ReorderRequest: {
             /** Ordered Ids */
             ordered_ids: number[];
+        };
+        /**
+         * RepriceResult
+         * @description The outcome of reloading one strategy's prices — see the endpoint's docstring.
+         */
+        RepriceResult: {
+            /**
+             * Changed Holdings
+             * @default 0
+             */
+            changed_holdings?: number;
+            /**
+             * Holdings
+             * @default []
+             */
+            holdings?: components["schemas"]["RepricedHolding"][];
+            /** Note */
+            note?: string | null;
+            /** Snapshot Id */
+            snapshot_id?: number | null;
+            /** Strategy Id */
+            strategy_id: number;
+        };
+        /**
+         * RepricedHolding
+         * @description One holding's four price marks after a reload, plus what moved.
+         */
+        RepricedHolding: {
+            /**
+             * Changed
+             * @default []
+             */
+            changed?: string[];
+            /** Company Name */
+            company_name?: string | null;
+            /** Entry Date */
+            entry_date?: string | null;
+            /** Entry Price Eur */
+            entry_price_eur?: number | null;
+            /** Entry Price Local */
+            entry_price_local?: number | null;
+            /** Exit Date */
+            exit_date?: string | null;
+            /** Exit Price Eur */
+            exit_price_eur?: number | null;
+            /** Exit Price Local */
+            exit_price_local?: number | null;
+            /** Forward Return Pct */
+            forward_return_pct?: number | null;
+            /**
+             * Is Etf
+             * @default false
+             */
+            is_etf?: boolean;
+            /** Ticker */
+            ticker?: string | null;
         };
         /** ResolveNameResponse */
         ResolveNameResponse: {
@@ -18727,6 +18833,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reprice_scheduled_strategy_api_scheduled_strategies__strategy_id__reprice_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepriceResult"];
                 };
             };
             /** @description Validation Error */

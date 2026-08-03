@@ -67,6 +67,33 @@ def _to_eur(local: float | None, currency: str | None, day_iso: str,
     return float(local) / rate
 
 
+# Two prices this close are the same number to the cent. Below it we are looking at float noise,
+# not at the seven-year gap the entry-price correction exists to catch.
+_PRICE_EPS = 0.005
+
+
+def _benchmark_asof(benchmark_id: int, day: str) -> float | None:
+    """A benchmark's close ON OR BEFORE `day` — ONE indexed row, never a series scan.
+
+    ⚠ DELIBERATELY NOT A FULL-SERIES READ. Loading the whole series to pick one price is what
+    caused the bug this repairs: unpaged and ascending, PostgREST cut it to the oldest thousand
+    bars and the lookup answered every recent date with a 2019 close. `order desc + limit 1`
+    cannot be truncated into a wrong answer — there is only ever one row to return, and the
+    `(benchmark_id, target_date)` index serves it directly.
+    """
+    rows = (
+        supabase.table("benchmark_price")
+        .select("price")
+        .eq("benchmark_id", benchmark_id)
+        .lte("target_date", day)
+        .order("target_date", desc=True)
+        .limit(1)
+        .execute()
+    ).data or []
+    p = rows[0].get("price") if rows else None
+    return float(p) if p is not None else None
+
+
 def compute_and_save_price_update(
     strategy_id: int,
     ingest_run_id: int | None,
@@ -225,13 +252,54 @@ def compute_and_save_price_update(
         entry_local = h.get("entry_price_local")
         ccy = _hold_ccy(h)
         entry_date_iso = str(h.get("entry_date") or rebal.get("as_of_date") or "")[:10]
+
+        # ⚠ AN ETF'S ENTRY PRICE IS RE-DERIVED EVERY RUN, LIKE ITS ENTRY EUR ALREADY IS.
+        #
+        # For an overlay sleeve there is exactly one right answer — `benchmark_price` as of the
+        # holding's own `entry_date` — and it is a pure function of data we hold. A STORED value
+        # can only ever be equal to it or wrong, so re-deriving is idempotent and, when the stored
+        # one is wrong, self-healing.
+        #
+        # It was wrong. `_apply_etf_overlay_to_snapshot` built its as-of lookup from an UNPAGED
+        # ascending read, and PostgREST's 1,000-row cloud cap silently cut the series to its
+        # OLDEST thousand bars. Measured on SPMO (2,716 bars from 2015-10-12): the cut ends at
+        # 2019-10-01, price 40.18 — which /schedule showed as the entry beside a correct 143.83
+        # exit on the same date, a +258% return on a days-old position that drifted the weight to
+        # 74.5% against a 45% target. The read is paged now, but every snapshot already written
+        # kept the bad number, and nothing in the daily pass could repair it.
+        #
+        # This is the SAME argument the entry-EUR line below already makes, one level up — and
+        # making it here means a corrupted entry heals on the next tick instead of needing a
+        # script or a button.
+        #
+        # ⚠ ETFs ONLY, AND THAT LIMIT IS THE POINT. A company's entry comes from `metric_data`,
+        # which is NOT append-only in `target_date` — GuruFocus publishes late closes with their
+        # true earlier date, so re-deriving a company's entry could legitimately CHANGE a price
+        # the strategy actually traded at, rewriting history to match today's data. That is the
+        # thing the golden-master test exists to prevent. A benchmark series has no such
+        # behaviour, and `benchmark_price` is its single authority.
+        if is_etf and entry_date_iso:
+            fixed = _benchmark_asof(-cid, entry_date_iso)
+            if fixed is not None and (
+                not entry_local or abs(float(entry_local) - fixed) > _PRICE_EPS
+            ):
+                _log.warning(
+                    "[schedule] %s entry price corrected %s -> %s (benchmark %s as of %s) — a "
+                    "stored entry that disagrees with its own source; see the truncated-read note",
+                    h.get("ticker") or f"benchmark {-cid}", entry_local, fixed, -cid,
+                    entry_date_iso)
+                entry_local = fixed
+                new_h["entry_price_local"] = fixed
+                # The stored EUR mark was derived from the wrong local price, so it must not be
+                # reused — the branch below re-derives it for ETFs unconditionally anyway.
+                new_h.pop("entry_price_eur", None)
         # Entry EUR basis. Companies keep their rebalance EUR mark (set with a
         # proper conversion). ETFs ALWAYS re-derive from the benchmark local +
         # entry-date FX: a stored ETF entry_price_eur can be a stale pre-FX
         # pass-through (the local price recorded AS EUR before the currency fix),
         # and mixing that unconverted entry with the now-converted exit corrupts
         # the return. Derive-if-missing for everyone else.
-        entry_eur = h.get("entry_price_eur")
+        entry_eur = new_h.get("entry_price_eur")
         if is_etf or not entry_eur or entry_eur <= 0:
             derived = _to_eur(entry_local, ccy, entry_date_iso, fx_rates)
             if derived is not None:
@@ -393,14 +461,44 @@ def apply_sleeves_to_snapshot(
         # Daily benchmark closes per id, for as-of (last-on-or-before) lookups.
         px: dict[int, tuple[list[str], list[float]]] = {}
         for bid in bids:
-            rows = (
-                supabase.table("benchmark_price")
-                .select("target_date, price")
-                .eq("benchmark_id", bid)
-                .lte("target_date", latest or as_of)
-                .order("target_date")
-                .execute()
-            ).data or []
+            # ⚠⚠ PAGED, AND THE BUG IT FIXES PRINTED A SEVEN-YEAR-OLD PRICE AS TODAY'S ENTRY.
+            #
+            # This read is ASCENDING and was unpaged. PostgREST caps a response at 1,000 rows on
+            # Supabase cloud (10,000 locally) and truncates SILENTLY, so in production the series
+            # stopped at the 1,000th BAR — the OLDEST thousand — and `_asof` then answered every
+            # recent date with the last row it happened to have.
+            #
+            # Measured 2026-08-03 on SPMO (Invesco S&P 500 Momentum ETF), 2,716 bars from
+            # 2015-10-12: the 1,000-row cut ends at **2019-10-01, price 40.18**. That is exactly
+            # what /schedule showed as the entry — "Start (local) 40.18 USD, as of 2026-07-31" —
+            # beside a true End of 143.83 on the same date. A +258% return on a position opened
+            # days earlier, which then drifted the Current weight to 74.5% against a 45.0% target.
+            # Every figure downstream of that entry was wrong, and nothing raised.
+            #
+            # ⚠ THE EXIT WAS RIGHT, WHICH IS WHY IT LOOKED LIKE A DISPLAY BUG. The daily
+            # price-update re-prices the exit through a different path, so the row carried one
+            # correct price and one seven-year-old one, both stamped with today's date.
+            #
+            # 4 of our 5 benchmarks already exceed 1,000 bars (SPY reaches back to 1998), so this
+            # was live for every ETF overlay in production and invisible in local dev.
+            rows: list[dict] = []
+            off = 0
+            while True:
+                page = (
+                    supabase.table("benchmark_price")
+                    .select("target_date, price")
+                    .eq("benchmark_id", bid)
+                    .lte("target_date", latest or as_of)
+                    # `(benchmark_id, target_date)` is unique, so a page boundary cannot serve a
+                    # row twice or skip one.
+                    .order("target_date")
+                    .range(off, off + 999)
+                    .execute()
+                ).data or []
+                if not page:
+                    break
+                rows += page
+                off += len(page)      # advance by what came back — correct under any cap
             if rows:
                 px[bid] = (
                     [str(r["target_date"])[:10] for r in rows],
