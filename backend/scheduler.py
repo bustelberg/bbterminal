@@ -798,6 +798,45 @@ def _fire_airs_vermogen() -> None:
             _log.exception(
                 "[scheduler] airs_vermogen refresh failed: %s: %s", type(e).__name__, e,
             )
+        # ⚠ THE MODEL PORTFOLIOS TOO — NOTHING SCHEDULED HAS EVER SCANNED THEM, AND THE PAIRING
+        # SILENTLY DEPENDS ON THEM. This tick refreshes the ACCOUNTS (Rendement,
+        # Vermogensoverzicht); the model COMPOSITIONS were only ever populated by pressing "Scan
+        # AIRS" on the portfolios page by hand. So a deployment where nobody pressed it has an
+        # empty `airs_model_portfolio_position` — and `_airs_account_links._models()` keeps only
+        # models that HAVE a composition, so every account then matches nothing, loses its
+        # pairing, and Analyse falls back to an unpaired basket for books that are perfectly
+        # fine. That is the production symptom this exists to end: "No valued positions to show",
+        # on a portfolio whose rows expand normally one panel away.
+        #
+        # ⚠ AFTER the accounts, in the SAME thread, never beside it. Both drive one authenticated
+        # AirSPMS session through Playwright; two scrapers at once is a contended login, and the
+        # failure mode there is a half-finished scan rather than an error.
+        try:
+            from airs_scanner import (  # noqa: PLC0415
+                count_model_portfolio_holdings_sync,
+                fetch_model_portfolios_sync,
+            )
+            from routers import _airs_portfolio_store as store  # noqa: PLC0415
+
+            def _quiet(_msg_type: str, **_kw) -> None:
+                """The scan streams progress for the UI; here there is nobody to stream to."""
+
+            rows = fetch_model_portfolios_sync(_quiet)
+            store.save_portfolios(rows)
+            # ⚠ WRITES AS IT GOES (`on_positions`), so a scan that dies halfway leaves behind
+            # what it did reach — the same contract the manual button has.
+            count_model_portfolio_holdings_sync(
+                rows, _quiet,
+                on_positions=store.save_positions,
+                on_error=store.save_positions_error,
+            )
+            _log.warning("[scheduler] airs model-portfolio scan: %d portfolio(s) stored", len(rows))
+        except Exception as e:
+            # Best effort, and NEVER fatal to the accounts refresh above — that one is the daily
+            # valuation and must not be lost to a failure in the composition scan.
+            _log.exception(
+                "[scheduler] airs model-portfolio scan failed: %s: %s", type(e).__name__, e,
+            )
     threading.Thread(target=_run, daemon=True, name="airs-vermogen").start()
 
 
@@ -886,6 +925,11 @@ def register_scheduler(app) -> None:
         # prior close, harmless). Re-discovers the live AirSPMS portfolio list
         # each run (it changes day-to-day) and stores each portfolio's Rendement
         # + Vermogensoverzicht. Runs on its own thread.
+        #
+        # ⚠ IT ALSO SCANS THE MODEL PORTFOLIOS NOW (Stamgegevens → Model portefeuilles), which
+        # nothing scheduled ever did. Their compositions are what the account↔model PAIRING is
+        # guessed from, so on a deployment where nobody pressed "Scan AIRS" by hand every book
+        # was unpaired and Analyse fell back to a basket. See `_fire_airs_vermogen`.
         sched.add_job(
             _fire_airs_vermogen,
             CronTrigger(day_of_week="mon-fri", hour=10, minute=0, timezone="Europe/Amsterdam"),
