@@ -717,6 +717,72 @@ def _maybe_kickstart_asset_prices() -> None:
     ).start()
 
 
+def _maybe_kickstart_airs_models() -> None:
+    """On STARTUP: if we hold no model-portfolio COMPOSITIONS, scan them now.
+
+    ⚠ THE DAILY TICK CANNOT FIX A DEPLOYMENT THAT HAS NEVER HAD THEM. `airs_model_portfolio_
+    position` was only ever populated by a human pressing "Scan AIRS", so a fresh environment
+    starts empty — and `_airs_account_links._models()` keeps only models WITH a composition, so
+    every account matches nothing, loses its pairing, and Analyse falls back to an unpaired
+    basket. Measured in production 2026-08-03 on `AITopSelectie OFF DYN`: "No valued positions to
+    show", beside a portfolios list whose rows expand perfectly.
+
+    Waiting for the next weekday 10:00 Amsterdam tick would leave that state up for as much as a
+    long weekend after the deploy that was supposed to fix it, which is the same reasoning as
+    `_maybe_kickstart_asset_prices`.
+
+    ⚠ IT DETECTS BEFORE IT SCRAPES — ONE COUNT QUERY. The scan is minutes of authenticated
+    Playwright, so it must not run on every restart: `uvicorn --reload` restarts constantly, and
+    after the first successful scan the count is non-zero and this is a single round-trip no-op.
+    Deliberately NOT a staleness check — refreshing an existing composition is the daily tick's
+    job. This only fills a hole.
+
+    ⚠ WARNING level when it acts. uvicorn leaves the root logger at WARNING, so an `info` line is
+    invisible in production — and "why did my deploy start scraping AIRS" is a question the log
+    has to answer. The healthy no-op stays quiet.
+    """
+    def _run() -> None:
+        try:
+            from deps import supabase  # noqa: PLC0415
+
+            n = (supabase.table("airs_model_portfolio_position")
+                 .select("portfolio_id", count="exact").limit(1).execute().count or 0)
+            if n:
+                _log.info("[scheduler] %d model-portfolio position row(s) already stored — "
+                          "no startup scan needed", n)
+                return
+            _log.warning(
+                "[scheduler] NO model-portfolio compositions stored — scanning AIRS now. Without "
+                "them no account can be paired to a model, so Analyse falls back to an unpaired "
+                "basket for every portfolio. This runs once; the Mon-Fri 10:00 tick keeps them "
+                "current afterwards.")
+            from airs_scanner import (  # noqa: PLC0415
+                count_model_portfolio_holdings_sync,
+                fetch_model_portfolios_sync,
+            )
+            from routers import _airs_portfolio_store as store  # noqa: PLC0415
+
+            def _quiet(_msg_type: str, **_kw) -> None:
+                """No SSE client on a startup run."""
+
+            rows = fetch_model_portfolios_sync(_quiet)
+            store.save_portfolios(rows)
+            count_model_portfolio_holdings_sync(
+                rows, _quiet,
+                on_positions=store.save_positions,
+                on_error=store.save_positions_error,
+            )
+            _log.warning("[scheduler] startup model-portfolio scan stored %d portfolio(s)",
+                         len(rows))
+        except Exception as e:
+            # Never fatal to boot. A missing AIRS credential or an unavailable AirSPMS must not
+            # stop the API from serving; the pairing simply stays unresolved and says so.
+            _log.exception("[scheduler] startup model-portfolio scan failed: %s: %s",
+                           type(e).__name__, e)
+
+    threading.Thread(target=_run, name="airs-models-kickstart", daemon=True).start()
+
+
 def _fire_history_drift_check() -> None:
     """Daily: probe 1/5th of the universe for a vendor rewrite of PAST bars.
 
@@ -1050,6 +1116,17 @@ def register_scheduler(app) -> None:
         except Exception as e:
             _log.warning(
                 "[scheduler] asset-price kickstart wrapper failed: %s: %s",
+                type(e).__name__, e,
+            )
+        # ...and fill the model-portfolio compositions if this deployment has none. Unlike the
+        # two above this is not a staleness catch-up — it is the "never had them" case, which the
+        # daily tick cannot fix retroactively and which silently unpairs every account until it
+        # runs. One count query when they exist; see `_maybe_kickstart_airs_models`.
+        try:
+            _maybe_kickstart_airs_models()
+        except Exception as e:
+            _log.warning(
+                "[scheduler] airs-models kickstart wrapper failed: %s: %s",
                 type(e).__name__, e,
             )
         next_runs = {j.id: str(j.next_run_time) for j in sched.get_jobs()}
