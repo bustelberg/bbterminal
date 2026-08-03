@@ -93,16 +93,16 @@ class TestTheCapConversionIsNotReDerived:
 
     Yahoo quotes a London listing in PENCE but reports its `marketCap` in POUNDS — same payload,
     same `currency: "GBp"`. Asking `fx_to_eur("GBp")` for a cap divides an already-major figure by
-    100: Shell becomes a EUR 1.95bn company and still looks like a number. The fill path therefore
+    100: Shell becomes a EUR 1.95bn company and still looks like a number. Step 2 therefore
     imports `_cap_currency` rather than carrying its own map.
     """
 
-    def test_the_backfill_normalises_through_the_shared_map(self):
+    def test_the_cap_step_normalises_through_the_shared_map(self):
         import inspect
 
-        from routers import _benchmark_fill as f
+        from routers import _benchmark_refresh as f
 
-        src = inspect.getsource(f._backfill_caps)
+        src = inspect.getsource(f._caps)
         assert "_cap_currency" in src
         assert "fx_to_eur(ccy)" in src        # the MAJOR code, never the raw quote currency
 
@@ -113,26 +113,27 @@ class TestTheCapConversionIsNotReDerived:
         assert _cap_currency("USD") == "USD"
 
 
-class TestResolutionIsNeverRunInline:
+class TestResolutionGoesThroughTheQueuesOwnSlice:
     """⚠ ONE YAHOO CONSUMER. An overloaded caller gets an EMPTY result, not a 429, and an empty
-    candidate set is how a constituent lands on a thin foreign listing. The fill path must hand
-    work to the queue, never resolve in the request thread."""
+    candidate set is how a constituent lands on a thin foreign listing. Step 1 may only hand work
+    to the queue and run the queue's OWN slice (`_drain_now`) — never a resolver of its own."""
 
-    def test_it_enqueues_rather_than_resolving(self):
+    def test_step_one_uses_the_queue_never_its_own_resolver(self):
         import inspect
 
-        from routers import _benchmark_fill as f
+        from routers import _benchmark_refresh as f
 
-        src = inspect.getsource(f.fill_benchmark)
+        src = inspect.getsource(f._constituents)
         assert "_queue.enqueue" in src
-        for forbidden in ("store_one", "resolve(", "fast_resolve"):
+        assert "_drain_now" in src
+        for forbidden in ("store_one", "fast_resolve"):
             assert forbidden not in src, forbidden
 
 
-class TestDeleteIsOnlyOfferedWhereFillCanUndoIt:
-    """⚠ THE DELETE EXISTS SO FILL CAN BE WATCHED REBUILDING — WHICH IS A PROMISE ABOUT THE LABEL.
+class TestResetIsOnlyOfferedWhereRefreshCanUndoIt:
+    """⚠ RESET EXISTS SO REFRESH CAN BE WATCHED REBUILDING — WHICH IS A PROMISE ABOUT THE LABEL.
 
-    `fill_benchmark`'s only route back is `_build_universe`. Offering Delete for a label it cannot
+    Refresh's only route back is `_build_universe`. Offering Reset for a label it cannot
     rebuild is a one-way door behind a button whose whole point is reversibility, so the guard and
     the rebuild must never disagree about which labels those are: both ask `rebuildable()`.
 
@@ -194,18 +195,18 @@ class TestDeleteIsOnlyOfferedWhereFillCanUndoIt:
         assert "filtered_changes" in src
 
 
-class TestResetUndoesAllThreeOfFillsJobs:
-    """Deleting only the membership left two thirds of Fill untested: a constituent that is already
+class TestResetUndoesAllThreeOfRefreshsSteps:
+    """Deleting only the membership left two thirds of Refresh untested: a constituent that is already
     resolved and already capped goes straight into `usable`, so the cap backfill and the price
     refill never run and the counts read like success without either having done anything.
 
-    The three deletions match Fill's three jobs one for one — and what is NOT deleted is what keeps
+    The three deletions match Refresh's three steps one for one — and what is NOT deleted is what keeps
     the refill safe.
     """
 
     def test_the_grid_row_and_the_symbol_are_never_touched(self):
         """⚠ THE PROPERTY THAT STOPS THIS BEING DESTRUCTIVE. Every instrument keeps `status='ok'`,
-        its `analysis_id` and its Yahoo symbol, so Fill re-fetches prices for a KNOWN listing
+        its `analysis_id` and its Yahoo symbol, so Refresh re-fetches prices for a KNOWN listing
         (`extend_series`). Deleting the grid row or zeroing `bars` would push it into
         `needs_resolve` instead — and a re-resolve is how Alphabet moved from GOOGL to a Vienna
         line 75,000x thinner, because Yahoo answers an overloaded caller with an empty search."""
@@ -241,18 +242,182 @@ class TestResetUndoesAllThreeOfFillsJobs:
     def test_the_refill_uses_the_known_symbol_and_never_the_resolve_queue(self):
         import inspect
 
-        from routers._benchmark_fill import _refill_prices
+        from routers._benchmark_refresh import _prices
 
-        src = inspect.getsource(_refill_prices)
+        src = inspect.getsource(_prices)
         assert "extend_series" in src
-        assert "enqueue" not in src, "re-resolving is the destructive path; the refill must not use it"
+        assert "enqueue" not in src, "re-resolving is the destructive path; step 3 must not use it"
 
-    def test_the_refill_only_touches_constituents_with_no_mark_in_the_window(self):
-        """`window_marks` is the same selection the panel prices from, so "needs a price" means
-        exactly "the panel cannot price it" — and a press after a completed refill costs one query
-        and no Yahoo calls."""
+
+class TestRefreshIsExactlyThreeSteps:
+    """The Refresh button does three things and only three: gather the constituents, get every
+    one's market cap from Yahoo, then each one's start-of-year price and current price.
+
+    ⚠ THE PRICE STEP MUST NOT BECOME CLEVER AGAIN. It replaced two overlapping passes — a
+    gap-filler that only touched constituents with NO mark in the window, and a staleness sweep
+    for the ones that had marks but were weeks old — sharing a bounded budget between them. Two
+    passes with a shared cap is three things to get right to answer one question ("what are this
+    constituent's two prices?"), and the bound meant a press left the job unfinished and asked to
+    be pressed again. One pass over every constituent, streamed, is the whole design.
+    """
+
+    def test_the_run_is_the_three_named_steps_in_order(self):
         import inspect
 
-        from routers._benchmark_fill import _refill_prices
+        from routers._benchmark_refresh import refresh_benchmark
 
-        assert "window_marks" in inspect.getsource(_refill_prices)
+        src = inspect.getsource(refresh_benchmark)
+        assert src.index("_constituents(") < src.index("_caps(") < src.index("_prices(")
+
+    def test_each_step_announces_itself(self):
+        """A run is minutes long. Every step emits a `phase` frame so the console log has
+        headings, not just 491 undifferentiated lines."""
+        import inspect
+
+        from routers import _benchmark_refresh as r
+
+        for fn, phase in ((r._constituents, "constituents"), (r._caps, "caps"),
+                          (r._prices, "prices")):
+            assert f'phase="{phase}"' in inspect.getsource(fn), phase
+
+    def test_there_is_no_bounded_slice_left(self):
+        """A cap on the price step is what made the old button ask to be pressed nine times for
+        the S&P. The run is streamed precisely so it does not need one."""
+        import inspect
+
+        from routers import _benchmark_refresh as r
+
+        src = inspect.getsource(r._prices)
+        for forbidden in ("limit", "pending"):
+            assert forbidden not in src, forbidden
+
+
+class TestEveryConstituentIsCapped:
+    """⚠ ALL OF THEM, EVERY RUN — NOT ONLY THE UNCAPPED ONES.
+
+    The cap IS the weight. An index re-weighted from caps quoted three weeks ago is a three-week-
+    old index wearing today's prices, and the old path only quoted constituents whose cap was
+    missing entirely, so a stale cap was never refreshed by anything. It is also nearly free:
+    `yahoo.quote` batches at 100 symbols per call, so the S&P is five requests.
+    """
+
+    def test_it_quotes_the_priceable_set_not_only_the_uncapped_bucket(self):
+        import inspect
+
+        from routers import _benchmark_refresh as r
+
+        # `_caps` is handed `_USABLE + _NEEDS_CAP` — every constituent we can reach.
+        assert "_USABLE] + buckets[_NEEDS_CAP]" in inspect.getsource(r.refresh_benchmark)
+        # ...and it takes every one of them that has a symbol, with no bucket filter of its own.
+        assert "needs_cap" not in inspect.getsource(r._caps)
+
+    def test_a_constituent_with_no_cap_is_named_not_silently_weightless(self):
+        """It weighs nothing, so it is absent from a cap-weighted index while looking perfectly
+        healthy in the asset grid — the `needs_cap` failure, seen from the other side."""
+        import inspect
+
+        from routers import _benchmark_refresh as r
+
+        assert "weigh nothing" in inspect.getsource(r._caps)
+
+
+class TestThePriceStepFetchesBySymbolOnly:
+    """Re-resolution asks Yahoo *which listing is this*, and Yahoo answers an overloaded caller
+    with an empty search rather than a 429 — which is how Alphabet moved from GOOGL to a Vienna
+    line 75,000x thinner. Identity is decided in step 1, through the single paced queue worker,
+    and nowhere else."""
+
+    def test_step_three_never_resolves(self):
+        import inspect
+
+        from routers._benchmark_refresh import _prices
+
+        src = inspect.getsource(_prices)
+        assert "extend_series" in src
+        for forbidden in ("enqueue", "fast_resolve", "store_one"):
+            assert forbidden not in src, forbidden
+
+    def test_it_extends_rather_than_re_downloading_the_history(self):
+        """`store_series` re-downloads every bar an instrument ever had (KO: 16,239, back to
+        1962) to add eight days, and derives `bars`/`price_from` FROM THE SLICE IT FETCHED.
+        `extend_series` fetches the gap and recomputes those stats from the DB — the full path is
+        the FALLBACK, taken only when it returns None."""
+        import inspect
+
+        from routers._benchmark_refresh import _prices
+
+        src = inspect.getsource(_prices)
+        assert "extend_series(aid, sym, lookback) is None" in src
+        assert src.index("extend_series") < src.index("store_series")
+
+
+class TestAbsencesAreNotFailures:
+    """Three outcomes look alike in a log and are not the same fact."""
+
+    def test_already_current_is_reported_not_skipped_silently(self):
+        """A run where nothing needed fetching did real work — it checked. Silence there reads as
+        the button having done nothing, which is how the old one got pressed again and again."""
+        import inspect
+
+        from routers import _benchmark_refresh as r
+
+        src = inspect.getsource(r._prices)
+        assert "already_current" in src
+        assert "already current" in src        # ...and it is SAID, per constituent
+
+    def test_no_start_price_is_its_own_outcome(self):
+        """The instrument had not listed when the year opened. It cannot contribute a YTD and the
+        index drops it — that is an answer about the constituent, not a failed fetch."""
+        import inspect
+
+        from routers import _benchmark_refresh as r
+
+        assert "no_start" in inspect.getsource(r._prices)
+
+    def test_one_dead_symbol_does_not_end_the_run(self):
+        import inspect
+
+        from routers import _benchmark_refresh as r
+
+        src = inspect.getsource(r._prices)
+        assert "except Exception" in src and "continue" in src
+
+
+class TestTheAnchorIsNeverTheCalendar:
+    """⚠ Anchoring "is this current?" on today flags every instrument every weekend, calls a bank
+    holiday a fleet-wide failure and turns a Yahoo outage into "re-fetch all 1,684 constituents"
+    at the one moment fetching cannot work. Both halves of the anchor come from `price_refresh`,
+    which owns this definition; a copy here would be free to drift from the daily tick's."""
+
+    def test_the_anchor_is_the_shared_definition(self):
+        import inspect
+
+        from routers._benchmark_refresh import _market_anchor
+
+        src = inspect.getsource(_market_anchor)
+        assert "from asset_pipeline.price_refresh import" in src
+        assert "global_latest_close" in src and "market_latest_close" in src
+
+    def test_a_failed_probe_falls_back_to_our_own_maximum(self, monkeypatch):
+        """`market_latest_close` returns None when the probe is throttled or dead. Taking the max
+        of what is not None leaves the previous behaviour intact; treating None as "today" would
+        be the stampede this rule exists to prevent."""
+        import routers._benchmark_refresh as r
+
+        monkeypatch.setattr("asset_pipeline.price_refresh.global_latest_close",
+                            lambda: "2026-07-30")
+        monkeypatch.setattr("asset_pipeline.price_refresh.market_latest_close", lambda: None)
+
+        assert r._market_anchor(lambda *a, **k: None) == "2026-07-30"
+
+    def test_the_market_wins_when_it_has_published_since(self, monkeypatch):
+        """The failure our own maximum cannot see: a fleet that stopped updating as a block stays
+        within `stale_days` of itself for ever."""
+        import routers._benchmark_refresh as r
+
+        monkeypatch.setattr("asset_pipeline.price_refresh.global_latest_close",
+                            lambda: "2026-07-30")
+        monkeypatch.setattr("asset_pipeline.price_refresh.market_latest_close",
+                            lambda: "2026-08-01")
+
+        assert r._market_anchor(lambda *a, **k: None) == "2026-08-01"

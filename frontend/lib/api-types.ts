@@ -3020,28 +3020,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/benchmarks/index/{label}/fill": {
+    "/api/benchmarks/index/{label}/refresh": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
         /**
-         * Benchmark Fill
-         * @description Close the asset-world gap behind a reconstructed index, and report what remains.
+         * Benchmark Refresh
+         * @description Refresh a reconstructed index: constituents, market caps, then two prices each.
          *
-         *     A benchmark reads 0 members when its constituents are not in the asset grid — the universe is
-         *     usually fine. This enqueues the unresolved ISINs for the single paced ingest worker and writes
-         *     market caps for the ones already resolved (a batched quote, ~1 call per 100 symbols).
+         *     Exactly three steps, streamed line by line (see `_benchmark_refresh`):
          *
-         *     ⚠ IT DOES NOT RESOLVE INLINE, and the response is therefore not a "done": Yahoo returns an
-         *     EMPTY result to an overloaded caller instead of a 429, so a second concurrent consumer is how
-         *     a constituent lands on a thin foreign listing. The counts say what was handed to the worker.
+         *         1. CONSTITUENTS  rebuild the universe if it has none, read its membership, bridge each
+         *                          member into the asset world by ISIN, resolve what is not there yet.
+         *         2. MARKET CAPS   a batched Yahoo quote for EVERY constituent — the cap IS the weight,
+         *                          and a three-week-old cap is a three-week-old index.
+         *         3. PRICES        each constituent's start-of-year close and its current close. Those two
+         *                          numbers are the whole of the YTD the panel shows.
+         *
+         *     ⚠ SSE, NOT A POST. Step 3 is one paced Yahoo call per constituent: 491 for the S&P, 1,684 for
+         *     ACWI. That is minutes, and a button that hangs silently for eleven of them is
+         *     indistinguishable from a broken one — so every step reports as it happens.
+         *
+         *     ⚠ PRICES ARE FETCHED BY SYMBOL. Identity is decided in step 1 only, through the single paced
+         *     queue worker; nothing in step 3 reopens the question of WHICH listing an instrument is (Yahoo
+         *     answers an overloaded caller with an empty search, which is how Alphabet moved to a Vienna
+         *     line 75,000x thinner).
          */
-        post: operations["benchmark_fill_api_benchmarks_index__label__fill_post"];
+        get: operations["benchmark_refresh_api_benchmarks_index__label__refresh_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -7973,103 +7983,6 @@ export interface components {
             ticker: string;
             /** Ytd */
             ytd?: number | null;
-        };
-        /** BenchmarkFillResult */
-        BenchmarkFillResult: {
-            /**
-             * Capped
-             * @default 0
-             */
-            capped?: number;
-            /** Label */
-            label: string;
-            /**
-             * Needs Cap
-             * @default 0
-             */
-            needs_cap?: number;
-            /**
-             * Needs Resolve
-             * @default 0
-             */
-            needs_resolve?: number;
-            /**
-             * No Isin
-             * @default 0
-             */
-            no_isin?: number;
-            /**
-             * No Isin Names
-             * @default []
-             */
-            no_isin_names?: string[];
-            /** Note */
-            note?: string | null;
-            /**
-             * Price Failed
-             * @default 0
-             */
-            price_failed?: number;
-            /**
-             * Price Pending
-             * @default 0
-             */
-            price_pending?: number;
-            /**
-             * Queued
-             * @default 0
-             */
-            queued?: number;
-            /**
-             * Repriced
-             * @default 0
-             */
-            repriced?: number;
-            /**
-             * Resolve Failed
-             * @default 0
-             */
-            resolve_failed?: number;
-            /**
-             * Resolve Pending
-             * @default 0
-             */
-            resolve_pending?: number;
-            /**
-             * Resolve Unmapped
-             * @default 0
-             */
-            resolve_unmapped?: number;
-            /**
-             * Resolved
-             * @default 0
-             */
-            resolved?: number;
-            /**
-             * Skipped Existing
-             * @default 0
-             */
-            skipped_existing?: number;
-            /**
-             * Universe Built
-             * @default false
-             */
-            universe_built?: boolean;
-            /**
-             * Universe Members
-             * @default 0
-             */
-            universe_members?: number;
-            /**
-             * Usable
-             * @default 0
-             */
-            usable?: number;
-            /**
-             * Worker Live
-             * @default false
-             */
-            worker_live?: boolean;
         };
         /** BenchmarkResetResult */
         BenchmarkResetResult: {
@@ -14444,7 +14357,7 @@ export interface operations {
             };
         };
     };
-    benchmark_fill_api_benchmarks_index__label__fill_post: {
+    benchmark_refresh_api_benchmarks_index__label__refresh_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -14461,7 +14374,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BenchmarkFillResult"];
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
