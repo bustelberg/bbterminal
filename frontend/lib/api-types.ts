@@ -9079,6 +9079,8 @@ export interface components {
              * @default []
              */
             book_holdings?: components["schemas"]["BookHoldingDetail"][];
+            /** Book Note */
+            book_note?: string | null;
             /**
              * Covered Pct
              * @default 0
