@@ -8133,6 +8133,10 @@ export interface components {
             isin?: string | null;
             /** Name */
             name?: string | null;
+            /** Own Income Eur */
+            own_income_eur?: number | null;
+            /** Own Return As Of */
+            own_return_as_of?: string | null;
             /**
              * Own Return Estimated
              * @default false
@@ -8142,6 +8146,8 @@ export interface components {
             own_return_from?: string | null;
             /** Own Return Pct */
             own_return_pct?: number | null;
+            /** Own Return Source */
+            own_return_source?: string | null;
             /** Return Pct */
             return_pct?: number | null;
             /**
@@ -8870,8 +8876,14 @@ export interface components {
             end_price: number;
             /** Isin */
             isin?: string | null;
+            /** Market Cap Checked At */
+            market_cap_checked_at?: string | null;
+            /** Market Cap Currency */
+            market_cap_currency?: string | null;
             /** Market Cap Eur */
             market_cap_eur: number;
+            /** Market Cap Native */
+            market_cap_native?: number | null;
             /** Return Eur Pct */
             return_eur_pct: number;
             /** Return Local Pct */
@@ -9082,6 +9094,8 @@ export interface components {
              * @default 0
              */
             holdings?: number;
+            /** Holdings As Of */
+            holdings_as_of?: string | null;
             /**
              * Looked Through
              * @default []
@@ -9139,6 +9153,10 @@ export interface components {
          *     allocation for "avoiding" Healthcare.) `unpriced_buckets` names the rows to discount.
          */
         ModelPortfolioAttribution: {
+            /** Account Excess Pct */
+            account_excess_pct?: number | null;
+            /** Account Return Pct */
+            account_return_pct?: number | null;
             /**
              * Attributable Pct
              * @default 0
@@ -9225,6 +9243,8 @@ export interface components {
              * @default []
              */
             top_detractors?: components["schemas"]["AttributionName"][];
+            /** Unattributed Excess Pct */
+            unattributed_excess_pct?: number | null;
             /**
              * Unpriced Buckets
              * @default []

@@ -165,3 +165,58 @@ class TestSplitFactorFromJumpsAlone:
 
         assert "split_factor(" in inspect.getsource(m._split_adjust)
         assert "split_factor(" in inspect.getsource(m._window_rows)
+
+
+class TestTheCapColumnCarriesItsOwnProvenance:
+    """⚠ THE Mkt cap COLUMN DOES NOT EXPLAIN THE Weight COLUMN, AND THE ROW HAS TO SAY SO.
+
+    Every other cell on a constituent row is arithmetic a reader can follow — Start and Now give
+    YTD (local), the two FX legs give YTD (€) — so the obvious next step is `cap ÷ Σcap = Weight`.
+    It does not hold: the weight is formed from `start_cap_eur`, today's cap rolled BACK on the
+    price move, because weighting by today's cap is the look-ahead bias pinned above (+21.70%
+    against the real +9.10%). A row that quietly refuses to add up reads as a bug, so the cap cell
+    carries a card naming which cap it is — and when Yahoo was last asked for it, because a
+    weighting computed off a three-week-old cap renders identically to one computed this morning.
+    """
+
+    def _row(self, cap_now=200.0, p0=10.0, p1=20.0):
+        from routers._benchmark_index import _window_rows
+
+        member = {
+            "company_id": 1, "company_name": "Winner", "gurufocus_ticker": "WIN",
+            "isin": "US0000000001", "currency": "USD", "market_cap_eur": cap_now,
+            "market_cap_native": 220.0, "market_cap_currency": "USD",
+            "market_cap_checked_at": "2026-08-03T09:12:57+00:00",
+        }
+        marks = {1: {"start": ("2025-12-31", p0), "end": ("2026-07-31", p1), "jumps": []}}
+        fx = {"USD": {"2025-12-31": 1.0, "2026-07-31": 1.0}}
+        rows, _ = _window_rows([member], {}, fx, "2026-01-01", marks=marks)
+        return rows[0]
+
+    def test_the_displayed_cap_is_TODAYS_and_the_weight_is_not_formed_from_it(self):
+        r = self._row()
+        assert r["market_cap_eur"] == 200.0          # what the column shows
+        assert r["start_cap_eur"] == 100.0           # what the weight is formed from
+        assert r["start_cap_eur"] != r["market_cap_eur"], (
+            "if these ever coincide the card's warning is still right in general — but this "
+            "fixture must keep them apart, or the test proves nothing")
+
+    def test_the_source_and_the_date_reach_the_row(self):
+        r = self._row()
+        assert r["market_cap_native"] == 220.0
+        assert r["market_cap_currency"] == "USD"
+        assert r["market_cap_checked_at"].startswith("2026-08-03")
+
+    def test_a_member_without_provenance_still_prices(self):
+        """`_window_rows` is SHARED with the GuruFocus path, whose members carry no cap
+        provenance at all. Absent fields must come back as None, never raise."""
+        from routers._benchmark_index import _window_rows
+
+        member = {"company_id": 2, "company_name": "Legacy", "gurufocus_ticker": "LEG",
+                  "isin": "US0000000002", "currency": "USD", "market_cap_eur": 50.0}
+        marks = {2: {"start": ("2025-12-31", 5.0), "end": ("2026-07-31", 6.0), "jumps": []}}
+        rows, _ = _window_rows([member], {}, {"USD": {"2025-12-31": 1.0, "2026-07-31": 1.0}},
+                               "2026-01-01", marks=marks)
+        assert rows[0]["market_cap_native"] is None
+        assert rows[0]["market_cap_checked_at"] is None
+        assert rows[0]["return_local_pct"] == pytest.approx(20.0)

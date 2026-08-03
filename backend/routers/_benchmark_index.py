@@ -375,6 +375,16 @@ def _window_rows(members: list[dict], closes: dict[int, list[tuple[str, float]]]
             "return_eur_pct": ((last_p / r1) / (first_p / r0) - 1.0) * 100.0,
             "market_cap_eur": cap_now_eur,
             "start_cap_eur": cap_start_eur,
+            # ⚠ PROVENANCE FOR THE CAP, AND IT DESCRIBES `market_cap_eur` — NOT THE WEIGHT.
+            # `cap_start_eur` above is the number the weight is formed from, rolled back on the
+            # price move; the cap shown to a reader is TODAY's. So `cap / Σcap` does not reproduce
+            # the Weight column and is not supposed to — the surface has to say so.
+            # `.get()` because this builder is shared with the GuruFocus path, whose members
+            # carry no such fields.
+            "market_cap_native": m.get("market_cap_native"),
+            "market_cap_currency": m.get("market_cap_currency"),
+            "market_cap_checked_at": (str(m["market_cap_checked_at"])
+                                      if m.get("market_cap_checked_at") else None),
         })
     return rows, adjusted
 

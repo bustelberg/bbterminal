@@ -179,12 +179,27 @@ def members(label: str) -> tuple[list[dict], dict]:
             if r.get("status") == "ok" and r.get("analysis_id") and (r.get("bars") or 0) > 0:
                 grid[r["isin"]] = r
 
+    # WHERE THE CAP CAME FROM AND WHEN — for the panel's per-row provenance, not for the maths.
+    # `asset_grid` carries `market_cap_eur` and its currency but not the native figure or the
+    # timestamp; both live on `asset_analysis`, which the Refresh button stamps every run
+    # (`_benchmark_refresh._caps`). Surfaced because a cap is a fetched number with an age, and a
+    # weight computed off a three-week-old cap is a three-week-old weight — invisible otherwise.
+    caps: dict[int, dict] = {}
+    aids = sorted({g["analysis_id"] for g in grid.values() if g.get("analysis_id")})
+    for i in range(0, len(aids), IN_CHUNK_SIZE):
+        for r in (supabase.table("asset_analysis")
+                  .select("analysis_id,market_cap_native,market_cap_currency,"
+                          "market_cap_checked_at")
+                  .in_("analysis_id", aids[i:i + IN_CHUNK_SIZE]).execute().data or []):
+            caps[r["analysis_id"]] = r
+
     by_name: dict[str, dict] = {}
     for c in companies:
         g = grid.get(c.get("isin") or "")
         cap = float((g or {}).get("market_cap_eur") or 0)
         if not g or cap <= 0:
             continue                      # not in the asset grid, or no cap to weight it by
+        prov = caps.get(g["analysis_id"]) or {}
         key = (c.get("company_name") or "").strip().lower()
         prev = by_name.get(key)
         if prev is None or cap > float(prev["market_cap_eur"]):
@@ -196,6 +211,11 @@ def members(label: str) -> tuple[list[dict], dict]:
                 "isin": c["isin"],
                 "currency": g.get("currency"),
                 "market_cap_eur": cap,
+                # Provenance only — nothing downstream weights off these.
+                "market_cap_native": prov.get("market_cap_native"),
+                "market_cap_currency": (prov.get("market_cap_currency")
+                                        or g.get("market_cap_currency")),
+                "market_cap_checked_at": prov.get("market_cap_checked_at"),
             }
 
     out = list(by_name.values())

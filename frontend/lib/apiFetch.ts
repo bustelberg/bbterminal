@@ -19,6 +19,7 @@
  * surfaces normally.
  */
 
+import { traceRequest } from './debugTrace';
 import { createClient } from './supabase/client';
 
 // Cache the access token between calls. Supabase rotates it ~hourly
@@ -81,5 +82,24 @@ export async function apiFetch(
   if (_isViewingAsUser() && !headers.has('x-view-as')) {
     headers.set('X-View-As', 'user');
   }
-  return fetch(url, { ...init, headers });
+  // ⚠ TRACED FROM HERE BECAUSE THIS IS THE ONE CHOKEPOINT. Every backend call in the app goes
+  // through this function, so one line here logs method, path, status, duration and payload size
+  // for every panel — including the calls nobody thought to instrument, which are exactly the
+  // ones that go wrong in production. It never touches the body (see `debugTrace`): the size
+  // comes from `content-length`, and cloning to count rows would double the memory of every
+  // payload on the page.
+  //
+  // ⚠ THE TOKEN IS NEVER LOGGED, here or anywhere. It is a bearer credential; a console trace is
+  // pasted into chats and screenshots.
+  const done = traceRequest(init.method ?? 'GET', url);
+  try {
+    const resp = await fetch(url, { ...init, headers });
+    done(resp);
+    return resp;
+  } catch (e) {
+    // A network failure never reaches the caller's `resp.ok` check — it throws, and without this
+    // the console shows nothing at all for a request that was made and died.
+    done(null, e);
+    throw e;
+  }
 }

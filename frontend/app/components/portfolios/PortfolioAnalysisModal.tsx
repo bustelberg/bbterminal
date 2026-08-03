@@ -369,9 +369,17 @@ type BookHolding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
  *  ⚠ RETURN IS `own_return_pct`, NOT `return_pct`, FOR THE SAME REASON IN REVERSE. `return_pct` is
  *  the book's value change, and the book knows what the CERTIFICATE did, not what NVIDIA did —
  *  splitting it hands all 135 stocks their wrapper's number (NVIDIA read +0.08% against its own
- *  +2.82%). `own_return_pct` prices each instrument off its own EUR series. It follows that the
- *  rows do NOT sum to a class return, so no class return is shown in this table; that figure is a
- *  different measure and it lives in the chart legend, where it is the only one on offer.
+ *  +2.82%). It follows that the rows do NOT sum to a class return, so no class return is shown in
+ *  this table; that figure is a different measure and it lives in the chart legend, where it is
+ *  the only one on offer.
+ *
+ *  ⚠ `own_return_pct` IS AIRS'S OWN FIGURE WHEREVER AIRS HAS ONE — the identical number the
+ *  expanded row's `Return` column shows (Beginwaarde → Huidige waarde plus net dividend). The
+ *  wrapper argument above applies to LOOK-THROUGH rows and was being applied to every row, so a
+ *  directly-held holding was priced off our yfinance series while the row that opened this modal
+ *  priced it off AIRS: Fortinet read +108.65% here and +111.74% there. Both defensible, and having
+ *  both on one screen is not. `own_return_source` says which basis each row got — yfinance now
+ *  appears only where the book genuinely cannot answer.
  *
  *  NO CLASS RETURN IN THE GROUP HEADER. Two returns for one class, a few points apart and both
  *  correct, is exactly the pair a reader cannot arbitrate. */
@@ -382,6 +390,11 @@ type HoldingSortKey = 'name' | 'weight' | 'weightStart' | 'return';
  *  Fixed precision also keeps the column optically aligned in a mono font. */
 const num2 = (v: number) => v.toFixed(2);
 const ret2 = (v?: number | null) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
+
+/** A euro amount for a provenance card — whole euros. The dividend inside a return is context for
+ *  the number above it, not a figure anyone reconciles to the cent. */
+const eur0 = (v: number) =>
+  `€${v.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
 function PortfolioHoldings({ holdings, slices, asOf }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
@@ -516,11 +529,29 @@ function PortfolioHoldings({ holdings, slices, asOf }: {
                 </td>
                 {/* The class at the window's open — the denominator a reader needs to check a bar
                     against. Summed from the rows, since the pie carries only the current figure. */}
-                <td className="py-2 text-right font-mono text-[11px] font-semibold text-fg-muted">
+                <td className="py-2 text-right font-mono text-[11px] font-semibold text-fg-muted whitespace-nowrap">
                   {num2(g.rows.reduce((s, h) => s + (h.weight_start_pct ?? 0), 0))}%
+                  {/* ⚠ THE TWO SUBTOTALS COME FROM DIFFERENT DENOMINATORS AND WILL NOT MATCH —
+                      the first question a reader asks when Stocks reads 100.00% / 99.91%. */}
+                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    what={`${g.bucket}'s share of the book WHEN THE WINDOW OPENED.`}
+                    note="summed from the rows below — Σ Beginwaarde ÷ the book’s priced Beginwaarde"
+                    how={'Normalised over the PRICED holdings only, so it reaches 100% across the '
+                      + 'classes even where the book holds something we cannot value. That is why '
+                      + 'it can differ from the “now” subtotal beside it, which is the allocation '
+                      + 'pie’s slice and counts cash. Weighting each row’s Return by its share of '
+                      + 'THIS figure reproduces the class return exactly.'} />
                 </td>
-                <td className="py-2 text-right font-mono text-[11px] font-semibold text-fg-strong">
+                <td className="py-2 text-right font-mono text-[11px] font-semibold text-fg-strong whitespace-nowrap">
                   {num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}%
+                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    what={`${g.bucket}'s share of the book TODAY.`}
+                    note={g.slice ? 'the allocation chart’s own slice — cash included'
+                      : 'summed from the rows below'}
+                    how={'Read from the same figure the pie above is drawn from, so the bar and '
+                      + 'this number cannot disagree. It counts every class INCLUDING cash, which '
+                      + 'is why the classes sum to 100% here while any one of them can sit below '
+                      + 'its start-weight subtotal.'} />
                 </td>
                 {/* Deliberately blank. A class return here would be the book's value change —
                     a different measure from the instrument returns beneath it, and putting the
@@ -539,25 +570,89 @@ function PortfolioHoldings({ holdings, slices, asOf }: {
                   {/* ⚠ A BLANK IS NOT A ZERO HERE. `null` = no ISIN to join on (cash); `0.00%` =
                       a real fact, the position was bought after the window opened and therefore
                       carries no weight on ANY of the composition charts. */}
-                  <td className="py-1.5 text-right font-mono text-fg-muted tabular-nums"
-                    title={h.weight_start_pct === 0
-                      ? 'Bought after the window opened — no start weight, so it is absent from the Sector / Region / Currency charts.'
-                      : undefined}>
+                  <td className="py-1.5 text-right font-mono text-fg-muted tabular-nums whitespace-nowrap">
                     {h.weight_start_pct == null ? '—' : `${num2(h.weight_start_pct)}%`}
+                    {/* ⚠ THE CARD IS PER CELL BECAUSE THE ANSWER IS PER CELL. The definition is
+                        shared, but "0.00%" and "—" mean opposite things on this column and only
+                        the row knows which it is: a real zero is a position BOUGHT after the
+                        window opened (it exists, it just carries no weight on any composition
+                        chart), while a blank is a line with no ISIN to join on — cash. */}
+                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                      what={`${h.name ?? 'This holding'}'s share of the book WHEN THE WINDOW OPENED.`}
+                      note={h.weight_start_pct == null
+                        ? 'no opening value — this line has no ISIN to join on (cash)'
+                        : h.weight_start_pct === 0
+                          ? 'zero: bought AFTER the window opened, so it is absent from the Sector / Region / Currency charts'
+                          : 'Beginwaarde lopend jaar ÷ the book’s total Beginwaarde'}
+                      how={'AIRS’s own opening valuation, divided by the sum of every priced '
+                        + 'holding’s. ⚠ THIS is the weight the Return column belongs to: '
+                        + 'Σ (this weight × that return) reproduces the class figure exactly. '
+                        + 'The “now” weight beside it does not — a holding that rose carries a '
+                        + 'bigger share today than it held while it was rising, so weighting by '
+                        + 'it overstates (measured on BUS_Offensief_Dyn: +11.19% against a book '
+                        + 'that made +5.58%, exactly double).'} />
                   </td>
-                  <td className="py-1.5 text-right font-mono text-fg tabular-nums">
+                  <td className="py-1.5 text-right font-mono text-fg tabular-nums whitespace-nowrap">
                     {num2(h.weight_now_pct ?? 0)}%
+                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                      what={`${h.name ?? 'This holding'}'s share of the book TODAY.`}
+                      note="Huidige waarde ÷ the book’s total Huidige waarde"
+                      how={'AIRS’s own current valuation as a share of the book — what the '
+                        + 'allocation pie is drawn from, and the right answer to “how much of my '
+                        + 'money is in this now”. ⚠ It is NOT the weight to multiply the Return '
+                        + 'by: it already contains the return (a winner has grown into a larger '
+                        + 'share), so the product double-counts. Use the Start weight for that.'} />
                   </td>
                   {/* An unpriced position shows a dash, never 0% — "we could not price this over
                       the window" and "it did not move" are different facts and a 0 states the
                       wrong one. An interpolated opening mark is flagged per value, because that
                       one IS a property of the number rather than of the column. */}
-                  <td className={`py-1.5 pr-4 text-right font-mono tabular-nums ${retTone(h.own_return_pct)}`}
-                    title={h.own_return_pct == null ? 'No price series over this window' : undefined}>
+                  <td className={`py-1.5 pr-4 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.own_return_pct)}`}>
                     {ret2(h.own_return_pct)}
+                    {/* ⚠ THE FALLBACK MARKS ITSELF. Most rows are AIRS's own number now, so a
+                        yfinance one sitting silently among them is the pair a reader cannot
+                        arbitrate — same rule as the ≈ beside an interpolated mark. */}
+                    {h.own_return_pct != null && h.own_return_source === 'yfinance' && (
+                      <span className="ml-1 text-fg-faint"
+                        title="yfinance, not AIRS — this row sits inside a certificate or has no opening value in the book, so AIRS has no return of its own for it.">ƒ</span>
+                    )}
                     {h.own_return_estimated && (
                       <span className="ml-1 text-warn-400" title="Opening price interpolated — no close near the window's start">≈</span>
                     )}
+                    {/* ⚠ THE CARD'S *SOURCE* CHANGES PER ROW, WHICH IS THE WHOLE REASON IT IS ON
+                        THE CELL. Most rows are AIRS's own valuation; a row inside a certificate
+                        (or bought mid-window) has no AIRS return of its own and is priced off our
+                        yfinance series instead. Same column, same font, two vendors — a header
+                        card could only state one of them, and would be wrong for the other. */}
+                    <Provenance
+                      source={h.own_return_source === 'yfinance' ? 'yfinance' : 'airs_volk'}
+                      /* ⚠ THE ROW'S OWN DATE, NOT THE TABLE'S. An AIRS row is as-of the book
+                         snapshot; a look-through row is as-of that instrument's last close,
+                         which is a different date and can trail it by weeks. One clock for both
+                         would be wrong for one of them, every time. */
+                      asOf={h.own_return_as_of ?? (h.own_return_source === 'yfinance' ? undefined : asOf)}
+                      kind="formula"
+                      what={h.own_return_pct == null
+                        ? `${h.name ?? 'This holding'} could not be priced over this window.`
+                        : `What ${h.name ?? 'this holding'} returned since ${h.own_return_from ?? 'the window opened'}, in EUR.`}
+                      note={h.own_return_pct == null
+                        ? 'no valuation at one end of the window — a dash, never a 0%, because “could not price” and “did not move” are different facts'
+                        : h.own_return_source === 'yfinance'
+                          ? 'our own EUR close series — AIRS has no return of its own for this row'
+                          : h.own_income_eur
+                            ? `(Huidige waarde + ${eur0(h.own_income_eur)} net dividend) ÷ Beginwaarde − 1`
+                            : 'Huidige waarde ÷ Beginwaarde − 1'}
+                      how={h.own_return_source === 'yfinance'
+                        ? ('This row sits inside a certificate, or had no opening value in the '
+                          + 'book. AIRS values the WRAPPER, not what is inside it — splitting the '
+                          + 'certificate’s value change across its holdings would hand every one '
+                          + 'of them the wrapper’s number (NVIDIA once read +0.08% against its own '
+                          + '+2.82%). So it is priced off the instrument’s own EUR series, at the '
+                          + 'same anchor, with the same split adjustment and per-date FX.')
+                        : ('AIRS’s own valuation at both ends of the window, plus any dividend it '
+                          + 'paid, net of withholding. This is the IDENTICAL number the Return '
+                          + 'column shows when you expand this portfolio on the portfolios list — '
+                          + 'same formula, same income journal, so the two cannot disagree.')} />
                   </td>
                 </tr>
               ))}
@@ -897,7 +992,12 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                  and nothing about what they hold. Picking a class still narrows this to that
                  class's own breakdown. */
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
-                asOf={data.as_of} />
+                /* ⚠ THE BOOK SNAPSHOT, NOT `data.as_of`. That field is the model COMPOSITION's
+                   effective date (2025-12-30 for AITopSelectie) — a true fact about the weights
+                   the model declares, and the wrong clock for figures the BOOK values, which are
+                   as-of 2026-08-01. Stamped with it, the modal called the row's own +111.74%
+                   216 days old while the row called it 2. */
+                asOf={data.holdings_as_of ?? data.as_of} />
             ) : sleeve ? (
               /* NON-EQUITY class: its holdings' contribution + a currency chart, no benchmark. */
               <SleeveBreakdown holdings={data.book_holdings ?? []} bucket={sleeve} />

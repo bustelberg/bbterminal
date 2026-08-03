@@ -268,6 +268,18 @@ class IndexMember(BaseModel):
     start_price: float
     end_date: str
     end_price: float
+    # ⚠ PROVENANCE FOR `market_cap_eur`, WHICH IS TODAY'S CAP — AND `weight_pct` IS NOT FORMED
+    # FROM IT. The weight uses the START-of-window cap, rolled back on the price move (weighting
+    # by today's cap is look-ahead bias: measured, it turns the S&P's +9.10% into +21.70%). So
+    # `market_cap_eur / Σ market_cap_eur` deliberately does NOT reproduce the Weight column, and
+    # the row has to say so rather than leave a reader to discover it.
+    #
+    # `market_cap_checked_at` is when Yahoo was last asked — the Refresh button stamps every
+    # constituent on every run. A cap is a fetched number with an age; without the date, a
+    # three-week-old weighting is indistinguishable from today's.
+    market_cap_native: float | None = None
+    market_cap_currency: str | None = None
+    market_cap_checked_at: str | None = None
 
 
 class SplitAdjustment(BaseModel):

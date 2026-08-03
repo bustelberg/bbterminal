@@ -26,18 +26,31 @@ WHAT THE BUTTON DOES, IN THE ORDER IT DOES IT
     which is how Alphabet moved from GOOGL to a Vienna line 75,000x thinner. Step 1 is the only
     place identity is ever decided, and there it goes through the single paced queue worker.
 
-⚠ A CONSTITUENT ALREADY CURRENT IS SKIPPED, AND THE LOG SAYS SO. Re-fetching it would spend a
-    throttled call to write rows we already hold, and over ACWI that is 1,600 wasted calls per
-    press. The skip is printed per constituent, so a run that fetched nothing reads as "all
-    current", never as "did nothing".
+⚠ A PRESS ALWAYS FETCHES. EVERY CONSTITUENT. NO STALENESS TOLERANCE.
+    This briefly skipped any constituent whose newest close was within `DEFAULT_STALE_DAYS` of
+    the market anchor, to save throttled calls. It was wrong, and wrong in the way that costs
+    trust: ING sat at its 2026-07-30 close of 30.215 while the AEX's `as_of` read 2026-07-31, the
+    row wore a stale-price warning, and pressing Refresh reported "already current" without ever
+    looking. A human pressing Refresh is asking us to LOOK; deciding on their behalf that there
+    is nothing to find is not a saving, it is a refusal dressed as a result.
 
-    ⚠ "CURRENT" CARRIES A TOLERANCE, AND WITHOUT IT NOTHING IS EVER CURRENT. Requiring the
-    newest close to sit exactly ON the anchor makes every market whose close has not published
-    yet look behind: measured on the AEX, the anchor was 2026-07-31 (ASML and the London lines
-    had printed) while all 21 Amsterdam names still ended 2026-07-30, so a second press
-    re-fetched 21 series to learn Yahoo had nothing to add. The tolerance is
-    `price_refresh.DEFAULT_STALE_DAYS`, imported — the same figure the daily tick uses, chosen
-    to clear a weekend, and not a second threshold that can drift from it.
+    The saving it bought was also mostly imaginary. `extend_series` fetches only the gap after the
+    last stored close, so a constituent with nothing new costs one small windowed request, and it
+    comes back with an honest answer instead of an assumed one.
+
+⚠ WHAT DOES NOT MOVE IS REPORTED AS SUCH, WITH THE REASON. "unchanged" is an ANSWER — the vendor
+    has no closed bar after the one we hold — and it is a different fact from "we skipped it".
+    Measured on the AEX, 2026-08-03: Yahoo's 2026-07-31 bar is NULL for every Amsterdam listing
+    (INGA.AS, AD.AS — the venue has no close that day) while ASML's US line and the London lines
+    do have one, which is why the index's `as_of` runs ahead of its Dutch constituents. That is a
+    vendor gap, not a stale fetch, and no amount of refreshing will close it. The log says so per
+    row rather than leaving a reader to suspect the button.
+
+⚠ AND TODAY'S UNFINISHED SESSION IS NEVER STORED. Amsterdam was open when the above was measured
+    and Yahoo happily returned an 08-03 bar at 30.13 — a live quote, not a close. `store.
+    extend_series` drops any bar failing `yahoo.is_closed_bar`, so fetching mid-session is safe:
+    it cannot write an intraday price that would move the index and then be overwritten at the
+    bell. That guarantee is what makes "always fetch" the right default.
 """
 from __future__ import annotations
 
@@ -287,21 +300,15 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
     emit("phase", phase="prices", message=(
         f"3/3 Start-of-year and current price for {len(todo)} constituent(s) — "
         f"window opens {start_anchor}"))
-    out = {"total": len(todo), "fetched": 0, "already_current": 0,
+    # `moved` = the series gained a closed bar. `unchanged` = the vendor has none after the one we
+    # hold, which is an ANSWER (a venue with no close that day, a delisted line, a session still
+    # open) and is why it is counted apart from a failure.
+    out = {"total": len(todo), "fetched": 0, "moved": 0, "unchanged": 0,
            "failed": 0, "no_start": 0, "no_end": 0}
-    from asset_pipeline.price_refresh import DEFAULT_STALE_DAYS
-
     for n, (isin, aid, sym) in enumerate(todo, 1):
         name = by_isin_name.get(isin, "")[:28]
         start, end = _marks(aid, lookback, start_anchor)
-        if start and end and anchor and _days(anchor, end[0]) < DEFAULT_STALE_DAYS:
-            out["already_current"] += 1
-            emit("progress", message=(
-                f"  [{n}/{len(todo)}] {sym:<12} {name:<28} already current "
-                f"(anchor {anchor}) — {start[0]} {start[1]:.4g} → {end[0]} {end[1]:.4g}"
-                + (f" ({_pct(start[1], end[1]):+.2f}%)"
-                   if _pct(start[1], end[1]) is not None else "")))
-            continue
+        was_end = end[0] if end else None
         try:
             # `since` is the LOOKBACK, not the last close: the opening mark is the last bar on or
             # before 1 January, which sits inside it, and a constituent whose window was deleted
@@ -331,10 +338,29 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
                 f"  [{n}/{len(todo)}] {sym:<12} {name:<28} no current price"))
         else:
             chg = _pct(start[1], end[1])
-            emit("progress", message=(
-                f"  [{n}/{len(todo)}] {sym:<12} {name:<28} "
-                f"{start[0]} {start[1]:.4g} → {end[0]} {end[1]:.4g}"
-                + (f" ({chg:+.2f}%)" if chg is not None else "")))
+            # ⚠ DID IT ACTUALLY MOVE? Printing the marks alone cannot answer the question the
+            # press was asking. A row that comes back on the same date it went in is the vendor
+            # saying "there is nothing after this" — and when that date trails the index's own
+            # `as_of`, that gap is a property of the LISTING, not of our fetch. Measured on the
+            # AEX: Yahoo's 2026-07-31 bar is null for every Amsterdam line, so ING stays at its
+            # 07-30 close of 30.215 no matter how often this runs. Saying so is the difference
+            # between a data gap and a suspected bug.
+            if was_end and end[0] == was_end:
+                out["unchanged"] += 1
+                behind = (f" — trails the index's {anchor}, so this LISTING has no close that day"
+                          if anchor and end[0] < anchor else "")
+                emit("progress", message=(
+                    f"  [{n}/{len(todo)}] {sym:<12} {name:<28} "
+                    f"{start[0]} {start[1]:.4g} → {end[0]} {end[1]:.4g}"
+                    + (f" ({chg:+.2f}%)" if chg is not None else "")
+                    + f"  · unchanged, Yahoo has no closed bar after {end[0]}{behind}"))
+            else:
+                out["moved"] += 1
+                emit("progress", message=(
+                    f"  [{n}/{len(todo)}] {sym:<12} {name:<28} "
+                    f"{start[0]} {start[1]:.4g} → {end[0]} {end[1]:.4g}"
+                    + (f" ({chg:+.2f}%)" if chg is not None else "")
+                    + f"  · NEW close ({was_end or 'nothing'} → {end[0]})"))
         time.sleep(_SLEEP_S)
     return out
 
@@ -371,7 +397,10 @@ def refresh_benchmark(label: str, emit) -> dict:
         "no_cap": caps["no_cap"],
         "prices_total": px["total"],
         "prices_fetched": px["fetched"],
-        "prices_already_current": px["already_current"],
+        # Of the ones fetched: how many gained a closed bar, and how many the vendor had nothing
+        # newer for. The second is an answer, not a miss — see `_prices`.
+        "prices_moved": px["moved"],
+        "prices_unchanged": px["unchanged"],
         "prices_failed": px["failed"],
         "no_start_price": px["no_start"],
         "market_anchor": anchor,
@@ -379,7 +408,8 @@ def refresh_benchmark(label: str, emit) -> dict:
     }
     emit("progress", message=(
         f"[{label}] done in {took:.0f}s — {len(priceable)} constituents, {caps['capped']} caps, "
-        f"{px['fetched']} price series fetched, {px['already_current']} already current"
+        f"{px['fetched']} price series fetched — {px['moved']} gained a new close, "
+        f"{px['unchanged']} already at the vendor's latest"
         + (f", {px['failed']} failed" if px["failed"] else "")))
     return summary
 
