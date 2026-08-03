@@ -648,6 +648,39 @@ def _is_fund(grid_row: dict | None) -> bool:
     return _is_etf(grid_row)
 
 
+def book_unavailable_reason(portfolio_id: int) -> str:
+    """WHY this model has no book view — in the words the reader needs, not "no positions".
+
+    ⚠ `_book_port_items` RETURNS `None` FOR THREE DIFFERENT REASONS AND THE MODAL SHOWED ONE
+    SENTENCE FOR ALL OF THEM. "No positions to show for this portfolio" was rendered when the
+    model is not paired with a book, when the paired book has never been scanned, and when the
+    scan returned nothing — three different problems with three different remedies, and it was
+    reported alongside a portfolios list that visibly HAS rows. The obvious reading is "the modal
+    is broken", and the actual answer was never on screen.
+
+    Called only on the unhappy path, so the extra reads cost nothing in the normal case.
+    """
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+
+    link = next((a for a in list_account_links()["accounts"]
+                 if a.get("model_portfolio_id") == portfolio_id), None)
+    if not link:
+        return ("This model portfolio is not paired with an AIRS book, so there are no valued "
+                "holdings to show. The portfolios list can still expand the BOOK's own rows — "
+                "that view reads the account directly and needs no pairing. Pair them from the "
+                "Link column to see them here.")
+    pf = link["portefeuille"]
+    n = (supabase.table("airs_holding").select("portefeuille", count="exact")
+         .eq("portefeuille", pf).limit(1).execute().count or 0)
+    if not n:
+        return (f"Paired with the book {pf}, but `airs_holding` has no rows for it — its "
+                f"Vermogensoverzicht has never been scraped, or the last scan did not reach it. "
+                f"Refresh that portfolio from AIRS.")
+    return (f"Paired with the book {pf}, which has {n} stored holding row(s), but none of them "
+            f"survived resolution — every line lacks an ISIN we can join on. Check the book's "
+            f"holdings on the portfolios list.")
+
+
 def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     """The composition as the BOOK actually holds it — weighted by AIRS's EUR values, not the
     model's nominal percentages.
@@ -1000,6 +1033,18 @@ def compute_portfolio_analysis(portfolio_id: int,
     # The paired book drives book-weighting (if asked) AND the per-bucket returns for the pie —
     # a return is a property of the held instruments, not the weighting basis. Loaded once.
     book = _book_port_items(portfolio_id, codes)
+    # ⚠ SAY WHY THERE IS NO BOOK, HERE, EVERY TIME — not only when book WEIGHTS were asked for.
+    # The holdings table is empty whenever `book` is None regardless of `weight_by`, and it was
+    # the one surface with no explanation attached. WARNING level because uvicorn leaves the root
+    # logger there, so an `info` line never reaches production — and production is where this was
+    # reported ("No positions to show" beside a portfolios list that plainly has rows).
+    book_note = None if book else book_unavailable_reason(portfolio_id)
+    if book_note:
+        _log.warning("[analysis] portfolio %s has no book view: %s", portfolio_id, book_note)
+    else:
+        _log.warning("[analysis] portfolio %s: book view has %d holding(s) from %s",
+                     portfolio_id, len(book.get("holdings_detail") or []),
+                     book.get("portefeuille"))
     weight_basis, weight_note = "model", None
     port_holdings = len([r for r in pos if r.get("isin")])
     if weight_by == "book":
@@ -1157,6 +1202,8 @@ def compute_portfolio_analysis(portfolio_id: int,
         # actual EUR holdings. `weight_note` is set only when "book" was asked for and refused.
         "weight_basis": weight_basis,
         "weight_note": weight_note,
+        # Why the holdings table is empty, when it is. Null when there IS a book view.
+        "book_note": book_note,
         # Coverage, always — a composition renormalised over a fraction of the model is the same
         # invention the returns refuse to make. The reader gets to see it.
         "covered_pct": (classified_w / total_w * 100.0) if total_w > 0 else 0.0,
@@ -1374,6 +1421,15 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
         # A basket has no AIRS book, so no per-holding book returns — the non-equity sleeve view is
         # a portfolio-only feature.
         "book_holdings": [],
+        # ⚠ AND IT HAS TO SAY SO. This is the OTHER route to an empty holdings table, and from the
+        # reader's side the two are identical: the same blank panel, on a portfolio whose rows they
+        # can see on the list behind it. A basket is opened when the book is NOT paired with a
+        # model portfolio (`fixed_portfolio_id` is null), which is a fact about the pairing, not
+        # about the holdings.
+        "book_note": ("Opened as a basket of ISINs, because this book is not paired with a model "
+                      "portfolio. The charts above are computed from its holdings, but the valued "
+                      "per-holding table is a paired-portfolio feature — pair it from the Link "
+                      "column to get it."),
     }
 
 

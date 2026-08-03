@@ -396,14 +396,24 @@ const ret2 = (v?: number | null) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${
 const eur0 = (v: number) =>
   `€${v.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
-function PortfolioHoldings({ holdings, slices, asOf }: {
+function PortfolioHoldings({ holdings, slices, asOf, note }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
+  /** WHY the table is empty, from the server (`book_note`) — three different faults used to
+   *  render as one sentence, next to a portfolios list that visibly has rows. */
+  note?: string | null;
 }) {
   const [sortKey, setSortKey] = useState<HoldingSortKey>('weight');
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
 
+  // ⚠ AN EMPTY TABLE MUST NAME ITS OWN CAUSE. "No positions to show for this portfolio" was
+  // shown for three unrelated faults — unpaired model, book never scanned, opened as a basket —
+  // and it was read, correctly, as the modal being broken: the portfolios list right behind it
+  // shows the rows, because THAT view reads the account directly and needs no pairing.
   if (!holdings.length) return (
-    <p className="text-[11px] text-fg-subtle py-8 text-center">No positions to show for this portfolio.</p>
+    <div className="py-8 px-6 text-center space-y-1">
+      <p className="text-[11px] text-fg-subtle">No valued positions to show here.</p>
+      {note && <p className="text-[11px] text-fg-faint max-w-xl mx-auto">{note}</p>}
+    </div>
   );
 
   // Classes in the chart's own order, so the eye moves between them without re-reading.
@@ -992,6 +1002,7 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                  and nothing about what they hold. Picking a class still narrows this to that
                  class's own breakdown. */
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
+                note={data.book_note}
                 /* ⚠ THE BOOK SNAPSHOT, NOT `data.as_of`. That field is the model COMPOSITION's
                    effective date (2025-12-30 for AITopSelectie) — a true fact about the weights
                    the model declares, and the wrong clock for figures the BOOK values, which are

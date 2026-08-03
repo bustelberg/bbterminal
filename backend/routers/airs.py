@@ -854,6 +854,12 @@ class ModelPortfolioAnalysis(BaseModel):
     # Per-holding book detail — the source for a non-equity sleeve's contribution breakdown +
     # currency chart (where sector/region/SP500 say nothing). Empty for a basket or an unpaired model.
     book_holdings: list[BookHoldingDetail] = []
+    # ⚠ WHY `book_holdings` IS EMPTY, WHEN IT IS. Three different faults rendered as one
+    # sentence — "No positions to show for this portfolio" — beside a portfolios list that
+    # visibly HAS rows: the model is not paired with a book, the paired book has never been
+    # scanned, or it was opened as an unpaired basket. Different remedies, and none of them was
+    # on screen. Null when there IS a book view.
+    book_note: str | None = None
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/analysis",

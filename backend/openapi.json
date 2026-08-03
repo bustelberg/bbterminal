@@ -5563,6 +5563,17 @@
             "title": "Book Holdings",
             "type": "array"
           },
+          "book_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Note"
+          },
           "covered_pct": {
             "default": 0.0,
             "title": "Covered Pct",
