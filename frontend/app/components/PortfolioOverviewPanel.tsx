@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
+import { trace, traceEmpty, traceError, traceRows, traceScope } from '../../lib/debugTrace';
 import { dialog } from '../../lib/dialog';
 import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { Provenance } from '../../lib/provenance';
@@ -423,14 +424,39 @@ export default function PortfolioOverviewPanel() {
   }, []);
 
   const loadOverview = useCallback(async () => {
-    try {
-      const r = await apiFetch(`${API_URL}/api/airs/portfolios/overview`);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setRows((await r.json()) as AirsPortfolioOverview[]);
-      setErr(null);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    }
+    await traceScope('overview', 'loading the portfolios table', async () => {
+      try {
+        const r = await apiFetch(`${API_URL}/api/airs/portfolios/overview`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const body = (await r.json()) as AirsPortfolioOverview[];
+        // ⚠ AN EMPTY TABLE IS THE STATE A FRESH PRODUCTION DATABASE IS IN, and it renders exactly
+        // like a broken page. It is not an error — nothing has been scanned yet — so it is a
+        // WARN with the remedy in it, not a red banner and not silence.
+        traceRows('overview', 'portfolios', body,
+          'nothing in `airs_account_roster` / `airs_performance` yet. This is what a fresh '
+          + 'database looks like — press "Refresh all from AIRS" to run the Front-Office '
+          + 'discovery and populate it. Not an error.');
+        if (body.length) {
+          // The three facts that decide whether every OTHER number on the page can exist. A row
+          // with no pairing has no Analyse-by-id; a row with no YTD had no Rendement report.
+          const paired = body.filter((x) => x.fixed_portfolio_id != null).length;
+          const withYtd = body.filter((x) => x.ytd_pct != null).length;
+          const incomplete = body.filter((x) => (x.missing_reports ?? []).length > 0).length;
+          trace('overview', `${paired}/${body.length} paired with a model portfolio, `
+            + `${withYtd} carry a YTD, ${incomplete} are missing at least one AIRS report`);
+          if (!withYtd) {
+            traceEmpty('overview', 'no portfolio has a YTD',
+              '`airs_performance` has no rows for these books — the Rendement (ATT) report has '
+              + 'never been scraped. Every return column on this page will be blank.');
+          }
+        }
+        setRows(body);
+        setErr(null);
+      } catch (e) {
+        traceError('overview', 'the portfolios table could not be loaded', e);
+        setErr(e instanceof Error ? e.message : String(e));
+      }
+    });
   }, []);
 
   useEffect(() => { void loadOverview(); }, [loadOverview]);

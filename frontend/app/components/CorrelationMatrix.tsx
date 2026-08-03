@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
+import { trace, traceEmpty, traceError } from '../../lib/debugTrace';
 import { API_URL } from '../../lib/apiUrl';
 import type { PortfolioCorrelationMatrix } from '../../lib/types/api';
 import { sliceMatrix } from './correlationFilter';
@@ -151,8 +152,33 @@ export default function CorrelationMatrix() {
         const r = await apiFetch(`${API_URL}/api/airs/model-portfolios/correlations`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = (await r.json()) as PortfolioCorrelationMatrix;
+        // ⚠ THREE WAYS THIS PANEL COMES BACK EMPTY AND THEY NEED DIFFERENT ACTIONS. A correlation
+        // needs two portfolios that BOTH have a daily return series over the same days, so a
+        // fresh database yields no ids, a partly-populated one yields ids whose cells are all
+        // null, and a healthy one yields a matrix. On screen the first two look identical — a
+        // grey grid — so the console has to separate them.
+        const n = d.portfolio_ids?.length ?? 0;
+        if (!n) {
+          traceEmpty('correlations', 'no portfolios in the matrix',
+            'no model portfolio has a priceable daily return series yet — the matrix needs '
+            + 'holdings with prices on both sides of a pair. Scan the model portfolios and '
+            + 'refresh their instruments. Not an error.');
+        } else {
+          const cells = (d.ytd ?? []).flat();
+          const filled = cells.filter((c) => c != null).length;
+          trace('correlations', `${n}×${n} matrix, ${filled} of ${cells.length} YTD cells computed`
+            + ` (min overlap ${d.min_overlap_days ?? '?'} days)`);
+          if (n > 1 && filled <= n) {
+            // Only the diagonal came back: every PAIR failed the overlap test.
+            traceEmpty('correlations', 'every off-diagonal cell is null',
+              `no two portfolios share ${d.min_overlap_days ?? 'the minimum'} days of returns. `
+              + 'Their price series are too short or do not overlap — the grid will render '
+              + 'blank even though the portfolios themselves are fine.');
+          }
+        }
         if (!cancelled) setData(d);
       } catch (e) {
+        traceError('correlations', 'the correlation matrix could not be loaded', e);
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       } finally {
         if (!cancelled) setLoading(false);

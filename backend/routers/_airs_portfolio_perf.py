@@ -570,6 +570,7 @@ def ytd_anchor_for(effective: str | None, year: int | None = None) -> str:
 
 
 def compute_portfolio_performance(year: int | None = None, *,
+                                  only_portfolio_id: int | None = None,
                                   trace_portfolio_id: int | None = None,
                                   trace_out: dict | None = None) -> list[dict]:
     """Per-portfolio YTD (EUR), plus the return / Sharpe / Sortino since the composition's own
@@ -591,6 +592,23 @@ def compute_portfolio_performance(year: int | None = None, *,
     ports = (supabase.table("airs_model_portfolio")
              .select("id,name,positions_datum,positions_scanned_at")
              .not_.is_("positions_datum", "null").execute().data or [])
+    # ⚠ ONE PORTFOLIO'S NUMBERS SHOULD NOT COST FIFTY-SIX PORTFOLIOS' PRICES. The Analyse modal
+    # reads exactly one row out of this function's output, and paid for the whole fleet to get it
+    # — every model's holdings resolved, priced and FX-converted, then 55/56 of that thrown away.
+    # Measured: 5.56s to open the modal.
+    #
+    # ⚠ AND IT IS THE SAME ANSWER, NOT AN APPROXIMATION OF IT. The only fleet-wide inputs are the
+    # price and FX WINDOWS, and both are lower bounds: `lookback` reaches back to the earliest
+    # inception, `fx_from` to the oldest bar loaded. Narrowing them to one portfolio's own history
+    # cannot change ITS marks — `_prepend_opening_bars` fetches each anchor's opening bar
+    # explicitly however far back it sits, which is exactly why that guarantee exists. Verified by
+    # comparing every field against the fleet-wide run.
+    #
+    # `explain_portfolio_ytd` deliberately does NOT use this: its job is to reproduce the grid
+    # byte for byte while a discrepancy is being chased, and "we narrowed the window" is precisely
+    # the kind of difference that would then have to be ruled out by hand.
+    if only_portfolio_id is not None:
+        ports = [p for p in ports if p["id"] == only_portfolio_id]
     if not ports:
         return []
 

@@ -3102,6 +3102,28 @@
             ],
             "title": "Name"
           },
+          "own_income_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Own Income Eur"
+          },
+          "own_return_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Own Return As Of"
+          },
           "own_return_estimated": {
             "default": false,
             "title": "Own Return Estimated",
@@ -3128,6 +3150,17 @@
               }
             ],
             "title": "Own Return Pct"
+          },
+          "own_return_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Own Return Source"
           },
           "return_pct": {
             "anyOf": [
@@ -4974,9 +5007,42 @@
             ],
             "title": "Isin"
           },
+          "market_cap_checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap Checked At"
+          },
+          "market_cap_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap Currency"
+          },
           "market_cap_eur": {
             "title": "Market Cap Eur",
             "type": "number"
+          },
+          "market_cap_native": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap Native"
           },
           "return_eur_pct": {
             "title": "Return Eur Pct",
@@ -5512,6 +5578,17 @@
             "title": "Holdings",
             "type": "integer"
           },
+          "holdings_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings As Of"
+          },
           "looked_through": {
             "default": [],
             "items": {
@@ -5589,6 +5666,28 @@
       "ModelPortfolioAttribution": {
         "description": "WHY a model beat or lagged the index \u2014 Brinson-Fachler, plus the names that drove it.\n\nAn excess return is a fact, not an explanation: \"-11.60% vs ACWI\" says nothing about whether\nthe failed bet was the SECTORS chosen or the STOCKS chosen inside them. Those are different\nmistakes with different fixes.\n\n    allocation  = (w_p - w_b) x (R_b,bucket - R_b_total)   the right buckets?\n    selection   =  w_b        x (R_p,bucket - R_b,bucket)  the right names inside them?\n    interaction = the cross term\n\n\u26a0 THE IDENTITY IS ASSERTED, NOT ASSUMED: sum(allocation + selection + interaction) == excess.\n`residual_pct` and `reconciles` carry the proof. Three columns that do not sum to the excess\nare not a decomposition of it.\n\n\u26a0 FUNDS AND CASH ARE EXCLUDED. An ETF has no sector \u2014 the benchmark's weight in the fund\nbucket is zero, so Brinson would report holding a world tracker as a *sector bet*.\n`attributable_pct` says how much of the model the table explains.\n\n\u26a0 `unpriced_pct` IS NOT THE SAME AS `excluded_pct`, AND IT IS THE DANGEROUS ONE. A fund is\nexcluded because it is not a sector bet. An UNPRICED equity is excluded because we failed to\nprice it \u2014 and its sector then reads as UNOWNED, so the allocation effect on that row is a\nFALSE finding. (Measured: a model holding 6% Healthcare, unpriceable, was credited +1.73pp of\nallocation for \"avoiding\" Healthcare.) `unpriced_buckets` names the rows to discount.",
         "properties": {
+          "account_excess_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Excess Pct"
+          },
+          "account_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Return Pct"
+          },
           "attributable_pct": {
             "default": 0.0,
             "title": "Attributable Pct",
@@ -5740,6 +5839,17 @@
             },
             "title": "Top Detractors",
             "type": "array"
+          },
+          "unattributed_excess_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unattributed Excess Pct"
           },
           "unpriced_buckets": {
             "default": [],

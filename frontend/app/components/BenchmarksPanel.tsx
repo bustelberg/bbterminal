@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
+import { trace, traceEmpty, traceError } from '../../lib/debugTrace';
 import { dialog } from '../../lib/dialog';
 import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { Provenance } from '../../lib/provenance';
@@ -44,6 +45,13 @@ const tone = (v: number | null | undefined) =>
 const price = (v: number | null | undefined) =>
   v == null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/** A market cap in billions of its own currency — the tooltip's "as quoted" figure. */
+const bn = (v: number) => (v / 1e9).toLocaleString('en-US', { maximumFractionDigits: 1 });
+
+/** `market_cap_checked_at` is a full timestamp; the freshness pill compares DATES.
+ *  Passing the timestamp through would make every cap look stale the moment the clock ticked. */
+const capDay = (ts: string | null | undefined) => (ts ? ts.slice(0, 10) : null);
+
 /** Benchmarks — a cap-weighted index rebuilt from OUR membership, prices and FX.
  *
  * Why rebuild an index we could just read off SPY: because this one is computed the same way
@@ -78,7 +86,10 @@ type RefreshSummary = {
   no_cap?: number;
   prices_total?: number;
   prices_fetched?: number;
-  prices_already_current?: number;
+  /** Of those fetched: gained a new closed bar vs the vendor having nothing newer. The second
+   *  is an ANSWER (a venue with no close that day, a session still open), not a miss. */
+  prices_moved?: number;
+  prices_unchanged?: number;
   prices_failed?: number;
   no_start_price?: number;
   market_anchor?: string | null;
@@ -96,9 +107,11 @@ function refreshSummary(s: RefreshSummary): string {
   // looking healthy in the grid. Never silent.
   if (s.no_cap) bits.push(`⚠ ${s.no_cap} with no market cap (they weigh nothing)`);
   if (s.prices_fetched) bits.push(`${s.prices_fetched} price series fetched`);
-  // ⚠ SAID, NOT OMITTED. A run where everything was already current fetched nothing, and
-  // silence there reads as "the button did nothing".
-  if (s.prices_already_current) bits.push(`${s.prices_already_current} already current`);
+  if (s.prices_moved) bits.push(`${s.prices_moved} gained a new close`);
+  // ⚠ SAID, NOT OMITTED. A press now always fetches, so a run where nothing moved still did the
+  // work — and 'the vendor has nothing newer' is the finding. Silence here reads as a broken
+  // button, which is exactly how ING's untouched 30.22 was first reported.
+  if (s.prices_unchanged) bits.push(`${s.prices_unchanged} already at the vendor's latest`);
   if (s.no_start_price) bits.push(`${s.no_start_price} have no start-of-year price (listed later)`);
   if (s.prices_failed) bits.push(`${s.prices_failed} failed (see the console)`);
   if (s.needs_resolve) bits.push(`${s.needs_resolve} still unresolved — press again`);
@@ -248,8 +261,29 @@ export default function BenchmarksPanel() {
         if (res.status === 'fulfilled') out[res.value[0]] = res.value[1];
         else errs.push(res.reason instanceof Error ? res.reason.message : String(res.reason));
       }
+      // ⚠ AN INDEX THAT LOADS WITH ZERO MEMBERS IS THE FRESH-DATABASE CASE AND IT IS NOT AN
+      // ERROR — the request succeeded, the universe simply has not been built or its
+      // constituents are not in the asset grid. It renders as "0 —", which is identical to a
+      // failure on screen, so the console has to tell them apart. The backend already sends the
+      // reason in `note`; this is where it becomes visible.
+      for (const [label, d] of Object.entries(out)) {
+        if (!d.member_count) {
+          traceEmpty('benchmarks', `${label} priced 0 constituents`,
+            d.note ?? 'no universe, or none of its constituents are resolved and capped in the '
+            + 'asset grid. Press Refresh on the row — it builds the universe, resolves what it '
+            + 'can and fetches the prices. Not an error.');
+        } else {
+          trace('benchmarks', `${label}: ${d.member_count} priced (${d.priced_of_universe ?? '?'} `
+            + `of the universe), YTD ${d.ytd_eur_pct?.toFixed(2) ?? '—'}% EUR, as of ${d.as_of ?? '—'}`
+            + (d.split_adjusted?.length ? ` · ${d.split_adjusted.length} split-adjusted` : ''));
+        }
+      }
+      for (const e of errs) traceError('benchmarks', `an index failed to load: ${e}`);
       setData(out);
-      if (Object.keys(out).length === 0) setError(errs.join('; ') || 'Failed to load');
+      if (Object.keys(out).length === 0) {
+        traceError('benchmarks', 'every index failed — the panel will show an error, not a table');
+        setError(errs.join('; ') || 'Failed to load');
+      }
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -460,9 +494,32 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
                 <td className={`px-3 py-1.5 text-right font-mono ${tone(m.return_eur_pct)}`}>
                   {pct(m.return_eur_pct)}
                 </td>
-                <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
+                {/* ⚠ THE ICON IS HERE BECAUSE THIS NUMBER DOES NOT EXPLAIN THE WEIGHT BESIDE IT.
+                    Every other cell on the row is arithmetic a reader can follow — Start and Now
+                    give YTD (local), the FX legs give YTD (€) — and the obvious next step is
+                    `cap ÷ Σcap = Weight`. It does not hold, and it is not meant to: the weight is
+                    formed from the START-of-window cap, rolled back on the price move, because
+                    weighting by today's cap is look-ahead bias (measured, it turns the S&P's
+                    +9.10% into +21.70%). A row that quietly refuses to add up invites the reader
+                    to assume a bug; the card says which cap this is.
+
+                    It also carries the DATE Yahoo was last asked. A cap is a fetched number with
+                    an age, and a weighting computed off a three-week-old cap renders identically
+                    to one computed this morning. `asOf` turns the icon amber when it is stale, so
+                    an index whose caps have gone cold marks itself. */}
+                <td className="px-3 py-1.5 text-right font-mono text-fg-subtle whitespace-nowrap">
                   {(m.market_cap_eur / 1e9).toFixed(1)}
-                </td>
+                  <Provenance source="yfinance" asOf={capDay(m.market_cap_checked_at)} kind="copied"
+                    what={`${m.company_name ?? 'This constituent'}'s CURRENT market capitalisation, converted to euro.`}
+                    note={m.market_cap_native != null && m.market_cap_currency
+                      ? `${bn(m.market_cap_native)}bn ${m.market_cap_currency} as quoted, at the ECB rate for the day it was read`
+                      : 'converted at the ECB rate for the day it was read'}
+                    how={'Yahoo’s own `marketCap`, re-quoted for every constituent each time this index is refreshed. '
+                      + `⚠ It is NOT what the ${m.weight_pct.toFixed(2)}% weight is computed from. `
+                      + 'The weight uses this cap rolled BACK to the start of the window on the price move '
+                      + `(${price(m.start_price)} → ${price(m.end_price)}), because the share count is what stays put — `
+                      + 'weighting by today’s cap would hand a stock that doubled a share of the index it never had. '
+                      + 'So this figure divided by the column total will not reproduce the Weight column.'} /></td>
               </tr>
             ))}
           </tbody>

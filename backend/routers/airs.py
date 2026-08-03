@@ -753,9 +753,32 @@ class BookHoldingDetail(BaseModel):
     # (the portfolio's YTD anchor: max(1 Jan, the composition's effective date)), through the same
     # marks that produce the arithmetic behind a portfolio's YTD elsewhere. Use THIS one per row;
     # `return_pct` only aggregates correctly, and only over a whole class.
+    #
+    # ⚠ BUT ONLY WHERE THE BOOK CANNOT ANSWER. The wrapper argument above is about LOOK-THROUGH
+    # rows and was being applied to every row, including the ones AIRS values directly — and for
+    # those AIRS knows the answer exactly. Fortinet in AITopSelectie OFF DYN is +111.74% by AIRS's
+    # own Beginwaarde -> Huidige waarde plus its net dividend, and +108.65% off our yfinance
+    # series. Both defensible; the modal showing one while the row that opened it shows the other
+    # is not. So a directly-held row now reports AIRS's TOTAL return — the identical number the
+    # expanded row's `Return` column computes — and only a look-through row (or one with no
+    # opening value in the book) falls back to the instrument's own price series.
+    #
+    # `own_return_source` says which of the two this row got. Two rows in one column measured
+    # different ways, with nothing on screen saying which, is the thing that change undid.
     own_return_pct: float | None = None
     own_return_from: str | None = None
     own_return_estimated: bool = False
+    own_return_source: str | None = None      # "airs" | "yfinance" | None
+    # ⚠ THE DATE THIS ROW'S RETURN IS AS-OF, PER ROW, because the two bases have different
+    # clocks: an `airs` row is as-of the BOOK SNAPSHOT, a `yfinance` row as-of that instrument's
+    # own last close, which can trail it by weeks. The payload's `as_of` is neither — it is the
+    # model composition's effective date, and stamping the cards with it reported the row's own
+    # +111.74% as 216 days old while the portfolios list called the same figure 2.
+    own_return_as_of: str | None = None
+    # The net dividend inside an `airs` figure (gross + withholding, which AIRS books negative).
+    # None on a look-through row, and None when the journal has no line for the holding — "paid
+    # nothing" and "we have not read the journal" are different claims.
+    own_income_eur: float | None = None
 
 
 class ModelPortfolioAnalysis(BaseModel):
@@ -776,7 +799,14 @@ class ModelPortfolioAnalysis(BaseModel):
 
     portfolio_id: int | None = None    # null for an ad-hoc basket (a stock / group has no id)
     name: str | None = None
+    # ⚠ THE COMPOSITION'S EFFECTIVE DATE — when the MODEL declared these weights. It is NOT the
+    # date any figure on this screen is valued at, and using it as one is how the modal came to
+    # report the portfolios row's own +111.74% as 216 days old while the row called it 2 days.
     as_of: str | None = None
+    # The snapshot the BOOK valuations come from — the clock for the weight columns and for every
+    # `own_return_source == "airs"` row. Null in model mode, where each row carries its own
+    # `own_return_as_of` instead.
+    holdings_as_of: str | None = None
     benchmark: str
     # Which side the portfolio bars weight by: "model" (nominal strategy weights) or "book" (the
     # paired AIRS book's actual EUR holdings). Only the WEIGHTS change — classification and the
@@ -999,6 +1029,20 @@ class ModelPortfolioAttribution(BaseModel):
     attributed_pct: float = 0.0
     residual_pct: float = 0.0
     reconciles: bool = False
+    # ⚠ TWO DIFFERENT "EXCESS" FIGURES LIVE ON THIS SCREEN AND BOTH ARE RIGHT — the payload
+    # carries both so the panel can reconcile them instead of contradicting the tile.
+    #   `excess_pct`         the ATTRIBUTABLE SLEEVE's: the holdings that have a bucket at all,
+    #                        renormalised once cash and funds come out (cash has no sector, so
+    #                        leaving it in would score holding cash as a sector bet).
+    #   `account_excess_pct` the ACCOUNT's: AIRS's own flow-aware `cumulatief_rendement` against
+    #                        the same benchmark — what the Analyse tile shows.
+    # Measured on AITopSelectie OFF DYN: +23.39pp here against +24.26pp there, same benchmark.
+    # `unattributed_excess_pct` is the difference — cash, income on positions closed during the
+    # year, and the account's flows: real return with no bucket to attribute it to. Null for
+    # `source=model`, which has no account behind it.
+    account_return_pct: float | None = None
+    account_excess_pct: float | None = None
+    unattributed_excess_pct: float | None = None
     attributable_pct: float = 0.0
     excluded_pct: float = 0.0
     excluded_return_pct: float | None = None

@@ -39,6 +39,7 @@ ONE VOCABULARY, OR THE COMPARISON IS A LIE
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import defaultdict
 from datetime import date
 
@@ -49,6 +50,8 @@ from routers._asset_benchmark import members as _members
 from routers._benchmark_index import SP500_LABEL
 
 CASH_BUCKET = "Cash"
+_log = logging.getLogger(__name__)
+
 UNKNOWN_BUCKET = "Unclassified"
 # A fund is a black box on these axes — an ETF's listing tells you nothing about its holdings — so
 # it FOLDS INTO Unclassified rather than being split into a sector/region/currency it never had.
@@ -444,7 +447,11 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
         ytd_anchor_for,
     )
 
-    perf = next((x for x in compute_portfolio_performance()
+    # ⚠ SCOPED TO THIS PORTFOLIO — same function, same definition, one row's worth of work. It
+    # used to price all 56 models and keep one, which was 5.56s of a modal open. See
+    # `only_portfolio_id`: the narrowing touches only the load WINDOWS, which are lower bounds,
+    # so the row that comes back is identical.
+    perf = next((x for x in compute_portfolio_performance(only_portfolio_id=portfolio_id)
                  if x["portfolio_id"] == portfolio_id), None)
     if not perf:
         return {}
@@ -721,7 +728,28 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     # For the allocation pie's legend + the sleeve views. Alongside it the per-HOLDING detail
     # (start-weight + return), so a non-equity sleeve's contribution breakdown reconciles to the
     # sleeve figure: Σ over a bucket of (startᵢ / Σstart) · retᵢ == that bucket's return above, exactly.
-    bucket_agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])  # [Σ start, Σ now]
+    # ⚠ THE INCOME IS LOADED HERE, BEFORE ANY RETURN IS FORMED, BECAUSE EVERY RETURN ON THIS
+    # SCREEN HAS TO INCLUDE IT. AIRS's own headline (`cumulatief_rendement`) is flow-aware and
+    # carries dividends; the per-holding column is `(current + net income) ÷ Beginwaarde − 1`, the
+    # same figure the expanded row shows. A class subtotal computed on price alone therefore sat
+    # between two totals and disagreed with both — measured on EuropaTopSelect OFF DYN, the Equity
+    # sleeve read −2.79% while 17 of its 27 holdings had paid a dividend that the rows above and
+    # the tile below both counted. Three bases on one screen, all AIRS-sourced, all defensible
+    # separately.
+    #
+    # `_direct_result` is the row's OWN loader (the Mutaties journal, keyed on `holding_name`), so
+    # the two surfaces cannot drift. ⚠ The tax is ADDED — AIRS books withholding as a negative, so
+    # `gross + tax` IS the net; `- tax` overstates every foreign holding by twice the withholding.
+    from ._airs_accounts import _direct_result  # noqa: PLC0415
+
+    _income, _sold = _direct_result(
+        link["portefeuille"], {r.get("holding_name") for r in rows if r.get("holding_name")})
+
+    def _net_income(r: dict) -> float:
+        d = _income.get(r.get("holding_name"))
+        return ((d.gross_eur or 0.0) + (d.tax_eur or 0.0)) if d else 0.0
+
+    bucket_agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])  # [Σ start, Σ now+income]
     priced = [(r, float(r.get("start_value_eur") or 0), float(r["current_value_eur"]))
               for r in rows
               if float(r.get("start_value_eur") or 0) != 0 and r.get("current_value_eur") is not None]
@@ -729,7 +757,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     for _r, start, now in priced:
         b = _r.get("bucket") or UNKNOWN_BUCKET
         bucket_agg[b][0] += start
-        bucket_agg[b][1] += now
+        bucket_agg[b][1] += now + _net_income(_r)
     priced_by_id = {id(r): (s, n) for r, s, n in priced}
 
     # ⚠ EVERY LONG POSITION, not only the priced ones — this list is also the whole-portfolio
@@ -767,6 +795,38 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     marks = compute_holding_marks(
         sorted({r["isin"] for r, _w, _b in raw_positions if r.get("isin")}), anchor)
 
+    # ⚠ AIRS'S OWN RETURN FOR A DIRECTLY-HELD ROW; THE YFINANCE SERIES ONLY WHERE THE BOOK CANNOT
+    # ANSWER. The look-through argument above is right and stays — a certificate's value change
+    # belongs to the WRAPPER, so splitting it across the 135 stocks inside gives every one of them
+    # the wrapper's number (NVIDIA read +0.08% against its own +2.82%). But it was applied to
+    # EVERY row, including the ones the book values directly, and for those AIRS knows the answer
+    # exactly: Fortinet in AITopSelectie OFF DYN is +111.74% by AIRS's own Beginwaarde → Huidige
+    # waarde (plus its net dividend) and +108.65% off our yfinance series. Both are defensible;
+    # having the modal show one while the row that opened it shows the other is not.
+    #
+    # `via_names` is what tells the two apart: non-empty means the row was exploded out of a
+    # certificate and its share of the book's value change is synthetic.
+    #
+    # The income is `_net_income` above — ONE load, shared with the bucket aggregation, so a class
+    # subtotal and the rows under it cannot end up on different bases.
+    _airs_n = _look_n = 0
+
+    # ⚠ THE DATE A NUMBER IS AS-OF BELONGS TO THE NUMBER, NOT TO THE PAYLOAD.
+    # The analysis publishes `as_of = positions_datum` — the MODEL COMPOSITION's effective date,
+    # 2025-12-30 for AITopSelectie. That is a true fact about the weights the model declares, and
+    # it is the wrong clock for anything valued by the book: these returns are AIRS valuations
+    # dated 2026-08-01. Stamped with the payload-level date, the modal reported the same
+    # +111.74% as the portfolios row while calling it 216 days old against the row's 2 — one
+    # number, two ages, and no way for a reader to tell which surface to believe.
+    #
+    # So each holding carries its own. A book-valued row is as-of the SNAPSHOT the valuation came
+    # from; a look-through row is as-of the last close of the instrument's OWN series, which is a
+    # different date again and can trail it.
+    _bh = (supabase.table("airs_holding").select("as_of_date")
+           .eq("portefeuille", link["portefeuille"]).order("as_of_date", desc=True)
+           .limit(1).execute().data or [])
+    book_as_of = str(_bh[0]["as_of_date"]) if _bh else None
+
     holdings_detail: list[dict] = []
     for r, w, b_alloc in raw_positions:
         isin = r.get("isin")
@@ -777,25 +837,63 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         cur = (grow.get("market_cap_currency") or grow.get("currency")) if grow else None
         pr = priced_by_id.get(id(r))
         mk = marks.get(isin) if isin else None
+        via = r.get("via_names") or []
+
+        # Directly held AND valued by AIRS on both ends -> AIRS's own total return, which is the
+        # identical number the expanded row's `Return` column shows.
+        d = _income.get(r.get("holding_name"))
+        net_income = _net_income(r)
+        if not via and pr and pr[0]:
+            own = ((pr[1] + net_income) / pr[0] - 1.0) * 100.0
+            own_src, own_est = "airs", False
+            own_as_of = book_as_of          # the snapshot the valuation came from
+            _airs_n += 1
+        else:
+            # Look-through, or a row AIRS cannot value on both ends (bought mid-window, no
+            # Beginwaarde). The instrument's own EUR series is the only honest answer left.
+            own = mk.get("return_pct") if mk else None
+            own_src, own_est = ("yfinance", bool(mk.get("start_interpolated"))) if mk else (None, False)
+            # This listing's OWN latest close — not the book's snapshot and not the fleet's. A
+            # thinly-traded line can sit weeks behind both, and that is the row worth doubting.
+            own_as_of = (mk.get("end_date") or mk.get("last_close")) if mk else None
+            _look_n += 1
+
         holdings_detail.append({
             "name": r.get("holding_name"),
             "isin": isin,
             "bucket": b_alloc,
             "currency": cur,
-            "via_names": r.get("via_names") or [],
+            "via_names": via,
             "weight_pct": (pr[0] / total_start * 100.0) if pr else None,
             "weight_now_pct": w / total_w * 100.0 if total_w else 0.0,
             "return_pct": ((pr[1] / pr[0] - 1.0) * 100.0) if pr else None,
-            "own_return_pct": mk.get("return_pct") if mk else None,
+            "own_return_pct": own,
             "own_return_from": anchor,
-            # A sparse series gets an interpolated opening mark, and it has to say so.
-            "own_return_estimated": bool(mk.get("start_interpolated")) if mk else False,
+            # WHICH of the two answers this row got. Two rows in one column measured different
+            # ways, with nothing saying which is which, is the thing this whole change is undoing.
+            "own_return_source": own_src,
+            # ⚠ PER ROW, because the two bases have different clocks — see `book_as_of` above.
+            "own_return_as_of": own_as_of,
+            "own_income_eur": (net_income if d and not via else None),
+            # A sparse yfinance series gets an interpolated opening mark, and it has to say so.
+            "own_return_estimated": own_est,
         })
+    # WARNING, not info: uvicorn leaves the root logger at WARNING, so an `info` line is invisible
+    # in production — and this is the line that says which of the two return bases each row got.
+    _log.warning(
+        "[analysis] %s: per-holding returns — %d from AIRS (Beginwaarde -> Huidige waarde + net "
+        "income, identical to the expanded row's Return column), %d from the yfinance series "
+        "(look-through rows, or no opening value in the book)",
+        link["portefeuille"], _airs_n, _look_n)
+
     bucket_returns = {b: (v[1] / v[0] - 1) * 100.0 for b, v in bucket_agg.items() if v[0]}
     return {"items": items, "labels": labels,
             "alloc_items": alloc_items, "bucket_returns": bucket_returns,
             "holdings_detail": holdings_detail,
             "classified_w": classified_w, "total_w": total_w, "foreign": foreign,
+            # The snapshot every figure above is valued at — carried out so the payload can stamp
+            # the weight columns with it instead of with the composition's effective date.
+            "book_as_of": book_as_of,
             "holdings": holdings, "portefeuille": link["portefeuille"]}
 
 
@@ -1042,7 +1140,16 @@ def compute_portfolio_analysis(portfolio_id: int,
     return {
         "portfolio_id": portfolio_id,
         "name": p["name"],
+        # ⚠ THE COMPOSITION'S EFFECTIVE DATE — NOT THE DATE ANY FIGURE IS VALUED AT. It is when
+        # the MODEL declared these weights (2025-12-30 for AITopSelectie). Every book-valued
+        # number on this screen is as-of `holdings_as_of` below, which for that same portfolio is
+        # 2026-08-01 — 216 days apart. Using this one as a provenance timestamp made the modal
+        # report the row's own +111.74% as 216 days old while the row called it 2.
         "as_of": p.get("positions_datum"),
+        # The snapshot the book valuations come from — the clock for the weight columns and for
+        # every `own_return_source == "airs"` row. Null in model mode, where the holdings table is
+        # priced from yfinance and each row carries its own `own_return_as_of` instead.
+        "holdings_as_of": (book or {}).get("book_as_of"),
         "benchmark": benchmark_label,
         "benchmark_members": len(bench_items),
         "holdings": port_holdings,

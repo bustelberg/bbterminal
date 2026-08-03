@@ -302,6 +302,31 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
             </p>
           )}
 
+          {/* ⚠ THE TWO "EXCESS" FIGURES ON THIS SCREEN ARE DIFFERENT QUANTITIES, AND SAYING SO IS
+              THE ONLY THING THAT MAKES EITHER READABLE. The tile one click away shows the
+              ACCOUNT's excess — AIRS's own flow-aware return, cash included, carrying dividends
+              from positions closed during the year. This table decomposes the ATTRIBUTABLE
+              SLEEVE: the holdings that have a sector at all, renormalised once cash and funds
+              come out (cash has no sector; leaving it in would score holding cash as a sector
+              bet). Measured on AITopSelectie OFF DYN against the same benchmark: +24.26pp on the
+              tile, +23.39pp here. Neither is wrong; presenting them as one number, in one word,
+              one click apart, was. */}
+          {data.unattributed_excess_pct != null
+            && Math.abs(data.unattributed_excess_pct) > 0.005 && (
+            <p className="text-[11px] text-fg-faint mb-2">
+              {'This table explains '}
+              <span className="font-mono text-fg-muted">{pp(data.excess_pct)}</span>
+              {' of the account’s '}
+              <span className="font-mono text-fg-muted">{pp(data.account_excess_pct)}</span>
+              {' excess. The remaining '}
+              <span className="font-mono text-fg-muted">{pp(data.unattributed_excess_pct)}</span>
+              {' is cash, income on positions closed during the year, and the account’s own '
+                + 'flows — real return with no '}
+              {AXIS_WORD[axis] ?? 'bucket'}
+              {' to attribute it to.'}
+            </p>
+          )}
+
           {/* ⚠ An UNPRICED holding makes its sector read as UNOWNED, so the allocation effect on
               that row is a FALSE finding — not a missing one. Name the rows to discount. */}
           {(data.unpriced_pct ?? 0) > 0.05 && (

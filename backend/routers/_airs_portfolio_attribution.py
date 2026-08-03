@@ -39,6 +39,7 @@ swallowed.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import date
 
 from deps import supabase
@@ -52,12 +53,15 @@ from routers._airs_portfolio_analysis import (
     _grid,
 )
 from routers._airs_portfolio_perf import ytd_anchor_for
+
 from routers._asset_benchmark import index_rows
 
 # ⚠ THE WEIGHTING BASIS IS SHARED WITH THE COMPOSITION CHARTS, NOT DUPLICATED HERE. Both read
 # `portfolio_legs` + `split_legs`, which is what makes a sector bar and its Brinson row the same
 # number. See `_airs_attribution_basis` for what that basis is and what it excludes.
 from ._airs_attribution_basis import portfolio_legs, split_legs  # noqa: E402
+
+_log = logging.getLogger(__name__)
 
 # Buckets that are NOT a sector bet and must never be decomposed as one.
 _NON_ATTRIBUTABLE = {FUND_BUCKET, CASH_BUCKET, UNKNOWN_BUCKET}
@@ -340,6 +344,48 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
               for b in bench if not _held(b)]
     missed.sort(key=lambda m: -m["contribution_pct"])
 
+    # ⚠ THE HEADLINE EXCESS, CARRIED HERE SO THE TWO SCREENS RECONCILE INSTEAD OF DISAGREEING.
+    #
+    # The Analyse tile and this panel both say "Excess" and both are right, over DIFFERENT
+    # portfolios. Measured on AITopSelectie OFF DYN, same benchmark (12.3768%) on both sides:
+    #
+    #     tile          36.6417% − 12.3768% = +24.26pp   the ACCOUNT — AIRS's own
+    #                                                    `cumulatief_rendement`: flow-aware,
+    #                                                    cash included, and carrying dividends
+    #                                                    from positions SOLD during the year
+    #                                                    (which have no holding row left).
+    #     this panel    35.7649% − 12.3768% = +23.39pp   the ATTRIBUTABLE SLEEVE — the holdings
+    #                                                    that have a sector at all, renormalised
+    #                                                    once cash and funds come out. Cash has
+    #                                                    no sector; leaving it in would score
+    #                                                    holding cash as a sector bet.
+    #
+    # Neither figure is wrong and neither can be dropped. What was wrong is presenting them as
+    # the same quantity, in the same word, one click apart, with nothing naming the 0.88pp
+    # between them — the reader's only options were to pick one or to assume a bug. So the gap is
+    # computed and returned, and the panel states it.
+    #
+    # Read straight off `_book_return`, never recomputed: re-deriving the account's return "the
+    # same way" here is precisely how a second surface starts disagreeing with the first.
+    account_return = account_excess = unattributed = None
+    if source == "book":
+        from ._airs_portfolio_analysis import _book_return  # noqa: PLC0415
+
+        account_return = (_book_return(portfolio_id, start, None) or {}).get("book_ytd_pct")
+        if account_return is not None and r_b_total is not None:
+            account_excess = account_return - r_b_total
+            unattributed = account_excess - excess
+
+    # WARNING, not info: uvicorn leaves the root logger at WARNING, so an `info` line never
+    # reaches production — and this is the line that says why two screens show two excesses.
+    _log.warning(
+        "[attribution] %s (%s/%s): sleeve %+.2f%% − benchmark %+.2f%% = %+.2fpp explained; "
+        "account %s%s",
+        p["name"], axis, window, r_p_total, r_b_total, excess,
+        f"{account_excess:+.2f}pp" if account_excess is not None else "n/a",
+        (f", leaving {unattributed:+.2f}pp in cash / closed positions / flows — no sector to "
+         f"attribute it to" if unattributed is not None else ""))
+
     excl_w = sum(e["weight_pct"] for e in excluded)
     excl_priced = [e for e in excluded if e["return_pct"] is not None]
     # The dangerous subset: real sector positions the table below will show as UNOWNED.
@@ -363,6 +409,13 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         "attributed_pct": attributed,
         "residual_pct": residual,
         "reconciles": abs(residual) < 1e-6,
+        # The ACCOUNT's own return and excess — what the Analyse tile shows — beside this panel's,
+        # and the gap between them. `unattributed_excess_pct` is cash, plus income on positions
+        # closed during the year, plus the account's flows: real return with no sector to put it
+        # in. Non-null only for `source=book`; the yfinance model has no account behind it.
+        "account_return_pct": account_return,
+        "account_excess_pct": account_excess,
+        "unattributed_excess_pct": unattributed,
         # ⚠ How much of the model the table above explains. The rest is funds and cash, which are
         # not a sector bet and are NOT decomposed.
         "attributable_pct": (p_w_total / total_w * 100.0) if total_w > 0 else 0.0,

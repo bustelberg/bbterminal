@@ -93,7 +93,28 @@ def model_legs(portfolio_id: int, eff: str | None, start: str) -> list[dict]:
 
 def book_legs(portfolio_id: int) -> list[dict] | None:
     """The paired AIRS BOOK as legs: weight = the START-of-window EUR value as a % of the book,
-    return = the VOLK start→current EUR PRICE return. None when no book is paired.
+    return = the VOLK start→current EUR TOTAL return. None when no book is paired.
+
+    ⚠ TOTAL, NOT PRICE — AND THE REASON IS THAT THE ROW BEHIND THIS MODAL ALREADY SAYS TOTAL.
+    Expanding a portfolio on /management-dashboard shows a `Return` column computed as
+    `(current + gross dividend + dividend_tax) ÷ Beginwaarde − 1` (`startWeights.holdingTotalReturn`
+    — the tax is ADDED because AIRS books withholding as a negative, so that sum IS current + NET
+    income). This function used to compute `current ÷ Beginwaarde − 1` and drop the income leg
+    entirely, so the same holding of the same book showed two different returns on the same page:
+    the row's, and the modal's. Both were AIRS-sourced and neither was wrong — they were answers to
+    different questions, presented identically.
+
+    So the numerator is now the SAME one, and the income comes from the SAME loader the row uses
+    (`_direct_result` over the Mutaties journal, keyed on `holding_name`), rather than a second
+    reading of the same journal that could drift from it.
+
+    ⚠ WHICH MAKES THE PORTFOLIO SIDE A TOTAL RETURN AGAINST A PRICE-RETURN BENCHMARK, and that is
+    a real asymmetry, not a rounding one. `_asset_benchmark` rebuilds the index on FULL-cap PRICE
+    returns — dividends are not in it (validated against ISAC: ~1.1pp/yr of the gap is exactly
+    this). Attributed naively, every dividend a holding pays reads as selection skill. It is
+    surfaced (`return_basis` on each leg) rather than silently absorbed, because the alternative —
+    keeping the modal on a price return so the benchmark comparison stays clean — puts two
+    different numbers for one holding on one screen, which is the worse of the two lies.
 
     ⚠ THE WEIGHT IS THE BEGINWAARDE, NOT THE HUIDIGE WAARDE. Weighting a window's return by the
     CURRENT value overweights the winners (a holding that doubled carries ~2× the share it started
@@ -110,26 +131,44 @@ def book_legs(portfolio_id: int) -> list[dict] | None:
     from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
     from ._airs_portfolio_analysis import _expand_book_rows  # noqa: PLC0415
 
+    from ._airs_accounts import _direct_result  # noqa: PLC0415
+
     link = next((a for a in list_account_links()["accounts"]
                  if a.get("model_portfolio_id") == portfolio_id), None)
     if not link:
         return None
     rows = _expand_book_rows(resolve_account_isins(link["portefeuille"]).get("rows") or [])
+    # THE ROW'S OWN INCOME LOADER, keyed on `holding_name` exactly as `account_holdings` keys it.
+    # A second pass over the Mutaties journal here would be a second answer to "what did this
+    # holding pay", free to drift from the column the reader is comparing against.
+    income, _sold = _direct_result(link["portefeuille"],
+                                   {r.get("holding_name") for r in rows if r.get("holding_name")})
     total = sum(float(r.get("start_value_eur") or 0) for r in rows) or 1.0
     out: list[dict] = []
     for r in rows:
         start_val = float(r.get("start_value_eur") or 0)
         cur = float(r.get("current_value_eur") or 0)
         is_cash = r.get("asset_class") == "Cash" or not r.get("isin")
+        # ⚠ THE TAX IS ADDED, NOT SUBTRACTED, AND IT IS NOT A TYPO. `tax_eur` is already negative
+        # (AIRS books withholding as a debit), so `gross + tax` IS the net. Writing the intuitive
+        # `- tax` adds the withholding back and overstates every foreign holding by twice it —
+        # silently, because the result is still a plausible number. Same note as `valueWithIncome`.
+        d = income.get(r.get("holding_name"))
+        net_income = ((d.gross_eur or 0.0) + (d.tax_eur or 0.0)) if d else 0.0
         out.append({
             "isin": r.get("isin"),
             "weight_pct": start_val / total * 100.0,
-            "return_pct": ((cur / start_val - 1.0) * 100.0)
+            "return_pct": (((cur + net_income) / start_val - 1.0) * 100.0)
             if (not is_cash and start_val > 0) else None,
             "airs_name": r.get("holding_name"),
             "is_cash": is_cash,
             "via_names": r.get("via_names") or [],
             "asset_class": r.get("bucket"),
+            # What this return INCLUDES, carried so the benchmark comparison can say that its own
+            # side does not. `None` income is a book whose journal we have not read; 0.0 is a
+            # holding that genuinely paid nothing — kept apart for the same reason the row does.
+            "income_eur": (net_income if d else None),
+            "return_basis": "total",
         })
     return out
 
