@@ -1392,6 +1392,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/{portfolio_id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Refresh
+         * @description Re-acquire EVERY input behind one model's YTD, then rebuild the number. Streamed.
+         *
+         *     A YTD has five inputs and only the first comes from AIRS:
+         *
+         *         1. composition   AirSPMS                 weights + ISINs + the effective date
+         *         2. instruments   Yahoo / OpenFIGI        ISIN -> symbol, currency (queue-paced)
+         *         3. FX            ECB / pegs / Yahoo      rates covering the window — BOTH directions
+         *         4. prices        Yahoo                   each holding's series brought current
+         *         5. recompute     ours                    the YTD, with the per-leg arithmetic
+         *
+         *     ⚠ WHICH IS WHY "REFRESH FROM AIRS" ALONE CANNOT FIX A WRONG RETURN. The per-row button
+         *     re-scrapes step 1 and nothing else, so a disagreement caused by a missing price series or a
+         *     short FX history survives any number of presses. This runs all four fetchable steps and then
+         *     prints the arithmetic, so the input that differs is visible rather than inferred.
+         *
+         *     ⚠ STEP 3 IS THE ONE NOTHING ELSE DOES. `sync_fx_rates_to_db` only extends FORWARD, so a
+         *     currency whose stored history STARTS after the window opens is never repaired — and a
+         *     holding with no rate on or before its opening bar is dropped, silently, which renormalises
+         *     the return over the survivors and reads HIGH.
+         */
+        get: operations["airs_model_portfolio_refresh_api_airs_model_portfolios__portfolio_id__refresh_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios/{portfolio_id}/risk-windows": {
         parameters: {
             query?: never;
@@ -12198,6 +12236,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PriceSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_refresh_api_airs_model_portfolios__portfolio_id__refresh_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

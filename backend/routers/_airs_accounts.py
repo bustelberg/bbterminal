@@ -76,6 +76,43 @@ _PER_PERIOD_SUMS = ("stortingen", "onttrekkingen", "koersresultaat", "opbrengste
                     "kosten", "mutatie_opgelopen_rente", "beleggingsresultaat")
 
 
+def _paged(build, *, page: int = 1000) -> list[dict]:
+    """Every row the query matches — not the first serverful.
+
+    ⚠⚠ `.limit(20000)` IS NOT PROTECTION, AND READING IT AS PROTECTION IS HOW THIS BIT US. The
+    bound that applies is the SERVER'S `db-max-rows`: **1,000 on Supabase cloud, 10,000 locally**.
+    PostgREST truncates to it and says nothing — no error, no header, no short-read signal.
+
+    Measured 2026-08-03, and it is the whole reason this helper exists: `_year_perf` read
+    `airs_performance` with `.order("periode").limit(20000)`. The table holds 1,334 rows, so
+    locally it all came back and every figure was right. In production the read stopped at 1,000
+    — and because the order is ASCENDING, the rows it dropped were the NEWEST ones. The portfolios
+    page then showed `AITopSelectie OFF DYN` at **+55.20%**, which is June's `cumulatief_rendement`,
+    while July's −11.96% sat in the table unread. Local: +36.64%. Same code, same query, two
+    answers, and nothing anywhere said the read was short.
+
+    ⚠ AND REFRESHING MADE IT WORSE. `airs_performance` is append-only — every daily run writes
+    another row for each month in progress — so each refresh pushed the newest rows further past
+    the cap. The one action that looks like a fix was feeding the bug.
+
+    Advances by what CAME BACK and stops on an empty page, so it is correct under any cap (a
+    short page is only "the last page" while the server's limit is at least `page`). The caller
+    must order on a key unique enough that a page boundary landing inside a tie cannot serve a
+    row twice or skip it.
+
+    `build()` returns a FRESH query each call — postgrest builders are not re-executable.
+    """
+    out: list[dict] = []
+    off = 0
+    while True:
+        rows = build().range(off, off + page - 1).execute().data or []
+        if not rows:
+            break
+        out += rows
+        off += len(rows)
+    return out
+
+
 def _year_perf() -> dict[str, dict]:
     """Each account's YEAR, aggregated from AIRS's own monthly rows.
 
@@ -108,8 +145,13 @@ def _year_perf() -> dict[str, dict]:
     year's opening from the FIRST, and `cumulatief_rendement` from the LAST (never
     recomputed — it is AIRS's own and it is flow-aware).
     """
-    rows = (supabase.table("airs_performance").select(_PERF_COLS)
-            .order("periode").limit(20000).execute().data or [])
+    # ⚠ PAGED, NOT `.limit(20000)` — see `_paged`. This exact read served June's YTD in
+    # production while July sat unread, because the cap that binds is the server's (1,000) and
+    # ascending order puts the newest rows last. The sort key is `(periode, portefeuille,
+    # fetched_at)`: `periode` alone ties across all ~44 accounts, and a page boundary inside a
+    # tie can serve a row twice or never.
+    rows = _paged(lambda: supabase.table("airs_performance").select(_PERF_COLS)
+                  .order("periode").order("portefeuille").order("fetched_at"))
     by_acct: dict[str, list[dict]] = {}
     for r in rows:
         by_acct.setdefault(r["portefeuille"], []).append(r)
@@ -180,9 +222,12 @@ def _direct_result(portefeuille: str, holding_names: set[str]):
     """
     from airs_mutaties import Mutatie, attach, direct_result  # noqa: PLC0415
 
-    rows = (supabase.table("airs_mutatie")
-            .select("boekdatum,grootboek,fonds,omschrijving,amount_eur")
-            .eq("portefeuille", portefeuille).limit(5000).execute().data or [])
+    # Paged for the same reason as `_year_perf` — `.limit(5000)` never overrode the server's
+    # 1,000. One account's mutations are under that today; the table only grows.
+    rows = _paged(lambda: supabase.table("airs_mutatie")
+                  .select("boekdatum,grootboek,fonds,omschrijving,amount_eur")
+                  .eq("portefeuille", portefeuille)
+                  .order("boekdatum").order("grootboek").order("fonds"))
     empty: dict = {"gross": None, "tax": None, "funds": None}
     if not rows:
         return {}, empty
@@ -500,16 +545,32 @@ def account_holdings(portefeuille: str) -> dict:
     quantity, so it is not contaminated by a purchase. It will NOT sum to the account's return:
     that one is flow-aware and includes income. See the module docstring.
     """
-    rows = (supabase.table("airs_holding")
-            .select("as_of_date,holding_name,quantity,currency,weight,start_value_eur,"
-                    "current_value_eur,ytd_return_eur,ytd_return_pct,ytd_return_local_pct,"
-                    "cost_basis_local,current_price_local,airs_weight,fund_result_eur,fx_result_eur,"
-                    "airs_result_pct")
-            .eq("portefeuille", portefeuille).limit(2000).execute().data or [])
-    if not rows:
+    # ⚠ THE NEWEST SNAPSHOT IS ASKED FOR, NOT FILTERED OUT OF EVERY SNAPSHOT. This read all of an
+    # account's history under `.limit(2000)` and took `max(as_of_date)` from whatever came back —
+    # but `airs_holding` keeps one snapshot per account PER DATE and grows on every scan (10,084
+    # rows across all accounts, 704 for the busiest, and only climbing). The server caps a
+    # response at 1,000 in production and truncates SILENTLY, and this query had no `order` at
+    # all, so the rows it kept were arbitrary: `max()` over them would name an OLD snapshot and
+    # the panel would show last month's positions as today's, with nothing saying so. Same family
+    # as `_year_perf`'s June-instead-of-July (see `_paged`).
+    #
+    # Two reads instead: the newest date, then that date's rows. ~40 rows rather than 704, and
+    # the answer stops depending on how much history has accumulated.
+    newest = (supabase.table("airs_holding").select("as_of_date")
+              .eq("portefeuille", portefeuille)
+              .order("as_of_date", desc=True).limit(1).execute().data or [])
+    if not newest:
         return {"portefeuille": portefeuille, "as_of": None, "rows": []}
-    as_of = max(str(r["as_of_date"]) for r in rows)
-    snap = [r for r in rows if str(r["as_of_date"]) == as_of]
+    as_of = str(newest[0]["as_of_date"])
+    snap = _paged(lambda: supabase.table("airs_holding")
+                  .select("as_of_date,holding_name,quantity,currency,weight,start_value_eur,"
+                          "current_value_eur,ytd_return_eur,ytd_return_pct,ytd_return_local_pct,"
+                          "cost_basis_local,current_price_local,airs_weight,fund_result_eur,"
+                          "fx_result_eur,airs_result_pct")
+                  .eq("portefeuille", portefeuille).eq("as_of_date", as_of)
+                  .order("holding_name"))
+    if not snap:
+        return {"portefeuille": portefeuille, "as_of": None, "rows": []}
     snap.sort(key=lambda r: -(r.get("current_value_eur") or 0))
     income, sold_income = _direct_result(portefeuille, {r["holding_name"] for r in snap})
     model = _model_weights(portefeuille)

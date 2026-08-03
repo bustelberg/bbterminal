@@ -162,8 +162,53 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
     #
     # "AIRS listed this account" and "we scanned this account" are different facts about different
     # sets. `reports_at` is this function's timestamp; `last_seen_at` is `_record_roster`'s.
-    rows = [{"portefeuille": n, "reports_ok": sorted(ok), "reports_at": stamp}
-            for n, ok in sorted(outcomes.items())]
+    # ⚠ UPDATE ONLY — AN ACCOUNT DISCOVERY HAS NEVER SEEN CANNOT BE INSERTED HERE, AND TRYING
+    # TOOK THE WHOLE BATCH DOWN WITH IT. PostgREST's `upsert` is INSERT ... ON CONFLICT, so for a
+    # portefeuille with no roster row the INSERT ran without `last_seen_at` — a NOT NULL column
+    # with no default, by design (see the migration: the live set IS `last_seen_at = max(...)`,
+    # so a per-row default would let this function redefine it). Measured in production
+    # 2026-08-03, refreshing one account:
+    #
+    #   null value in column "last_seen_at" of relation "airs_account_roster" violates not-null
+    #   constraint — Failing row contains (AITopSelectie OFF DYN, null, ...)
+    #
+    # And the damage is not the missing row. This is a BATCHED upsert, so one unseen account
+    # fails the outcomes of every account in its batch — on a full scan, all 44. The outcome
+    # table is exactly what marks a row "att did not arrive", so the failure silences the very
+    # warning it should have raised: the page then shows a stale figure with nothing saying the
+    # newest report never came. `AITopSelectie OFF DYN` read +55.20% (June's `cumulatief_rendement`)
+    # while July's −11.96% sat unfetched, and the row looked healthy.
+    #
+    # Giving `last_seen_at` a default would "fix" the error and break the live set instead: a row
+    # inserted here with now() becomes the maximum, and `_live_accounts` would collapse to this
+    # one account. Existence is discovery's fact to state. So we update what discovery knows and
+    # say plainly what we skipped.
+    names = sorted(outcomes)
+    try:
+        known: set[str] = set()
+        for i in range(0, len(names), 200):
+            known.update(
+                r["portefeuille"] for r in
+                (supabase.table("airs_account_roster").select("portefeuille")
+                 .in_("portefeuille", names[i:i + 200]).execute().data or [])
+                if r.get("portefeuille"))
+    except Exception as e:  # noqa: BLE001 — bookkeeping must never fail the scrape
+        _log.warning("[airs_vermogen] could not read the roster to record outcomes: %s: %s",
+                     type(e).__name__, e)
+        return
+
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        _log.warning(
+            "[airs_vermogen] %d account(s) are not in the roster, so their report outcomes are "
+            "NOT recorded and they cannot be flagged as incomplete: %s. Run a full discovery "
+            "(the portfolios scan) — only discovery may create a roster row, because "
+            "`last_seen_at` defines the live set.", len(unknown), ", ".join(unknown[:10]))
+
+    rows = [{"portefeuille": n, "reports_ok": sorted(outcomes[n]), "reports_at": stamp}
+            for n in names if n in known]
+    if not rows:
+        return
     try:
         for i in range(0, len(rows), 200):
             supabase.table("airs_account_roster").upsert(

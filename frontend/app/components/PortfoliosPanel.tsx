@@ -255,6 +255,56 @@ export default function PortfoliosPanel() {
     }
   };
 
+  /** Re-acquire EVERY input behind one model's YTD, streamed, then rebuild the number.
+   *
+   * ⚠ "REFRESH FROM AIRS" ON ITS OWN CANNOT FIX A WRONG RETURN, WHICH IS WHY THIS EXISTS. A YTD
+   * has five inputs and only the first comes from AIRS: the composition (AirSPMS), the
+   * instrument mapping (Yahoo/OpenFIGI), the FX history (ECB), the price series (Yahoo), and our
+   * own certificate links. The old button re-scraped the composition and nothing else, so a
+   * disagreement caused by a missing price series or a short FX history survived any number of
+   * presses — and the FX one is unfixable by anything else in the app, because `sync_fx_rates`
+   * only ever extends FORWARD.
+   *
+   * Detail goes to the console; the row gets the latest line and then reloads. */
+  const [refreshingPf, setRefreshingPf] = useState<number | null>(null);
+  const [refreshTick, setRefreshTick] = useState<string | null>(null);
+  const refreshPortfolio = async (id: number) => {
+    setRefreshingPf(id);
+    setRefreshTick('starting…');
+    console.groupCollapsed(`[portfolio refresh] #${id}`);
+    let summary: Record<string, unknown> | null = null;
+    try {
+      await runSSE(`${API_URL}/api/airs/model-portfolios/${id}/refresh`, { method: 'GET' },
+        (evt) => {
+          const e = evt as { type?: string; message?: string; summary?: Record<string, unknown> };
+          if (e.type === 'error') { console.error(e.message); setError(e.message ?? 'refresh failed'); return; }
+          if (e.type === 'done') { summary = e.summary ?? null; return; }
+          if (!e.message) return;
+          if (e.type === 'phase') console.log(`%c${e.message}`, 'font-weight:bold');
+          else console.log(e.message);
+          setRefreshTick(e.message.trim());
+        });
+      if (summary) console.log('[portfolio refresh] summary', summary);
+    } catch (e) {
+      console.warn('[portfolio refresh] failed', e);
+      setError('Refresh failed — see the console.');
+    } finally {
+      console.groupEnd();
+      setRefreshingPf(null);
+      setRefreshTick(null);
+    }
+    // The composition, the prices and the YTD all just changed — re-read both surfaces rather
+    // than leaving the row showing what it showed before the run.
+    void loadPositions(id);
+    try {
+      const pr = await apiFetch(`${API_URL}/api/airs/model-portfolios/performance`);
+      if (pr.ok) {
+        const byId = new Map(((await pr.json()) as Perf[]).map((x) => [x.portfolio_id, x]));
+        setRows((prev) => prev?.map((p) => ({ ...p, perf: byId.get(p.id) ?? p.perf })) ?? prev);
+      }
+    } catch { /* the row keeps its previous figure; the console has the new one */ }
+  };
+
   const toggle = (id: number) => {
     if (open === id) { setOpen(null); return; }
     setOpen(id);
@@ -554,7 +604,9 @@ export default function PortfoliosPanel() {
                         source={pos[r.id]?.source ?? 'model'}
                         onSource={(s) => setSource(r.id, s)}
                         onPickDate={(d) => void loadPositions(r.id, d)}
-                        onRefresh={() => void loadPositions(r.id, undefined, true)}
+                        onRefresh={() => void refreshPortfolio(r.id)}
+                        refreshing={refreshingPf === r.id}
+                        refreshTick={refreshingPf === r.id ? refreshTick : null}
                         // A link edit re-reads from OUR cache, never from AIRS: the composition
                         // did not change, only what we say one of its rows is.
                         onLinkSaved={() => void loadPositions(r.id)}
@@ -1359,13 +1411,18 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
  * The ISIN is the whole point: it's an EXACT join into `asset_execution`, where the AIRS
  * holdings sheet only ever gave us a fund name ("Alphabet - C", "L` Oreal") that no amount
  * of fuzzy matching resolves safely. */
-function Positions({ state, source, onSource, onPickDate, onRefresh, onLinkSaved,
-                     onExplainYtd, explaining }: {
+function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing, refreshTick,
+                     onLinkSaved, onExplainYtd, explaining }: {
   state?: PosState;
   source: 'model' | 'book';
   onSource: (s: 'model' | 'book') => void;
   onPickDate: (datum: string) => void;
+  /** The FULL refresh: composition from AIRS, then instruments, FX, prices, and the YTD
+   *  rebuilt. Streamed to the console — see `refreshPortfolio`. */
   onRefresh: () => void;
+  refreshing: boolean;
+  /** The newest line off that stream, so a run that takes tens of seconds visibly moves. */
+  refreshTick: string | null;
   onLinkSaved: () => void;
   /** Print the full YTD derivation to the console — see `ytdExplain.ts`. */
   onExplainYtd: () => void;
@@ -1492,9 +1549,15 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, onLinkSaved
             ) : (
               <span className="text-pos-400" title="Fetched live from AirSPMS just now.">live</span>
             )}
-            <button type="button" onClick={onRefresh}
-              className="text-[11px] px-2 py-1 rounded-lg hover:bg-overlay/5 text-accent-400 transition-colors">
-              Refresh from AIRS
+            {/* ⚠ NOT "Refresh from AIRS" ANY MORE, AND THE LABEL MATTERS. That button re-read
+                the composition and nothing else, so a return that was wrong because of a stale
+                price series or a short FX history survived every press — which is exactly how
+                production and local disagreed on AITopSelectie by 18 points. This re-acquires
+                all four fetchable inputs and rebuilds the number. */}
+            <button type="button" onClick={onRefresh} disabled={refreshing}
+              title="Re-acquire everything behind this model's YTD: its composition from AirSPMS, its instrument mapping, its FX history (both directions — nothing else backfills it), and each holding's price series from Yahoo. Then recompute the YTD and print the per-holding arithmetic to the browser console."
+              className="text-[11px] px-2 py-1 rounded-lg hover:bg-overlay/5 text-accent-400 transition-colors disabled:opacity-50">
+              {refreshing ? 'Refreshing…' : 'Refresh (AIRS + prices + FX)'}
             </button>
             {/* The YTD's own arithmetic, printed to the console — for diffing this deployment
                 against another when the same model reads two different numbers. It re-prices
@@ -1508,6 +1571,18 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, onLinkSaved
           </span>
         )}
       </div>
+
+      {/* The live tail while a refresh runs. A TAIL, not a log — the log is the console; this
+          exists only so a run of tens of seconds visibly moves. Truncated so a 20-holding
+          price sweep cannot reflow the panel on every frame. */}
+      {refreshing && (
+        <div className="text-[11px] rounded-lg px-3 py-1.5 border border-neutral-800/40 bg-overlay/[0.03]">
+          <div className="loading-bar h-0.5 w-full rounded-full mb-1" aria-hidden />
+          <div className="font-mono text-fg-faint truncate" title={refreshTick ?? ''}>
+            {refreshTick ?? 'starting…'}
+          </div>
+        </div>
+      )}
 
       <div className="overflow-auto rounded-lg border border-neutral-800/40 max-h-[50vh]">
         <table className="w-full text-xs">
