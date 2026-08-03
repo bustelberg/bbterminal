@@ -6,7 +6,7 @@ FK-rewire machinery.
 """
 from __future__ import annotations
 
-from ingest.company_overrides import apply_company_overrides, set_company_isin
+from ingest.company_overrides import apply_company_overrides
 from tests._fake_supabase import FakeSupabase
 
 
@@ -83,24 +83,3 @@ def test_set_isin_forces_value_and_is_idempotent():
     # Re-running is a no-op now that the value is correct (idempotent).
     rep2 = apply_company_overrides(fake)
     assert rep2.isin_set == 0
-
-
-def test_set_company_isin_inserts_when_absent():
-    fake = FakeSupabase(tables={"company_override": []})
-    set_company_isin(fake, ticker="Z", exchange="NASDAQ", isin="US98954M2008")
-    rows = [r for r in fake.tables["company_override"] if r["kind"] == "set_isin"]
-    assert len(rows) == 1
-    assert rows[0]["canonical_isin"] == "US98954M2008"
-
-
-def test_set_company_isin_updates_existing_in_place():
-    # Pre-seed a row WITH an id (real Postgres assigns it) so the upsert takes
-    # the update branch instead of inserting a duplicate.
-    fake = FakeSupabase(tables={"company_override": [
-        {"id": 1, "kind": "set_isin", "isin": None, "ticker": "Z", "exchange": "NASDAQ",
-         "canonical_isin": "US98954M1018", "note": "stale"},
-    ]})
-    set_company_isin(fake, ticker="Z", exchange="NASDAQ", isin="US98954M2008")
-    rows = [r for r in fake.tables["company_override"] if r["kind"] == "set_isin"]
-    assert len(rows) == 1  # updated in place, not duplicated
-    assert rows[0]["canonical_isin"] == "US98954M2008"

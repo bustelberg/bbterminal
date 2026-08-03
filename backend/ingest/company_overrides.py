@@ -45,53 +45,6 @@ class OverrideReport:
     actions: list[str] = field(default_factory=list)
 
 
-def record_isin_alias(supabase: Client, secondary_isin: str | None,
-                      canonical_isin: str | None, note: str | None = None) -> None:
-    """Remember that `secondary_isin` is the SAME issuer as `canonical_isin`
-    (keep the canonical). Idempotent upsert — call this whenever you merge two
-    companies that carry different ISINs, so the next ingest re-applies it if the
-    secondary listing is re-created."""
-    s = (secondary_isin or "").strip()
-    c = (canonical_isin or "").strip()
-    if not s or not c or s == c:
-        return
-    existing = (
-        supabase.table("company_override").select("id")
-        .eq("kind", "alias").eq("isin", s).limit(1).execute()
-    ).data
-    payload = {"kind": "alias", "isin": s, "canonical_isin": c, "note": note}
-    if existing:
-        supabase.table("company_override").update(payload).eq("id", existing[0]["id"]).execute()
-    else:
-        supabase.table("company_override").insert(payload).execute()
-
-
-def add_exclusion(supabase: Client, *, isin: str | None = None, ticker: str | None = None,
-                  exchange: str | None = None, note: str | None = None) -> None:
-    """Record an unwanted constituent so the override pass keeps it out of scope.
-    Match by `isin` if it has one, else by `(ticker, exchange)`."""
-    supabase.table("company_override").insert({
-        "kind": "exclude", "isin": isin, "ticker": ticker, "exchange": exchange, "note": note,
-    }).execute()
-
-
-def set_company_isin(supabase: Client, *, ticker: str, exchange: str, isin: str,
-                     note: str | None = None) -> None:
-    """Pin a company's stored ISIN: the override pass forces `company.isin` to
-    `isin` for the company matched by `(ticker, exchange)` on every ingest.
-    Idempotent upsert (one `set_isin` row per ticker+exchange)."""
-    existing = (
-        supabase.table("company_override").select("id")
-        .eq("kind", "set_isin").eq("ticker", ticker).eq("exchange", exchange).limit(1).execute()
-    ).data
-    payload = {"kind": "set_isin", "ticker": ticker, "exchange": exchange,
-               "canonical_isin": isin, "note": note}
-    if existing:
-        supabase.table("company_override").update(payload).eq("id", existing[0]["id"]).execute()
-    else:
-        supabase.table("company_override").insert(payload).execute()
-
-
 def _company_by_isin(supabase: Client, isin: str | None) -> dict | None:
     if not isin:
         return None
@@ -137,36 +90,6 @@ def _merge_alias(supabase: Client, loser: dict, winner: dict, report: OverrideRe
         supabase.table(t).delete().eq("company_id", lid).execute()
     supabase.table("company").delete().eq("company_id", lid).execute()
     report.rows_deleted += 1
-
-
-def merge_companies(supabase: Client, loser_id: int, winner_id: int, *,
-                    drop_loser_prices: bool = False, record_alias: bool = True,
-                    note: str | None = None) -> None:
-    """Canonical company merge: rewire every reference from `loser_id` onto
-    `winner_id`, delete the loser, and — when both carry (different) ISINs and
-    `record_alias` — record the loser->winner ISIN alias so a re-created loser is
-    auto-folded on the next ingest. THE entry point for consolidating two rows
-    (use it instead of hand-rolling FK moves) so cross-ISIN decisions stick.
-
-    `drop_loser_prices=True` discards the loser's `metric_data` instead of moving
-    it — use when the two are DIFFERENT listings (an ADR vs its home line) whose
-    prices/currencies must not mix; the keeper repopulates from its own listing."""
-    pair = (
-        supabase.table("company").select("company_id, isin, " + ", ".join(_MC_COLS) +
-                                          ", company_name, out_of_scope_at")
-        .in_("company_id", [loser_id, winner_id]).execute()
-    ).data or []
-    by_id = {c["company_id"]: c for c in pair}
-    loser, winner = by_id.get(loser_id), by_id.get(winner_id)
-    if not loser or not winner or loser_id == winner_id:
-        return
-    if record_alias:
-        record_isin_alias(supabase, loser.get("isin"), winner.get("isin"), note)
-    if drop_loser_prices:
-        _merge_alias(supabase, loser, winner, OverrideReport())
-    else:
-        from ingest.dedupe import _reassign_and_delete, MergeReport  # noqa: PLC0415
-        _reassign_and_delete(supabase, loser_id, winner_id, MergeReport())
 
 
 def apply_company_overrides(supabase: Client, *, dry_run: bool = False) -> OverrideReport:
