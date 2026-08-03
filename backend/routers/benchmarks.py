@@ -321,54 +321,69 @@ async def benchmark_reconstructed_index(label: str, year: int | None = None):
     return await compute_index_async(label, year)
 
 
-class BenchmarkFillResult(BaseModel):
-    label: str
-    universe_members: int = 0
-    usable: int = 0
-    needs_resolve: int = 0
-    needs_cap: int = 0
-    no_isin: int = 0
-    no_isin_names: list[str] = []
-    queued: int = 0
-    skipped_existing: int = 0
-    # ⚠ `resolved` IS WORK DONE; `queued` IS ONLY WORK RECORDED. The queue's default drainer is a
-    # standalone process that a single-service deployment does not run, so a press used to report
-    # "25 queued (a paced worker drains them)" and nothing ever drained them. Fill now runs the
-    # worker's own slice inline unless something else is already consuming Yahoo (`worker_live`).
-    resolved: int = 0
-    # OpenFIGI identified it, Yahoo has no daily series (a bond, a structured product, an exchange
-    # Yahoo does not carry). Done for ever, never retried — an answer, not a failure.
-    resolve_unmapped: int = 0
-    resolve_failed: int = 0
-    resolve_pending: int = 0
-    worker_live: bool = False
-    capped: int = 0
-    # Prices re-fetched this press, and how many constituents still have no mark in the window.
-    # `price_pending` is not a failure: one press re-prices a bounded slice on purpose, and the
-    # 06:00 asset-price tick clears the rest unattended.
-    repriced: int = 0
-    price_pending: int = 0
-    price_failed: int = 0
-    # True when the label had NO universe row and its template was run to create one — AEX.
-    universe_built: bool = False
-    note: str | None = None
+async def _benchmark_refresh_stream(label: str):
+    """The Refresh button's three steps, one SSE line each.
 
-
-@router.post("/api/benchmarks/index/{label}/fill", response_model=BenchmarkFillResult)
-async def benchmark_fill(label: str):
-    """Close the asset-world gap behind a reconstructed index, and report what remains.
-
-    A benchmark reads 0 members when its constituents are not in the asset grid — the universe is
-    usually fine. This enqueues the unresolved ISINs for the single paced ingest worker and writes
-    market caps for the ones already resolved (a batched quote, ~1 call per 100 symbols).
-
-    ⚠ IT DOES NOT RESOLVE INLINE, and the response is therefore not a "done": Yahoo returns an
-    EMPTY result to an overloaded caller instead of a 429, so a second concurrent consumer is how
-    a constituent lands on a thin foreign listing. The counts say what was handed to the worker.
+    A worker thread does the blocking work and pushes frames onto a queue the async side drains
+    — the same shape as the AIRS scan, and for the same reason: this is minutes of paced Yahoo
+    calls, not a request.
     """
-    from routers._benchmark_fill import fill_benchmark  # noqa: PLC0415
+    import queue as thread_queue  # noqa: PLC0415
+    import threading  # noqa: PLC0415
 
-    return await asyncio.to_thread(fill_benchmark, label)
+    from routers._benchmark_refresh import refresh_benchmark  # noqa: PLC0415
+    from routers._sse import sse_event, sse_message  # noqa: PLC0415
+
+    q: thread_queue.Queue = thread_queue.Queue()
+
+    def emit(msg_type: str, **kw):
+        q.put(sse_event({"type": msg_type, **kw}))
+
+    def run():
+        try:
+            emit("done", summary=refresh_benchmark(label, emit))
+        except Exception as e:  # noqa: BLE001 — surface it, don't 500 a stream mid-flight
+            q.put(sse_message("error", f"{type(e).__name__}: {e}"))
+        finally:
+            q.put(None)
+
+    threading.Thread(target=run, daemon=True).start()
+    while True:
+        item = await asyncio.to_thread(q.get)
+        if item is None:
+            break
+        yield item
+
+
+@router.get("/api/benchmarks/index/{label}/refresh")
+async def benchmark_refresh(label: str):
+    """Refresh a reconstructed index: constituents, market caps, then two prices each.
+
+    Exactly three steps, streamed line by line (see `_benchmark_refresh`):
+
+        1. CONSTITUENTS  rebuild the universe if it has none, read its membership, bridge each
+                         member into the asset world by ISIN, resolve what is not there yet.
+        2. MARKET CAPS   a batched Yahoo quote for EVERY constituent — the cap IS the weight,
+                         and a three-week-old cap is a three-week-old index.
+        3. PRICES        each constituent's start-of-year close and its current close. Those two
+                         numbers are the whole of the YTD the panel shows.
+
+    ⚠ SSE, NOT A POST. Step 3 is one paced Yahoo call per constituent: 491 for the S&P, 1,684 for
+    ACWI. That is minutes, and a button that hangs silently for eleven of them is
+    indistinguishable from a broken one — so every step reports as it happens.
+
+    ⚠ PRICES ARE FETCHED BY SYMBOL. Identity is decided in step 1 only, through the single paced
+    queue worker; nothing in step 3 reopens the question of WHICH listing an instrument is (Yahoo
+    answers an overloaded caller with an empty search, which is how Alphabet moved to a Vienna
+    line 75,000x thinner).
+    """
+    from fastapi.responses import StreamingResponse  # noqa: PLC0415
+
+    return StreamingResponse(
+        _benchmark_refresh_stream(label),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 class BenchmarkResetResult(BaseModel):

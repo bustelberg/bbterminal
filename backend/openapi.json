@@ -2905,123 +2905,6 @@
         "title": "BenchmarkCompare",
         "type": "object"
       },
-      "BenchmarkFillResult": {
-        "properties": {
-          "capped": {
-            "default": 0,
-            "title": "Capped",
-            "type": "integer"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
-          },
-          "needs_cap": {
-            "default": 0,
-            "title": "Needs Cap",
-            "type": "integer"
-          },
-          "needs_resolve": {
-            "default": 0,
-            "title": "Needs Resolve",
-            "type": "integer"
-          },
-          "no_isin": {
-            "default": 0,
-            "title": "No Isin",
-            "type": "integer"
-          },
-          "no_isin_names": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "No Isin Names",
-            "type": "array"
-          },
-          "note": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          },
-          "price_failed": {
-            "default": 0,
-            "title": "Price Failed",
-            "type": "integer"
-          },
-          "price_pending": {
-            "default": 0,
-            "title": "Price Pending",
-            "type": "integer"
-          },
-          "queued": {
-            "default": 0,
-            "title": "Queued",
-            "type": "integer"
-          },
-          "repriced": {
-            "default": 0,
-            "title": "Repriced",
-            "type": "integer"
-          },
-          "resolve_failed": {
-            "default": 0,
-            "title": "Resolve Failed",
-            "type": "integer"
-          },
-          "resolve_pending": {
-            "default": 0,
-            "title": "Resolve Pending",
-            "type": "integer"
-          },
-          "resolve_unmapped": {
-            "default": 0,
-            "title": "Resolve Unmapped",
-            "type": "integer"
-          },
-          "resolved": {
-            "default": 0,
-            "title": "Resolved",
-            "type": "integer"
-          },
-          "skipped_existing": {
-            "default": 0,
-            "title": "Skipped Existing",
-            "type": "integer"
-          },
-          "universe_built": {
-            "default": false,
-            "title": "Universe Built",
-            "type": "boolean"
-          },
-          "universe_members": {
-            "default": 0,
-            "title": "Universe Members",
-            "type": "integer"
-          },
-          "usable": {
-            "default": 0,
-            "title": "Usable",
-            "type": "integer"
-          },
-          "worker_live": {
-            "default": false,
-            "title": "Worker Live",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "label"
-        ],
-        "title": "BenchmarkFillResult",
-        "type": "object"
-      },
       "BenchmarkResetResult": {
         "properties": {
           "caps_cleared": {
@@ -15851,10 +15734,10 @@
         ]
       }
     },
-    "/api/benchmarks/index/{label}/fill": {
-      "post": {
-        "description": "Close the asset-world gap behind a reconstructed index, and report what remains.\n\nA benchmark reads 0 members when its constituents are not in the asset grid \u2014 the universe is\nusually fine. This enqueues the unresolved ISINs for the single paced ingest worker and writes\nmarket caps for the ones already resolved (a batched quote, ~1 call per 100 symbols).\n\n\u26a0 IT DOES NOT RESOLVE INLINE, and the response is therefore not a \"done\": Yahoo returns an\nEMPTY result to an overloaded caller instead of a 429, so a second concurrent consumer is how\na constituent lands on a thin foreign listing. The counts say what was handed to the worker.",
-        "operationId": "benchmark_fill_api_benchmarks_index__label__fill_post",
+    "/api/benchmarks/index/{label}/refresh": {
+      "get": {
+        "description": "Refresh a reconstructed index: constituents, market caps, then two prices each.\n\nExactly three steps, streamed line by line (see `_benchmark_refresh`):\n\n    1. CONSTITUENTS  rebuild the universe if it has none, read its membership, bridge each\n                     member into the asset world by ISIN, resolve what is not there yet.\n    2. MARKET CAPS   a batched Yahoo quote for EVERY constituent \u2014 the cap IS the weight,\n                     and a three-week-old cap is a three-week-old index.\n    3. PRICES        each constituent's start-of-year close and its current close. Those two\n                     numbers are the whole of the YTD the panel shows.\n\n\u26a0 SSE, NOT A POST. Step 3 is one paced Yahoo call per constituent: 491 for the S&P, 1,684 for\nACWI. That is minutes, and a button that hangs silently for eleven of them is\nindistinguishable from a broken one \u2014 so every step reports as it happens.\n\n\u26a0 PRICES ARE FETCHED BY SYMBOL. Identity is decided in step 1 only, through the single paced\nqueue worker; nothing in step 3 reopens the question of WHICH listing an instrument is (Yahoo\nanswers an overloaded caller with an empty search, which is how Alphabet moved to a Vienna\nline 75,000x thinner).",
+        "operationId": "benchmark_refresh_api_benchmarks_index__label__refresh_get",
         "parameters": [
           {
             "in": "path",
@@ -15870,9 +15753,7 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BenchmarkFillResult"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"
@@ -15888,7 +15769,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Benchmark Fill",
+        "summary": "Benchmark Refresh",
         "tags": [
           "benchmarks"
         ]

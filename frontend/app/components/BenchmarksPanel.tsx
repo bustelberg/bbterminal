@@ -6,6 +6,7 @@ import { API_URL } from '../../lib/apiUrl';
 import { dialog } from '../../lib/dialog';
 import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { Provenance } from '../../lib/provenance';
+import { runSSE } from '../../lib/stream';
 import type { ReconstructedIndex } from '../../lib/types/api';
 
 /** The indices we rebuild from our own constituents.
@@ -55,66 +56,57 @@ const price = (v: number | null | undefined) =>
  * three constituents' price series had to be un-split (our stored closes are not
  * split-adjusted and cannot self-heal).
  */
-/** `POST /api/benchmarks/index/{label}/fill` — the fields the button reads. */
-type FillResult = {
-  label: string; universe_members: number; usable: number; needs_resolve: number;
-  needs_cap: number; no_isin: number; no_isin_names?: string[];
-  queued: number; skipped_existing: number; capped: number; note?: string | null;
-  /** The template was run because no universe existed — AEX had none at all. */
-  universe_built?: boolean;
-  /** Prices re-fetched this press, and how many constituents still have no mark in the window.
-   *  `price_pending` is not a failure — a press re-prices a bounded slice on purpose. */
-  repriced?: number; price_pending?: number; price_failed?: number;
-  /** What this press RESOLVED, as opposed to merely queued. `worker_live` = something else is
-   *  already draining the queue, which is the only case where queuing IS the whole answer. */
-  resolved?: number; resolve_unmapped?: number; resolve_failed?: number;
-  resolve_pending?: number; worker_live?: boolean;
+/** `GET /api/benchmarks/index/{label}/refresh` (SSE) — the run's own frames.
+ *
+ *  `progress` is one human line per step; `done` carries the totals. Nothing is parsed out of
+ *  the prose — the summary is a separate object — so the log can be made more detailed without
+ *  anything in the UI depending on its wording. */
+type RefreshEvent = {
+  type?: 'progress' | 'phase' | 'done' | 'error';
+  phase?: string;
+  message?: string;
+  summary?: RefreshSummary;
 };
 
-/** One sentence saying what the press actually achieved — and, when nothing was queued, WHY.
- *
- * ⚠ IT NEVER SAYS "DONE". Resolution is handed to a single paced worker precisely so a second
- * Yahoo consumer cannot corrupt it (an overloaded caller gets an empty result, not a 429), so the
- * members count will not move on the next load. A button that implied otherwise would be pressed
- * again, and again, each press queueing nothing and looking broken. */
-function fillSummary(f: FillResult): string {
-  if (f.note) return f.note;
+type RefreshSummary = {
+  label: string;
+  universe_members?: number;
+  priceable?: number;
+  needs_resolve?: number;
+  no_isin?: number;
+  capped?: number;
+  no_cap?: number;
+  prices_total?: number;
+  prices_fetched?: number;
+  prices_already_current?: number;
+  prices_failed?: number;
+  no_start_price?: number;
+  market_anchor?: string | null;
+  seconds?: number;
+  note?: string | null;
+};
+
+/** One sentence for the panel. The DETAIL is in the console — this is the receipt. */
+function refreshSummary(s: RefreshSummary): string {
+  if (s.note) return s.note;
   const bits: string[] = [];
-  if (f.universe_built) bits.push('built the universe from its template');
-  // ⚠ SAY WHAT WAS DONE, NOT WHAT WAS RECORDED. This read "N queued for ingest (a paced worker
-  // drains them — minutes to hours)" — a promise about a process that a single-service deployment
-  // does not run, so in production the number went up and nothing ever happened. Fill now runs the
-  // worker's own slice itself; `worker_live` is the one case where queuing really is the answer.
-  if (f.worker_live && f.queued) {
-    bits.push(`${f.queued} handed to the ingest worker, which is already running`);
-  } else {
-    if (f.resolved) bits.push(`${f.resolved} constituents resolved and priced`);
-    // Not a failure: Yahoo has no daily series for them and never will. Said plainly, because
-    // otherwise a press that did 25 of these reports "0" and reads as broken.
-    if (f.resolve_unmapped) bits.push(`${f.resolve_unmapped} have no Yahoo listing (bonds, structured products — they cannot be priced)`);
-    if (f.resolve_failed) bits.push(`${f.resolve_failed} failed to resolve`);
-    if (f.resolve_pending) bits.push(`${f.resolve_pending} left to resolve — press again`);
-  }
-  if (f.capped) bits.push(`${f.capped} market caps written`);
-  if (f.repriced) bits.push(`${f.repriced} price series refilled`);
-  // ⚠ SAID EVERY TIME IT IS NON-ZERO. A press re-prices a bounded slice, so silence here would
-  // read as "finished" over a benchmark still missing 1,600 windows.
-  if (f.price_pending) bits.push(`${f.price_pending} still to refill — press again, or the 06:00 tick clears them`);
-  if (f.price_failed) bits.push(`${f.price_failed} could not be repriced (see the console)`);
-  if (f.skipped_existing) bits.push(`${f.skipped_existing} already queued or ingested`);
-  if (!bits.length) {
-    // ⚠ ZERO MEMBERS IS NOT "EVERYTHING IS FINE". `usable === universe_members` is vacuously true
-    // at 0 === 0, so an EMPTY universe reported "every constituent is already priced and
-    // weighted" — the most reassuring possible sentence about a benchmark with nothing in it.
-    // Measured on AEX, whose universe did not exist at all.
-    if (!f.universe_members) return 'The universe is empty — nothing to price. Its template produced no members.';
-    if (f.usable === f.universe_members) return 'Nothing to do — every constituent is already priced and weighted.';
-    if (f.no_isin) return `Nothing this can fix: ${f.no_isin} of ${f.universe_members} members have no ISIN, which is the only bridge into the price world.`;
-    return 'Nothing to do.';
-  }
-  let s = `${bits.join(', ')}.`;
-  if (f.no_isin) s += ` ⚠ ${f.no_isin} members have no ISIN and can never be reached from here.`;
-  return s;
+  bits.push(`${s.priceable ?? 0} of ${s.universe_members ?? 0} constituents priceable`);
+  if (s.capped) bits.push(`${s.capped} market caps`);
+  // A constituent with no cap weighs nothing, so it is absent from a cap-weighted index while
+  // looking healthy in the grid. Never silent.
+  if (s.no_cap) bits.push(`⚠ ${s.no_cap} with no market cap (they weigh nothing)`);
+  if (s.prices_fetched) bits.push(`${s.prices_fetched} price series fetched`);
+  // ⚠ SAID, NOT OMITTED. A run where everything was already current fetched nothing, and
+  // silence there reads as "the button did nothing".
+  if (s.prices_already_current) bits.push(`${s.prices_already_current} already current`);
+  if (s.no_start_price) bits.push(`${s.no_start_price} have no start-of-year price (listed later)`);
+  if (s.prices_failed) bits.push(`${s.prices_failed} failed (see the console)`);
+  if (s.needs_resolve) bits.push(`${s.needs_resolve} still unresolved — press again`);
+  if (s.no_isin) bits.push(`⚠ ${s.no_isin} members have no ISIN and can never be reached from here`);
+  let out = `${bits.join(', ')}.`;
+  if (s.market_anchor) out += ` Priced to ${s.market_anchor}.`;
+  if (s.seconds != null) out += ` (${s.seconds}s)`;
+  return out;
 }
 
 export default function BenchmarksPanel() {
@@ -123,43 +115,70 @@ export default function BenchmarksPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [filling, setFilling] = useState<Set<string>>(new Set());
-  const [fillMsg, setFillMsg] = useState<{ text: string; kind: 'info' | 'warn' } | null>(null);
+  const [refreshing, setRefreshing] = useState<Set<string>>(new Set());
+  const [runMsg, setRunMsg] = useState<{ text: string; kind: 'info' | 'warn' } | null>(null);
+  // The newest line off the stream, so the panel shows motion while the console shows the run.
+  const [tick, setTick] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
-  // ⚠ THE TABLE HAS TO RE-READ, OR THE WHOLE POINT IS LOST. Delete → Fill is a loop you watch:
+  // ⚠ THE TABLE HAS TO RE-READ, OR THE WHOLE POINT IS LOST. Reset → Refresh is a loop you watch:
   // without a reload the row keeps showing the members it had before you deleted them, which reads
   // as the button having done nothing.
   const [reloadKey, setReloadKey] = useState(0);
   const reload = () => setReloadKey((k) => k + 1);
 
-  /** Fill one label, or every label in sequence.
+  /** Refresh one index, or every index in sequence: constituents → market caps → the two prices.
    *
-   * ⚠ SEQUENTIALLY, NEVER `Promise.all`. Each fill issues batched Yahoo quotes for market caps;
-   * three at once is three concurrent consumers on the throttle, which is the failure this whole
-   * pipeline is arranged to avoid. */
-  const fill = async (labels: string[]) => {
-    setFilling(new Set(labels));
-    setFillMsg({ text: `Filling ${labels.join(', ')}…`, kind: 'info' });
+   * ⚠ SEQUENTIALLY, NEVER `Promise.all`. Every step calls Yahoo; three indices at once is three
+   * concurrent consumers on the throttle, which is the failure this whole pipeline is arranged
+   * to avoid (an overloaded caller gets an EMPTY result, not a 429).
+   *
+   * ⚠ THE DETAIL GOES TO THE CONSOLE, THE RECEIPT TO THE PANEL. Step 3 emits a line per
+   * constituent — 491 for the S&P — which is exactly what you want when checking a price and
+   * exactly what you do not want in a status bar. The panel gets the latest line while it runs
+   * and one sentence at the end. */
+  const refresh = async (labels: string[]) => {
+    setRefreshing(new Set(labels));
+    setRunMsg({ text: `Refreshing ${labels.join(', ')}…`, kind: 'info' });
+    setTick(null);
     const lines: string[] = [];
     try {
       for (const label of labels) {
-        const r = await apiFetch(`${API_URL}/api/benchmarks/index/${label}/fill`, { method: 'POST' });
-        if (!r.ok) { lines.push(`${label}: failed — HTTP ${r.status}`); continue; }
-        lines.push(`${label}: ${fillSummary((await r.json()) as FillResult)}`);
+        console.groupCollapsed(`[benchmark refresh] ${label}`);
+        let summary: RefreshSummary | null = null;
+        let failed: string | null = null;
+        try {
+          await runSSE(`${API_URL}/api/benchmarks/index/${label}/refresh`, { method: 'GET' },
+            (evt) => {
+              const e = evt as RefreshEvent;
+              if (e.type === 'error') { failed = e.message ?? 'refresh failed'; console.error(failed); return; }
+              if (e.type === 'done') { summary = e.summary ?? null; return; }
+              if (!e.message) return;
+              // A phase header is the one line worth making findable in a 500-line log.
+              if (e.type === 'phase') console.log(`%c${e.message}`, 'font-weight:bold');
+              else console.log(e.message);
+              setTick(e.message.trim());
+            });
+        } finally {
+          console.groupEnd();
+        }
+        if (failed) { lines.push(`${label}: ${failed}`); continue; }
+        lines.push(summary ? `${label}: ${refreshSummary(summary)}` : `${label}: no summary returned`);
+        if (summary) console.log(`[benchmark refresh] ${label} summary`, summary);
       }
-      setFillMsg({ text: lines.join('  ·  '), kind: 'warn' });
-      // Caps are written inline, and a rebuilt universe lands immediately — both are visible now.
-      // (The RESOLVES are not: they went to the paced worker, which is what the amber says.)
+      setRunMsg({ text: lines.join('  ·  '), kind: 'warn' });
+      // Caps and prices are written as the run goes, so the table's numbers change now.
       reload();
     } catch (e) {
-      setFillMsg({ text: e instanceof Error ? e.message : String(e), kind: 'warn' });
+      console.warn('[benchmark refresh] failed', e);
+      setRunMsg({ text: e instanceof Error ? e.message : String(e), kind: 'warn' });
     } finally {
-      setFilling(new Set());
+      setRefreshing(new Set());
+      setTick(null);
     }
   };
 
   /**
-   * Delete the live universe behind one benchmark, so Fill can be watched rebuilding it.
+   * Delete the live universe behind one benchmark, so Refresh can be watched rebuilding it.
    *
    * ⚠ THE CONFIRM NAMES WHAT SURVIVES, NOT JUST WHAT GOES. "Delete SP500?" invites the reading
    * that the prices and the market caps go with it; they do not, and knowing that is the
@@ -168,14 +187,14 @@ export default function BenchmarksPanel() {
   const del = async (label: string, members?: number) => {
     const ok = await dialog.confirm(
       `Reset ${label}?\n\n`
-      + `Deletes all three things Fill puts in place, so the whole button can be tested:\n`
+      + `Deletes all three things Refresh puts in place, so the whole button can be tested:\n`
       + `  • its ${members ?? ''} membership rows\n`
       + '  • its constituents’ market caps\n'
       + '  • their closes from mid-November onward (the start-of-year mark and everything since)\n\n'
-      + 'The asset grid, the Yahoo symbol and the older history stay — so Fill re-fetches prices '
+      + 'The asset grid, the Yahoo symbol and the older history stay — so Refresh re-fetches prices '
       + 'for a KNOWN listing and nothing is ever re-resolved.\n\n'
       + '⚠ Prices are shared: some of these constituents are also held in AIRS books, and '
-      + 'those portfolio figures will read short until the prices are refilled. One press of Fill '
+      + 'those portfolio figures will read short until the prices are refilled. One press of Refresh '
       + 'refills 50; the 06:00 price tick finishes the rest overnight.',
     );
     if (!ok) return;
@@ -190,21 +209,21 @@ export default function BenchmarksPanel() {
         // 422 carries a sentence about THIS label (no template, frozen, has children) — show it
         // rather than a status code, because it names what to do instead.
         console.warn(`[benchmarks] delete ${label} refused`, { status: r.status, body: b });
-        setFillMsg({ text: b?.detail ?? `${label}: delete failed — HTTP ${r.status}`, kind: 'warn' });
+        setRunMsg({ text: b?.detail ?? `${label}: delete failed — HTTP ${r.status}`, kind: 'warn' });
         return;
       }
-      setFillMsg({
+      setRunMsg({
         text: b?.deleted
           ? `${label}: reset — ${b.members_deleted ?? 0} members, ${b.caps_cleared ?? 0} market `
             + `caps and ${(b.price_rows_deleted ?? 0).toLocaleString('en-US')} closes from `
-            + `${b.prices_from ?? 'the window open'}. Press Fill to rebuild all three.`
+            + `${b.prices_from ?? 'the window open'}. Press Refresh to rebuild all three.`
           : b?.note ?? `${label}: nothing to delete.`,
         kind: 'warn',
       });
       reload();
     } catch (e) {
       console.warn(`[benchmarks] delete ${label} threw`, e);
-      setFillMsg({ text: e instanceof Error ? e.message : String(e), kind: 'warn' });
+      setRunMsg({ text: e instanceof Error ? e.message : String(e), kind: 'warn' });
     } finally {
       setDeleting(null);
     }
@@ -249,25 +268,30 @@ export default function BenchmarksPanel() {
         {/* Ingesting constituents is admin work — hidden rather than left to 403. The index itself
             reads the same for everyone. */}
         {isAdmin && (
-          <button type="button" onClick={() => void fill(INDICES.map((i) => i.label))}
-            disabled={filling.size > 0}
-            title="For each index: queue its un-ingested constituents for the price worker and write market caps for the ones already resolved. Runs one index at a time — concurrent Yahoo callers are how a constituent lands on the wrong listing."
+          <button type="button" onClick={() => void refresh(INDICES.map((i) => i.label))}
+            disabled={refreshing.size > 0}
+            title="For each index, in order: gather its constituents, get every one's market cap from Yahoo, then each one's start-of-year price and current price. Minutes per index — every step is logged to the browser console as it happens. Runs one index at a time; concurrent Yahoo callers are how a constituent lands on the wrong listing."
             className="ml-auto text-[11px] px-2.5 py-1 rounded-lg bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-50">
-            {filling.size > 1 ? 'Filling…' : 'Fill all'}
+            {refreshing.size > 1 ? 'Refreshing…' : 'Refresh all'}
           </button>
         )}
       </div>
 
-      {fillMsg && (
-        // ⚠ AMBER, NOT GREEN. The work is handed to a paced background worker, so this is a
-        // receipt for what was QUEUED — the table above will not change on the next load.
+      {runMsg && (
         <div className={`text-[11px] rounded-lg px-3 py-1.5 border ${
-          fillMsg.kind === 'warn'
+          runMsg.kind === 'warn'
             ? 'text-warn-300 bg-warn-500/10 border-warn-500/20'
             : 'text-fg-subtle bg-overlay/[0.03] border-neutral-800/40'}`}>
-          {fillMsg.text}
+          {runMsg.text}
+          {/* The live line, while it runs. It is a TAIL, not a log — the log is the console, and
+              this exists only so a run that will take minutes visibly moves. Monospace and
+              truncated so a 491-constituent run cannot reflow the panel on every frame. */}
+          {tick && (
+            <div className="mt-1 font-mono text-fg-faint truncate" title={tick}>{tick}</div>
+          )}
         </div>
       )}
+      {refreshing.size > 0 && <div className="loading-bar h-0.5 w-full rounded-full" aria-hidden />}
 
       {loading && <p className="text-xs text-fg-subtle">Computing…</p>}
       {error && (
@@ -309,21 +333,21 @@ export default function BenchmarksPanel() {
                       </td>
                       <td className="px-3 py-1.5 font-mono text-fg-subtle whitespace-nowrap">{d.as_of ?? '—'}</td>
                       <td className="px-3 py-1.5 text-right">
-                        {/* ⚠ `stopPropagation` — the whole row is the expand toggle, and a Fill
+                        {/* ⚠ `stopPropagation` — the whole row is the expand toggle, and a Refresh
                             that also opened the detail would look like it had rendered a result. */}
                         {isAdmin && (
                           <div className="inline-flex items-center gap-1">
-                            <button type="button" disabled={filling.size > 0 || deleting != null}
-                              onClick={(e) => { e.stopPropagation(); void fill([ix.label]); }}
-                              title={`Queue ${ix.name}'s un-ingested constituents for the price worker and write market caps for the ones already resolved.`}
+                            <button type="button" disabled={refreshing.size > 0 || deleting != null}
+                              onClick={(e) => { e.stopPropagation(); void refresh([ix.label]); }}
+                              title={`Refresh ${ix.name}: gather its constituents, get every one's market cap from Yahoo, then each one's start-of-year price and current price. Takes minutes — every step is logged to the browser console as it happens.`}
                               className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
-                              {filling.has(ix.label) && filling.size === 1 ? 'Filling…' : 'Fill'}
+                              {refreshing.has(ix.label) && refreshing.size === 1 ? 'Refreshing…' : 'Refresh'}
                             </button>
-                            {/* Only where Fill can put it back — see `rebuildable`. */}
+                            {/* Only where Refresh can put it back — see `rebuildable`. */}
                             {ix.rebuildable && (
-                              <button type="button" disabled={filling.size > 0 || deleting != null}
+                              <button type="button" disabled={refreshing.size > 0 || deleting != null}
                                 onClick={(e) => { e.stopPropagation(); void del(ix.label, d?.member_count); }}
-                                title={`Delete the ${ix.name} universe so Fill can be watched rebuilding it. Membership only — prices and market caps are untouched.`}
+                                title={`Delete the ${ix.name} universe so Refresh can be watched rebuilding it. Membership only — prices and market caps are untouched.`}
                                 aria-label={`Delete the ${ix.name} universe`}
                                 className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-800/40 text-fg-faint hover:text-neg-400 hover:border-neg-500/40 disabled:opacity-50">
                                 {deleting === ix.label ? '…' : 'Delete'}
