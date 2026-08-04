@@ -540,10 +540,7 @@ def _book_return(portfolio_id: int, ytd_from: str | None, model_ytd: float | Non
     book_ytd = link.get("ytd_pct")
     # The book's freshness — the latest AIRS scan of its holdings. Always returned (both source
     # modes) so the Book-vs-strategy tile's ⓘ can date the book number regardless of the toggle.
-    _bh = (supabase.table("airs_holding").select("as_of_date")
-           .eq("portefeuille", link["portefeuille"]).order("as_of_date", desc=True)
-           .limit(1).execute().data or [])
-    book_as_of = str(_bh[0]["as_of_date"]) if _bh else None
+    book_as_of = _book_snapshot_date(link["portefeuille"])
     aligned = ytd_from == f"{date.today().year}-01-01"
     if book_ytd is None:
         reason = "AIRS reports no return for the paired book."
@@ -699,6 +696,23 @@ def book_unavailable_reason(portfolio_id: int) -> str:
     return (f"Paired with the book {pf}, which has {n} stored holding row(s), but none of them "
             f"survived resolution — every line lacks an ISIN we can join on. Check the book's "
             f"holdings on the portfolios list.")
+
+
+def _book_snapshot_date(portefeuille: str) -> str | None:
+    """The newest `airs_holding` snapshot for one account — the clock every AIRS-valued figure on
+    this screen is as-of.
+
+    ⚠ A NAMED FUNCTION, NOT AN INLINE QUERY, FOR TWO REASONS. It was written out twice (the book
+    items and the legs), so it was two places to keep in step; and inline it was an unstubbable
+    database hop in the middle of an otherwise pure function — `TestBookWeighting` reached
+    PRODUCTION through it on a developer machine and raised `KeyError: 'SUPABASE_URL'` in CI,
+    which is exactly the asymmetry `tests/conftest.py` exists to make impossible. One seam, and a
+    test monkeypatches this instead of faking the whole client.
+    """
+    rows = (supabase.table("airs_holding").select("as_of_date")
+            .eq("portefeuille", portefeuille).order("as_of_date", desc=True)
+            .limit(1).execute().data or [])
+    return str(rows[0]["as_of_date"]) if rows else None
 
 
 def _airs_position_return(row: dict | None, net_income: float = 0.0) -> float | None:
@@ -1054,10 +1068,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     # So each holding carries its own. A book-valued row is as-of the SNAPSHOT the valuation came
     # from; a look-through row is as-of the last close of the instrument's OWN series, which is a
     # different date again and can trail it.
-    _bh = (supabase.table("airs_holding").select("as_of_date")
-           .eq("portefeuille", link["portefeuille"]).order("as_of_date", desc=True)
-           .limit(1).execute().data or [])
-    book_as_of = str(_bh[0]["as_of_date"]) if _bh else None
+    book_as_of = _book_snapshot_date(link["portefeuille"])
 
     holdings_detail: list[dict] = []
     for r, w, b_alloc in raw_positions:

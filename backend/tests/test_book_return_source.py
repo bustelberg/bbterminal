@@ -70,6 +70,11 @@ class TestTheLadder:
         # The wrapped books are stubbed here; they have their own tests below and their own DB hops.
         monkeypatch.setattr(pa, "_wrapped_book_marks", lambda ids: dict(wrapped or {}))
         monkeypatch.setattr(accounts, "_direct_result", lambda pf, names: ({}, {}))
+        # ⚠ THE LAST DATABASE HOP IN AN OTHERWISE PURE FUNCTION. Unstubbed it reads `airs_holding`
+        # for the book's snapshot date — which passes on a developer machine (dotenv supplies
+        # credentials, and the test reads PRODUCTION) and raises `KeyError: 'SUPABASE_URL'` in CI.
+        # That asymmetry is the one `tests/conftest.py` exists to convert into a hard failure.
+        monkeypatch.setattr(pa, "_book_snapshot_date", lambda pf: "2026-08-04")
         monkeypatch.setattr("routers._airs_lookthrough._datum_of", lambda pid: None)
         monkeypatch.setattr("routers._airs_portfolio_perf.compute_holding_marks",
                             lambda isins, anchor, **kw: dict(marks or {}))

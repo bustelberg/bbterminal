@@ -362,8 +362,12 @@ class TestAbsencesAreNotFailures:
         from routers import _benchmark_refresh as r
 
         src = inspect.getsource(r._prices)
-        assert "already_current" in src
-        assert "already current" in src        # ...and it is SAID, per constituent
+        # ⚠ THE COUNTER WAS RENAMED, THE INVARIANT WAS NOT. `already_current` became `unchanged`
+        # on 2026-08-03, split from `moved` — a better vocabulary for the same fact, and this test
+        # went red naming a string rather than the behaviour it guards. What must stay true is that
+        # a constituent needing no fetch is COUNTED and SAID, not silently skipped.
+        assert '"unchanged"' in src                            # counted…
+        assert "unchanged, Yahoo has no closed bar" in src     # …and said, per constituent
 
     def test_no_start_price_is_its_own_outcome(self):
         """The instrument had not listed when the year opened. It cannot contribute a YTD and the

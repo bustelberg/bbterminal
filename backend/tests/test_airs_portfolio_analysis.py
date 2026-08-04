@@ -188,7 +188,12 @@ class TestTheBenchmarkRidesTheSAMEWINDOW:
         the /portfolios table shows exactly it. Re-deriving it here — even 'the same way' — is
         how a modal ends up quietly disagreeing with the row that opened it."""
         src = inspect.getsource(pa._returns)
-        assert "compute_portfolio_performance()" in src
+        # ⚠ MATCH THE CALL, NOT AN EXACT ARGUMENT LIST. This read `compute_portfolio_performance()`
+        # with empty parens until 2026-08-04, so the day that call gained `only_portfolio_id=` —
+        # an optimisation that left the invariant completely intact — the test went red claiming
+        # the portfolio side was being recomputed. A guard that fires on a signature change it does
+        # not care about teaches people to edit the test without reading it.
+        assert "compute_portfolio_performance(" in src
 
 
 class TestOneCompanyOneRow:
@@ -539,6 +544,12 @@ class TestBookWeighting:
         monkeypatch.setattr("routers._airs_lookthrough._datum_of", lambda pid: None)
         monkeypatch.setattr("routers._airs_portfolio_perf.compute_holding_marks",
                             lambda isins, anchor, **kw: {})
+        # ⚠ ADDED 2026-08-04, AFTER THESE FOUR WENT RED IN CI AND ONLY IN CI. `_book_port_items`
+        # grew a read of `airs_holding` for the book's snapshot date (2026-08-03), which on a
+        # developer machine quietly queried PRODUCTION and in CI raised `KeyError: 'SUPABASE_URL'`
+        # — the exact failure mode conftest's guard describes, arriving through a hop these tests
+        # predate. Stubbing the named function is what the guard's docstring prescribes.
+        monkeypatch.setattr(pa, "_book_snapshot_date", lambda pf: None)
         # The classification grid — yfinance attributes, the SAME source the model side uses.
         monkeypatch.setattr(pa, "_grid", lambda isins: {
             "US1": {"sector": "Technology", "msci_region": "North America",
