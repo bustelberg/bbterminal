@@ -123,7 +123,9 @@ export default function DebtRatioCard({ holdingsTarget, holdingsName, benchTarge
       )}
 
       {showInputs && (
-        <DebtRatioInputsModal target={holdingsTarget} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <DebtRatioInputsModal target={holdingsTarget} portfolioName={holdingsName}
+          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          onClose={() => setShowInputs(false)} />
       )}
     </div>
   );
