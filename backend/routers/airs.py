@@ -694,6 +694,37 @@ class PortfolioAllocationSlice(BaseModel):
     holdings: int = 0
 
 
+class HoldingSource(BaseModel):
+    """One ROUTE into a holding, and how much of the book arrives that way.
+
+    `label` is null for the book's own shares (held directly); otherwise it is the strategy whose
+    certificate was looked through to reach the instrument.
+    """
+
+    label: str | None = None
+    value_eur: float
+    # A share of the WHOLE BOOK, not of the row — so the routes add up to the holding's
+    # `weight_now_pct` and can be checked against the column next to them.
+    weight_now_pct: float
+    # What this route was worth when the window opened, and what IT returned — valued by the book
+    # that actually holds it, so a wrapped leg carries that book's own figure.
+    start_value_eur: float | None = None
+    return_pct: float | None = None
+    book: str | None = None                # the AIRS account that valued this route
+    as_of: str | None = None               # ...and the snapshot it valued it at
+    # ⚠ THAT BOOK'S OWN VALUATION — the numerator and denominator behind `return_pct`, so the card
+    # can print the division instead of asserting its result. NOT this route's slice of our book:
+    # on a split row the two diverge, and showing the slice beside the direct position's return
+    # would put two numbers on screen whose ratio is not the third.
+    book_start_value_eur: float | None = None
+    book_current_value_eur: float | None = None
+    book_income_eur: float | None = None
+    # This route's share of the OPENING value of the routes that could be valued — the weight it
+    # carried in `own_return_pct`. Null where the route had no return to contribute, which is also
+    # how the card shows a reader which legs actually spoke.
+    blend_weight_pct: float | None = None
+
+
 class BookHoldingDetail(BaseModel):
     """One paired-book position — every LONG line, priced or not.
 
@@ -735,11 +766,24 @@ class BookHoldingDetail(BaseModel):
     name: str | None = None
     isin: str | None = None
     bucket: str
+    # ⚠ THE SECTOR CHART'S OWN BUCKET, NOT `asset_grid.sector` RAW. It runs through the identical
+    # `_buckets` the bars and the benchmark use — canonicalised ("Financial Services" -> Financials,
+    # the two Yahoo vocabularies), the ETF/asset-class leftovers ("etf", "Equity") stripped back to
+    # Unclassified, a fund folded to Unclassified because its listing says nothing about what it
+    # holds, and cash to Cash. A column that named a sector the bars have never heard of is exactly
+    # the taxonomy split this module exists to prevent, one screen apart instead of one chart apart.
+    sector: str | None = None
     currency: str | None = None
     # Which strategies put us in this instrument — the model portfolios whose certificates were
     # looked through to reach it. Empty when the position is held directly. More than one is
     # normal: NVIDIA arrives through three of ToppenbergBeheer Defensief's certificates.
     via_names: list[str] = []
+    # ⚠ HOW MUCH CAME EACH WAY — `via_names` names the routes but cannot size them, and unsized
+    # they mislead: MasterCard is EUR 50,489 of BUS_Offensief_Dyn's own shares against EUR 1,991
+    # (3.8%) through the Star certificate, and a row chipped only "Star" reads as a position the
+    # book does not hold itself. `label` is null for the book's own shares. The percentages are
+    # shares of the BOOK and SUM to `weight_now_pct` by construction — the column beside them.
+    sources: list[HoldingSource] = []
     weight_pct: float | None = None
     weight_now_pct: float = 0.0
     weight_start_pct: float | None = None
@@ -769,6 +813,15 @@ class BookHoldingDetail(BaseModel):
     own_return_from: str | None = None
     own_return_estimated: bool = False
     own_return_source: str | None = None      # "airs" | "yfinance" | None
+    # ⚠ WHICH AIRS BOOK THE FIGURE CAME FROM, because it is no longer always this one. A leg held
+    # only inside a certificate is valued by the account behind that certificate — the book that
+    # actually holds the shares — and its answer can differ sharply from this book's for the same
+    # instrument, because AIRS's Beginwaarde is the year-open value OR the PURCHASE value for a
+    # position opened during the year. MasterCard: +2.14% in BUS_Offensief_Dyn (held since January)
+    # against +17.62% in StarTopSelectie's book (bought later, cheaper). Both AIRS, both correct,
+    # different questions — so the column names its source rather than leaving it inferable.
+    # None on a yfinance row.
+    own_return_book: str | None = None
     # ⚠ THE DATE THIS ROW'S RETURN IS AS-OF, PER ROW, because the two bases have different
     # clocks: an `airs` row is as-of the BOOK SNAPSHOT, a `yfinance` row as-of that instrument's
     # own last close, which can trail it by weeks. The payload's `as_of` is neither — it is the
@@ -779,6 +832,26 @@ class BookHoldingDetail(BaseModel):
     # None on a look-through row, and None when the journal has no line for the holding — "paid
     # nothing" and "we have not read the journal" are different claims.
     own_income_eur: float | None = None
+
+
+class AllocationBand(BaseModel):
+    """One cell of the allocation policy: what share this class may take in this risk profile.
+
+    ⚠ EVERY PERCENT IS OPTIONAL, AND NULL IS NOT ZERO. "No policy recorded" and "hold none of this"
+    are the same claim for a minimum and OPPOSITE claims for a default and a maximum, so an unset
+    cell comes back null rather than 0 — a zeroed grid would publish a policy nobody wrote.
+
+    ⚠ DECLARED ABOVE `ModelPortfolioAnalysis` BECAUSE THAT MODEL EMBEDS IT (the bands drawn over
+    the allocation bars). Pydantic resolves the annotation when the class is built, so a definition
+    further down the file is a NameError at import, not a forward reference.
+    """
+
+    variant: str            # a `_airs_portfolio_variant.VARIANTS` label
+    bucket: str             # a BUCKET_ORDER key — "Equity", never the "Stocks" display label
+    min_pct: float | None = None
+    default_pct: float | None = None
+    max_pct: float | None = None
+    updated_at: str | None = None
 
 
 class ModelPortfolioAnalysis(BaseModel):
@@ -807,6 +880,18 @@ class ModelPortfolioAnalysis(BaseModel):
     # `own_return_source == "airs"` row. Null in model mode, where each row carries its own
     # `own_return_as_of` instead.
     holdings_as_of: str | None = None
+    # ⚠ WHICH BOOK IS "THIS" BOOK. Needed the moment a holding's Return could come from ANOTHER
+    # account: a leg held only inside a certificate is valued by the book behind that certificate,
+    # which reports its own `own_return_book`. Without this to compare against, either every AIRS
+    # row has to be labelled with its source or none of them can be.
+    book_portefeuille: str | None = None
+    # The risk profile AIRS's own name says this model is offered at (Offensief / Beperkt
+    # Offensief / Neutraal / Defensief), and the allocation policy recorded for it — the band each
+    # class is SUPPOSED to sit in, drawn over the bar showing where it actually sits. `variant` is
+    # null for the 8 models not offered at a profile at all, and `bands` is then empty: a product
+    # with no risk profile has no policy, and inventing one would be worse than drawing nothing.
+    variant: str | None = None
+    bands: list[AllocationBand] = []
     benchmark: str
     # Which side the portfolio bars weight by: "model" (nominal strategy weights) or "book" (the
     # paired AIRS book's actual EUR holdings). Only the WEIGHTS change — classification and the
@@ -2352,3 +2437,55 @@ async def clear_airs_account_model_link(portefeuille: str):
     from routers._airs_account_links import clear_account_link_async  # noqa: PLC0415
 
     return await clear_account_link_async(portefeuille)
+
+
+class AllocationBandGrid(BaseModel):
+    """The whole policy, always complete: every profile × every invested class.
+
+    `variants` and `buckets` ship with it so the editor renders the grid the SERVER knows about
+    rather than a copy of it — add a fifth risk profile to `VARIANTS` and the editor grows a column
+    without a frontend change, which is the only way the two cannot drift.
+    """
+
+    variants: list[str]
+    buckets: list[str]
+    cells: list[AllocationBand]
+
+
+@router.get("/api/airs/allocation-bands", response_model=AllocationBandGrid)
+async def airs_allocation_bands():
+    """The allocation policy — all sixteen cells, nulls where nothing is set."""
+    from routers._airs_allocation_bands import POLICY_BUCKETS, load_bands  # noqa: PLC0415
+    from routers._airs_portfolio_variant import VARIANTS  # noqa: PLC0415
+
+    cells = await asyncio.to_thread(load_bands)
+    return {"variants": list(VARIANTS), "buckets": list(POLICY_BUCKETS), "cells": cells}
+
+
+@router.put("/api/airs/allocation-bands", response_model=AllocationBandGrid)
+async def airs_set_allocation_bands(body: list[AllocationBand]):
+    """Apply these cells to the policy. Admin-only (the API gate refuses a non-admin write).
+
+    ⚠ PARTIAL BY DESIGN — send only the cells you changed. A cell that IS sent and is empty means
+    "clear this row"; a cell that is not sent means nothing at all. Sending the full grid from a
+    stale view therefore deletes everything that changed since it loaded, which is not theoretical:
+    it wiped 15 of 16 seeded rows on 2026-08-04, silently.
+
+    ⚠ VALIDATED IN FULL BEFORE ANYTHING IS WRITTEN. A save is ONE intent, so a bad cell rejects the
+    whole submission with a sentence naming it — landing the first eight and refusing the ninth
+    would leave a policy half-updated while the reader believes all of it took.
+
+    Returns the WHOLE grid as stored, so the editor renders what the database now holds — including
+    any cell somebody else changed while it was open — rather than what it hoped it sent.
+    """
+    from routers._airs_allocation_bands import POLICY_BUCKETS, load_bands, save_bands  # noqa: PLC0415
+    from routers._airs_portfolio_variant import VARIANTS  # noqa: PLC0415
+
+    def _run() -> dict:
+        try:
+            save_bands([c.model_dump() for c in body])
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        return {"variants": list(VARIANTS), "buckets": list(POLICY_BUCKETS), "cells": load_bands()}
+
+    return await asyncio.to_thread(_run)

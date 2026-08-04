@@ -157,7 +157,7 @@ export default function CompositionDataModal({
           </h2>
           <span className="text-sm text-fg-soft truncate max-w-[28ch]" title={name}>{name}</span>
           <button type="button" onClick={onClose}
-            className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
+            className="ml-auto cursor-pointer text-fg-muted hover:text-fg-strong px-2">✕</button>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-3">
@@ -227,7 +227,7 @@ export default function CompositionDataModal({
                       <tr className="border-t border-neutral-800/40 bg-inset/60 hover:bg-overlay/[0.03]">
                         <td className="px-3 py-1.5" colSpan={3}>
                           <button type="button" onClick={() => toggle(r.bucket)}
-                            className="flex items-center gap-2 text-left text-fg-strong font-medium">
+                            className="flex cursor-pointer items-center gap-2 text-left text-fg-strong font-medium">
                             <span className="text-fg-faint w-3 inline-block">{hs.length ? (isOpen ? '▾' : '▸') : ''}</span>
                             {r.bucket}
                             <span className="text-fg-faint font-normal">

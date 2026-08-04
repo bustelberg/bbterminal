@@ -1002,6 +1002,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/allocation-bands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Allocation Bands
+         * @description The allocation policy — all sixteen cells, nulls where nothing is set.
+         */
+        get: operations["airs_allocation_bands_api_airs_allocation_bands_get"];
+        /**
+         * Airs Set Allocation Bands
+         * @description Apply these cells to the policy. Admin-only (the API gate refuses a non-admin write).
+         *
+         *     ⚠ PARTIAL BY DESIGN — send only the cells you changed. A cell that IS sent and is empty means
+         *     "clear this row"; a cell that is not sent means nothing at all. Sending the full grid from a
+         *     stale view therefore deletes everything that changed since it loaded, which is not theoretical:
+         *     it wiped 15 of 16 seeded rows on 2026-08-04, silently.
+         *
+         *     ⚠ VALIDATED IN FULL BEFORE ANYTHING IS WRITTEN. A save is ONE intent, so a bad cell rejects the
+         *     whole submission with a sentence naming it — landing the first eight and refusing the ninth
+         *     would leave a policy half-updated while the reader believes all of it took.
+         *
+         *     Returns the WHOLE grid as stored, so the editor renders what the database now holds — including
+         *     any cell somebody else changed while it was open — rather than what it hoped it sent.
+         */
+        put: operations["airs_set_allocation_bands_api_airs_allocation_bands_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/asset-bucket-override": {
         parameters: {
             query?: never;
@@ -7603,6 +7639,48 @@ export interface components {
             /** Ytd Pct */
             ytd_pct?: number | null;
         };
+        /**
+         * AllocationBand
+         * @description One cell of the allocation policy: what share this class may take in this risk profile.
+         *
+         *     ⚠ EVERY PERCENT IS OPTIONAL, AND NULL IS NOT ZERO. "No policy recorded" and "hold none of this"
+         *     are the same claim for a minimum and OPPOSITE claims for a default and a maximum, so an unset
+         *     cell comes back null rather than 0 — a zeroed grid would publish a policy nobody wrote.
+         *
+         *     ⚠ DECLARED ABOVE `ModelPortfolioAnalysis` BECAUSE THAT MODEL EMBEDS IT (the bands drawn over
+         *     the allocation bars). Pydantic resolves the annotation when the class is built, so a definition
+         *     further down the file is a NameError at import, not a forward reference.
+         */
+        AllocationBand: {
+            /** Bucket */
+            bucket: string;
+            /** Default Pct */
+            default_pct?: number | null;
+            /** Max Pct */
+            max_pct?: number | null;
+            /** Min Pct */
+            min_pct?: number | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Variant */
+            variant: string;
+        };
+        /**
+         * AllocationBandGrid
+         * @description The whole policy, always complete: every profile × every invested class.
+         *
+         *     `variants` and `buckets` ship with it so the editor renders the grid the SERVER knows about
+         *     rather than a copy of it — add a fifth risk profile to `VARIANTS` and the editor grows a column
+         *     without a frontend change, which is the only way the two cannot drift.
+         */
+        AllocationBandGrid: {
+            /** Buckets */
+            buckets: string[];
+            /** Cells */
+            cells: components["schemas"]["AllocationBand"][];
+            /** Variants */
+            variants: string[];
+        };
         /** AssetBucketOverride */
         AssetBucketOverride: {
             /** Bucket */
@@ -8163,6 +8241,8 @@ export interface components {
             own_income_eur?: number | null;
             /** Own Return As Of */
             own_return_as_of?: string | null;
+            /** Own Return Book */
+            own_return_book?: string | null;
             /**
              * Own Return Estimated
              * @default false
@@ -8176,6 +8256,13 @@ export interface components {
             own_return_source?: string | null;
             /** Return Pct */
             return_pct?: number | null;
+            /** Sector */
+            sector?: string | null;
+            /**
+             * Sources
+             * @default []
+             */
+            sources?: components["schemas"]["HoldingSource"][];
             /**
              * Via Names
              * @default []
@@ -8864,6 +8951,37 @@ export interface components {
             /** Note */
             note?: string | null;
         };
+        /**
+         * HoldingSource
+         * @description One ROUTE into a holding, and how much of the book arrives that way.
+         *
+         *     `label` is null for the book's own shares (held directly); otherwise it is the strategy whose
+         *     certificate was looked through to reach the instrument.
+         */
+        HoldingSource: {
+            /** As Of */
+            as_of?: string | null;
+            /** Blend Weight Pct */
+            blend_weight_pct?: number | null;
+            /** Book */
+            book?: string | null;
+            /** Book Current Value Eur */
+            book_current_value_eur?: number | null;
+            /** Book Income Eur */
+            book_income_eur?: number | null;
+            /** Book Start Value Eur */
+            book_start_value_eur?: number | null;
+            /** Label */
+            label?: string | null;
+            /** Return Pct */
+            return_pct?: number | null;
+            /** Start Value Eur */
+            start_value_eur?: number | null;
+            /** Value Eur */
+            value_eur: number;
+            /** Weight Now Pct */
+            weight_now_pct: number;
+        };
         /** HoldingStateInfo */
         HoldingStateInfo: {
             /** Band Pct */
@@ -9071,6 +9189,11 @@ export interface components {
              * @default []
              */
             axes?: components["schemas"]["PortfolioAnalysisAxis"][];
+            /**
+             * Bands
+             * @default []
+             */
+            bands?: components["schemas"]["AllocationBand"][];
             /** Benchmark */
             benchmark: string;
             /** Benchmark Coverage Pct */
@@ -9107,6 +9230,8 @@ export interface components {
             book_holdings?: components["schemas"]["BookHoldingDetail"][];
             /** Book Note */
             book_note?: string | null;
+            /** Book Portefeuille */
+            book_portefeuille?: string | null;
             /**
              * Covered Pct
              * @default 0
@@ -9153,6 +9278,8 @@ export interface components {
             timings_ms?: {
                 [key: string]: number;
             };
+            /** Variant */
+            variant?: string | null;
             /**
              * Weight Basis
              * @default model
@@ -11820,6 +11947,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LinkableContext"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_allocation_bands_api_airs_allocation_bands_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllocationBandGrid"];
+                };
+            };
+        };
+    };
+    airs_set_allocation_bands_api_airs_allocation_bands_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AllocationBand"][];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllocationBandGrid"];
                 };
             };
             /** @description Validation Error */

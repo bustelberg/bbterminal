@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import type { ModelPortfolioAttribution } from '../../../lib/types/api';
 import { Provenance, type SourceKey } from '../../../lib/provenance';
+import { Holdings } from './BucketDetailPanel';
 
 /**
  * WHY the model beat or lagged the index — Brinson-Fachler.
@@ -211,6 +212,82 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
   );
 }
 
+/**
+ * The names behind ONE row of the attribution table: what you hold in that bucket beside what the
+ * index holds, with each side's weights and returns.
+ *
+ * ⚠ THE SAME TABLE THE SECTOR-BAR DRILL-DOWN USES, imported rather than rebuilt — same columns,
+ * same rank, same sort, same overlap treatment (a shared name tinted and dotted, the rest faded),
+ * off the same payload. Two tables for one question is two things to learn.
+ *
+ * ⚠ BOTH LISTS ARE ON THE SAME BASE AS THE ROW ABOVE THEM. The backend renormalises each side's
+ * per-holding weights over what that side can attribute, so the weights in each list ADD UP to the
+ * "Your wt" / "Index wt" figures in the row that opened it — the check a reader will actually try.
+ * They were raw shares of the whole portfolio once: Technology read 34.38% while its own holdings
+ * summed to 9.11%, out by exactly 100/attributable_pct, and neither number was wrong on its own.
+ *
+ * ⚠ AN EMPTY SIDE IS A FINDING, NOT A BLANK. A bucket the index holds and you do not is an
+ * allocation bet with no picks to judge — exactly what the row's Selection column says by being
+ * 0.00pp. Saying so beats an empty box.
+ */
+function BucketNames({ row, bucket, benchmark }: {
+  row: NonNullable<ModelPortfolioAttribution['rows']>[number];
+  bucket: string;
+  benchmark: string;
+}) {
+  const mine = row.portfolio_holdings ?? [];
+  const theirs = row.benchmark_holdings ?? [];
+  const shared = (rows: typeof mine) => rows.filter((h) => h.in_both).length;
+  const sum = (rows: typeof mine) => rows.reduce((s, h) => s + n(h.weight_pct), 0);
+  return (
+    <div className="space-y-2">
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+        <div>
+          <p className="text-[11px] font-medium text-fg-muted mb-1">
+            Your holdings <span className="text-fg-faint">({mine.length})</span>
+            {shared(mine) > 0 && <span className="text-accent-400"> · {shared(mine)} in both</span>}
+            {mine.length > 0 && (
+              <span className="text-fg-faint"> · {sum(mine).toFixed(1)}% of the attributable model</span>
+            )}
+          </p>
+          {mine.length
+            ? <Holdings rows={mine} />
+            : (
+              <p className="text-[11px] text-fg-subtle py-1">
+                {`You hold nothing in ${bucket} — the whole effect is the decision not to own it, `}
+                {'which is why Selection and Interaction are zero on this row.'}
+              </p>
+            )}
+        </div>
+        <div>
+          <p className="text-[11px] font-medium text-fg-muted mb-1">
+            {benchmark} constituents <span className="text-fg-faint">({theirs.length})</span>
+            {shared(theirs) > 0 && <span className="text-accent-400"> · {shared(theirs)} in both</span>}
+            {theirs.length > 0 && (
+              <span className="text-fg-faint"> · {sum(theirs).toFixed(1)}% of the index</span>
+            )}
+          </p>
+          {theirs.length
+            ? <Holdings rows={theirs} />
+            : (
+              <p className="text-[11px] text-fg-subtle py-1">
+                {`${benchmark} holds nothing in ${bucket}, so there is no index return to judge `}
+                {'your picks against — the whole effect is allocation.'}
+              </p>
+            )}
+        </div>
+      </div>
+      {mine.some((h) => h.in_both) && (
+        <p className="text-[10px] text-fg-faint flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-accent-500 inline-block shrink-0" />
+          marked rows are held in both your portfolio and {benchmark} (a share class counts as the
+          same company)
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function AttributionPanel({ id, benchmark, window, source = 'model',
   portfolioAsOf, benchmarkAsOf, onClose }: {
   id: number; benchmark: string; window: 'ytd' | 'since';
@@ -221,6 +298,15 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   const [axis, setAxis] = useState<Axis>('sector');
   const [data, setData] = useState<ModelPortfolioAttribution | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * The bucket whose names are open, or null.
+   *
+   * ⚠ ONE AT A TIME, AND CLEARED WHEN THE AXIS CHANGES. Bucket names are not unique across axes
+   * — "Technology" is a sector and "United States" a region — so a key left over from the previous
+   * axis would either open nothing or, worse, open a same-named bucket on a table it does not
+   * belong to.
+   */
+  const [openBucket, setOpenBucket] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -268,14 +354,15 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
           </h4>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <select value={axis} onChange={(e) => { setData(null); setAxis(e.target.value as Axis); }}
+          <select value={axis}
+            onChange={(e) => { setData(null); setOpenBucket(null); setAxis(e.target.value as Axis); }}
             className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[11px] text-fg focus:border-accent-500">
             <option value="sector">by Sector</option>
             <option value="region">by Region</option>
             <option value="currency">by Currency</option>
           </select>
           <button type="button" onClick={onClose}
-            className="text-[11px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 transition-colors">
+            className="cursor-pointer text-[11px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 transition-colors">
             Hide
           </button>
         </div>
@@ -421,9 +508,23 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                   const rP = pct(r.portfolio_return_pct, 1);
                   const rB = pct(r.benchmark_return_pct, 1);
                   const rBt = pct(data.benchmark_return_pct, 1);
+                  const open = openBucket === r.bucket;
                   return (
-                    <tr key={r.bucket} className="hover:bg-overlay/[0.02]">
-                      <td className="px-2 py-1.5 text-fg whitespace-nowrap">{r.bucket}</td>
+                    <Fragment key={r.bucket}>
+                    {/* ⚠ THE WHOLE ROW IS THE HIT TARGET, not a chevron in the first cell. Every
+                        figure on it belongs to the bucket the drill-down explains, so any of them
+                        is a reasonable place to click and ask "which names is this?". */}
+                    <tr onClick={() => setOpenBucket(open ? null : r.bucket)}
+                      title={open ? `Hide the names behind ${r.bucket}`
+                        : `Show the names behind ${r.bucket} — what you hold and what ${benchmark} holds`}
+                      className={`cursor-pointer transition-colors ${
+                        open ? 'bg-accent-500/[0.07]' : 'hover:bg-overlay/[0.02]'}`}>
+                      <td className="px-2 py-1.5 text-fg whitespace-nowrap">
+                        <span className={`inline-block w-3 text-[9px] ${open ? 'text-accent-400' : 'text-fg-faint'}`}>
+                          {open ? '▾' : '▸'}
+                        </span>
+                        {r.bucket}
+                      </td>
                       <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
                         <Num prov={<Provenance source={pSrc} asOf={portfolioAsOf} kind="formula"
                           what={`Your share of the attributable model held in ${r.bucket}.`}
@@ -481,6 +582,14 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                             how={`${pp(r.allocation_pct)} + ${pp(r.selection_pct)} + ${pp(r.interaction_pct)} = ${pp(r.total_pct)}.`} />} />
                       </td>
                     </tr>
+                    {open && (
+                      <tr className="bg-inset/60">
+                        <td colSpan={9} className="px-3 py-3">
+                          <BucketNames row={r} bucket={r.bucket} benchmark={benchmark} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>

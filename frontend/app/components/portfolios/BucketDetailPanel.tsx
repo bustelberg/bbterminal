@@ -57,7 +57,11 @@ const WEIGHT_HINT = 'Share of the attributable holdings (funds, cash and unprice
   + 'the rest renormalised to 100%), weighted by each position\'s value when the window OPENED. '
   + 'The composition chart is weighted the same way, so a bucket total here equals its bar.';
 
-function Holdings({ rows }: { rows: Name[] }) {
+/** ⚠ EXPORTED, AND THE ATTRIBUTION TABLE'S ROW DRILL-DOWN USES THE SAME ONE. Both answer the
+ *  identical question — "which names are behind this bucket, on each side" — off the identical
+ *  payload. A second table with its own columns, sort and overlap treatment would be two
+ *  appearances of one fact, and the reader would have to learn which is which. */
+export function Holdings({ rows }: { rows: Name[] }) {
   // Sortable — click a header to toggle direction. Default: weight, largest first. Each table sorts
   // on its OWN state (your names and the index's are independent lists).
   const [key, setKey] = useState<SortKey>('weight');
@@ -203,7 +207,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
           {AXIS_LABEL[axis] ?? axis}: <span className="font-mono">{bucket}</span>
         </h4>
         <button onClick={onClose}
-          className="text-[11px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 shrink-0">
+          className="cursor-pointer text-[11px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 shrink-0">
           ✕
         </button>
       </div>

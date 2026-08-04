@@ -1606,6 +1606,102 @@
         "title": "AirsPortfolioOverview",
         "type": "object"
       },
+      "AllocationBand": {
+        "description": "One cell of the allocation policy: what share this class may take in this risk profile.\n\n\u26a0 EVERY PERCENT IS OPTIONAL, AND NULL IS NOT ZERO. \"No policy recorded\" and \"hold none of this\"\nare the same claim for a minimum and OPPOSITE claims for a default and a maximum, so an unset\ncell comes back null rather than 0 \u2014 a zeroed grid would publish a policy nobody wrote.\n\n\u26a0 DECLARED ABOVE `ModelPortfolioAnalysis` BECAUSE THAT MODEL EMBEDS IT (the bands drawn over\nthe allocation bars). Pydantic resolves the annotation when the class is built, so a definition\nfurther down the file is a NameError at import, not a forward reference.",
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "default_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Pct"
+          },
+          "max_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Pct"
+          },
+          "min_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Pct"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "variant": {
+            "title": "Variant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "variant",
+          "bucket"
+        ],
+        "title": "AllocationBand",
+        "type": "object"
+      },
+      "AllocationBandGrid": {
+        "description": "The whole policy, always complete: every profile \u00d7 every invested class.\n\n`variants` and `buckets` ship with it so the editor renders the grid the SERVER knows about\nrather than a copy of it \u2014 add a fifth risk profile to `VARIANTS` and the editor grows a column\nwithout a frontend change, which is the only way the two cannot drift.",
+        "properties": {
+          "buckets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Buckets",
+            "type": "array"
+          },
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/AllocationBand"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "variants": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Variants",
+            "type": "array"
+          }
+        },
+        "required": [
+          "variants",
+          "buckets",
+          "cells"
+        ],
+        "title": "AllocationBandGrid",
+        "type": "object"
+      },
       "AssetBucketOverride": {
         "properties": {
           "bucket": {
@@ -3124,6 +3220,17 @@
             ],
             "title": "Own Return As Of"
           },
+          "own_return_book": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Own Return Book"
+          },
           "own_return_estimated": {
             "default": false,
             "title": "Own Return Estimated",
@@ -3172,6 +3279,25 @@
               }
             ],
             "title": "Return Pct"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "sources": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HoldingSource"
+            },
+            "title": "Sources",
+            "type": "array"
           },
           "via_names": {
             "default": [],
@@ -4887,6 +5013,124 @@
         "title": "HoldingIsinOverride",
         "type": "object"
       },
+      "HoldingSource": {
+        "description": "One ROUTE into a holding, and how much of the book arrives that way.\n\n`label` is null for the book's own shares (held directly); otherwise it is the strategy whose\ncertificate was looked through to reach the instrument.",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "blend_weight_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blend Weight Pct"
+          },
+          "book": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book"
+          },
+          "book_current_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Current Value Eur"
+          },
+          "book_income_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Income Eur"
+          },
+          "book_start_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Start Value Eur"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
+          "start_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Value Eur"
+          },
+          "value_eur": {
+            "title": "Value Eur",
+            "type": "number"
+          },
+          "weight_now_pct": {
+            "title": "Weight Now Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "value_eur",
+          "weight_now_pct"
+        ],
+        "title": "HoldingSource",
+        "type": "object"
+      },
       "HoldingStateInfo": {
         "properties": {
           "band_pct": {
@@ -5515,6 +5759,14 @@
             "title": "Axes",
             "type": "array"
           },
+          "bands": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AllocationBand"
+            },
+            "title": "Bands",
+            "type": "array"
+          },
           "benchmark": {
             "title": "Benchmark",
             "type": "string"
@@ -5573,6 +5825,17 @@
               }
             ],
             "title": "Book Note"
+          },
+          "book_portefeuille": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Portefeuille"
           },
           "covered_pct": {
             "default": 0.0,
@@ -5658,6 +5921,17 @@
             "default": {},
             "title": "Timings Ms",
             "type": "object"
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant"
           },
           "weight_basis": {
             "default": "model",
@@ -11659,6 +11933,72 @@
           }
         },
         "summary": "Airs Account Linkable Portfolios",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/allocation-bands": {
+      "get": {
+        "description": "The allocation policy \u2014 all sixteen cells, nulls where nothing is set.",
+        "operationId": "airs_allocation_bands_api_airs_allocation_bands_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllocationBandGrid"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Airs Allocation Bands",
+        "tags": [
+          "airs"
+        ]
+      },
+      "put": {
+        "description": "Apply these cells to the policy. Admin-only (the API gate refuses a non-admin write).\n\n\u26a0 PARTIAL BY DESIGN \u2014 send only the cells you changed. A cell that IS sent and is empty means\n\"clear this row\"; a cell that is not sent means nothing at all. Sending the full grid from a\nstale view therefore deletes everything that changed since it loaded, which is not theoretical:\nit wiped 15 of 16 seeded rows on 2026-08-04, silently.\n\n\u26a0 VALIDATED IN FULL BEFORE ANYTHING IS WRITTEN. A save is ONE intent, so a bad cell rejects the\nwhole submission with a sentence naming it \u2014 landing the first eight and refusing the ninth\nwould leave a policy half-updated while the reader believes all of it took.\n\nReturns the WHOLE grid as stored, so the editor renders what the database now holds \u2014 including\nany cell somebody else changed while it was open \u2014 rather than what it hoped it sent.",
+        "operationId": "airs_set_allocation_bands_api_airs_allocation_bands_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "$ref": "#/components/schemas/AllocationBand"
+                },
+                "title": "Body",
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AllocationBandGrid"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Set Allocation Bands",
         "tags": [
           "airs"
         ]

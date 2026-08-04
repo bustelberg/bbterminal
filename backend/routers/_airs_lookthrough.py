@@ -159,6 +159,13 @@ def merge_by_isin(legs: list[dict], fields: tuple[str, ...] = ("percentage",)) -
         # could still tell you about where the exposure came from.
         prev["via_names"] = sorted({*(prev.get("via_names") or []),
                                     *(leg.get("via_names") or [])})
+        # ⚠ AND THE ROUTES KEEP THEIR SIZE, not just their names. `via_names` says MasterCard
+        # arrives through Star; it cannot say that EUR 50,489 of it is held outright and EUR 1,991
+        # comes through the certificate — and a row labelled only "Star" reads as a position the
+        # book does not hold itself. Concatenated, never summed here: each entry is one route in,
+        # and the caller turns the EUR into a share of the book.
+        if prev.get("sources") or leg.get("sources"):
+            prev["sources"] = [*(prev.get("sources") or []), *(leg.get("sources") or [])]
         if prev.get("via_name") and leg.get("via_name") and prev["via_name"] != leg["via_name"]:
             prev["via_name"] = "several"
     return out

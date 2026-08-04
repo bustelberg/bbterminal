@@ -11,6 +11,7 @@ import { runSSE } from '../../lib/stream';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
+import AllocationBandsModal from './portfolios/AllocationBandsModal';
 import OwnerEarningsModal from './portfolios/OwnerEarningsModal';
 import { type Basket } from './portfolios/types';
 import { allocColor, bucketLabel, BUCKET_ORDER } from './portfolios/allocationColors';
@@ -183,6 +184,9 @@ export default function PortfolioOverviewPanel() {
   const [detail, setDetail] = useState<Record<string, AirsAccountDetail>>({});
   const [isins, setIsins] = useState<Record<string, AirsAccountIsins>>({});
   const [hideSmall, setHideSmall] = useState(true);
+  // The allocation-policy editor. Mounted only while open — it fetches its own grid, and a policy
+  // nobody asked to see is not worth a request on every page load.
+  const [showBands, setShowBands] = useState(false);
   // The Fixed portfolio to analyse. Its id, not the row's — the modal describes the strategy.
   const [analyse, setAnalyse] = useState<{ id?: number; name: string; basket?: Basket } | null>(null);
   // The whole portfolio's Fundamental (blended owner earnings + price steadiness), by its id.
@@ -676,6 +680,15 @@ export default function PortfolioOverviewPanel() {
               {refreshingAll ? (scanningModels ? 'Scanning models…' : 'Refreshing…') : 'Refresh all'}
             </button>
           )}
+          {/* The POLICY, beside the thing that measures against it. Shown to everyone and editable
+              by admins only — a non-admin reading what the bands are supposed to be is exactly the
+              use this has for them, and hiding it would leave the numbers on this page with no
+              stated target at all. */}
+          <button type="button" onClick={() => setShowBands(true)}
+            title="Per risk profile (Offensief / Beperkt Offensief / Neutraal / Defensief), the minimum, default and maximum share each asset class may take."
+            className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors">
+            Allocation bands
+          </button>
           {/* ⚠ ONE BUTTON. It ran as two for a while — accounts here, model portfolios on a second
               control — which put an implementation rule (keep the two scans' error verdicts apart)
               in front of the operator as a chore. They are phases of one action now; only the
@@ -940,6 +953,9 @@ export default function PortfolioOverviewPanel() {
       {pfFund && (
         <OwnerEarningsModal portfolioId={pfFund.id} basket={pfFund.basket} name={pfFund.name}
           onClose={() => setPfFund(null)} />
+      )}
+      {showBands && (
+        <AllocationBandsModal canEdit={isAdmin} onClose={() => setShowBands(false)} />
       )}
     </section>
   );
