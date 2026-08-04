@@ -369,12 +369,9 @@ export default function MetricGrowthCard({
       )}
 
       {showHoldings && (
-        // ⚠ `chartData` IS HANDED OVER, NOT RE-DERIVED. The modal exists to show what this chart
-        // plotted; recomputing the same series there is how the two come to disagree — and the one
-        // place a reader would look to check the chart is the last place that may differ from it.
         <HoldingsRevenueModal target={holdingsTarget} metric={cfg.benchmarkMetric} unit={cfg.unit}
           noun={cfg.noun} portfolioName={holdingsName} onClose={() => setShowHoldings(false)}
-          plotted={chartData} seriesLabel={cfg.title} isIndex={isAgg}
+          seriesLabel={cfg.title}
           benchLabel={benchByX ? benchLabel : null}
           benchTarget={benchLabel ? { universe: benchLabel, cadence } : null} />
       )}

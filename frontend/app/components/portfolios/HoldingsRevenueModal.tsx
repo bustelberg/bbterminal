@@ -5,22 +5,21 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
-import { MIN_YEAR_COVERAGE_PCT, xToPeriod } from './marginData';
+import { MIN_YEAR_COVERAGE_PCT } from './marginData';
 
 /**
- * Everything behind one growth chart: the SERIES AS PLOTTED, then the raw per-company figures both
- * of its lines were built from.
+ * Everything behind one growth chart: the per-company figures its line was built from, and — when
+ * a benchmark is active — the same for the index it is drawn against.
  *
- * ⚠ THE PLOTTED SERIES IS SHOWN FIRST BECAUSE IT IS NOWHERE IN THE TABLE UNDER IT. A portfolio's
- * line is a blended growth INDEX (each holding rebased to 100 at its first year, then weighted)
- * and the benchmark's is that index scaled onto ours — neither number appears in a table of
- * reported revenues, so "click the chart to see the data" opened a table that could not be
- * reconciled with the line that was clicked. Both are here now, in the units the chart drew.
+ * ⚠ TWO TABLES, ONE VIEW SWITCH. `Reported | Rebased | YoY %` is owned here and passed to both, so
+ * the book and the index are always on the same basis; per-table switches would let a reader
+ * compare a rebased index against reported euros and take the gap for a finding. `Rebased` is the
+ * one the chart actually weights, and each table's footer carries the weighted result.
  *
- * ⚠ THE BENCHMARK'S CONSTITUENTS LOAD ON DEMAND, and only when a benchmark is active. Same
- * endpoint, same table — `{holdings|portfolio_id}` swapped for `{universe}` — but the S&P is ~490
- * rows against a book's 20, and fetching it on every open would make the common case pay for the
- * rare one.
+ * ⚠ NO "PLOTTED SERIES" TABLE. There was one, listing the chart's own points. It is gone: on a
+ * single company it repeated the reported figures three ways, and on a portfolio it repeated the
+ * Rebased footer — the same numbers in a second place, which is one more place for them to
+ * disagree. The footer row IS the line.
  */
 
 type Row = {
@@ -46,11 +45,6 @@ export type Target = {
    *  cap off the daily close). Narrowing this to the tab's two would reject them at the type
    *  level, so it stays a string here and the tab-level toggle owns the other two. */
   cadence?: string;
-};
-
-/** One point of the line as the chart drew it. `bench` is already rebased (see `rebaseOnto`). */
-export type PlottedPoint = {
-  year: number; value: number | null; trend?: number | null; bench?: number | null;
 };
 
 // Sort key is a fixed column ('name'|'weight'|'ccy') OR a year string ('2018').
@@ -368,63 +362,9 @@ function MatrixTable({ data, fmt, noun, view, onFetch }: {
   );
 }
 
-/** The lines as the chart drew them, one row per period. */
-function PlottedTable({ points, seriesLabel, benchLabel, fmt, isIndex }: {
-  points: PlottedPoint[]; seriesLabel: string; benchLabel?: string | null;
-  fmt: (v: number | null | undefined) => string; isIndex: boolean;
-}) {
-  const hasTrend = points.some((p) => p.trend != null);
-  const hasBench = points.some((p) => p.bench != null);
-  return (
-    <div className="overflow-auto rounded-lg border border-neutral-800/40">
-      <table className="w-full text-xs">
-        <thead className="bg-page">
-          <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
-            <th className="px-3 py-1.5 font-medium text-left w-full">Period</th>
-            {/* ⚠ The head is tinted to its line; the VALUES stay in text ink. A number wearing a
-                series colour is the "text wears text tokens" rule broken. */}
-            {/* ⚠ SAME HAZARD ON THIS SIDE WHEN IT IS A BLEND, and it needs saying here too — the
-                benchmark column that carries the other half of the warning may not be present. */}
-            <th className="px-3 py-1.5 font-medium text-right whitespace-nowrap"
-              style={{ color: chartTheme.accent }}
-              title={isIndex
-                ? 'A blended growth INDEX, not a currency amount — each holding rebased to 100 at '
-                  + 'its first period, then weight-averaged. Revenues in different currencies '
-                  + 'cannot be summed, so no level here belongs to anyone.'
-                : undefined}>
-              {seriesLabel}
-            </th>
-            {hasTrend && <th className="px-3 py-1.5 font-medium text-right whitespace-nowrap"
-              style={{ color: chartTheme.warn }}>Trend</th>}
-            {/* ⚠ THE WARNING LIVES ON THE HEAD NOW, BUT IT STILL HAS TO LIVE SOMEWHERE. This
-                column is scaled to meet the line beside it at the first shared period, so it
-                carries that line's units and reads exactly like an absolute figure — "AEX revenue
-                23.9B" — which it is not. Only its SHAPE is meaningful. */}
-            {hasBench && <th className="px-3 py-1.5 font-medium text-right whitespace-nowrap"
-              style={{ color: chartTheme.pos }}
-              title={`Not ${benchLabel}'s own figures. ${benchLabel}'s blended series, multiplied by a single constant so it meets the ${seriesLabel} column at the first period both cover — on a log axis that is a vertical shift, so the growth rate is untouched and the level is not a quantity of anything.${isIndex ? ' The other column is itself a growth index (each holding rebased to 100 at its first period, then weight-averaged), not a currency amount.' : ''}`}>
-              {benchLabel} (rebased)
-            </th>}
-          </tr>
-        </thead>
-        <tbody>
-          {points.map((p) => (
-            <tr key={p.year} className="border-b border-neutral-800/20 hover:bg-overlay/[0.02]">
-              <td className="px-3 py-1.5 font-mono text-fg-soft">{xToPeriod(p.year)}</td>
-              <td className="px-3 py-1.5 text-right font-mono text-fg-soft whitespace-nowrap">{fmt(p.value)}</td>
-              {hasTrend && <td className="px-3 py-1.5 text-right font-mono text-fg-muted whitespace-nowrap">{fmt(p.trend)}</td>}
-              {hasBench && <td className="px-3 py-1.5 text-right font-mono text-fg-soft whitespace-nowrap">{fmt(p.bench)}</td>}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 export default function HoldingsRevenueModal({
   target, metric = 'revenue', unit = 'millions', noun = 'revenue', portfolioName, onClose,
-  plotted, seriesLabel, benchLabel, benchTarget, isIndex = false,
+  seriesLabel, benchLabel, benchTarget,
 }: {
   target: Target;
   metric?: string;
@@ -432,14 +372,11 @@ export default function HoldingsRevenueModal({
   noun?: string;
   portfolioName?: string | null;
   onClose: () => void;
-  /** The chart's own points. Absent ⇒ the modal is the holdings table alone, as it was. */
-  plotted?: PlottedPoint[];
+  /** Names the metric in the modal title — the card's own column heading. */
   seriesLabel?: string;
   benchLabel?: string | null;
   /** Set when a benchmark is active — lets the modal load the INDEX's constituents on demand. */
   benchTarget?: { universe: string; cadence: 'annual' | 'quarterly' } | null;
-  /** True when the plotted line is a blended index rather than one company's reported figures. */
-  isIndex?: boolean;
 }) {
   // millions/shares → compact B/T/M; per_share → a plain per-share figure; percent → a % ratio.
   const fmtM = (v: number | null | undefined) => {
@@ -451,10 +388,6 @@ export default function HoldingsRevenueModal({
     if (a >= 1e3) return `${(v / 1e3).toFixed(1)}B`;
     return `${v.toFixed(0)}M`;
   };
-  // ⚠ A BLENDED INDEX IS NOT CURRENCY. Rendering 214.3 as "214M" claims a unit it does not have —
-  // the same reason the blend endpoint returns a null `currency`.
-  const fmtPlot = (v: number | null | undefined) => (
-    v == null ? '—' : isIndex ? v.toFixed(1) : fmtM(v));
   const [data, setData] = useState<Resp | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -542,20 +475,9 @@ export default function HoldingsRevenueModal({
    * weight column and a Total row over one row — noise that makes the modal look like it holds two
    * findings when it holds one. It stays the moment there is a second row to compare against.
    */
-  const solo = !!plotted && (data?.rows.length ?? 0) === 1;
-  const only = solo ? data!.rows[0] : null;
-  /**
-   * ⚠ THE PLOTTED TABLE EARNS ITS PLACE ONLY WHERE THE NUMBERS EXIST NOWHERE ELSE.
-   *
-   * On a PORTFOLIO the line is a blended growth index — no table of reported revenues contains it,
-   * so this is the only view of what was drawn and it stays.
-   *
-   * On a SINGLE COMPANY the line IS its reported revenue: the chart above already shows it, the
-   * tooltip already reads it off, and the table is a third copy. It is dropped — unless there is
-   * no benchmark section either, in which case dropping it would leave an empty modal, and an
-   * empty modal is a worse answer than a redundant one.
-   */
-  const showPlotted = !!plotted?.length && (!solo || !benchTarget);
+  /** A one-row table: the modal titles itself with that company's listing instead of
+   *  "1 companies". */
+  const only = (data?.rows.length ?? 0) === 1 ? data!.rows[0] : null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"
@@ -604,16 +526,7 @@ export default function HoldingsRevenueModal({
             </span>
           </div>
 
-          {/* 1 — the lines themselves, where they are not readable off the chart. See `showPlotted`. */}
-          {showPlotted && (
-            <div className="space-y-1.5">
-              <h3 className={section}>Plotted series</h3>
-              <PlottedTable points={plotted!} seriesLabel={seriesLabel ?? noun} benchLabel={benchLabel}
-                fmt={fmtPlot} isIndex={isIndex} />
-            </div>
-          )}
-
-          {/* 2 — the book (or the single company), on the same three views as the index below it. */}
+          {/* 1 — the book (or the single company), on the same three views as the index below it. */}
           <div className="space-y-1.5">
             <h3 className={section}>
               {portfolioName ? `${portfolioName} — ` : ''}{noun} by period
