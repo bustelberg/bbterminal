@@ -5,7 +5,7 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
-import { xToPeriod } from './marginData';
+import { MIN_YEAR_COVERAGE_PCT, xToPeriod } from './marginData';
 
 /**
  * Everything behind one growth chart: the SERIES AS PLOTTED, then the raw per-company figures both
@@ -70,10 +70,50 @@ function cmp(a: number | string | null | undefined, b: number | string | null | 
  * sort a null, differently — on a screen whose whole purpose is comparing them. Only the ingest
  * action differs, so it arrives as an optional callback rather than as a separate table.
  */
-function MatrixTable({ data, fmt, noun, onFetch }: {
+/**
+ * What the period columns show.
+ *
+ * ⚠ `rebased` IS THE ONE THE CHART ACTUALLY WEIGHTS, and `yoy` — the obvious thing to ask for — is
+ * NOT. The blend rebases each member to 100 at its own first period and takes a weighted average
+ * of those LEVELS; it never averages growth rates. The two are different constructions and give
+ * different lines whenever membership changes mid-series, so both are offered and the footer says
+ * which one reproduces the chart.
+ */
+type View = 'reported' | 'rebased' | 'yoy';
+
+/**
+ * A period cell's contents, at a WIDTH THAT DOES NOT DEPEND ON THE STRING.
+ *
+ * ⚠ A `w-*` ON THE `<td>` IS NOT ENOUGH, AND THAT WAS THE FIRST ATTEMPT. In an auto-layout table a
+ * cell's width is a suggestion: once the sticky Company column is capped (`max-w-0`, which is what
+ * lets it truncate), the browser has no percentage column left to absorb slack and distributes it
+ * across the rest in proportion to their CONTENT widths. So "6.3B" (reported), "108.6" (rebased)
+ * and "+8.6%" (YoY) each produced a different layout and every column moved on a switch.
+ *
+ * Fixing the CONTENT width fixes the layout under any algorithm: the base widths are identical in
+ * all three views, so whatever the browser distributes, it distributes the same way.
+ */
+const Cell = ({ children }: { children: React.ReactNode }) => (
+  <span className="inline-block w-[4.5rem] text-right tabular-nums">{children}</span>
+);
+
+const VIEWS: [View, string, string][] = [
+  ['reported', 'Reported', 'The figures as filed, in each company’s own reporting currency.'],
+  ['rebased', 'Rebased', 'Each company indexed to 100 at ITS OWN first period — exactly what the '
+    + 'chart weight-averages. The footer row is the weighted average, i.e. the plotted line.'],
+  ['yoy', 'YoY %', 'Growth from that company’s previous reported period. ⚠ The chart does NOT '
+    + 'average these: it averages the Rebased levels. The footer is the plotted line’s own '
+    + 'period-on-period change, not the average of the column above it.'],
+];
+
+function MatrixTable({ data, fmt, noun, view, onFetch }: {
   data: Resp;
   fmt: (v: number | null | undefined) => string;
   noun: string;
+  /** ⚠ OWNED BY THE MODAL, NOT HERE — one switch drives the book's table and the index's together.
+   *  Two independent switches would let a reader compare a rebased index against reported euros
+   *  and read the gap as a finding. */
+  view: View;
   /** Holdings only: fetch a `no_data` company's financials. Absent ⇒ the cell states the gap,
    *  which is right for an index nobody is curating row by row. */
   onFetch?: (isin: string, name: string) => Promise<void>;
@@ -87,6 +127,69 @@ function MatrixTable({ data, fmt, noun, onFetch }: {
    *  that the division can be checked by eye. */
   const capBn = (v: number | null | undefined) => (
     v == null ? '—' : `${(v / 1e9).toLocaleString('en-US', { maximumFractionDigits: 1 })}`);
+
+  /**
+   * Every row's rebased series + the weight it carries, and the blend's own denominator.
+   *
+   * ⚠ THE DENOMINATOR IS THE **CONTRIBUTING** WEIGHT, NOT THE TABLE'S. `blend_series` is handed
+   * only the members that carry the metric, and `_prepare` then drops any whose base is ≤ 0
+   * (100 × v/0 is undefined; a negative base inverts the curve). Using the table's full weight
+   * would put SP500's 264 contributors over its 489 listed rows and every coverage figure — and
+   * the floor decision that rides on it — would be wrong by that ratio.
+   */
+  const blend = useMemo(() => {
+    const parts: { w: number; idx: Record<string, number> }[] = [];
+    let total = 0;
+    for (const r of data.rows) {
+      const periods = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort();
+      const w = r.market_cap_eur ?? r.weight_pct;
+      if (!periods.length || !w) continue;
+      // ⚠ COUNTED IN THE DENOMINATOR **BEFORE** THE BASE TEST, because that is the order
+      // `blend_series` uses: it takes `total_w` over every member handed to it, and `_prepare`
+      // drops the non-positive bases afterwards. Filtering first would shrink the denominator,
+      // lift every coverage figure, and let a period slip over the floor that the chart omits.
+      total += w;
+      const base = r.revenue[periods[0]] as number;
+      if (!(base > 0)) continue;              // matches `_prepare`'s non_positive_base drop
+      const idx: Record<string, number> = {};
+      for (const p of periods) idx[p] = 100 * (r.revenue[p] as number) / base;
+      parts.push({ w, idx });
+    }
+    const level: Record<string, { value: number; covered: number }> = {};
+    for (const y of data.years) {
+      const hit = parts.filter((p) => p.idx[y] != null);
+      const w = hit.reduce((a, p) => a + p.w, 0);
+      if (w > 0) {
+        level[y] = { value: hit.reduce((a, p) => a + p.w * p.idx[y], 0) / w,
+          covered: 100 * w / total };
+      }
+    }
+    return { level, contributors: parts.length };
+  }, [data]);
+
+  /** The value a period column shows for one row, under the current view. */
+  const cellOf = (r: Row, y: string): number | null => {
+    const v = r.revenue[y];
+    if (v == null) return null;
+    if (view === 'reported') return v;
+    const periods = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort();
+    if (view === 'rebased') {
+      const base = r.revenue[periods[0]] as number;
+      return base > 0 ? 100 * v / base : null;
+    }
+    // ⚠ THE PREVIOUS PERIOD **THIS ROW REPORTED**, not the previous column. A company that skipped
+    // a year would otherwise show its two-year growth in the same ink as everyone's one-year.
+    const i = periods.indexOf(y);
+    if (i <= 0) return null;                  // its first period has nothing to grow from
+    const prev = r.revenue[periods[i - 1]] as number;
+    return prev > 0 ? 100 * (v / prev - 1) : null;
+  };
+
+  const cellText = (v: number | null) => (
+    v == null ? '—'
+      : view === 'reported' ? fmt(v)
+        : view === 'rebased' ? v.toFixed(1)
+          : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`);
   const toggle = (key: string) => setSort((s) => (s.key === key
     ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' }
     // Names/currency read A→Z first; weight, cap and figures read biggest-first.
@@ -135,8 +238,13 @@ function MatrixTable({ data, fmt, noun, onFetch }: {
             )}
             <th className="px-3 py-1.5 font-medium text-right whitespace-nowrap" onClick={() => toggle('weight')}>Weight{caret('weight')}</th>
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('ccy')}>Ccy{caret('ccy')}</th>
+            {/* ⚠ A FIXED WIDTH, SO THE VIEW SWITCH MOVES NUMBERS AND NOTHING ELSE. "6.3B", "108.6"
+                and "+8.6%" are different lengths, and on an auto-layout table every column
+                re-measures on each switch — the row you were reading slides sideways, which is
+                exactly what makes two views hard to compare. 6rem holds the longest of the three
+                at this size; the Company column still absorbs the slack. */}
             {data.years.map((y) => (
-              <th key={y} className="px-3 py-1.5 font-medium text-right whitespace-nowrap" onClick={() => toggle(y)}>{y}{caret(y)}</th>
+              <th key={y} className="px-3 py-1.5 font-medium text-right whitespace-nowrap w-24" onClick={() => toggle(y)}>{y}{caret(y)}</th>
             ))}
           </tr>
         </thead>
@@ -188,7 +296,10 @@ function MatrixTable({ data, fmt, noun, onFetch }: {
                 </td>
               ) : (
                 data.years.map((y) => (
-                  <td key={y} className="px-3 py-1.5 text-right font-mono text-fg-soft whitespace-nowrap">{fmt(r.revenue[y])}</td>
+                  <td key={y} className="px-3 py-1.5 text-right font-mono text-fg-soft whitespace-nowrap"
+                    title={view === 'reported' ? undefined : `${fmt(r.revenue[y])} as reported`}>
+                    <Cell>{cellText(cellOf(r, y))}</Cell>
+                  </td>
                 ))
               )}
             </tr>
@@ -198,7 +309,14 @@ function MatrixTable({ data, fmt, noun, onFetch }: {
           {/* Sum of the shown companies' weights — under 100% because cash / bonds / any holding
               we can't price aren't listed. */}
           <tr className="border-t border-neutral-800/40 bg-page font-semibold text-fg-strong">
-            <td className="px-3 py-1.5 sticky left-0 bg-page z-10">Total</td>
+            <td className="px-3 py-1.5 sticky left-0 bg-page z-10"
+              title={view === 'rebased'
+                ? `Weighted average of the ${blend.contributors} contributing rows — this row IS the plotted line.`
+                : view === 'yoy'
+                  ? 'The plotted line’s own period-on-period change. NOT the average of the column above: the chart averages rebased levels, never growth rates.'
+                  : undefined}>
+              {view === 'rebased' ? 'Weighted (= the line)' : view === 'yoy' ? 'Line YoY' : 'Total'}
+            </td>
             <td className="px-3 py-1.5" />
             <td className="px-3 py-1.5" />
             {/* ⚠ THE DENOMINATOR, SPELLED OUT. Without it the Weight column is a set of numbers to
@@ -213,7 +331,36 @@ function MatrixTable({ data, fmt, noun, onFetch }: {
               {rows.reduce((a, r) => a + r.weight_pct, 0).toFixed(2)}%
             </td>
             <td className="px-3 py-1.5" />
-            {data.years.map((y) => <td key={y} className="px-3 py-1.5" />)}
+            {/* ⚠ THE ROW THAT MAKES THE TABLE CHECKABLE — and it is only a sum in one of the three
+                views. Reported: nothing to total, the columns are different currencies. Rebased:
+                the weighted average IS the plotted line. YoY: the plotted line's own change, NOT
+                the average of the column above it (the chart averages levels, never growth rates)
+                — labelling it "average YoY" would present the chain-linked construction as if it
+                were the chart's. A period under the coverage floor is greyed and says so: it is in
+                this table and absent from the chart. */}
+            {data.years.map((y) => {
+              const lv = blend.level[y];
+              const prevY = data.years[data.years.indexOf(y) - 1];
+              const prev = prevY ? blend.level[prevY] : undefined;
+              const value = view === 'reported' ? null
+                : view === 'rebased' ? lv?.value ?? null
+                  : (lv && prev && prev.value > 0) ? 100 * (lv.value / prev.value - 1) : null;
+              const thin = lv != null && lv.covered < MIN_YEAR_COVERAGE_PCT;
+              return (
+                <td key={y}
+                  className={`px-3 py-1.5 text-right font-mono whitespace-nowrap ${
+                    thin ? 'text-fg-faint font-normal' : ''}`}
+                  title={lv == null ? undefined
+                    : `${lv.covered.toFixed(1)}% of the contributing weight reported this period`
+                      + (thin ? ` — under the ${MIN_YEAR_COVERAGE_PCT}% floor, so the chart omits it`
+                        : '')}>
+                  <Cell>
+                    {value == null ? '' : view === 'rebased' ? value.toFixed(1)
+                      : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`}
+                  </Cell>
+                </td>
+              );
+            })}
           </tr>
         </tfoot>
       </table>
@@ -311,6 +458,13 @@ export default function HoldingsRevenueModal({
   const [data, setData] = useState<Resp | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  /**
+   * ⚠ ONE SWITCH FOR BOTH TABLES. The book above and the index below are here to be read against
+   * each other; per-table switches would let someone compare a rebased index with reported euros
+   * and take the gap for a finding. It is a view over rows already in hand — no refetch — so
+   * flipping it cannot land the two tables on different vintages of the same accounts either.
+   */
+  const [view, setView] = useState<View>('reported');
 
   const load = async (body: Target): Promise<Resp> => {
     const r = await apiFetch(`${API_URL}/api/earnings/portfolio-revenue-matrix?metric=${encodeURIComponent(metric)}`, {
@@ -390,6 +544,18 @@ export default function HoldingsRevenueModal({
    */
   const solo = !!plotted && (data?.rows.length ?? 0) === 1;
   const only = solo ? data!.rows[0] : null;
+  /**
+   * ⚠ THE PLOTTED TABLE EARNS ITS PLACE ONLY WHERE THE NUMBERS EXIST NOWHERE ELSE.
+   *
+   * On a PORTFOLIO the line is a blended growth index — no table of reported revenues contains it,
+   * so this is the only view of what was drawn and it stays.
+   *
+   * On a SINGLE COMPANY the line IS its reported revenue: the chart above already shows it, the
+   * tooltip already reads it off, and the table is a third copy. It is dropped — unless there is
+   * no benchmark section either, in which case dropping it would leave an empty modal, and an
+   * empty modal is a worse answer than a redundant one.
+   */
+  const showPlotted = !!plotted?.length && (!solo || !benchTarget);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"
@@ -418,37 +584,54 @@ export default function HoldingsRevenueModal({
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-5">
-          {/* 1 — the lines themselves. First, because they are what was clicked. */}
-          {plotted && plotted.length > 0 && (
+          {/* 0 — the switch, above everything it governs. */}
+          <div className="flex items-center gap-2 text-[10px]">
+            <div className="inline-flex rounded-lg border border-neutral-700 overflow-hidden">
+              {VIEWS.map(([k, label, note]) => (
+                <button key={k} type="button" onClick={() => setView(k)} title={note}
+                  aria-pressed={view === k}
+                  className={`cursor-pointer px-2.5 py-0.5 font-medium transition-colors ${
+                    view === k ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-overlay/5'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <span className="text-fg-faint">
+              {view === 'reported' ? 'as filed, each in its own currency'
+                : view === 'rebased' ? 'indexed to 100 at each company’s first period — what the chart weights'
+                  : 'growth on that company’s previous reported period'}
+              {view !== 'reported' && ' · hover a cell for the reported figure'}
+            </span>
+          </div>
+
+          {/* 1 — the lines themselves, where they are not readable off the chart. See `showPlotted`. */}
+          {showPlotted && (
             <div className="space-y-1.5">
               <h3 className={section}>Plotted series</h3>
-              <PlottedTable points={plotted} seriesLabel={seriesLabel ?? noun} benchLabel={benchLabel}
+              <PlottedTable points={plotted!} seriesLabel={seriesLabel ?? noun} benchLabel={benchLabel}
                 fmt={fmtPlot} isIndex={isIndex} />
             </div>
           )}
 
-          {/* 2 — the reported figures the portfolio line was built from. Dropped on a single
-              company, where it is the table above with one row — see `solo`. */}
+          {/* 2 — the book (or the single company), on the same three views as the index below it. */}
           <div className="space-y-1.5">
-            {!solo && (
-              <h3 className={section}>
-                {portfolioName ? `${portfolioName} — ` : ''}{noun} by period, as reported
-              </h3>
-            )}
+            <h3 className={section}>
+              {portfolioName ? `${portfolioName} — ` : ''}{noun} by period
+            </h3>
             {err && <p className="text-xs text-neg-300">{err}</p>}
             {!data && !err && <p className="text-xs text-fg-subtle">Loading…</p>}
             {data && data.rows.length === 0 && !err && (
               <p className="text-xs text-fg-subtle">No held company has {noun} ingested.</p>
             )}
-            {data && data.rows.length > 0 && !solo && (
-              <MatrixTable data={data} fmt={fmtM} noun={noun} onFetch={fetchRevenue} />
+            {data && data.rows.length > 0 && (
+              <MatrixTable data={data} fmt={fmtM} noun={noun} view={view} onFetch={fetchRevenue} />
             )}
           </div>
 
           {/* 3 — the same, for the index, on demand. */}
           {benchTarget && (
             <div className="space-y-1.5">
-              <h3 className={section}>{benchLabel} constituents — {noun} by period, as reported</h3>
+              <h3 className={section}>{benchLabel} constituents — {noun} by period</h3>
               {!bench && !benchErr && (
                 <p className="text-xs text-fg-subtle">Loading {benchLabel} constituents…</p>
               )}
@@ -482,7 +665,7 @@ export default function HoldingsRevenueModal({
                         .map((x) => `${x.name ?? '?'} (${x.reason})`).join(' · ')}
                     </p>
                   )}
-                  <MatrixTable data={bench} fmt={fmtM} noun={noun} />
+                  <MatrixTable data={bench} fmt={fmtM} noun={noun} view={view} />
                 </>
               )}
             </div>
