@@ -171,10 +171,10 @@ function byYear(metrics: MetricRow[], codes: string[]): Map<number, number> {
  * point belongs to, not just its year.
  *
  * ⚠ THE DAY MATTERS, BECAUSE THE PRICE IS NOW LIVE. The forecast sits a fixed number of years
- * past this date, so the horizon a live price is annualised over is the distance from TODAY to
- * it — anywhere from one to two years, depending how long ago the company last reported. Rounding
- * that to "2 years" understates the CAGR by however stale the accounts are, which is exactly the
- * staleness this change exists to stop hiding.
+ * past this date (`PROJECT_YEARS`), so the horizon a live price is annualised over is the
+ * distance from TODAY to it — up to a year shorter, depending how long ago the company last
+ * reported. Rounding that back to the full horizon understates the CAGR by however stale the
+ * accounts are, which is exactly the staleness this exists to stop hiding.
  */
 export function latestDateOf(metrics: MetricRow[], codes: string[]): string | null {
   const want = new Set(codes);
@@ -201,8 +201,8 @@ export function addYears(iso: string | null, n: number): string | null {
  * Years from `from` to `to`, as a decimal.
  *
  * Null when either date is missing or the window has closed — a CAGR needs a positive horizon,
- * and a target date already in the past is not one. (It happens: a company that has not filed in
- * over two years has a forecast year that is already here.)
+ * and a target date already in the past is not one. (It happens: a company that has not filed
+ * for longer than the projection horizon has a forecast year that is already here.)
  */
 export function yearsBetween(from: string | null, to: string | null): number | null {
   if (!from || !to) return null;

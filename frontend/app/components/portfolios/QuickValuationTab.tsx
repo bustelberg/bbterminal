@@ -52,8 +52,21 @@ import {
  */
 
 const YEARS = 10;
-/** How far the fitted trend is carried past the last reported year. */
-const PROJECT_YEARS = 2;
+/**
+ * How far the fitted trend is carried past the last reported year — and therefore the horizon
+ * of EVERY forecast on this tab: the dotted projection on the chart, the forecast per-share
+ * figure, the forecast share price, and the CAGR quoted against them.
+ *
+ * ⚠ RAISED 2 → 10 (2026-08-04). Ten years is the horizon the question is actually asked over,
+ * and it makes the CAGR mean something: over two years the answer was dominated by the rerating
+ * (today's yield to the assumed one) rather than by the business compounding.
+ *
+ * ⚠ IT IS ALSO THE HISTORY WINDOW (`YEARS` = 10), SO HALF THE CHART IS NOW EXTRAPOLATION. That
+ * is why the projected stretch is drawn as a separate, thinner, dotted series and the panel's
+ * info card says in as many words that it is an extrapolation nobody forecast — a decade of
+ * compounding an exponential fit is a big claim, and the chart must not let it read as data.
+ */
+const PROJECT_YEARS = 10;
 /** All three charts share it, so the grid cells match without any card padding out the gap. */
 const CHART_HEIGHT = 320;
 /** Where the multiple-history chart opens. GuruFocus's forward-P/E indicator starts 2015-11-30 —
@@ -298,9 +311,9 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   /**
    * How long the CAGR actually has to run.
    *
-   * ⚠ IT IS NOT `PROJECT_YEARS` ANY MORE. The forecast sits two years past the last REPORTED year;
-   * from a live price that is between one and two years away, depending how stale the accounts
-   * are. Holding the divisor at 2 while moving the start to today understates the return by
+   * ⚠ IT IS NOT `PROJECT_YEARS`. The forecast sits `PROJECT_YEARS` past the last REPORTED year;
+   * from a live price that is up to a year nearer, depending how stale the accounts are. Holding
+   * the divisor at the full horizon while moving the start to today understates the return by
    * exactly the reporting lag — the CAGR would quietly get worse the fresher the price got.
    * Falls back to `PROJECT_YEARS`, which is what the distance IS when the price is the fiscal one.
    */
