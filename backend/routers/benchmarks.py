@@ -433,3 +433,212 @@ async def benchmark_reset(label: str):
         return await asyncio.to_thread(reset_benchmark, label)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+class ConstituentFundamentalColumn(BaseModel):
+    """One RAW GuruFocus line the Long Equity charts consume. Shipped with the data so the table
+    renders the set the SERVER knows about — add a line backend-side and its columns appear
+    without a frontend change, which is the only way the two cannot drift."""
+
+    key: str
+    label: str
+    # Why the line matters, and its trap where it has one (a bank has no gross profit; interest
+    # expense is reported negative). Shown on the column head rather than kept in the source.
+    note: str | None = None
+
+
+class ConstituentFundamentals(BaseModel):
+    """The RAW GuruFocus lines per constituent, and the period span we hold for each.
+
+    ⚠ `covered` IS NOT DECORATION. Only the members whose fundamentals have been ingested appear in
+    `rows`; measured 2026-08-04, that was 92 of SP500's 503. A table that simply renders blanks for
+    the rest reads as "these companies have no margins", which is a claim about the companies
+    rather than about our ingest. The count says which it is.
+    """
+
+    label: str
+    columns: list[ConstituentFundamentalColumn]
+    members: int
+    covered: int
+    # ⚠ KEYED BY **ISIN**, NOT BY company_id — AND THAT IS A CORRECTNESS FIX, NOT A PREFERENCE.
+    # The constituent table is served by `_asset_benchmark`, which puts the `analysis_id` (an
+    # `asset_execution` row) into a field NAMED `company_id`, because it reuses
+    # `_benchmark_index._window_rows` and that keys prices by that name. Fundamentals live in the
+    # `company` world. The two id spaces are disjoint, so keying this by company_id matched nothing
+    # the table could look up and EVERY cell rendered a dash — including the 92 companies that do
+    # have data. ISIN is the one identifier both worlds carry, and it is the bridge the rest of the
+    # app uses between them.
+    rows: dict[str, dict]     # ISIN -> {line key: {from, to, n}}
+
+
+@router.get("/api/benchmarks/index/{label}/fundamentals", response_model=ConstituentFundamentals)
+async def benchmark_constituent_fundamentals(label: str):
+    """The twelve Long Equity measures for each of an index's constituents.
+
+    ⚠ A SEPARATE CALL FROM `/index/{label}`, DELIBERATELY. That endpoint prices 500 constituents and
+    is what the table needs to render at all; this one reads fourteen metric series. Folding them
+    together would hold the whole table behind the slower half, so the prices land first and the
+    fundamentals fill in — the same progressive shape the /schedule and holdings-count surfaces use.
+    """
+    from routers._benchmark_fundamentals import COLUMNS, constituent_fundamentals  # noqa: PLC0415
+    from routers._benchmark_index import _members  # noqa: PLC0415
+
+    def _run() -> dict:
+        # `_members` is the COMPANY-world list: it carries the real `company_id` the metrics are
+        # stored against AND the ISIN the table can be joined on. A member with no ISIN cannot be
+        # bridged and is simply absent — honest, since nothing could look it up either.
+        members = _members(label)
+        by_cid = {m["company_id"]: (m.get("isin") or "").strip().upper()
+                  for m in members if m.get("company_id")}
+        rows = constituent_fundamentals(sorted(by_cid))
+        out: dict[str, dict] = {}
+        for cid, spans in rows.items():
+            isin = by_cid.get(cid)
+            if isin:
+                out[isin] = spans
+        return {
+            "label": label,
+            "columns": [{"key": c["key"], "label": c["label"], "note": c.get("note")}
+                        for c in COLUMNS],
+            "members": len(by_cid),
+            "covered": len(out),
+            "rows": out,
+        }
+
+    return await asyncio.to_thread(_run)
+
+
+class CompanyIngestResult(BaseModel):
+    """What one company's backfill did. `feeds` names the calls actually spent."""
+
+    company_id: int
+    name: str | None = None
+    feeds: list[str] = []
+    rows: int = 0
+    skipped: str | None = None      # why nothing was fetched (unsubscribed, no ticker)
+    error: str | None = None
+
+
+@router.post("/api/benchmarks/isin/{isin}/fundamentals/ingest",
+             response_model=CompanyIngestResult)
+async def ingest_company_fundamentals(isin: str, force: bool = False):
+    """Fetch the GuruFocus feeds ONE constituent is missing — the per-row button.
+
+    ⚠ BY ISIN, NOT BY THE TABLE'S `company_id`. That field is an `analysis_id` in the constituent
+    payload (see `ConstituentFundamentals.rows`), so an id taken straight off the row 404s against
+    the `company` table — measured, on analysis_id 1457, which is a real asset row and not a
+    company at all. ISIN is the identifier both worlds carry.
+
+    ⚠ ALL THREE FEEDS, unlike `/api/earnings/fundamental-coverage/ingest`, which fetches only the
+    statements. A company with financials and no estimates renders a Long Equity tab that fills in
+    around two empty panels, which reads as a charting bug. See `_fundamental_backfill`.
+
+    Admin-only: it spends GuruFocus quota, and the auth gate holds any non-`/refresh` write here to
+    admins.
+    """
+    from routers._fundamental_backfill import (  # noqa: PLC0415
+        company_rows, eligible, ingest_company, needs,
+    )
+
+    def _run() -> dict:
+        key = (isin or "").strip().upper()
+        hit = (supabase.table("company").select("company_id")
+               .eq("isin", key).limit(1).execute().data or [])
+        if not hit:
+            # ⚠ AN ANSWER, NOT A FAULT. Plenty of constituents are priced from `asset_execution`
+            # with no `company` row behind them — there is nothing to fetch fundamentals INTO, and
+            # saying so beats a 404 the reader reads as a broken button.
+            return {"company_id": 0, "name": None,
+                    "skipped": f"no company row for {key} — nothing to ingest into"}
+        cid = hit[0]["company_id"]
+        comps = company_rows([cid])
+        c = comps[cid]
+        why = eligible(c)
+        if why:
+            return {"company_id": cid, "name": c.get("company_name"), "skipped": why}
+        # `needs` tells us which feeds are missing; with `force` we re-fetch regardless.
+        todo = {**c, **({} if force else next(
+            (n for n in needs(comps) if n["company_id"] == cid),
+            {"need_fin": False, "need_est": False, "need_ind": False}))}
+        r = ingest_company(todo, force=force)
+        return {"company_id": cid, "name": c.get("company_name"),
+                "feeds": r["done"], "rows": r["rows"], "error": r["error"]}
+
+    return await asyncio.to_thread(_run)
+
+
+@router.get("/api/benchmarks/index/{label}/fundamentals/ingest")
+async def ingest_index_fundamentals(label: str, limit: int = 0):
+    """Backfill every constituent that is missing a feed — SSE, one frame per company.
+
+    ⚠ SSE, NOT A REQUEST THAT RETURNS AT THE END. This is ~3 GuruFocus calls per company over
+    hundreds of companies; a silent five-minute POST is indistinguishable from a hung one, and the
+    operator needs to see WHICH company it is on when it stalls. Same shape as the AIRS scan.
+
+    ⚠ IT REPORTS THE QUOTA BEFORE IT STARTS AND THE SKIPS AS IT GOES. A region at zero means every
+    further call is wasted, and a company on an unsubscribed exchange is a refusal with a reason —
+    never a failure.
+
+    `limit` spends the budget in tranches; 0 is everything that needs it.
+    """
+    import queue as _queue  # noqa: PLC0415
+    import threading  # noqa: PLC0415
+
+    from fastapi.responses import StreamingResponse  # noqa: PLC0415
+
+    from ingest.api_usage import remaining_budget  # noqa: PLC0415
+    from routers._benchmark_index import _members  # noqa: PLC0415
+    from routers._fundamental_backfill import (  # noqa: PLC0415
+        company_rows, eligible, ingest_company, needs,
+    )
+    from routers._sse import sse_message  # noqa: PLC0415
+
+    q: _queue.Queue = _queue.Queue()
+
+    def _work() -> None:
+        try:
+            ids = sorted({m["company_id"] for m in _members(label) if m.get("company_id")})
+            comps = company_rows(ids)
+            todo = needs(comps)
+            skipped = [(c, eligible(c)) for c in todo]
+            work = [c for c, why in skipped if why is None]
+            refused = [(c, why) for c, why in skipped if why]
+            if limit:
+                work = work[:limit]
+            q.put(sse_message(
+                "start",
+                f"{len(ids)} constituents · {len(todo)} missing a feed · {len(work)} to fetch"
+                f" · {len(refused)} refused · quota {remaining_budget(supabase)}",
+                total=len(work)))
+            for w, why in refused:
+                q.put(sse_message("skip", f"{w.get('company_name') or w['company_id']}: {why}"))
+            ok = failed = rows = 0
+            for n, c in enumerate(work, 1):
+                r = ingest_company(c)
+                rows += r["rows"]
+                if r["error"]:
+                    failed += 1
+                else:
+                    ok += 1
+                q.put(sse_message(
+                    "progress",
+                    f"[{n}/{len(work)}] {c.get('gurufocus_ticker')} "
+                    + (r["error"] or ", ".join(r["done"]) or "nothing to do"),
+                    done=n, total=len(work), company_id=c["company_id"], failed=bool(r["error"])))
+            q.put(sse_message("done", f"{ok} ingested, {failed} failed, {rows:,} rows loaded",
+                              ok=ok, failed=failed, rows=rows))
+        except Exception as e:  # noqa: BLE001
+            q.put(sse_message("error", f"{type(e).__name__}: {e}"))
+        finally:
+            q.put(None)
+
+    threading.Thread(target=_work, daemon=True).start()
+
+    async def _stream():
+        while True:
+            item = await asyncio.to_thread(q.get)
+            if item is None:
+                return
+            yield item
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")

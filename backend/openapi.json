@@ -3369,6 +3369,66 @@
         "title": "BuildUniverseRequest",
         "type": "object"
       },
+      "CompanyIngestResult": {
+        "description": "What one company's backfill did. `feeds` names the calls actually spent.",
+        "properties": {
+          "company_id": {
+            "title": "Company Id",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "feeds": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Feeds",
+            "type": "array"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "rows": {
+            "default": 0,
+            "title": "Rows",
+            "type": "integer"
+          },
+          "skipped": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped"
+          }
+        },
+        "required": [
+          "company_id"
+        ],
+        "title": "CompanyIngestResult",
+        "type": "object"
+      },
       "CompositionExcluded": {
         "description": "A holding this axis does not weigh, and why. `cash` \u00b7 `unpriced` \u00b7 `unclassified`.\n\n\u26a0 TWO OF THESE THREE ARE ANSWERS, NOT GAPS. A fund, a bond and a cash line have no sector by\ndefinition \u2014 they are not Stocks in our own classification and already have their own slice of\nthe allocation chart. Only `unpriced` is a real hole: a stock we hold, in a real sector, that\nwe cannot price, so its bucket reads lower than it is. `asset_class` rides along precisely so\nthe first kind can be shown as \"this was never a stock\" rather than as missing weight.",
         "properties": {
@@ -3487,6 +3547,77 @@
           }
         },
         "title": "CompositionHolding",
+        "type": "object"
+      },
+      "ConstituentFundamentalColumn": {
+        "description": "One RAW GuruFocus line the Long Equity charts consume. Shipped with the data so the table\nrenders the set the SERVER knows about \u2014 add a line backend-side and its columns appear\nwithout a frontend change, which is the only way the two cannot drift.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "ConstituentFundamentalColumn",
+        "type": "object"
+      },
+      "ConstituentFundamentals": {
+        "description": "The RAW GuruFocus lines per constituent, and the period span we hold for each.\n\n\u26a0 `covered` IS NOT DECORATION. Only the members whose fundamentals have been ingested appear in\n`rows`; measured 2026-08-04, that was 92 of SP500's 503. A table that simply renders blanks for\nthe rest reads as \"these companies have no margins\", which is a claim about the companies\nrather than about our ingest. The count says which it is.",
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ConstituentFundamentalColumn"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "covered": {
+            "title": "Covered",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "members": {
+            "title": "Members",
+            "type": "integer"
+          },
+          "rows": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Rows",
+            "type": "object"
+          }
+        },
+        "required": [
+          "label",
+          "columns",
+          "members",
+          "covered",
+          "rows"
+        ],
+        "title": "ConstituentFundamentals",
         "type": "object"
       },
       "CorrelationRequest": {
@@ -4601,6 +4732,11 @@
       "FundamentalBreakdownRequest": {
         "description": "One blended point to take apart: which metric, which fiscal year.",
         "properties": {
+          "cadence": {
+            "default": "annual",
+            "title": "Cadence",
+            "type": "string"
+          },
           "holdings": {
             "anyOf": [
               {
@@ -4646,6 +4782,11 @@
       "FundamentalCoverageRequest": {
         "description": "Either a model portfolio's id, or an explicit basket of (isin, weight).",
         "properties": {
+          "cadence": {
+            "default": "annual",
+            "title": "Cadence",
+            "type": "string"
+          },
           "holdings": {
             "anyOf": [
               {
@@ -4709,6 +4850,11 @@
       "FundamentalMatrixRequest": {
         "description": "The whole blended line taken apart: which metric (every period, every holding).",
         "properties": {
+          "cadence": {
+            "default": "annual",
+            "title": "Cadence",
+            "type": "string"
+          },
           "holdings": {
             "anyOf": [
               {
@@ -8311,6 +8457,11 @@
       "RelativeGrowthRequest": {
         "description": "One year of the Share-Price-vs-Owner-Earnings chart, decomposed per holding.",
         "properties": {
+          "cadence": {
+            "default": "annual",
+            "title": "Cadence",
+            "type": "string"
+          },
           "holdings": {
             "anyOf": [
               {
@@ -16412,6 +16563,100 @@
         ]
       }
     },
+    "/api/benchmarks/index/{label}/fundamentals": {
+      "get": {
+        "description": "The twelve Long Equity measures for each of an index's constituents.\n\n\u26a0 A SEPARATE CALL FROM `/index/{label}`, DELIBERATELY. That endpoint prices 500 constituents and\nis what the table needs to render at all; this one reads fourteen metric series. Folding them\ntogether would hold the whole table behind the slower half, so the prices land first and the\nfundamentals fill in \u2014 the same progressive shape the /schedule and holdings-count surfaces use.",
+        "operationId": "benchmark_constituent_fundamentals_api_benchmarks_index__label__fundamentals_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConstituentFundamentals"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Benchmark Constituent Fundamentals",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/benchmarks/index/{label}/fundamentals/ingest": {
+      "get": {
+        "description": "Backfill every constituent that is missing a feed \u2014 SSE, one frame per company.\n\n\u26a0 SSE, NOT A REQUEST THAT RETURNS AT THE END. This is ~3 GuruFocus calls per company over\nhundreds of companies; a silent five-minute POST is indistinguishable from a hung one, and the\noperator needs to see WHICH company it is on when it stalls. Same shape as the AIRS scan.\n\n\u26a0 IT REPORTS THE QUOTA BEFORE IT STARTS AND THE SKIPS AS IT GOES. A region at zero means every\nfurther call is wasted, and a company on an unsubscribed exchange is a refusal with a reason \u2014\nnever a failure.\n\n`limit` spends the budget in tranches; 0 is everything that needs it.",
+        "operationId": "ingest_index_fundamentals_api_benchmarks_index__label__fundamentals_ingest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Index Fundamentals",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
     "/api/benchmarks/index/{label}/refresh": {
       "get": {
         "description": "Refresh a reconstructed index: constituents, market caps, then two prices each.\n\nExactly three steps, streamed line by line (see `_benchmark_refresh`):\n\n    1. CONSTITUENTS  rebuild the universe if it has none, read its membership, bridge each\n                     member into the asset world by ISIN, resolve what is not there yet.\n    2. MARKET CAPS   a batched Yahoo quote for EVERY constituent \u2014 the cap IS the weight,\n                     and a three-week-old cap is a three-week-old index.\n    3. PRICES        each constituent's start-of-year close and its current close. Those two\n                     numbers are the whole of the YTD the panel shows.\n\n\u26a0 SSE, NOT A POST. Step 3 is one paced Yahoo call per constituent: 491 for the S&P, 1,684 for\nACWI. That is minutes, and a button that hangs silently for eleven of them is\nindistinguishable from a broken one \u2014 so every step reports as it happens.\n\n\u26a0 PRICES ARE FETCHED BY SYMBOL. Identity is decided in step 1 only, through the single paced\nqueue worker; nothing in step 3 reopens the question of WHICH listing an instrument is (Yahoo\nanswers an overloaded caller with an empty search, which is how Alphabet moved to a Vienna\nline 75,000x thinner).",
@@ -16448,6 +16693,59 @@
           }
         },
         "summary": "Benchmark Refresh",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/benchmarks/isin/{isin}/fundamentals/ingest": {
+      "post": {
+        "description": "Fetch the GuruFocus feeds ONE constituent is missing \u2014 the per-row button.\n\n\u26a0 BY ISIN, NOT BY THE TABLE'S `company_id`. That field is an `analysis_id` in the constituent\npayload (see `ConstituentFundamentals.rows`), so an id taken straight off the row 404s against\nthe `company` table \u2014 measured, on analysis_id 1457, which is a real asset row and not a\ncompany at all. ISIN is the identifier both worlds carry.\n\n\u26a0 ALL THREE FEEDS, unlike `/api/earnings/fundamental-coverage/ingest`, which fetches only the\nstatements. A company with financials and no estimates renders a Long Equity tab that fills in\naround two empty panels, which reads as a charting bug. See `_fundamental_backfill`.\n\nAdmin-only: it spends GuruFocus quota, and the auth gate holds any non-`/refresh` write here to\nadmins.",
+        "operationId": "ingest_company_fundamentals_api_benchmarks_isin__isin__fundamentals_ingest_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyIngestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Company Fundamentals",
         "tags": [
           "benchmarks"
         ]
@@ -17421,6 +17719,16 @@
               "title": "Label",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "cadence",
+            "required": false,
+            "schema": {
+              "default": "annual",
+              "title": "Cadence",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -17605,6 +17913,16 @@
             "required": true,
             "schema": {
               "title": "Isin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cadence",
+            "required": false,
+            "schema": {
+              "default": "annual",
+              "title": "Cadence",
               "type": "string"
             }
           }

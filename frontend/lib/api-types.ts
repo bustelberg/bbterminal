@@ -3094,6 +3094,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/benchmarks/index/{label}/fundamentals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Constituent Fundamentals
+         * @description The twelve Long Equity measures for each of an index's constituents.
+         *
+         *     ⚠ A SEPARATE CALL FROM `/index/{label}`, DELIBERATELY. That endpoint prices 500 constituents and
+         *     is what the table needs to render at all; this one reads fourteen metric series. Folding them
+         *     together would hold the whole table behind the slower half, so the prices land first and the
+         *     fundamentals fill in — the same progressive shape the /schedule and holdings-count surfaces use.
+         */
+        get: operations["benchmark_constituent_fundamentals_api_benchmarks_index__label__fundamentals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/index/{label}/fundamentals/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ingest Index Fundamentals
+         * @description Backfill every constituent that is missing a feed — SSE, one frame per company.
+         *
+         *     ⚠ SSE, NOT A REQUEST THAT RETURNS AT THE END. This is ~3 GuruFocus calls per company over
+         *     hundreds of companies; a silent five-minute POST is indistinguishable from a hung one, and the
+         *     operator needs to see WHICH company it is on when it stalls. Same shape as the AIRS scan.
+         *
+         *     ⚠ IT REPORTS THE QUOTA BEFORE IT STARTS AND THE SKIPS AS IT GOES. A region at zero means every
+         *     further call is wasted, and a company on an unsubscribed exchange is a refusal with a reason —
+         *     never a failure.
+         *
+         *     `limit` spends the budget in tranches; 0 is everything that needs it.
+         */
+        get: operations["ingest_index_fundamentals_api_benchmarks_index__label__fundamentals_ingest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/benchmarks/index/{label}/refresh": {
         parameters: {
             query?: never;
@@ -3126,6 +3181,38 @@ export interface paths {
         get: operations["benchmark_refresh_api_benchmarks_index__label__refresh_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/isin/{isin}/fundamentals/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Company Fundamentals
+         * @description Fetch the GuruFocus feeds ONE constituent is missing — the per-row button.
+         *
+         *     ⚠ BY ISIN, NOT BY THE TABLE'S `company_id`. That field is an `analysis_id` in the constituent
+         *     payload (see `ConstituentFundamentals.rows`), so an id taken straight off the row 404s against
+         *     the `company` table — measured, on analysis_id 1457, which is a real asset row and not a
+         *     company at all. ISIN is the identifier both worlds carry.
+         *
+         *     ⚠ ALL THREE FEEDS, unlike `/api/earnings/fundamental-coverage/ingest`, which fetches only the
+         *     statements. A company with financials and no estimates renders a Long Equity tab that fills in
+         *     around two empty panels, which reads as a charting bug. See `_fundamental_backfill`.
+         *
+         *     Admin-only: it spends GuruFocus quota, and the auth gate holds any non-`/refresh` write here to
+         *     admins.
+         */
+        post: operations["ingest_company_fundamentals_api_benchmarks_isin__isin__fundamentals_ingest_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8296,6 +8383,30 @@ export interface components {
             start_month: string;
         };
         /**
+         * CompanyIngestResult
+         * @description What one company's backfill did. `feeds` names the calls actually spent.
+         */
+        CompanyIngestResult: {
+            /** Company Id */
+            company_id: number;
+            /** Error */
+            error?: string | null;
+            /**
+             * Feeds
+             * @default []
+             */
+            feeds?: string[];
+            /** Name */
+            name?: string | null;
+            /**
+             * Rows
+             * @default 0
+             */
+            rows?: number;
+            /** Skipped */
+            skipped?: string | null;
+        };
+        /**
          * CompositionExcluded
          * @description A holding this axis does not weigh, and why. `cash` · `unpriced` · `unclassified`.
          *
@@ -8354,6 +8465,45 @@ export interface components {
              * @default 0
              */
             weight_pct?: number;
+        };
+        /**
+         * ConstituentFundamentalColumn
+         * @description One RAW GuruFocus line the Long Equity charts consume. Shipped with the data so the table
+         *     renders the set the SERVER knows about — add a line backend-side and its columns appear
+         *     without a frontend change, which is the only way the two cannot drift.
+         */
+        ConstituentFundamentalColumn: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * ConstituentFundamentals
+         * @description The RAW GuruFocus lines per constituent, and the period span we hold for each.
+         *
+         *     ⚠ `covered` IS NOT DECORATION. Only the members whose fundamentals have been ingested appear in
+         *     `rows`; measured 2026-08-04, that was 92 of SP500's 503. A table that simply renders blanks for
+         *     the rest reads as "these companies have no margins", which is a claim about the companies
+         *     rather than about our ingest. The count says which it is.
+         */
+        ConstituentFundamentals: {
+            /** Columns */
+            columns: components["schemas"]["ConstituentFundamentalColumn"][];
+            /** Covered */
+            covered: number;
+            /** Label */
+            label: string;
+            /** Members */
+            members: number;
+            /** Rows */
+            rows: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
         };
         /** CorrelationRequest */
         CorrelationRequest: {
@@ -8765,6 +8915,11 @@ export interface components {
          * @description One blended point to take apart: which metric, which fiscal year.
          */
         FundamentalBreakdownRequest: {
+            /**
+             * Cadence
+             * @default annual
+             */
+            cadence?: string;
             /** Holdings */
             holdings?: {
                 [key: string]: unknown;
@@ -8781,6 +8936,11 @@ export interface components {
          * @description Either a model portfolio's id, or an explicit basket of (isin, weight).
          */
         FundamentalCoverageRequest: {
+            /**
+             * Cadence
+             * @default annual
+             */
+            cadence?: string;
             /** Holdings */
             holdings?: {
                 [key: string]: unknown;
@@ -8809,6 +8969,11 @@ export interface components {
          * @description The whole blended line taken apart: which metric (every period, every holding).
          */
         FundamentalMatrixRequest: {
+            /**
+             * Cadence
+             * @default annual
+             */
+            cadence?: string;
             /** Holdings */
             holdings?: {
                 [key: string]: unknown;
@@ -10178,6 +10343,11 @@ export interface components {
          * @description One year of the Share-Price-vs-Owner-Earnings chart, decomposed per holding.
          */
         RelativeGrowthRequest: {
+            /**
+             * Cadence
+             * @default annual
+             */
+            cadence?: string;
             /** Holdings */
             holdings?: {
                 [key: string]: unknown;
@@ -14717,6 +14887,70 @@ export interface operations {
             };
         };
     };
+    benchmark_constituent_fundamentals_api_benchmarks_index__label__fundamentals_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConstituentFundamentals"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_index_fundamentals_api_benchmarks_index__label__fundamentals_ingest_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     benchmark_refresh_api_benchmarks_index__label__refresh_get: {
         parameters: {
             query?: never;
@@ -14735,6 +14969,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_company_fundamentals_api_benchmarks_isin__isin__fundamentals_ingest_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyIngestResult"];
                 };
             };
             /** @description Validation Error */
@@ -15504,6 +15771,7 @@ export interface operations {
         parameters: {
             query?: {
                 label?: string;
+                cadence?: string;
             };
             header?: never;
             path?: never;
@@ -15629,7 +15897,9 @@ export interface operations {
     };
     get_earnings_metrics_by_isin_api_earnings_by_isin__isin__metrics_get: {
         parameters: {
-            query?: never;
+            query?: {
+                cadence?: string;
+            };
             header?: never;
             path: {
                 isin: string;

@@ -13,7 +13,7 @@ import { Stat } from './MetricGrowthCard';
 import { type Target } from './HoldingsRevenueModal';
 import CashReturnInputsModal from './CashReturnInputsModal';
 import { MODES, seriesByYear, type CapitalMode, type CashReturnInputs } from './cashReturnData';
-import { meanOf, paddedDomain } from './marginData';
+import { meanOf, paddedDomain , xToPeriod } from './marginData';
 
 /**
  * Cash-return-on-capital card: Free Cash Flow ÷ invested capital (non-current liabilities + total
@@ -124,7 +124,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
                 style={{ cursor: M.derived ? 'pointer' : 'default' }}
                 onClick={() => { if (M.derived) setShowInputs(true); }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
+                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
                 <YAxis domain={paddedDomain([...ratioByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}

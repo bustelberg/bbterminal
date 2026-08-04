@@ -13,7 +13,7 @@ import InfoTip from '../InfoTip';
 import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
 import HoldingsIngestPanel from './HoldingsIngestPanel';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
-import { paddedLogDomain } from './marginData';
+import { paddedLogDomain , xToPeriod } from './marginData';
 
 /**
  * One "Long Equity" growth card: a metric per fiscal year on a LOG axis with an exponential-trend
@@ -54,9 +54,13 @@ export function Stat({ label, value, tone, color, info }: {
 
 export default function MetricGrowthCard({
   cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin, onIngested,
-  blendNotes, onReloadMetrics,
+  blendNotes, onReloadMetrics, cadence = 'annual',
 }: {
   cfg: MetricCfg;
+  /** 'annual' = one point per fiscal year. 'quarterly' = one TRAILING-TWELVE-MONTH point per
+   *  quarter — quarterly frequency, annual scope, so it is comparable with the annual line and
+   *  free of the seasonality raw quarters would carry. */
+  cadence?: 'annual' | 'quarterly';
   metrics: MetricRow[] | null;   // null = still loading (the tab's company fetch)
   isAgg: boolean;
   currency?: string | null;
@@ -116,19 +120,35 @@ export default function MetricGrowthCard({
     }
   };
 
+  /**
+   * ⚠ THE X UNIT IS ALWAYS A YEAR — WHOLE ON ANNUAL, FRACTIONAL ON QUARTERLY — AND THAT IS WHAT
+   * KEEPS THE CAGR A **C-A-GR**. `logLinearFit` regresses ln(value) on this axis, so its slope is
+   * "per x unit". Bucketing quarterly points 0,1,2,3… would make the slope per QUARTER and the
+   * card would print a quarterly growth rate under a label that says annual — a number ~4x too
+   * small, entirely plausible, and wrong on every one of the three growth cards at once.
+   *
+   * A TTM point dated 2026-03-31 sits at 2026.25, so four of them span exactly 1.0 on the axis and
+   * the fitted slope is per year by construction. R² is unaffected (it is scale-free).
+   */
   const points = useMemo(() => {
     const rows = metrics ?? [];
     const codes = new Set(cfg.codes);
-    const byYear = new Map<number, { date: string; value: number }>();
+    const byX = new Map<number, { date: string; value: number }>();
     for (const m of rows) {
       if (!codes.has(m.metric_code) || m.numeric_value == null) continue;
-      const y = parseInt(String(m.target_date).slice(0, 4), 10);
+      const d = String(m.target_date);
+      const y = parseInt(d.slice(0, 4), 10);
       if (y < 2015) continue;   // charts start from 2015, like the holdings/margin views
-      const cur = byYear.get(y);
-      if (!cur || m.target_date > cur.date) byYear.set(y, { date: m.target_date, value: m.numeric_value });
+      // Annual rows keep one point per calendar year (the latest); TTM rows are already one per
+      // quarter, so each gets its own x and nothing collapses.
+      const x = cadence === 'quarterly'
+        ? y + (Math.ceil(parseInt(d.slice(5, 7), 10) / 3) - 1) / 4
+        : y;
+      const cur = byX.get(x);
+      if (!cur || d > cur.date) byX.set(x, { date: d, value: m.numeric_value });
     }
-    return [...byYear.entries()].map(([year, v]) => ({ year, value: v.value })).sort((a, b) => a.year - b.year);
-  }, [metrics, cfg]);
+    return [...byX.entries()].map(([year, v]) => ({ year, value: v.value })).sort((a, b) => a.year - b.year);
+  }, [metrics, cfg, cadence]);
 
   // Present only when the blend saw this metric and still drew nothing — the one case where
   // "not ingested" would be false.
@@ -248,7 +268,7 @@ export default function MetricGrowthCard({
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowHoldings(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
+                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
                 {isRatio ? (
                   <YAxis tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
                     tickFormatter={(v: number) => `${v.toFixed(0)}%`} />

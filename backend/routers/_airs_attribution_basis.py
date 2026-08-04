@@ -137,7 +137,8 @@ def book_legs(portfolio_id: int) -> list[dict] | None:
                  if a.get("model_portfolio_id") == portfolio_id), None)
     if not link:
         return None
-    rows = _expand_book_rows(resolve_account_isins(link["portefeuille"]).get("rows") or [])
+    rows = _expand_book_rows(
+        resolve_account_isins(link["portefeuille"], freshen=False).get("rows") or [])
     # THE ROW'S OWN INCOME LOADER, keyed on `holding_name` exactly as `account_holdings` keys it.
     # A second pass over the Mutaties journal here would be a second answer to "what did this
     # holding pay", free to drift from the column the reader is comparing against.

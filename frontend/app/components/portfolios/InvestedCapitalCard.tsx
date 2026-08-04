@@ -14,7 +14,7 @@ import { Stat } from './MetricGrowthCard';
 import { type Target } from './HoldingsRevenueModal';
 import InvestedCapitalInputsModal from './InvestedCapitalInputsModal';
 import { investedCapitalIndexByYear, investedCapitalSeries } from './investedCapitalData';
-import { paddedLogDomain } from './marginData';
+import { paddedLogDomain , xToPeriod } from './marginData';
 import { type CashReturnInputs } from './cashReturnData';
 
 /**
@@ -114,7 +114,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
+                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
                 <YAxis scale="log" domain={logDomain ?? ['dataMin', 'dataMax']} allowDataOverflow
                   tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: number) => fmt(v)} width={60} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}

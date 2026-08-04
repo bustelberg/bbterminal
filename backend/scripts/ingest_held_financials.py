@@ -1,4 +1,5 @@
-"""Fetch GuruFocus financials AND analyst estimates for every company an AIRS book HOLDS.
+"""Fetch GuruFocus financials, analyst estimates and indicators for a set of companies —
+the companies an AIRS book HOLDS, or the members of a UNIVERSE (`--universe SP500`).
 
 WHY THIS EXISTS
     The /portfolios Fundamental view can only chart a company whose financials are ingested, and
@@ -15,9 +16,18 @@ WHY THIS EXISTS
     `indicator_q_forward_pe_ratio`. The suite fills in AROUND the panels that cannot, which reads
     as a bug in the charts rather than as data nobody fetched.
 
-⚠ HELD COMPANIES ONLY, NOT THE WHOLE TABLE. 2,776 companies at ~1 call each would spend an eighth
-    of the monthly quota on names nothing holds. The held set is ~177, of which the missing ones
-    are ~164 — a rounding error against the budget, and every one of them is on a screen.
+⚠ A NAMED SET, NEVER THE WHOLE TABLE. 2,776 companies at ~3 calls each would spend a large slice
+    of the monthly quota on names nothing looks at. Two sets are worth it, and both are opt-in:
+      * the HELD set (default) — ~177 companies, every one of them on a screen;
+      * `--universe SP500` — the index's members, so the Long Equity BENCHMARK line describes the
+        index rather than a fifth of it. Measured 2026-08-04: 92 of 503 SP500 members had any
+        fundamentals, so the benchmark's cap-weighted margin was an average over 18% of the index,
+        drawn in the same ink as the portfolio's own line beside it.
+
+⚠ IT IS THE QUOTA THAT DECIDES WHETHER A UNIVERSE IS AFFORDABLE, SO CHECK THE DRY RUN FIRST. An
+    index backfill is ~3 calls x the missing members (SP500: ~411 x 3 ≈ 1,233), which is a real
+    fraction of a month. `--limit` exists to spend it in tranches across days rather than
+    discovering the ceiling halfway through.
 
 ⚠ IT SKIPS EXCHANGES OUTSIDE THE SUBSCRIPTION RATHER THAN 403-ing THROUGH THEM. LSE, ASX and the
     rest return "unsubscribed" — the call is spent and nothing comes back. `is_gf_subscribed_exchange`
@@ -26,8 +36,10 @@ WHY THIS EXISTS
 ⚠ AND IT CHECKS THE BUDGET BEFORE IT STARTS. `remaining_budget` is per region; a region at zero
     means the month's quota is gone and every further call is wasted.
 
-    cd backend && uv run python scripts/ingest_held_financials.py            # dry run
+    cd backend && uv run python scripts/ingest_held_financials.py            # dry run, held set
     cd backend && uv run python scripts/ingest_held_financials.py --apply
+    cd backend && uv run python scripts/ingest_held_financials.py --universe SP500
+    cd backend && uv run python scripts/ingest_held_financials.py --universe SP500 --apply --limit 100
 """
 from __future__ import annotations
 
@@ -40,85 +52,73 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import deps  # noqa: E402, F401
 from deps import supabase  # noqa: E402
-from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: E402
 from ingest.api_usage import remaining_budget  # noqa: E402
-from ingest.earnings import (  # noqa: E402
-    fetch_analyst_estimates,
-    fetch_financials,
-    fetch_indicators,
+
+# ⚠ THE SENTINELS, THE SUBSCRIPTION GATE AND THE THREE-CALL SEQUENCE LIVE IN ONE PLACE, shared with
+# the /benchmarks table's per-row and fill-all buttons. They were inline here first; a second copy
+# is how one caller quietly goes back to fetching two feeds.
+from routers._fundamental_backfill import (  # noqa: E402
+    company_rows as _company_rows,
+    eligible,
+    ingest_company,
+    needs as _missing,
 )
 
-# The line the /portfolios blend charts. A company that has it can be charted; one that does not
-# is what this script exists to fix. Probed with ONE code, never `LIKE 'annuals__%'` — a wildcard
-# over 20 companies is ~40k rows against PostgREST's silent 1,000-row cap.
-SENTINEL = "annuals__Cashflow Statement__Free Cash Flow"
+def _universe_company_ids(label: str) -> list[int]:
+    """Every company in a universe, by label ("SP500", "ACWI", …).
 
-# ⚠ TWO INGESTS, TWO SENTINELS. Financials and analyst estimates are SEPARATE GuruFocus calls and
-# a company can have one without the other — running only the first leaves Forward P/E (and every
-# other estimate-driven panel) empty while the rest of the suite fills in, which reads as a bug in
-# the chart rather than as data nobody fetched. Measured 2026-07-23: 168 companies with financials,
-# 31 with estimates.
-SENTINEL_EST = "annual_pettm_estimate"
-
-# ⚠ AND A THIRD, BECAUSE FORWARD P/E IS NOT AN ESTIMATE. The chart reads
-# `indicator_q_forward_pe_ratio` — the INDICATORS feed, a third call again. Naming makes this easy
-# to get wrong: `annual_pettm_estimate` is also a forward P/E and is also present, but no chart
-# reads it. Measured 2026-07-23: 12,536 indicator rows fleet-wide and ZERO on any held company.
-SENTINEL_IND = "indicator_q_forward_pe_ratio"
-
-
-def _has(cids: list[int], metric_code: str) -> set[int]:
-    """Which of these companies carry `metric_code`. ONE code, never `LIKE 'annuals__%'` — a
-    wildcard over 20 companies is ~40k rows against PostgREST's silent 1,000-row cap, and every
-    company past the cut-off would look like it had nothing."""
-    out: set[int] = set()
-    for i in range(0, len(cids), 20):
-        for m in (supabase.table("metric_data").select("company_id")
-                  .in_("company_id", cids[i:i + 20]).eq("metric_code", metric_code)
-                  .limit(1000).execute().data or []):
-            out.add(m["company_id"])
-    return out
+    ⚠ A SECOND SOURCE FOR THE SAME WORK, NOT A SECOND SCRIPT. The held set and an index are two
+    answers to "which companies matter"; everything after this point — the three sentinels, the
+    subscription gate, the budget check, the per-row log — is identical, and a forked copy would
+    be one more place for the three-ingests trap to be got wrong.
+    """
+    uni = (supabase.table("universe").select("universe_id")
+           .eq("label", label).limit(1).execute().data or [])
+    if not uni:
+        raise SystemExit(f"  no universe labelled {label!r}")
+    uid = uni[0]["universe_id"]
+    rows, off = [], 0
+    while True:                       # ⚠ paged: 500+ members is past PostgREST's silent 1,000 cap
+        page = (supabase.table("universe_membership").select("company_id")
+                .eq("universe_id", uid).order("company_id")
+                .range(off, off + 999).execute().data or [])
+        if not page:
+            break
+        rows += page
+        off += len(page)
+    return sorted({r["company_id"] for r in rows if r.get("company_id")})
 
 
-def _held_companies() -> list[dict]:
+
+def _held_company_ids() -> list[int]:
     isins = sorted({r["isin"] for r in (supabase.table("airs_holding").select("isin")
                     .not_.is_("isin", "null").limit(5000).execute().data or []) if r.get("isin")})
-    comps: dict[int, dict] = {}
+    out: set[int] = set()
     for i in range(0, len(isins), 100):
-        for c in (supabase.table("company")
-                  .select("company_id,company_name,gurufocus_ticker,"
-                          "gurufocus_exchange:gurufocus_exchange(exchange_code)")
+        for c in (supabase.table("company").select("company_id")
                   .in_("isin", isins[i:i + 100]).execute().data or []):
-            comps[c["company_id"]] = c
-    cids = sorted(comps)
-    fin, est = _has(cids, SENTINEL), _has(cids, SENTINEL_EST)
-    ind = _has(cids, SENTINEL_IND)
-    out = []
-    for cid, c in comps.items():
-        c = {**c, "need_fin": cid not in fin, "need_est": cid not in est,
-             "need_ind": cid not in ind}
-        if c["need_fin"] or c["need_est"] or c["need_ind"]:
-            out.append(c)
-    return out
+            out.add(c["company_id"])
+    return sorted(out)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true", help="spend the calls (default: dry run)")
     ap.add_argument("--limit", type=int, default=0, help="stop after N companies (0 = all)")
+    ap.add_argument("--universe", default=None, metavar="LABEL",
+                    help="ingest a universe's members instead of the held set (e.g. SP500)")
     a = ap.parse_args()
 
-    todo = _held_companies()
-    skipped = [c for c in todo
-               if not c.get("gurufocus_ticker")
-               or not is_gf_subscribed_exchange(
-                   ((c.get("gurufocus_exchange") or {}) or {}).get("exchange_code"))]
-    work = [c for c in todo if c not in skipped]
+    cids = _universe_company_ids(a.universe) if a.universe else _held_company_ids()
+    todo = _missing(_company_rows(cids))
+    print(f"\n  source: {a.universe or 'held books'} — {len(cids)} companies")
+    skipped = [c for c in todo if eligible(c)]
+    work = [c for c in todo if not eligible(c)]
     if a.limit:
         work = work[:a.limit]
 
     budget = remaining_budget(supabase)
-    print(f"\n  held companies missing financials / estimates / indicators: {len(todo)}")
+    print(f"  missing financials / estimates / indicators: {len(todo)}")
     print(f"  skipped (no ticker / unsubscribed exchange): {len(skipped)}")
     print(f"  to fetch: {len(work)}     quota remaining: {budget}\n", flush=True)
     if not a.apply:
@@ -132,24 +132,17 @@ def main() -> int:
     for n, c in enumerate(work, 1):
         ex = ((c.get("gurufocus_exchange") or {}) or {}).get("exchange_code")
         label = f"{ex}:{c['gurufocus_ticker']}"
-        try:
-            done = []
-            if c.get("need_fin"):
-                r1 = fetch_financials(supabase, c["company_id"], c["gurufocus_ticker"], ex)
-                done.append(f"fin {r1.rows_loaded} rows")
-            if c.get("need_est"):
-                r2 = fetch_analyst_estimates(supabase, c["company_id"], c["gurufocus_ticker"], ex)
-                done.append(f"est {r2.rows_loaded} rows")
-            if c.get("need_ind"):
-                r3 = fetch_indicators(supabase, c["company_id"], c["gurufocus_ticker"], ex)
-                done.append(f"ind {r3.rows_loaded} rows")
-            ok += 1
-            print(f"  [{n:>3}/{len(work)}] {label:<16} {', '.join(done) or 'nothing to do'}",
-                  flush=True)
-        except Exception as e:  # noqa: BLE001
+        # ⚠ THE SAME FUNCTION THE /benchmarks BUTTON CALLS. It never raises — a failure comes back
+        # on the row — so this loop keeps the per-company reporting it always had while the
+        # three-call sequence lives in one place.
+        r = ingest_company(c)
+        if r["error"]:
             failed += 1
-            print(f"  [{n:>3}/{len(work)}] {label:<16} FAIL {type(e).__name__}: {str(e)[:70]}",
-                  flush=True)
+            print(f"  [{n:>3}/{len(work)}] {label:<16} FAIL {r['error']}", flush=True)
+        else:
+            ok += 1
+            print(f"  [{n:>3}/{len(work)}] {label:<16} "
+                  f"{', '.join(r['done']) or 'nothing to do'}", flush=True)
         time.sleep(0.2)     # a courtesy pause; the API is not rate-limited at this volume
     print(f"\n  ok={ok}  failed={failed}\n")
     return 0

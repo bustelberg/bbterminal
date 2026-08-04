@@ -13,7 +13,7 @@ import { Stat } from './MetricGrowthCard';
 import { type Target } from './HoldingsRevenueModal';
 import CashConversionInputsModal from './CashConversionInputsModal';
 import { cashConversionByYear, type CashConversionInputs } from './cashConversionData';
-import { meanOf, paddedDomain } from './marginData';
+import { meanOf, paddedDomain , xToPeriod } from './marginData';
 
 /**
  * Cash-conversion card: Free Cash Flow ÷ Net Income per fiscal year, on a LINEAR % axis. Whether
@@ -107,7 +107,7 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
+                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
                 <YAxis domain={paddedDomain([...marginByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}

@@ -513,7 +513,7 @@ def _segments(rows: list[dict]) -> list[dict]:
     return out
 
 
-def resolve_account_isins(portefeuille: str) -> dict:
+def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
     """One account's holdings, each with its own ISIN and what we know about that instrument.
 
     ⚠ NO PAIRING, NO SCORING, NO ASSIGNMENT — all three were deleted 2026-07-23. Everything they
@@ -580,8 +580,20 @@ def resolve_account_isins(portefeuille: str) -> dict:
     # ⚠ BEFORE the closes are read, never after: the check below is a comparison, and half of it
     # comes from here. See `_freshen` — a series that merely stopped updating reads as a wrong
     # listing, which is the loudest finding this table can make.
+    # ⚠ SKIPPABLE, AND ONLY THE PRICE CHECK DEPENDS ON IT. `_freshen` exists so the implied-vs-our
+    # price comparison below is not drawn against a series that merely stopped updating — it
+    # protects `verdict` / `price_ratio` / `implied_price_eur`, which the /portfolios expand shows.
+    # The ANALYSIS path reads none of those: it takes the ISIN, the two AIRS valuations, the class
+    # and the certificate link, and prices nothing off our own closes any more. It was paying ~3.3s
+    # per book for a check it does not display — twice, since the wrapped book is resolved too, so
+    # 6.4s of a 9.7s modal open.
+    #
+    # ⚠ THE PRICES STILL GET FRESHENED, JUST NOT HERE: the 06:00 tick covers account holdings
+    # (`price_refresh.held_isins` unions `airs_holding`), and any /portfolios expand runs the full
+    # path. This only declines to do the vendor's work on a read that will not show the result.
     with _phase(t, "freshen_prices"):
-        _freshen(isins)
+        if freshen:
+            _freshen(isins)
     with _phase(t, "closes"):
         closes = _last_closes(isins, as_of)
     with _phase(t, "fx"):

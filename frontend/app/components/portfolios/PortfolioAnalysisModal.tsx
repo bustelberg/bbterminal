@@ -12,6 +12,7 @@ import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
 import BucketDetailPanel from './BucketDetailPanel';
 import CompositionDataModal from './CompositionDataModal';
+import OwnerEarningsModal from './OwnerEarningsModal';
 import { type Basket } from './types';
 
 /**
@@ -618,8 +619,30 @@ function blendHow(h: BookHolding): string | null {
   return `${parts.join(' + ')} = ${fmtRet(h.own_return_pct)}`;
 }
 
-function PortfolioHoldings({ holdings, slices, asOf, note, bookName }: {
+/** A Fundamental trigger — the same control the /portfolios table carries, for one instrument or
+ *  for a whole class as a value-weighted basket.
+ *
+ *  ⚠ ONLY WHERE THERE IS SOMETHING TO LOOK UP. Owner earnings are per-COMPANY: cash has no ISIN,
+ *  an unresolved line has none either, and a class whose members are all unresolved yields an
+ *  empty basket. A button that opens a modal saying "nothing to show" is worse than no button —
+ *  it reads as a broken feature rather than an absent one. */
+function FundamentalButton({ onOpen, title, className = '' }: {
+  onOpen: () => void; title: string; className?: string;
+}) {
+  return (
+    <button type="button"
+      onClick={(e) => { e.stopPropagation(); onOpen(); }}
+      title={title}
+      className={`cursor-pointer text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap transition-colors ${className}`}>
+      Fundamental
+    </button>
+  );
+}
+
+function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundamental }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
+  /** Opens the owner-earnings modal for one instrument or a whole class. */
+  onFundamental: (t: { name: string; isin?: string; basket?: Basket }) => void;
   /** WHY the table is empty, from the server (`book_note`) — three different faults used to
    *  render as one sentence, next to a portfolios list that visibly has rows. */
   note?: string | null;
@@ -644,11 +667,22 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName }: {
   // Classes in the chart's own order, so the eye moves between them without re-reading.
   const order = (slices ?? []).map((s) => s.bucket);
   const groups = [...new Set([...order, ...holdings.map((h) => h.bucket)])]
-    .map((bucket) => ({
-      bucket,
-      slice: (slices ?? []).find((s) => s.bucket === bucket),
-      rows: holdings.filter((h) => h.bucket === bucket),
-    }))
+    .map((bucket) => {
+      const rows = holdings.filter((h) => h.bucket === bucket);
+      return {
+        bucket,
+        slice: (slices ?? []).find((s) => s.bucket === bucket),
+        rows,
+        // The class as a value-weighted basket, for the Fundamental button on its header. ISIN-
+        // bearing rows only: owner earnings are per-company, and cash has no company.
+        basket: {
+          label: bucketLabel(bucket),
+          holdings: rows
+            .filter((h) => h.isin)
+            .map((h) => ({ isin: h.isin!, weight: h.weight_now_pct ?? 0, name: h.name ?? undefined })),
+        } satisfies Basket,
+      };
+    })
     .filter((g) => g.rows.length > 0);
 
   const cmp = (a: BookHolding, b: BookHolding) => {
@@ -772,6 +806,16 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName }: {
                   <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[10px] font-normal text-fg-muted">
                     {g.rows.length}
                   </span>
+                  {/* ⚠ WEIGHTED BY WHAT IS BEING BLENDED, over the members that CAN be blended.
+                      The basket takes each member's `weight_now_pct` — the same figure this row's
+                      subtotal is summed from — and only the rows with an ISIN, because owner
+                      earnings are per-company and cash has none. Sending the whole class would
+                      hand the blender a weight it cannot attribute to anything. */}
+                  {g.basket.holdings.length > 0 && (
+                    <FundamentalButton className="ml-2 align-middle"
+                      title={`Blended owner earnings and price steadiness across the ${g.basket.holdings.length} priced name${g.basket.holdings.length === 1 ? '' : 's'} in ${bucketLabel(g.bucket)}, weighted by what the book holds today.`}
+                      onOpen={() => onFundamental({ name: g.basket.label, basket: g.basket })} />
+                  )}
                 </td>
                 <td className="py-2 text-right font-mono text-[11px] font-semibold text-fg-strong whitespace-nowrap">
                   {num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}%
@@ -793,9 +837,24 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName }: {
               </tr>
               {[...g.rows].sort(cmp).map((h, i) => (
                 <tr key={h.isin ?? `${g.bucket}-${h.name ?? i}`}
-                  className="border-b border-neutral-800/[0.15] last:border-0 hover:bg-overlay/[0.03] transition-colors">
+                  className="group border-b border-neutral-800/[0.15] last:border-0 hover:bg-overlay/[0.03] transition-colors">
                   <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[10px] text-fg-faint tabular-nums">{i + 1}</td>
-                  <td className="py-1.5 pr-3 text-fg truncate max-w-0" title={h.name ?? undefined}>{h.name ?? '—'}</td>
+                  {/* ⚠ IN THE NAME CELL, NOT A NEW COLUMN. The header's colSpans are counted by
+                      hand across four places in this table (group row, thead, body, tfoot); a
+                      fourteenth column here shifts every figure one cell right, silently — a
+                      weight renders perfectly well under "Ccy". The button rides with the name it
+                      belongs to and appears on hover so 52 rows are not 52 buttons at rest. */}
+                  <td className="py-1.5 pr-3 text-fg max-w-0" title={h.name ?? undefined}>
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <span className="truncate">{h.name ?? '—'}</span>
+                      {h.isin && (
+                        <FundamentalButton
+                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0"
+                          title={`Fundamental — is ${h.name ?? h.isin} fundamentally good? (owner earnings + price steadiness)`}
+                          onOpen={() => onFundamental({ name: h.name ?? h.isin!, isin: h.isin! })} />
+                      )}
+                    </span>
+                  </td>
                   <td className="py-1.5 pr-3 font-mono text-[10px] text-fg-faint">{h.isin ?? '—'}</td>
                   <td className="py-1.5 pr-3">
                     <ViaChips names={h.via_names ?? []} sources={h.sources} />
@@ -1139,6 +1198,8 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
   // portfolio, where the modal shows the book's return vs the benchmark and prompts the reader to
   // click a class. Selecting a class replaces that with the class's OWN return + its breakdown.
   const [assetFilter, setAssetFilter] = useState<string | null>(null);
+  /** The instrument or class whose Fundamental is open, over this modal. Null = closed. */
+  const [fund, setFund] = useState<{ name: string; isin?: string; basket?: Basket } | null>(null);
   const [data, setData] = useState<ModelPortfolioAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -1294,6 +1355,7 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                  and nothing about what they hold. Picking a class still narrows this to that
                  class's own breakdown. */
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
+                onFundamental={setFund}
                 note={data.book_note} bookName={data.book_portefeuille}
                 /* ⚠ THE BOOK SNAPSHOT, NOT `data.as_of`. That field is the model COMPOSITION's
                    effective date (2025-12-30 for AITopSelectie) — a true fact about the weights
@@ -1337,6 +1399,16 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
               </>
             )}
           </>
+        )}
+        {/* ⚠ RENDERED INSIDE THE CONTENT BOX, NOT BESIDE IT. This modal's backdrop closes it on
+            click, and a nested modal's own backdrop covers the whole screen — mounted as a sibling
+            of that backdrop, dismissing the Fundamental would bubble up and close the Analyse
+            modal underneath it too. The content box already stops propagation, so putting it here
+            makes the two dismiss independently. It still paints over everything: the nested
+            backdrop is `fixed inset-0`, which escapes this box's layout but not its event tree. */}
+        {fund && (
+          <OwnerEarningsModal isin={fund.isin} basket={fund.basket} name={fund.name}
+            onClose={() => setFund(null)} />
         )}
       </div>
     </div>

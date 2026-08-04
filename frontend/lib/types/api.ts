@@ -95,6 +95,9 @@ export type ModelPortfolioAnalysis = components['schemas']['ModelPortfolioAnalys
 // effects SUM to the excess; `reconciles` carries the proof.
 export type ModelPortfolioAttribution = components['schemas']['ModelPortfolioAttribution'];
 export type ReconstructedIndex = components['schemas']['ReconstructedIndex'];
+/** Per-constituent Long Equity measures for a benchmark — a second, slower call than the index
+ *  itself, so the price table renders first and these fill in. */
+export type ConstituentFundamentals = components['schemas']['ConstituentFundamentals'];
 export type IndexMember = components['schemas']['IndexMember'];
 
 /** The four soundness charts — price vs fair value, yield, ROIC vs WACC, safety.

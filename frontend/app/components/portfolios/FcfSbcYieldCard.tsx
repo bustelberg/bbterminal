@@ -14,7 +14,8 @@ import { type Target } from './HoldingsRevenueModal';
 import { fcfLabel } from './sbcCorrection';
 import FcfSbcYieldInputsModal from './FcfSbcYieldInputsModal';
 import { fcfSbcYieldByYear, type FcfSbcYieldInputs } from './fcfSbcYieldData';
-import { meanOf, paddedDomain } from './marginData';
+import DailyToggle from './DailyToggle';
+import { meanOf, paddedDomain, xToMonth, xToPeriod } from './marginData';
 
 /**
  * FCF-SBC yield card: (Free Cash Flow − Stock-Based Compensation) ÷ Market Cap per fiscal year, on
@@ -35,6 +36,11 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
   const [data, setData] = useState<FcfSbcYieldInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
+  /** Per-card daily override — see {@link ./DailyToggle} for why it is not on the tab control. */
+  const [daily, setDaily] = useState(false);
+  const target = useMemo(
+    () => (daily ? { ...holdingsTarget, cadence: 'daily' } : holdingsTarget),
+    [holdingsTarget, daily]);
 
   useEffect(() => {
     let alive = true;
@@ -43,7 +49,7 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
       try {
         const r = await apiFetch(`${API_URL}/api/earnings/fcf-sbc-yield-inputs`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(holdingsTarget),
+          body: JSON.stringify(target),
         });
         const b = await r.json().catch(() => null);
         if (!alive) return;
@@ -54,7 +60,7 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
       }
     })();
     return () => { alive = false; };
-  }, [holdingsTarget]);
+  }, [target]);
 
   const yieldByYr = useMemo(
     () => fcfSbcYieldByYear(data?.rows ?? [], sbcCorrection), [data, sbcCorrection]);
@@ -70,7 +76,13 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      <h4 className="text-base font-semibold text-fg-strong">{fcfLabel(sbcCorrection)} yield</h4>
+      <div className="flex items-baseline justify-between gap-2">
+        <h4 className="text-base font-semibold text-fg-strong">{fcfLabel(sbcCorrection)} yield</h4>
+        <DailyToggle on={daily} onChange={setDaily}
+          note={'Daily: FCF − SBC stays flat between fiscal periods while the market cap moves '
+            + 'every trading day — rebuilt as the day’s close × shares outstanding, since '
+            + 'GuruFocus publishes a market cap only per fiscal period. Off, it follows the tab.'} />
+      </div>
 
       {data == null && !err ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
@@ -95,14 +107,15 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
+                <XAxis dataKey="year" tickFormatter={daily ? xToMonth : xToPeriod} tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
                 <YAxis domain={paddedDomain([...yieldByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
                   formatter={(v) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, `${fcfLabel(sbcCorrection)} yield`]} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
-                <Line dataKey="yld" name="yld" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
+                {/* ⚠ NO DOTS ON A DAILY SERIES — 2,700 markers is a solid band, not a line. */}
+                <Line dataKey="yld" name="yld" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={daily ? false : { r: 2.5 }} connectNulls />
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
@@ -113,7 +126,7 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
       )}
 
       {showInputs && (
-        <FcfSbcYieldInputsModal target={holdingsTarget} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <FcfSbcYieldInputsModal target={target} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
       )}
     </div>
   );

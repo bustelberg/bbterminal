@@ -13,7 +13,7 @@ import { Stat } from './MetricGrowthCard';
 import { type Target } from './HoldingsRevenueModal';
 import DebtRatioInputsModal from './DebtRatioInputsModal';
 import { debtRatioByYear, type DebtRatioInputs } from './debtRatioData';
-import { meanOf, paddedDomain } from './marginData';
+import { meanOf, paddedDomain , xToPeriod } from './marginData';
 
 /**
  * Debt-to-tangible-assets card: Long-Term Debt ÷ (Total Assets − Goodwill) per fiscal year, on a
@@ -90,7 +90,7 @@ export default function DebtRatioCard({ holdingsTarget, holdingsName }: {
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
+                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
                 <YAxis domain={paddedDomain([...ratioByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}

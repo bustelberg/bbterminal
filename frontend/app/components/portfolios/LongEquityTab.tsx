@@ -80,13 +80,28 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
   const [metricsKey, setMetricsKey] = useState(0);
   /** Portfolio only: how many holdings the blend has read. Null on a single company. */
   const [progress, setProgress] = useState<BlendProgress | null>(null);
+  /**
+   * The cadence every chart on this tab is on.
+   *
+   * ⚠ "Quarterly" IS TRAILING TWELVE MONTHS, NOT RAW QUARTERS — quarterly frequency with annual
+   * scope. Raw quarters would put a seasonal sawtooth through revenue, margins and cash
+   * conversion, and the growth cards' trend line would fit the season rather than the business.
+   * The roll-up is per metric and lives on the SERVER (`_TTM_RULE`): flows sum over four quarters,
+   * balances take the latest, and an already-annualised rate takes the mean. Summing four
+   * quarter-end balance sheets would report a company with 4x its assets, and nothing on the
+   * resulting chart would look wrong.
+   */
+  const [cadence, setCadence] = useState<'annual' | 'quarterly'>('annual');
 
   // ⚠ Memoised — it's a card/modal effect dep, so a fresh object each render would refetch forever.
+  // ⚠ `cadence` RIDES IN THE BODY, which is what makes one toggle move nine cards: every derived
+  // card POSTs this object verbatim to its own `*-inputs` endpoint, and they all read their lines
+  // through one cadence-aware loader on the server. Nothing per-card to keep in step.
   const holdingsTarget = useMemo(() => (isAgg
     ? (basket
-      ? { holdings: basket.holdings.map((h) => ({ isin: h.isin, name: h.name, weight: h.weight })) }
-      : { portfolio_id: portfolioId })
-    : { holdings: [{ isin: isin ?? '', weight: 1 }] }), [isAgg, basket, portfolioId, isin]);
+      ? { holdings: basket.holdings.map((h) => ({ isin: h.isin, name: h.name, weight: h.weight })), cadence }
+      : { portfolio_id: portfolioId, cadence })
+    : { holdings: [{ isin: isin ?? '', weight: 1 }], cadence }), [isAgg, basket, portfolioId, isin, cadence]);
 
   useEffect(() => {
     let alive = true;
@@ -99,7 +114,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
         // `FundamentalCharts` uses, so the two tabs cannot come to load the blend differently.
         if (isAgg) {
           const out = await loadBlendMetrics<MetricsResponse>(
-            { basket, portfolioId }, (p) => { if (alive) setProgress(p); },
+            { basket, portfolioId, cadence }, (p) => { if (alive) setProgress(p); },
           );
           if (!alive) return;
           if (out.kind === 'none') { setData({ metrics: [] }); return; }
@@ -107,7 +122,8 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
           setData(out.data);
           return;
         }
-        const r = await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin ?? '')}/metrics`);
+        const r = await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin ?? '')}`
+          + `/metrics?cadence=${cadence}`);
         if (r.status === 404) { if (alive) setData({ metrics: [] }); return; }
         const b = await r.json().catch(() => null);
         if (!alive) return;
@@ -118,7 +134,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
       }
     })();
     return () => { alive = false; };
-  }, [isin, isAgg, basket, portfolioId, reloadKey, metricsKey]);
+  }, [isin, isAgg, basket, portfolioId, reloadKey, metricsKey, cadence]);
 
   if (err) return <p className="text-xs text-neg-300 py-16 text-center">{err}</p>;
 
@@ -142,32 +158,64 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
   const growth = {
     metrics: data?.metrics ?? null, isAgg, currency: data?.currency,
     blendNotes: data?.blend_notes, holdingsTarget, holdingsName: gName,
-    ingestIsin, onIngested, onReloadMetrics,
+    ingestIsin, onIngested, onReloadMetrics, cadence,
   };
+  // ⚠ ONE KEY SUFFIX FOR EVERY DERIVED CARD. They each own their fetch, so without the cadence in
+  // the key a switch would leave twelve charts showing the previous basis until something else
+  // re-keyed them — and the toggle would look broken on the cards that matter most.
+  const ck = `${reloadKey}-${cadence}`;
   return (
+    <>
+    <div className="flex items-center gap-2 mb-3 text-[10px]">
+      <span className="text-fg-faint">Periods</span>
+      <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden">
+        {([
+          ['annual', 'Annual', 'One point per fiscal year.'],
+          ['quarterly', 'Quarterly',
+            'One point per quarter, each the TRAILING TWELVE MONTHS — quarterly frequency with '
+            + 'annual scope. Flows sum the last four quarters, balances take the latest, and an '
+            + 'already-annualised rate takes their mean. Raw quarters would put a seasonal '
+            + 'sawtooth through revenue and every margin built on it.'],
+        ] as const).map(([k, label, note]) => (
+          <button key={k} type="button" onClick={() => setCadence(k)} title={note}
+            aria-pressed={cadence === k}
+            className={`cursor-pointer px-2 py-1 transition-colors ${cadence === k
+              ? 'bg-accent-600 text-white'
+              : 'text-fg-subtle hover:bg-overlay/5'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {cadence === 'quarterly' && (
+        <span className="text-fg-faint">
+          trailing 12 months — a Q4 point equals that fiscal year
+        </span>
+      )}
+    </div>
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
       <MetricGrowthCard key={revenue.title} cfg={revenue}
         {...growth} />
       <MetricGrowthCard key={fcfPs.title} cfg={fcfPs}
         {...growth} />
       {/* Derived cards fetch their own inputs; re-key on reload so an ingest repopulates them too. */}
-      <MarginCard key={`margin-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
-      <CashReturnCard key={`cashret-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
-      <DebtRatioCard key={`debt-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
-      <InterestBurdenCard key={`intburden-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <MarginCard key={`margin-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
+      <CashReturnCard key={`cashret-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
+      <DebtRatioCard key={`debt-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <InterestBurdenCard key={`intburden-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <MetricGrowthCard key={shares.title} cfg={shares}
         {...growth} />
-      <SbcOcfCard key={`sbcocf-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
-      <InvestedCapitalCard key={`invcap-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} isAgg={isAgg} />
-      <CapexMarginCard key={`capex-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
-      <DividendYieldCard key={`divyield-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
-      <FcfSbcYieldCard key={`fcfsbcyield-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
+      <SbcOcfCard key={`sbcocf-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <InvestedCapitalCard key={`invcap-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} isAgg={isAgg} />
+      <CapexMarginCard key={`capex-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <DividendYieldCard key={`divyield-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <FcfSbcYieldCard key={`fcfsbcyield-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
       {/* Last on the tab, as asked. Gross margin is the cleanest read on pricing power, and it is
           the one card here a bank simply cannot have — see GrossMarginCard. */}
-      <GrossMarginCard key={`grossmargin-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <GrossMarginCard key={`grossmargin-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
       {/* Directly after gross margin: the two halves of "are these earnings real" — what the sale
           leaves after direct cost, then whether the resulting profit turns into money. */}
-      <CashConversionCard key={`cashconv-${reloadKey}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
+      <CashConversionCard key={`cashconv-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
     </div>
+    </>
   );
 }

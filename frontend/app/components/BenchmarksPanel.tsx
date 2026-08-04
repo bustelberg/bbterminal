@@ -8,7 +8,7 @@ import { dialog } from '../../lib/dialog';
 import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { Provenance } from '../../lib/provenance';
 import { runSSE } from '../../lib/stream';
-import type { ReconstructedIndex } from '../../lib/types/api';
+import type { ConstituentFundamentals, ReconstructedIndex } from '../../lib/types/api';
 
 /** The indices we rebuild from our own constituents.
  *
@@ -97,6 +97,26 @@ type RefreshSummary = {
   note?: string | null;
 };
 
+/**
+ * A fundamentals backfill in flight (or the receipt of the last one).
+ *
+ * `lines` is a short TAIL, not a log — the log is the console. It exists so a run measured in
+ * minutes visibly moves, and so the operator can see WHICH constituent it is on when it stalls.
+ */
+type FillRun = {
+  label: string;
+  done: number;
+  total: number;
+  lines: string[];
+  /** Set when the stream ends — the box stays, holding the summary, instead of vanishing. */
+  summary?: string;
+  failed?: boolean;
+};
+
+/** How many tail lines the box keeps. Enough to see motion and the last few outcomes; short
+ *  enough that a 400-company run cannot grow the panel without bound. */
+const FILL_TAIL = 6;
+
 /** One sentence for the panel. The DETAIL is in the console — this is the receipt. */
 function refreshSummary(s: RefreshSummary): string {
   if (s.note) return s.note;
@@ -138,6 +158,98 @@ export default function BenchmarksPanel() {
   // as the button having done nothing.
   const [reloadKey, setReloadKey] = useState(0);
   const reload = () => setReloadKey((k) => k + 1);
+  /**
+   * The fundamentals backfill's own progress, lifted OUT of `IndexDetail` so it can render under
+   * the panel heading.
+   *
+   * ⚠ IT MUST OUTLIVE THE ROW THAT STARTED IT. The detail pane is collapsible and the constituent
+   * table is long; a progress box that lived inside it would scroll away — or unmount — while a
+   * run that takes minutes was still going, and the operator would be left with a page that shows
+   * nothing happening. Held here, it stays put and survives collapsing the index.
+   */
+  const [fill, setFill] = useState<FillRun | null>(null);
+
+  /**
+   * The fundamentals backfill for one index, streamed into the box above.
+   *
+   * ⚠ EVERY FRAME GOES TO THE CONSOLE AND ONLY A TAIL GOES ON SCREEN. A 465-company run emits a
+   * line per company; rendering all of them would grow the panel without bound and re-layout on
+   * every frame. The console is the log — this is the receipt plus proof of motion.
+   *
+   * ⚠ AND IT ENDS IN A SUMMARY THAT STAYS. A box that disappears when the stream closes leaves an
+   * operator who looked away unable to tell a finished run from one that never started.
+   */
+  /**
+   * ONE company's backfill, reported into the SAME box as the bulk run.
+   *
+   * ⚠ IT IS NOT A STREAM, AND IT DOES NOT PRETEND TO BE. Three GuruFocus calls take a few seconds;
+   * an SSE channel for that is machinery with nothing to say between "started" and "done". What
+   * matters is that the OUTCOME lands in the same place as everything else — before this, a row
+   * press wrote only to the console, so pressing Fill looked like nothing had happened at all.
+   *
+   * ⚠ AND THE OUTCOME IS NAMED, not reduced to a tick. "fin 1204, est 96, ind 48" says which of
+   * the three feeds were spent and how much came back; a refusal says why. Both are answers a
+   * spinner cannot give.
+   */
+  const fillOne = async (isin: string, name: string | null) => {
+    const who = name || isin;
+    setFill({ label: who, done: 0, total: 1, lines: ['fetching statements, estimates, indicators…'] });
+    try {
+      const r = await apiFetch(
+        `${API_URL}/api/benchmarks/isin/${encodeURIComponent(isin)}/fundamentals/ingest`,
+        { method: 'POST' });
+      const b = (await r.json().catch(() => null)) as {
+        feeds?: string[]; rows?: number; skipped?: string; error?: string; detail?: string;
+      } | null;
+      if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
+      const summary = b?.skipped
+        ? `skipped — ${b.skipped}`
+        : b?.error
+          ? `failed — ${b.error}`
+          : `${(b?.feeds ?? []).join(', ') || 'nothing to do'}`
+            + (b?.rows ? ` · ${b.rows.toLocaleString('en-US')} rows` : '');
+      console.warn(`[benchmarks fill] ${who}: ${summary}`);
+      setFill((f) => (f && f.label === who
+        ? { ...f, done: 1, summary, failed: !!(b?.error), lines: [] } : f));
+    } catch (e) {
+      traceError('benchmarks', `ingest failed for ${isin}`, e);
+      setFill((f) => (f && f.label === who
+        ? { ...f, done: 1, summary: 'failed — see the console', failed: true, lines: [] } : f));
+    }
+  };
+
+  const fillAll = async (label: string) => {
+    setFill({ label, done: 0, total: 0, lines: [] });
+    const push = (line: string) => setFill((f) => (f && f.label === label
+      ? { ...f, lines: [...f.lines, line].slice(-FILL_TAIL) } : f));
+    try {
+      await runSSE(`${API_URL}/api/benchmarks/index/${encodeURIComponent(label)}/fundamentals/ingest`,
+        { method: 'GET' }, (raw) => {
+          const e = raw as {
+            type?: string; message?: string; done?: number; total?: number; failed?: boolean;
+          };
+          if (e.message) console.warn(`[benchmarks fill] ${e.message}`);
+          if (e.type === 'start') {
+            setFill((f) => (f && f.label === label ? { ...f, total: e.total ?? 0 } : f));
+            if (e.message) push(e.message);
+          } else if (e.type === 'progress') {
+            setFill((f) => (f && f.label === label
+              ? { ...f, done: e.done ?? f.done, total: e.total ?? f.total,
+                lines: [...f.lines, e.message ?? ''].slice(-FILL_TAIL) }
+              : f));
+          } else if (e.type === 'skip') {
+            if (e.message) push(e.message);
+          } else if (e.type === 'done' || e.type === 'error') {
+            setFill((f) => (f && f.label === label
+              ? { ...f, summary: e.message ?? 'finished', failed: e.type === 'error' } : f));
+          }
+        });
+    } catch (err) {
+      traceError('benchmarks', `the fundamentals fill for ${label} failed`, err);
+      setFill((f) => (f && f.label === label
+        ? { ...f, summary: 'the stream failed — see the console', failed: true } : f));
+    }
+  };
 
   /** Refresh one index, or every index in sequence: constituents → market caps → the two prices.
    *
@@ -311,6 +423,49 @@ export default function BenchmarksPanel() {
         )}
       </div>
 
+      {/* ⚠ THE FILL'S OWN BOX, AND IT IS SEPARATE FROM `runMsg` ON PURPOSE. That one reports the
+          price/constituent Refresh; this reports the GuruFocus fundamentals backfill. They are
+          different jobs against different vendors with different quotas, and one box showing
+          whichever spoke last is how an operator comes to believe a finished run is still going. */}
+      {fill && (
+        <div className={`text-[11px] rounded-lg px-3 py-2 border ${
+          fill.failed
+            ? 'text-warn-300 bg-warn-500/10 border-warn-500/20'
+            : 'text-fg-subtle bg-overlay/[0.03] border-neutral-800/40'}`}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium text-fg-soft">
+              Fundamentals · {fill.label}
+            </span>
+            {fill.summary
+              ? <span>{fill.summary}</span>
+              : <span className="font-mono">{fill.done}/{fill.total || '…'}</span>}
+            {/* A bar, because "247/465" is a number and this is a wait. Width only — no colour
+                change on completion, which would read as a status the summary already states. */}
+            {!fill.summary && fill.total > 0 && (
+              <span className="relative h-1.5 flex-1 min-w-[8rem] rounded bg-inset overflow-hidden">
+                <span className="absolute inset-y-0 left-0 rounded bg-accent-500 transition-all"
+                  style={{ width: `${Math.min(100, (fill.done / fill.total) * 100)}%` }} />
+              </span>
+            )}
+            {fill.summary && (
+              <button type="button" onClick={() => setFill(null)}
+                className="cursor-pointer ml-auto text-fg-faint hover:text-accent-300">✕</button>
+            )}
+          </div>
+          {/* The tail. Monospace and truncated so a long constituent name cannot reflow the panel
+              on every frame — the same rule the Refresh tick follows. */}
+          {fill.lines.length > 0 && (
+            <div className="mt-1.5 space-y-0.5">
+              {fill.lines.map((l, i) => (
+                <div key={`${i}-${l}`} className="font-mono text-[10px] text-fg-faint truncate">
+                  {l}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {runMsg && (
         <div className={`text-[11px] rounded-lg px-3 py-1.5 border ${
           runMsg.kind === 'warn'
@@ -394,7 +549,9 @@ export default function BenchmarksPanel() {
                     {isOpen && (
                       <tr>
                         <td colSpan={6} className="px-3 py-3 bg-inset">
-                          <IndexDetail d={d} />
+                          <IndexDetail d={d} fill={fill}
+                            onFillAll={async (lbl) => { await fillAll(lbl); }}
+                            onFillOne={fillOne} />
                         </td>
                       </tr>
                     )}
@@ -409,11 +566,89 @@ export default function BenchmarksPanel() {
   );
 }
 
-function IndexDetail({ d }: { d: ReconstructedIndex }) {
+/** The span we hold for one raw GuruFocus line. `n` is how many observations are inside it — a
+ *  2015–2025 span with three points in it is not the same as one with eleven, and the two are
+ *  indistinguishable from the ends alone. */
+type Span = { from?: string | null; to?: string | null; n: number };
+
+function IndexDetail({ d, fill, onFillAll, onFillOne }: {
+  d: ReconstructedIndex;
+  /** The panel's fill state — this pane reads it only to disable its own buttons. */
+  fill: FillRun | null;
+  /** Starts the bulk run; the PANEL owns the stream so its box survives this pane collapsing.
+   *  Resolves when the run ends, so the caller can re-read the coverage. */
+  onFillAll: (label: string) => Promise<void>;
+  /** One row's backfill — same owner, same box, so every outcome lands in one place. */
+  onFillOne: (isin: string, name: string | null) => Promise<void>;
+}) {
   const [q, setQ] = useState('');
+  /**
+   * The twelve Long Equity measures per constituent — a SECOND request, on purpose.
+   *
+   * ⚠ IT LOADS AFTER THE PRICES, NOT WITH THEM. `/index/{label}` prices 500 constituents and is
+   * what makes the table exist; this reads fourteen metric series on top. Folding them into one
+   * call would hold the whole table behind the slower half, so the prices render and the
+   * fundamentals fill in — the same progressive shape the holdings-count column uses.
+   */
+  const [fund, setFund] = useState<ConstituentFundamentals | null>(null);
+  const [fundErr, setFundErr] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setFund(null); setFundErr(null);
+    void (async () => {
+      try {
+        const r = await apiFetch(`${API_URL}/api/benchmarks/index/${encodeURIComponent(d.label)}/fundamentals`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const b = (await r.json()) as ConstituentFundamentals;
+        if (alive) setFund(b);
+      } catch (e) {
+        traceError('benchmarks', 'constituent fundamentals could not be loaded', e);
+        if (alive) setFundErr(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => { alive = false; };
+  }, [d.label]);
+
+  /** True while THIS index's bulk fill is running — the panel owns the run and its progress box;
+   *  this pane only needs to know whether to disable its buttons. */
+  const filling = fill?.label === d.label && !fill?.summary;
+  /** Which single row is fetching — so its own button spins without disabling the other 500. */
+  const [rowBusy, setRowBusy] = useState<number | null>(null);
+  const isAdmin = useIsAdmin();
+
+  /** Re-read the coverage after an ingest. ⚠ WITHOUT THIS THE TABLE LIES: the spans it shows are
+   *  the ones from before the fetch, so a successful fill looks like it did nothing. */
+  const reloadFund = async () => {
+    try {
+      const r = await apiFetch(`${API_URL}/api/benchmarks/index/${encodeURIComponent(d.label)}/fundamentals`);
+      if (r.ok) setFund((await r.json()) as ConstituentFundamentals);
+    } catch { /* the table keeps its previous spans; the buttons still report per row */ }
+  };
+
+  /**
+   * ⚠ BY ISIN, AND THE ROW's `company_id` IS A TRAP. The constituent payload comes from
+   * `_asset_benchmark`, which puts the `analysis_id` (an `asset_execution` row) into a field NAMED
+   * `company_id` because it reuses the price machinery that keys on that name. Fundamentals live
+   * in the `company` world, and the two id spaces are disjoint — analysis_id 1457 is a real asset
+   * row and not a company at all, which is exactly the 404 that found this. ISIN is the one
+   * identifier both worlds carry.
+   */
+  /** The row press: the PANEL owns the request and the progress box; this pane only spins its
+   *  own button and re-reads the coverage afterwards so the row's From/To spans update in place. */
+  const fillOne = async (isin: string, rowKey: number) => {
+    setRowBusy(rowKey);
+    try {
+      await onFillOne(isin, members.find((x) => x.company_id === rowKey)?.company_name ?? null);
+      await reloadFund();
+    } finally {
+      setRowBusy(null);
+    }
+  };
+
   const needle = q.trim().toLowerCase();
   const members = (d.members ?? []).filter((m) =>
     !needle || `${m.company_name ?? ''} ${m.ticker ?? ''}`.toLowerCase().includes(needle));
+  const cols = fund?.columns ?? [];
 
   return (
     <div className="space-y-2">
@@ -422,6 +657,30 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
           <span className="font-mono text-fg">{d.priced_of_universe}</span> priced ·{' '}
           weights as of <span className="font-mono">{d.start_date}</span>
         </span>
+        {/* ⚠ THE COVERAGE IS STATED, because most cells are empty until the fundamentals are
+            ingested. A table of blanks reads as "these companies have no margins" — a claim about
+            the companies rather than about our ingest — and the count is what tells them apart. */}
+        {fund && (
+          <span className={fund.covered < fund.members ? 'text-warn-500' : 'text-fg-faint'}>
+            fundamentals for{' '}
+            <span className="font-mono">{fund.covered}</span> of{' '}
+            <span className="font-mono">{fund.members}</span>
+            {fund.covered < fund.members
+              && ' — the rest have none ingested (scripts/ingest_held_financials.py --universe)'}
+          </span>
+        )}
+        {fundErr && <span className="text-neg-400">fundamentals: {fundErr}</span>}
+        {!fund && !fundErr && <span className="text-fg-faint">loading fundamentals…</span>}
+        {/* ⚠ THE BULK FILL IS SSE, NOT A POST THAT RETURNS AT THE END. It is ~3 GuruFocus calls per
+            company over hundreds of them; a silent five-minute request is indistinguishable from a
+            hung one, and when it stalls the operator needs to see WHICH company it stalled on. */}
+        {isAdmin && fund && fund.covered < fund.members && (
+          <button type="button" onClick={() => void onFillAll(d.label).then(reloadFund)} disabled={filling}
+            title={`Fetch the three GuruFocus feeds for the ${fund.members - fund.covered} constituents missing them — statements, analyst estimates and indicators. Spends roughly 3 API calls each.`}
+            className="cursor-pointer text-[10px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors disabled:opacity-50 disabled:cursor-wait">
+            {filling ? "Filling…" : `Fill all (${fund.members - fund.covered})`}
+          </button>
+        )}
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search constituent…"
           className="bg-page border border-neutral-700 rounded-lg px-3 py-1 text-[11px] text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 w-52 ml-auto" />
       </div>
@@ -441,6 +700,7 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
         <table className="w-full text-xs">
           <thead className="bg-card sticky top-0">
             <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+              {isAdmin && <th className="px-2 py-1.5 font-medium text-left"> </th>}
               <th className="px-3 py-1.5 font-medium text-left">Company</th>
               <th className="px-3 py-1.5 font-medium text-left">Ticker</th>
               {/* ⚠ THE CURRENCY IS THE LISTING'S, AND IT IS WHAT MAKES THE TWO YTD COLUMNS
@@ -455,11 +715,52 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
               <th className="px-3 py-1.5 font-medium text-right">YTD (local)</th>
               <th className="px-3 py-1.5 font-medium text-right">YTD (€)</th>
               <th className="px-3 py-1.5 font-medium text-right">Mkt cap (€bn)</th>
+              {/* ⚠ A TWO-ROW HEADER, because nineteen lines x (from, to) is thirty-eight columns
+                  and a flat header would repeat "From From From…" across the screen with no way to
+                  tell which line each belongs to. The line name spans its pair; the sub-row names
+                  the ends. The SET comes from the server — add a line backend-side and its pair
+                  appears here with no frontend change. */}
+              {cols.map((c) => (
+                <th key={c.key} colSpan={2} title={c.note ?? undefined}
+                  className="px-3 py-1.5 font-medium text-center whitespace-nowrap border-l border-neutral-800/40">
+                  {c.label}
+                </th>
+              ))}
             </tr>
+            {cols.length > 0 && (
+              <tr className="text-fg-faint text-[9px] uppercase tracking-wide border-b border-neutral-800/40">
+                <th colSpan={isAdmin ? 10 : 9} className="px-3 py-1 font-normal text-left text-fg-faint">
+                  the raw GuruFocus lines every Long Equity chart is built from — the span we hold
+                </th>
+                {cols.map((c) => (
+                  <Fragment key={c.key}>
+                    <th className="px-3 py-1 font-normal text-right border-l border-neutral-800/40">From</th>
+                    <th className="px-3 py-1 font-normal text-right">To</th>
+                  </Fragment>
+                ))}
+              </tr>
+            )}
           </thead>
           <tbody className="divide-y divide-neutral-800/20">
             {members.map((m) => (
               <tr key={m.company_id} className="hover:bg-overlay/[0.02]">
+                {/* ⚠ PER ROW, AND IT FETCHES ALL THREE FEEDS. The row's own button is the only way
+                    to close a single company's gap without spending the whole index's quota — and
+                    it goes through the same `ingest_company` the script and the fill-all use, so
+                    "ingest" cannot come to mean two different things depending on which control
+                    you pressed. */}
+                {isAdmin && (
+                  <td className="px-2 py-1.5">
+                    <button type="button" onClick={() => void fillOne(m.isin ?? '', m.company_id)}
+                      disabled={rowBusy === m.company_id || !!filling || !m.isin}
+                      title={m.isin
+                        ? `Fetch this company's GuruFocus statements, analyst estimates and indicators (~3 API calls).`
+                        : 'No ISIN on this constituent — there is no way to reach a company row from here.'}
+                      className="cursor-pointer text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-wait">
+                      {rowBusy === m.company_id ? '…' : 'Fill'}
+                    </button>
+                  </td>
+                )}
                 <td className="px-3 py-1.5 text-fg-soft">{m.company_name ?? '—'}</td>
                 <td className="px-3 py-1.5 font-mono text-fg-muted">{m.ticker ?? '—'}</td>
                 <td className="px-3 py-1.5 font-mono text-fg-subtle">{m.currency ?? '—'}</td>
@@ -520,6 +821,38 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
                       + `(${price(m.start_price)} → ${price(m.end_price)}), because the share count is what stays put — `
                       + 'weighting by today’s cap would hand a stock that doubled a share of the index it never had. '
                       + 'So this figure divided by the column total will not reproduce the Weight column.'} /></td>
+                {/* ⚠ ONE LOOKUP PER ROW, KEYED BY company_id AS A STRING — JSON object keys are
+                    strings, so `rows[m.company_id]` with a number silently misses every row. */}
+                {cols.length > 0 && (() => {
+                  // `{line key: {from, to, n}}` — a loose bag on the wire because its keys ARE the
+                  // column list, which the server owns.
+                  //
+                  // ⚠ LOOKED UP BY **ISIN**, NEVER BY `m.company_id`. That field is an
+                  // `analysis_id` here (`_asset_benchmark` reuses the price machinery, which keys
+                  // on that name), and fundamentals live in the `company` world — two disjoint id
+                  // spaces. Keyed by it, this matched nothing and EVERY cell rendered a dash,
+                  // including the companies that do have data. ISIN is what both worlds carry.
+                  const f = (m.isin ? fund?.rows?.[m.isin] : undefined) as
+                    Record<string, Span | undefined> | undefined;
+                  return cols.map((c) => {
+                    const s = f?.[c.key];
+                    return (
+                      <Fragment key={c.key}>
+                        {/* ⚠ A DASH, NEVER A BLANK CELL. "we hold nothing for this line" is the
+                            finding this table exists to show; an empty cell reads as a rendering
+                            gap. The count rides in the tooltip — a span of 2015-2025 with three
+                            observations in it is not the same as one with eleven. */}
+                        <td className="px-3 py-1.5 text-right font-mono text-fg-subtle whitespace-nowrap border-l border-neutral-800/40"
+                          title={s ? `${s.n} period${s.n === 1 ? '' : 's'} held` : 'nothing ingested for this line'}>
+                          {s?.from ?? '—'}
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono text-fg-subtle whitespace-nowrap">
+                          {s?.to ?? '—'}
+                        </td>
+                      </Fragment>
+                    );
+                  });
+                })()}
               </tr>
             ))}
           </tbody>

@@ -49,6 +49,62 @@ export const fmtRatioPct = (v: number | null | undefined) => (v == null ? '—' 
 export const MIN_YEAR_COVERAGE_PCT = 80;
 
 /**
+ * A period LABEL from the server → the numeric x every card plots on.
+ *
+ * ⚠ THIS EXISTS BECAUSE `Number("2025-Q3")` IS **NaN**, AND NaN IS A VALID Map KEY. Every card on
+ * this tab keyed its series with `Number(year)`, which was correct while the server only ever sent
+ * "2025" — and the day it started sending trailing-twelve-month labels, all 42 quarterly periods
+ * collapsed onto ONE NaN key and nine charts went blank. Not one of them errored: the drill-down
+ * modals read the same payload as strings and rendered perfectly, so the data was visibly there
+ * while the chart above it was empty.
+ *
+ * ⚠ FRACTIONAL YEARS, NOT AN INDEX. A quarter is a quarter OF A YEAR, so four points span exactly
+ * 1.0 on the axis — which keeps the spacing honest when a series has gaps and keeps any per-year
+ * arithmetic (the growth cards' CAGR) per year. `2025-Q3` → 2025.5.
+ */
+export const periodToX = (period: string): number => {
+  const q = /^(\d{4})-Q([1-4])$/.exec(period);
+  if (q) return Number(q[1]) + (Number(q[2]) - 1) / 4;
+  // A DAILY label is an ISO date — the two yield cards' cadence. Same trap as the quarter one:
+  // `Number("2026-07-31")` is NaN, so every trading day would land on one key. Placed on the same
+  // fractional-year axis as the others, so a daily series and an annual one are directly
+  // comparable and nothing downstream needs to know which cadence produced the point.
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(period);
+  if (d) {
+    const y = Number(d[1]);
+    const start = Date.UTC(y, 0, 1);
+    const days = (Date.UTC(y, Number(d[2]) - 1, Number(d[3])) - start) / 86_400_000;
+    const inYear = (Date.UTC(y + 1, 0, 1) - start) / 86_400_000;   // 365 or 366
+    return y + days / inYear;
+  }
+  return Number(period);
+};
+
+/** The inverse, for an axis tick or a tooltip: 2025 → "2025", 2025.5 → "2025 Q3". Without it an
+ *  axis tick reads "2025.5", which is a year that does not exist.
+ *
+ *  ⚠ KNOWN AMBIGUITY, AND IT IS THE LEAST-BAD ONE: a Q1 point sits on an integer x (the quarter is
+ *  offset by (q−1)/4 so that four quarters span exactly 1.0 — see `periodToX`), so it renders as
+ *  the bare "2025" rather than "2025 Q1". The alternatives are worse: offsetting by q/4 puts Q4 on
+ *  the NEXT year's integer, and taking a cadence argument means threading one through twelve chart
+ *  components for a tick label. Nothing collides on screen — in quarterly mode there is no annual
+ *  point to confuse it with, and the "2025" tick is visibly the first of that year's four. */
+/** A DAILY axis tick: "Jul 2026". A daily series spans thousands of points, so the tick that helps
+ *  is the month, not the day — and a fractional year like 2026.58 is unreadable either way. */
+export const xToMonth = (x: number): string => {
+  const y = Math.floor(x);
+  const inYear = (Date.UTC(y + 1, 0, 1) - Date.UTC(y, 0, 1)) / 86_400_000;
+  const d = new Date(Date.UTC(y, 0, 1) + Math.round((x - y) * inYear) * 86_400_000);
+  return `${d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })} ${d.getUTCFullYear()}`;
+};
+
+export const xToPeriod = (x: number): string => {
+  const y = Math.floor(x);
+  const q = Math.round((x - y) * 4);
+  return q === 0 && Number.isInteger(x) ? String(y) : `${y} Q${q + 1}`;
+};
+
+/**
  * The one weighted-average-per-year used by every ratio card. Each card supplies the years it
  * could have a value for and a per-holding value; this applies the weights, the renormalisation
  * and the floor in ONE place.
@@ -77,7 +133,7 @@ export function weightedByYear<T extends { weight_pct: number }>(
       num += r.weight_pct * v;
       den += r.weight_pct;
     }
-    if (den > 0 && 100 * den / total >= MIN_YEAR_COVERAGE_PCT) out.set(Number(y), num / den);
+    if (den > 0 && 100 * den / total >= MIN_YEAR_COVERAGE_PCT) out.set(periodToX(y), num / den);
   }
   return out;
 }
@@ -98,7 +154,7 @@ export function coverageByYear<T extends { weight_pct: number }>(
   for (const y of years) {
     let den = 0;
     for (const r of rows) if (valueOf(r, y) != null) den += r.weight_pct;
-    out.set(Number(y), 100 * den / total);
+    out.set(periodToX(y), 100 * den / total);
   }
   return out;
 }

@@ -839,7 +839,8 @@ def _wrapped_book_marks(model_ids: set[int]) -> dict[int, dict[str, dict]]:
             _log.warning("[analysis] wrapped model %s has no paired AIRS account — its legs fall "
                          "back to the price series", mid)
             continue
-        res = resolve_account_isins(pf)
+        # See `resolve_account_isins(freshen=...)` — this path shows no price-check verdict.
+        res = resolve_account_isins(pf, freshen=False)
         child_rows = res.get("rows") or []
         # The journal, for the same reason the parent loads it: a leg that paid a dividend must not
         # read lower here than the identical instrument held directly.
@@ -892,7 +893,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
                  if a.get("model_portfolio_id") == portfolio_id), None)
     if not link:
         return None
-    rows = (resolve_account_isins(link["portefeuille"]).get("rows") or [])
+    rows = (resolve_account_isins(link["portefeuille"], freshen=False).get("rows") or [])
     if not rows:
         return None
 
