@@ -93,6 +93,50 @@ def _members(label: str) -> list[dict]:
     return list(by_name.values())
 
 
+def weight_basis(label: str) -> dict:
+    """How this index's constituent weights were arrived at, and who fell out on the way.
+
+    ⚠ THE FUNDAMENTAL BLEND WEIGHTS ON **TODAY's** CAP, NOT THE START-OF-WINDOW CAP THE PRICE
+    INDEX USES. `_window_rows` backs the start weight out through the price precisely because
+    weighting a RETURN by today's cap is look-ahead bias (measured: +9.10% → +21.70%). A growth
+    blend has no single window to back a cap out to — each constituent's series starts in a
+    different year — so it uses `market_cap_eur` as stored. That is a real tilt toward companies
+    that have since grown, and it is stated rather than buried: a constituent whose revenue rose
+    tenfold carries its post-growth weight over its whole history.
+
+    ⚠ AND A CONSTITUENT WITH NO STORED CAP IS NOT IN THE INDEX AT ALL. `_members` requires
+    `market_cap_eur`, and the names that lack one are systematically the ones GuruFocus does not
+    cover — LSE listings above all. Measured 2026-08-04 on the AEX: **Shell, Unilever and RELX**
+    are all missing, so the 22 that remain are renormalised over 100% and **ASML alone reads
+    51.76%**. Against the real AEX — which float-adjusts and caps any constituent at 15% — that
+    is not a small difference, and a reader comparing the two has to be told.
+
+    Returns the counts + the dropped names so the surface that shows the weights can say so.
+    """
+    uni = (supabase.table("universe").select("universe_id")
+           .eq("label", label).limit(1).execute().data or [])
+    if not uni:
+        return {"members": 0, "weighted": 0, "excluded": []}
+    ids = sorted({m["company_id"] for m in
+                  (supabase.table("universe_membership").select("company_id")
+                   .eq("universe_id", uni[0]["universe_id"]).execute().data or [])})
+    rows: list[dict] = []
+    for i in range(0, len(ids), IN_CHUNK_SIZE):
+        rows += (supabase.table("company")
+                 .select("company_name,market_cap_eur,delisted_at,out_of_scope_at")
+                 .in_("company_id", ids[i:i + IN_CHUNK_SIZE]).execute().data or [])
+    excluded = [
+        {"name": r.get("company_name"),
+         "reason": ("delisted" if r.get("delisted_at")
+                    else "out of scope" if r.get("out_of_scope_at")
+                    else "no market cap")}
+        for r in rows
+        if r.get("market_cap_eur") is None or r.get("delisted_at") or r.get("out_of_scope_at")
+    ]
+    return {"members": len(ids), "weighted": len(ids) - len(excluded),
+            "excluded": sorted(excluded, key=lambda e: (e["reason"], e["name"] or ""))}
+
+
 def _closes(company_ids: list[int], start: str, end: str) -> dict[int, list[tuple[str, float]]]:
     """Each company's closes in [start, end], ascending. Local currency."""
     out: dict[int, list[tuple[str, float]]] = {}

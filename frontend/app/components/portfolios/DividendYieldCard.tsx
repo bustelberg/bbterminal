@@ -15,6 +15,7 @@ import DividendYieldInputsModal from './DividendYieldInputsModal';
 import DailyToggle from './DailyToggle';
 import { coverageByYear, dividendYieldByYear, type DividendYieldInputs } from './dividendYieldData';
 import { meanOf, paddedDomain, xToMonth, xToPeriod } from './marginData';
+import { benchNote, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**
  * Dividend yield card: Dividends per Share ÷ the fiscal year-end share price, per fiscal year, on
@@ -30,8 +31,10 @@ import { meanOf, paddedDomain, xToMonth, xToPeriod } from './marginData';
  * dropped. Mirrors {@link ./FcfSbcYieldCard}.
  */
 
-export default function DividendYieldCard({ holdingsTarget, holdingsName }: {
+export default function DividendYieldCard({ holdingsTarget, holdingsName, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
+  /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
+  benchTarget?: BenchTarget | null;
 }) {
   const [data, setData] = useState<DividendYieldInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -74,10 +77,14 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName }: {
   const yieldByYr = useMemo(() => dividendYieldByYear(data?.rows ?? []), [data]);
   const covByYr = useMemo(() => coverageByYear(data?.rows ?? []), [data]);
 
-  const chartData = useMemo(() => (
-    [...yieldByYr.keys()].sort((a, b) => a - b)
-      .map((year) => ({ year, yld: yieldByYr.get(year) ?? null }))
-  ), [yieldByYr]);
+  const [benchData, benchErr] = useBenchInputs<DividendYieldInputs>('dividend-yield-inputs', benchTarget);
+  const benchByYr = useMemo(
+    () => (benchData ? dividendYieldByYear(benchData.rows) : null), [benchData]);
+
+  const note = benchNote(benchTarget, benchData, benchErr, benchByYr);
+
+  const chartData = useMemo(
+    () => mergeSeries(yieldByYr, benchByYr, 'yld'), [yieldByYr, benchByYr]);
 
   const avg = meanOf([...yieldByYr.values()]);
   const latestYear = Math.max(-Infinity, ...yieldByYr.keys());
@@ -128,18 +135,25 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName }: {
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
                 <XAxis dataKey="year" tickFormatter={daily ? xToMonth : xToPeriod} tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
-                <YAxis domain={paddedDomain([...yieldByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                <YAxis domain={paddedDomain(withBench(yieldByYr.values(), benchByYr))} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v) => [`${typeof v === 'number' ? v.toFixed(2) : '—'}%`, 'Dividend yield']} />
+                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(2) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : 'Dividend yield']} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 {/* ⚠ NO DOTS ON A DAILY SERIES — 2,700 markers is a solid band, not a line. */}
                 <Line dataKey="yld" name="yld" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={daily ? false : { r: 2.5 }} connectNulls />
+                {benchByYr && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
               <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />Dividend yield (avg dashed)</span>
+              {benchByYr && <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />{benchTarget?.universe}</span>}
+              {note && (
+                <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">
+                  {note}
+                </span>
+              )}
             </div>
           </div>
         </>

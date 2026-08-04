@@ -592,12 +592,29 @@ function IndexDetail({ d, fill, onFillAll, onFillOne }: {
    */
   const [fund, setFund] = useState<ConstituentFundamentals | null>(null);
   const [fundErr, setFundErr] = useState<string | null>(null);
+  /**
+   * Which basis the spans below are on — PER INDEX, so two open panes can be compared.
+   *
+   * ⚠ IT IS A VIEW, NOT A SECOND FETCH FROM GuruFocus. `fetch_financials` writes the `annuals` and
+   * `quarterly` blocks of one blob, so both cadences arrive on the same call and this toggle never
+   * spends quota — it shows what a fill already brought. What it makes visible is the gap between
+   * them: measured 2026-08-04, 264 SP500 constituents carry annual Free Cash Flow and 263 carry
+   * the quarterly line, and before this there was no way to find that one row short of opening its
+   * chart.
+   *
+   * ⚠ QUARTERLY MEANS TRAILING TWELVE MONTHS, the basis the Long Equity tab plots — so its `from`
+   * sits three quarters after the first raw quarter and its count is raw quarters minus three. A
+   * shorter span here is usually that, not a gap.
+   */
+  const [fundCadence, setFundCadence] = useState<'annual' | 'quarterly'>('annual');
+  const fundUrl = `${API_URL}/api/benchmarks/index/${encodeURIComponent(d.label)}`
+    + `/fundamentals?cadence=${fundCadence}`;
   useEffect(() => {
     let alive = true;
     setFund(null); setFundErr(null);
     void (async () => {
       try {
-        const r = await apiFetch(`${API_URL}/api/benchmarks/index/${encodeURIComponent(d.label)}/fundamentals`);
+        const r = await apiFetch(fundUrl);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const b = (await r.json()) as ConstituentFundamentals;
         if (alive) setFund(b);
@@ -607,7 +624,7 @@ function IndexDetail({ d, fill, onFillAll, onFillOne }: {
       }
     })();
     return () => { alive = false; };
-  }, [d.label]);
+  }, [fundUrl]);
 
   /** True while THIS index's bulk fill is running — the panel owns the run and its progress box;
    *  this pane only needs to know whether to disable its buttons. */
@@ -620,7 +637,7 @@ function IndexDetail({ d, fill, onFillAll, onFillOne }: {
    *  the ones from before the fetch, so a successful fill looks like it did nothing. */
   const reloadFund = async () => {
     try {
-      const r = await apiFetch(`${API_URL}/api/benchmarks/index/${encodeURIComponent(d.label)}/fundamentals`);
+      const r = await apiFetch(fundUrl);
       if (r.ok) setFund((await r.json()) as ConstituentFundamentals);
     } catch { /* the table keeps its previous spans; the buttons still report per row */ }
   };
@@ -657,12 +674,39 @@ function IndexDetail({ d, fill, onFillAll, onFillOne }: {
           <span className="font-mono text-fg">{d.priced_of_universe}</span> priced ·{' '}
           weights as of <span className="font-mono">{d.start_date}</span>
         </span>
+        {/* ⚠ THE BASIS IS ON THE TABLE, NOT IMPLIED. The two cadences give different periods for
+            the same company ("2025" vs "2025-Q3") and different counts, so a reader who cannot see
+            which one they are on cannot read a span at all. Switching costs a re-read of our own
+            database and NEVER a GuruFocus call — both blocks come from one fetch. */}
+        <div className="inline-flex rounded-lg border border-neutral-700 overflow-hidden shrink-0"
+          role="group" aria-label="Fundamentals period basis">
+          {([
+            ['annual', 'Annual', 'One period per fiscal year.'],
+            ['quarterly', 'Quarterly',
+              'One period per quarter, each the TRAILING TWELVE MONTHS — the basis the Long Equity '
+              + 'tab plots. A series needs four quarters before it has any TTM point, so this span '
+              + 'starts three quarters after the first raw quarter and its count is quarters minus '
+              + 'three. Both cadences come from the SAME GuruFocus call; switching spends no quota.'],
+          ] as const).map(([k, lab, note]) => (
+            <button key={k} type="button" onClick={() => setFundCadence(k)} title={note}
+              aria-pressed={fundCadence === k}
+              className={`cursor-pointer px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                fundCadence === k ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-overlay/5'}`}>
+              {lab}
+            </button>
+          ))}
+        </div>
         {/* ⚠ THE COVERAGE IS STATED, because most cells are empty until the fundamentals are
             ingested. A table of blanks reads as "these companies have no margins" — a claim about
             the companies rather than about our ingest — and the count is what tells them apart. */}
         {fund && (
-          <span className={fund.covered < fund.members ? 'text-warn-500' : 'text-fg-faint'}>
-            fundamentals for{' '}
+          <span className={fund.covered < fund.members ? 'text-warn-500' : 'text-fg-faint'}
+            title={fund.cadence === 'quarterly'
+              ? 'Counted on the TTM basis. A company with fewer than four quarters has no TTM point '
+                + 'at all and is absent here even when its annual lines are ingested — compare the '
+                + 'two tabs before concluding a fetch is missing.'
+              : undefined}>
+            {fund.cadence === 'quarterly' ? 'quarterly (TTM)' : 'annual'} fundamentals for{' '}
             <span className="font-mono">{fund.covered}</span> of{' '}
             <span className="font-mono">{fund.members}</span>
             {fund.covered < fund.members

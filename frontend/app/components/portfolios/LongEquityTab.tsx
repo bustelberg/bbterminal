@@ -35,6 +35,11 @@ type MetricsResponse = {
 
 // Each card is one metric. `codes` carries BOTH GuruFocus section spellings (see the backend's
 // `_METRIC_CODES`); `benchmarkMetric` is the `metric` param for the benchmark + holdings endpoints.
+/** The indices a chart can be measured against — the same three the /benchmarks panel rebuilds.
+ *  ⚠ Their coverage differs a lot (SP500 is the best-ingested), and a thinly-covered index makes a
+ *  confident-looking line over a fraction of itself; each card states the coverage it drew. */
+const BENCHMARKS = ['SP500', 'ACWI', 'AEX'];
+
 const CARDS: MetricCfg[] = [
   {
     title: 'Revenue', noun: 'revenue', unit: 'millions', kind: 'growth', benchmarkMetric: 'revenue',
@@ -92,6 +97,19 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
    * resulting chart would look wrong.
    */
   const [cadence, setCadence] = useState<'annual' | 'quarterly'>('annual');
+  /**
+   * The benchmark drawn beside every chart, or null for none.
+   *
+   * ⚠ IT IS THE SAME REQUEST AS THE PORTFOLIO'S, WITH `universe` INSTEAD OF `holdings` — so each
+   * card computes the benchmark line with the identical helper it runs over the book. There is no
+   * second implementation of "FCF-SBC margin" anywhere, which is the only way the two lines on one
+   * chart can be guaranteed to mean the same thing. The index arrives cap-weighted; the card's
+   * existing weighted average does the rest.
+   */
+  const [benchmark, setBenchmark] = useState<string | null>(null);
+  /** ⚠ Memoised for the same reason `holdingsTarget` is — it is an effect dep in twelve cards. */
+  const benchTarget = useMemo(
+    () => (benchmark ? { universe: benchmark, cadence } : null), [benchmark, cadence]);
 
   // ⚠ Memoised — it's a card/modal effect dep, so a fresh object each render would refetch forever.
   // ⚠ `cadence` RIDES IN THE BODY, which is what makes one toggle move nine cards: every derived
@@ -136,6 +154,52 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
     return () => { alive = false; };
   }, [isin, isAgg, basket, portfolioId, reloadKey, metricsKey, cadence]);
 
+  /**
+   * The benchmark's metrics for the three GROWTH cards — ONE blend for all three, exactly as the
+   * book's own metrics are fetched once above.
+   *
+   * ⚠ The nine derived cards do NOT come through here: each owns its `*-inputs` endpoint and
+   * fetches the index from it directly (`useBenchInputs`), because that is the only way each
+   * benchmark line is computed by the same helper as the portfolio line beside it. This fetch is
+   * the growth cards' equivalent, not a second source for anyone else.
+   *
+   * Silent on failure: the benchmark is an overlay on charts that already work.
+   */
+  const [benchMetrics, setBenchMetrics] = useState<MetricRow[] | null>(null);
+  const [benchErr, setBenchErr] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      setBenchMetrics(null); setBenchErr(null);
+      if (!benchmark) return;
+      try {
+        const r = await apiFetch(`${API_URL}/api/earnings/fundamental-blend-metrics`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          // ⚠ NAME THE THREE METRICS. Unnamed, the blend reads every charted code per constituent —
+          // three paged requests each, i.e. ~1,500 round trips for the S&P. Named, it is one
+          // chunked query per metric. See the request model's `metrics` field.
+          body: JSON.stringify({
+            universe: benchmark, cadence, metrics: CARDS.map((c) => c.benchmarkMetric),
+          }),
+        });
+        const b = await r.json().catch(() => null);
+        if (!alive) return;
+        if (!r.ok) {
+          const detail = (b?.detail as string) ?? `HTTP ${r.status}`;
+          console.warn(`[bb:bench] blend ${benchmark}: ${detail}`, b);
+          setBenchErr(detail);
+          return;
+        }
+        setBenchMetrics((b as MetricsResponse)?.metrics ?? []);
+      } catch (e) {
+        const detail = e instanceof Error ? e.message : String(e);
+        console.warn(`[bb:bench] blend ${benchmark}: ${detail}`, e);
+        if (alive) setBenchErr(detail);
+      }
+    })();
+    return () => { alive = false; };
+  }, [benchmark, cadence]);
+
   if (err) return <p className="text-xs text-neg-300 py-16 text-center">{err}</p>;
 
   // ⚠ ONE COUNT FOR THE WHOLE GRID, NOT TWELVE. Every card below reads this one metrics fetch (or
@@ -159,6 +223,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
     metrics: data?.metrics ?? null, isAgg, currency: data?.currency,
     blendNotes: data?.blend_notes, holdingsTarget, holdingsName: gName,
     ingestIsin, onIngested, onReloadMetrics, cadence,
+    benchMetrics, benchLabel: benchmark, benchErr,
   };
   // ⚠ ONE KEY SUFFIX FOR EVERY DERIVED CARD. They each own their fetch, so without the cadence in
   // the key a switch would leave twelve charts showing the previous basis until something else
@@ -191,6 +256,26 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
           trailing 12 months — a Q4 point equals that fiscal year
         </span>
       )}
+      {/* ⚠ ONE CONTROL FOR TWELVE CHARTS. Per-card benchmark pickers would let two charts on one
+          screen be measured against different indices — a comparison a reader cannot arbitrate,
+          and the same failure the tab-wide cadence toggle avoids. */}
+      <label className="flex items-center gap-1.5 ml-4 cursor-pointer text-fg-faint">
+        <input type="checkbox" className="cursor-pointer"
+          checked={benchmark != null}
+          onChange={(e) => setBenchmark(e.target.checked ? BENCHMARKS[0] : null)} />
+        Benchmark
+      </label>
+      {benchmark != null && (
+        <select value={benchmark} onChange={(e) => setBenchmark(e.target.value)}
+          aria-label="Benchmark"
+          title={'The index each chart is measured against. Its constituents are cap-weighted and '
+            + 'run through the SAME formula as the portfolio, so the two lines are comparable. '
+            + 'Only constituents whose fundamentals are ingested contribute — the coverage floor '
+            + 'applies to the index exactly as it does to the book.'}
+          className="cursor-pointer bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-[10px] font-mono text-fg focus:border-accent-500">
+          {BENCHMARKS.map((b) => <option key={b} value={b}>{b}</option>)}
+        </select>
+      )}
     </div>
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
       <MetricGrowthCard key={revenue.title} cfg={revenue}
@@ -198,23 +283,23 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
       <MetricGrowthCard key={fcfPs.title} cfg={fcfPs}
         {...growth} />
       {/* Derived cards fetch their own inputs; re-key on reload so an ingest repopulates them too. */}
-      <MarginCard key={`margin-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
-      <CashReturnCard key={`cashret-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
-      <DebtRatioCard key={`debt-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
-      <InterestBurdenCard key={`intburden-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <MarginCard key={`margin-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
+      <CashReturnCard key={`cashret-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
+      <DebtRatioCard key={`debt-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <InterestBurdenCard key={`intburden-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <MetricGrowthCard key={shares.title} cfg={shares}
         {...growth} />
-      <SbcOcfCard key={`sbcocf-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
-      <InvestedCapitalCard key={`invcap-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} isAgg={isAgg} />
-      <CapexMarginCard key={`capex-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
-      <DividendYieldCard key={`divyield-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
-      <FcfSbcYieldCard key={`fcfsbcyield-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
+      <SbcOcfCard key={`sbcocf-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <InvestedCapitalCard key={`invcap-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} isAgg={isAgg} />
+      <CapexMarginCard key={`capex-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <DividendYieldCard key={`divyield-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <FcfSbcYieldCard key={`fcfsbcyield-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
       {/* Last on the tab, as asked. Gross margin is the cleanest read on pricing power, and it is
           the one card here a bank simply cannot have — see GrossMarginCard. */}
-      <GrossMarginCard key={`grossmargin-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} />
+      <GrossMarginCard key={`grossmargin-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} />
       {/* Directly after gross margin: the two halves of "are these earnings real" — what the sale
           leaves after direct cost, then whether the resulting profit turns into money. */}
-      <CashConversionCard key={`cashconv-${ck}`} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
+      <CashConversionCard key={`cashconv-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
     </div>
     </>
   );

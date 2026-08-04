@@ -3109,6 +3109,11 @@ export interface paths {
          *     is what the table needs to render at all; this one reads fourteen metric series. Folding them
          *     together would hold the whole table behind the slower half, so the prices land first and the
          *     fundamentals fill in — the same progressive shape the /schedule and holdings-count surfaces use.
+         *
+         *     `cadence` is `annual` (fiscal years) or `quarterly` (TRAILING TWELVE MONTHS, the basis the tab
+         *     plots) — see `constituent_fundamentals`, which owns what each one means and why the quarterly
+         *     span starts three quarters late. It is a VIEW over data one GuruFocus call already brought;
+         *     switching it never spends quota.
          */
         get: operations["benchmark_constituent_fundamentals_api_benchmarks_index__label__fundamentals_get"];
         put?: never;
@@ -8490,6 +8495,8 @@ export interface components {
          *     rather than about our ingest. The count says which it is.
          */
         ConstituentFundamentals: {
+            /** Cadence */
+            cadence: string;
             /** Columns */
             columns: components["schemas"]["ConstituentFundamentalColumn"][];
             /** Covered */
@@ -8926,10 +8933,14 @@ export interface components {
             }[] | null;
             /** Metric Code */
             metric_code: string;
+            /** Metrics */
+            metrics?: string[] | null;
             /** Period */
             period: string;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            /** Universe */
+            universe?: string | null;
         };
         /**
          * FundamentalCoverageRequest
@@ -8945,8 +8956,12 @@ export interface components {
             holdings?: {
                 [key: string]: unknown;
             }[] | null;
+            /** Metrics */
+            metrics?: string[] | null;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            /** Universe */
+            universe?: string | null;
         };
         /**
          * FundamentalIngestRequest
@@ -8980,8 +8995,12 @@ export interface components {
             }[] | null;
             /** Metric Code */
             metric_code: string;
+            /** Metrics */
+            metrics?: string[] | null;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            /** Universe */
+            universe?: string | null;
         };
         /** FundamentalPoint */
         FundamentalPoint: {
@@ -10352,10 +10371,14 @@ export interface components {
             holdings?: {
                 [key: string]: unknown;
             }[] | null;
+            /** Metrics */
+            metrics?: string[] | null;
             /** Period */
             period: string;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            /** Universe */
+            universe?: string | null;
         };
         /** RenameBacktestRequest */
         RenameBacktestRequest: {
@@ -14889,7 +14912,9 @@ export interface operations {
     };
     benchmark_constituent_fundamentals_api_benchmarks_index__label__fundamentals_get: {
         parameters: {
-            query?: never;
+            query?: {
+                cadence?: string;
+            };
             header?: never;
             path: {
                 label: string;

@@ -21,6 +21,7 @@ in place and recorded on `.writes` for assertions.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 
@@ -119,6 +120,19 @@ class _Query:
     def in_(self, col: str, vals: list) -> "_Query":
         allowed = set(vals)
         self._filters.append(lambda r: r.get(col) in allowed)
+        return self
+
+    def like(self, col: str, pattern: str) -> "_Query":
+        """PostgREST `.like` — SQL LIKE, with BOTH its wildcards.
+
+        ⚠ `_` MATCHES ANY SINGLE CHARACTER, and every metric code in this project contains one
+        (`annuals__Income Statement__Revenue`), while some contain a literal `%` (`ROE %`). A fake
+        that treated the pattern as a prefix would pass code that only works by accident here and
+        over-matches in production, which is precisely the trap `_page_metrics` is written around.
+        """
+        rx = re.compile("^" + "".join(
+            "." if c == "_" else ".*" if c == "%" else re.escape(c) for c in pattern) + "$")
+        self._filters.append(lambda r: isinstance(r.get(col), str) and bool(rx.match(r[col])))
         return self
 
     def order(self, col: str, desc: bool = False) -> "_Query":

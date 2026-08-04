@@ -457,6 +457,10 @@ class ConstituentFundamentals(BaseModel):
     """
 
     label: str
+    # ⚠ ECHOED BACK, so a row of spans can never be read under the wrong basis. The two cadences
+    # give DIFFERENT periods for the same company ("2025" vs "2025-Q3") and different counts, and a
+    # table that shows one while its toggle says the other is a silent lie about the data.
+    cadence: str
     columns: list[ConstituentFundamentalColumn]
     members: int
     covered: int
@@ -472,16 +476,26 @@ class ConstituentFundamentals(BaseModel):
 
 
 @router.get("/api/benchmarks/index/{label}/fundamentals", response_model=ConstituentFundamentals)
-async def benchmark_constituent_fundamentals(label: str):
+async def benchmark_constituent_fundamentals(label: str, cadence: str = "annual"):
     """The twelve Long Equity measures for each of an index's constituents.
 
     ⚠ A SEPARATE CALL FROM `/index/{label}`, DELIBERATELY. That endpoint prices 500 constituents and
     is what the table needs to render at all; this one reads fourteen metric series. Folding them
     together would hold the whole table behind the slower half, so the prices land first and the
     fundamentals fill in — the same progressive shape the /schedule and holdings-count surfaces use.
+
+    `cadence` is `annual` (fiscal years) or `quarterly` (TRAILING TWELVE MONTHS, the basis the tab
+    plots) — see `constituent_fundamentals`, which owns what each one means and why the quarterly
+    span starts three quarters late. It is a VIEW over data one GuruFocus call already brought;
+    switching it never spends quota.
     """
-    from routers._benchmark_fundamentals import COLUMNS, constituent_fundamentals  # noqa: PLC0415
+    from routers._benchmark_fundamentals import (  # noqa: PLC0415
+        COLUMNS, constituent_fundamentals, normalise_cadence,
+    )
     from routers._benchmark_index import _members  # noqa: PLC0415
+
+    # ⚠ NORMALISED, NEVER PASSED THROUGH — see `normalise_cadence` for the failure it prevents.
+    cad = normalise_cadence(cadence)
 
     def _run() -> dict:
         # `_members` is the COMPANY-world list: it carries the real `company_id` the metrics are
@@ -490,7 +504,7 @@ async def benchmark_constituent_fundamentals(label: str):
         members = _members(label)
         by_cid = {m["company_id"]: (m.get("isin") or "").strip().upper()
                   for m in members if m.get("company_id")}
-        rows = constituent_fundamentals(sorted(by_cid))
+        rows = constituent_fundamentals(sorted(by_cid), cad)
         out: dict[str, dict] = {}
         for cid, spans in rows.items():
             isin = by_cid.get(cid)
@@ -498,6 +512,7 @@ async def benchmark_constituent_fundamentals(label: str):
                 out[isin] = spans
         return {
             "label": label,
+            "cadence": cad,
             "columns": [{"key": c["key"], "label": c["label"], "note": c.get("note")}
                         for c in COLUMNS],
             "members": len(by_cid),

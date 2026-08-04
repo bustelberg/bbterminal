@@ -70,12 +70,38 @@ COLUMNS: tuple[dict, ...] = (
 _KEYS: tuple[str, ...] = tuple(c["key"] for c in COLUMNS)
 
 
-def constituent_fundamentals(company_ids: list[int]) -> dict[int, dict]:
+def normalise_cadence(value: str | None) -> str:
+    """A request's cadence → the one it will actually be answered on.
+
+    ⚠ AN UNRECOGNISED VALUE MUST RESOLVE TO A REAL BASIS, NOT TO NOTHING. `_metrics_by_company`
+    falls back to the ANNUAL codes for anything that is not "quarterly", so passing the raw string
+    through would echo a cadence the rows were not computed on — annual spans under a heading that
+    says something else. The table's whole job is saying which periods we hold, and "2025" versus
+    "2025-Q3" are different claims.
+    """
+    return "quarterly" if value == "quarterly" else "annual"
+
+
+def constituent_fundamentals(company_ids: list[int], cadence: str = "annual") -> dict[int, dict]:
     """{company_id: {metric key: {"from": period, "to": period, "n": count}}}.
 
     ⚠ A LINE WITH NO ROWS IS ABSENT FROM THE DICT, not present with nulls. The table renders the
     difference as a dash, and "we hold nothing" is the finding — padding it with an empty object
     would make an unfetched company look identical to one whose fiscal year has not landed.
+
+    ⚠ `cadence="quarterly"` REPORTS THE **TRAILING-TWELVE-MONTH** SPAN, NOT THE RAW QUARTERS, because
+    that is what the tab draws — it reads through the same `_metrics_by_company`, so this table
+    cannot claim a period the chart would not plot. Two consequences worth knowing before reading a
+    span as a gap: a series needs FOUR quarters before it has any TTM point at all, so `from` sits
+    three quarters after the first raw quarter and a company with three or fewer is absent
+    entirely; and `n` counts TTM points, i.e. raw quarters minus three.
+
+    ⚠ THE TWO CADENCES ARE ONE GuruFocus CALL, NOT TWO. `fetch_financials` writes the `annuals` and
+    `quarterly` blocks of the same blob, so switching this toggle never means "fetch again" — it
+    means "look at what the same fetch already brought". Measured 2026-08-04 on the live DB: of 264
+    SP500 constituents with annual Free Cash Flow, 263 also have the quarterly line. That ONE row is
+    exactly what this toggle exists to make visible; before it, the two cadences could only be
+    compared by opening a chart.
     """
     from routers.earnings import _metrics_by_company  # noqa: PLC0415  (cycle at module import)
 
@@ -83,13 +109,13 @@ def constituent_fundamentals(company_ids: list[int]) -> dict[int, dict]:
         return {}
     out: dict[int, dict] = {}
     for key in _KEYS:
-        for cid, series in _metrics_by_company(company_ids, key).items():
+        for cid, series in _metrics_by_company(company_ids, key, cadence).items():
             if not series:
                 continue
             periods = sorted(series)
             out.setdefault(cid, {})[key] = {
                 "from": periods[0], "to": periods[-1], "n": len(periods),
             }
-    _log.warning("[bench-fund] %d companies x %d raw lines in %d bulk reads — %d companies carry "
-                 "at least one", len(company_ids), len(_KEYS), len(_KEYS), len(out))
+    _log.warning("[bench-fund] %s: %d companies x %d raw lines in %d bulk reads — %d companies "
+                 "carry at least one", cadence, len(company_ids), len(_KEYS), len(_KEYS), len(out))
     return out

@@ -3582,6 +3582,10 @@
       "ConstituentFundamentals": {
         "description": "The RAW GuruFocus lines per constituent, and the period span we hold for each.\n\n\u26a0 `covered` IS NOT DECORATION. Only the members whose fundamentals have been ingested appear in\n`rows`; measured 2026-08-04, that was 92 of SP500's 503. A table that simply renders blanks for\nthe rest reads as \"these companies have no margins\", which is a claim about the companies\nrather than about our ingest. The count says which it is.",
         "properties": {
+          "cadence": {
+            "title": "Cadence",
+            "type": "string"
+          },
           "columns": {
             "items": {
               "$ref": "#/components/schemas/ConstituentFundamentalColumn"
@@ -3612,6 +3616,7 @@
         },
         "required": [
           "label",
+          "cadence",
           "columns",
           "members",
           "covered",
@@ -4756,6 +4761,20 @@
             "title": "Metric Code",
             "type": "string"
           },
+          "metrics": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metrics"
+          },
           "period": {
             "title": "Period",
             "type": "string"
@@ -4770,6 +4789,17 @@
               }
             ],
             "title": "Portfolio Id"
+          },
+          "universe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Universe"
           }
         },
         "required": [
@@ -4802,6 +4832,20 @@
             ],
             "title": "Holdings"
           },
+          "metrics": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metrics"
+          },
           "portfolio_id": {
             "anyOf": [
               {
@@ -4812,6 +4856,17 @@
               }
             ],
             "title": "Portfolio Id"
+          },
+          "universe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Universe"
           }
         },
         "title": "FundamentalCoverageRequest",
@@ -4874,6 +4929,20 @@
             "title": "Metric Code",
             "type": "string"
           },
+          "metrics": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metrics"
+          },
           "portfolio_id": {
             "anyOf": [
               {
@@ -4884,6 +4953,17 @@
               }
             ],
             "title": "Portfolio Id"
+          },
+          "universe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Universe"
           }
         },
         "required": [
@@ -8477,6 +8557,20 @@
             ],
             "title": "Holdings"
           },
+          "metrics": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metrics"
+          },
           "period": {
             "title": "Period",
             "type": "string"
@@ -8491,6 +8585,17 @@
               }
             ],
             "title": "Portfolio Id"
+          },
+          "universe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Universe"
           }
         },
         "required": [
@@ -16565,7 +16670,7 @@
     },
     "/api/benchmarks/index/{label}/fundamentals": {
       "get": {
-        "description": "The twelve Long Equity measures for each of an index's constituents.\n\n\u26a0 A SEPARATE CALL FROM `/index/{label}`, DELIBERATELY. That endpoint prices 500 constituents and\nis what the table needs to render at all; this one reads fourteen metric series. Folding them\ntogether would hold the whole table behind the slower half, so the prices land first and the\nfundamentals fill in \u2014 the same progressive shape the /schedule and holdings-count surfaces use.",
+        "description": "The twelve Long Equity measures for each of an index's constituents.\n\n\u26a0 A SEPARATE CALL FROM `/index/{label}`, DELIBERATELY. That endpoint prices 500 constituents and\nis what the table needs to render at all; this one reads fourteen metric series. Folding them\ntogether would hold the whole table behind the slower half, so the prices land first and the\nfundamentals fill in \u2014 the same progressive shape the /schedule and holdings-count surfaces use.\n\n`cadence` is `annual` (fiscal years) or `quarterly` (TRAILING TWELVE MONTHS, the basis the tab\nplots) \u2014 see `constituent_fundamentals`, which owns what each one means and why the quarterly\nspan starts three quarters late. It is a VIEW over data one GuruFocus call already brought;\nswitching it never spends quota.",
         "operationId": "benchmark_constituent_fundamentals_api_benchmarks_index__label__fundamentals_get",
         "parameters": [
           {
@@ -16574,6 +16679,16 @@
             "required": true,
             "schema": {
               "title": "Label",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cadence",
+            "required": false,
+            "schema": {
+              "default": "annual",
+              "title": "Cadence",
               "type": "string"
             }
           }

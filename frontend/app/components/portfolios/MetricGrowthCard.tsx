@@ -14,6 +14,7 @@ import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
 import HoldingsIngestPanel from './HoldingsIngestPanel';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
 import { paddedLogDomain , xToPeriod } from './marginData';
+import { benchNote, rebaseOnto } from './benchSeries';
 
 /**
  * One "Long Equity" growth card: a metric per fiscal year on a LOG axis with an exponential-trend
@@ -38,6 +39,40 @@ export type MetricCfg = {
 
 type MetricRow = { metric_code: string; target_date: string; numeric_value: number | null };
 
+/**
+ * One metric's points out of a metrics blob — the company's, or an index's.
+ *
+ * ⚠ THE X UNIT IS ALWAYS A YEAR — WHOLE ON ANNUAL, FRACTIONAL ON QUARTERLY — AND THAT IS WHAT
+ * KEEPS THE CAGR A **C-A-GR**. `logLinearFit` regresses ln(value) on this axis, so its slope is
+ * "per x unit". Bucketing quarterly points 0,1,2,3… would make the slope per QUARTER and the card
+ * would print a quarterly growth rate under a label that says annual — a number ~4x too small,
+ * entirely plausible, and wrong on every one of the three growth cards at once.
+ *
+ * A TTM point dated 2026-03-31 sits at 2026.25, so four of them span exactly 1.0 on the axis and
+ * the fitted slope is per year by construction. R² is unaffected (it is scale-free).
+ *
+ * ⚠ ONE EXTRACTION, BOTH LINES. The benchmark overlay runs through this same function, so the two
+ * series on a chart cannot have been built from different rules about which row wins a period.
+ */
+function extractPoints(rows: MetricRow[], codes: string[], cadence: 'annual' | 'quarterly') {
+  const want = new Set(codes);
+  const byX = new Map<number, { date: string; value: number }>();
+  for (const m of rows) {
+    if (!want.has(m.metric_code) || m.numeric_value == null) continue;
+    const d = String(m.target_date);
+    const y = parseInt(d.slice(0, 4), 10);
+    if (y < 2015) continue;   // charts start from 2015, like the holdings/margin views
+    // Annual rows keep one point per calendar year (the latest); TTM rows are already one per
+    // quarter, so each gets its own x and nothing collapses.
+    const x = cadence === 'quarterly'
+      ? y + (Math.ceil(parseInt(d.slice(5, 7), 10) / 3) - 1) / 4
+      : y;
+    const cur = byX.get(x);
+    if (!cur || d > cur.date) byX.set(x, { date: d, value: m.numeric_value });
+  }
+  return [...byX.entries()].map(([year, v]) => ({ year, value: v.value })).sort((a, b) => a.year - b.year);
+}
+
 export function Stat({ label, value, tone, color, info }: {
   label: string; value: string; tone?: string; color?: string; info?: React.ReactNode;
 }) {
@@ -54,7 +89,7 @@ export function Stat({ label, value, tone, color, info }: {
 
 export default function MetricGrowthCard({
   cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin, onIngested,
-  blendNotes, onReloadMetrics, cadence = 'annual',
+  blendNotes, onReloadMetrics, cadence = 'annual', benchMetrics, benchLabel, benchErr,
 }: {
   cfg: MetricCfg;
   /** 'annual' = one point per fiscal year. 'quarterly' = one TRAILING-TWELVE-MONTH point per
@@ -78,6 +113,16 @@ export default function MetricGrowthCard({
   // drill-down instead, so this is left undefined there.
   ingestIsin?: string;
   onIngested?: () => void;
+  /**
+   * The selected index blended the SAME way this card's own series is — one
+   * `fundamental-blend-metrics` call in the tab, every code in it, so all three growth cards read
+   * one fetch exactly as they read the company's own. Null = no benchmark selected.
+   */
+  benchMetrics?: MetricRow[] | null;
+  benchLabel?: string | null;
+  /** Why the blend failed, if it did — so a missing overlay states its reason instead of looking
+   *  like an index that happens to track this book exactly. See `benchNote`. */
+  benchErr?: string | null;
 }) {
   const [showHoldings, setShowHoldings] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -120,35 +165,28 @@ export default function MetricGrowthCard({
     }
   };
 
-  /**
-   * ⚠ THE X UNIT IS ALWAYS A YEAR — WHOLE ON ANNUAL, FRACTIONAL ON QUARTERLY — AND THAT IS WHAT
-   * KEEPS THE CAGR A **C-A-GR**. `logLinearFit` regresses ln(value) on this axis, so its slope is
-   * "per x unit". Bucketing quarterly points 0,1,2,3… would make the slope per QUARTER and the
-   * card would print a quarterly growth rate under a label that says annual — a number ~4x too
-   * small, entirely plausible, and wrong on every one of the three growth cards at once.
-   *
-   * A TTM point dated 2026-03-31 sits at 2026.25, so four of them span exactly 1.0 on the axis and
-   * the fitted slope is per year by construction. R² is unaffected (it is scale-free).
-   */
-  const points = useMemo(() => {
-    const rows = metrics ?? [];
-    const codes = new Set(cfg.codes);
-    const byX = new Map<number, { date: string; value: number }>();
-    for (const m of rows) {
-      if (!codes.has(m.metric_code) || m.numeric_value == null) continue;
-      const d = String(m.target_date);
-      const y = parseInt(d.slice(0, 4), 10);
-      if (y < 2015) continue;   // charts start from 2015, like the holdings/margin views
-      // Annual rows keep one point per calendar year (the latest); TTM rows are already one per
-      // quarter, so each gets its own x and nothing collapses.
-      const x = cadence === 'quarterly'
-        ? y + (Math.ceil(parseInt(d.slice(5, 7), 10) / 3) - 1) / 4
-        : y;
-      const cur = byX.get(x);
-      if (!cur || d > cur.date) byX.set(x, { date: d, value: m.numeric_value });
-    }
-    return [...byX.entries()].map(([year, v]) => ({ year, value: v.value })).sort((a, b) => a.year - b.year);
-  }, [metrics, cfg, cadence]);
+  /** See `extractPoints` — the x unit, and why it has to be a year. */
+  const points = useMemo(
+    () => extractPoints(metrics ?? [], cfg.codes, cadence), [metrics, cfg, cadence]);
+
+  /** The index's own series, through the IDENTICAL extraction, then scaled to meet ours — see
+   *  `rebaseOnto`. A ratio card needs no rebase: both lines are already the same unit (%). */
+  const benchByX = useMemo(() => {
+    if (!benchMetrics) return null;
+    const raw = new Map<number, number | null>(
+      extractPoints(benchMetrics, cfg.codes, cadence).map((p) => [p.year, p.value]));
+    if (!raw.size) return null;
+    if (isRatio) return raw;
+    return rebaseOnto(raw, new Map(points.map((p) => [p.year, p.value as number | null])));
+  }, [benchMetrics, cfg, cadence, isRatio, points]);
+
+  /** ⚠ THE FOURTH ABSENCE, WHICH ONLY THE LEVEL CARDS HAVE: the index and this series may share no
+   *  period, and `rebaseOnto` then refuses rather than inventing a scale factor. `benchNote`
+   *  reports it as an empty series; the extra clause names the real cause. */
+  const note = benchLabel
+    ? benchNote({ universe: benchLabel, cadence }, benchMetrics, benchErr ?? null, benchByX)
+      ?? (benchByX ? null : `${benchLabel}: no period in common to scale it on`)
+    : null;
 
   // Present only when the blend saw this metric and still drew nothing — the one case where
   // "not ingested" would be false.
@@ -160,17 +198,27 @@ export default function MetricGrowthCard({
 
   const chartData = useMemo(() => {
     const trendByYear = new Map(fit.trend.map((t) => [t.year, t.value]));
-    return points.map((p) => ({
-      year: p.year,
-      // A log axis can't plot ≤ 0; a linear ratio can (ROIC can be negative), so keep it.
-      value: isRatio ? p.value : (p.value > 0 ? p.value : null),
-      trend: isRatio ? null : (trendByYear.get(p.year) ?? null),
-    }));
-  }, [points, fit, isRatio]);
+    const byYear = new Map(points.map((p) => [p.year, p.value]));
+    // ⚠ The x UNION, not our own periods: an index reaches back further than most books, and
+    // clipping it to ours would redraw the benchmark's history whenever a holding changed.
+    const xs = new Set<number>(points.map((p) => p.year));
+    if (benchByX) for (const x of benchByX.keys()) xs.add(x);
+    return [...xs].sort((a, b) => a - b).map((year) => {
+      const v = byYear.get(year) ?? null;
+      const b = benchByX ? benchByX.get(year) ?? null : null;
+      return {
+        year,
+        // A log axis can't plot ≤ 0; a linear ratio can (ROIC can be negative), so keep it.
+        value: isRatio ? v : (v != null && v > 0 ? v : null),
+        trend: isRatio ? null : (trendByYear.get(year) ?? null),
+        bench: isRatio ? b : (b != null && b > 0 ? b : null),
+      };
+    });
+  }, [points, fit, isRatio, benchByX]);
 
   // Log axis: pad the domain (multiplicatively) so the min/max points + trend endpoints don't clip.
   const logDomain = useMemo(() =>
-    paddedLogDomain(chartData.flatMap((d) => [d.value, d.trend]).filter((v): v is number => v != null)),
+    paddedLogDomain(chartData.flatMap((d) => [d.value, d.trend, d.bench]).filter((v): v is number => v != null)),
   [chartData]);
 
   const fmt = (v: number | null | undefined) => {
@@ -278,11 +326,23 @@ export default function MetricGrowthCard({
                     tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: number) => fmt(v)} width={60} />
                 )}
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v, name) => [`${ccy}${fmt(typeof v === 'number' ? v : null)}`, name === 'trend' ? 'Trend' : cfg.title]} />
+                  formatter={(v, name) => [`${ccy}${fmt(typeof v === 'number' ? v : null)}`,
+                    name === 'trend' ? 'Trend'
+                      : name === 'bench'
+                        ? `${benchLabel ?? 'Benchmark'}${isRatio ? '' : ' (rebased)'}`
+                        : cfg.title]} />
                 {isRatio && <ReferenceLine y={0} stroke={chartTheme.zeroLine} />}
                 {isRatio && avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 <Line dataKey="value" name="value" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
                 {!isRatio && <Line dataKey="trend" name="trend" type="monotone" stroke={chartTheme.warn} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />}
+                {/* ⚠ ONE COLOUR FOR THE BENCHMARK ON ALL FOURTEEN CHARTS — green (`chartTheme.pos`).
+                    It has to be the same everywhere or the eye re-learns which line is the index on
+                    every card. Validated, not eyeballed (`dataviz/scripts/validate_palette.js`):
+                    green↔the accent blue is ΔE 19.1 deutan / 20.7 normal.
+                    ⚠ ON THIS CARD IT ALSO SITS BESIDE THE AMBER TREND, and green↔amber is ΔE 7.9
+                    under protanopia — the 6–8 floor band, legal only with a second encoding. It has
+                    two: the trend is DASHED where the benchmark is solid, and both are named. */}
+                {benchByX && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
@@ -290,14 +350,33 @@ export default function MetricGrowthCard({
               {!isRatio && (
                 <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.warn }} />Trend (R² {fit.r2 == null ? '—' : fit.r2.toFixed(2)})</span>
               )}
+              {benchByX && (
+                <span className="flex items-center gap-1.5"
+                  title={isRatio ? undefined
+                    : 'The index blended the same way, scaled to meet this line at the first period both cover. On a log axis that is a vertical shift — the growth rate, which is the comparison, is untouched.'}>
+                  <span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />
+                  {benchLabel}{isRatio ? '' : ' (rebased)'}
+                </span>
+              )}
+              {note && (
+                <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">
+                  {note}
+                </span>
+              )}
             </div>
           </div>
         </>
       )}
 
       {showHoldings && (
+        // ⚠ `chartData` IS HANDED OVER, NOT RE-DERIVED. The modal exists to show what this chart
+        // plotted; recomputing the same series there is how the two come to disagree — and the one
+        // place a reader would look to check the chart is the last place that may differ from it.
         <HoldingsRevenueModal target={holdingsTarget} metric={cfg.benchmarkMetric} unit={cfg.unit}
-          noun={cfg.noun} portfolioName={holdingsName} onClose={() => setShowHoldings(false)} />
+          noun={cfg.noun} portfolioName={holdingsName} onClose={() => setShowHoldings(false)}
+          plotted={chartData} seriesLabel={cfg.title} isIndex={isAgg}
+          benchLabel={benchByX ? benchLabel : null}
+          benchTarget={benchLabel ? { universe: benchLabel, cadence } : null} />
       )}
     </div>
   );

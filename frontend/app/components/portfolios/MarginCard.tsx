@@ -14,6 +14,7 @@ import { type Target } from './HoldingsRevenueModal';
 import { fcfLabel } from './sbcCorrection';
 import MarginInputsModal from './MarginInputsModal';
 import { marginByYear, meanOf, paddedDomain, type MarginInputs , xToPeriod } from './marginData';
+import { benchNote, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**
  * FCF-SBC margin card: (Free Cash Flow − Stock-Based Compensation) ÷ Revenue per fiscal year, on a
@@ -26,11 +27,13 @@ import { marginByYear, meanOf, paddedDomain, type MarginInputs , xToPeriod } fro
  * margins — currency-safe, unlike summing mixed-currency amounts.
  */
 
-export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection = true }: {
+export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
   /** Tab-level toggle. ⚠ This card USED to subtract SBC unconditionally; it now follows
    *  the checkbox, and its title changes with it. */
   sbcCorrection?: boolean;
+  /** The index to draw beside the book — same endpoint, same helper. See `benchSeries`. */
+  benchTarget?: BenchTarget | null;
 }) {
   const [data, setData] = useState<MarginInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -59,9 +62,14 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
   const marginByYr = useMemo(
     () => marginByYear(data?.rows ?? [], sbcCorrection), [data, sbcCorrection]);
 
-  const chartData = useMemo(() => (
-    [...marginByYr.keys()].sort((a, b) => a - b).map((year) => ({ year, margin: marginByYr.get(year) ?? null }))
-  ), [marginByYr]);
+  const [benchData, benchErr] = useBenchInputs<MarginInputs>('margin-inputs', benchTarget);
+  const benchByYr = useMemo(
+    () => (benchData ? marginByYear(benchData.rows, sbcCorrection) : null), [benchData, sbcCorrection]);
+
+  const note = benchNote(benchTarget, benchData, benchErr, benchByYr);
+
+  const chartData = useMemo(
+    () => mergeSeries(marginByYr, benchByYr, 'margin'), [marginByYr, benchByYr]);
 
   const avg = meanOf([...marginByYr.values()]);
   const latestYear = Math.max(-Infinity, ...marginByYr.keys());
@@ -95,17 +103,24 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
                 <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
-                <YAxis domain={paddedDomain([...marginByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                <YAxis domain={paddedDomain(withBench(marginByYr.values(), benchByYr))} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, 'Margin']} />
+                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : 'Margin']} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 <Line dataKey="margin" name="margin" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
+                {benchByYr && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
               <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />Margin (avg dashed)</span>
+              {benchByYr && <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />{benchTarget?.universe}</span>}
+              {note && (
+                <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">
+                  {note}
+                </span>
+              )}
             </div>
           </div>
         </>

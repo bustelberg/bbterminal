@@ -14,6 +14,7 @@ set the frontend renders — additions need a matching ingest fetcher in
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 from collections import defaultdict
 from routers._sse import sse_message as event
@@ -408,6 +409,18 @@ class FundamentalCoverageRequest(BaseModel):
     # while the card beside it shows trailing twelve months. "quarterly" means TTM, not raw
     # quarters: see `_ttm_by_period` for what each metric's roll-up is and why.
     cadence: str = "annual"
+    # ⚠ A BENCHMARK LABEL ("SP500", "ACWI", "AEX") INSTEAD OF a book. Set it and every `*-inputs`
+    # endpoint returns that index's cap-weighted constituents in the identical shape, so the client
+    # draws the benchmark line with the same helper it uses for the portfolio. Takes precedence
+    # over `holdings`/`portfolio_id` — a request is one or the other, never a blend of both.
+    universe: str | None = None
+    # ⚠ NARROWS THE BLEND TO THESE METRICS, AND IT IS WHAT MAKES A BENCHMARK BLEND POSSIBLE AT ALL.
+    # `/fundamental-blend-metrics` normally reads EVERY charted code per company — three paged
+    # requests each, which is fine for a 40-name book and is ~1,500 round trips for the S&P 500.
+    # Named here (`_METRIC_CODES` keys: "revenue", "fcf_ps", "shares"), the read becomes one
+    # chunked, paged query per metric across all constituents — the same 400x that
+    # `_metrics_by_company` documents. Omitted = every code, i.e. the behaviour a book still gets.
+    metrics: list[str] | None = None
 
 
 async def _load_and_expand_members(body: FundamentalCoverageRequest) -> list[dict]:
@@ -421,6 +434,30 @@ async def _load_and_expand_members(body: FundamentalCoverageRequest) -> list[dic
     table never admitted. Raises 422 when neither field is set; returns [] for an empty portfolio.
     """
     from routers._airs_portfolio_links import expand_members_through_links  # noqa: PLC0415
+
+    # ⚠ A BENCHMARK IS JUST ANOTHER MEMBER LIST, AND THAT IS THE WHOLE DESIGN. Asking for a
+    # universe here makes every `*-inputs` endpoint return the index's constituents instead of a
+    # book's holdings — same shape, same columns, same coverage floor — so the CLIENT computes the
+    # benchmark line with the identical helper it already runs over the portfolio. There is no
+    # second implementation of "FCF-SBC margin" to drift, which is the only way a benchmark line
+    # and the line it is drawn beside can be guaranteed to mean the same thing.
+    #
+    # ⚠ CAP-WEIGHTED, because that is what the index IS. `_members` is the same deduped one-row-
+    # per-company list the /benchmarks panel uses (GOOGL+GOOG would otherwise count Alphabet's cap
+    # twice, 11.3% of the S&P, fictional).
+    #
+    # ⚠ NO LOOK-THROUGH. An index constituent is a company, never a Leonteq certificate wrapping a
+    # model — running the expansion over 500 names would be work with nothing to find.
+    if body.universe:
+        from routers._benchmark_index import _members  # noqa: PLC0415
+
+        def _load_universe() -> list[dict]:
+            return [{"isin": m["isin"], "name": m.get("company_name"),
+                     "weight": float(m.get("market_cap_eur") or 0)}
+                    for m in _members(body.universe or "")
+                    if m.get("isin") and (m.get("market_cap_eur") or 0) > 0]
+
+        return await asyncio.to_thread(_load_universe)
 
     members = body.holdings
     owner_id = 0
@@ -646,6 +683,37 @@ def _company_metric_rows(cid: int) -> list[dict]:
     return rows
 
 
+def _bulk_blend_rows(cids: list[int], metrics: list[str], cadence: str) -> list[dict]:
+    """The named metrics' rows for MANY companies, in `_blend_rows`' shape.
+
+    The bulk twin of `_company_metric_rows` / `_ttm_metric_rows`, and it exists for one reason:
+    those read per company, which is three paged requests each — fine for a 40-name book, ~1,500
+    round trips for the S&P 500, which is what a benchmark overlay asks for. Here it is one
+    chunked, paged query per metric.
+
+    ⚠ TTM ROWS ARE EMITTED UNDER THE **ANNUAL** CODE, exactly as `_ttm_metric_rows` does — the
+    charts select their line by `annuals__…` and the cadence is a property of the request, not of
+    the row. Emit the `quarterly__` spelling here and every card would go blank on the benchmark
+    while its own line kept drawing, which reads as "the index has no data".
+    """
+    out: list[dict] = []
+    for m in metrics:
+        codes, rule = _codes_and_rule(m, cadence)
+        if codes is None:
+            continue
+        raw = _rows_by_company(cids, codes)
+        if rule is None:
+            for rows in raw.values():
+                out += rows
+            continue
+        annual_code = _metric_codes(m)[0]
+        for cid, rows in raw.items():
+            for date, val in _ttm_by_period(rows, rule, key="date").items():
+                out.append({"company_id": cid, "metric_code": annual_code,
+                            "target_date": date, "numeric_value": val})
+    return out
+
+
 def _blend_rows(rows: list[dict], covered: list[dict]) -> dict:
     """The blend itself, over rows already fetched. Pure of I/O, so the plain endpoint and the
     streaming one cannot drift: they differ only in HOW the rows arrive."""
@@ -739,10 +807,15 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
     covered, cov = await _blend_inputs(body)
 
     def _build() -> dict:
+        if body.metrics:
+            # ⚠ SAME BLEND, DIFFERENT READ. Only the fetch changes — `_blend_rows` is untouched, so
+            # a narrowed request cannot blend by a different rule than a full one.
+            rows = _bulk_blend_rows([r["company_id"] for r in covered], body.metrics, body.cadence)
+            return _blend_rows(rows, covered)
         # The PORTFOLIO path takes the same cadence as the single-company one, through the same
         # roll-up — otherwise a book's Long Equity tab would ignore a toggle its holdings honour.
         load = (_ttm_metric_rows if body.cadence == "quarterly" else _company_metric_rows)
-        rows: list[dict] = []
+        rows = []
         for r in covered:
             rows += load(r["company_id"])
         return _blend_rows(rows, covered)
@@ -1094,7 +1167,12 @@ def _ttm_metric_rows(company_id: int) -> list[dict]:
         for qc in qcodes:
             rows += _page_metrics(company_id, qc, exact=True)
         for date, val in _ttm_by_period(rows, rule, key="date").items():
-            out.append({"metric_code": code, "target_date": date,
+            # ⚠ `company_id` IS NOT DECORATION HERE. These rows also feed `_blend_rows`, which keys
+            # every point by the company that reported it — without it a PORTFOLIO's growth cards
+            # raised KeyError on `quarterly` (a 500 the moment a book switched cadence) while the
+            # single-company path, which never blends, was fine. The synthesised rows have to
+            # carry what the read they replace carried.
+            out.append({"company_id": company_id, "metric_code": code, "target_date": date,
                         "numeric_value": val, "is_prediction": False})
     return out
 
@@ -1136,6 +1214,35 @@ def _ttm_by_period(rows: list[dict], rule: str, key: str = "label") -> dict[str,
     return out
 
 
+# ⚠ A REQUEST-SCOPED PREFETCH, AND IT EXISTS BECAUSE THE SAME LOOP COSTS 50x AT INDEX SCALE.
+# `_metric_by_year` is one paged read per company per metric. Over a book's ~50 holdings that is
+# fine; over an index's 489 constituents — which is exactly what a benchmark line asks for — it is
+# 72 SECONDS for one card, measured, against 0.1 s for the same rows fetched in bulk.
+#
+# Rather than rewrite eleven endpoint loops, they call `_prefetch(ids, metrics, cadence)` once and
+# `_metric_by_year` reads the cache. A ContextVar, not a module global: two requests can be in
+# flight in the same process and must never see each other's companies.
+_PREFETCH: contextvars.ContextVar[dict[tuple[str, str], dict[int, dict[str, float]]] | None] = (
+    contextvars.ContextVar("_earnings_prefetch", default=None))
+
+
+def _prefetch(company_ids: list[int], metrics: tuple[str, ...], cadence: str = "annual") -> None:
+    """Load these metrics for these companies in one bulk read each, for the rest of the request.
+
+    ⚠ SILENTLY OPTIONAL. Anything not prefetched still resolves through the per-company path, so a
+    caller that forgets is slow rather than wrong — and a metric fetched here that nobody asks for
+    costs one query, not a wrong answer.
+    """
+    if not company_ids:
+        return
+    cache = _PREFETCH.get() or {}
+    for m in metrics:
+        key = (m, cadence)
+        if key not in cache:
+            cache[key] = _metrics_by_company(company_ids, m, cadence)
+    _PREFETCH.set(cache)
+
+
 def _metric_by_year(company_id: int, metric: str, cadence: str = "annual") -> dict[str, float]:
     """{period: value} for a metric — fiscal YEARS, or trailing-twelve-month points per quarter.
 
@@ -1148,6 +1255,10 @@ def _metric_by_year(company_id: int, metric: str, cadence: str = "annual") -> di
     them as opaque categories on an x-axis. A caller that slices `[:4]` for a year would silently
     collapse four TTM points onto one.
     """
+    # The request-scoped bulk cache, when the caller filled it — see `_prefetch`.
+    cached = (_PREFETCH.get() or {}).get((metric, cadence))
+    if cached is not None:
+        return cached.get(company_id, {})
     if cadence == "quarterly":
         rule = _TTM_RULE.get(metric)
         if rule is None:
@@ -1203,15 +1314,35 @@ def _metrics_by_company(company_ids: list[int], metric: str,
     LIMIT/OFFSET queries, so a page boundary inside a tie serves a row twice or never;
     (company_id, target_date, metric_code) is unique here.
     """
-    codes = list(_metric_codes(metric))
-    rule = None
-    if cadence == "quarterly":
-        rule = _TTM_RULE.get(metric)
-        if rule is None:
-            _log.warning("[earnings] no TTM rule for %r — benchmark omits it", metric)
-            return {}
-        codes = [c.replace("annuals__", "quarterly__") for c in codes]
+    codes, rule = _codes_and_rule(metric, cadence)
+    if codes is None:
+        return {}
+    raw = _rows_by_company(company_ids, codes)
+    return {cid: (_ttm_by_period(rows, rule) if rule else _latest_per_year(rows))
+            for cid, rows in raw.items()}
 
+
+def _codes_and_rule(metric: str, cadence: str) -> tuple[list[str] | None, str | None]:
+    """A metric's codes for the requested cadence, plus its TTM roll-up rule (None on annual).
+
+    `(None, None)` means the metric has no declared roll-up, so quarterly cannot be answered for
+    it — the caller omits it rather than inventing one. Shared so the bulk readers and the blend
+    cannot come to disagree about which spelling a cadence uses.
+    """
+    codes = list(_metric_codes(metric))
+    if cadence != "quarterly":
+        return codes, None
+    rule = _TTM_RULE.get(metric)
+    if rule is None:
+        _log.warning("[earnings] no TTM rule for %r — omitted", metric)
+        return None, None
+    return [c.replace("annuals__", "quarterly__") for c in codes], rule
+
+
+def _rows_by_company(company_ids: list[int], codes: list[str]) -> dict[int, list[dict]]:
+    """{company_id: rows} for the named codes across MANY companies — the read the benchmark work
+    is bounded by. See `_metrics_by_company` for the measurement and for why this is chunked AND
+    paged, ordered on a unique key, and advances by what came back."""
     raw: dict[int, list[dict]] = defaultdict(list)
     for i in range(0, len(company_ids), IN_CHUNK_SIZE):
         chunk = company_ids[i:i + IN_CHUNK_SIZE]
@@ -1228,8 +1359,7 @@ def _metrics_by_company(company_ids: list[int], metric: str,
             for r in page:
                 raw[r["company_id"]].append(r)
             off += len(page)
-    return {cid: (_ttm_by_period(rows, rule) if rule else _latest_per_year(rows))
-            for cid, rows in raw.items()}
+    return raw
 
 
 @router.get("/api/earnings/benchmark-revenue")
@@ -1429,6 +1559,14 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
 
         rows: list[dict] = []
         years: set[str] = set()
+        # ⚠ ONE BULK READ FOR THE WHOLE SET, NOT ONE PER COMPANY — and here it is the difference
+        # between a table and a timeout. This loop reads ONE metric per member through
+        # `_metric_by_year`, which is ~160 ms each: measured 2026-08-04, the S&P's 489 constituents
+        # took **64.5 s**; prefetched they are one chunked, paged query. The endpoint was fine while
+        # only a 20-name book could reach it and became the slowest thing on the tab the day the
+        # benchmark overlay let it be pointed at an index.
+        _prefetch([c["company_id"] for c in comp.values() if c.get("company_id")],
+                  (metric,), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -1458,9 +1596,25 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
                 "exchange": exch,
                 "status": status,
                 "revenue": rev,
+                # ⚠ THE NUMERATOR OF THE WEIGHT, AND ONLY ON THE INDEX PATH. For a universe,
+                # `weight_by[ci]` IS `company.market_cap_eur` (see `_load_and_expand_members`), so
+                # this is the figure the percentage beside it was divided out of — cap ÷ Σcap — and
+                # a reader can check the division. For a PORTFOLIO the same variable holds the
+                # holding's weight, which is not a market cap at all, so the field is omitted
+                # rather than filled with a number that would be read as one.
+                **({"market_cap_eur": weight_by[ci]} if body.universe else {}),
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(years), "rows": rows, "holdings": len(members)}
+        out = {"years": sorted(years), "rows": rows, "holdings": len(members)}
+        if body.universe:
+            # ⚠ WHO IS **NOT** IN THE INDEX, ON THE ONE SCREEN BUILT FOR CHECKING IT BY HAND. A
+            # constituent with no stored market cap is dropped before weighting, and the names
+            # that lack one are systematically the ones GuruFocus does not cover — on the AEX that
+            # is Shell, Unilever and RELX, which is why ASML renormalises to 51.76%. Absent from
+            # the table AND absent from a footnote, that reads as a weight the index really has.
+            from routers._benchmark_index import weight_basis  # noqa: PLC0415
+            out["weight_basis"] = weight_basis(body.universe)
+        return out
 
     return await asyncio.to_thread(_run)
 
@@ -1506,6 +1660,10 @@ async def margin_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('revenue', 'fcf', 'sbc',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -1575,6 +1733,10 @@ async def debt_ratio_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('long_term_debt', 'total_assets', 'goodwill',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -1648,6 +1810,10 @@ async def cash_return_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('fcf', 'sbc', 'noncurrent_liabilities', 'total_equity', 'roic',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -1731,6 +1897,10 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('interest_expense', 'operating_income',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -1802,6 +1972,10 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('sbc', 'ocf',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -1872,6 +2046,10 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('capex', 'revenue',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -1950,6 +2128,10 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('gross_profit', 'revenue',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -2031,6 +2213,10 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('fcf', 'sbc', 'net_income',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -2102,6 +2288,10 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('fcf', 'sbc', 'market_cap',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -2236,6 +2426,10 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('div_ps', 'price_ps',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
