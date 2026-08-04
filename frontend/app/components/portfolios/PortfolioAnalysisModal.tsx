@@ -198,28 +198,33 @@ function AllocationBars({ slices, selected, onSelect, variant, bands }: {
             </button>
           : <span className="text-[10px] text-fg-faint">click a class to filter the charts</span>)}
       </div>
-      {/* ⚠ A SECOND THING IS ON THE CHART NOW, SO IT IS NAMED. The bar is what the portfolio holds;
-          the bracket is what the policy permits. Without this line the caps read as gridlines and
-          the target tick as noise. Only rendered when there IS a policy — the products with no
-          risk profile draw no bands and get no legend for them. */}
+      {/* ⚠ A SECOND THING IS ON THE CHART, SO IT IS NAMED. The bar is what the portfolio holds;
+          the three stripes are what the policy permits. Without this line they read as gridlines
+          and the target tick as noise. Only rendered when there IS a policy — the products with
+          no risk profile draw no stripes and get no legend for them. */}
       {bandOf.size > 0 && (
         <div className="flex items-center gap-3.5 text-[10px] text-fg-faint mb-1.5">
-          {/* The swatches are the marks themselves at row scale — a legend drawn differently from
-              the thing it names is one more thing to map. */}
+          {/* ⚠ ONE ENTRY PER STRIPE, AND EACH SWATCH IS THAT STRIPE AT ROW SCALE — a legend drawn
+              differently from the thing it names is one more thing to map.
+
+              ⚠ MINIMAL AND MAXIMAL SHARE A SWATCH ON PURPOSE. They are the same kind of mark, told
+              apart by POSITION (left bound, right bound). Neither ever changes colour — see the
+              bounds themselves below.
+
+              ⚠ THERE IS NO BREACH ENTRY (there was one: "outside the band"). Nothing on the chart
+              is amber any more; a weight outside its band is reported on the row's percentage,
+              which goes amber with the crossed bound named in its tooltip. */}
           <span className="flex items-center gap-1.5">
-            <span className="relative inline-block w-5 h-3 rounded-sm bg-neutral-500/[0.14]">
-              <span className="absolute inset-y-0 left-0 w-0.5 bg-neutral-500/70" />
-              <span className="absolute inset-y-0 right-0 w-0.5 bg-neutral-500/70" />
-            </span>
-            {variant} band
+            <span className="inline-block w-0.5 h-3 bg-neutral-500/70" />
+            minimal
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-[3px] h-3 rounded-sm bg-neutral-800/85" />
             target
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="inline-block w-0.5 h-3 bg-warn-500" />
-            outside the band
+            <span className="inline-block w-0.5 h-3 bg-neutral-500/70" />
+            maximal
           </span>
         </div>
       )}
@@ -274,53 +279,60 @@ function AllocationBars({ slices, selected, onSelect, variant, bands }: {
               <span className={`w-[6.5rem] shrink-0 truncate text-[11px] ${
                 active ? 'font-medium text-fg-strong' : 'text-fg-muted'}`}>{bucketLabel(s.bucket)}</span>
               {/* ⚠ THIS IS A BULLET CHART, AND ITS ONE RULE IS THAT THE MEASURE IS THINNER THAN
-                  THE RANGE. The band sits BEHIND the bar at full height while the bar is a slimmer
-                  ribbon down the middle, so the band's top and bottom edges stay visible straight
-                  THROUGH the bar — no wash over the colour, nothing hidden, and the overlap reads
-                  as "this much of the permitted range is used". The first version drew the band on
-                  top in a 6% overlay, which darkened the class colour where they met and vanished
-                  where they didn't: two different readings of one annotation. */}
-              <span className="relative h-[18px] flex-1 rounded bg-inset overflow-hidden">
+                  THE RANGE. The policy marks run the FULL height of the track while the bar is a
+                  slimmer ribbon down the middle, so a stripe stays visible straight THROUGH the
+                  bar — nothing is hidden and nothing is washed over. Two earlier versions are
+                  worth not repeating: a 6% overlay ON TOP of the bar, which darkened the class
+                  colour where they met and vanished where they didn't (two readings of one
+                  annotation), and a translucent min→max block behind it, which was a second grey
+                  wash under every row for a span the two outer stripes already delimit. */}
+              {/* ⚠ THE TRACK GROWS WITH THE BAR, IN PROPORTION. The measure is inset from this
+                  height, so thickening the ribbon alone would eat the margin the band's top and
+                  bottom edges live in and break the bullet-chart rule above it. 36 / inset-10
+                  keeps the ribbon at exactly half the track, as 18 / inset-5 did. */}
+              <span className="relative h-[36px] flex-1 rounded bg-inset overflow-hidden">
                 {/* Recessive gridlines at the axis's own ticks. The ends are the track's own
                     edges, so only the interior ticks are drawn. */}
                 {AXIS_TICKS.filter((t) => t > 0 && t < 100).map((t) => (
                   <span key={t} className="absolute inset-y-0 w-px bg-neutral-700/30"
                     style={{ left: `${t}%` }} />
                 ))}
+                {/* ⚠ THE POLICY IS THREE STRIPES — min, target, max — AND NO FILL. The band used to
+                    be drawn as a translucent block spanning min→max with caps at its edges; at one
+                    stripe per bound the same information reads at a glance and nothing is shaded
+                    over the class colour. What the fill added was the SPAN as an area, which the
+                    two outer stripes already delimit; what it cost was a second grey wash behind
+                    every bar. (The target stripe is drawn after the measure, further down, because
+                    it has to cross it.) */}
+                {/* ⚠ THE BOUNDS ARE ALWAYS GREY — they never recolour on a breach. A limit is a
+                    fixed property of the policy; it does not change because today's weight sits
+                    the wrong side of it. Tinting it amber made the CHART report the exception
+                    twice (the bar visibly ends past the stripe already) and made the mark look
+                    like a different mark. The breach is said where a fact about the holding
+                    belongs: the row's percentage, in amber, with the bound named in its tooltip. */}
                 {(() => {
                   const b = bandOf.get(s.bucket);
                   if (!b) return null;
-                  const lo = b.min_pct ?? 0;
-                  const hi = b.max_pct ?? 100;
-                  const bad = breach(s);
-                  // The breached bound goes amber — the mark points at WHICH limit was crossed,
-                  // which the amber value at the end of the row cannot say. The bar itself keeps
-                  // its class colour: colour follows the entity, never its status.
-                  const cap = (mine: 'min' | 'max') =>
-                    (bad?.includes(mine === 'min' ? 'minimum' : 'maximum')
-                      ? 'bg-warn-500' : 'bg-neutral-500/70');
                   return (
                     <>
-                      <span className="absolute inset-y-0 bg-neutral-500/[0.14] pointer-events-none"
-                        style={{ left: `${lo}%`, width: `${Math.max(0, hi - lo)}%` }} />
                       {b.min_pct != null && (
-                        <span className={`absolute inset-y-0 w-0.5 pointer-events-none ${cap('min')}`}
+                        <span className="absolute inset-y-0 w-0.5 pointer-events-none bg-neutral-500/70"
                           style={{ left: `${b.min_pct}%` }} />
                       )}
                       {b.max_pct != null && (
-                        <span className={`absolute inset-y-0 w-0.5 pointer-events-none ${cap('max')}`}
+                        <span className="absolute inset-y-0 w-0.5 pointer-events-none bg-neutral-500/70"
                           style={{ left: `calc(${b.max_pct}% - 2px)` }} />
                       )}
                     </>
                   );
                 })()}
-                {/* The measure: a slim ribbon, centred, so the band shows above and below it. */}
-                <span className="absolute inset-y-[5px] left-0 rounded-sm"
+                {/* The measure: a slim ribbon, centred, so the stripes read above and below it. */}
+                <span className="absolute inset-y-[10px] left-0 rounded-sm"
                   style={{ width: `${Math.min(100, s.pct)}%`, minWidth: 3,
                     background: allocColor(s.bucket) }} />
-                {/* The target, LAST so it crosses the bar — a target hidden under the measure is
-                    the one comparison this chart exists to make. Full height and dark, so it can
-                    never be mistaken for the lighter band caps beside it. */}
+                {/* The target — the third stripe, and LAST so it crosses the bar: a target hidden
+                    under the measure is the one comparison this chart exists to make. Darker and a
+                    pixel wider than the two bounds, so the three are never confused. */}
                 {bandOf.get(s.bucket)?.default_pct != null && (
                   <span className="absolute inset-y-0 w-[3px] rounded-sm bg-neutral-800/85 pointer-events-none"
                     style={{ left: `calc(${bandOf.get(s.bucket)!.default_pct}% - 1.5px)` }} />

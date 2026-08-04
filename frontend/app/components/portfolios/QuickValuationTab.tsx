@@ -179,7 +179,6 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     year: r.year,
     price: posOnly(r.price), value: posOnly(r.value),
     trend: posOnly(r.trend), future: posOnly(r.future),
-    priceTo: null as number | null,
   })), [indexData]);
   const hiddenByLog = indexData.filter((r) => r.value != null && r.value <= 0).length;
 
@@ -312,67 +311,26 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     latestPs, currentPrice,
     asNum(fcfStr) ?? forecastPs, asNum(yieldStr) ?? avgYield, horizonYears);
 
-  /**
-   * The price line carried out to the target, in index units.
-   *
-   * ⚠ THIS IS THE TARGET, NOT A FORECAST OF THE PRICE. It goes where the demanded yield says it
-   * goes — draw it like an observation and the chart would claim to predict the market. Hence the
-   * separate series, drawn like the FCF projection: thin and dotted.
-   *
-   * ⚠ IT STARTS AT TODAY'S PRICE, WHICH IS WHY THE AXIS IS NUMERIC. The line's two endpoints are
-   * the two numbers the calculator prints — current price and forecast price — so on a LOG axis
-   * its slope IS the CAGR beside it. That only holds if "today" sits at its true distance along
-   * the axis: on the category axis this used to be, a mid-year date had nowhere to go, the line
-   * started at the year-old fiscal close instead, and it drew a different (gentler) rate than the
-   * panel stated. `type="number"` gives today a fractional year (`nowX`), and `targetX − nowX` is
-   * `horizonYears` by construction — the same quantity the CAGR is divided by, not a second one.
-   *
-   * With no live price `nowX` collapses onto `lastPriceYear` and the line is exactly what it was.
-   */
-  const anchorPrice = idx.anchor == null ? null
-    : points.find((p) => p.year === idx.anchor)?.price ?? null;
+  /** The horizon the calculator's target is quoted over — still shown in the panel and named in
+   *  the trend legend; nothing is plotted at it since the price-target line was removed. */
   const targetYear = lastPriceYear == null ? null : lastPriceYear + PROJECT_YEARS;
-  /** Where today falls on the fiscal-year axis: the last reported year plus the fraction of a
-   *  year since that year end. Zero when the price IS the fiscal close. */
-  const nowX = lastPriceYear == null ? null
-    : lastPriceYear + (yearsBetween(lastFiscalPriceDate, priceDate) ?? 0);
   // ⚠ NOT WRAPPED IN `useMemo`. The React Compiler could not preserve a manual memo here and so
   // skipped optimising the whole component — worse than the memo was worth. Left plain, the
   // compiler memoizes it itself.
-  const forecastPrice = target.forecastPrice;
-  const currentIndex = anchorPrice != null && anchorPrice > 0 && currentPrice != null
-    ? currentPrice / anchorPrice * 100 : null;
-  const chartData = anchorPrice == null || anchorPrice <= 0 || lastPriceYear == null
-    || forecastPrice == null || nowX == null || currentIndex == null
-    ? chartRows
-    : [
-      ...chartRows.map((r) => (
-        // The start point rides an EXISTING row only when today and the fiscal year end coincide
-        // (the fallback price). Otherwise it gets its own row below, at its own x.
-        r.year === nowX ? { ...r, priceTo: currentIndex }
-          : r.year === targetYear ? { ...r, priceTo: forecastPrice / anchorPrice * 100 }
-            : r)),
-      ...(nowX === lastPriceYear ? [] : [{
-        year: nowX, price: null, value: null, trend: null, future: null, priceTo: currentIndex,
-      }]),
-      // The target year is normally already on the axis (the FCF projection put it there). It is
-      // NOT when the company stopped reporting FCF before its last priced year — and a target
-      // endpoint with no row is a line with one point: a lone dot, and a legend quoting a CAGR
-      // for a line nobody can see.
-      ...(chartRows.some((r) => r.year === targetYear) ? [] : [{
-        year: targetYear as number, price: null, value: null, trend: null, future: null,
-        priceTo: forecastPrice / anchorPrice * 100,
-      }]),
-      // Sorted, because a numeric axis draws a line in DATA order, not x order — an out-of-place
-      // row makes the line double back on itself.
-    ].sort((a, b) => a.year - b.year);
+  // ⚠ THE CHART IS THE REPORTED ROWS, NOTHING SPLICED IN. It used to carry a dashed blue "price
+  // target" line — where the price would have to go to hit the demanded yield — which needed two
+  // synthetic rows (one at today's fractional x, one at the target year) grafted onto the fiscal
+  // series and the whole thing re-sorted. The line is gone (2026-08-04) and so are they: every row
+  // here is now a period the company actually reported. The calculator's target itself is
+  // unaffected — it is a panel figure, not a series.
+  const chartData = chartRows;
 
   /** Integer years only. A numeric axis would otherwise tick at 2025.8 — and the fractional x is
    *  a position for today, not a period anyone reports in. */
   const yearTicks = useMemo(() => chartRows.map((r) => r.year), [chartRows]);
 
   const logDomain = useMemo(() => paddedLogDomain(
-    chartData.flatMap((r) => [r.price, r.value, r.trend, r.future, r.priceTo])
+    chartData.flatMap((r) => [r.price, r.value, r.trend, r.future])
       .filter((v): v is number => v != null)),
   [chartData]);
 
@@ -506,8 +464,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
                   labelFormatter={(v) => (typeof v === 'number' && !Number.isInteger(v)
                     ? 'Today' : `FY${v}`)}
                   formatter={(v, n) => [typeof v === 'number' ? v.toFixed(0) : '—',
-                    n === 'price' ? 'Price (index)'
-                      : n === 'priceTo' ? 'Price target (index)' : `${b.perShare} (index)`]} />
+                    n === 'price' ? 'Price (index)' : `${b.perShare} (index)`]} />
                 <ReferenceLine y={100} stroke={chartTheme.zeroLine} />
                 <Line dataKey="price" name="price" type="monotone" stroke={chartTheme.accentStrong}
                   strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
@@ -521,29 +478,11 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
                   strokeWidth={1.5} strokeDasharray="5 3" strokeOpacity={0.75} dot={false} connectNulls />
                 <Line dataKey="future" name="future" type="monotone" stroke={chartTheme.warn}
                   strokeWidth={1.5} strokeDasharray="2 4" strokeOpacity={0.5} dot={false} connectNulls />
-                {/* Where the price has to go to hit the demanded yield. ⚠ NOT A PRICE FORECAST —
-                    it is the calculator's target, drawn in the price colour but dotted like the
-                    FCF projection so it cannot be mistaken for an observation.
-                    Its first dot is TODAY'S price, sitting between two fiscal years; its slope on
-                    this log axis is the panel's "Est. CAGR to FY{targetYear}", not a second rate. */}
-                <Line dataKey="priceTo" name="priceTo" type="linear" stroke={chartTheme.accentStrong}
-                  strokeWidth={1.5} strokeDasharray="2 4" strokeOpacity={0.5}
-                  dot={{ r: 2.5, strokeWidth: 0, fill: chartTheme.accentStrong }} connectNulls />
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
               <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accentStrong }} />Share price</span>
               <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.warn }} />{b.perShare}</span>
-              {/* The target line names its own rate. ⚠ It DISPLAYS `target.cagr` — the panel's
-                  figure, not a second one computed for the legend. */}
-              {target.cagr != null && targetYear != null && (
-                <span className="flex items-center gap-1.5 text-fg-muted"
-                  title={`From ${priceLive ? "today's" : "the last fiscal year-end"} price to the target, over ${horizonYears.toFixed(1)} years. The same figure as “Est. CAGR to FY${targetYear}” in the panel.`}>
-                  <span className="w-3 h-0.5 inline-block rounded"
-                    style={{ background: chartTheme.accentStrong, opacity: 0.5 }} />
-                  Price target — {pct(target.cagr * 100)}/yr to FY{targetYear}
-                </span>
-              )}
               {fit.r2 != null && (
                 <span className="flex items-center gap-1.5 text-fg-muted"
                   title={`Exponential fit over ${fit.n} year(s)${fit.dropped ? `, ${fit.dropped} dropped (${b.negativeYear} years have no logarithm)` : ''}. R² is how tightly ${b.perShare} hugs a constant-growth line: 1.0 = perfectly steady compounding.`}>

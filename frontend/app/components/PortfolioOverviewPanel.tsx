@@ -12,7 +12,6 @@ import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 import AllocationBandsModal from './portfolios/AllocationBandsModal';
-import OwnerEarningsModal from './portfolios/OwnerEarningsModal';
 import { type Basket } from './portfolios/types';
 import { allocColor, bucketLabel, BUCKET_ORDER } from './portfolios/allocationColors';
 import {
@@ -20,9 +19,6 @@ import {
   WEIGHT_BASES, type GroupStats, type WeightBasis, type WeightedReturn,
 } from './portfolios/startWeights';
 
-/** What an Analyse/Fundamental modal is opened for: one instrument (isin), a group (basket), or a
- *  whole portfolio (portfolioId, resolved to a basket server-side). */
-type ModalTarget = { name: string; isin?: string; basket?: Basket; portfolioId?: number };
 import type {
   AirsAccountDetail, AirsAccountIsins, AirsHoldingSegment, AirsPortfolioOverview,
 } from '../../lib/types/api';
@@ -189,8 +185,6 @@ export default function PortfolioOverviewPanel() {
   const [showBands, setShowBands] = useState(false);
   // The Fixed portfolio to analyse. Its id, not the row's — the modal describes the strategy.
   const [analyse, setAnalyse] = useState<{ id?: number; name: string; basket?: Basket } | null>(null);
-  // The whole portfolio's Fundamental (blended owner earnings + price steadiness), by its id.
-  const [pfFund, setPfFund] = useState<{ id?: number; name: string; basket?: Basket } | null>(null);
   // Refresh state: the fleet job is running; a status/error line; which single rows are re-scanning.
   const [refreshingAll, setRefreshingAll] = useState(false);
   /**
@@ -252,10 +246,11 @@ export default function PortfolioOverviewPanel() {
   };
 
   /**
-   * What Analyse / Fundamental should open for a row — the model portfolio if it has one, else the
-   * book's OWN holdings.
+   * What Analyse should open for a row — the model portfolio if it has one, else the book's OWN
+   * holdings. (Fundamental buttons used to share this — one per row, one per holding and one per
+   * segment. All were removed 2026-08-04; this panel opens Analyse only.)
    *
-   * ⚠ NEITHER MODAL EVER NEEDED A MODEL PORTFOLIO, AND WIRING THEM TO ONE COST DAYS. Both accept a
+   * ⚠ IT NEVER NEEDED A MODEL PORTFOLIO, AND WIRING IT TO ONE COST DAYS. It accepts a
    * plain basket of `{isin, weight}` — `PortfolioAnalysisModal`'s own comment says "a basket is
    * treated as a portfolio-of-N: same view" — and every account already carries exactly that, from
    * the Vermogensoverzicht's `ISIN-code` column. Gating the buttons on `fixed_portfolio_id` instead
@@ -268,8 +263,8 @@ export default function PortfolioOverviewPanel() {
    *
    * The ISINs come from `/isins`, which an expanded row has already loaded; otherwise one fetch.
    */
-  const openModal = async (r: AirsPortfolioOverview, which: 'analyse' | 'fundamental') => {
-    const set = which === 'analyse' ? setAnalyse : setPfFund;
+  const openModal = async (r: AirsPortfolioOverview) => {
+    const set = setAnalyse;
     if (r.fixed_portfolio_id != null) {
       set({ id: r.fixed_portfolio_id, name: r.name });
       return;
@@ -307,7 +302,7 @@ export default function PortfolioOverviewPanel() {
    *
    * ⚠ IT IS A SEPARATE SCAN FROM "Refresh all", AND THAT IS THE WHOLE TRAP. Refresh all scans the
    * ACCOUNTS (returns, holdings, mutations); this one scans the MODEL portfolios that give an
-   * account its name, its ISINs and — the part you notice — its Analyse and Fundamental buttons.
+   * account its name, its ISINs and — the part you notice — its Analyse button.
    * Until 2026-07-30 it had no button anywhere in the app, so a fresh deployment could never get
    * past "0 analysable" from inside the UI.
    *
@@ -613,12 +608,12 @@ export default function PortfolioOverviewPanel() {
 
   /**
    * ⚠ THE FILTER KEEPS WHAT THE PAGE CAN ACTUALLY DO SOMETHING WITH — `canAnalyse`, the same
-   * predicate the Analyse and Fundamental buttons render on.
+   * predicate the Analyse button renders on.
    *
    * It went through a wrong turn worth recording. It was "Linked only", which hid two books that
    * showed real figures (`BUS_Ris_bepOff_Kl_AFS_Dy`, 24 holdings; `BUS_WTS_StMerken_Dyn`, 22), so
    * it was changed to keep anything with real holdings. That surfaced them — and surfaced that
-   * they are the ONLY two rows with no Analyse/Fundamental buttons, because they pair with no
+   * they are the ONLY two rows with no Analyse button, because they pair with no
    * model portfolio. Both turned out to be bogus books. Holdings measure whether a row has DATA;
    * the buttons measure whether a row is USABLE, and this table exists to open them.
    *
@@ -698,7 +693,7 @@ export default function PortfolioOverviewPanel() {
               substantial === 0 ? 'text-fg-faint' : 'text-fg-subtle'}`}
               title={substantial === 0
                 ? 'No account is paired with a model portfolio yet, so this filter would hide every row — it is inactive until a model-portfolio scan has run.'
-                : 'Keeps only the books that can actually be opened: Analyse and Fundamental both describe the paired model portfolio, so a book with no model has neither button and nothing this page can do with it. Hides the AIRS benchmarks and the test shells for the same reason.'}>
+                : 'Keeps only the books that can actually be opened: Analyse describes the paired model portfolio, so a book with no model has no button and nothing this page can do with it. Hides the AIRS benchmarks and the test shells for the same reason.'}>
               <input type="checkbox" checked={hideSmall} disabled={substantial === 0}
                 onChange={(e) => setHideSmall(e.target.checked)} />
               {/* ⚠ Disabled at zero — see `effectiveHideSmall`. A checkbox that silently does
@@ -790,21 +785,11 @@ export default function PortfolioOverviewPanel() {
                         <div className="flex items-stretch gap-1">
                           {canAnalyse(r) && (
                             <button
-                              onClick={(e) => { e.stopPropagation(); void openModal(r, 'analyse'); }}
+                              onClick={(e) => { e.stopPropagation(); void openModal(r); }}
                               disabled={opening === r.dynamic_portefeuille}
                               className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg disabled:opacity-50"
                             >
                               {opening === r.dynamic_portefeuille ? '…' : 'Analyse'}
-                            </button>
-                          )}
-                          {canAnalyse(r) && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); void openModal(r, 'fundamental'); }}
-                              disabled={opening === r.dynamic_portefeuille}
-                              title="Fundamental — the whole portfolio's blended owner earnings & price steadiness"
-                              className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg disabled:opacity-50"
-                            >
-                              Fundamental
                             </button>
                           )}
                           {/* Re-scan just this portfolio (a few seconds). stopPropagation so it does
@@ -949,10 +934,6 @@ export default function PortfolioOverviewPanel() {
         // forces a fresh mount, so an unloaded modal can only ever show "Loading composition…".
         <PortfolioAnalysisModal key={analyse.id ?? analyse.name} id={analyse.id} basket={analyse.basket}
           name={analyse.name} onClose={() => setAnalyse(null)} />
-      )}
-      {pfFund && (
-        <OwnerEarningsModal portfolioId={pfFund.id} basket={pfFund.basket} name={pfFund.name}
-          onClose={() => setPfFund(null)} />
       )}
       {showBands && (
         <AllocationBandsModal canEdit={isAdmin} onClose={() => setShowBands(false)} />
@@ -1141,9 +1122,8 @@ function IsinCell({ r, onPin }: {
  *   AIRS's classification and it is the right one: 10 of the 11 bond ISINs are ETFs, so an "ETF"
  *   bucket would empty Bonds and make a defensive book read as holding almost none.
  */
-function SegmentHeader({ s, asOf, holdings, stats, altReturnPct, basisKey, onFundamental }: {
+function SegmentHeader({ s, asOf, stats, altReturnPct, basisKey }: {
   s: AirsHoldingSegment; asOf?: string | null;
-  holdings: { isin: string; weight: number }[];
   /** ⚠ EVERY FIGURE ON THIS ROW COMES FROM THE HOLDINGS UNDER IT (`groupStats`), not from the
    *  backend's own per-segment numbers — it computes those over a different row set, and a header
    *  that disagrees with the lines beneath it is a second source of truth with no way to tell
@@ -1155,25 +1135,14 @@ function SegmentHeader({ s, asOf, holdings, stats, altReturnPct, basisKey, onFun
    *  the one the Return is computed on — so a header that gated on a different value than its
    *  rows would put this segment's figure under someone else's column heading. */
   basisKey: WeightBasis;
-  onFundamental: (v: ModalTarget) => void;
 }) {
   const { etfPct, partial } = stats;
   // The figure this row actually prints: the chosen weight basis, falling back to the row's own
   // start-weighted return when the basis is "start" (where the two are the same by construction).
   const shown = altReturnPct ?? stats.returnPct;
   const label = bucketLabel(s.asset_class) || 'Group';
-  const target: ModalTarget = { name: label, basket: { holdings, label } };
-  const cls = 'text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap';
   return (
     <tr className="bg-overlay/[0.03] border-t border-neutral-800/40">
-      <td className="px-2 py-1">
-        {holdings.length > 0 && (
-          <div className="flex items-center gap-1">
-            <button type="button" onClick={() => onFundamental(target)} className={cls}
-              title={`Fundamentals of the ${label} holdings — blended owner earnings & price steadiness`}>Fundamental</button>
-          </div>
-        )}
-      </td>
       <td className="px-3 py-1 font-semibold text-fg-strong">
         {label}
         <span className="text-fg-faint font-normal ml-2">
@@ -1191,11 +1160,12 @@ function SegmentHeader({ s, asOf, holdings, stats, altReturnPct, basisKey, onFun
           )}
         </span>
       </td>
-      {/* ⚠ ONE CELL PER COLUMN. The table is [Fundamental] · Fund · ISIN · Class · Link · Sector
-          · Region · Ccy · Beginwaarde · Huidige waarde · Direct result · Div tax · <one weight> ·
-          Return — FOURTEEN (the leading Fundamental cell is emitted above). An extra blank here
-          shifts every figure one column right, which is silent: a weight renders perfectly well
-          under "Ccy".
+      {/* ⚠ ONE CELL PER COLUMN. The table is Fund · ISIN · Class · Link · Sector · Region · Ccy
+          · Beginwaarde · Huidige waarde · Direct result · Div tax · <one weight> · Return —
+          THIRTEEN. (It was fourteen: a leading Fundamental column was removed 2026-08-04, one
+          cell from each of the four row shapes — thead, this header, the holdings and Total. Drop
+          one and not the others and every figure below shifts a column, silently: a weight
+          renders perfectly well under "Ccy".)
           ⚠ EXACTLY ONE WEIGHT COLUMN, and WHICH one is `basisKey`. All four rows — this header,
           the <thead>, the Total row and the holdings — gate on the same value, so a gate added to
           one and forgotten in another does not shift a column here; it puts this segment's figure
@@ -1297,28 +1267,6 @@ function SegmentHeader({ s, asOf, holdings, stats, altReturnPct, basisKey, onFun
   );
 }
 
-/** Leading-cell triggers for the per-instrument fundamentals + risk views. Only an instrument with
- *  an ISIN can be looked up — cash and unresolved lines have none, so they get a blank cell rather
- *  than dead buttons. */
-function FundamentalCell({ isin, name, onFundamental }: {
-  isin?: string | null; name?: string | null;
-  onFundamental: (v: ModalTarget) => void;
-}) {
-  if (!isin) return <td className="px-2 py-1.5" />;
-  const nm = name ?? isin;
-  const cls = 'text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap';
-  return (
-    <td className="px-2 py-1.5">
-      <div className="flex items-center gap-1">
-        <button type="button" onClick={() => onFundamental({ name: nm, isin })} className={cls}
-          title="Fundamental — is this company fundamentally good? (owner earnings + price steadiness)">
-          Fundamental
-        </button>
-      </div>
-    </td>
-  );
-}
-
 function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
   d?: AirsAccountDetail; i?: AirsAccountIsins;
   portefeuille?: string; onOverride?: (p: string) => void | Promise<void>;
@@ -1326,7 +1274,6 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
    *  non-admin sees each one's ANSWER as plain text and no control to change it. */
   canEdit?: boolean;
 }) {
-  const [fund, setFund] = useState<ModalTarget | null>(null);
   // Which column's weights the segment/Total returns are weighted by. "start" is the book’s own
   // return; everything else is a HYPOTHETICAL and the UI says so.
   const [basisKey, setBasisKey] = useState<WeightBasis>('start');
@@ -1496,7 +1443,6 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
         <table className="w-full text-xs whitespace-nowrap">
           <thead className="bg-card z-20 [&_th]:bg-card">
             <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
-              <th className="px-2 py-1.5 font-medium text-left" />{/* Fundamental */}
               <th className="px-3 py-1.5 font-medium text-left">Fund</th>
               <th className="px-3 py-1.5 font-medium text-left"
                 title="AIRS's own ISIN-code where the book carries one (exact), else matched by name to a Fixed portfolio position, else pinned by hand. Always price-checked against that instrument's own close. ⚠ = the price disagrees; ? = no series, so nothing cross-checks it.">
@@ -1569,7 +1515,6 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
           <tbody className="divide-y divide-neutral-800/20">
             {/* TOTAL — all weights summed and the value-weighted price return, at the top. */}
             <tr className="bg-overlay/[0.04] font-semibold border-b border-neutral-800/40">
-              <td className="px-2 py-1.5" />{/* Fundamental */}
               <td className="px-3 py-1.5 text-fg-strong" colSpan={7}>
                 Total · {all.length} holding{all.length === 1 ? '' : 's'}
                 <Provenance source="airs_volk" asOf={d.as_of} kind="formula" what="How many positions this account holds in total."
@@ -1667,21 +1612,16 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
               </td>
             </tr>
             {ordered.map(([seg, group]) => {
-              const groupHoldings = group
-                .map((r) => ({ isin: byName.get(r.holding_name)?.isin, weight: r.weight ?? 0, name: r.holding_name }))
-                .filter((h): h is { isin: string; weight: number; name: string } => !!h.isin);
               return (
               <Fragment key={seg?.asset_class ?? 'x'}>
-                {seg && <SegmentHeader s={seg} asOf={d.as_of} holdings={groupHoldings}
+                {seg && <SegmentHeader s={seg} asOf={d.as_of}
                   stats={groupStatsOf.get(seg.asset_class ?? 'rest')!}
                   altReturnPct={isHypothetical ? wrByGroup.get(seg.asset_class ?? 'rest')?.pct : null}
-                  basisKey={basisKey}
-                  onFundamental={setFund} />}
+                  basisKey={basisKey} />}
                 {group.map((r, n) => {
                   const g = byName.get(r.holding_name);
                   return (
               <tr key={`${r.holding_name}-${n}`} className="hover:bg-overlay/[0.02]">
-                <FundamentalCell isin={g?.isin} name={r.holding_name} onFundamental={setFund} />
                 <td className="px-3 py-1.5 text-fg-soft pl-6">
                   <span className="inline-block max-w-[24ch] truncate align-bottom"
                     title={r.holding_name}>{r.holding_name}</span>
@@ -1874,10 +1814,6 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
           </tbody>
         </table>
       </div>
-      {fund && (
-        <OwnerEarningsModal isin={fund.isin} basket={fund.basket} portfolioId={fund.portfolioId}
-          name={fund.name} onClose={() => setFund(null)} />
-      )}
     </div>
   );
 }
