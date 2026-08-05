@@ -113,6 +113,57 @@ class Ledger:
     days: int = 0
 
 
+# ⚠ REAL SPLIT RATIOS ONLY, exactly as `_benchmark_index._split_adjust` does it. "Any small
+# rational n/d" is dense enough to sit within a few percent of anything and would "correct" a
+# genuine event into nothing; a whitelist cannot.
+SPLIT_RATIOS = (2, 3, 4, 5, 6, 8, 10, 15, 20)
+_RATIO_TOLERANCE = 0.01
+# How far a pre-event trade's price may sit from the 1-Jan price once the ratio is divided out.
+# ⚠ THIS IS THE TEST THAT SEPARATES A SPLIT FROM A TRANSFER, and it is not a fudge factor. On a
+# split, both prices are the same economic price in different unit bases, so the quotient is
+# 1 + whatever the stock did in between. On a TRANSFER-IN the prices share one basis while the
+# quantity ratio is 10, so the quotient is ~0.1 — the stock would have had to fall 90%.
+_MOVE_LO, _MOVE_HI = 0.5, 2.0
+
+
+def detect_split(qty_now: float, deposited_qty: float, opening_price: float,
+                 pre_event_prices: list[float]) -> float | None:
+    """The ratio a `Tt = D` row represents, or None if it cannot be shown to be a split.
+
+    ⚠ TWO INDEPENDENT COLUMNS MUST AGREE, WHICH IS WHY THIS IS A MEASUREMENT AND NOT A GUESS.
+    `D` is *Deponering* — a DEPOSIT of securities (AIRS's own page says so). A split produces one;
+    so does a transfer in from another custodian, and those need opposite handling: a split
+    rescales every earlier quantity, a transfer leaves them alone. So:
+
+      1. the QUANTITY ratio `qty_now / (qty_now − deposited)` must be a whitelisted split ratio;
+      2. every pre-event trade's PRICE ratio, divided by that same quantity ratio, must land in a
+         plausible price move.
+
+    Measured 2026-08-05 on KLA-Tencor, in two different books with different share counts:
+
+        BUS_Offensief   310 / (310 − 279) = 10.0000   implied move 1.074
+        AITopSelectie   410 / (410 − 369) = 10.0000   implied moves 1.000, 1.185
+
+    The 1.000 is the decisive one: a 5 January purchase at EXACTLY 10.0000× the 1 January price.
+    A stock does not move 0.00% in four days and independently happen to be 10× — that is one
+    price written in two unit bases, and the quantity column reached 10.0000 on its own.
+
+    ⚠ RETURNS None RATHER THAN A BEST GUESS. Both gates must pass; a deposit that is not
+    demonstrably a split leaves the position refused, which is what it was before this existed.
+    """
+    before = qty_now - deposited_qty
+    if before <= 0 or qty_now <= 0 or opening_price <= 0 or not pre_event_prices:
+        return None
+    ratio = qty_now / before
+    whole = min(SPLIT_RATIOS, key=lambda w: abs(w - ratio))
+    if abs(whole - ratio) / whole > _RATIO_TOLERANCE:
+        return None
+    if not all(_MOVE_LO <= (px / opening_price) / ratio <= _MOVE_HI
+               for px in pre_event_prices if px > 0):
+        return None
+    return ratio
+
+
 def _flow_weight(datum: str | None, start: date, end: date, days: int) -> float:
     """The fraction of the period a flow on `datum` was invested.
 
@@ -131,7 +182,8 @@ def _flow_weight(datum: str | None, start: date, end: date, days: int) -> float:
 
 def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, float],
                  beginvermogen: float | None, period_start: date, period_end: date,
-                 unknown_names: set[str] | None = None) -> Ledger:
+                 unknown_names: set[str] | None = None,
+                 splits: dict[str, float] | None = None) -> Ledger:
     """Every position the book touched, with its average capital and its contribution.
 
     `volk_rows` are `airs_holding` rows (holding_name, quantity, start_value_eur,
@@ -160,6 +212,9 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
     # withheld with a reason costs one cell; a figure quietly rescaled by a guessed ratio is the
     # kind nobody re-checks.
     unknown_action: set[str] = set(unknown_names or ())
+    # ⚠ A PROVEN ratio per name — see `detect_split`. Only names in here are rescaled; a deposit
+    # that could not be shown to be a split stays in `unknown_action` and stays refused.
+    splits = dict(splits or {})
 
     def pos(name: str) -> Position:
         return by_name.setdefault(name, Position(name=name))
@@ -197,7 +252,15 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
         cur = _f(r.get("current_value_eur"))
         if start and cur is not None:
             p.held_result_eur = round(cur - start, 2)
-        if name in unknown_action:
+        # ⚠ RESCALE, THEN DE-RESTATE. A proven split means every quantity traded BEFORE it is in
+        # the old basis; multiplying those by the ratio puts the whole position on today's basis,
+        # after which the ordinary de-restatement below is valid again. The EUR flows are untouched
+        # — money is unit-invariant, and only the share counts were ever ambiguous.
+        split = splits.get(name)
+        if split:
+            bought_qty[name] = bought_qty.get(name, 0.0) * split
+            sold_qty[name] = sold_qty.get(name, 0.0) * split
+        if name in unknown_action and not split:
             # ⚠ REFUSED, NOT ESTIMATED. Its share count moved for a reason we do not interpret, so
             # `qty_now − bought` subtracts quantities on two different bases. `None` propagates to
             # the UI as a blank cell with a reason; the euro columns beside it are unaffected,

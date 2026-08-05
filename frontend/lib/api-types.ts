@@ -1346,6 +1346,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/{portfolio_id}/holding-timing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Holding Timing
+         * @description Why one holding's `On money invested` differs from its `Return` — trade by trade.
+         *
+         *     `Return` erases your timing on purpose (it divides by AIRS's opening value restated to today's
+         *     quantity, so a share bought in June is still measured from January); `On money invested` is
+         *     driven by it. This decomposes the gap: what the position you held on 1 January would have made
+         *     untouched, and what each buy and sell added or cost against that.
+         */
+        get: operations["airs_holding_timing_api_airs_model_portfolios__portfolio_id__holding_timing_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios/{portfolio_id}/link": {
         parameters: {
             query?: never;
@@ -9498,6 +9523,136 @@ export interface components {
             /** Target Pct */
             target_pct: number;
         };
+        /**
+         * HoldingTiming
+         * @description One held position's year: what doing nothing would have made, and what each trade changed.
+         *
+         *     ⚠ THE IDENTITY IS EXACT AND IS ASSERTED: `buy_hold_eur + timing_eur == actual_eur`. Measured
+         *     2026-08-05, residual 0.00 on every position tried. Three lines that do not add up are not a
+         *     decomposition, and `reconciles` is how the UI knows not to present them as one.
+         *
+         *     ⚠⚠ `actual_eur` IS THE ECONOMIC RESULT AND IS NOT THE TABLE'S `Result` COLUMN. That column is
+         *     AIRS's restated figure — `Huidige waarde − Beginwaarde`, where Beginwaarde prices TODAY's share
+         *     count at the 1 January price, valuing shares bought later at January's price rather than what
+         *     was paid. `restatement_eur` is the difference, named rather than left for a reader to find.
+         */
+        HoldingTiming: {
+            /**
+             * Actual Eur
+             * @default 0
+             */
+            actual_eur?: number;
+            /** Actual Pct */
+            actual_pct?: number | null;
+            /** Airs Result Eur */
+            airs_result_eur?: number | null;
+            /**
+             * Available
+             * @default false
+             */
+            available?: boolean;
+            /**
+             * Buy Hold Eur
+             * @default 0
+             */
+            buy_hold_eur?: number;
+            /** Buy Hold Pct */
+            buy_hold_pct?: number | null;
+            /**
+             * Income Eur
+             * @default 0
+             */
+            income_eur?: number;
+            /** Name */
+            name: string;
+            /** Note */
+            note?: string | null;
+            /** Open Value Eur */
+            open_value_eur?: number | null;
+            /** Period End */
+            period_end?: string | null;
+            /** Period Start */
+            period_start?: string | null;
+            /** Portefeuille */
+            portefeuille?: string | null;
+            /**
+             * Price Now Eur
+             * @default 0
+             */
+            price_now_eur?: number;
+            /**
+             * Price Open Eur
+             * @default 0
+             */
+            price_open_eur?: number;
+            /**
+             * Qty Now
+             * @default 0
+             */
+            qty_now?: number;
+            /**
+             * Qty Open
+             * @default 0
+             */
+            qty_open?: number;
+            /**
+             * Reconciles
+             * @default false
+             */
+            reconciles?: boolean;
+            /**
+             * Residual Eur
+             * @default 0
+             */
+            residual_eur?: number;
+            /** Restatement Eur */
+            restatement_eur?: number | null;
+            /** Split Ratio */
+            split_ratio?: number | null;
+            /**
+             * Timing Eur
+             * @default 0
+             */
+            timing_eur?: number;
+            /** Timing Pp */
+            timing_pp?: number | null;
+            /**
+             * Trades
+             * @default []
+             */
+            trades?: components["schemas"]["HoldingTradeEffect"][];
+        };
+        /**
+         * HoldingTradeEffect
+         * @description One decision, and what it was worth against not having made it.
+         *
+         *     ⚠ AGAINST DOING NOTHING, NOT AGAINST A PERFECT DECISION. A buy gains if the price rose after
+         *     it; a sell gains if the price fell after it. A lucky call and a good one produce the same
+         *     number — this makes no claim about skill.
+         */
+        HoldingTradeEffect: {
+            /** Amount Eur */
+            amount_eur: number;
+            /** Datum */
+            datum?: string | null;
+            /** Effect Eur */
+            effect_eur: number;
+            /** Effect Pp */
+            effect_pp?: number | null;
+            /** Kind */
+            kind: string;
+            /** Move Pct */
+            move_pct?: number | null;
+            /** Price Eur */
+            price_eur: number;
+            /** Quantity */
+            quantity: number;
+            /**
+             * Rescaled
+             * @default false
+             */
+            rescaled?: boolean;
+        };
         /** ImpersonateRequest */
         ImpersonateRequest: {
             /** Target User Id */
@@ -13083,6 +13238,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_holding_timing_api_airs_model_portfolios__portfolio_id__holding_timing_get: {
+        parameters: {
+            query: {
+                name: string;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HoldingTiming"];
                 };
             };
             /** @description Validation Error */

@@ -1408,9 +1408,42 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
     # 170, and the money-weighted return read +39.81% instead of +56.67%.
     unknown = {r.get("Fonds") for r in sheet.rows
                if r.get("Fonds") and r.get("Tt") not in ("A", "V")}
+    unknown = {n for n in unknown if isinstance(n, str)}
+
+    # ⚠ A DEPOSIT THAT CAN BE PROVEN A SPLIT IS RESCALED; ONE THAT CANNOT IS STILL REFUSED.
+    # `detect_split` needs two things this loader has and the ledger does not: the deposited
+    # quantity, and the per-share prices of the trades that happened BEFORE it. See its docstring
+    # for why both columns must agree before anything is rescaled.
+    from airs_capital import detect_split  # noqa: PLC0415
+
+    by_name = {r.get("holding_name"): r for r in volk if r.get("holding_name")}
+    splits: dict[str, float] = {}
+    for name in unknown:
+        v = by_name.get(name) or {}
+        qty = float(v.get("quantity") or 0)
+        start_val = float(v.get("start_value_eur") or 0)
+        if qty <= 0 or start_val <= 0:
+            continue
+        events = [r for r in sheet.rows
+                  if r.get("Fonds") == name and r.get("Tt") not in ("A", "V")]
+        deposited = sum(float(r.get("Aantal") or 0) for r in events)
+        first = min((r.get("Datum") for r in events if r.get("Datum")), default=None)
+        prices = [abs(float(r.get("Waarde  EUR") or r.get("Waarde  EUR.1") or 0))
+                  / float(r["Aantal"])
+                  for r in sheet.rows
+                  if r.get("Fonds") == name and r.get("Tt") in ("A", "V")
+                  and float(r.get("Aantal") or 0) > 0
+                  and (not first or (r.get("Datum") or "") < first)]
+        ratio = detect_split(qty, deposited, start_val / qty, prices)
+        if ratio:
+            splits[name] = ratio
+    if splits:
+        _log.warning("[analysis] %s: proven split(s) rescaled — %s", portefeuille,
+                     ", ".join(f"{k} {v:.4f}:1" for k, v in splits.items()))
+
     led = build_ledger(volk, trades(sheet), income, rec.get("book_start_eur"),
                        _date.fromisoformat(van), _date.fromisoformat(tot),
-                       unknown_names={n for n in unknown if isinstance(n, str)})
+                       unknown_names=unknown, splits=splits)
     return {
         "positions": [{
             "name": p.name,

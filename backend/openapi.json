@@ -6072,6 +6072,276 @@
         "title": "HoldingStateInfo",
         "type": "object"
       },
+      "HoldingTiming": {
+        "description": "One held position's year: what doing nothing would have made, and what each trade changed.\n\n\u26a0 THE IDENTITY IS EXACT AND IS ASSERTED: `buy_hold_eur + timing_eur == actual_eur`. Measured\n2026-08-05, residual 0.00 on every position tried. Three lines that do not add up are not a\ndecomposition, and `reconciles` is how the UI knows not to present them as one.\n\n\u26a0\u26a0 `actual_eur` IS THE ECONOMIC RESULT AND IS NOT THE TABLE'S `Result` COLUMN. That column is\nAIRS's restated figure \u2014 `Huidige waarde \u2212 Beginwaarde`, where Beginwaarde prices TODAY's share\ncount at the 1 January price, valuing shares bought later at January's price rather than what\nwas paid. `restatement_eur` is the difference, named rather than left for a reader to find.",
+        "properties": {
+          "actual_eur": {
+            "default": 0.0,
+            "title": "Actual Eur",
+            "type": "number"
+          },
+          "actual_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Pct"
+          },
+          "airs_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Airs Result Eur"
+          },
+          "available": {
+            "default": false,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "buy_hold_eur": {
+            "default": 0.0,
+            "title": "Buy Hold Eur",
+            "type": "number"
+          },
+          "buy_hold_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buy Hold Pct"
+          },
+          "income_eur": {
+            "default": 0.0,
+            "title": "Income Eur",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "open_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Value Eur"
+          },
+          "period_end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period End"
+          },
+          "period_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period Start"
+          },
+          "portefeuille": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portefeuille"
+          },
+          "price_now_eur": {
+            "default": 0.0,
+            "title": "Price Now Eur",
+            "type": "number"
+          },
+          "price_open_eur": {
+            "default": 0.0,
+            "title": "Price Open Eur",
+            "type": "number"
+          },
+          "qty_now": {
+            "default": 0.0,
+            "title": "Qty Now",
+            "type": "number"
+          },
+          "qty_open": {
+            "default": 0.0,
+            "title": "Qty Open",
+            "type": "number"
+          },
+          "reconciles": {
+            "default": false,
+            "title": "Reconciles",
+            "type": "boolean"
+          },
+          "residual_eur": {
+            "default": 0.0,
+            "title": "Residual Eur",
+            "type": "number"
+          },
+          "restatement_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restatement Eur"
+          },
+          "split_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Split Ratio"
+          },
+          "timing_eur": {
+            "default": 0.0,
+            "title": "Timing Eur",
+            "type": "number"
+          },
+          "timing_pp": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timing Pp"
+          },
+          "trades": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HoldingTradeEffect"
+            },
+            "title": "Trades",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "HoldingTiming",
+        "type": "object"
+      },
+      "HoldingTradeEffect": {
+        "description": "One decision, and what it was worth against not having made it.\n\n\u26a0 AGAINST DOING NOTHING, NOT AGAINST A PERFECT DECISION. A buy gains if the price rose after\nit; a sell gains if the price fell after it. A lucky call and a good one produce the same\nnumber \u2014 this makes no claim about skill.",
+        "properties": {
+          "amount_eur": {
+            "title": "Amount Eur",
+            "type": "number"
+          },
+          "datum": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datum"
+          },
+          "effect_eur": {
+            "title": "Effect Eur",
+            "type": "number"
+          },
+          "effect_pp": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effect Pp"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "move_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Move Pct"
+          },
+          "price_eur": {
+            "title": "Price Eur",
+            "type": "number"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "number"
+          },
+          "rescaled": {
+            "default": false,
+            "title": "Rescaled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "quantity",
+          "price_eur",
+          "amount_eur",
+          "effect_eur"
+        ],
+        "title": "HoldingTradeEffect",
+        "type": "object"
+      },
       "ImpersonateRequest": {
         "properties": {
           "target_user_id": {
@@ -14044,6 +14314,58 @@
           }
         },
         "summary": "Airs Set Portfolio Display Name",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/{portfolio_id}/holding-timing": {
+      "get": {
+        "description": "Why one holding's `On money invested` differs from its `Return` \u2014 trade by trade.\n\n`Return` erases your timing on purpose (it divides by AIRS's opening value restated to today's\nquantity, so a share bought in June is still measured from January); `On money invested` is\ndriven by it. This decomposes the gap: what the position you held on 1 January would have made\nuntouched, and what each buy and sell added or cost against that.",
+        "operationId": "airs_holding_timing_api_airs_model_portfolios__portfolio_id__holding_timing_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldingTiming"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Holding Timing",
         "tags": [
           "airs"
         ]

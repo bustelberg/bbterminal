@@ -289,16 +289,10 @@ function BucketNames({ row, bucket, benchmark }: {
 }
 
 export default function AttributionPanel({ id, benchmark, window, source = 'model',
-  portfolioAsOf, benchmarkAsOf, realisedSharePct, onClose }: {
+  portfolioAsOf, benchmarkAsOf, onClose }: {
   id: number; benchmark: string; window: 'ytd' | 'since';
   source?: 'model' | 'book';
   portfolioAsOf?: string | null; benchmarkAsOf?: string | null;
-  /** ⚠ HOW MUCH OF THE YEAR HAPPENED IN POSITIONS SINCE SOLD — and is therefore ABSENT from every
-   *  number in this panel. Brinson is `(w_p − w_b)(…)`: definitionally weight-based, and a sold
-   *  position has no recoverable opening weight, so it cannot be included. Same class of
-   *  distortion as `unpriced_pct` below, and larger — measured 22.5% on one book against a
-   *  typical unpriced share of a few points. Stated, never quietly omitted. */
-  realisedSharePct?: number | null;
   onClose: () => void;
 }) {
   const [axis, setAxis] = useState<Axis>('sector');
@@ -395,72 +389,19 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
             </p>
           )}
 
-          {/* ⚠ THE TWO "EXCESS" FIGURES ON THIS SCREEN ARE DIFFERENT QUANTITIES, AND SAYING SO IS
-              THE ONLY THING THAT MAKES EITHER READABLE. The tile one click away shows the
-              ACCOUNT's excess — AIRS's own flow-aware return, cash included, carrying dividends
-              from positions closed during the year. This table decomposes the ATTRIBUTABLE
-              SLEEVE: the holdings that have a sector at all, renormalised once cash and funds
-              come out (cash has no sector; leaving it in would score holding cash as a sector
-              bet). Measured on AITopSelectie OFF DYN against the same benchmark: +24.26pp on the
-              tile, +23.39pp here. Neither is wrong; presenting them as one number, in one word,
-              one click apart, was. */}
-          {data.unattributed_excess_pct != null
-            && Math.abs(data.unattributed_excess_pct) > 0.005 && (
-            <p className="text-[11px] text-fg-faint mb-2">
-              {'This table explains '}
-              <span className="font-mono text-fg-muted">{pp(data.excess_pct)}</span>
-              {' of the account’s '}
-              <span className="font-mono text-fg-muted">{pp(data.account_excess_pct)}</span>
-              {' excess. The remaining '}
-              <span className="font-mono text-fg-muted">{pp(data.unattributed_excess_pct)}</span>
-              {' is cash, income on positions closed during the year, and the account’s own '
-                + 'flows — real return with no '}
-              {AXIS_WORD[axis] ?? 'bucket'}
-              {' to attribute it to.'}
-            </p>
-          )}
-
-          {/* ⚠⚠ A SOLD POSITION IS THE SAME FALSE FINDING AS AN UNPRICED ONE, CAUSED BY TIME
-              RATHER THAN BY PRICING — its sector reads as UNOWNED here, so a sector the book
-              traded out of entirely is credited or blamed for an allocation call it never made.
-              It cannot be fixed by adding the sold names: an allocation effect needs an opening
-              weight, and a sold parcel has none that is recoverable. Placed ABOVE the unpriced
-              note because it is the larger of the two. */}
-          {(realisedSharePct ?? 0) >= 1 && (
-            <p className="text-[11px] text-warn-300 mb-2">
-              {'⚠ '}
-              <span className="font-mono">{(realisedSharePct ?? 0).toFixed(0)}%</span>
-              {' of this book’s year happened in positions it has since SOLD. They carry no '
-                + 'opening weight, so none of them is in this table — a sector traded out of '
-                + 'entirely reads here as one that was never owned, which is a false finding, not '
-                + 'a missing one. The sold names are itemised under Holdings.'}
-            </p>
-          )}
-
-          {/* ⚠ An UNPRICED holding makes its sector read as UNOWNED, so the allocation effect on
-              that row is a FALSE finding — not a missing one. Name the rows to discount. */}
-          {(data.unpriced_pct ?? 0) > 0.05 && (
-            <p className="text-[11px] text-warn-300 mb-2">
-              {'⚠ '}
-              <span className="font-mono">{(data.unpriced_pct ?? 0).toFixed(0)}%</span>
-              {' of this model is a holding we cannot price ('}
-              {(data.unpriced_buckets ?? []).join(', ')}
-              {`). Those sectors read as unowned below, so their allocation effect there is a false `}
-              {'finding — discount those rows.'}
-            </p>
-          )}
-
-          {/* ⚠ Shown only when something IS excluded. At full coverage the old line read
-              "Explains 100% of the model. 0% is excluded", spending three clauses to say
-              nothing was left out — a caveat that fires when it does not apply trains a
-              reader to skip it, which is exactly when it needs to be read. */}
-          {(data.excluded_pct ?? 0) >= 0.5 && (
-            <p className="text-xs text-fg-faint mb-3">
-              {'Excludes '}
-              <span className="font-mono">{(data.excluded_pct ?? 0).toFixed(0)}%</span>
-              {' of the model (funds and cash).'}
-            </p>
-          )}
+          {/* ⚠ NO COVERAGE NOTES HERE — ALL FOUR REMOVED ON REQUEST 2026-08-05, not overlooked.
+              What they said is still true and the fields are still in the payload:
+                • `unattributed_excess_pct` — this table decomposes the ATTRIBUTABLE SLEEVE, not
+                  the account: cash, income on positions closed during the year and the account’s
+                  own flows are real return with no bucket to attribute them to.
+                • the SOLD share — a position sold out has no opening weight, so a sector traded
+                  out of entirely reads here as one that was never owned. A FALSE finding, not a
+                  missing one.
+                • `unpriced_pct` — the same false finding from a different cause.
+                • `excluded_pct` — funds and cash, correctly out (a fund has no sector).
+              Every one of those is still computed and still on the wire; none of them is on
+              screen. Read a row here as a statement about the sleeve that COULD be attributed,
+              never about the account. */}
 
           {/* ⚠ NO FORMULA STRIP HERE. Each effect's arithmetic lives in its OWN column header's
               info icon (`Th prov` → `Provenance how`), stated in the SAME WORDS the headers use

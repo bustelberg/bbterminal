@@ -1157,6 +1157,94 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
     return await compute_portfolio_analysis_async(portfolio_id, benchmark, basis, src, bucket_filter)
 
 
+class HoldingTradeEffect(BaseModel):
+    """One decision, and what it was worth against not having made it.
+
+    ⚠ AGAINST DOING NOTHING, NOT AGAINST A PERFECT DECISION. A buy gains if the price rose after
+    it; a sell gains if the price fell after it. A lucky call and a good one produce the same
+    number — this makes no claim about skill.
+    """
+
+    datum: str | None = None
+    kind: str
+    quantity: float          # in TODAY's share basis
+    price_eur: float         # per share, EUR, today's basis
+    amount_eur: float
+    effect_eur: float
+    # The effect per euro that changed hands — i.e. how far the price moved in your favour since
+    # the decision. Says how GOOD it was, and nothing about whether it mattered.
+    move_pct: float | None = None
+    # The effect over the position's value on 1 January — how MUCH it mattered. Null where nothing
+    # was held at the open, since there is no base to be a share of.
+    effect_pp: float | None = None
+    # The trade was in a pre-split basis and had to be converted before it could be compared.
+    rescaled: bool = False
+
+
+class HoldingTiming(BaseModel):
+    """One held position's year: what doing nothing would have made, and what each trade changed.
+
+    ⚠ THE IDENTITY IS EXACT AND IS ASSERTED: `buy_hold_eur + timing_eur == actual_eur`. Measured
+    2026-08-05, residual 0.00 on every position tried. Three lines that do not add up are not a
+    decomposition, and `reconciles` is how the UI knows not to present them as one.
+
+    ⚠⚠ `actual_eur` IS THE ECONOMIC RESULT AND IS NOT THE TABLE'S `Result` COLUMN. That column is
+    AIRS's restated figure — `Huidige waarde − Beginwaarde`, where Beginwaarde prices TODAY's share
+    count at the 1 January price, valuing shares bought later at January's price rather than what
+    was paid. `restatement_eur` is the difference, named rather than left for a reader to find.
+    """
+
+    available: bool = False
+    name: str
+    portefeuille: str | None = None
+    note: str | None = None
+    qty_open: float = 0.0
+    qty_now: float = 0.0
+    price_open_eur: float = 0.0
+    price_now_eur: float = 0.0
+    buy_hold_eur: float = 0.0
+    timing_eur: float = 0.0
+    actual_eur: float = 0.0
+    # ── The same three lines in percent, over ONE base: what the position held on 1 January was
+    #    worth. Because it is one base the identity survives the division —
+    #    `buy_hold_pct + timing_pp == actual_pct`. Null where nothing was held at the open.
+    #    ⚠ `actual_pct` is NOT the `On money invested` column: that is Modified Dietz over the
+    #    TIME-WEIGHTED average capital, a different denominator.
+    open_value_eur: float | None = None
+    buy_hold_pct: float | None = None
+    timing_pp: float | None = None
+    actual_pct: float | None = None
+    residual_eur: float = 0.0
+    reconciles: bool = False
+    airs_result_eur: float | None = None
+    restatement_eur: float | None = None
+    income_eur: float = 0.0
+    # The proven split ratio applied to the pre-event trades, or null if there was none.
+    split_ratio: float | None = None
+    # The window every figure here is measured over — carried so a timeline can place each
+    # decision on a real axis rather than one inferred from the trades themselves.
+    period_start: str | None = None
+    period_end: str | None = None
+    trades: list[HoldingTradeEffect] = []
+
+
+@router.get("/api/airs/model-portfolios/{portfolio_id}/holding-timing",
+            response_model=HoldingTiming)
+async def airs_holding_timing(portfolio_id: int, name: str):
+    """Why one holding's `On money invested` differs from its `Return` — trade by trade.
+
+    `Return` erases your timing on purpose (it divides by AIRS's opening value restated to today's
+    quantity, so a share bought in June is still measured from January); `On money invested` is
+    driven by it. This decomposes the gap: what the position you held on 1 January would have made
+    untouched, and what each buy and sell added or cost against that.
+    """
+    import asyncio  # noqa: PLC0415
+
+    from routers._airs_holding_timing import holding_timing  # noqa: PLC0415
+
+    return await asyncio.to_thread(holding_timing, portfolio_id, name)
+
+
 @router.get("/api/airs/model-portfolios/{portfolio_id}/risk-windows",
             response_model=PerformanceResponse)
 async def airs_model_portfolio_risk_windows(portfolio_id: int):

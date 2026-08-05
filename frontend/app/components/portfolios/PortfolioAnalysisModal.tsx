@@ -11,6 +11,7 @@ import { Provenance } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
+import HoldingTimingModal from './HoldingTimingModal';
 import BucketDetailPanel from './BucketDetailPanel';
 import CompositionDataModal from './CompositionDataModal';
 import OwnerEarningsModal from './OwnerEarningsModal';
@@ -549,31 +550,6 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
 
 type BookHolding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
 
-/** HOW MUCH OF THE YEAR THE WEIGHT-BASED VIEWS CANNOT SEE — the Sector / Region / Currency bars
- *  and the Brinson table beneath them.
- *
- *  ⚠ SHOWN ONLY WHEN IT IS MATERIAL (≥1% of the year's movement). A permanent banner on every
- *  portfolio is furniture; a reader stops reading it, and it is then worth nothing on the book
- *  where it matters. Below 1pp the omission cannot change a sector's verdict.
- *
- *  ⚠ THE SHARE IS OF THE ABSOLUTE movement, not the net. A realised −28,656 against a held
- *  +75,164 is not "negative coverage" — the question is how much happened outside these charts,
- *  and a loss counts as much as a gain. */
-function RealisedCoverageNote({ r }: { r?: ModelPortfolioAnalysis['realised'] }) {
-  const share = r?.available ? r.realised_share_of_result_pct : null;
-  if (share == null || share < 1) return null;
-  return (
-    <p className="text-[11px] text-warn-500 mb-3">
-      ⚠ <span className="font-mono">{share.toFixed(0)}%</span>
-      {' of this book’s year happened in positions it has since SOLD, and these charts cannot show '
-        + 'them: they are weighted by what each position was worth when the year opened, and a sold '
-        + 'position’s opening weight cannot be recovered from AIRS’s data. The bars and the '
-        + 'attribution below therefore describe only what is still held — a sector traded out of '
-        + 'entirely reads as one that was never owned. The sold names and what each contributed are '
-        + 'itemised under Holdings.'}
-    </p>
-  );
-}
 
 /** THE WHOLE PORTFOLIO, one row per instrument, grouped by asset class — what the reader sees
  *  before picking a class. Every long position is here, counted AFTER the certificates are looked
@@ -661,7 +637,14 @@ type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution';
  * when one of two groups that both need it is switched off — a question with no good answer, and
  * one this shape never has to ask.
  *
- * ⚠ NOTHING IS ON BY DEFAULT. The table opens at six columns, which fits a screen.
+ * ⚠ NOTHING IS ON BY DEFAULT. The table opens at seven columns — Name, Via, Sector, Weight
+ * (now), On money invested and Return, plus the row number — which fits a screen and answers
+ * what most visits are asking: what you hold, and what your money did with it.
+ *
+ * ⚠ TWO COLUMNS SIT OUTSIDE THE GROUPS AND ARE ALWAYS ON: `Return` and `On money invested`.
+ * They are the two ANSWERS; every group here is a DERIVATION, and a derivation with its answer
+ * hidden explains nothing. Ticking a group puts the chain on screen beside the figure it
+ * produces, which is the only arrangement in which a reader can check one against the other.
  */
 const COLUMN_GROUPS = [
   {
@@ -676,7 +659,10 @@ const COLUMN_GROUPS = [
     key: 'onmoney',
     label: 'How On money invested is built',
     hint: 'Result ÷ Avg capital invested',
-    cols: ['result', 'avgcapital', 'moneyweighted'],
+    // ⚠ `moneyweighted` itself is NOT here — like `Return`, that column is always on, and this
+    // group supplies the chain BEHIND it. Listing it would put a key in the union that nothing
+    // reads: harmless at runtime and a lie in the data, which is how the next reader gets misled.
+    cols: ['result', 'avgcapital'],
   },
   {
     key: 'contribution',
@@ -906,7 +892,7 @@ function FundamentalButton({ onOpen, title, className = '' }: {
   );
 }
 
-function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, onFundamental }: {
+function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, onTiming, onFundamental }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
   /** ⚠ THE POSITIONS THAT NO LONGER HAVE A ROW — sold out entirely during the year. They are the
    *  reason this table could not add up before: measured, 8 names and −2.38pp of one book's year,
@@ -918,6 +904,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
   /** WHY the table is empty, from the server (`book_note`) — three different faults used to
    *  render as one sentence, next to a portfolios list that visibly has rows. */
   note?: string | null;
+  /** Opens the per-holding timing popup. Null on an ad-hoc basket, which has no book to trade.
+   *  ⚠ Only a HELD row can open it: 'what would doing nothing have made' needs a position that
+   *  still exists to hold. */
+  onTiming?: (name: string) => void;
   /** THIS book's own account name. A Return whose `own_return_book` differs came from the book
    *  behind a certificate, and this is the only thing that tells the two apart. */
   bookName?: string | null;
@@ -1234,7 +1224,6 @@ ${eur0n(grand.unrealised)} + ${eur0n(grand.realised)} + ${eur0n(grand.income)} =
 ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contribution)}`} />
               </th>
 )}
-{show('moneyweighted') && (
               <th className="text-right w-32 py-2 font-medium">
                 On money invested
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
@@ -1244,7 +1233,6 @@ ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contributi
 
 ${eur0n(grand.result)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`} />
               </th>
-)}
               <th className={`text-right w-28 pr-4 ${th}`} onClick={() => click('return')}>
                 Return{caret('return')}
                 {/* ⚠ `airs_volk`, NOT `yfinance`. This header claimed yfinance while the rows
@@ -1343,7 +1331,6 @@ ${num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}
 ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%'} (${eur0n(g.ret.startEur)} of ${eur0n(realised?.basis_eur)}) = ${ppt(g.sum.contribution)}`} />
                 </td>
                 )}
-                {show('moneyweighted') && (
                 <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.mwr)}`}>
                   {fmtRet(g.sum.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -1353,7 +1340,6 @@ ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%
 
 ${eur0n(g.sum.mwrResult)} ÷ ${eur0n(g.sum.avgcapital)} = ${fmtRet(g.sum.mwr)}${g.sum.mwrRows < g.rows.length ? ` (over the ${g.sum.mwrRows} of ${g.rows.length} holdings the book buys and sells itself — the rest sit inside certificates and have no flows of their own)` : ''}`} />
                 </td>
-                )}
                 {/* ⚠ THE COLUMN BELOW, AGGREGATED — NOT THE BOOK'S VALUE CHANGE, and not the
                     Weight (now) column times the returns. A dash where nothing in the class had
                     both an opening weight and a return; a 0.00% there would claim the class went
@@ -1398,7 +1384,10 @@ ${eur0n(g.ret.resultEur)} ÷ ${eur0n(g.ret.startEur)} = ${fmtRet(g.ret.pct)}`} /
               </tr>
               {[...g.rows].sort(cmp).map((h, i) => (
                 <tr key={h.isin ?? `${g.bucket}-${h.name ?? i}`}
-                  className="group border-b border-neutral-800/[0.15] last:border-0 hover:bg-overlay/[0.03] transition-colors">
+                  onClick={onTiming && h.name ? () => onTiming(h.name!) : undefined}
+                  title={onTiming && h.name ? `Why the trading mattered for ${h.name}` : undefined}
+                  className={`group border-b border-neutral-800/[0.15] last:border-0 transition-colors ${
+                    onTiming && h.name ? 'cursor-pointer hover:bg-accent-500/[0.07]' : 'hover:bg-overlay/[0.03]'}`}>
                   <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[10px] text-fg-faint tabular-nums">{i + 1}</td>
                   {/* ⚠ IN THE NAME CELL, NOT A NEW COLUMN. The header's colSpans are counted by
                       hand across four places in this table (group row, thead, body, tfoot); a
@@ -1475,7 +1464,6 @@ ${eur0n(h.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(h.contribution_p
 no result — this position could not be valued at both ends of the window, so there is nothing to divide`} />
                   </td>
                   )}
-                  {show('moneyweighted') && (
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.money_weighted_return_pct)}`}>
                     {fmtRet(h.money_weighted_return_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -1495,7 +1483,6 @@ refused — shares were DEPOSITED into this position during the year (AIRS books
 
 no denominator — this position is reached through a certificate, and AIRS trades the certificate rather than what is inside it, so it has no purchases of its own.`} />
                   </td>
-                  )}
                   {/* An unpriced position shows a dash, never 0% — "we could not price this over
                       the window" and "it did not move" are different facts and a 0 states the
                       wrong one. An interpolated opening mark is flagged per value, because that
@@ -1614,7 +1601,6 @@ ${bookMath(h) ?? (h.own_income_eur ? `(Huidige waarde + ${eur0(h.own_income_eur)
 ${eur0n(soldSum.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(soldSum.contribution)}`} />
                 </td>
                 )}
-                {show('moneyweighted') && (
                 <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.mwr)}`}>
                   {fmtRet(soldSum.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -1624,7 +1610,6 @@ ${eur0n(soldSum.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(soldSum.contri
 
 ${eur0n(soldSum.mwrResult)} ÷ ${eur0n(soldCap)} = ${fmtRet(soldSum.mwr)}`} />
                 </td>
-                )}
                 <td className="pr-4" />
               </tr>
               {sold.map((p, i) => (
@@ -1664,7 +1649,6 @@ ${eur0n(soldSum.mwrResult)} ÷ ${eur0n(soldCap)} = ${fmtRet(soldSum.mwr)}`} />
 ${eur0n(p.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(p.contribution_pct)}`} />
                   </td>
                   )}
-                  {show('moneyweighted') && (
                   <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.return_pct)}`}>
                     {fmtRet(p.return_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -1674,7 +1658,6 @@ ${eur0n(p.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(p.contribution_p
 
 ${eur0n(p.result_eur)} ÷ ${eur0n(p.avg_capital_eur)} = ${fmtRet(p.return_pct)}`} />
                   </td>
-                  )}
                   <td className="pr-4" />
                 </tr>
               ))}
@@ -1721,7 +1704,6 @@ ${eur0n(p.result_eur)} ÷ ${eur0n(p.avg_capital_eur)} = ${fmtRet(p.return_pct)}`
 ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contribution)}`} />
                 </td>
                 )}
-                {show('moneyweighted') && (
                 <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.mwr)}`}>
                   {fmtRet(grand.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -1731,7 +1713,6 @@ ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contributi
 
 ${eur0n(grand.mwrResult)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`} />
                 </td>
-                )}
                 <td className={`py-2 pr-4 text-right font-mono tabular-nums ${retTone(realised?.book_ytd_pct)}`}>
                   {fmtRet(realised?.book_ytd_pct)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -1994,6 +1975,9 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
   const [assetFilter, setAssetFilter] = useState<string | null>(null);
   /** The instrument or class whose Fundamental is open, over this modal. Null = closed. */
   const [fund, setFund] = useState<{ name: string; isin?: string; basket?: Basket } | null>(null);
+  // ⚠ The per-holding timing popup. Keyed by AIRS's own holding NAME, because that is what the
+  // Transacties sheet joins on — it carries no ISIN.
+  const [timingFor, setTimingFor] = useState<string | null>(null);
   const [data, setData] = useState<ModelPortfolioAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -2110,7 +2094,14 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
               {selected
                 ? (
                   <div className="self-center flex items-stretch gap-3">
-                    <SleeveTile bucket={selected} slices={data.allocation} />
+                    {/* ⚠ NOT ON STOCKS (removed on request 2026-08-05), which also restores this
+                        tile's own docstring: it exists for a NON-EQUITY sleeve, where
+                        `SleeveBreakdown` renders instead of the holdings table and this is the only
+                        place that class's return appears. On Stocks it sat above the sector charts
+                        duplicating a figure the Holdings view already carries on its class row. */}
+                    {selected !== EQUITY_BUCKET && (
+                      <SleeveTile bucket={selected} slices={data.allocation} />
+                    )}
                     {/* Attribution (Brinson) is an EQUITY analysis — offered ONLY on the Stocks
                         sleeve, never on a bond/cash/fund sleeve or the whole-portfolio view. Same
                         box size as the return tile (items-stretch + centred label). */}
@@ -2162,6 +2153,9 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
                 onFundamental={setFund}
                 note={data.book_note} bookName={data.book_portefeuille} realised={data.realised}
+                /* ⚠ Only when this modal is a real portfolio with a paired book. An ad-hoc
+                   basket has no account and therefore no trades to explain. */
+                onTiming={id && data.realised?.available ? setTimingFor : undefined}
                 /* ⚠ THE BOOK SNAPSHOT, NOT `data.as_of`. That field is the model COMPOSITION's
                    effective date (2025-12-30 for AITopSelectie) — a true fact about the weights
                    the model declares, and the wrong clock for figures the BOOK values, which are
@@ -2176,19 +2170,14 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                  Brinson attribution ("why", from the Attribution button) or a per-bucket drill-down
                  (from a bar) docked full-width below — mutually exclusive. */
               <>
-                {/* ⚠⚠ THESE VIEWS ARE WEIGHT-BASED, AND A SOLD POSITION HAS NO WEIGHT — so the
-                    bars and the attribution below describe only what is still held. That is not a
-                    rounding hole: measured on BUS_Offensief_Dyn, 22.5% of the year's movement was
-                    realised on sales and is absent from every figure in this section.
-                    ⚠ IT CANNOT BE FIXED BY ADDING THEM. A sold parcel's opening value is not
-                    recoverable from AIRS's data (`proceeds − Res. YtD` gives its cost basis, which
-                    for a February purchase is capital that did not exist on 1 January), and
-                    allocation effect is undefined without a start weight. Inventing one
-                    manufactures exactly the confident false finding this modal already documents —
-                    a model holding 6% Healthcare credited +1.73pp for "avoiding" it. So the hole
-                    is STATED, in the same idiom as `unpriced_pct` and `benchmark_coverage_pct`,
-                    and the sold names are itemised in the Holdings view instead. */}
-                <RealisedCoverageNote r={data.realised} />
+                {/* ⚠ NO COVERAGE BANNER HERE — REMOVED ON REQUEST 2026-08-05, not overlooked.
+                    These views are weight-based and a sold position has no weight, so the bars
+                    and the attribution below describe only what is still held (measured: 22.5%
+                    of one book’s year was realised on sales). That is still true and still
+                    unfixable — a sold parcel’s opening weight is not recoverable — but the
+                    warning sat above every chart on every portfolio and was not wanted. The
+                    same fact is on the Attribution panel, where the false finding actually
+                    bites, and the sold names are itemised under Holdings. */}
                 <div className="grid gap-4 lg:grid-cols-3">
                   {(data.axes ?? []).map((a) => (
                     <Chart key={a.axis} axis={a.axis} rows={a.rows}
@@ -2206,12 +2195,6 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                       <AttributionPanel id={id ?? 0} benchmark={data.benchmark ?? 'SP500'} window={why}
                         source={source} portfolioAsOf={data.returns?.portfolio_as_of}
                         benchmarkAsOf={data.returns?.benchmark_as_of}
-                        /* ⚠ The share of the year Brinson structurally cannot see — see the
-                           prop's own note. Only meaningful once the book's transactions have been
-                           read; undefined otherwise, which the panel renders as no notice rather
-                           than as a reassuring 0%. */
-                        realisedSharePct={data.realised?.available
-                          ? data.realised.realised_share_of_result_pct : null}
                         onClose={() => setWhy(null)} />
                     ) : bucket ? (
                       <BucketDetailPanel id={id ?? 0} benchmark={data.benchmark ?? 'SP500'}
@@ -2230,7 +2213,12 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
             modal underneath it too. The content box already stops propagation, so putting it here
             makes the two dismiss independently. It still paints over everything: the nested
             backdrop is `fixed inset-0`, which escapes this box's layout but not its event tree. */}
-        {fund && (
+        {/* ⚠ ABOVE this modal (z-[60] vs z-50) and stopping propagation, or a click inside it
+          closes the analysis behind it. */}
+      {timingFor && id && (
+        <HoldingTimingModal portfolioId={id} name={timingFor} onClose={() => setTimingFor(null)} />
+      )}
+      {fund && (
           <OwnerEarningsModal isin={fund.isin} basket={fund.basket} name={fund.name}
             onClose={() => setFund(null)} />
         )}

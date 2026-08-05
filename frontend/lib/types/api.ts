@@ -122,6 +122,9 @@ export type AirsAccountTransactions = components['schemas']['AirsAccountTransact
  *  ⚠ `realised_ytd_eur` of null is NOT zero: it means no Transacties sheet is cached, so the
  *  realised leg is unknown and there is no total to show. */
 export type AirsAccountReconciliation = components['schemas']['AirsAccountReconciliation'];
+/** One holding's year split into buy-and-hold + the effect of each trade. ⚠ `actual_eur` is the
+ *  ECONOMIC result and is not the table's `Result` column — see `restatement_eur`. */
+export type HoldingTiming = components['schemas']['HoldingTiming'];
 export type AirsHoldingSegment = components['schemas']['AirsHoldingSegment'];
 export type AirsHoldingIsin = components['schemas']['AirsHoldingIsin'];
 export type AirsAccountModelLink = components['schemas']['AirsAccountModelLink'];
