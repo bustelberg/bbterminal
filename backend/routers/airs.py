@@ -788,6 +788,27 @@ class BookHoldingDetail(BaseModel):
     weight_now_pct: float = 0.0
     weight_start_pct: float | None = None
     return_pct: float | None = None
+    # ── WHAT THIS POSITION ACTUALLY MADE, in euros, and its share of the book's year.
+    # ⚠ THESE ADD UP AND THE WEIGHTS DO NOT, which is why they exist. `unrealised + realised +
+    # income = result`, and Σ `contribution_pct` over every row — these plus the sold-out positions
+    # in `realised.positions` — IS the book's own return (measured: 0.0000pp residual).
+    #
+    # ⚠ A EURO AMOUNT MAY BE SPLIT ACROSS A CERTIFICATE'S LEGS; A PERCENTAGE MAY NOT. A
+    # looked-through row's `unrealised_eur` is its share of the certificate's value change — real
+    # money, really this row's share — while its `return_pct` would be the WRAPPER's rate, which is
+    # the documented lie (NVIDIA +0.08% against its own +2.82%). That is why the result columns are
+    # in euros and the Return column stays `own_return_pct`.
+    start_value_eur: float | None = None
+    current_value_eur: float | None = None
+    unrealised_eur: float | None = None
+    # ⚠ Only on a position TRIMMED but still held. A name sold out entirely has no row here at all
+    # — it is in `realised.positions` — and a looked-through leg is never sold on its own, because
+    # AIRS trades the certificate. Null, never 0: "nothing was sold" and "the sale broke even" are
+    # different facts.
+    realised_result_eur: float | None = None
+    income_eur: float | None = None
+    result_eur: float | None = None
+    contribution_pct: float | None = None
     # ⚠ THE INSTRUMENT'S OWN EUR RETURN — NOT `return_pct`, AND THE DIFFERENCE IS THE WHOLE POINT.
     # `return_pct` is the book's value change, and the book does not know what NVIDIA did: it knows
     # what the CERTIFICATE holding NVIDIA did. Splitting that certificate's start and current value
@@ -879,6 +900,43 @@ class RealisedContributionLeg(BaseModel):
     last: str | None = None
 
 
+class LedgerPosition(BaseModel):
+    """One instrument's whole year — whether the book still holds it or not.
+
+    ⚠ `contribution_pct` IS THE COLUMN THAT ADDS UP. Its sum over every position IS the book's own
+    YTD (measured exactly: 5.8267 against AIRS's 5.826704, and 44.4624 against 44.462408).
+    `weight_pct` is DESCRIPTIVE — how much of the year's capital this position occupied — so
+    `contribution ≈ weight × return` holds only approximately, and the identity the table asserts
+    is the contribution one.
+
+    ⚠ `return_pct` IS ON AVERAGE CAPITAL, NOT THE INSTRUMENT'S PRICE RETURN. A name bought in June
+    shows a larger percentage on the same euros than one held all year, because it answers "how
+    hard did this money work" rather than "what did the instrument do". The Holdings table's own
+    Return column is the other question and the two will differ.
+    """
+
+    name: str
+    held: bool = False
+    # ⚠ Decided by ABSENCE from the holdings, not by having sold — most sold names are trims.
+    closed_out: bool = False
+    # Value at the year's open. For a held row, `Beginwaarde` de-restated back to the quantity
+    # actually owned then; for a sold-out row, `proceeds − Res. YtD` scaled to the shares held at
+    # the open (AIRS does not publish its parcel matching, so that split is proportional).
+    opening_eur: float = 0.0
+    avg_capital_eur: float = 0.0
+    weight_pct: float | None = None
+    held_result_eur: float = 0.0
+    realised_result_eur: float = 0.0
+    income_eur: float = 0.0
+    result_eur: float = 0.0
+    contribution_pct: float | None = None
+    return_pct: float | None = None
+    sales: int = 0
+    first_sale: str | None = None
+    last_sale: str | None = None
+    prior_year_eur: float = 0.0
+
+
 class RealisedBlock(BaseModel):
     """What the paired book realised on sales this year — the leg the holdings table cannot show.
 
@@ -920,6 +978,20 @@ class RealisedBlock(BaseModel):
     # sector's verdict in an attribution built only on what is left.
     realised_share_of_result_pct: float | None = None
     legs: list[RealisedContributionLeg] = []
+
+    # ── EVERY POSITION THE BOOK TOUCHED, held and sold, in ONE list.
+    # ⚠ `weight_pct` is AVERAGE INVESTED CAPITAL (Modified Dietz), not a 1-January snapshot — the
+    # only weight a sold position can carry, and the only one that describes a book that changed
+    # during the year. AITopSelectie's equities were worth EUR 40,319 on 1 January against a
+    # EUR 1,000,000 opening capital (it began the year in cash and deployed on 5 January), so a
+    # start-weighted table would have called it 96% cash.
+    positions: list[LedgerPosition] = []
+    avg_capital_eur: float | None = None
+    # ⚠ Σ average capital ÷ `beginvermogen`. REPORTED, never assumed to be 1: Modified Dietz
+    # ignores the price path within a position and the de-restatement is its own approximation.
+    # Measured 0.980 (BUS_Offensief) and 1.023 (AITopSelectie).
+    capital_coverage_ratio: float | None = None
+    ledger_result_eur: float | None = None
 
 
 class ModelPortfolioAnalysis(BaseModel):

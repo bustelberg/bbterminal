@@ -8602,8 +8602,14 @@ export interface components {
         BookHoldingDetail: {
             /** Bucket */
             bucket: string;
+            /** Contribution Pct */
+            contribution_pct?: number | null;
             /** Currency */
             currency?: string | null;
+            /** Current Value Eur */
+            current_value_eur?: number | null;
+            /** Income Eur */
+            income_eur?: number | null;
             /** Isin */
             isin?: string | null;
             /** Name */
@@ -8625,6 +8631,10 @@ export interface components {
             own_return_pct?: number | null;
             /** Own Return Source */
             own_return_source?: string | null;
+            /** Realised Result Eur */
+            realised_result_eur?: number | null;
+            /** Result Eur */
+            result_eur?: number | null;
             /** Return Pct */
             return_pct?: number | null;
             /** Sector */
@@ -8634,6 +8644,10 @@ export interface components {
              * @default []
              */
             sources?: components["schemas"]["HoldingSource"][];
+            /** Start Value Eur */
+            start_value_eur?: number | null;
+            /** Unrealised Eur */
+            unrealised_eur?: number | null;
             /**
              * Via Names
              * @default []
@@ -9576,6 +9590,85 @@ export interface components {
             stale_days?: number;
             /** Symbol */
             symbol?: string | null;
+        };
+        /**
+         * LedgerPosition
+         * @description One instrument's whole year — whether the book still holds it or not.
+         *
+         *     ⚠ `contribution_pct` IS THE COLUMN THAT ADDS UP. Its sum over every position IS the book's own
+         *     YTD (measured exactly: 5.8267 against AIRS's 5.826704, and 44.4624 against 44.462408).
+         *     `weight_pct` is DESCRIPTIVE — how much of the year's capital this position occupied — so
+         *     `contribution ≈ weight × return` holds only approximately, and the identity the table asserts
+         *     is the contribution one.
+         *
+         *     ⚠ `return_pct` IS ON AVERAGE CAPITAL, NOT THE INSTRUMENT'S PRICE RETURN. A name bought in June
+         *     shows a larger percentage on the same euros than one held all year, because it answers "how
+         *     hard did this money work" rather than "what did the instrument do". The Holdings table's own
+         *     Return column is the other question and the two will differ.
+         */
+        LedgerPosition: {
+            /**
+             * Avg Capital Eur
+             * @default 0
+             */
+            avg_capital_eur?: number;
+            /**
+             * Closed Out
+             * @default false
+             */
+            closed_out?: boolean;
+            /** Contribution Pct */
+            contribution_pct?: number | null;
+            /** First Sale */
+            first_sale?: string | null;
+            /**
+             * Held
+             * @default false
+             */
+            held?: boolean;
+            /**
+             * Held Result Eur
+             * @default 0
+             */
+            held_result_eur?: number;
+            /**
+             * Income Eur
+             * @default 0
+             */
+            income_eur?: number;
+            /** Last Sale */
+            last_sale?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Opening Eur
+             * @default 0
+             */
+            opening_eur?: number;
+            /**
+             * Prior Year Eur
+             * @default 0
+             */
+            prior_year_eur?: number;
+            /**
+             * Realised Result Eur
+             * @default 0
+             */
+            realised_result_eur?: number;
+            /**
+             * Result Eur
+             * @default 0
+             */
+            result_eur?: number;
+            /** Return Pct */
+            return_pct?: number | null;
+            /**
+             * Sales
+             * @default 0
+             */
+            sales?: number;
+            /** Weight Pct */
+            weight_pct?: number | null;
         };
         /** LinkableContext */
         LinkableContext: {
@@ -10613,12 +10706,16 @@ export interface components {
              * @default false
              */
             available?: boolean;
+            /** Avg Capital Eur */
+            avg_capital_eur?: number | null;
             /** Basis Eur */
             basis_eur?: number | null;
             /** Book As Of */
             book_as_of?: string | null;
             /** Book Ytd Pct */
             book_ytd_pct?: number | null;
+            /** Capital Coverage Ratio */
+            capital_coverage_ratio?: number | null;
             /** Comparable */
             comparable?: boolean | null;
             /** Dates Aligned */
@@ -10629,6 +10726,8 @@ export interface components {
             held_pct?: number | null;
             /** Holdings As Of */
             holdings_as_of?: string | null;
+            /** Ledger Result Eur */
+            ledger_result_eur?: number | null;
             /**
              * Legs
              * @default []
@@ -10638,6 +10737,11 @@ export interface components {
             note?: string | null;
             /** Portefeuille */
             portefeuille?: string | null;
+            /**
+             * Positions
+             * @default []
+             */
+            positions?: components["schemas"]["LedgerPosition"][];
             /** Realised Eur */
             realised_eur?: number | null;
             /** Realised Pct */

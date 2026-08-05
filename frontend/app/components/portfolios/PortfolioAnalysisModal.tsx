@@ -5,13 +5,12 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { formatPct, visibleBuckets } from './composition';
-import { allocColor, bucketLabel } from './allocationColors';
+import { allocColor, bucketLabel, CASH_BUCKET } from './allocationColors';
 import { classWeightedReturn } from './classReturn';
 import { Provenance } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
-import RealisedPanel from './RealisedPanel';
 import BucketDetailPanel from './BucketDetailPanel';
 import CompositionDataModal from './CompositionDataModal';
 import OwnerEarningsModal from './OwnerEarningsModal';
@@ -616,7 +615,44 @@ function RealisedCoverageNote({ r }: { r?: ModelPortfolioAnalysis['realised'] })
  *  denominator, so the class reads as though that weight behaved exactly like the rest — the same
  *  silent renormalisation the coverage floors elsewhere exist to stop. `coveredPct` is on the
  *  cell's card and short coverage is marked in amber, never absorbed. */
-type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return';
+type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution';
+
+/** The four euro/point columns, summed. ⚠ A SUM OF NULLS IS NULL, NOT ZERO: a class in which
+ *  nothing could be valued has an undefined result, and a €0 subtotal would say it broke even. */
+function sumResults(rows: BookHolding[]) {
+  const add = (pick: (h: BookHolding) => number | null | undefined) => {
+    const vals = rows.map(pick).filter((v): v is number => v != null);
+    return vals.length ? vals.reduce((s, v) => s + v, 0) : null;
+  };
+  return {
+    unrealised: add((h) => h.unrealised_eur),
+    realised: add((h) => h.realised_result_eur),
+    income: add((h) => h.income_eur),
+    result: add((h) => h.result_eur),
+    contribution: add((h) => h.contribution_pct),
+  };
+}
+
+/** ⚠ NULL, NOT ZERO, WHEN THERE IS NOTHING TO ADD — the same rule as `sumResults`. */
+const sum = (vals: (number | null | undefined)[]) => {
+  const v = vals.filter((x): x is number => x != null);
+  return v.length ? v.reduce((s, x) => s + x, 0) : null;
+};
+/** Two subtotals, either of which may be "nothing to add". ⚠ `null + 5` must be 5, not null: a
+ *  book with no sold positions still has a grand total. */
+const add2 = (a: number | null, b: number | null) =>
+  (a == null && b == null ? null : (a ?? 0) + (b ?? 0));
+
+/** Whole euros with a sign, or a dash. ⚠ Whole euros because these are result columns read across
+ *  a 52-row table — cents there are noise that costs column width and buys nothing. */
+const eur0n = (v?: number | null) =>
+  (v == null ? '—'
+    : `${v < 0 ? '−' : ''}€${Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 })}`);
+
+/** ⚠ pp, not %. A share OF the book's return; "+2.87%" beside the book's "+5.83%" reads as a
+ *  second, rival return rather than as a part of it. */
+const ppt = (v?: number | null) =>
+  (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}pp`);
 
 /** Weights and returns to TWO decimals, always — including the trailing zero. A 0.4% and a 0.44%
  *  position round to the same "0.4%", and in a 172-row table that is where the small holdings live.
@@ -693,8 +729,13 @@ function FundamentalButton({ onOpen, title, className = '' }: {
   );
 }
 
-function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundamental }: {
+function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, onFundamental }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
+  /** ⚠ THE POSITIONS THAT NO LONGER HAVE A ROW — sold out entirely during the year. They are the
+   *  reason this table could not add up before: measured, 8 names and −2.38pp of one book's year,
+   *  invisible because a closed position has nothing left to list. Rendered as their own group,
+   *  because they have no asset class, no ISIN and no current weight — only a result. */
+  realised?: ModelPortfolioAnalysis['realised'];
   /** Opens the owner-earnings modal for one instrument or a whole class. */
   onFundamental: (t: { name: string; isin?: string; basket?: Basket }) => void;
   /** WHY the table is empty, from the server (`book_note`) — three different faults used to
@@ -729,7 +770,14 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
         rows,
         // The class's own return: the Return column below, weighted by what each position was
         // worth when the window OPENED. Never by the Weight (now) column — see `classReturn.ts`.
-        ret: classWeightedReturn(rows),
+        // ⚠ Cash has no `Beginwaarde` to divide by, and its return is nonetheless known exactly:
+        // zero. See the flag's own note — a dash there says "unknown" about the one asset whose
+        // return is certain, and hides its drag.
+        ret: classWeightedReturn(rows, bucket === CASH_BUCKET),
+        // ⚠ PLAIN SUMS, and they are allowed to be plain BECAUSE they are euros. A euro column
+        // adds; that is the whole reason the result breakdown is in euros and the weight-based
+        // arguments elsewhere in this file do not apply to it.
+        sum: sumResults(rows),
         // The class as a value-weighted basket, for the Fundamental button on its header. ISIN-
         // bearing rows only: owner earnings are per-company, and cash has no company.
         basket: {
@@ -741,6 +789,30 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
       };
     })
     .filter((g) => g.rows.length > 0);
+
+  // ⚠ ONLY THE CLOSED-OUT ONES. A name that was TRIMMED still has a holdings row, and its realised
+  // result is already grafted onto that row — listing it here too would count it twice and the
+  // total would stop tying. Measured on BUS_Offensief: of 13 traded names, 5 are trims (on their
+  // own rows) and 8 are gone (here). Every orphan being closed-out is what makes the split exact.
+  const sold = (realised?.available ? realised.positions ?? [] : []).filter((p) => p.closed_out);
+  const soldSum = {
+    realised: sum(sold.map((p) => p.realised_result_eur)),
+    income: sum(sold.map((p) => p.income_eur)),
+    result: sum(sold.map((p) => p.result_eur)),
+    contribution: sum(sold.map((p) => p.contribution_pct)),
+  };
+  const heldSum = sumResults(holdings);
+  const grand = {
+    unrealised: heldSum.unrealised,
+    realised: add2(heldSum.realised, soldSum.realised),
+    income: add2(heldSum.income, soldSum.income),
+    result: add2(heldSum.result, soldSum.result),
+    contribution: add2(heldSum.contribution, soldSum.contribution),
+  };
+  // Within a cent of a point. The measured case lands at exactly 0.0000pp; the tolerance is for
+  // float noise across ~60 additions, not for a missing leg.
+  const reconciled = grand.contribution != null && realised?.book_ytd_pct != null
+    && Math.abs(grand.contribution - realised.book_ytd_pct) < 0.01;
 
   const cmp = (a: BookHolding, b: BookHolding) => {
     // The two text columns sort as text. ⚠ An unclassified row sorts LAST either way, like an
@@ -756,7 +828,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
       return dir === 'asc' ? c : -c;
     }
     const pick = (h: BookHolding) => (sortKey === 'weight' ? (h.weight_now_pct ?? 0)
-      : h.own_return_pct);
+      : sortKey === 'contribution' ? h.contribution_pct
+        : h.own_return_pct);
     const av = pick(a);
     const bv = pick(b);
     if (av == null && bv == null) return 0;
@@ -799,9 +872,19 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
           <thead className="text-[10px] uppercase tracking-wide text-fg-faint bg-card sticky top-0 z-10">
             <tr className="border-b border-neutral-800/40">
               <th className="text-right w-10 pl-4 pr-2 py-2 font-medium">#</th>
-              <th className={`text-left ${th}`} onClick={() => click('name')}>Name{caret('name')}</th>
+              {/* ⚠ A FLOOR IS REQUIRED HERE BECAUSE THE CELL BELOW IS `max-w-0`. That is what lets
+                  a long instrument name truncate instead of stretching the table — but it also
+                  makes Name the column an auto-layout table takes slack FROM first, and with
+                  twelve columns there was none left: on a book whose Via column carries certificate
+                  chips, Name collapsed to a single letter per row. `min-w` is the only thing
+                  standing between "truncates gracefully" and "shows nothing". */}
+              <th className={`text-left min-w-[13rem] ${th}`} onClick={() => click('name')}>Name{caret('name')}</th>
               <th className="text-left py-2 font-medium w-32">ISIN</th>
-              <th className="text-left py-2 font-medium">
+              {/* ⚠ CAPPED. The chips truncate INDIVIDUALLY (max-w-[9rem] each) but the column
+                  itself had no bound, so a row with three routes in was free to demand 30rem —
+                  taken straight out of Name. Bounded here, the chips wrap within the column
+                  instead of eating the table. */}
+              <th className="text-left w-40 max-w-[10rem] py-2 font-medium">
                 Via
                 <Provenance source="airs_model" asOf={asOf} kind="formula" column
                   what={'How the portfolio got into this instrument — its own shares, a strategy '
@@ -836,19 +919,84 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
                     + 'EUR value split by the strategy’s own percentages, so each class subtotal '
                     + 'equals its share of the chart above.'} />
               </th>
+              {/* ⚠ THE THREE COMPONENTS, THEN THEIR SUM — the whole point of merging the ledger
+                  into this table. A reader who wants to know what a position MADE should not have
+                  to reconcile a return against a weight; these add up on screen.
+                  ⚠ COLUMN COUNT IS NOW TWELVE and is counted by hand in FOUR places (this thead,
+                  the group row, the body row, the total row). Add one here and forget another and
+                  every figure below shifts a cell right, silently — a contribution renders
+                  perfectly well under "Return". */}
+              <th className="text-right w-28 py-2 font-medium">
+                Unrealised
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what="What this position has gained or lost while the book has held it — on paper, not banked."
+                  note="value now − value when the year opened"
+                  how={'AIRS’s own valuation at both ends. ⚠ Its opening value is restated to the '
+                    + 'quantity held today, so buying more during the year does not show up here '
+                    + 'as a gain. A position held inside a certificate carries its share of the '
+                    + 'certificate’s value change — the euros are really this row’s; only the '
+                    + 'percentage would be the wrapper’s, which is why the Return column is the '
+                    + 'instrument’s own instead.'} />
+              </th>
+              <th className="text-right w-28 py-2 font-medium">
+                Realised
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what="What was banked by actually selling — this year’s part of it."
+                  note="AIRS’s Res. YtD, summed over the year’s sales"
+                  how={'⚠ NOT proceeds minus cost. The difference is whatever was earned in '
+                    + 'EARLIER years, and on this book that difference is eight percentage points '
+                    + 'and a sign. Blank where nothing was sold. A position held through a '
+                    + 'certificate is never sold on its own — AIRS trades the certificate — so its '
+                    + 'cell stays blank rather than showing an invented figure.'} />
+              </th>
+              <th className="text-right w-24 py-2 font-medium">
+                Income
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what="The dividends and coupons this position paid the book this year."
+                  note="net — gross less withholding tax"
+                  how={'From AIRS’s own Mutaties journal, joined by name. A price return cannot '
+                    + 'see it: the money leaves the position’s value and arrives as cash, which is '
+                    + 'why it is a column of its own rather than folded into the one beside it.'} />
+              </th>
+              <th className="text-right w-28 py-2 font-medium">
+                Result
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what="What the book actually made on this position this year, in euros."
+                  note="unrealised + realised + income"
+                  how={'The three columns to its left, added. This is the figure that answers '
+                    + '“what did we make on this”, and unlike a return it needs no weight to be '
+                    + 'read.'} />
+              </th>
+              <th className={`text-right w-28 ${th}`} onClick={() => click('contribution')}>
+                Contribution{caret('contribution')}
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what="What this position added to, or took off, the book’s return for the year."
+                  note="result ÷ the book’s opening capital"
+                  how={'⚠ THIS IS THE COLUMN THAT ADDS UP — every row on the same denominator, so '
+                    + 'the total row equals the book’s own return exactly, positions sold during '
+                    + 'the year included. The Weight column cannot do that: it is today’s share, '
+                    + 'and a position sold in March has none.'} />
+              </th>
               <th className={`text-right w-28 pr-4 ${th}`} onClick={() => click('return')}>
                 Return{caret('return')}
-                <Provenance source="yfinance" asOf={asOf} kind="formula" column
-                  what={'What this instrument itself returned in euros over the window, '
-                    + 'independent of how much of it the portfolio holds.'}
-                  how={'Its closing price now ÷ its closing price on '
-                    + `${anchor ?? 'the window’s opening date'}, minus 1, both converted to euros `
-                    + 'at that date’s rate, so the figure carries the currency leg. The window '
-                    + 'opens on 1 January or on the composition’s effective date, whichever is '
-                    + 'later. This is the instrument’s own return, not the portfolio’s share of '
-                    + 'it — so the rows do not ADD up to the class figure on the grey row, they '
-                    + 'average into it, weighted by what each position was worth when the window '
-                    + 'opened.'} />
+                {/* ⚠ `airs_volk`, NOT `yfinance`. This header claimed yfinance while the rows
+                    beneath it are AIRS's own valuation — each row's card names its actual source
+                    correctly, so the column header disagreed with almost every cell under it. The
+                    yfinance path is the marked FALLBACK (ƒ), not the basis.
+                    ⚠ AND IT DESCRIBED THE CLASS ROW'S OLD ARITHMETIC. It said the rows "average
+                    into" the class figure weighted by opening value — true when the class return
+                    was Σ(weight × return), and false since it became Σ result ÷ Σ opening value.
+                    A header that explains a formula the table no longer uses is worse than one
+                    that explains nothing. */}
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what={'What this instrument itself returned in euros since '
+                    + `${anchor ?? 'the year opened'} — independent of how much of it the book `
+                    + 'holds.'}
+                  how={'AIRS’s own (Huidige waarde + net income) ÷ Beginwaarde − 1. ⚠ The opening '
+                    + 'value is restated to today’s quantity, so this measures the INSTRUMENT, not '
+                    + 'your timing — a stock bought in June is still measured from January. A row '
+                    + 'marked ƒ was priced off our own EUR series instead. ⚠ These rates do not '
+                    + 'combine into the class row: each sits on its own denominator.'} />
               </th>
             </tr>
           </thead>
@@ -858,7 +1006,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
                 <td className="pl-4" />
                 {/* colSpan 4: Name · ISIN · Via · Sector — every text column, so the class label
                     runs to the first number. */}
-                <td className="py-2 text-[11px] font-medium text-fg-strong" colSpan={4}>
+                <td className="py-2 font-medium text-fg-strong" colSpan={4}>
                   <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 align-middle"
                     style={{ background: allocColor(g.bucket) }} />
                   {bucketLabel(g.bucket)}
@@ -876,7 +1024,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
                       onOpen={() => onFundamental({ name: g.basket.label, basket: g.basket })} />
                   )}
                 </td>
-                <td className="py-2 text-right font-mono text-[11px] font-semibold text-fg-strong whitespace-nowrap">
+                <td className="py-2 text-right font-mono font-semibold text-fg-strong whitespace-nowrap">
                   {num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}%
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={`${g.bucket}'s share of the book TODAY.`}
@@ -889,41 +1037,73 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
                       + 'bucket, so dividing a figure here by a class and expecting a bar will '
                       + 'not work — the difference between the two is what the positions did.'} />
                 </td>
+                {/* The class's own four euro columns, summed — so a reader can see which CLASS
+                    made the money, not only which position. */}
+                <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.unrealised)}`}>{eur0n(g.sum.unrealised)}</td>
+                <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.realised)}`}>{eur0n(g.sum.realised)}</td>
+                <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.income)}`}>{eur0n(g.sum.income)}</td>
+                <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.result)}`}>{eur0n(g.sum.result)}</td>
+                <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.contribution)}`}>
+                  {ppt(g.sum.contribution)}
+                  {/* ⚠ THE PAIR A READER CANNOT ARBITRATE UNLESS IT IS EXPLAINED, and on a class
+                      that is nearly the whole book the two sit a fraction of a point apart and
+                      look like one of them is wrong. They share a NUMERATOR and differ only in
+                      what they divide by — so the card prints both divisions, side by side. */}
+                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    what={`What ${bucketLabel(g.bucket)} added to, or took off, the book’s return for the year.`}
+                    note={`${eur0n(g.sum.result)} ÷ the book’s opening capital`}
+                    how={'⚠ THE COLUMN THAT ADDS UP — every class on the book’s own opening '
+                      + 'capital, so these sum to its return exactly, positions sold during the '
+                      + 'year included. '
+                      + (g.ret.pct != null && g.ret.startEur
+                        ? `⚠ Not the Return beside it: both divide the same `
+                          + `${eur0n(g.sum.result)}, but that one divides by this class’s own `
+                          + `${eur0n(g.ret.startEur)} instead of the book’s.`
+                        : '')} />
+                </td>
                 {/* ⚠ THE COLUMN BELOW, AGGREGATED — NOT THE BOOK'S VALUE CHANGE, and not the
                     Weight (now) column times the returns. A dash where nothing in the class had
                     both an opening weight and a return; a 0.00% there would claim the class went
                     nowhere. */}
-                <td className={`py-2 pr-4 text-right font-mono text-[11px] font-semibold tabular-nums whitespace-nowrap ${retTone(g.ret.pct)}`}>
+                <td className={`py-2 pr-4 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.ret.pct)}`}>
                   {fmtRet(g.ret.pct)}
-                  {/* Coverage short of the class, marked on the number itself. Weight that leaves
-                      an average silently is the failure this whole modal keeps refusing to make;
-                      1pp of slack absorbs float noise without hiding a real gap. */}
-                  {g.ret.pct != null && g.ret.coveredPct < 99 && (
+                  {/* ⚠ MARKED WHEN THE RATE DOES NOT DESCRIBE ALL THE MONEY. A row with no opening
+                      value is out of both sides of the division — right, and invisible unless it
+                      is said, because the money it made is still in the Result column beside it.
+                      0.5pp of slack absorbs float noise without hiding a real gap. */}
+                  {g.ret.pct != null && g.ret.coveredPct < 99.5 && (
                     <span className="ml-1 text-warn-400"
-                      title={`Weighted over ${num2(g.ret.coveredPct)}% of ${bucketLabel(g.bucket)}’s opening value — ${g.ret.weighed - g.ret.legs} position(s) could not be priced over this window and left the average.`}>⚠</span>
+                      title={`This rate covers ${num2(g.ret.coveredPct)}% of what ${bucketLabel(g.bucket)} made — ${g.ret.rows - g.ret.legs} position(s) had no value when the year opened (bought since, or a cash line), so there is nothing to measure their result against. Their euros are still in the Result column.`}>⚠</span>
                   )}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={g.ret.pct == null
-                      ? `Nothing in ${bucketLabel(g.bucket)} can be both weighed and priced over this window.`
-                      : `What ${bucketLabel(g.bucket)} returned over the window, in EUR — the ${g.ret.legs} position${g.ret.legs === 1 ? '' : 's'} below, weighted by what each was worth when it opened.`}
+                      ? `Nothing in ${bucketLabel(g.bucket)} was held when the year opened, so it has no return to measure.`
+                      : `What ${bucketLabel(g.bucket)} made this year, against what it was worth when the year opened.`}
                     note={g.ret.pct == null
-                      ? 'a dash, never a 0% — “nothing to weigh” and “went nowhere” are different facts'
-                      : `Σ (opening weight × Return), over ${num2(g.ret.coveredPct)}% of the class’s opening value`
-                        + (g.ret.notHeldAtOpen
-                          ? ` · ${g.ret.notHeldAtOpen} row(s) not held at the open`
+                      ? 'a dash, never a 0% — “no starting money to measure against” and “went nowhere” are different facts'
+                      : `${eur0n(g.ret.resultEur)} ÷ ${eur0n(g.ret.startEur)}`
+                        + (g.ret.coveredPct < 99.5
+                          ? ` · covers ${num2(g.ret.coveredPct)}% of what this class made`
                           : '')}
-                    how={'Each position’s share of the class when the WINDOW OPENED (AIRS’s '
-                      + 'Beginwaarde), times its own Return from the column below, summed. ⚠ NOT '
-                      + 'the Weight (now) beside it: today’s share already contains the return, so '
-                      + 'a holding that doubled carries twice the weight it held while it was '
-                      + 'doubling and the product hands the winners a share of the class they '
-                      + 'never had. ⚠ A position with no opening value (cash, or bought since) is '
-                      + 'out of the average — it has exposure today and no share of the opening '
-                      + 'class — and one we could not price leaves both sides, which is what the '
-                      + 'coverage above states. ⚠ This is the ROWS aggregated, so it can differ '
-                      + 'from the class return in the allocation legend: that one is the book’s '
-                      + 'own value change, and for a position held through a certificate the book '
-                      + 'knows what the CERTIFICATE did, not what the instrument did.'} />
+                    /* ⚠ THE DIFFERENCE FROM THE BOOK'S OWN RETURN IS NAMED HERE, because a reader
+                       who spots a class at 99.9% of the book returning a point less than the book
+                       will otherwise go looking for it in the cash line — where it is not. */
+                    /* ⚠ THE LONG VERSION IS IN THE CODE, NOT ON THE CARD (shortened 2026-08-05,
+                       on request). What a reader needs at the cell is: what it divides, that it
+                       does not tie to the book, and which column does. The reasoning behind that
+                       — measured on AITopSelectie — is that three percentages on this row sit on
+                       three different bases: Weight is the class's share TODAY (99.91%), this
+                       Return divides by the RESTATED opening value (100.69% of the book), and the
+                       class's TRUE share on 1 January was 4.03%, because the book held 96% cash
+                       and deployed it on 5 January. On those true weights it composes exactly:
+                       4.03% × 1102.77% + 95.97% × 0% = 44.4624%, AIRS's own figure. Which is
+                       precisely why none of the three may be multiplied by another. */
+                    how={'Result ÷ what this class was worth when the year opened. ⚠ It will not '
+                      + 'tie to the book’s return, and must not be multiplied by the Weight beside '
+                      + 'it: that weight is today’s share, while this denominator is AIRS’s '
+                      + 'opening values restated to today’s quantities — which can come out larger '
+                      + 'than the book’s own opening capital. Contribution is the column that '
+                      + 'composes.'} />
                 </td>
               </tr>
               {[...g.rows].sort(cmp).map((h, i) => (
@@ -947,8 +1127,13 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
                     </span>
                   </td>
                   <td className="py-1.5 pr-3 font-mono text-[10px] text-fg-faint">{h.isin ?? '—'}</td>
+                  {/* ⚠ The cap lives on a wrapper, not on the `<td>`: a second `max-w-0` column
+                      fights the Name cell for the slack (the Sector comment below records the same
+                      trap). A fixed max-width simply bounds it, and `ViaChips` already wraps. */}
                   <td className="py-1.5 pr-3">
-                    <ViaChips names={h.via_names ?? []} sources={h.sources} />
+                    <div className="max-w-[10rem]">
+                      <ViaChips names={h.via_names ?? []} sources={h.sources} />
+                    </div>
                   </td>
                   {/* ⚠ A DASH IS AN ANSWER, NOT A MISSING LOOKUP — a fund has no sector to show
                       (its listing says nothing about what it holds) and neither has a holding the
@@ -974,6 +1159,14 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
                         + 'that sum on the right weight — each position’s share when the window '
                         + 'OPENED — so there is nothing here to multiply by hand.'} />
                   </td>
+                  {/* ⚠ EVERY ONE A DASH WHERE THERE IS NOTHING, NEVER A €0. "Nothing was sold" and
+                      "the sale broke even" are different facts, and on a money column the second
+                      is a claim. */}
+                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.unrealised_eur)}`}>{eur0n(h.unrealised_eur)}</td>
+                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.realised_result_eur)}`}>{eur0n(h.realised_result_eur)}</td>
+                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.income_eur)}`}>{eur0n(h.income_eur)}</td>
+                  <td className={`py-1.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(h.result_eur)}`}>{eur0n(h.result_eur)}</td>
+                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.contribution_pct)}`}>{ppt(h.contribution_pct)}</td>
                   {/* An unpriced position shows a dash, never 0% — "we could not price this over
                       the window" and "it did not move" are different facts and a 0 states the
                       wrong one. An interpolated opening mark is flagged per value, because that
@@ -1067,8 +1260,118 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
               ))}
             </tbody>
           ))}
+          {/* ⚠ THE POSITIONS THAT ARE GONE — the reason this table did not add up before. A book
+              that sold a name in March has nothing left to list it with, so its result vanished
+              from a table that looked complete. They get no Weight, no Sector and no ISIN, because
+              they genuinely have none any more; a 0% weight there would say the book held none of
+              it, which is a claim rather than a blank. */}
+          {!!sold.length && (
+            <tbody>
+              <tr className="bg-inset border-y border-neutral-800/40">
+                <td className="pl-4" />
+                <td className="py-2 font-medium text-fg-strong" colSpan={4}>
+                  <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 align-middle bg-neutral-600" />
+                  No longer held
+                  <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[10px] font-normal text-fg-muted">
+                    {sold.length}
+                  </span>
+                  <span className="ml-2 text-[10px] font-normal text-fg-faint">
+                    sold out during the year
+                  </span>
+                </td>
+                <td className="py-2 text-right font-mono text-fg-faint">—</td>
+                <td />
+                <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.realised)}`}>{eur0n(soldSum.realised)}</td>
+                <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.income)}`}>{eur0n(soldSum.income)}</td>
+                <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.result)}`}>{eur0n(soldSum.result)}</td>
+                <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.contribution)}`}>{ppt(soldSum.contribution)}</td>
+                <td className="pr-4" />
+              </tr>
+              {sold.map((p, i) => (
+                <tr key={p.name ?? i} className="border-b border-neutral-800/[0.15] last:border-0 hover:bg-overlay/[0.03] transition-colors">
+                  <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[10px] text-fg-faint tabular-nums">{i + 1}</td>
+                  <td className="py-1.5 pr-3 text-fg max-w-0" colSpan={4} title={p.name}>
+                    <span className="truncate inline-block max-w-full align-bottom">{p.name}</span>
+                    <span className="ml-2 text-[9px] text-fg-faint">
+                      {p.first_sale === p.last_sale ? p.first_sale : `${p.first_sale} → ${p.last_sale}`}
+                    </span>
+                    {/* ⚠ THE REASON THE REALISED FIGURE IS AIRS'S `Res. YtD` AND NOT proceeds − cost:
+                        part of this gain was made in earlier years and is correctly not counted. */}
+                    {!!p.prior_year_eur && (
+                      <span className="ml-2 text-[9px] text-warn-500"
+                        title={`${eur0n(p.prior_year_eur)} of this position's realised result was earned in EARLIER years and is correctly not in this year's figure.`}>
+                        {eur0n(p.prior_year_eur)} prior yr
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-1.5 text-right font-mono text-fg-faint">—</td>
+                  <td />
+                  <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.realised_result_eur)}`}>{eur0n(p.realised_result_eur)}</td>
+                  <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.income_eur)}`}>{eur0n(p.income_eur)}</td>
+                  <td className={`py-1.5 text-right font-mono font-semibold tabular-nums ${retTone(p.result_eur)}`}>{eur0n(p.result_eur)}</td>
+                  <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.contribution_pct)}`}>{ppt(p.contribution_pct)}</td>
+                  <td className="pr-4" />
+                </tr>
+              ))}
+            </tbody>
+          )}
+          {/* ⚠ THE CHECK, AT THE FOOT OF THE TABLE IT CHECKS. Σ Contribution over every row above
+              — held and sold — against AIRS's own return for the book. That the two agree is the
+              statement this whole merge exists to make; showing the sum without the figure it
+              should equal would be an assertion, not a check. */}
+          {grand.contribution != null && (
+            <tfoot>
+              <tr className="bg-overlay/[0.05] border-t-2 border-neutral-800/40 font-semibold">
+                <td className="pl-4" />
+                <td className="py-2 text-fg-strong" colSpan={4}>
+                  The book’s year
+                  <span className="ml-2 font-normal text-[10px] text-fg-faint">
+                    {holdings.length + sold.length} positions, everything it held or sold
+                  </span>
+                </td>
+                <td />
+                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.unrealised)}`}>{eur0n(grand.unrealised)}</td>
+                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.realised)}`}>{eur0n(grand.realised)}</td>
+                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.income)}`}>{eur0n(grand.income)}</td>
+                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.result)}`}>{eur0n(grand.result)}</td>
+                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.contribution)}`}>{ppt(grand.contribution)}</td>
+                <td className={`py-2 pr-4 text-right font-mono tabular-nums ${retTone(realised?.book_ytd_pct)}`}>
+                  {fmtRet(realised?.book_ytd_pct)}
+                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    what="The book’s own return for the year, from AIRS."
+                    note="cumulatief_rendement — flow-aware, the system of record"
+                    how={reconciled
+                      ? 'Set beside the Contribution total to its left, which is built from every '
+                        + 'row in this table. The two agreeing is the check that no part of the '
+                        + 'year is missing from the list — including the positions sold during it, '
+                        + 'which have no row of their own until they are given one.'
+                      : 'Set beside the Contribution total to its left. ⚠ The two do NOT agree, so '
+                        + 'some part of the year is not accounted for by the rows above.'} />
+                </td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
+      {/* Said in words under the table, because a reader who has just added a column of euros
+          wants to know whether it landed — not to compare two figures themselves. */}
+      {grand.contribution != null && realised?.book_ytd_pct != null && (
+        <div className="px-4 py-2 border-t border-neutral-800/40 text-[10px]">
+          {reconciled ? (
+            <span className="text-pos-400">
+              ✓ These positions account for the whole year — the Contribution column adds to
+              AIRS’s own {fmtRet(realised.book_ytd_pct)} exactly.
+            </span>
+          ) : (
+            <span className="text-warn-500">
+              ⚠ The Contribution column adds to {ppt(grand.contribution)} against AIRS’s own
+              {' '}{fmtRet(realised.book_ytd_pct)} — {ppt(grand.contribution - realised.book_ytd_pct)}
+              {' '}of the year is not explained by these rows.
+              {realised.residual_reason ? ` ${realised.residual_reason}` : ''}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1447,32 +1750,19 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                  A prompt to click something used to sit here; it told the reader what to do next
                  and nothing about what they hold. Picking a class still narrows this to that
                  class's own breakdown. */
-              /* ⚠ `space-y-8`, NOT the `space-y-4` used between ordinary sibling cards — and it
-                 shipped as a bare fragment, i.e. NO gap at all, which is what put the two flush
-                 against each other. These are not sibling cards; they are the two halves of one
-                 year measured on DIFFERENT denominators (Holdings weights by the priced HELD book,
-                 Sold by the book's OPENING capital). Butted together they read as one continuous
-                 table, and a reader carries the Weight column's meaning straight down into a block
-                 that deliberately has none. The space IS the seam. */
-              <div className="space-y-8">
+              /* ⚠ ONE TABLE AGAIN. It was briefly two — a composition view plus a separate ledger
+                 — and that was the wrong shape: the sold positions were the only thing standing
+                 between this table and a total, so the answer was to give them rows, not their own
+                 card. `realised` carries them (and the book's own return to check against). */
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
                 onFundamental={setFund}
-                note={data.book_note} bookName={data.book_portefeuille}
+                note={data.book_note} bookName={data.book_portefeuille} realised={data.realised}
                 /* ⚠ THE BOOK SNAPSHOT, NOT `data.as_of`. That field is the model COMPOSITION's
                    effective date (2025-12-30 for AITopSelectie) — a true fact about the weights
                    the model declares, and the wrong clock for figures the BOOK values, which are
                    as-of 2026-08-01. Stamped with it, the modal called the row's own +111.74%
                    216 days old while the row called it 2. */
                 asOf={data.holdings_as_of ?? data.as_of} />
-              {/* ⚠ THE OTHER HALF OF THE YEAR. Everything in the table above is built from
-                  positions the book STILL HOLDS; a name sold in March has no row and its result
-                  is invisible — measured, 22.5% of one book's year. It sits directly beneath so
-                  the two are read as one accounting, and it carries the check that they add up to
-                  AIRS's own figure. Absent for an unpaired model: only a book trades. */}
-              {data.realised && (
-                <RealisedPanel r={data.realised} asOf={data.holdings_as_of ?? data.as_of} />
-              )}
-              </div>
             ) : sleeve ? (
               /* NON-EQUITY class: its holdings' contribution + a currency chart, no benchmark. */
               <SleeveBreakdown holdings={data.book_holdings ?? []} bucket={sleeve} />

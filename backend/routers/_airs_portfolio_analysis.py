@@ -647,15 +647,28 @@ def _reclassify_book_rows(rows: list[dict]) -> list[dict]:
     """Give every expanded leg its own Class, from the same classifier the rest of the app uses."""
     from routers._airs_holding_isin import classify_bucket  # noqa: PLC0415
 
-    need = sorted({r["isin"] for r in rows if r.get("isin") and not r.get("bucket")})
-    if not need:
+    # ⚠⚠ A LEG WITH NO ISIN MUST BE CLASSIFIED TOO — SKIPPING IT DISABLED THE ONE RULE WRITTEN FOR
+    # IT. This used to `continue` on `not r.get("isin")`, leaving `bucket` as None (rendered
+    # "Unclassified"). But `classify_bucket`'s FIRST rule is
+    #     `not isin and name in {"effectenrekening", "liquiditeiten"}` -> Cash
+    # which by construction can only ever fire on a row with no ISIN. The guard made it
+    # unreachable. Measured: every certificate's own cash line — `Liquiditeiten`, arriving through
+    # look-through in 8 books — sat in Unclassified while its `sector` (computed elsewhere, without
+    # this guard) correctly read Cash. Two answers for one row, one screen apart.
+    #
+    # ⚠ The direct cash line was NOT affected, which is why this hid: `Effectenrekening` comes in
+    # already bucketed from `resolve_account_isins` and never reaches here. Only EXPANDED legs
+    # arrive with `bucket=None`, so only cash inside a certificate was mislabelled.
+    todo = [r for r in rows if not r.get("bucket")]
+    if not todo:
         return rows
-    grid = _grid(need)
-    for r in rows:
-        if r.get("bucket") or not r.get("isin"):
-            continue
-        g = grid.get(r["isin"])
-        r["bucket"] = classify_bucket(None, _is_fund(g), r["isin"], r.get("holding_name") or "", g)
+    grid = _grid(sorted({r["isin"] for r in todo if r.get("isin")}))
+    for r in todo:
+        g = grid.get(r["isin"]) if r.get("isin") else None
+        # An ISIN-less, non-cash row still lands on "Unclassified" — an honest unsure, reached by
+        # the classifier rather than by never asking it.
+        r["bucket"] = classify_bucket(None, _is_fund(g), r.get("isin"),
+                                      r.get("holding_name") or "", g)
     return rows
 
 
@@ -992,15 +1005,10 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         d = _income.get(r.get("holding_name"))
         return ((d.gross_eur or 0.0) + (d.tax_eur or 0.0)) if d else 0.0
 
-    bucket_agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])  # [Σ start, Σ now+income]
     priced = [(r, float(r.get("start_value_eur") or 0), float(r["current_value_eur"]))
               for r in rows
               if float(r.get("start_value_eur") or 0) != 0 and r.get("current_value_eur") is not None]
     total_start = sum(s for _r, s, _n in priced) or 1.0
-    for _r, start, now in priced:
-        b = _r.get("bucket") or UNKNOWN_BUCKET
-        bucket_agg[b][0] += start
-        bucket_agg[b][1] += now + _net_income(_r)
     priced_by_id = {id(r): (s, n) for r, s, n in priced}
 
     # ⚠ EVERY LONG POSITION, not only the priced ones — this list is also the whole-portfolio
@@ -1199,6 +1207,25 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             "sources": routes,
             "weight_pct": (pr[0] / total_start * 100.0) if pr else None,
             "weight_now_pct": w / total_w * 100.0 if total_w else 0.0,
+            # ⚠ THE EUROS BEHIND THE RESULT COLUMNS, at the EXPANDED granularity — so a
+            # looked-through leg carries its share of the certificate's value, exactly as its
+            # weight already does. `_expand_book_rows` splits start AND current by the same
+            # composition share, so summing these over the expanded rows reproduces the book's own
+            # held result: expansion moves value between rows, it does not create or destroy it.
+            #
+            # ⚠ THIS IS A VALUE SPLIT, NOT A RETURN CLAIM. The Return column stays
+            # `own_return_pct` (the instrument's own), because handing every stock inside a
+            # certificate the wrapper's PERCENTAGE is the documented lie (NVIDIA +0.08% against its
+            # own +2.82%). A euro amount is different in kind: the certificate really did produce
+            # it, and this row really is that share of the certificate.
+            "start_value_eur": (float(r.get("start_value_eur")) or None
+                                if r.get("start_value_eur") else None),
+            "current_value_eur": (float(r["current_value_eur"])
+                                  if r.get("current_value_eur") is not None else None),
+            # Unconditional, unlike `own_income_eur` below, which is suppressed when another book
+            # produced the return. The money reached THIS book either way, so it belongs in this
+            # book's result.
+            "income_eur": net_income or None,
             "return_pct": ((pr[1] / pr[0] - 1.0) * 100.0) if pr else None,
             "own_return_pct": own,
             "own_return_from": anchor,
@@ -1227,9 +1254,16 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         "no return at all (cash lines, and rows with no ISIN to join on)",
         link["portefeuille"], _airs_n, _blend_n, _direct_via_n, _wrapped_n, _look_n, _none_n)
 
-    bucket_returns = {b: (v[1] / v[0] - 1) * 100.0 for b, v in bucket_agg.items() if v[0]}
+    # ⚠ NO `bucket_returns` HERE ANY MORE, AND IT MUST NOT COME BACK. This function computed
+    # `(Σ current + income) ÷ Σ start` per class, which OMITS whatever the class banked by selling:
+    # measured on AITopSelectie, it reported Stocks at +43.53% against a class that made +44.16%,
+    # with the EUR 6,307 realised on trims missing from the rate while sitting in the Result column
+    # beside it. The class return is now derived ONCE, in `compute_portfolio_analysis`, from the
+    # rows the table actually renders — so the allocation legend and the class subtotal cannot be
+    # two different numbers. Leaving this here as an unused second answer is how it would drift
+    # back in.
     return {"items": items, "labels": labels,
-            "alloc_items": alloc_items, "bucket_returns": bucket_returns,
+            "alloc_items": alloc_items,
             "holdings_detail": holdings_detail,
             "classified_w": classified_w, "total_w": total_w, "foreign": foreign,
             # The snapshot every figure above is valued at — carried out so the payload can stamp
@@ -1284,6 +1318,7 @@ def _realised_block(portfolio_id: int) -> dict:
                             "realised on sales is unknown. Load them on /portfolios → expand this "
                             "book → Transactions.")}
 
+    ledger = _position_ledger(link["portefeuille"], rec)
     c = contributions(rec)
     _log.warning("[analysis] %s realised %s over %d name(s); %s%% of the year's movement is "
                  "outside the holdings table", link["portefeuille"], rec.get("realised_ytd_eur"),
@@ -1320,6 +1355,79 @@ def _realised_block(portfolio_id: int) -> dict:
         # They report this share instead of quietly omitting it.
         "realised_share_of_result_pct": c["realised_share_of_result_pct"],
         "legs": c["legs"],
+        # ⚠ EVERY POSITION THE BOOK TOUCHED, held and sold, on ONE weight both kinds can carry.
+        # See `airs_capital` for why that weight is average invested capital and not a 1-January
+        # snapshot (AITopSelectie's equities were worth EUR 40,319 on 1 Jan against a EUR 1m book —
+        # it opened the year in cash).
+        **ledger,
+    }
+
+
+def _position_ledger(portefeuille: str, rec: dict) -> dict:
+    """The book's whole year, one row per instrument — the merged held+sold list.
+
+    ⚠ THE INCOME IS JOINED PER NAME, INCLUDING NAMES NO LONGER HELD. `_direct_result` rolls the
+    orphans up into one total (right for the account row, which has no row to put them on); here
+    every name gets its own row, so the roll-up would lose the attribution. `direct_result` is
+    read directly for that reason — same journal, same function, one level less aggregation.
+    """
+    from datetime import date as _date  # noqa: PLC0415
+
+    from airs_capital import build_ledger, contribution_pct, money_weighted_return_pct  # noqa: PLC0415
+    from airs_mutaties import Mutatie, direct_result  # noqa: PLC0415
+    from airs_transacties import ParsedSheet, trades  # noqa: PLC0415
+
+    from routers._airs_transacties import ytd_window  # noqa: PLC0415
+
+    van, tot = ytd_window()
+    rows = (supabase.table("airs_transactie_snapshot").select("columns,kinds,rows")
+            .eq("portefeuille", portefeuille).limit(1).execute().data or [])
+    if not rows:
+        return {"positions": [], "capital_coverage_ratio": None, "avg_capital_eur": None}
+    sheet = ParsedSheet(columns=rows[0].get("columns") or [], kinds=rows[0].get("kinds") or {},
+                        rows=rows[0].get("rows") or [])
+
+    volk = (supabase.table("airs_holding")
+            .select("holding_name,quantity,start_value_eur,current_value_eur")
+            .eq("portefeuille", portefeuille)
+            .eq("as_of_date", _book_snapshot_date(portefeuille) or "").execute().data or [])
+
+    muts = (supabase.table("airs_mutatie").select("boekdatum,grootboek,fonds,amount_eur")
+            .eq("portefeuille", portefeuille).execute().data or [])
+    income = {f: d.net_eur for f, d in direct_result([Mutatie(
+        grootboek=m["grootboek"], fonds=m["fonds"], omschrijving="",
+        boekdatum=_date.fromisoformat(str(m["boekdatum"])) if m.get("boekdatum") else None,
+        amount_eur=float(m["amount_eur"]))
+        for m in muts]).by_fonds.items()}
+
+    led = build_ledger(volk, trades(sheet), income, rec.get("book_start_eur"),
+                       _date.fromisoformat(van), _date.fromisoformat(tot))
+    return {
+        "positions": [{
+            "name": p.name,
+            "held": p.held,
+            "closed_out": p.closed_out,
+            "opening_eur": p.opening_eur,
+            "avg_capital_eur": p.avg_capital_eur,
+            # ⚠ Descriptive — a share of the year's CAPITAL, not of the return. The column that
+            # adds up is `contribution_pct`.
+            "weight_pct": p.weight_pct,
+            "held_result_eur": p.held_result_eur,
+            "realised_result_eur": p.realised_result_eur,
+            "income_eur": p.income_eur,
+            "result_eur": p.result_eur,
+            "contribution_pct": contribution_pct(p, led.basis_eur),
+            "return_pct": money_weighted_return_pct(p),
+            "sales": p.sales,
+            "first_sale": p.first_sale,
+            "last_sale": p.last_sale,
+            "prior_year_eur": p.prior_year_eur,
+        } for p in led.positions],
+        "avg_capital_eur": led.avg_capital_eur,
+        # ⚠ REPORTED, NEVER ASSUMED TO BE 1. Modified Dietz ignores the price path within a
+        # position and the de-restatement is its own approximation; measured 0.998 and 1.023.
+        "capital_coverage_ratio": led.capital_coverage_ratio,
+        "ledger_result_eur": led.total_result_eur,
     }
 
 
@@ -1479,6 +1587,9 @@ def compute_portfolio_analysis(portfolio_id: int,
     # the one surface with no explanation attached. WARNING level because uvicorn leaves the root
     # logger there, so an `info` line never reaches production — and production is where this was
     # reported ("No positions to show" beside a portfolios list that plainly has rows).
+    # ⚠ COMPUTED BEFORE THE PAYLOAD, because `book_holdings` now needs it: the result columns are
+    # grafted onto the holdings rows so the Holdings table is ONE table that adds up.
+    realised_block = _realised_block(portfolio_id)
     book_note = None if book else book_unavailable_reason(portfolio_id)
     if book_note:
         _log.warning("[analysis] portfolio %s has no book view: %s", portfolio_id, book_note)
@@ -1498,7 +1609,6 @@ def compute_portfolio_analysis(portfolio_id: int,
             weight_basis = "book"
         else:
             weight_note = "No priced book to weight by — showing the model's own weights."
-    bucket_returns = book["bucket_returns"] if book else {}
 
     # The charts show the (optionally) filtered asset-class sleeve — click a bar of the allocation
     # bar to sub-select. `alloc_items` is parallel to `port_items` (same loop), so zip to filter;
@@ -1564,6 +1674,40 @@ def compute_portfolio_analysis(portfolio_id: int,
     # these three axes changed, and only so a sector bar equals its own Brinson row.
     basis_axes = _basis_axes(portfolio_id, source, p.get("positions_datum"), bucket_filter)
     _phase("axes")
+
+    # ⚠⚠ THE CLASS RETURN IS RE-DERIVED FROM THE ENRICHED ROWS, AND `_book_port_items`' OWN
+    # `bucket_returns` IS DELIBERATELY DISCARDED. That one is `(Σ current + income) ÷ Σ start`,
+    # which OMITS whatever the class banked by selling — the identical defect the Holdings table's
+    # class Return had. Measured on AITopSelectie: it reported Stocks at +43.53% against a class
+    # that made +44.16%, the EUR 6,307 realised on trims missing from the rate while sitting in the
+    # Result column two cells away. Two class returns a point apart, on one screen, is the pair a
+    # reader cannot arbitrate.
+    #
+    # Recomputed here — after `_with_results` — from EXACTLY the rows the table renders, so the
+    # allocation legend and the class subtotal cannot be two different numbers. One formula, one
+    # place: Σ result ÷ Σ opening value, over the rows that HAVE an opening value.
+    #
+    # ⚠ A CLOSED-OUT POSITION HAS NO CLASS, so its realised result is not in any bucket here. That
+    # is correct rather than missing: it has no sector, no ISIN and no current weight either, which
+    # is why the table gives it its own group outside the classes. The figure that accounts for it
+    # is `Contribution`, on the book's own capital.
+    enriched_holdings = _with_results(
+        _with_start_weights(book["holdings_detail"] if book else [],
+                            (basis_axes or {}).get("_start_weights") or {}),
+        realised_block)
+    _agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])   # [Σ start, Σ result]
+    for _h in enriched_holdings:
+        _start = _h.get("start_value_eur") or 0.0
+        if _start > 0:
+            _agg[_h["bucket"]][0] += _start
+            _agg[_h["bucket"]][1] += _h.get("result_eur") or 0.0
+    bucket_returns = {b: v[1] / v[0] * 100.0 for b, v in _agg.items() if v[0]}
+    # ⚠ CASH IS 0%, NOT UNDEFINED — it has no `Beginwaarde` to divide by, so the rule above leaves
+    # it out and the bar reads a dash. That dash says "unknown" about the one asset whose return is
+    # certain. Set explicitly, so the allocation legend and the class row agree here too rather
+    # than one of them going quiet.
+    if any(h["bucket"] == CASH_BUCKET for h in enriched_holdings):
+        bucket_returns.setdefault(CASH_BUCKET, 0.0)
 
     axes = []
     for axis in ("sector", "region", "currency"):
@@ -1703,16 +1847,89 @@ def compute_portfolio_analysis(portfolio_id: int,
         # Both weight columns are whole-book shares, so they sit beside each other honestly:
         # ASML 5.00% at the start against 7.02% now IS the story, and a bar is that start weight
         # divided by the axis's `attributable_pct`.
-        "book_holdings": _with_start_weights(book["holdings_detail"] if book else [],
-                                             (basis_axes or {}).get("_start_weights") or {}),
+        # ⚠ THE RESULT COLUMNS ARE GRAFTED ON HERE, so the Holdings table is ONE table that adds
+        # up rather than a composition view beside a separate ledger. See `_with_results`.
+        "book_holdings": enriched_holdings,
         # ⚠ THE HOLDINGS TABLE IS ONLY HALF THE YEAR, AND UNTIL NOW NOTHING SAID SO. Every figure
         # above it is built from positions the book STILL HOLDS; a name sold in March has no row
         # and its result is invisible. Measured on BUS_Offensief_Dyn, that is EUR -28,656 — 41% of
         # the year's movement, and enough on its own to reverse a sector's verdict in the
         # attribution panel. This block carries it, on the book's own opening capital so held +
         # sold + income adds to the book's YTD exactly.
-        "realised": _realised_block(portfolio_id),
+        "realised": realised_block,
     }
+
+
+def _with_results(holdings: list[dict], realised: dict) -> list[dict]:
+    """Attach each row's RESULT — unrealised + realised + income — and its contribution.
+
+    ⚠ ONE TABLE, BECAUSE THE TWO WERE ANSWERING ONE QUESTION IN TWO PLACES. The composition view
+    could not add up (a name sold in March has no row) and the ledger could not show a sector or an
+    ISIN. Merged, the columns Unrealised / Realised / Income sum to Result, and Result over the
+    book's opening capital sums to the book's own year.
+
+    ⚠ THE REALISED LEG JOINS BY NAME, EXACTLY, AND ONLY LANDS ON A ROW THAT STILL EXISTS. Measured
+    on BUS_Offensief_Dyn: of 13 traded names, 5 are trims of positions still held (they get their
+    realised result here) and 8 are gone entirely — EVERY orphan is `closed_out`, which is the
+    whole reason the join is safe. Those 8 have no holdings row by definition and are carried
+    separately in `realised.positions`, for the UI to render as its own group.
+
+    ⚠ A LOOKED-THROUGH LEG NEVER MATCHES, AND MUST NOT. AIRS trades the CERTIFICATE, not the stocks
+    inside it, so an instrument reached through one has no transactions of its own — 21 of
+    BUS_Offensief's 52 rows. Its unrealised result is still real (its share of the certificate's
+    value change), and its realised is correctly absent rather than invented.
+    """
+    if not holdings:
+        return holdings
+    basis = realised.get("basis_eur") if realised.get("available") else None
+    by_name = {p["name"]: p for p in (realised.get("positions") or []) if p.get("held")}
+    out = []
+    for h in holdings:
+        start, cur = h.get("start_value_eur"), h.get("current_value_eur")
+        # ⚠⚠ CASH RETURNS EXACTLY 0%, AND SAYING SO IS NOT THE SAME AS SAYING NOTHING. AIRS books
+        # no `Beginwaarde` for the cash line, so the generic rule below leaves every cash cell a
+        # dash — and a dash means "we could not work this out", which for cash is false: we know
+        # precisely what it earned. It earned nothing.
+        #
+        # ⚠ AND ITS DRAG IS A FACT. This repo already prices cash at 0% rather than skipping it
+        # everywhere else (`portfolio_math.make_cash_holding`, `explain_portfolio_ytd`), for the
+        # reason recorded there: dropping it scales a 20%-cash portfolio's return up by 25%. A
+        # dash invites exactly that reading — that cash is an unknown to be ignored — where a 0%
+        # states the drag.
+        #
+        # ⚠ ITS INCOME IS STILL ITS OWN. Interest credited to the account is real money and stays
+        # in the Income column; only the price leg is asserted to be zero, because a euro is
+        # always worth a euro.
+        is_cash = h.get("bucket") == CASH_BUCKET
+        # ⚠ None, not 0, when the row cannot be valued at BOTH ends — an unpriceable position's
+        # result is undefined, and a 0 would state that it went nowhere.
+        #
+        # ⚠⚠ FOR CASH THE ZERO IS A FALLBACK, NEVER AN OVERRIDE, and getting that backwards is a
+        # real bug I shipped: forcing 0 unconditionally would have erased a cash line that AIRS
+        # values at BOTH ends. A certificate's own `Liquiditeiten` leg has a real start and current
+        # value and moved -EUR 61 over the year (FX on a foreign balance, or a movement inside the
+        # wrapper) — that euro is part of the book's own result, so zeroing it would have silently
+        # broken the reconciliation the total row asserts. The 0 applies ONLY where there was
+        # nothing to compute, which is the case the dash was wrong about.
+        unreal = (round(cur - start, 2) if (start and cur is not None)
+                  else 0.0 if is_cash
+                  else None)
+        income = h.get("income_eur") or 0.0
+        realised_eur = (by_name.get(h.get("name") or "") or {}).get("realised_result_eur") or 0.0
+        total = (None if unreal is None and not realised_eur and not income
+                 else round((unreal or 0.0) + realised_eur + income, 2))
+        out.append({**h,
+                    "unrealised_eur": unreal,
+                    "realised_result_eur": realised_eur or None,
+                    "result_eur": total,
+                    "contribution_pct": (total / basis * 100.0)
+                    if (total is not None and basis) else None,
+                    # ⚠ 0%, NOT a dash — same reason as the price leg above, and same direction:
+                    # a FALLBACK where nothing could be computed, never an override of a figure
+                    # AIRS actually produced.
+                    **({"own_return_pct": 0.0}
+                       if is_cash and h.get("own_return_pct") is None else {})})
+    return out
 
 
 async def compute_portfolio_analysis_async(portfolio_id: int,

@@ -1,91 +1,110 @@
 /**
  * A CLASS's return in the Analyse modal's Holdings table — the rows under it, aggregated.
  *
- * ⚠ WEIGHTED AT THE WINDOW'S OPEN, NEVER BY THE `Weight (now)` COLUMN BESIDE IT. The column shows
- *   each holding's CURRENT share of the book, and that share already contains the return: a
- *   holding that doubled carries ~2× the weight it held while it was doubling, so
- *   Σ(now-weight × return) hands the winners a share of the class they never had. It is not a
- *   rounding difference — the same failure measured elsewhere in this codebase read +58.75%
- *   against a true +44.99% (`book_legs`), and +11.19% against +5.58% (`startWeights`). Both were
- *   plausible numbers, which is what makes the bug survive.
+ * ⚠⚠ IT IS THE `Result` COLUMN OVER THE CLASS'S OPENING VALUE, AND NOTHING ELSE. It used to be
+ * Σ(start weight × the instrument's own return), which was wrong in TWO independent ways at once
+ * and produced a figure a reader could not reconcile with anything on screen. Measured on
+ * AITopSelectie 2026-08-05, where the class is 99.91% of the book and the gap was 0.93pp:
  *
- * ⚠ THE WEIGHT IS `weight_pct`, THE OPENING-VALUE SHARE, AND THE OTHER START WEIGHT IN THE PAYLOAD
- *   WOULD GIVE THE SAME ANSWER. `weight_pct` is AIRS's Beginwaarde over the PRICED book;
- *   `weight_start_pct` is the same Beginwaarde over the WHOLE book. Two denominators, and both
- *   cancel here because a class figure renormalises within the class anyway. `weight_pct` is the
- *   one used because (a) it is present whenever the row can be weighed at all, where
- *   `weight_start_pct` is grafted on from the attribution basis and is absent entirely when that
- *   basis cannot be built, and (b) it is the identical weight `SleeveBreakdown`'s Contribution
- *   column uses — so this figure IS the sum of that column, and the modal cannot show the class
- *   two returns a few points apart.
+ *     43.532%   Σ(weight × own return)   -- what this used to show
+ *     44.159%   result ÷ opening value   -- +0.627pp: the realised leg was MISSING
+ *     44.462%   result ÷ beginvermogen   -- +0.303pp: a different denominator again
  *
- * ⚠ THE RETURN IS THE INSTRUMENT'S OWN (`own_return_pct`), SO THIS IS THE COLUMN'S OWN AGGREGATE
- *   AND NOT THE BOOK'S VALUE CHANGE. Those are two different measures — the book knows what the
- *   CERTIFICATE did, not what NVIDIA did — and the class header deliberately shows the one built
- *   from the rows printed beneath it. It follows that it need NOT equal the book's own class
- *   return in the allocation legend: where a position is reached through a certificate the two
- *   are answering different questions. Exactness against the book was the alternative, and it
- *   costs every row's number being its wrapper's (measured: 135 stocks, 37 distinct returns).
+ *   * THE REALISED LEG WAS ABSENT. `own_return_pct` is what the still-held shares did; a position
+ *     trimmed during the year banked EUR 6,307 that appeared in the Result column beside it and
+ *     in no percentage anywhere. Using the Result column as the numerator fixes that by
+ *     construction — the two columns can no longer describe different money.
+ *   * AND IT WAS A WEIGHTED AVERAGE OF PER-ROW RATES, which is not the class's return unless every
+ *     row shares one denominator. They do not: `own_return_pct` is each instrument's own rate.
  *
- * ⚠ A LEG THAT CANNOT BE PRICED LEAVES BOTH SIDES, AND THAT HAS TO BE REPORTED RATHER THAN
- *   ABSORBED. Renormalising over what is left is the right arithmetic and a silent one: the class
- *   then reads as though the missing weight behaved exactly like the rest. `coveredPct` is the
- *   share of the class's opening weight the figure actually speaks for, and the caller shows it.
+ * ⚠ THE DENOMINATOR IS THE CLASS'S OWN `Beginwaarde`, NOT THE BOOK'S OPENING CAPITAL. That is
+ * deliberate and it is why this still will not equal the book's return on the total row:
+ *   * `Beginwaarde` is RESTATED to today's quantity, so buying more during the year inflates it
+ *     (AITopSelectie's rows claim EUR 1,006,881 against a book that opened at EUR 1,000,000);
+ *   * a position sold out entirely has no row, so its opening value is missing from the sum
+ *     (BUS_Offensief_Dyn's rows claim EUR 1,142,384 against EUR 1,197,811).
+ * Those two pull in OPPOSITE directions and neither is an error — restatement is what stops a
+ * purchase reading as a gain. The column that ties to the book is `Contribution`, which is on the
+ * book's own capital; this one answers "what did this class do", which is a different question and
+ * is why both are shown.
+ *
+ * ⚠ A ROW WITHOUT AN OPENING VALUE IS OUT OF BOTH SIDES. It was not held when the year opened (or
+ * is a cash line), so it has no share of the class's starting money and its result cannot be
+ * expressed as a rate on it. `coveredPct` says how much of the class's RESULT the figure speaks
+ * for, so weight silently leaving the ratio is visible rather than absorbed.
  */
 
 export type ClassReturnRow = {
-  /** Opening-value share of the book. Null where the position had no value at the window's open
-   *  (cash, or bought since) — see `notHeldAtOpen`. */
-  weight_pct?: number | null;
-  /** The instrument's own EUR return over the window, in %. Null where nothing could price it. */
-  own_return_pct?: number | null;
+  /** AIRS's `Beginwaarde`, restated to today's quantity. Null where the row cannot be valued. */
+  start_value_eur?: number | null;
+  /** unrealised + realised + income, in EUR — the Result column. */
+  result_eur?: number | null;
 };
 
 export type ClassReturn = {
-  /** The class's start-weighted return, in %. Null when no row can be weighed AND priced — a
-   *  dash, never a 0%, because "nothing to weigh" and "went nowhere" are different facts. */
+  /** The class's return, in %. Null when nothing in it has an opening value — a dash, never a
+   *  0.00%, because "no starting money to measure against" and "went nowhere" differ. */
   pct: number | null;
-  /** Rows that spoke for the figure. */
+  /** Rows that spoke for it, and rows carrying a result at all. */
   legs: number;
-  /** Rows carrying an opening weight — the denominator's full membership, priced or not. */
-  weighed: number;
-  /** Share of the class's opening weight the figure speaks for, 0–100. 100 when every weighed row
-   *  is priced; below that, weight has silently left the average. */
+  rows: number;
+  /** Share of the class's RESULT that the ratio covers, 0–100. Below 100 means some of what the
+   *  class made came from rows with no opening value, so the rate understates the money. */
   coveredPct: number;
-  /** Rows with NO opening weight at all: they were not held when the window opened (cash, or
-   *  bought since), so they are out of a start-weighted measure by construction — an absence to
-   *  name, not a hole to warn about. */
-  notHeldAtOpen: number;
+  /** The euro figures behind it, so the card can print the division rather than assert it. */
+  resultEur: number | null;
+  startEur: number | null;
 };
 
-const EMPTY: ClassReturn = { pct: null, legs: 0, weighed: 0, coveredPct: 0, notHeldAtOpen: 0 };
+const EMPTY: ClassReturn = { pct: null, legs: 0, rows: 0, coveredPct: 0,
+  resultEur: null, startEur: null };
 
 /**
- * Σ ( wᵢ/Σw × retᵢ ) over the rows that have BOTH an opening weight and a return.
+ * `Σ result ÷ Σ opening value` over the rows that have an opening value.
  *
- * ⚠ A NON-POSITIVE OR MISSING WEIGHT IS NOT A ZERO-WEIGHT MEMBER, IT IS A NON-MEMBER. AIRS gives
- * a position bought mid-window no Beginwaarde, so it has real exposure today and an undefined
- * share of the opening book; counting it at 0 would be arithmetically harmless and would then
- * report it as covered, which is the part that is false.
+ * ⚠ THE NUMERATOR IS RESTRICTED TO THE SAME ROWS AS THE DENOMINATOR. Summing every row's result
+ * over only the rows that have an opening value would divide one population by another — the
+ * figure would exceed the truth by whatever the excluded rows made, and it would still look like
+ * a return.
  */
-export function classWeightedReturn(rows: readonly ClassReturnRow[]): ClassReturn {
-  const weighed = rows.filter((r) => r.weight_pct != null && r.weight_pct > 0);
-  if (!weighed.length) return { ...EMPTY, notHeldAtOpen: rows.length };
-  const legs = weighed.filter((r) => r.own_return_pct != null);
-  const denomAll = weighed.reduce((s, r) => s + r.weight_pct!, 0);
-  const denom = legs.reduce((s, r) => s + r.weight_pct!, 0);
-  const base = {
-    legs: legs.length,
-    weighed: weighed.length,
-    // ⚠ Against the weighed rows only. A row with no opening weight is not missing from this
-    // average, it was never in it — folding the two together would report a book that is 20% cash
-    // as 80% covered and send the reader looking for a pricing fault that does not exist.
-    coveredPct: denomAll > 0 ? (denom / denomAll) * 100 : 0,
-    notHeldAtOpen: rows.length - weighed.length,
-  };
-  if (!legs.length || denom <= 0) return { ...base, pct: null, coveredPct: 0 };
+export function classWeightedReturn(
+  rows: readonly ClassReturnRow[],
+  /**
+   * ⚠⚠ CASH RETURNS 0%, AND THAT IS AN ANSWER, NOT A MISSING ONE. AIRS books no `Beginwaarde` for
+   * a cash line, so the rule below finds nothing to divide by and would print a dash — which says
+   * "we could not work this out" about the one asset whose return is certain. It earned nothing;
+   * a euro is always worth a euro.
+   *
+   * ⚠ AND ITS DRAG IS A FACT. This repo prices cash at 0% rather than skipping it everywhere else
+   * (`portfolio_math.make_cash_holding`) for the reason recorded there: dropping it scales a
+   * 20%-cash portfolio's return up by 25%. A dash invites exactly that — treating cash as an
+   * unknown to be ignored — where a 0% states the drag.
+   */
+  zeroWhenNoOpening = false,
+): ClassReturn {
+  const priced = rows.filter((r) => r.start_value_eur != null && r.start_value_eur > 0);
+  const startEur = priced.reduce((s, r) => s + r.start_value_eur!, 0);
+  const allResult = rows.reduce((s, r) => s + (r.result_eur ?? 0), 0);
+  if (!priced.length || startEur <= 0) {
+    // ⚠ The income leg still counts. A cash account that was credited interest made real money,
+    // and only its PRICE leg is asserted to be zero — so an all-cash class with income is not
+    // flatly 0%, it is whatever that income was over... nothing to divide by. Still 0: the rate is
+    // undefined and 0 is the honest floor, while the euros stay visible in the Result column.
+    if (zeroWhenNoOpening) {
+      return { ...EMPTY, pct: 0, rows: rows.length, coveredPct: 100,
+        resultEur: allResult || 0, startEur: null };
+    }
+    return { ...EMPTY, rows: rows.length, resultEur: allResult || null };
+  }
+  const resultEur = priced.reduce((s, r) => s + (r.result_eur ?? 0), 0);
   return {
-    ...base,
-    pct: legs.reduce((s, r) => s + (r.weight_pct! / denom) * r.own_return_pct!, 0),
+    pct: (resultEur / startEur) * 100,
+    legs: priced.length,
+    rows: rows.length,
+    // ⚠ Of the RESULT, not of the weight. The question a reader has is "does this rate describe
+    // all the money this class made", and an unpriced row that made nothing costs nothing.
+    coveredPct: allResult === 0 ? 100 : Math.abs(resultEur) / Math.abs(allResult) * 100,
+    resultEur,
+    startEur,
   };
 }

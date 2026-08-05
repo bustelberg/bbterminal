@@ -286,3 +286,48 @@ def _f(v: object) -> float:
     on this report. (It is NOT right on a return — see `_mark_at` elsewhere — which is why this
     helper is local to the money sums and not exported.)"""
     return float(v) if isinstance(v, (int, float)) else 0.0
+
+
+@dataclass
+class Trade:
+    """ONE transaction, normalised out of the grouped buy/sell blocks.
+
+    ⚠ THIS IS WHERE THE COLUMN NAMES STOP. Everything downstream works on `eur`, `quantity` and
+    `datum` and never learns that a buy's value lives in `Waarde  EUR` while a sell's lives in
+    `Waarde  EUR.1` — that grouped-header quirk is this module's problem, and leaking it would
+    make every consumer re-learn which side of the sheet to read.
+    """
+
+    fonds: str
+    kind: str                 # 'buy' | 'sell'
+    datum: str | None
+    eur: float = 0.0          # buy cost / sale proceeds, always POSITIVE — direction is `kind`
+    quantity: float = 0.0
+    realised_ytd_eur: float = 0.0     # sells only; AIRS's own Res. YtD
+    prior_year_eur: float = 0.0       # sells only; the part earned in EARLIER years
+
+
+def trades(sheet: ParsedSheet) -> list[Trade]:
+    """Every buy and sell on the sheet, one object each, in the sheet's own order.
+
+    ⚠ EMPTY ON AN UNRECOGNISED SHEET, and the caller must check `realised_results(...).unreadable`
+    rather than reading emptiness as "this book never traded". Same refusal, one place to ask.
+    """
+    if any(c not in sheet.columns for c in _REQUIRED):
+        return []
+    out: list[Trade] = []
+    for r in sheet.rows:
+        tt = (r.get(TT) or "").strip() if isinstance(r.get(TT), str) else None
+        fonds = r.get(COL_FONDS)
+        if not isinstance(fonds, str) or not fonds or tt not in (TT_BUY, TT_SELL):
+            continue
+        datum = r.get(COL_DATE) if isinstance(r.get(COL_DATE), str) else None
+        if tt == TT_BUY:
+            out.append(Trade(fonds=fonds, kind="buy", datum=datum,
+                             eur=_f(r.get(COL_BUY_VALUE_EUR)), quantity=_f(r.get(COL_QTY))))
+        else:
+            out.append(Trade(fonds=fonds, kind="sell", datum=datum,
+                             eur=_f(r.get(COL_SELL_PROCEEDS_EUR)), quantity=_f(r.get(COL_QTY)),
+                             realised_ytd_eur=_f(r.get(COL_REALISED_YTD_EUR)),
+                             prior_year_eur=_f(r.get(COL_REALISED_PRIOR_EUR))))
+    return out

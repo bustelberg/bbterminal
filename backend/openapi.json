@@ -3716,6 +3716,17 @@
             "title": "Bucket",
             "type": "string"
           },
+          "contribution_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contribution Pct"
+          },
           "currency": {
             "anyOf": [
               {
@@ -3726,6 +3737,28 @@
               }
             ],
             "title": "Currency"
+          },
+          "current_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Value Eur"
+          },
+          "income_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Income Eur"
           },
           "isin": {
             "anyOf": [
@@ -3820,6 +3853,28 @@
             ],
             "title": "Own Return Source"
           },
+          "realised_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realised Result Eur"
+          },
+          "result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Eur"
+          },
           "return_pct": {
             "anyOf": [
               {
@@ -3849,6 +3904,28 @@
             },
             "title": "Sources",
             "type": "array"
+          },
+          "start_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Value Eur"
+          },
+          "unrealised_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unrealised Eur"
           },
           "via_names": {
             "default": [],
@@ -6325,6 +6402,125 @@
           "currency"
         ],
         "title": "LatestCloseResponse",
+        "type": "object"
+      },
+      "LedgerPosition": {
+        "description": "One instrument's whole year \u2014 whether the book still holds it or not.\n\n\u26a0 `contribution_pct` IS THE COLUMN THAT ADDS UP. Its sum over every position IS the book's own\nYTD (measured exactly: 5.8267 against AIRS's 5.826704, and 44.4624 against 44.462408).\n`weight_pct` is DESCRIPTIVE \u2014 how much of the year's capital this position occupied \u2014 so\n`contribution \u2248 weight \u00d7 return` holds only approximately, and the identity the table asserts\nis the contribution one.\n\n\u26a0 `return_pct` IS ON AVERAGE CAPITAL, NOT THE INSTRUMENT'S PRICE RETURN. A name bought in June\nshows a larger percentage on the same euros than one held all year, because it answers \"how\nhard did this money work\" rather than \"what did the instrument do\". The Holdings table's own\nReturn column is the other question and the two will differ.",
+        "properties": {
+          "avg_capital_eur": {
+            "default": 0.0,
+            "title": "Avg Capital Eur",
+            "type": "number"
+          },
+          "closed_out": {
+            "default": false,
+            "title": "Closed Out",
+            "type": "boolean"
+          },
+          "contribution_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contribution Pct"
+          },
+          "first_sale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Sale"
+          },
+          "held": {
+            "default": false,
+            "title": "Held",
+            "type": "boolean"
+          },
+          "held_result_eur": {
+            "default": 0.0,
+            "title": "Held Result Eur",
+            "type": "number"
+          },
+          "income_eur": {
+            "default": 0.0,
+            "title": "Income Eur",
+            "type": "number"
+          },
+          "last_sale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sale"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "opening_eur": {
+            "default": 0.0,
+            "title": "Opening Eur",
+            "type": "number"
+          },
+          "prior_year_eur": {
+            "default": 0.0,
+            "title": "Prior Year Eur",
+            "type": "number"
+          },
+          "realised_result_eur": {
+            "default": 0.0,
+            "title": "Realised Result Eur",
+            "type": "number"
+          },
+          "result_eur": {
+            "default": 0.0,
+            "title": "Result Eur",
+            "type": "number"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
+          "sales": {
+            "default": 0,
+            "title": "Sales",
+            "type": "integer"
+          },
+          "weight_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Pct"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "LedgerPosition",
         "type": "object"
       },
       "LinkableContext": {
@@ -8977,6 +9173,17 @@
             "title": "Available",
             "type": "boolean"
           },
+          "avg_capital_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Capital Eur"
+          },
           "basis_eur": {
             "anyOf": [
               {
@@ -9009,6 +9216,17 @@
               }
             ],
             "title": "Book Ytd Pct"
+          },
+          "capital_coverage_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capital Coverage Ratio"
           },
           "comparable": {
             "anyOf": [
@@ -9065,6 +9283,17 @@
             ],
             "title": "Holdings As Of"
           },
+          "ledger_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ledger Result Eur"
+          },
           "legs": {
             "default": [],
             "items": {
@@ -9094,6 +9323,14 @@
               }
             ],
             "title": "Portefeuille"
+          },
+          "positions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/LedgerPosition"
+            },
+            "title": "Positions",
+            "type": "array"
           },
           "realised_eur": {
             "anyOf": [

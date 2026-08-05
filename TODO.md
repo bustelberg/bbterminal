@@ -37,11 +37,29 @@ identity and the size of the error are what matter, not the exact totals.)
 measured. It carries no money, so it is excluded from every total and **counted** (surfaced in the
 panel). If a `D` ever arrives carrying a value, that count is what will show it.
 
-**Not yet done, now that the data exists:**
-- Mark a holding bought or sold mid-year on the positions table — `Beginwaarde` of 0 has an
-  explanation now, and `startWeights` could tell a genuine mid-year purchase from a data gap.
-- `start_gap_eur` is still reported as the NET of two opposite effects (positions sold out, minus
-  AIRS restating `Beginwaarde` to the current quantity). The buy rows can now separate them.
+**✅ The merged position ledger is built** (`airs_capital.py`, Analyse modal → "Every position this
+year"). One row per instrument the book touched, held or sold, weighted by **average invested
+capital** (Modified Dietz) — the only weight a sold position can carry, and the only one that
+describes a book whose composition changed. Contributions sit on `beginvermogen` and sum to the
+book's own YTD **exactly** (measured: 5.8267 vs 5.8267, 44.4624 vs 44.4624; residual 0.0000pp).
+
+⚠ A 1-January weight was tried first and is WRONG: AITopSelectie's equities were worth EUR 40,319
+on 1 Jan against a EUR 1m opening capital, because it began the year in cash and deployed on
+5 January — a start-weighted table calls it 96% cash.
+
+**Still approximate, and surfaced rather than hidden** (`capital_coverage_ratio`, measured
+0.980 / 1.023):
+- Modified Dietz ignores the price path *within* a position.
+- A sold-out parcel's opening value is split proportionally by quantity between shares held at the
+  open and shares bought during the year — AIRS does not publish its parcel matching.
+- The de-restatement assumes `Beginwaarde ÷ quantity` is the 1-Jan price (linear restatement).
+
+**Not yet done:**
+- `start_gap_eur` in the /portfolios reconciliation is still the NET of two opposite effects. The
+  ledger now separates them; that panel could read the ledger instead.
+- A sold position has no sector, so it is absent from the composition bars and Brinson. Those
+  report `realised_share_of_result_pct` instead. Classifying by name → `asset_execution` would
+  close it, but a name match is exactly what `_airs_holding_isin` warns against.
 - `kosten` is 0 on all 53 accounts, so whether costs sit inside `cumulatief_rendement` but outside
   `beleggingsresultaat` is untested. If a book ever charges them, the residual is where it shows.
 
