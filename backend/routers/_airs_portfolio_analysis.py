@@ -1400,15 +1400,29 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
         amount_eur=float(m["amount_eur"]))
         for m in muts]).by_fonds.items()}
 
+    # ⚠ THE NAMES WHOSE QUANTITY ARITHMETIC CANNOT BE TRUSTED — anything carrying a transaction
+    # type we do not interpret. `trades()` drops those rows (it emits only buys and sells), so the
+    # ledger would never learn of them; they have to be read off the sheet directly. Measured: a
+    # `D` row on KLA-Tencor added 279 shares in a 10:1 split, leaving its February purchase in
+    # PRE-split units against a POST-split holding — `qty_now − bought` gave 296 where the truth is
+    # 170, and the money-weighted return read +39.81% instead of +56.67%.
+    unknown = {r.get("Fonds") for r in sheet.rows
+               if r.get("Fonds") and r.get("Tt") not in ("A", "V")}
     led = build_ledger(volk, trades(sheet), income, rec.get("book_start_eur"),
-                       _date.fromisoformat(van), _date.fromisoformat(tot))
+                       _date.fromisoformat(van), _date.fromisoformat(tot),
+                       unknown_names={n for n in unknown if isinstance(n, str)})
     return {
         "positions": [{
             "name": p.name,
             "held": p.held,
             "closed_out": p.closed_out,
-            "opening_eur": p.opening_eur,
-            "avg_capital_eur": p.avg_capital_eur,
+            # ⚠ BOTH BLANK WHEN THE QUANTITY ARITHMETIC IS REFUSED, not just the ratio. Leaving the
+            # capital visible would print a number that is only the flows (the opening leg having
+            # been skipped) — a partial figure in a column headed "Avg capital invested" is worse
+            # than none, because it looks whole.
+            "opening_eur": None if p.capital_unknown else p.opening_eur,
+            "avg_capital_eur": None if p.capital_unknown else p.avg_capital_eur,
+            "capital_unknown": p.capital_unknown,
             # ⚠ Descriptive — a share of the year's CAPITAL, not of the return. The column that
             # adds up is `contribution_pct`.
             "weight_pct": p.weight_pct,
@@ -1702,6 +1716,20 @@ def compute_portfolio_analysis(portfolio_id: int,
             _agg[_h["bucket"]][0] += _start
             _agg[_h["bucket"]][1] += _h.get("result_eur") or 0.0
     bucket_returns = {b: v[1] / v[0] * 100.0 for b, v in _agg.items() if v[0]}
+    # ⚠ THE CLASS'S SHARE OF THE BOOK'S YEAR, in POINTS — a different question from the return
+    # beside it, on the book's own opening capital rather than the class's. These ADD; the returns
+    # do not, because each of those sits on its own denominator.
+    #
+    # ⚠ THEY DO NOT ADD TO THE WHOLE BOOK, AND THE CALLER MUST SAY SO. A position sold out during
+    # the year has no asset class — no sector, no ISIN, no current weight — so no bar can carry it.
+    # Measured on BUS_Offensief_Dyn: the classes come to +8.211pp against a book that made +5.827%,
+    # the missing -2.384pp being eight names it no longer holds. `realised.positions` carries them
+    # and the UI prints the remainder beneath the bars, because a set of parts that silently misses
+    # the total is the exact failure this modal keeps removing.
+    _contrib: dict[str, float] = defaultdict(float)
+    for _h in enriched_holdings:
+        if _h.get("contribution_pct") is not None:
+            _contrib[_h["bucket"]] += _h["contribution_pct"]
     # ⚠ CASH IS 0%, NOT UNDEFINED — it has no `Beginwaarde` to divide by, so the rule above leaves
     # it out and the bar reads a dash. That dash says "unknown" about the one asset whose return is
     # certain. Set explicitly, so the allocation legend and the class row agree here too rather
@@ -1835,7 +1863,8 @@ def compute_portfolio_analysis(portfolio_id: int,
         "axes": axes,
         # The portfolio's own asset-class split, on the active weighting basis; each slice carries
         # the bucket's value-weighted YTD price return (from the paired book), for the pie legend.
-        "allocation": [{**s, "return_pct": bucket_returns.get(s["bucket"])}
+        "allocation": [{**s, "return_pct": bucket_returns.get(s["bucket"]),
+                        "contribution_pct": _contrib.get(s["bucket"])}
                        for s in _weigh_alloc(alloc_items)],
         # Per-holding book detail (bucket / currency / start-weight / return) — the source for a
         # non-equity sleeve's contribution + currency view, where sector-vs-SP500 says nothing.
@@ -1883,6 +1912,10 @@ def _with_results(holdings: list[dict], realised: dict) -> list[dict]:
         return holdings
     basis = realised.get("basis_eur") if realised.get("available") else None
     by_name = {p["name"]: p for p in (realised.get("positions") or []) if p.get("held")}
+    # ⚠ THE MONEY-WEIGHTED LEG IS ONLY DEFINED WHERE WE KNOW THE FLOWS, and that is the direct
+    # holdings. A leg reached through a certificate has no buys or sells of its own — AIRS trades
+    # the WRAPPER — so there is no "money you put in" to divide by, and `None` is the honest
+    # answer rather than the certificate's flows split across its contents.
     out = []
     for h in holdings:
         start, cur = h.get("start_value_eur"), h.get("current_value_eur")
@@ -1915,13 +1948,35 @@ def _with_results(holdings: list[dict], realised: dict) -> list[dict]:
                   else 0.0 if is_cash
                   else None)
         income = h.get("income_eur") or 0.0
-        realised_eur = (by_name.get(h.get("name") or "") or {}).get("realised_result_eur") or 0.0
+        led = by_name.get(h.get("name") or "") or {}
+        realised_eur = led.get("realised_result_eur") or 0.0
         total = (None if unreal is None and not realised_eur and not income
                  else round((unreal or 0.0) + realised_eur + income, 2))
+        # ⚠ NOT `led["return_pct"]` BLINDLY — a looked-through leg never matches a ledger position
+        # (see above), so `led` is empty for it and both fields stay None. Only a row the book
+        # holds DIRECTLY has an average invested capital to divide by.
+        avg_cap = led.get("avg_capital_eur")
         out.append({**h,
                     "unrealised_eur": unreal,
                     "realised_result_eur": realised_eur or None,
                     "result_eur": total,
+                    # ⚠ WHAT THE MONEY ACTUALLY MADE, as opposed to what the instrument did. The
+                    # `Return` column beside it divides by AIRS's RESTATED Beginwaarde — today's
+                    # quantity at January's price — which deliberately erases your timing so the
+                    # figure describes the stock. This one divides by the capital that was really
+                    # tied up, flow-weighted by when it went in, and its numerator carries the
+                    # dividends (net of withholding) and anything realised on a mid-year sale.
+                    # Measured: KLA-Tencor is +55.62% as an instrument and +30.94% on the money,
+                    # because more of it was bought later at higher prices.
+                    "avg_capital_eur": avg_cap,
+                    "money_weighted_return_pct": led.get("return_pct"),
+                    # ⚠ WHICH OF THE TWO REASONS THE CELL IS BLANK. Both produce a `None`, and they
+                    # are not the same fact: a leg inside a certificate has no flows because AIRS
+                    # trades the wrapper, while a directly-held position with a `D` (Deponering)
+                    # row has flows we cannot put on one basis. One tooltip for both told a reader
+                    # that KLA-Tencor — held outright — was inside a certificate, which is simply
+                    # untrue and sends them looking for a wrapper that does not exist.
+                    "capital_unknown": bool(led.get("capital_unknown")),
                     "contribution_pct": (total / basis * 100.0)
                     if (total is not None and basis) else None,
                     # ⚠ 0%, NOT a dash — same reason as the price leg above, and same direction:

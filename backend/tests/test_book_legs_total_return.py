@@ -1,24 +1,30 @@
-"""The Analyse modal and the row that opens it must report the SAME return for the same holding.
+"""Both sides of a Brinson subtraction must price the same instrument the same way.
 
-Both surfaces are AIRS-sourced, and both were right about something — they just answered different
-questions and looked identical doing it:
+Selection effect is `w_b × (R_p,bucket − R_b,bucket)` — it subtracts our return from the INDEX's
+for the same names. The benchmark is rebuilt from `asset_price`, so pricing our side off AIRS put
+one instrument on the two sides of that subtraction at two different numbers, and Brinson booked
+the difference as skill. Measured 2026-08-05, direct holdings only, one window:
 
-    the expanded row   `(current + gross dividend + dividend_tax) ÷ Beginwaarde − 1`   TOTAL
-    the Analyse modal  `current ÷ Beginwaarde − 1`                                     price only
+    ASML Holding              AIRS +49.68%   yfinance +63.70%   -14.03pp
+    Lam Research              AIRS +74.16%   yfinance +89.90%   -15.74pp
+    AITopSelectie   median |gap| 3.39pp, 18 of 20 legs over 1pp
+    BUS_Offensief   median |gap| 2.20pp, 20 of 25 legs over 1pp
 
-So a holding that paid a dividend read one way in the table and another in the modal, on the same
-page, for the same book, with nothing on either surface saying which was which. `book_legs` now
-uses the row's numerator, and takes the income from the row's own loader (`_direct_result`, keyed
-on `holding_name`) rather than reading the Mutaties journal a second time.
+Hold ASML at exactly its index weight and the old basis still reported a 14pp selection effect on
+it. The gaps were also ONE-DIRECTIONAL (the holdings snapshot trails the latest close), so they
+biased rather than cancelled.
 
-⚠ THE TAX IS ADDED, NOT SUBTRACTED. `tax_eur` is already negative — AIRS books withholding as a
-debit — so `gross + tax` IS the net. The intuitive `- tax` adds the withholding back and overstates
-every foreign holding by twice it, silently, because the result is still a plausible number.
+⚠ IT FIXED A SECOND FAULT THAT WAS WORSE. `_expand_book_rows` splits a certificate's start AND
+current value by each holding's share, so every instrument inside one came out with the WRAPPER's
+return — BUS_Offensief's 23 wrapped legs carried FOUR distinct returns between them. Pricing the
+instrument closes both faults with one source: 48 distinct returns across 48 priced legs.
 
-⚠ AND IT MAKES THE PORTFOLIO SIDE A TOTAL RETURN AGAINST A PRICE-RETURN BENCHMARK. The rebuilt
-index carries no dividends (~1.1pp/yr, measured against ISAC), so attributed naively a dividend
-reads as selection skill. That is surfaced per leg (`return_basis`), not absorbed — the alternative
-is two different numbers for one holding on one screen, which is the worse of the two lies.
+⚠ WHAT THIS DELIBERATELY GAVE UP. These legs no longer reproduce AIRS's `cumulatief_rendement` —
+they are not AIRS's numbers. That is correct for a RELATIVE decomposition (a difference between two
+vendors is not alpha), and `airs_return_pct` rides along on every leg so the gap can be shown
+rather than discovered. The income is still loaded and still reported per leg, but is OUT of the
+comparison: both sides are price returns now, so a dividend can no longer read as selection skill
+(~1.1pp/yr, measured against ISAC).
 """
 from __future__ import annotations
 
@@ -27,6 +33,8 @@ from dataclasses import dataclass
 import pytest
 
 import routers._airs_attribution_basis as basis
+
+START = "2026-01-01"
 
 
 @dataclass
@@ -38,8 +46,13 @@ class _Income:
 
 @pytest.fixture
 def book(monkeypatch):
-    """One paired book with three holdings: a dividend payer with withholding, a payer with
-    none, and a holding the journal has no line for at all."""
+    """One paired book: a dividend payer with withholding, a payer with none, a holding the
+    journal has no line for, and cash.
+
+    ⚠ THE AIRS VALUES AND THE PRICE MARKS DISAGREE ON PURPOSE — that disagreement IS the subject.
+    `US Payer` is +10% on AIRS's own valuation, +18.5% once its dividend is added, and +25% on the
+    price series, so a test that reads one where it means another cannot pass by accident.
+    """
     rows = [
         {"holding_name": "US Payer", "isin": "US0000000001", "start_value_eur": 1000.0,
          "current_value_eur": 1100.0, "asset_class": "Equity", "bucket": "Stocks"},
@@ -55,6 +68,9 @@ def book(monkeypatch):
         "US Payer": _Income(gross_eur=100.0, tax_eur=-15.0),
         "NL Payer": _Income(gross_eur=50.0, tax_eur=0.0),
     }
+    marks = {"US0000000001": {"return_pct": 25.0},
+             "NL0000000002": {"return_pct": -4.0},
+             "US0000000003": {"return_pct": 7.5}}
     monkeypatch.setattr(basis, "list_account_links",
                         lambda: {"accounts": [{"portefeuille": "BOOK_A",
                                                "model_portfolio_id": 7}]},
@@ -63,10 +79,11 @@ def book(monkeypatch):
                         lambda: {"accounts": [{"portefeuille": "BOOK_A",
                                                "model_portfolio_id": 7}]})
     monkeypatch.setattr("routers._airs_holding_isin.resolve_account_isins",
-                        lambda _p: {"rows": rows})
+                        lambda _p, **_k: {"rows": rows})
     monkeypatch.setattr("routers._airs_portfolio_analysis._expand_book_rows", lambda r: r)
     monkeypatch.setattr("routers._airs_accounts._direct_result",
                         lambda _p, _n: (income, {"gross": None, "tax": None, "funds": None}))
+    monkeypatch.setattr(basis, "compute_holding_marks", lambda _i, _s: marks)
     return rows
 
 
@@ -74,63 +91,89 @@ def _by_name(legs):
     return {leg["airs_name"]: leg for leg in legs}
 
 
-class TestTheLegMatchesTheRowsReturnColumn:
-    def test_the_income_is_in_the_numerator(self, book):
+class TestTheReturnComesFromThePriceSeries:
+    """⚠ The benchmark is built from `asset_price`. Our side must be too, or the same instrument
+    carries two different numbers into one subtraction and the difference reads as skill."""
+
+    def test_the_leg_uses_the_mark_not_the_books_own_valuation(self, book):
+        leg = _by_name(basis.book_legs(7, START))["US Payer"]
+        assert leg["return_pct"] == pytest.approx(25.0)      # the price series
+        assert leg["return_pct"] != pytest.approx(18.5)      # AIRS, income included
+        assert leg["return_pct"] != pytest.approx(10.0)      # AIRS, price only
+
+    def test_every_leg_declares_a_PRICE_basis(self, book):
+        # The old basis said "total": income in the numerator against a price-return benchmark,
+        # which read every dividend as selection skill.
+        assert {leg["return_basis"] for leg in basis.book_legs(7, START)} == {"price"}
+
+    def test_a_holding_the_price_series_cannot_reach_has_no_return(self, book, monkeypatch):
+        # ⚠ None, so `split_legs` reports it as `unpriced` — the one exclusion that is a genuine
+        # gap rather than an answer, and the one the panel already warns about loudly.
+        monkeypatch.setattr(basis, "compute_holding_marks", lambda _i, _s: {})
+        assert _by_name(basis.book_legs(7, START))["US Payer"]["return_pct"] is None
+
+
+class TestAirsIsCarriedButNotUsed:
+    """The book's own figure is what makes this panel's divergence from `cumulatief_rendement`
+    explainable rather than mysterious."""
+
+    def test_the_airs_figure_rides_along(self, book):
         """`holdingTotalReturn`'s definition, to the digit: (1100 + 100 − 15) / 1000 − 1."""
-        leg = _by_name(basis.book_legs(7))["US Payer"]
-        assert leg["return_pct"] == pytest.approx(18.5)
+        leg = _by_name(basis.book_legs(7, START))["US Payer"]
+        assert leg["airs_return_pct"] == pytest.approx(18.5)
 
     def test_the_withholding_is_ADDED_because_it_is_already_negative(self, book):
         """The trap: `- tax_eur` would give (1100 + 100 + 15)/1000 − 1 = 21.5% — plausible, and
         wrong by twice the withholding on every foreign holding."""
-        leg = _by_name(basis.book_legs(7))["US Payer"]
-        assert leg["return_pct"] != pytest.approx(21.5)
+        leg = _by_name(basis.book_legs(7, START))["US Payer"]
+        assert leg["airs_return_pct"] != pytest.approx(21.5)
         assert leg["income_eur"] == pytest.approx(85.0)
 
-    def test_a_holding_with_no_withholding_is_unaffected(self, book):
-        leg = _by_name(basis.book_legs(7))["NL Payer"]
-        assert leg["return_pct"] == pytest.approx(5.0)     # (1000 + 50) / 1000 − 1
-
-    def test_a_price_only_return_is_no_longer_what_is_reported(self, book):
-        """Guards the regression directly: the old formula gave +10.00% for the US payer."""
-        assert _by_name(basis.book_legs(7))["US Payer"]["return_pct"] != pytest.approx(10.0)
+    def test_income_is_reported_but_is_NOT_in_the_compared_return(self, book):
+        # Both sides are price returns now. The income still has to be visible — a reader is owed
+        # the fact that it exists and sits outside the comparison.
+        leg = _by_name(basis.book_legs(7, START))["NL Payer"]
+        assert leg["income_eur"] == pytest.approx(50.0)
+        assert leg["return_pct"] == pytest.approx(-4.0)
 
 
 class TestAbsencesStayApart:
     def test_no_journal_line_is_None_income_not_zero(self, book):
-        """"paid nothing" and "we have not read this book's journal" are different claims and
-        only one of them is safe to make — same rule the row's own column follows."""
-        leg = _by_name(basis.book_legs(7))["Silent"]
+        """"paid nothing" and "we have not read this book's journal" are different claims and only
+        one of them is safe to make — same rule the row's own column follows."""
+        leg = _by_name(basis.book_legs(7, START))["Silent"]
         assert leg["income_eur"] is None
-        # ...and with no income to add, the return is the price return, which is correct here.
-        assert leg["return_pct"] == pytest.approx(-10.0)
+        assert leg["return_pct"] == pytest.approx(7.5)
 
     def test_cash_has_no_return_at_all(self, book):
-        leg = _by_name(basis.book_legs(7))["Cash"]
+        leg = _by_name(basis.book_legs(7, START))["Cash"]
         assert leg["return_pct"] is None
         assert leg["is_cash"] is True
 
     def test_cash_still_carries_its_weight(self, book):
         """It has no return, but it is real exposure — dropping its weight would renormalise the
         book over its non-cash part and overstate every other holding's share."""
-        legs = _by_name(basis.book_legs(7))
+        legs = _by_name(basis.book_legs(7, START))
         assert legs["Cash"]["weight_pct"] == pytest.approx(500 / 3500 * 100)
 
 
-class TestTheBasisIsDeclared:
-    """The benchmark this gets compared against is a PRICE return. Saying so per leg is what
-    keeps a dividend from reading as selection skill without anyone noticing."""
-
-    def test_every_leg_says_what_it_includes(self, book):
-        assert {leg["return_basis"] for leg in basis.book_legs(7)} == {"total"}
-
-
 class TestTheWeightIsStillTheOpeningValue:
-    """Unchanged by this — pinned because the income change touches the same rows. Weighting by
-    the CURRENT value overweights the winners: measured on AITopSelectie, +58.75% against the
-    book's true +44.99%."""
+    """⚠ UNCHANGED, AND DELIBERATELY. A weight does not need the two sides to share a vendor —
+    Brinson compares OUR weight against the INDEX's by construction. Only the return had to be
+    unified. Weighting by the CURRENT value overweights the winners: measured on AITopSelectie,
+    +58.75% against the book's true +44.99%."""
 
     def test_weights_are_beginwaarde_shares(self, book):
-        legs = _by_name(basis.book_legs(7))
+        legs = _by_name(basis.book_legs(7, START))
         assert legs["US Payer"]["weight_pct"] == pytest.approx(1000 / 3500 * 100)
-        assert sum(leg["weight_pct"] for leg in basis.book_legs(7)) == pytest.approx(100.0)
+        assert sum(leg["weight_pct"] for leg in basis.book_legs(7, START)) == pytest.approx(100.0)
+
+
+class TestBothPathsShareOneBasis:
+    def test_the_book_path_takes_the_window_like_the_model_path(self):
+        """⚠ It used to ignore `start` entirely, so switching `source` changed the VENDOR as well
+        as the weights — two variables at once, on a control the reader thinks moves one."""
+        import inspect
+
+        assert "start" in inspect.signature(basis.book_legs).parameters
+        assert "compute_holding_marks" in inspect.getsource(basis.book_legs)

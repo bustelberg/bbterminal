@@ -91,30 +91,54 @@ def model_legs(portfolio_id: int, eff: str | None, start: str) -> list[dict]:
     } for r in pos]
 
 
-def book_legs(portfolio_id: int) -> list[dict] | None:
+def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
     """The paired AIRS BOOK as legs: weight = the START-of-window EUR value as a % of the book,
-    return = the VOLK start→current EUR TOTAL return. None when no book is paired.
+    return = the INSTRUMENT's own EUR price return over `start`. None when no book is paired.
 
-    ⚠ TOTAL, NOT PRICE — AND THE REASON IS THAT THE ROW BEHIND THIS MODAL ALREADY SAYS TOTAL.
-    Expanding a portfolio on /management-dashboard shows a `Return` column computed as
-    `(current + gross dividend + dividend_tax) ÷ Beginwaarde − 1` (`startWeights.holdingTotalReturn`
-    — the tax is ADDED because AIRS books withholding as a negative, so that sum IS current + NET
-    income). This function used to compute `current ÷ Beginwaarde − 1` and drop the income leg
-    entirely, so the same holding of the same book showed two different returns on the same page:
-    the row's, and the modal's. Both were AIRS-sourced and neither was wrong — they were answers to
-    different questions, presented identically.
+    ⚠⚠ THE RETURN IS PRICED FROM `asset_price`, NOT FROM AIRS, AND THAT IS THE WHOLE POINT OF THIS
+    FUNCTION'S EXISTENCE IN A BRINSON PANEL. Selection effect is `w_b × (R_p,bucket − R_b,bucket)`:
+    it subtracts the portfolio's return from the BENCHMARK's for the same names. The benchmark is
+    rebuilt from `asset_price` (`_asset_benchmark`), so pricing our side off AIRS put the SAME
+    instrument on the two sides of that subtraction at two different numbers, and Brinson booked
+    the difference as skill. Measured 2026-08-05 on direct holdings only, over one window:
 
-    So the numerator is now the SAME one, and the income comes from the SAME loader the row uses
-    (`_direct_result` over the Mutaties journal, keyed on `holding_name`), rather than a second
-    reading of the same journal that could drift from it.
+        ASML Holding              AIRS +49.68%   yfinance +63.70%   -14.03pp
+        Lam Research              AIRS +74.16%   yfinance +89.90%   -15.74pp
+        Taiwan Semiconductor ADR  AIRS +32.55%   yfinance +46.77%   -14.21pp
 
-    ⚠ WHICH MAKES THE PORTFOLIO SIDE A TOTAL RETURN AGAINST A PRICE-RETURN BENCHMARK, and that is
-    a real asymmetry, not a rounding one. `_asset_benchmark` rebuilds the index on FULL-cap PRICE
-    returns — dividends are not in it (validated against ISAC: ~1.1pp/yr of the gap is exactly
-    this). Attributed naively, every dividend a holding pays reads as selection skill. It is
-    surfaced (`return_basis` on each leg) rather than silently absorbed, because the alternative —
-    keeping the modal on a price return so the benchmark comparison stays clean — puts two
-    different numbers for one holding on one screen, which is the worse of the two lies.
+        AITopSelectie   median |gap| 3.39pp, 18 of 20 legs over 1pp
+        BUS_Offensief   median |gap| 2.20pp, 20 of 25 legs over 1pp
+
+    Hold ASML at exactly its index weight and the old basis still reported a 14pp selection effect
+    on it. The gaps are also ONE-DIRECTIONAL (AIRS below yfinance — the holdings snapshot is a day
+    or more behind the latest close), so they bias rather than cancel. CLAUDE.md already carried
+    the rule — "THE BENCHMARK MUST BE PRICED IN THE SAME WORLD AS THE PORTFOLIO" — and it had been
+    applied to the benchmark and never back-applied here.
+
+    ⚠⚠ AND IT FIXES A SECOND FAULT THAT WAS WORSE. `_expand_book_rows` splits a certificate's start
+    AND current value by each holding's share, so every instrument inside one came out with the
+    WRAPPER's return: BUS_Offensief's 50 legs carried 31 distinct returns, and its 23 wrapped legs
+    carried FOUR between them. "Selection" on those was measuring the certificate. This is the same
+    defect `_airs_portfolio_analysis` documents and fixed for its holdings table (NVIDIA read
+    +0.08% against its own +2.82%); `book_legs` fed Brinson and never got the fix. Pricing the
+    INSTRUMENT rather than the book's slice of it closes both faults with one source.
+
+    ⚠ THE PRICE THIS PAYS, AND IT IS REAL: these legs no longer reproduce AIRS's own
+    `cumulatief_rendement`. They are not AIRS's numbers any more. That is correct for a RELATIVE
+    decomposition — a difference between two vendors is not alpha — but it means the panel's
+    portfolio return will sit a little away from the book's own. `airs_return_pct` rides along on
+    every leg so the gap can be shown rather than discovered, and the headline return elsewhere in
+    the modal still comes from AIRS, which remains the system of record for what the book MADE.
+
+    ⚠ IT ALSO RETIRES THE TOTAL-vs-PRICE ASYMMETRY. The old basis was a TOTAL return (income in the
+    numerator) against a PRICE-return benchmark, so every dividend a holding paid read as selection
+    skill (~1.1pp/yr, validated against ISAC). Both sides are now price returns. The income is
+    still loaded and still carried per leg (`income_eur`), because the reader is owed the fact that
+    it is NOT in the comparison — it is simply no longer smuggled into one side of it.
+
+    ⚠ THE WEIGHT IS STILL AIRS'S BEGINWAARDE, AND DELIBERATELY SO. A weight does not need the two
+    sides to share a vendor — Brinson compares OUR weight against the INDEX's by construction —
+    and the Beginwaarde share is what the book actually held. Only the return had to be unified.
 
     ⚠ THE WEIGHT IS THE BEGINWAARDE, NOT THE HUIDIGE WAARDE. Weighting a window's return by the
     CURRENT value overweights the winners (a holding that doubled carries ~2× the share it started
@@ -144,6 +168,11 @@ def book_legs(portfolio_id: int) -> list[dict] | None:
     # holding pay", free to drift from the column the reader is comparing against.
     income, _sold = _direct_result(link["portefeuille"],
                                    {r.get("holding_name") for r in rows if r.get("holding_name")})
+    # ⚠ THE SAME LOADER `model_legs` USES, OVER THE SAME WINDOW — which is what puts the book path
+    # and the model path on one basis as well, not just this side and the benchmark. Priced AFTER
+    # the expansion, so a looked-through leg is priced as the INSTRUMENT it is rather than as its
+    # certificate's slice.
+    marks = compute_holding_marks(sorted({r["isin"] for r in rows if r.get("isin")}), start)
     total = sum(float(r.get("start_value_eur") or 0) for r in rows) or 1.0
     out: list[dict] = []
     for r in rows:
@@ -156,20 +185,30 @@ def book_legs(portfolio_id: int) -> list[dict] | None:
         # silently, because the result is still a plausible number. Same note as `valueWithIncome`.
         d = income.get(r.get("holding_name"))
         net_income = ((d.gross_eur or 0.0) + (d.tax_eur or 0.0)) if d else 0.0
+        isin = r.get("isin")
         out.append({
-            "isin": r.get("isin"),
+            "isin": isin,
             "weight_pct": start_val / total * 100.0,
-            "return_pct": (((cur + net_income) / start_val - 1.0) * 100.0)
+            # ⚠ THE INSTRUMENT'S OWN EUR PRICE RETURN, from the SAME series the benchmark is built
+            # from. None where we cannot price it — which `split_legs` then reports as `unpriced`,
+            # the one exclusion that is a genuine gap rather than an answer.
+            "return_pct": None if not isin else (marks.get(isin) or {}).get("return_pct"),
+            # ⚠ AIRS'S OWN FIGURE, CARRIED BUT NOT USED. It is what the book says this position
+            # made, and it is how the difference between this panel and the book's own return can
+            # be shown rather than discovered. ⚠ For a leg inside a certificate it is the WRAPPER's
+            # rate stamped on this holding — never present it as the instrument's.
+            "airs_return_pct": (((cur + net_income) / start_val - 1.0) * 100.0)
             if (not is_cash and start_val > 0) else None,
             "airs_name": r.get("holding_name"),
             "is_cash": is_cash,
             "via_names": r.get("via_names") or [],
             "asset_class": r.get("bucket"),
-            # What this return INCLUDES, carried so the benchmark comparison can say that its own
-            # side does not. `None` income is a book whose journal we have not read; 0.0 is a
-            # holding that genuinely paid nothing — kept apart for the same reason the row does.
+            # ⚠ CARRIED, AND NO LONGER INSIDE THE RETURN. Both sides of the comparison are price
+            # returns now, so a dividend can no longer read as selection skill — but the reader is
+            # still owed the fact that income exists and is OUT of the comparison. `None` is a book
+            # whose journal we have not read; 0.0 is a holding that genuinely paid nothing.
             "income_eur": (net_income if d else None),
-            "return_basis": "total",
+            "return_basis": "price",
         })
     return out
 
@@ -177,7 +216,11 @@ def book_legs(portfolio_id: int) -> list[dict] | None:
 def portfolio_legs(source: str, portfolio_id: int, eff: str | None,
                    start: str) -> list[dict] | None:
     """Legs from the chosen source. None only when `source=book` and no book is paired."""
-    return book_legs(portfolio_id) if source == "book" else model_legs(portfolio_id, eff, start)
+    # ⚠ BOTH PATHS NOW TAKE `start` AND BOTH PRICE FROM `asset_price`. The book path used to price
+    # itself off AIRS and ignore the window entirely, so switching `source` changed the VENDOR as
+    # well as the weights — two variables at once, on a control the reader thinks moves one.
+    return (book_legs(portfolio_id, start) if source == "book"
+            else model_legs(portfolio_id, eff, start))
 
 
 def split_legs(legs: list[dict], idx: int, grid: dict | None = None,

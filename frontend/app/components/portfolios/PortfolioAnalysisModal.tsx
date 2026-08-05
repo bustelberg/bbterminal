@@ -5,7 +5,7 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { formatPct, visibleBuckets } from './composition';
-import { allocColor, bucketLabel, CASH_BUCKET } from './allocationColors';
+import { allocColor, bucketLabel, CASH_BUCKET, EQUITY_BUCKET } from './allocationColors';
 import { classWeightedReturn } from './classReturn';
 import { Provenance } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
@@ -117,11 +117,12 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive }: {
   );
 }
 
-type AllocSlice = {
-  bucket: string; pct: number; return_pct?: number | null;
-  /** Individual holdings in this class, counted AFTER the certificates are looked through. */
-  holdings?: number;
-};
+/** ⚠ DERIVED FROM THE PAYLOAD, NOT HAND-WRITTEN. It used to be its own literal — `{bucket, pct,
+ *  return_pct, holdings}` — which silently went stale the moment the server grew a field: adding
+ *  `contribution_pct` compiled fine on the backend and failed here with "does not exist on type
+ *  AllocSlice", which is the good outcome; the bad one is a field that exists on both sides and
+ *  quietly is not the same shape. Same pattern `BookHolding` below already uses. */
+type AllocSlice = NonNullable<ModelPortfolioAnalysis['allocation']>[number];
 /** A return, TWO decimals, always — the same precision the holdings table and the scorecard use.
  *  One decimal was the odd one out: the legend said a class made +7.4% while the rows inside it
  *  were quoted to the hundredth, so the two could not be tied together by eye. `—` is not a zero:
@@ -153,8 +154,11 @@ const AXIS_TICKS = [0, 25, 50, 75, 100];
 
 type Band = NonNullable<ModelPortfolioAnalysis['bands']>[number];
 
-function AllocationBars({ slices, selected, onSelect, variant, bands }: {
+function AllocationBars({ slices, selected, onSelect, variant, bands, soldContribution }: {
   slices: AllocSlice[];
+  /** ⚠ The year's contribution from positions SOLD OUT during it. They have no asset class, so no
+   *  bar can carry them — without this the slices are a set of parts that misses its own total. */
+  soldContribution?: number | null;
   selected?: string | null;
   onSelect?: (bucket: string | null) => void;
   /** The risk profile AIRS's own name says this model is offered at, or null for the products
@@ -359,12 +363,35 @@ function AllocationBars({ slices, selected, onSelect, variant, bands }: {
               <span className="w-7 shrink-0 text-right text-[10px] text-fg-faint tabular-nums">
                 {(s.holdings ?? 0) > 0 ? `(${s.holdings})` : ''}
               </span>
-              <span className={`w-14 shrink-0 text-right font-mono text-[11px] tabular-nums ${retTone(s.return_pct)}`}>
-                {fmtRet(s.return_pct)}
+              {/* ⚠ POINTS, NOT PERCENT, AND THE FIGURE CHANGED WITH THE UNIT. This showed the
+                  class's RETURN (its Result over its own opening value) — a rate, which cannot
+                  wear "pp" because pp means points OF something. Relabelling alone would have been
+                  a lie; the number is now the class's CONTRIBUTION, on the book's own opening
+                  capital, which is the thing that legitimately adds. Its own return is still in
+                  the Holdings table below, in the column labelled Return. */}
+              <span className={`w-16 shrink-0 text-right font-mono text-[11px] tabular-nums ${retTone(s.contribution_pct)}`}
+                title={`${bucketLabel(s.bucket)} added ${ppt(s.contribution_pct)} to the book’s year.`
+                  + ` Its own return was ${fmtRet(s.return_pct)} — a rate on its own opening value,`
+                  + ' which is why the two differ and why only this one adds up.'}>
+                {ppt(s.contribution_pct)}
               </span>
             </Row>
           );
         })}
+        {/* ⚠⚠ THE PART NO BAR CAN CARRY. A position sold out during the year has no asset class —
+            no sector, no ISIN, no current weight — so it appears in no slice above. Without this
+            line the bars are a set of parts that silently misses its total: measured on
+            BUS_Offensief_Dyn they come to +8.211pp against a book that made +5.827%, and the
+            missing -2.384pp is eight names it no longer holds. Printed only when there IS a
+            remainder, so a book that sold nothing does not carry a permanent 0.00pp footnote. */}
+        {soldContribution != null && Math.abs(soldContribution) >= 0.005 && (
+          <div className="flex items-center gap-2 pt-1 mt-1 border-t border-neutral-800/40 text-[10px]">
+            <span className="text-fg-faint">Sold during the year — no longer a holding</span>
+            <span className={`ml-auto font-mono tabular-nums ${retTone(soldContribution)}`}>
+              {ppt(soldContribution)}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -617,6 +644,122 @@ function RealisedCoverageNote({ r }: { r?: ModelPortfolioAnalysis['realised'] })
  *  cell's card and short coverage is marked in amber, never absorbed. */
 type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution';
 
+/**
+ * The five money columns, which the reader turns on and off.
+ *
+ * ⚠ ALL FIVE ARE OFF BY DEFAULT (on request). The table opens at six columns — what you hold,
+ * how it got there, what class and sector it is, its weight and its return — which fits a screen
+ * and answers the question most visits are asking. The money columns are the ones that cost the
+ * width, and they are one click away when someone wants to know what a position MADE rather than
+ * what it did.
+ *
+ * ⚠ NOT `Weight`, `Sector`, `Via` or `Return`. Those are not part of this group — hiding the
+ * Return column would strand the class-row rate with nothing to compare it against, and hiding
+ * Sector would break the bars-to-rows link the Sector column exists to provide.
+ */
+const MONEY_COLUMNS = [
+  // ⚠ THE THREE RAW EUROS THE TWO RATIOS ARE BUILT FROM. With these on, every figure in the table
+  // is checkable rather than assertable:
+  //     Unrealised        = Value now − Beginwaarde
+  //     Result            = Unrealised + Realised + Income
+  //     Return            = Result ÷ Beginwaarde
+  //     On money invested = Result ÷ Avg capital
+  // A percentage whose numerator and denominator are both absent cannot be argued with, and this
+  // table has spent a lot of its life being argued with.
+  { key: 'opening', label: 'Beginwaarde (1 Jan)' },
+  { key: 'valuenow', label: 'Value now' },
+  { key: 'avgcapital', label: 'Avg capital invested' },
+  { key: 'unrealised', label: 'Unrealised' },
+  { key: 'realised', label: 'Realised' },
+  { key: 'income', label: 'Income' },
+  { key: 'result', label: 'Result' },
+  { key: 'contribution', label: 'Contribution' },
+  // ⚠ A DIFFERENT QUESTION FROM `Return`, NOT A BETTER VERSION OF IT. Return divides by AIRS's
+  // restated Beginwaarde and so describes the INSTRUMENT; this divides by the capital actually
+  // tied up and so describes the MONEY. Both belong on screen, which is why this is a column of
+  // its own rather than a redefinition of the one beside it.
+  { key: 'moneyweighted', label: 'On money invested' },
+] as const;
+type MoneyCol = (typeof MONEY_COLUMNS)[number]['key'];
+const DEFAULT_MONEY_COLS: MoneyCol[] = [];
+const MONEY_COLS_KEY = 'bb.analyse.holdings.columns';
+
+/**
+ * The saved choice, or the default.
+ *
+ * ⚠ READ DURING THE FIRST RENDER, WHICH IS SAFE *HERE* AND NOT IN GENERAL. Touching
+ * `localStorage` in a lazy initialiser is the classic hydration bug — the server renders one thing
+ * and the client another. It cannot happen in this table: it is rendered from `{data && …}` after
+ * a client-side fetch inside a modal the user opened, so the server never produces it and there is
+ * no first paint to mismatch. Doing it in an effect instead would mean a setState inside an
+ * effect, which is a cascading render and is exactly what the lint rule objects to.
+ *
+ * ⚠ AN UNREADABLE OR CORRUPT VALUE FALLS BACK TO THE DEFAULT rather than throwing. A stored UI
+ * preference must never be able to stop the table rendering; the worst it may do is be ignored.
+ */
+function readSavedColumns(): Set<MoneyCol> {
+  if (typeof window === 'undefined') return new Set(DEFAULT_MONEY_COLS);
+  try {
+    const raw = localStorage.getItem(MONEY_COLS_KEY);
+    if (!raw) return new Set(DEFAULT_MONEY_COLS);
+    const saved = JSON.parse(raw) as unknown;
+    if (!Array.isArray(saved)) return new Set(DEFAULT_MONEY_COLS);
+    const valid = MONEY_COLUMNS.map((c) => c.key) as readonly string[];
+    // ⚠ An EMPTY saved list is a legitimate choice (hide them all) and is honoured — the guard
+    // above is for a value that is not a list at all, not for a short one.
+    return new Set(saved.filter((k): k is MoneyCol => typeof k === 'string' && valid.includes(k)));
+  } catch (e) {
+    console.warn('[analyse] could not read the saved column choice', e);
+    return new Set(DEFAULT_MONEY_COLS);
+  }
+}
+
+/** Which money columns are shown, remembered across visits. */
+function useMoneyColumns() {
+  const [cols, setCols] = useState<Set<MoneyCol>>(readSavedColumns);
+  const toggle = (k: MoneyCol) => setCols((prev) => {
+    const next = new Set(prev);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    try { localStorage.setItem(MONEY_COLS_KEY, JSON.stringify([...next])); } catch { /* private mode */ }
+    return next;
+  });
+  return { cols, toggle };
+}
+
+/** The +/− control over those columns. ⚠ Closed by a full-screen click catcher rather than a
+ *  document listener: this lives inside a modal that already stops propagation in places, and a
+ *  listener that the modal swallows leaves a panel nothing can dismiss. */
+function ColumnPicker({ cols, toggle }: { cols: Set<MoneyCol>; toggle: (k: MoneyCol) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex">
+      <button type="button" onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        title="Add or remove the money columns"
+        className={`cursor-pointer text-[10px] leading-none px-1.5 py-1 rounded border transition-colors ${
+          open ? 'border-accent-500/50 text-accent-300 bg-overlay/5'
+            : 'border-neutral-800/40 text-fg-subtle hover:text-accent-300 hover:bg-overlay/5'}`}>
+        + columns
+      </button>
+      {open && (
+        <>
+          <span className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <span className="absolute right-0 top-full mt-1 z-40 min-w-[11rem] rounded-lg border border-neutral-800/40 bg-popover shadow-xl p-1.5 flex flex-col gap-0.5">
+            {MONEY_COLUMNS.map((c) => (
+              <label key={c.key}
+                className="flex items-center gap-2 px-1.5 py-1 rounded text-[11px] text-fg-soft hover:bg-overlay/5 cursor-pointer">
+                <input type="checkbox" checked={cols.has(c.key)} onChange={() => toggle(c.key)}
+                  className="accent-accent-600" />
+                {c.label}
+              </label>
+            ))}
+          </span>
+        </>
+      )}
+    </span>
+  );
+}
+
 /** The four euro/point columns, summed. ⚠ A SUM OF NULLS IS NULL, NOT ZERO: a class in which
  *  nothing could be valued has an undefined result, and a €0 subtotal would say it broke even. */
 function sumResults(rows: BookHolding[]) {
@@ -624,12 +767,28 @@ function sumResults(rows: BookHolding[]) {
     const vals = rows.map(pick).filter((v): v is number => v != null);
     return vals.length ? vals.reduce((s, v) => s + v, 0) : null;
   };
+  // ⚠ NUMERATOR AND DENOMINATOR OVER THE SAME ROWS. Only the rows that HAVE an average invested
+  // capital may contribute their result to this ratio — summing every row's result over the
+  // capital of some of them would divide one population by another and overstate by whatever the
+  // excluded rows made. On a book with certificates that is 22 of 52 rows, so it is not a rounding
+  // concern. Null when nothing in the group has flows we can see.
+  const priced = rows.filter((h) => (h.avg_capital_eur ?? 0) > 0);
+  const cap = priced.reduce((s, h) => s + h.avg_capital_eur!, 0);
   return {
+    opening: add((h) => h.start_value_eur),
+    valuenow: add((h) => h.current_value_eur),
+    // ⚠ Over the rows that HAVE one — a leg inside a certificate has no flows, so it contributes
+    // nothing here and its result is correspondingly excluded from `mwr` below.
+    avgcapital: cap || null,
     unrealised: add((h) => h.unrealised_eur),
     realised: add((h) => h.realised_result_eur),
     income: add((h) => h.income_eur),
     result: add((h) => h.result_eur),
     contribution: add((h) => h.contribution_pct),
+    mwr: cap > 0 ? priced.reduce((s, h) => s + (h.result_eur ?? 0), 0) / cap * 100 : null,
+    /** How much of the group this ratio speaks for — the rest is legs inside certificates, which
+     *  have no flows of their own. */
+    mwrRows: priced.length,
   };
 }
 
@@ -747,6 +906,13 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
 }) {
   const [sortKey, setSortKey] = useState<HoldingSortKey>('weight');
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
+  // ⚠ ONE PREDICATE, USED IN ALL SIX ROW SHAPES (thead, class row, holding row, sold header, sold
+  // row, total). The file already warns that the column count is counted by hand in several
+  // places; making them CONDITIONAL multiplies that risk, so every gate reads `show('x')` and
+  // nothing else — a grep for `show(` must return the same five keys in each shape or a figure is
+  // rendering under the wrong heading.
+  const { cols, toggle } = useMoneyColumns();
+  const show = (k: MoneyCol) => cols.has(k);
 
   // ⚠ AN EMPTY TABLE MUST NAME ITS OWN CAUSE. "No positions to show for this portfolio" was
   // shown for three unrelated faults — unpaired model, book never scanned, opened as a basket —
@@ -795,19 +961,40 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
   // total would stop tying. Measured on BUS_Offensief: of 13 traded names, 5 are trims (on their
   // own rows) and 8 are gone (here). Every orphan being closed-out is what makes the split exact.
   const sold = (realised?.available ? realised.positions ?? [] : []).filter((p) => p.closed_out);
+  const soldCap = sum(sold.map((p) => p.avg_capital_eur));
   const soldSum = {
+    // ⚠ `opening_eur`, NOT a Beginwaarde — a sold-out position has no holdings row and therefore
+    // no restated opening value. This is its value at the year's open reconstructed from the sale
+    // (`proceeds − Res. YtD`, scaled to the shares actually held then). Same quantity in spirit,
+    // different provenance, which is why the ⓘ on the column says so.
+    opening: sum(sold.map((p) => p.opening_eur)),
+    // ⚠ No "value now": it is gone. A 0 there would read as a holding that fell to nothing.
     realised: sum(sold.map((p) => p.realised_result_eur)),
     income: sum(sold.map((p) => p.income_eur)),
     result: sum(sold.map((p) => p.result_eur)),
     contribution: sum(sold.map((p) => p.contribution_pct)),
+    // A closed-out position DOES have an average invested capital — it was held for part of the
+    // year, and Modified Dietz weights it by exactly that part.
+    mwr: soldCap ? (sum(sold.map((p) => p.result_eur)) ?? 0) / soldCap * 100 : null,
   };
   const heldSum = sumResults(holdings);
+  const heldCap = holdings.reduce((s, h) => s + (h.avg_capital_eur ?? 0), 0);
   const grand = {
+    opening: add2(heldSum.opening, soldSum.opening),
+    valuenow: heldSum.valuenow,
+    avgcapital: add2(heldSum.avgcapital, soldCap),
     unrealised: heldSum.unrealised,
     realised: add2(heldSum.realised, soldSum.realised),
     income: add2(heldSum.income, soldSum.income),
     result: add2(heldSum.result, soldSum.result),
     contribution: add2(heldSum.contribution, soldSum.contribution),
+    // ⚠ Again both sides over the same rows: the held legs we can see flows for, plus the sold
+    // ones. A leg inside a certificate is in NEITHER, which is why this is not the book's own
+    // money-weighted return and is not labelled as one.
+    mwr: (heldCap + (soldCap ?? 0)) > 0
+      ? (holdings.reduce((s, h) => s + ((h.avg_capital_eur ?? 0) > 0 ? (h.result_eur ?? 0) : 0), 0)
+        + (sum(sold.map((p) => p.result_eur)) ?? 0)) / (heldCap + (soldCap ?? 0)) * 100
+      : null,
   };
   // Within a cent of a point. The measured case lands at exactly 0.0000pp; the tolerance is for
   // float noise across ~60 additions, not for a missing leg.
@@ -863,13 +1050,30 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
               + 'single row with the weights added, and every strategy it came through is named '
               + 'in the Via column.'} />
         </h4>
-        <span className="text-[10px] font-mono text-fg-faint">
-          {holdings.length} positions · {groups.length} classes
+        <span className="flex items-center gap-2">
+          <span className="text-[10px] font-mono text-fg-faint">
+            {holdings.length} positions · {groups.length} classes
+          </span>
+          <ColumnPicker cols={cols} toggle={toggle} />
         </span>
       </div>
-      <div className="overflow-x-auto">
+      {/* ⚠⚠ `overflow-auto` + a HEIGHT, because `sticky` needs a scrollport with room to scroll.
+          This was `overflow-x-auto` with a `sticky top-0` thead, and the sticky was DEAD: setting
+          `overflow-x` forces `overflow-y` to `auto` as well, so this div became a scroll container
+          in both axes — and `position: sticky` sticks to the NEAREST scrolling ancestor, which was
+          this box, exactly as tall as its own content. The header had nothing to travel against.
+          The modal body (`h-[80vh] overflow-auto`) is the real scrollport, and this wrapper stood
+          between the two.
+          ⚠ THE FIX IS NOT TO DROP `overflow-x`. Twelve columns are ~81rem wide and overflow the
+          modal on any ordinary screen; without a horizontal container that scroll moves to the
+          modal body, dragging every other section sideways with it. So the table gets its own
+          viewport instead — one box that scrolls both ways, with the header pinned inside it. */}
+      <div className="overflow-auto max-h-[55vh]">
         <table className="w-full text-xs">
-          <thead className="text-[10px] uppercase tracking-wide text-fg-faint bg-card sticky top-0 z-10">
+          {/* ⚠ `[&_th]:bg-card` IS LOAD-BEARING, not belt-and-braces. A background on `<thead>`
+              alone does not paint reliably under `border-collapse`, so the group rows (`bg-inset`)
+              scroll THROUGH the header and the two sets of text overlap. The cells carry it. */}
+          <thead className="text-[10px] uppercase tracking-wide text-fg-faint bg-card [&_th]:bg-card sticky top-0 z-20">
             <tr className="border-b border-neutral-800/40">
               <th className="text-right w-10 pl-4 pr-2 py-2 font-medium">#</th>
               {/* ⚠ A FLOOR IS REQUIRED HERE BECAUSE THE CELL BELOW IS `max-w-0`. That is what lets
@@ -879,7 +1083,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                   chips, Name collapsed to a single letter per row. `min-w` is the only thing
                   standing between "truncates gracefully" and "shows nothing". */}
               <th className={`text-left min-w-[13rem] ${th}`} onClick={() => click('name')}>Name{caret('name')}</th>
-              <th className="text-left py-2 font-medium w-32">ISIN</th>
               {/* ⚠ CAPPED. The chips truncate INDIVIDUALLY (max-w-[9rem] each) but the column
                   itself had no bound, so a row with three routes in was free to demand 30rem —
                   taken straight out of Name. Bounded here, the chips wrap within the column
@@ -922,61 +1125,88 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
               {/* ⚠ THE THREE COMPONENTS, THEN THEIR SUM — the whole point of merging the ledger
                   into this table. A reader who wants to know what a position MADE should not have
                   to reconcile a return against a weight; these add up on screen.
-                  ⚠ COLUMN COUNT IS NOW TWELVE and is counted by hand in FOUR places (this thead,
+                  ⚠ COLUMN COUNT IS ELEVEN and is counted by hand in FOUR places (this thead,
                   the group row, the body row, the total row). Add one here and forget another and
                   every figure below shifts a cell right, silently — a contribution renders
                   perfectly well under "Return". */}
+{show('opening') && (
+              <th className="text-right w-32 py-2 font-medium">
+                Beginwaarde (1 Jan)
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what="What this position was worth at the start of the year, on AIRS’s own basis."
+                  how={`Σ (quantity held today × its price on 1 January) · = ${eur0n(grand.opening)}`} />
+              </th>
+)}
+{show('valuenow') && (
+              <th className="text-right w-28 py-2 font-medium">
+                Value now
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what="What this position is worth today."
+                  how={`Σ (AIRS’s current valuation) · = ${eur0n(grand.valuenow)}`} />
+              </th>
+)}
+{show('avgcapital') && (
+              <th className="text-right w-32 py-2 font-medium">
+                Avg capital invested
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what="The money actually tied up in this position over the year."
+                  how={`Σ (value at the open + each flow × the share of the year still to run) · = ${eur0n(grand.avgcapital)}`} />
+              </th>
+)}
+{show('unrealised') && (
               <th className="text-right w-28 py-2 font-medium">
                 Unrealised
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What this position has gained or lost while the book has held it — on paper, not banked."
                   note="value now − value when the year opened"
-                  how={'AIRS’s own valuation at both ends. ⚠ Its opening value is restated to the '
-                    + 'quantity held today, so buying more during the year does not show up here '
-                    + 'as a gain. A position held inside a certificate carries its share of the '
-                    + 'certificate’s value change — the euros are really this row’s; only the '
-                    + 'percentage would be the wrapper’s, which is why the Return column is the '
-                    + 'instrument’s own instead.'} />
+                  how={`Value now − Beginwaarde · ${eur0n(grand.valuenow)} − ${eur0n(grand.opening)} = ${eur0n(grand.unrealised)}`} />
               </th>
+)}
+{show('realised') && (
               <th className="text-right w-28 py-2 font-medium">
                 Realised
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What was banked by actually selling — this year’s part of it."
                   note="AIRS’s Res. YtD, summed over the year’s sales"
-                  how={'⚠ NOT proceeds minus cost. The difference is whatever was earned in '
-                    + 'EARLIER years, and on this book that difference is eight percentage points '
-                    + 'and a sign. Blank where nothing was sold. A position held through a '
-                    + 'certificate is never sold on its own — AIRS trades the certificate — so its '
-                    + 'cell stays blank rather than showing an invented figure.'} />
+                  how={`Σ Res. YtD over the year’s sales · = ${eur0n(grand.realised)}`} />
               </th>
+)}
+{show('income') && (
               <th className="text-right w-24 py-2 font-medium">
                 Income
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="The dividends and coupons this position paid the book this year."
                   note="net — gross less withholding tax"
-                  how={'From AIRS’s own Mutaties journal, joined by name. A price return cannot '
-                    + 'see it: the money leaves the position’s value and arrives as cash, which is '
-                    + 'why it is a column of its own rather than folded into the one beside it.'} />
+                  how={`Σ (dividend + withholding tax) · = ${eur0n(grand.income)}`} />
               </th>
+)}
+{show('result') && (
               <th className="text-right w-28 py-2 font-medium">
                 Result
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What the book actually made on this position this year, in euros."
                   note="unrealised + realised + income"
-                  how={'The three columns to its left, added. This is the figure that answers '
-                    + '“what did we make on this”, and unlike a return it needs no weight to be '
-                    + 'read.'} />
+                  how={`Unrealised + Realised + Income · ${eur0n(grand.unrealised)} + ${eur0n(grand.realised)} + ${eur0n(grand.income)} = ${eur0n(grand.result)}`} />
               </th>
+)}
+{show('contribution') && (
               <th className={`text-right w-28 ${th}`} onClick={() => click('contribution')}>
                 Contribution{caret('contribution')}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What this position added to, or took off, the book’s return for the year."
                   note="result ÷ the book’s opening capital"
-                  how={'⚠ THIS IS THE COLUMN THAT ADDS UP — every row on the same denominator, so '
-                    + 'the total row equals the book’s own return exactly, positions sold during '
-                    + 'the year included. The Weight column cannot do that: it is today’s share, '
-                    + 'and a position sold in March has none.'} />
+                  how={`Result ÷ the book’s opening capital · ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contribution)}`} />
               </th>
+)}
+{show('moneyweighted') && (
+              <th className="text-right w-32 py-2 font-medium">
+                On money invested
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what="What this position returned on the money actually put into it."
+                  note="result ÷ average invested capital"
+                  how={`Result ÷ Avg capital invested · ${eur0n(grand.result)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`} />
+              </th>
+)}
               <th className={`text-right w-28 pr-4 ${th}`} onClick={() => click('return')}>
                 Return{caret('return')}
                 {/* ⚠ `airs_volk`, NOT `yfinance`. This header claimed yfinance while the rows
@@ -1000,13 +1230,19 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
               </th>
             </tr>
           </thead>
-          {groups.map((g) => (
+          {groups.map((g) => {
+            // ⚠ THE TERM THAT RECONCILES Contribution WITH Return, and it exists nowhere else on
+            // the row. `contribution = return × this`. Null when the book has no opening capital
+            // to divide by — in which case neither figure is on a footing to be explained.
+            const openingShare = (realised?.basis_eur && g.ret.startEur)
+              ? g.ret.startEur / realised.basis_eur * 100 : null;
+            return (
             <tbody key={g.bucket}>
               <tr className="bg-inset border-y border-neutral-800/40">
                 <td className="pl-4" />
-                {/* colSpan 4: Name · ISIN · Via · Sector — every text column, so the class label
+                {/* colSpan 3: Name · Via · Sector — every text column, so the class label
                     runs to the first number. */}
-                <td className="py-2 font-medium text-fg-strong" colSpan={4}>
+                <td className="py-2 font-medium text-fg-strong" colSpan={3}>
                   <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 align-middle"
                     style={{ background: allocColor(g.bucket) }} />
                   {bucketLabel(g.bucket)}
@@ -1017,8 +1253,15 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                       The basket takes each member's `weight_now_pct` — the same figure this row's
                       subtotal is summed from — and only the rows with an ISIN, because owner
                       earnings are per-company and cash has none. Sending the whole class would
-                      hand the blender a weight it cannot attribute to anything. */}
-                  {g.basket.holdings.length > 0 && (
+                      hand the blender a weight it cannot attribute to anything.
+                      ⚠⚠ AND ONLY ON STOCKS. An ISIN is not enough: an ETF has one and is not a
+                      company (this app deliberately does not look through funds, so there is
+                      nothing behind it to measure), Alternatives is crypto and commodities with no
+                      earnings at all, and a bond is a claim on a company rather than a share of
+                      it. The button used to appear on all of them and opened a modal with nothing
+                      in it — which reads as a broken feature rather than an absent one, the exact
+                      thing `FundamentalButton`'s own docstring says not to do. */}
+                  {g.bucket === EQUITY_BUCKET && g.basket.holdings.length > 0 && (
                     <FundamentalButton className="ml-2 align-middle"
                       title={`Blended owner earnings and price steadiness across the ${g.basket.holdings.length} priced name${g.basket.holdings.length === 1 ? '' : 's'} in ${bucketLabel(g.bucket)}, weighted by what the book holds today.`}
                       onOpen={() => onFundamental({ name: g.basket.label, basket: g.basket })} />
@@ -1039,10 +1282,14 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                 </td>
                 {/* The class's own four euro columns, summed — so a reader can see which CLASS
                     made the money, not only which position. */}
-                <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.unrealised)}`}>{eur0n(g.sum.unrealised)}</td>
-                <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.realised)}`}>{eur0n(g.sum.realised)}</td>
-                <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.income)}`}>{eur0n(g.sum.income)}</td>
-                <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.result)}`}>{eur0n(g.sum.result)}</td>
+                {show('opening') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(g.sum.opening)}</td>}
+                {show('valuenow') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(g.sum.valuenow)}</td>}
+                {show('avgcapital') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(g.sum.avgcapital)}</td>}
+                {show('unrealised') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.unrealised)}`}>{eur0n(g.sum.unrealised)}</td>}
+                {show('realised') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.realised)}`}>{eur0n(g.sum.realised)}</td>}
+                {show('income') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.income)}`}>{eur0n(g.sum.income)}</td>}
+                {show('result') && <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.result)}`}>{eur0n(g.sum.result)}</td>}
+                {show('contribution') && (
                 <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.contribution)}`}>
                   {ppt(g.sum.contribution)}
                   {/* ⚠ THE PAIR A READER CANNOT ARBITRATE UNLESS IT IS EXPLAINED, and on a class
@@ -1052,15 +1299,26 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={`What ${bucketLabel(g.bucket)} added to, or took off, the book’s return for the year.`}
                     note={`${eur0n(g.sum.result)} ÷ the book’s opening capital`}
+                    /* ⚠ THE MULTIPLICATION IS THE WHOLE EXPLANATION, so it goes on screen rather
+                       than in prose. Contribution and Return differ by exactly one term — the
+                       class's share of the book's OPENING capital — and that term is nowhere else
+                       in the table: the Weight column is today's share (85.38% where the opening
+                       share is 82.98%), which is why nobody could reconstruct it. Verified on
+                       every class of both measured books, to the third decimal. */
                     how={'⚠ THE COLUMN THAT ADDS UP — every class on the book’s own opening '
                       + 'capital, so these sum to its return exactly, positions sold during the '
                       + 'year included. '
-                      + (g.ret.pct != null && g.ret.startEur
-                        ? `⚠ Not the Return beside it: both divide the same `
-                          + `${eur0n(g.sum.result)}, but that one divides by this class’s own `
-                          + `${eur0n(g.ret.startEur)} instead of the book’s.`
+                      + (openingShare != null && g.ret.pct != null
+                        ? `It is the Return beside it, scaled to the book: ${fmtRet(g.ret.pct)} × `
+                          + `${num2(openingShare)}% (this class’s share of the book’s opening `
+                          + `capital, ${eur0n(g.ret.startEur)} of ${eur0n(realised?.basis_eur)}) `
+                          + `= ${ppt(g.sum.contribution)}. ⚠ That share is NOT the Weight column — `
+                          + 'Weight is today’s share, and the two differ by everything the '
+                          + 'positions did in between.'
                         : '')} />
                 </td>
+                )}
+                {show('moneyweighted') && <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.mwr)}`} title={g.sum.mwrRows < g.rows.length ? `Over the ${g.sum.mwrRows} of ${g.rows.length} holdings the book buys and sells itself — the rest sit inside certificates and have no flows of their own.` : undefined}>{fmtRet(g.sum.mwr)}</td>}
                 {/* ⚠ THE COLUMN BELOW, AGGREGATED — NOT THE BOOK'S VALUE CHANGE, and not the
                     Weight (now) column times the returns. A dash where nothing in the class had
                     both an opening weight and a return; a 0.00% there would claim the class went
@@ -1118,7 +1376,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                   <td className="py-1.5 pr-3 text-fg max-w-0" title={h.name ?? undefined}>
                     <span className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate">{h.name ?? '—'}</span>
-                      {h.isin && (
+                      {/* ⚠ SAME GATE AS THE CLASS ROW, and it has to be here too or the rule is
+                          half-applied: an ETF row carries an ISIN, so `h.isin &&` alone put a
+                          Fundamental button on every fund, bond and commodity in the table. Owner
+                          earnings are a property of an operating COMPANY; nothing else has them. */}
+                      {h.isin && h.bucket === EQUITY_BUCKET && (
                         <FundamentalButton
                           className="opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0"
                           title={`Fundamental — is ${h.name ?? h.isin} fundamentally good? (owner earnings + price steadiness)`}
@@ -1126,7 +1388,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                       )}
                     </span>
                   </td>
-                  <td className="py-1.5 pr-3 font-mono text-[10px] text-fg-faint">{h.isin ?? '—'}</td>
                   {/* ⚠ The cap lives on a wrapper, not on the `<td>`: a second `max-w-0` column
                       fights the Name cell for the slack (the Sector comment below records the same
                       trap). A fixed max-width simply bounds it, and `ViaChips` already wraps. */}
@@ -1162,11 +1423,15 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                   {/* ⚠ EVERY ONE A DASH WHERE THERE IS NOTHING, NEVER A €0. "Nothing was sold" and
                       "the sale broke even" are different facts, and on a money column the second
                       is a claim. */}
-                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.unrealised_eur)}`}>{eur0n(h.unrealised_eur)}</td>
-                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.realised_result_eur)}`}>{eur0n(h.realised_result_eur)}</td>
-                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.income_eur)}`}>{eur0n(h.income_eur)}</td>
-                  <td className={`py-1.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(h.result_eur)}`}>{eur0n(h.result_eur)}</td>
-                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.contribution_pct)}`}>{ppt(h.contribution_pct)}</td>
+                  {show('opening') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(h.start_value_eur)}</td>}
+                  {show('valuenow') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(h.current_value_eur)}</td>}
+                  {show('avgcapital') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(h.avg_capital_eur)}</td>}
+                  {show('unrealised') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.unrealised_eur)}`}>{eur0n(h.unrealised_eur)}</td>}
+                  {show('realised') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.realised_result_eur)}`}>{eur0n(h.realised_result_eur)}</td>}
+                  {show('income') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.income_eur)}`}>{eur0n(h.income_eur)}</td>}
+                  {show('result') && <td className={`py-1.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(h.result_eur)}`}>{eur0n(h.result_eur)}</td>}
+                  {show('contribution') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.contribution_pct)}`}>{ppt(h.contribution_pct)}</td>}
+                  {show('moneyweighted') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.money_weighted_return_pct)}`} title={h.money_weighted_return_pct != null ? undefined : h.capital_unknown ? 'Shares were DEPOSITED into this position during the year (AIRS books it Tt = D, Deponering — a split, a bonus issue or a transfer in). Its trade quantities and its holding quantity are then on different bases, so the capital it tied up cannot be worked out. Its euro figures are unaffected.' : 'Held through a certificate — AIRS trades the wrapper, so this position has no purchases of its own to measure a return on.'}>{fmtRet(h.money_weighted_return_pct)}</td>}
                   {/* An unpriced position shows a dash, never 0% — "we could not price this over
                       the window" and "it did not move" are different facts and a 0 states the
                       wrong one. An interpolated opening mark is flagged per value, because that
@@ -1259,7 +1524,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                 </tr>
               ))}
             </tbody>
-          ))}
+            );
+          })}
           {/* ⚠ THE POSITIONS THAT ARE GONE — the reason this table did not add up before. A book
               that sold a name in March has nothing left to list it with, so its result vanished
               from a table that looked complete. They get no Weight, no Sector and no ISIN, because
@@ -1269,7 +1535,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
             <tbody>
               <tr className="bg-inset border-y border-neutral-800/40">
                 <td className="pl-4" />
-                <td className="py-2 font-medium text-fg-strong" colSpan={4}>
+                <td className="py-2 font-medium text-fg-strong" colSpan={3}>
                   <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 align-middle bg-neutral-600" />
                   No longer held
                   <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[10px] font-normal text-fg-muted">
@@ -1280,17 +1546,25 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                   </span>
                 </td>
                 <td className="py-2 text-right font-mono text-fg-faint">—</td>
-                <td />
-                <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.realised)}`}>{eur0n(soldSum.realised)}</td>
-                <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.income)}`}>{eur0n(soldSum.income)}</td>
-                <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.result)}`}>{eur0n(soldSum.result)}</td>
-                <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.contribution)}`}>{ppt(soldSum.contribution)}</td>
+                {/* ⚠ THE UNREALISED PLACEHOLDER, AND IT MUST BE GATED LIKE THE COLUMN IT STANDS IN
+                    FOR. A sold-out position has nothing unrealised, so the cell is empty — but an
+                    empty cell still OCCUPIES the column, and leaving it ungated puts this row one
+                    cell ahead of the header the moment Unrealised is hidden. */}
+                {show('opening') && <td className="py-2 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted">{eur0n(soldSum.opening)}</td>}
+                {show('valuenow') && <td />}
+                {show('avgcapital') && <td className="py-2 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted">{eur0n(soldCap)}</td>}
+                {show('unrealised') && <td />}
+                {show('realised') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.realised)}`}>{eur0n(soldSum.realised)}</td>}
+                {show('income') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.income)}`}>{eur0n(soldSum.income)}</td>}
+                {show('result') && <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.result)}`}>{eur0n(soldSum.result)}</td>}
+                {show('contribution') && <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.contribution)}`}>{ppt(soldSum.contribution)}</td>}
+                {show('moneyweighted') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.mwr)}`}>{fmtRet(soldSum.mwr)}</td>}
                 <td className="pr-4" />
               </tr>
               {sold.map((p, i) => (
                 <tr key={p.name ?? i} className="border-b border-neutral-800/[0.15] last:border-0 hover:bg-overlay/[0.03] transition-colors">
                   <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[10px] text-fg-faint tabular-nums">{i + 1}</td>
-                  <td className="py-1.5 pr-3 text-fg max-w-0" colSpan={4} title={p.name}>
+                  <td className="py-1.5 pr-3 text-fg max-w-0" colSpan={3} title={p.name}>
                     <span className="truncate inline-block max-w-full align-bottom">{p.name}</span>
                     <span className="ml-2 text-[9px] text-fg-faint">
                       {p.first_sale === p.last_sale ? p.first_sale : `${p.first_sale} → ${p.last_sale}`}
@@ -1305,11 +1579,16 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                     )}
                   </td>
                   <td className="py-1.5 text-right font-mono text-fg-faint">—</td>
-                  <td />
-                  <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.realised_result_eur)}`}>{eur0n(p.realised_result_eur)}</td>
-                  <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.income_eur)}`}>{eur0n(p.income_eur)}</td>
-                  <td className={`py-1.5 text-right font-mono font-semibold tabular-nums ${retTone(p.result_eur)}`}>{eur0n(p.result_eur)}</td>
-                  <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.contribution_pct)}`}>{ppt(p.contribution_pct)}</td>
+                  {/* Same placeholder, same gate — see the class header above. */}
+                  {show('opening') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(p.opening_eur)}</td>}
+                  {show('valuenow') && <td />}
+                  {show('avgcapital') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(p.avg_capital_eur)}</td>}
+                  {show('unrealised') && <td />}
+                  {show('realised') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.realised_result_eur)}`}>{eur0n(p.realised_result_eur)}</td>}
+                  {show('income') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.income_eur)}`}>{eur0n(p.income_eur)}</td>}
+                  {show('result') && <td className={`py-1.5 text-right font-mono font-semibold tabular-nums ${retTone(p.result_eur)}`}>{eur0n(p.result_eur)}</td>}
+                  {show('contribution') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.contribution_pct)}`}>{ppt(p.contribution_pct)}</td>}
+                  {show('moneyweighted') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.return_pct)}`}>{fmtRet(p.return_pct)}</td>}
                   <td className="pr-4" />
                 </tr>
               ))}
@@ -1319,22 +1598,34 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
               — held and sold — against AIRS's own return for the book. That the two agree is the
               statement this whole merge exists to make; showing the sum without the figure it
               should equal would be an assertion, not a check. */}
+          {/* ⚠ PINNED TO THE BOTTOM OF THE SAME SCROLLPORT. Giving the table a viewport would
+              otherwise have buried the one row that carries the check — Σ Contribution against
+              AIRS's own return — under sixty holdings. A reconciliation you have to scroll to find
+              is one nobody reads.
+              ⚠ `[&_td]:bg-elevated`, a SOLID surface, for the same reason the header needs one:
+              the row's own `bg-overlay/[0.05]` is translucent and the holdings would show through
+              it. The tint is dropped rather than layered — an opaque total row that looks slightly
+              different beats a tinted one you can read two numbers through. */}
           {grand.contribution != null && (
-            <tfoot>
-              <tr className="bg-overlay/[0.05] border-t-2 border-neutral-800/40 font-semibold">
+            <tfoot className="sticky bottom-0 z-20">
+              <tr className="[&_td]:bg-elevated border-t-2 border-neutral-800/40 font-semibold">
                 <td className="pl-4" />
-                <td className="py-2 text-fg-strong" colSpan={4}>
+                <td className="py-2 text-fg-strong" colSpan={3}>
                   The book’s year
                   <span className="ml-2 font-normal text-[10px] text-fg-faint">
                     {holdings.length + sold.length} positions, everything it held or sold
                   </span>
                 </td>
                 <td />
-                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.unrealised)}`}>{eur0n(grand.unrealised)}</td>
-                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.realised)}`}>{eur0n(grand.realised)}</td>
-                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.income)}`}>{eur0n(grand.income)}</td>
-                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.result)}`}>{eur0n(grand.result)}</td>
-                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.contribution)}`}>{ppt(grand.contribution)}</td>
+                {show('opening') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(grand.opening)}</td>}
+                {show('valuenow') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(grand.valuenow)}</td>}
+                {show('avgcapital') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(grand.avgcapital)}</td>}
+                {show('unrealised') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.unrealised)}`}>{eur0n(grand.unrealised)}</td>}
+                {show('realised') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.realised)}`}>{eur0n(grand.realised)}</td>}
+                {show('income') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.income)}`}>{eur0n(grand.income)}</td>}
+                {show('result') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.result)}`}>{eur0n(grand.result)}</td>}
+                {show('contribution') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.contribution)}`}>{ppt(grand.contribution)}</td>}
+                {show('moneyweighted') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.mwr)}`}>{fmtRet(grand.mwr)}</td>}
                 <td className={`py-2 pr-4 text-right font-mono tabular-nums ${retTone(realised?.book_ytd_pct)}`}>
                   {fmtRet(realised?.book_ytd_pct)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -1355,7 +1646,12 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
       </div>
       {/* Said in words under the table, because a reader who has just added a column of euros
           wants to know whether it landed — not to compare two figures themselves. */}
-      {grand.contribution != null && realised?.book_ytd_pct != null && (
+      {/* ⚠ IT FOLLOWS THE COLUMN IT TALKS ABOUT. This line reads "the Contribution column adds to
+          AIRS's own +5.83% exactly" — a statement with no referent once that column is hidden,
+          which since the picker defaults to all-off would otherwise be its normal state. A caveat
+          pointing at something not on screen is worse than no caveat: it makes a reader hunt for a
+          column that is not there. */}
+      {show('contribution') && grand.contribution != null && realised?.book_ytd_pct != null && (
         <div className="px-4 py-2 border-t border-neutral-800/40 text-[10px]">
           {reconciled ? (
             <span className="text-pos-400">
@@ -1700,6 +1996,13 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
               {data.allocation && data.allocation.length > 0 && (
                 <AllocationBars slices={data.allocation} selected={assetFilter}
                   variant={data.variant} bands={data.bands}
+                  /* Summed here rather than server-side: it is the same `closed_out` set the
+                     Holdings table's own group already sums, and one source beats two. */
+                  soldContribution={data.realised?.available
+                    ? (data.realised.positions ?? [])
+                      .filter((p) => p.closed_out)
+                      .reduce((a, p) => a + (p.contribution_pct ?? 0), 0)
+                    : null}
                   onSelect={isBasket ? undefined : (b) => { setWhy(null); setBucket(null); setAssetFilter(b); }} />
               )}
               {selected

@@ -87,6 +87,9 @@ class Position:
     first_sale: str | None = None
     last_sale: str | None = None
     prior_year_eur: float = 0.0
+    # ⚠ Its share count moved for a reason we do not interpret, so no quantity arithmetic on it is
+    # trustworthy. Its EUR result stays valid — a corporate action of this kind carries no money.
+    capital_unknown: bool = False
 
     @property
     def result_eur(self) -> float:
@@ -127,7 +130,8 @@ def _flow_weight(datum: str | None, start: date, end: date, days: int) -> float:
 
 
 def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, float],
-                 beginvermogen: float | None, period_start: date, period_end: date) -> Ledger:
+                 beginvermogen: float | None, period_start: date, period_end: date,
+                 unknown_names: set[str] | None = None) -> Ledger:
     """Every position the book touched, with its average capital and its contribution.
 
     `volk_rows` are `airs_holding` rows (holding_name, quantity, start_value_eur,
@@ -141,6 +145,21 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
     bought_qty: dict[str, float] = {}
     sold_qty: dict[str, float] = {}
     by_name: dict[str, Position] = {}
+    # ⚠⚠ NAMES WHOSE SHARE COUNT MOVED FOR A REASON WE DO NOT INTERPRET — a corporate action, in
+    # practice a split. Their quantity arithmetic CANNOT be trusted, because the trade quantities
+    # and the holdings quantity are then on different bases and subtracting one from the other is
+    # meaningless. Measured on KLA-Tencor, 2026: the book holds 310 shares POST-split, bought 14
+    # PRE-split on 3 February (EUR 1,183/share against a Beginwaarde of EUR 110/share — 10.7x
+    # apart), and a `D` row added 279 on 12 June. `qty_now - bought` gave 296 where the truth is
+    # 170, so the opening value came out EUR 32,605 instead of EUR 18,725 and the money-weighted
+    # return read +39.81% instead of +56.67%. Plausible, and wrong by seventeen points.
+    #
+    # ⚠ THE FIX IS TO REFUSE, NOT TO INFER. The ratio IS recoverable from the `D` row (310/31 = 10)
+    # — and inferring it would mean deciding that `D` means "split", which is precisely what this
+    # codebase has declined to do until somebody measures one (see `airs_transacties`). A figure
+    # withheld with a reason costs one cell; a figure quietly rescaled by a guessed ratio is the
+    # kind nobody re-checks.
+    unknown_action: set[str] = set(unknown_names or ())
 
     def pos(name: str) -> Position:
         return by_name.setdefault(name, Position(name=name))
@@ -148,6 +167,8 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
     # ── Pass 1: the trades, so quantities are known before the holdings are de-restated.
     for t in trades:
         p = pos(t.fonds)
+        # ⚠ `trades()` emits only buys and sells, so an uninterpreted type never reaches here —
+        # which is exactly why it has to be flagged from the sheet instead. See `unknown_names`.
         w = _flow_weight(t.datum, period_start, period_end, days)
         if t.kind == "buy":
             bought_qty[t.fonds] = bought_qty.get(t.fonds, 0.0) + t.quantity
@@ -176,7 +197,13 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
         cur = _f(r.get("current_value_eur"))
         if start and cur is not None:
             p.held_result_eur = round(cur - start, 2)
-        if qty > 0 and start:
+        if name in unknown_action:
+            # ⚠ REFUSED, NOT ESTIMATED. Its share count moved for a reason we do not interpret, so
+            # `qty_now − bought` subtracts quantities on two different bases. `None` propagates to
+            # the UI as a blank cell with a reason; the euro columns beside it are unaffected,
+            # because a corporate action of this kind carries no money.
+            p.capital_unknown = True
+        elif qty > 0 and start:
             # ⚠ THE DE-RESTATEMENT. Beginwaarde is qty_now x the 1-Jan price, so the 1-Jan price is
             # Beginwaarde/qty_now and the true opening value is that price x the qty actually held
             # on 1 January. Clamped at 0: a position whose buys exceed its current quantity plus
@@ -211,9 +238,14 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
     # ⚠ The denominator is the POSITIVE average capital. A position with a negative one is a data
     # oddity (a sale weighted more heavily than the buy that supplied it); letting it shrink the
     # denominator would inflate every other row's weight.
-    led.avg_capital_eur = round(sum(max(p.avg_capital_eur, 0.0) for p in led.positions), 2)
+    # ⚠ A REFUSED POSITION LEAVES BOTH SIDES. Keeping its (untrustworthy) capital in the
+    # denominator would spread its error across every other row's weight.
+    led.avg_capital_eur = round(sum(max(p.avg_capital_eur, 0.0)
+                                    for p in led.positions if not p.capital_unknown), 2)
     if led.avg_capital_eur > 0:
         for p in led.positions:
+            if p.capital_unknown:
+                continue
             p.weight_pct = max(p.avg_capital_eur, 0.0) / led.avg_capital_eur * 100
     if beginvermogen:
         led.capital_coverage_ratio = led.avg_capital_eur / beginvermogen
@@ -238,7 +270,9 @@ def money_weighted_return_pct(p: Position) -> float | None:
     shows a larger percentage on the same euros — it answers "how hard did this money work", not
     "what did the instrument do". None on a position with no capital to divide by.
     """
-    return None if p.avg_capital_eur <= 0 else p.result_eur / p.avg_capital_eur * 100
+    if p.capital_unknown or p.avg_capital_eur <= 0:
+        return None
+    return p.result_eur / p.avg_capital_eur * 100
 
 
 def _f(v: object) -> float | None:

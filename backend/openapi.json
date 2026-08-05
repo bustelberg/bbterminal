@@ -3712,9 +3712,25 @@
       "BookHoldingDetail": {
         "description": "One paired-book position \u2014 every LONG line, priced or not.\n\n\u26a0 TWO WEIGHTS ON PURPOSE, AND THEY ARE NOT INTERCHANGEABLE.\n\n`weight_pct` is the holding's OPENING value (beginwaarde) as a share of the PRICED book, so that\nwithin ANY asset class, \u03a3 (weight_pct / \u03a3_class weight_pct) \u00b7 return_pct reproduces that class's\nSTART-weighted return (\u03a3now/\u03a3start\u22121) exactly \u2014 the true value change, not the current-value\nweighting that lets a big winner dominate. It is None where we could not price the position over\nthe window, which is why it is nullable: a 0% there would read as \"held nothing\", not \"unknown\".\n\n`weight_now_pct` is the CURRENT value as a share of the WHOLE book \u2014 the very number the\nallocation chart is drawn from, so per-class subtotals in the holdings table equal the chart's\nslices to the decimal. Use this one for anything shown beside the chart; a table that disagrees\nwith the chart above it is read as a bug in both.\n\n`weight_start_pct` is the THIRD weight, and it is the one that reconciles this table with the\ncomposition charts. \u26a0 THREE WEIGHTS, ONE POSITION, ALL CORRECT:\n\n  weight_now_pct    current EUR value \u00f7 the WHOLE book \u2014 what is held today.\n  weight_start_pct  Beginwaarde \u00f7 the WHOLE book at the window's open. It is GRAFTED ON from\n                    the very legs the sector/region/currency bars are built from, never\n                    recomputed, so the table and the chart cannot disagree about January.\n  the bar itself    `weight_start_pct` \u00f7 that axis's `attributable_pct` \u2014 a bar is a share of\n                    the holdings that HAVE a bucket, not of the book.\n\nMeasured on Bustelberg Offensief: ASML 7.02% now, ~5.00% at the start, 5.75% on the Technology\nbar. Dividing the FIRST by the Stocks slice and expecting the THIRD is the trap this column\ncloses \u2014 ASML outgrew the book by ~40% over the window, so its current share is much the larger.\n\n\u26a0 `weight_start_pct` IS NOT `weight_pct`. Same numerator, different denominator: `weight_pct`\ndivides by the PRICED book (so a class's contribution reconciles), this divides by the whole\nbook (so it sits honestly beside `weight_now_pct`). A `0.0` is a fact \u2014 bought after the window\nopened; `None` means no ISIN to join on (cash), never \"zero\".\n\n`currency` is the holding's quote currency (a fair first-order FX signal for a bond/ETF class \u2014\nNOT folded to Unclassified like the fund axes).",
         "properties": {
+          "avg_capital_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Capital Eur"
+          },
           "bucket": {
             "title": "Bucket",
             "type": "string"
+          },
+          "capital_unknown": {
+            "default": false,
+            "title": "Capital Unknown",
+            "type": "boolean"
           },
           "contribution_pct": {
             "anyOf": [
@@ -3770,6 +3786,17 @@
               }
             ],
             "title": "Isin"
+          },
+          "money_weighted_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Money Weighted Return Pct"
           },
           "name": {
             "anyOf": [
@@ -6408,9 +6435,20 @@
         "description": "One instrument's whole year \u2014 whether the book still holds it or not.\n\n\u26a0 `contribution_pct` IS THE COLUMN THAT ADDS UP. Its sum over every position IS the book's own\nYTD (measured exactly: 5.8267 against AIRS's 5.826704, and 44.4624 against 44.462408).\n`weight_pct` is DESCRIPTIVE \u2014 how much of the year's capital this position occupied \u2014 so\n`contribution \u2248 weight \u00d7 return` holds only approximately, and the identity the table asserts\nis the contribution one.\n\n\u26a0 `return_pct` IS ON AVERAGE CAPITAL, NOT THE INSTRUMENT'S PRICE RETURN. A name bought in June\nshows a larger percentage on the same euros than one held all year, because it answers \"how\nhard did this money work\" rather than \"what did the instrument do\". The Holdings table's own\nReturn column is the other question and the two will differ.",
         "properties": {
           "avg_capital_eur": {
-            "default": 0.0,
-            "title": "Avg Capital Eur",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Capital Eur"
+          },
+          "capital_unknown": {
+            "default": false,
+            "title": "Capital Unknown",
+            "type": "boolean"
           },
           "closed_out": {
             "default": false,
@@ -6470,9 +6508,15 @@
             "type": "string"
           },
           "opening_eur": {
-            "default": 0.0,
-            "title": "Opening Eur",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opening Eur"
           },
           "prior_year_eur": {
             "default": 0.0,
@@ -8173,6 +8217,17 @@
           "bucket": {
             "title": "Bucket",
             "type": "string"
+          },
+          "contribution_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contribution Pct"
           },
           "holdings": {
             "default": 0,
@@ -14631,7 +14686,7 @@
     },
     "/api/airs/portfolios/{portefeuille}/refresh": {
       "post": {
-        "description": "Re-scan ONE portfolio's AIRS Rendement + Vermogensoverzicht and store both \u2014 the per-row\nRefresh on the overview table. Awaited (a few seconds: two downloads), so the client can\nre-fetch the row on success. Serialized against the full scan via the module lock; returns\n`{status: busy}` if a fleet refresh is in flight.",
+        "description": "Re-scan ONE portfolio's AIRS reports \u2014 and the books it is BUILT FROM.\n\n\u26a0 A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another\nstrategy, and everything shown through one \u2014 the looked-through holdings, their returns, the\nattribution \u2014 is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads\nthe twelve lines it stores and leaves the instruments behind them as stale as they were.\nMeasured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.\n\n\u26a0 SO THIS IS NOT ALWAYS \"a few seconds\" ANY MORE \u2014 it is four downloads per account in the\nchain. Each one's outcome comes back in `cascaded` rather than being folded into a single\nstatus, because a parent refreshed against a child that failed is not fresh. `cascade=false`\nrefreshes only the named account.\n\nSerialized against the full scan via the module lock; returns `{status: busy}` if a fleet\nrefresh is in flight.",
         "operationId": "airs_portfolio_refresh_api_airs_portfolios__portefeuille__refresh_post",
         "parameters": [
           {
@@ -14641,6 +14696,16 @@
             "schema": {
               "title": "Portefeuille",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cascade",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Cascade",
+              "type": "boolean"
             }
           }
         ],

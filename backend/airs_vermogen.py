@@ -997,9 +997,71 @@ def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
     raise RuntimeError(f"no valued Vermogensoverzicht in the last 7 days ({last_err})")
 
 
-def refresh_one_portfolio(portefeuille: str) -> dict:
+def dependent_accounts(portefeuille: str) -> list[str]:
+    """The accounts this one's figures are BUILT FROM — transitively, nearest first.
+
+    ⚠ A CERTIFICATE IS ANOTHER BOOK, AND REFRESHING ONLY THE PARENT LEAVES IT HALF FRESH. Some
+    holdings are not instruments: they are Leonteq AMCs wrapping another strategy, and everything
+    the modal shows through one — the looked-through positions, their returns, the attribution —
+    is read from the WRAPPED book's own scan. Measured 2026-08-05: BUS_Offensief_Dyn is built on
+    StarTopSelectie OFF DYN; TOPS_BEOFF_BEH_DYN on NINE other books. Re-scanning the parent alone
+    re-reads AIRS for the 12 lines it stores and leaves the 40 instruments behind them dated to
+    whenever those books were last touched.
+
+    The chain is holding -> linked model portfolio -> the ACCOUNT paired with that model. All three
+    hops already exist; nothing here decides a link, it only follows them.
+
+    ⚠ READ FROM THE DB, NEVER FRESHENED (`freshen=False`). Working out WHAT to refresh must not
+    itself hit AIRS — that would put a scrape in front of every scrape, and it would need the very
+    session the refresh is about to use.
+
+    ⚠ CYCLE-SAFE, AND THE CYCLE IS REAL. `_airs_portfolio_links` records it: TOPS_STS_L holds the
+    certificate of the strategy it IS, so following links walks back to the row you started from.
+    A `seen` set is what stops a refresh recursing until the session dies.
+    """
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+    from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
+
+    try:
+        by_model = {a["model_portfolio_id"]: a["portefeuille"]
+                    for a in list_account_links()["accounts"] if a.get("model_portfolio_id")}
+    except Exception as e:  # noqa: BLE001 — a refresh must not fail because the map is unreadable
+        _log.warning("[airs_vermogen] could not resolve dependencies for %s (%s: %s)",
+                     portefeuille, type(e).__name__, e)
+        return []
+
+    seen, order, queue = {portefeuille}, [], [portefeuille]
+    while queue:
+        cur = queue.pop(0)
+        try:
+            rows = resolve_account_isins(cur, freshen=False).get("rows") or []
+        except Exception as e:  # noqa: BLE001 — one unreadable book must not lose the rest
+            _log.warning("[airs_vermogen] %s: dependency scan failed (%s: %s)",
+                         cur, type(e).__name__, e)
+            continue
+        for name in sorted({by_model[r["linked_portfolio_id"]] for r in rows
+                            if r.get("linked_portfolio_id") in by_model}):
+            if name in seen:
+                continue
+            seen.add(name)
+            order.append(name)
+            queue.append(name)
+    return order
+
+
+def refresh_one_portfolio(portefeuille: str, cascade: bool = True) -> dict:
     """Re-scan ONE portfolio's Rendement (ATT) + Vermogensoverzicht (VOLK) and store both — the
     per-row "Refresh" on the overview table.
+
+    ⚠ AND THE BOOKS IT IS BUILT FROM, unless `cascade=False`. A holding that is a certificate is
+    another book, and the parent's own scan says nothing about what is inside it — see
+    `dependent_accounts`. The cost is real and proportional: BUS_Offensief_Dyn pulls in one more
+    account, TOPS_BEOFF_BEH_DYN nine, at four downloads each. It is reported per account rather
+    than hidden in a single "done".
+
+    ⚠ THE TARGET IS SCANNED FIRST. It is the row the user clicked, so its answer should not be
+    held hostage to nine dependencies — and if one of those fails, the primary result is already
+    in hand and the failure is reported beside it rather than replacing it.
 
     Reuses the exact download → parse → save path the full daily scan uses, so a single row's
     refresh and the whole-fleet refresh can never diverge. Serialized against the full scan (and
@@ -1024,9 +1086,43 @@ def refresh_one_portfolio(portefeuille: str) -> dict:
         # this is a deliberate request for one named account, not a discovery whose size might mean
         # the scrape failed.
         _record_reports({portefeuille: ok}, datetime.now(timezone.utc).isoformat())
+
+        # ⚠ INSIDE THE SAME LOCK HOLD. `scan_one` deliberately does not take `_LOCK` (both callers
+        # already hold it), so the dependencies run on the session this call already owns. Taking
+        # and releasing per account would let the fleet scan interleave halfway through a cascade
+        # and leave the parent fresh against half-stale children.
+        cascaded: list[dict] = []
+        for dep in (dependent_accounts(portefeuille) if cascade else []):
+            try:
+                sub = scan_one(dep, van, tot)
+            except Exception as e:  # noqa: BLE001 — one child must not lose the parent's result
+                _log.warning("[airs_vermogen] cascade %s failed: %s: %s",
+                             dep, type(e).__name__, e)
+                cascaded.append({"portefeuille": dep, "status": "error",
+                                 "errors": [f"{type(e).__name__}: {e}"]})
+                continue
+            _record_reports({dep: sub["reports_ok"]}, datetime.now(timezone.utc).isoformat())
+            cascaded.append({
+                "portefeuille": dep,
+                "status": "ok" if ("att" in sub["reports_ok"] or "volk" in sub["reports_ok"])
+                else "error",
+                "holdings_rows": sub["holdings"],
+                "as_of": sub["as_of"],
+                "errors": [f"{e['report']}: {e['error_type']}: {e['message']}"
+                           for e in sub["errors"]],
+            })
+        if cascaded:
+            _log.warning("[airs_vermogen] %s: also refreshed %d book(s) it is built from — %s",
+                         portefeuille, len(cascaded),
+                         ", ".join(c["portefeuille"] for c in cascaded))
+
         return {
             "status": "ok" if ("att" in ok or "volk" in ok) else "error",
             "portefeuille": portefeuille,
+            # ⚠ The books BEHIND this one, each with its own outcome. A cascade that half-failed
+            # must not read as a clean refresh — the parent's figures are only as fresh as the
+            # child they are computed from.
+            "cascaded": cascaded,
             "as_of": res["as_of"] if "volk" in ok else tot,
             "holdings_rows": res["holdings"],
             "mutatie_rows": res["mutaties"],

@@ -473,7 +473,20 @@ export default function PortfolioOverviewPanel() {
         { method: 'POST' });
       const b = (await r.json().catch(() => null)) as
         { status?: string; errors?: string[]; as_of?: string; holdings_rows?: number;
-          complete?: boolean } | null;
+          complete?: boolean;
+          /** ⚠ The books this one is BUILT FROM — a holding can be a certificate wrapping another
+           *  strategy, and everything shown through it is read from that book's own scan. */
+          cascaded?: { portefeuille: string; status?: string; errors?: string[] }[] } | null;
+      // ⚠ NAMED, NOT SILENT. This refresh can now be nine scans instead of one (measured on
+      // TOPS_BEOFF_BEH_DYN), so the reader is owed what it did — and a parent refreshed against a
+      // child that FAILED is not fresh, which a single "refreshed" would have claimed.
+      const also = b?.cascaded ?? [];
+      const alsoFailed = also.filter((c) => c.status !== 'ok');
+      const alsoText = also.length
+        ? ` Also refreshed ${also.length} book${also.length === 1 ? '' : 's'} it is built from`
+          + (alsoFailed.length ? ` — ${alsoFailed.length} failed.` : '.')
+        : '';
+      if (alsoFailed.length) logDetail(`refresh ${portefeuille}: cascade failures`, alsoFailed);
       if (!r.ok) {
         logDetail(`refresh ${portefeuille} failed`, { status: r.status, body: b });
         setRefreshMsg({ text: `${portefeuille}: refresh failed — HTTP ${r.status}. Is the backend running with AIRS credentials?`, kind: 'error' });
@@ -489,11 +502,18 @@ export default function PortfolioOverviewPanel() {
         // already carries a ⚠ naming them, so repeating them here said it twice and neither well.
         logDetail(`refresh ${portefeuille} incomplete`, b?.errors ?? b);
         setRefreshMsg({
-          text: `${portefeuille}: partly refreshed — some reports did not arrive.`,
+          text: `${portefeuille}: partly refreshed — some reports did not arrive.${alsoText}`,
           kind: 'warn',
         });
       } else {
-        setRefreshMsg({ text: `${portefeuille}: refreshed — ${b?.holdings_rows ?? 0} holdings as of ${b?.as_of ?? 'today'}.`, kind: 'ok' });
+        setRefreshMsg({
+          text: `${portefeuille}: refreshed — ${b?.holdings_rows ?? 0} holdings as of `
+            + `${b?.as_of ?? 'today'}.${alsoText}`,
+          // ⚠ A failed dependency downgrades the whole message. The parent's own scan succeeded,
+          // but its looked-through figures are read from a book that did not — reporting that as
+          // a clean refresh is exactly the stale-shown-as-fresh failure this app keeps refusing.
+          kind: alsoFailed.length ? 'warn' : 'ok',
+        });
       }
       setDetail((d) => { const n = { ...d }; delete n[portefeuille]; return n; });
       setIsins((m) => { const n = { ...m }; delete n[portefeuille]; return n; });

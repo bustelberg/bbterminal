@@ -1683,10 +1683,21 @@ export interface paths {
         put?: never;
         /**
          * Airs Portfolio Refresh
-         * @description Re-scan ONE portfolio's AIRS Rendement + Vermogensoverzicht and store both — the per-row
-         *     Refresh on the overview table. Awaited (a few seconds: two downloads), so the client can
-         *     re-fetch the row on success. Serialized against the full scan via the module lock; returns
-         *     `{status: busy}` if a fleet refresh is in flight.
+         * @description Re-scan ONE portfolio's AIRS reports — and the books it is BUILT FROM.
+         *
+         *     ⚠ A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another
+         *     strategy, and everything shown through one — the looked-through holdings, their returns, the
+         *     attribution — is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads
+         *     the twelve lines it stores and leaves the instruments behind them as stale as they were.
+         *     Measured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.
+         *
+         *     ⚠ SO THIS IS NOT ALWAYS "a few seconds" ANY MORE — it is four downloads per account in the
+         *     chain. Each one's outcome comes back in `cascaded` rather than being folded into a single
+         *     status, because a parent refreshed against a child that failed is not fresh. `cascade=false`
+         *     refreshes only the named account.
+         *
+         *     Serialized against the full scan via the module lock; returns `{status: busy}` if a fleet
+         *     refresh is in flight.
          */
         post: operations["airs_portfolio_refresh_api_airs_portfolios__portefeuille__refresh_post"];
         delete?: never;
@@ -8600,8 +8611,15 @@ export interface components {
          *     NOT folded to Unclassified like the fund axes).
          */
         BookHoldingDetail: {
+            /** Avg Capital Eur */
+            avg_capital_eur?: number | null;
             /** Bucket */
             bucket: string;
+            /**
+             * Capital Unknown
+             * @default false
+             */
+            capital_unknown?: boolean;
             /** Contribution Pct */
             contribution_pct?: number | null;
             /** Currency */
@@ -8612,6 +8630,8 @@ export interface components {
             income_eur?: number | null;
             /** Isin */
             isin?: string | null;
+            /** Money Weighted Return Pct */
+            money_weighted_return_pct?: number | null;
             /** Name */
             name?: string | null;
             /** Own Income Eur */
@@ -9607,11 +9627,13 @@ export interface components {
          *     Return column is the other question and the two will differ.
          */
         LedgerPosition: {
+            /** Avg Capital Eur */
+            avg_capital_eur?: number | null;
             /**
-             * Avg Capital Eur
-             * @default 0
+             * Capital Unknown
+             * @default false
              */
-            avg_capital_eur?: number;
+            capital_unknown?: boolean;
             /**
              * Closed Out
              * @default false
@@ -9640,11 +9662,8 @@ export interface components {
             last_sale?: string | null;
             /** Name */
             name: string;
-            /**
-             * Opening Eur
-             * @default 0
-             */
-            opening_eur?: number;
+            /** Opening Eur */
+            opening_eur?: number | null;
             /**
              * Prior Year Eur
              * @default 0
@@ -10354,6 +10373,8 @@ export interface components {
         PortfolioAllocationSlice: {
             /** Bucket */
             bucket: string;
+            /** Contribution Pct */
+            contribution_pct?: number | null;
             /**
              * Holdings
              * @default 0
@@ -13475,7 +13496,9 @@ export interface operations {
     };
     airs_portfolio_refresh_api_airs_portfolios__portefeuille__refresh_post: {
         parameters: {
-            query?: never;
+            query?: {
+                cascade?: boolean;
+            };
             header?: never;
             path: {
                 portefeuille: string;

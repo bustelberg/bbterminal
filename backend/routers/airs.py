@@ -685,8 +685,16 @@ class PortfolioAllocationSlice(BaseModel):
     """
     bucket: str
     pct: float
-    # The bucket's value-weighted YTD price return (from the paired book); null when no book.
+    # The bucket's own return — its euro Result over what it was worth when the year opened.
+    # Null when no book. ⚠ A RATE ON ITS OWN DENOMINATOR, so these do NOT add across classes.
     return_pct: float | None = None
+    # ⚠ THE SAME EUROS ON THE BOOK'S DENOMINATOR, in POINTS — this one DOES add.
+    # ⚠ BUT NOT TO THE WHOLE BOOK: a position sold out during the year has no asset class, so no
+    # slice can carry it. Measured on BUS_Offensief_Dyn the classes come to +8.211pp against a
+    # book that made +5.827%, the missing -2.384pp being eight names it no longer holds
+    # (`realised.positions`). The UI states that remainder rather than letting the parts quietly
+    # miss the total.
+    contribution_pct: float | None = None
     # ⚠ How many INDIVIDUAL holdings sit in this class, counted AFTER the certificates are looked
     # through. A weight alone cannot tell "66% in one bond ETF" from "66% across sixty names" —
     # they draw the same slice and are not the same portfolio. On ToppenbergBeheer Defensief the
@@ -809,6 +817,23 @@ class BookHoldingDetail(BaseModel):
     income_eur: float | None = None
     result_eur: float | None = None
     contribution_pct: float | None = None
+    # ── WHAT THE MONEY MADE, as against what the instrument did.
+    # ⚠ `return_pct` / `own_return_pct` divide by AIRS's RESTATED `Beginwaarde` — today's quantity
+    # priced in January — which erases your timing ON PURPOSE so the figure describes the stock.
+    # This one divides by the capital actually tied up, weighted by when it went in (Modified
+    # Dietz), with dividends net of withholding and anything realised on a mid-year sale already
+    # in the numerator. Measured: KLA-Tencor +55.62% as an instrument, +30.94% on the money.
+    #
+    # ⚠ NULL FOR A LEG INSIDE A CERTIFICATE, and that is not a gap to fill. AIRS trades the
+    # WRAPPER, so a stock reached through one has no buys or sells of its own — there is no "money
+    # you put in" to divide by. 24 of BUS_Offensief_Dyn's 52 rows are in this position.
+    avg_capital_eur: float | None = None
+    money_weighted_return_pct: float | None = None
+    # ⚠ WHICH of the two reasons the two fields above are blank. True = this position carries a
+    # `Tt = D` (Deponering) row, so shares arrived without a purchase and its trade quantities and
+    # its holding quantity are on different bases. False with a blank value = it is a leg inside a
+    # certificate, which has no flows of its own at all. Same `None`, different facts.
+    capital_unknown: bool = False
     # ⚠ THE INSTRUMENT'S OWN EUR RETURN — NOT `return_pct`, AND THE DIFFERENCE IS THE WHOLE POINT.
     # `return_pct` is the book's value change, and the book does not know what NVIDIA did: it knows
     # what the CERTIFICATE holding NVIDIA did. Splitting that certificate's start and current value
@@ -922,9 +947,18 @@ class LedgerPosition(BaseModel):
     # Value at the year's open. For a held row, `Beginwaarde` de-restated back to the quantity
     # actually owned then; for a sold-out row, `proceeds − Res. YtD` scaled to the shares held at
     # the open (AIRS does not publish its parcel matching, so that split is proportional).
-    opening_eur: float = 0.0
-    avg_capital_eur: float = 0.0
+    # ⚠⚠ NULLABLE, AND THE NULL IS THE POINT — a 0.0 here would be a claim that the position
+    # opened at nothing and tied up nothing, which is exactly the false statement the refusal
+    # exists to avoid. `None` means "its share count moved for a reason we do not interpret
+    # (`Tt = D`, Deponering), so no quantity arithmetic on it is trustworthy". Typed as plain
+    # floats these blanks raised a ResponseValidationError and took the whole modal down with a
+    # 500 — the right failure for a wrong type, and a reminder that a refusal has to be modelled
+    # as far as the wire, not just computed.
+    opening_eur: float | None = None
+    avg_capital_eur: float | None = None
     weight_pct: float | None = None
+    # Why those three are blank, so the UI can say so rather than showing three unexplained dashes.
+    capital_unknown: bool = False
     held_result_eur: float = 0.0
     realised_result_eur: float = 0.0
     income_eur: float = 0.0
@@ -1907,14 +1941,25 @@ async def airs_account_set_display_name(portefeuille: str, body: AirsAccountName
 
 
 @router.post("/api/airs/portfolios/{portefeuille}/refresh")
-async def airs_portfolio_refresh(portefeuille: str):
-    """Re-scan ONE portfolio's AIRS Rendement + Vermogensoverzicht and store both — the per-row
-    Refresh on the overview table. Awaited (a few seconds: two downloads), so the client can
-    re-fetch the row on success. Serialized against the full scan via the module lock; returns
-    `{status: busy}` if a fleet refresh is in flight."""
+async def airs_portfolio_refresh(portefeuille: str, cascade: bool = True):
+    """Re-scan ONE portfolio's AIRS reports — and the books it is BUILT FROM.
+
+    ⚠ A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another
+    strategy, and everything shown through one — the looked-through holdings, their returns, the
+    attribution — is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads
+    the twelve lines it stores and leaves the instruments behind them as stale as they were.
+    Measured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.
+
+    ⚠ SO THIS IS NOT ALWAYS "a few seconds" ANY MORE — it is four downloads per account in the
+    chain. Each one's outcome comes back in `cascaded` rather than being folded into a single
+    status, because a parent refreshed against a child that failed is not fresh. `cascade=false`
+    refreshes only the named account.
+
+    Serialized against the full scan via the module lock; returns `{status: busy}` if a fleet
+    refresh is in flight."""
     from airs_vermogen import refresh_one_portfolio  # noqa: PLC0415
 
-    return await asyncio.to_thread(refresh_one_portfolio, portefeuille)
+    return await asyncio.to_thread(refresh_one_portfolio, portefeuille, cascade)
 
 
 @router.get("/api/airs/vermogen/status")
