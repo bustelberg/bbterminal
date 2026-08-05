@@ -829,6 +829,17 @@
             ],
             "title": "As Of"
           },
+          "book_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book As Of"
+          },
           "book_end_eur": {
             "anyOf": [
               {
@@ -911,6 +922,17 @@
             "title": "Costs Eur",
             "type": "number"
           },
+          "dates_aligned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dates Aligned"
+          },
           "deposits_eur": {
             "default": 0.0,
             "title": "Deposits Eur",
@@ -926,6 +948,17 @@
               }
             ],
             "title": "Gap Pp"
+          },
+          "holdings_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings As Of"
           },
           "months": {
             "anyOf": [
@@ -1052,6 +1085,17 @@
               }
             ],
             "title": "Reconciles"
+          },
+          "residual_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual Reason"
           },
           "residual_vs_book_eur": {
             "anyOf": [
@@ -6637,6 +6681,16 @@
             ],
             "title": "Portfolio Id"
           },
+          "realised": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RealisedBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "returns": {
             "anyOf": [
               {
@@ -8913,6 +8967,319 @@
           "label"
         ],
         "title": "QualityMetric",
+        "type": "object"
+      },
+      "RealisedBlock": {
+        "description": "What the paired book realised on sales this year \u2014 the leg the holdings table cannot show.\n\n\u26a0 EVERY FIGURE SITS ON ONE DENOMINATOR, `basis_eur` (the book's own `beginvermogen`), so\n`held_pct + realised_pct + sold_income_pct == book_ytd_pct` exactly. The holdings table weights\nby each position's share of the PRICED HELD book, which is right for a class return and cannot\ncarry a sold position at all \u2014 different question, different denominator.\n\n\u26a0 `available: false` IS NOT \"SOLD NOTHING\". No pairing, no cached Transacties sheet, or a\nsheet we could not read \u2014 each has its own `note`, and an empty list presented as an answer\nwould hide EUR 28,656 of realised loss on the book this was measured against.",
+        "properties": {
+          "available": {
+            "default": false,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "basis_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basis Eur"
+          },
+          "book_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book As Of"
+          },
+          "book_ytd_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Ytd Pct"
+          },
+          "comparable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparable"
+          },
+          "dates_aligned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dates Aligned"
+          },
+          "held_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Eur"
+          },
+          "held_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held Pct"
+          },
+          "holdings_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings As Of"
+          },
+          "legs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RealisedContributionLeg"
+            },
+            "title": "Legs",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "portefeuille": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portefeuille"
+          },
+          "realised_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realised Eur"
+          },
+          "realised_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realised Pct"
+          },
+          "realised_share_of_result_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realised Share Of Result Pct"
+          },
+          "reconciles": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconciles"
+          },
+          "residual_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual Eur"
+          },
+          "residual_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual Reason"
+          },
+          "sold_income_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sold Income Eur"
+          },
+          "sold_income_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sold Income Pct"
+          },
+          "total_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Pct"
+          }
+        },
+        "title": "RealisedBlock",
+        "type": "object"
+      },
+      "RealisedContributionLeg": {
+        "description": "One name the book SOLD this year, and what that sale contributed to the year.\n\n\u26a0 THERE IS NO WEIGHT HERE, AND ITS ABSENCE IS THE HONEST STATEMENT. A sold parcel's opening\nvalue is not recoverable from AIRS's data: `proceeds \u2212 Res. YtD` yields its COST BASIS, which\nfor a parcel bought in February is real capital that did not exist on 1 January \u2014 feeding it\nin made the opening-capital gap WORSE (EUR 55,427 \u2192 EUR 377,776 on BUS_Offensief_Dyn), and\npartial sells make it unrecoverable in principle since AIRS restates `Beginwaarde` to the\nCURRENT quantity. A contribution needs no weight; an allocation effect does, which is why\nthese legs may never enter the composition bars or Brinson.",
+        "properties": {
+          "closed_out": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed Out"
+          },
+          "contribution_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contribution Pct"
+          },
+          "first": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First"
+          },
+          "fonds": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fonds"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last"
+          },
+          "prior_year_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prior Year Eur"
+          },
+          "realised_ytd_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realised Ytd Eur"
+          }
+        },
+        "title": "RealisedContributionLeg",
         "type": "object"
       },
       "RecomputeRequest": {

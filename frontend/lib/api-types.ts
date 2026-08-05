@@ -7584,6 +7584,8 @@ export interface components {
         AirsAccountReconciliation: {
             /** As Of */
             as_of?: string | null;
+            /** Book As Of */
+            book_as_of?: string | null;
             /** Book End Eur */
             book_end_eur?: number | null;
             /** Book Reconciles */
@@ -7603,6 +7605,8 @@ export interface components {
              * @default 0
              */
             costs_eur?: number;
+            /** Dates Aligned */
+            dates_aligned?: boolean | null;
             /**
              * Deposits Eur
              * @default 0
@@ -7610,6 +7614,8 @@ export interface components {
             deposits_eur?: number;
             /** Gap Pp */
             gap_pp?: number | null;
+            /** Holdings As Of */
+            holdings_as_of?: string | null;
             /** Months */
             months?: number | null;
             /** Open End Eur */
@@ -7650,6 +7656,8 @@ export interface components {
             realised_ytd_eur?: number | null;
             /** Reconciles */
             reconciles?: boolean | null;
+            /** Residual Reason */
+            residual_reason?: string | null;
             /** Residual Vs Book Eur */
             residual_vs_book_eur?: number | null;
             /** Return Basis */
@@ -9725,6 +9733,7 @@ export interface components {
             opaque_pct?: number;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            realised?: components["schemas"]["RealisedBlock"] | null;
             returns?: components["schemas"]["PortfolioAnalysisReturns"] | null;
             /**
              * Timings Ms
@@ -10584,6 +10593,97 @@ export interface components {
             unit?: string;
             /** Value */
             value?: number | null;
+        };
+        /**
+         * RealisedBlock
+         * @description What the paired book realised on sales this year — the leg the holdings table cannot show.
+         *
+         *     ⚠ EVERY FIGURE SITS ON ONE DENOMINATOR, `basis_eur` (the book's own `beginvermogen`), so
+         *     `held_pct + realised_pct + sold_income_pct == book_ytd_pct` exactly. The holdings table weights
+         *     by each position's share of the PRICED HELD book, which is right for a class return and cannot
+         *     carry a sold position at all — different question, different denominator.
+         *
+         *     ⚠ `available: false` IS NOT "SOLD NOTHING". No pairing, no cached Transacties sheet, or a
+         *     sheet we could not read — each has its own `note`, and an empty list presented as an answer
+         *     would hide EUR 28,656 of realised loss on the book this was measured against.
+         */
+        RealisedBlock: {
+            /**
+             * Available
+             * @default false
+             */
+            available?: boolean;
+            /** Basis Eur */
+            basis_eur?: number | null;
+            /** Book As Of */
+            book_as_of?: string | null;
+            /** Book Ytd Pct */
+            book_ytd_pct?: number | null;
+            /** Comparable */
+            comparable?: boolean | null;
+            /** Dates Aligned */
+            dates_aligned?: boolean | null;
+            /** Held Eur */
+            held_eur?: number | null;
+            /** Held Pct */
+            held_pct?: number | null;
+            /** Holdings As Of */
+            holdings_as_of?: string | null;
+            /**
+             * Legs
+             * @default []
+             */
+            legs?: components["schemas"]["RealisedContributionLeg"][];
+            /** Note */
+            note?: string | null;
+            /** Portefeuille */
+            portefeuille?: string | null;
+            /** Realised Eur */
+            realised_eur?: number | null;
+            /** Realised Pct */
+            realised_pct?: number | null;
+            /** Realised Share Of Result Pct */
+            realised_share_of_result_pct?: number | null;
+            /** Reconciles */
+            reconciles?: boolean | null;
+            /** Residual Eur */
+            residual_eur?: number | null;
+            /** Residual Reason */
+            residual_reason?: string | null;
+            /** Sold Income Eur */
+            sold_income_eur?: number | null;
+            /** Sold Income Pct */
+            sold_income_pct?: number | null;
+            /** Total Pct */
+            total_pct?: number | null;
+        };
+        /**
+         * RealisedContributionLeg
+         * @description One name the book SOLD this year, and what that sale contributed to the year.
+         *
+         *     ⚠ THERE IS NO WEIGHT HERE, AND ITS ABSENCE IS THE HONEST STATEMENT. A sold parcel's opening
+         *     value is not recoverable from AIRS's data: `proceeds − Res. YtD` yields its COST BASIS, which
+         *     for a parcel bought in February is real capital that did not exist on 1 January — feeding it
+         *     in made the opening-capital gap WORSE (EUR 55,427 → EUR 377,776 on BUS_Offensief_Dyn), and
+         *     partial sells make it unrecoverable in principle since AIRS restates `Beginwaarde` to the
+         *     CURRENT quantity. A contribution needs no weight; an allocation effect does, which is why
+         *     these legs may never enter the composition bars or Brinson.
+         */
+        RealisedContributionLeg: {
+            /** Closed Out */
+            closed_out?: boolean | null;
+            /** Contribution Pct */
+            contribution_pct?: number | null;
+            /** First */
+            first?: string | null;
+            /** Fonds */
+            fonds?: string | null;
+            /** Last */
+            last?: string | null;
+            /** Prior Year Eur */
+            prior_year_eur?: number | null;
+            /** Realised Ytd Eur */
+            realised_ytd_eur?: number | null;
         };
         /** RecomputeRequest */
         RecomputeRequest: {

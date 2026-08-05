@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from airs_reconciliation import OpenSide, open_side_from_rows, reconcile
+from airs_reconciliation import OpenSide, contributions, open_side_from_rows, reconcile
 from airs_transacties import ParsedSheet, realised_results
 
 # AITopSelectie OFF DYN, 2026-08-05 — the aggregated ATT row.
@@ -199,3 +199,93 @@ class TestRealisedResults:
         s = realised_results(_sheet([_sell("", 100.0, 90.0, 10.0)]))
         assert s.legs == {}
         assert s.unknown_types == {"(sale with no Fonds)": 1}
+
+
+class TestTwoClocks:
+    """⚠⚠ The held leg is the VOLK holdings snapshot; the book's result is the ATT report. They are
+    separate downloads and land a day apart, and one day of market movement on a EUR 1.4m book was
+    read as a EUR 57,330 missing position."""
+
+    def test_a_misaligned_residual_is_unknown_not_failed(self):
+        # AITopSelectie, measured 2026-08-05: ATT to 08-05, holdings at 08-04.
+        book = {**BOOK, "periode": "2026-08-05", "beleggingsresultaat": 444624.08}
+        r = reconcile(book, OPEN, realised_ytd_eur=REALISED_YTD, holdings_as_of="2026-08-04")
+        assert r.dates_aligned is False
+        # ⚠ None, not False. Calling it False accuses the arithmetic of a fault the calendar owns,
+        # and sends a reader hunting for a position that is not missing.
+        assert r.reconciles is None
+        assert r.residual_reason and "2026-08-04" in r.residual_reason
+
+    def test_a_tie_still_counts_even_when_the_dates_differ(self):
+        # ⚠ BUS_Offensief_Dyn reconciles to EUR 0.05 with its two sides nominally a day apart. The
+        # market plainly did not move it, so suppressing a proven agreement on a calendar
+        # technicality would discard the evidence the check exists to produce.
+        book = {**BOOK, "periode": "2026-08-05"}
+        r = reconcile(book, OPEN, realised_ytd_eur=REALISED_YTD, holdings_as_of="2026-08-04")
+        assert abs(r.residual_vs_book_eur) > 1        # this book genuinely differs
+        book_tie = {**book, "beleggingsresultaat": 387293.79}
+        r2 = reconcile(book_tie, OPEN, realised_ytd_eur=REALISED_YTD, holdings_as_of="2026-08-04")
+        assert r2.dates_aligned is False
+        assert r2.reconciles is True                  # a tie is a tie
+        assert r2.residual_reason is None
+
+    def test_aligned_dates_and_a_real_gap_is_a_genuine_failure(self):
+        book = {**BOOK, "periode": "2026-08-04", "beleggingsresultaat": 500000.0}
+        r = reconcile(book, OPEN, realised_ytd_eur=REALISED_YTD, holdings_as_of="2026-08-04")
+        assert r.dates_aligned is True
+        assert r.reconciles is False
+        assert r.residual_reason and "a leg is missing" in r.residual_reason
+
+
+class TestContributions:
+    """One denominator — the book's own opening capital — so the legs add to its YTD."""
+
+    def _rec(self, **over):
+        r = reconcile(BOOK, OPEN, sold_income_eur=0.0, realised_ytd_eur=REALISED_YTD,
+                      holdings_as_of="2026-08-04")
+        base = {"book_start_eur": r.book_start_eur, "open_result_eur": r.open.result_eur,
+                "realised_ytd_eur": r.realised_ytd_eur, "sold_income_eur": r.sold_income_eur,
+                "return_basis": r.return_basis, "realised": []}
+        return {**base, **over}
+
+    def test_the_three_legs_add_to_the_books_own_ytd(self):
+        c = contributions(self._rec())
+        assert c["held_pct"] + c["realised_pct"] + c["sold_income_pct"] == pytest.approx(
+            c["total_pct"], abs=1e-9)
+        assert c["total_pct"] == pytest.approx(BOOK["cumulatief_rendement"], abs=1e-4)
+
+    def test_the_denominator_is_the_books_opening_capital_not_the_held_positions(self):
+        # ⚠ THE WHOLE POINT. On the held book's own opening value (1,006,880.70) the held leg
+        # would read 37.84% — the positions table's figure — and the sold leg could not be
+        # expressed at all, because a sold position is not in that denominator.
+        c = contributions(self._rec())
+        assert c["basis_eur"] == pytest.approx(1000000.0)
+        assert c["held_pct"] == pytest.approx(38.0987, abs=1e-3)   # NOT 37.84
+        assert OPEN.return_pct == pytest.approx(37.8383, abs=1e-3)
+
+    def test_a_flow_book_gets_no_percentages_at_all(self):
+        # Three contributions that do not add to the figure they decompose each look reasonable
+        # alone, which is worse than showing none.
+        r = reconcile({**BOOK, "stortingen": 250000.0}, OPEN, realised_ytd_eur=REALISED_YTD)
+        c = contributions({"book_start_eur": r.book_start_eur,
+                           "open_result_eur": r.open.result_eur,
+                           "realised_ytd_eur": r.realised_ytd_eur,
+                           "sold_income_eur": 0.0, "return_basis": r.return_basis,
+                           "realised": [{"fonds": "X", "realised_ytd_eur": 1.0}]})
+        assert c["comparable"] is False
+        assert c["held_pct"] is None and c["total_pct"] is None
+        assert c["legs"] == []
+
+    def test_the_coverage_share_is_of_the_ABSOLUTE_movement(self):
+        # ⚠ A realised LOSS beside a held GAIN is not "negative coverage" — the question is how
+        # much of the movement happened outside the holdings table, and a loss counts as much.
+        c = contributions(self._rec(open_result_eur=75164.23, realised_ytd_eur=-28656.46,
+                                    sold_income_eur=695.50))
+        assert c["realised_share_of_result_pct"] == pytest.approx(
+            28656.46 / (75164.23 + 28656.46 + 695.50) * 100, abs=1e-6)
+        assert c["realised_share_of_result_pct"] > 0
+
+    def test_no_realised_input_yields_no_contributions(self):
+        c = contributions(self._rec(realised_ytd_eur=None))
+        assert c["held_pct"] is None
+        assert c["realised_share_of_result_pct"] is None

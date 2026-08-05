@@ -126,7 +126,15 @@ class Reconciliation:
     return_basis: str | None = None
     # ⚠ ASSERTED, NOT ASSUMED. What `total_result_eur` fails to explain of the book's own result.
     residual_vs_book_eur: float | None = None
+    # ⚠ None means UNKNOWN, not False — see `dates_aligned`. A residual measured across two
+    # different valuation dates is market movement, and calling that a failed reconciliation
+    # accuses the arithmetic of a fault that belongs to the calendar.
     reconciles: bool | None = None
+    # The two clocks the residual depends on: the holdings snapshot (VOLK) and the ATT report.
+    holdings_as_of: str | None = None
+    book_as_of: str | None = None
+    dates_aligned: bool | None = None
+    residual_reason: str | None = None
 
     # What nothing on hand explains, BEFORE the sales are counted. Kept beside the residual so the
     # reader can see how much of the gap the transactions actually closed.
@@ -149,7 +157,8 @@ def reconcile(book: dict | None, open_side: OpenSide, sold_income_eur: float = 0
               transaction_rows: int | None = None,
               realised_ytd_eur: float | None = None, realised_names: int = 0,
               realised_note: str | None = None,
-              unknown_transaction_types: dict[str, int] | None = None) -> Reconciliation:
+              unknown_transaction_types: dict[str, int] | None = None,
+              holdings_as_of: str | None = None) -> Reconciliation:
     """Line up the book's own year against the positions — held AND sold.
 
     `book` is one account's aggregated ATT row (`_airs_accounts._year_perf`). None when AIRS has
@@ -198,12 +207,46 @@ def reconcile(book: dict | None, open_side: OpenSide, sold_income_eur: float = 0
     if r.book_return_pct is not None and open_side.return_pct is not None:
         r.gap_pp = round(open_side.return_pct - r.book_return_pct, 4)
 
+    # ⚠⚠ THE TWO SIDES ARE VALUED ON DIFFERENT CLOCKS, AND THE RESIDUAL IS ONLY A COMPLETENESS
+    # CHECK WHEN THEY MATCH. The held leg is the VOLK holdings snapshot; the book's result is the
+    # ATT report. They come from separate downloads and routinely land a day apart — measured
+    # 2026-08-05, AITopSelectie had ATT at 2026-08-05 and holdings at 2026-08-04, and that ONE DAY
+    # of market movement on a EUR 1.4m book showed up as a EUR 57,330 "unexplained" residual and a
+    # failed reconciliation. Nothing was missing; the calendar was.
+    #
+    # So a date-misaligned residual is reported with its reason and `reconciles` is None —
+    # UNKNOWN, not False. Calling it False accuses the arithmetic of a fault that belongs to the
+    # scan, and would send a reader hunting for a position that is not missing.
+    r.holdings_as_of = holdings_as_of
+    r.book_as_of = str(book.get("periode")) if book.get("periode") else None
+    if holdings_as_of and r.book_as_of:
+        r.dates_aligned = holdings_as_of == r.book_as_of
+
     # ⚠ THE CHECK IS THE PRODUCT. A total assembled from three legs that is never set against the
     # book's own figure is an assertion; set against it, it is a reconciliation. Measured residual
-    # on AITopSelectie: EUR -0.04 on a EUR 387,293.75 year.
+    # on AITopSelectie with both sides on the same date: EUR -0.04 on a EUR 387,293.75 year.
     if r.total_result_eur is not None and r.book_result_eur is not None:
         r.residual_vs_book_eur = round(r.total_result_eur - r.book_result_eur, 2)
-        r.reconciles = abs(r.residual_vs_book_eur) < RECONCILES_EUR
+        ties = abs(r.residual_vs_book_eur) < RECONCILES_EUR
+        if ties:
+            # ⚠ A TIE IS A TIE, WHATEVER THE DATES SAY. Measured: BUS_Offensief_Dyn reconciles to
+            # EUR 0.05 with its two sides nominally a day apart — the market plainly did not move
+            # the book in between, so suppressing a proven agreement to "unknown" on a calendar
+            # technicality would throw away the very evidence the check exists to produce.
+            r.reconciles = True
+        elif r.dates_aligned is False:
+            # Unknown, NOT failed. The likeliest cause is the day between the two scans, and
+            # accusing the arithmetic would send a reader hunting a position that is not missing.
+            r.reconciles = None
+            r.residual_reason = (
+                f"The positions are valued at {holdings_as_of} and AIRS's result runs to "
+                f"{r.book_as_of}, so this difference is most likely the market moving in "
+                f"between — not a missing position. Re-scan the book to line the dates up.")
+        else:
+            r.reconciles = False
+            r.residual_reason = (
+                "Both sides are valued on the same date, so this is genuinely unexplained by the "
+                "positions — a leg is missing.")
 
     # ⚠⚠ ONLY ON A FLOW-FREE BOOK. `result / opening capital` reproduces `cumulatief_rendement`
     # exactly — verified across the fleet 2026-08-05, on ALL 30 accounts with no flows, to within
@@ -260,3 +303,80 @@ def _f(v: object) -> float | None:
         return float(v)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# ONE DENOMINATOR: the book's own opening capital.
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def contributions(rec: dict) -> dict:
+    """Every leg of the year as a share OF THE BOOK, in percentage points on one denominator.
+
+    ⚠ THE DENOMINATOR IS `beginvermogen`, NOT THE HELD POSITIONS' OPENING VALUE, AND THAT CHOICE
+    IS WHAT MAKES THE LEGS ADD UP. The positions table weights each holding by its share of the
+    PRICED HELD book — right for a class return, and useless here, because a position sold in
+    March is not in that denominator at all. On the book's own opening capital the three legs sum
+    to the book's YTD exactly:
+
+        held + realised on sales + income from names no longer held  ==  cumulatief_rendement
+
+    ⚠⚠ AND ONLY ON A FLOW-FREE BOOK. The identity rests on `result ÷ opening capital` being the
+    return, which stops being true the moment money is paid in or out — so a book with flows gets
+    its euro amounts and NO percentages, exactly as `total_return_pct` is refused there. Producing
+    contributions that do not add to the figure they claim to decompose is worse than producing
+    none: they would each look individually reasonable.
+
+    ⚠ A SOLD POSITION HAS A CONTRIBUTION AND NO WEIGHT, AND THE DIFFERENCE IS NOT COSMETIC.
+    Measured 2026-08-05: a sold parcel's opening value is NOT recoverable from this data.
+    `proceeds - Res. YtD` gives its COST BASIS, which for a parcel bought in February and sold in
+    June is a real number for capital that did not exist on 1 January — feeding it in made the
+    opening-capital gap WORSE, from EUR 55,427 to EUR 377,776 on BUS_Offensief_Dyn. Partial sells
+    make it unrecoverable in principle, because AIRS restates `Beginwaarde` to the CURRENT
+    quantity and nothing says which shares left.
+
+    So: anything CONTRIBUTION-shaped may include the sold legs (this function). Anything
+    WEIGHT-shaped — the composition bars, Brinson's `(w_p - w_b)` — may NOT, because allocation
+    effect is undefined without a start weight, and inventing one manufactures a confident finding
+    of exactly the kind `_airs_portfolio_attribution` already documents (a model holding 6%
+    Healthcare credited +1.73pp for "avoiding" it). `realised_share_of_result_pct` is what those
+    views report instead: how much of the year they cannot see.
+    """
+    base = rec.get("book_start_eur")
+    realised = rec.get("realised_ytd_eur")
+    held = rec.get("open_result_eur")
+    income = rec.get("sold_income_eur") or 0.0
+    out: dict = {
+        "basis_eur": base,
+        # ⚠ Mirrors `reconcile`'s own gate. One rule, asked in one place, so the tile and the
+        # contributions cannot disagree about whether this book can carry percentages.
+        "comparable": rec.get("return_basis") == "opening_capital",
+        "held_pct": None, "realised_pct": None, "sold_income_pct": None, "total_pct": None,
+        "realised_share_of_result_pct": None,
+        "legs": [],
+    }
+    if not base or realised is None or held is None:
+        return out
+
+    if out["comparable"]:
+        out["held_pct"] = held / base * 100
+        out["realised_pct"] = realised / base * 100
+        out["sold_income_pct"] = income / base * 100
+        out["total_pct"] = (held + realised + income) / base * 100
+        out["legs"] = [{
+            "fonds": leg.get("fonds"),
+            "realised_ytd_eur": leg.get("realised_ytd_eur"),
+            "contribution_pct": (leg.get("realised_ytd_eur") or 0.0) / base * 100,
+            "closed_out": leg.get("closed_out"),
+            "prior_year_eur": leg.get("prior_year_eur"),
+            "first": leg.get("first"), "last": leg.get("last"),
+        } for leg in (rec.get("realised") or [])]
+
+    # ⚠ HOW MUCH OF THE YEAR THE WEIGHT-BASED VIEWS CANNOT SEE. Reported on the ABSOLUTE result,
+    # because a realised -28,656 against a held +75,164 is not "negative coverage" — the question
+    # is how much of the movement happened outside the holdings table, and both directions count.
+    # Measured on BUS_Offensief_Dyn: 41% of the year's movement is realised on sales, which is far
+    # more than enough to flip a sector's verdict in an attribution built only on what is left.
+    gross = abs(held) + abs(realised) + abs(income)
+    if gross > 0:
+        out["realised_share_of_result_pct"] = abs(realised) / gross * 100
+    return out

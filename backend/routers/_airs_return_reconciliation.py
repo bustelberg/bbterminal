@@ -78,6 +78,11 @@ def account_return_reconciliation(portefeuille: str) -> dict:
         realised_names=len(legs),
         realised_note=(realised.unreadable if realised else None),
         unknown_transaction_types=(realised.unknown_types if realised else {}),
+        # ⚠ THE HELD LEG'S OWN CLOCK. It is the VOLK snapshot date and the book's result is the ATT
+        # report's — two downloads, routinely a day apart, and one day of market movement on a
+        # EUR 1.4m book is tens of thousands of euros of "unexplained" residual. Passed so the
+        # check can say "the calendar" rather than "a missing position".
+        holdings_as_of=detail.get("as_of"),
     )
     return {
         "portefeuille": portefeuille,
@@ -128,6 +133,10 @@ def account_return_reconciliation(portefeuille: str) -> dict:
         "return_basis": r.return_basis,
         "residual_vs_book_eur": r.residual_vs_book_eur,
         "reconciles": r.reconciles,
+        "holdings_as_of": r.holdings_as_of,
+        "book_as_of": r.book_as_of,
+        "dates_aligned": r.dates_aligned,
+        "residual_reason": r.residual_reason,
         "unexplained_eur": r.unexplained_eur,
         "gap_pp": r.gap_pp,
         "transaction_rows": r.transaction_rows,

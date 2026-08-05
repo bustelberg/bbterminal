@@ -289,10 +289,16 @@ function BucketNames({ row, bucket, benchmark }: {
 }
 
 export default function AttributionPanel({ id, benchmark, window, source = 'model',
-  portfolioAsOf, benchmarkAsOf, onClose }: {
+  portfolioAsOf, benchmarkAsOf, realisedSharePct, onClose }: {
   id: number; benchmark: string; window: 'ytd' | 'since';
   source?: 'model' | 'book';
   portfolioAsOf?: string | null; benchmarkAsOf?: string | null;
+  /** ⚠ HOW MUCH OF THE YEAR HAPPENED IN POSITIONS SINCE SOLD — and is therefore ABSENT from every
+   *  number in this panel. Brinson is `(w_p − w_b)(…)`: definitionally weight-based, and a sold
+   *  position has no recoverable opening weight, so it cannot be included. Same class of
+   *  distortion as `unpriced_pct` below, and larger — measured 22.5% on one book against a
+   *  typical unpriced share of a few points. Stated, never quietly omitted. */
+  realisedSharePct?: number | null;
   onClose: () => void;
 }) {
   const [axis, setAxis] = useState<Axis>('sector');
@@ -411,6 +417,23 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                 + 'flows — real return with no '}
               {AXIS_WORD[axis] ?? 'bucket'}
               {' to attribute it to.'}
+            </p>
+          )}
+
+          {/* ⚠⚠ A SOLD POSITION IS THE SAME FALSE FINDING AS AN UNPRICED ONE, CAUSED BY TIME
+              RATHER THAN BY PRICING — its sector reads as UNOWNED here, so a sector the book
+              traded out of entirely is credited or blamed for an allocation call it never made.
+              It cannot be fixed by adding the sold names: an allocation effect needs an opening
+              weight, and a sold parcel has none that is recoverable. Placed ABOVE the unpriced
+              note because it is the larger of the two. */}
+          {(realisedSharePct ?? 0) >= 1 && (
+            <p className="text-[11px] text-warn-300 mb-2">
+              {'⚠ '}
+              <span className="font-mono">{(realisedSharePct ?? 0).toFixed(0)}%</span>
+              {' of this book’s year happened in positions it has since SOLD. They carry no '
+                + 'opening weight, so none of them is in this table — a sector traded out of '
+                + 'entirely reads here as one that was never owned, which is a false finding, not '
+                + 'a missing one. The sold names are itemised under Holdings.'}
             </p>
           )}
 

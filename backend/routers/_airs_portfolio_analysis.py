@@ -1238,6 +1238,91 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             "holdings": holdings, "portefeuille": link["portefeuille"]}
 
 
+def _realised_block(portfolio_id: int) -> dict:
+    """What this model's paired BOOK realised on sales this year — the leg the holdings table
+    cannot show, because a sold position has no row left.
+
+    ⚠ IT READS `account_return_reconciliation`, THE ONE PLACE THAT ASSEMBLES A BOOK'S YEAR. The
+    /portfolios "Total return" panel shows exactly this; re-deriving it here — even "the same way"
+    — is how a modal ends up quietly disagreeing with the surface it was checked against. Same
+    rule `_returns` and `_book_return` already follow.
+
+    ⚠ IT NEVER FETCHES FROM AIRS. The reconciliation reads the CACHED Transacties snapshot; the
+    modal opens on a click, and a headless scrape behind it would cost seconds and could collide
+    with a fleet scan holding the session lock. An unfetched book yields `available: false` with a
+    reason, which the UI states rather than showing an empty list that reads as "sold nothing".
+
+    ⚠ AN UNPAIRED MODEL HAS NO BOOK, SO NO SOLD LEG EXISTS — absent, not empty. A model portfolio
+    is a set of weights; only a book buys and sells.
+    """
+    from airs_reconciliation import contributions  # noqa: PLC0415
+
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+    from routers._airs_return_reconciliation import account_return_reconciliation  # noqa: PLC0415
+
+    link = next((a for a in list_account_links()["accounts"]
+                 if a.get("model_portfolio_id") == portfolio_id), None)
+    if not link:
+        return {"available": False,
+                "note": "No Dynamic portfolio is paired with this one, so there are no "
+                        "transactions to read — a model is a set of weights; only a book trades."}
+    try:
+        rec = account_return_reconciliation(link["portefeuille"])
+    except Exception as e:  # noqa: BLE001 — the sold block must never break the modal
+        _log.warning("[analysis] realised block failed for %s (%s: %s)",
+                     link["portefeuille"], type(e).__name__, e)
+        return {"available": False, "portefeuille": link["portefeuille"],
+                "note": f"Could not read this book's transactions ({type(e).__name__})."}
+
+    # ⚠ NULL IS NOT ZERO — the distinction the whole panel rests on. No cached sheet means the
+    # realised leg is UNKNOWN, and an empty "Sold this year" list would state that the book sold
+    # nothing, which on BUS_Offensief_Dyn would hide EUR 28,656 of realised loss.
+    if rec.get("realised_ytd_eur") is None:
+        return {"available": False, "portefeuille": link["portefeuille"],
+                "note": (rec.get("realised_note")
+                         or "This book's transactions have not been fetched yet, so what it "
+                            "realised on sales is unknown. Load them on /portfolios → expand this "
+                            "book → Transactions.")}
+
+    c = contributions(rec)
+    _log.warning("[analysis] %s realised %s over %d name(s); %s%% of the year's movement is "
+                 "outside the holdings table", link["portefeuille"], rec.get("realised_ytd_eur"),
+                 rec.get("realised_names") or 0,
+                 None if c["realised_share_of_result_pct"] is None
+                 else round(c["realised_share_of_result_pct"], 1))
+    return {
+        "available": True,
+        "portefeuille": link["portefeuille"],
+        "note": None,
+        # The book's own opening capital — the ONE denominator every figure below sits on.
+        "basis_eur": c["basis_eur"],
+        # ⚠ False on a book with deposits or withdrawals: `result ÷ opening capital` is not a
+        # return there, so the percentages are withheld and only the euro amounts stand.
+        "comparable": c["comparable"],
+        "held_pct": c["held_pct"],
+        "realised_pct": c["realised_pct"],
+        "sold_income_pct": c["sold_income_pct"],
+        "total_pct": c["total_pct"],
+        "held_eur": rec.get("open_result_eur"),
+        "realised_eur": rec.get("realised_ytd_eur"),
+        "sold_income_eur": rec.get("sold_income_eur"),
+        "book_ytd_pct": rec.get("book_return_pct"),
+        "residual_eur": rec.get("residual_vs_book_eur"),
+        # ⚠ None is UNKNOWN, not False — the two sides can be valued a day apart (VOLK snapshot vs
+        # ATT report), and that difference is market movement, not a missing position.
+        "reconciles": rec.get("reconciles"),
+        "holdings_as_of": rec.get("holdings_as_of"),
+        "book_as_of": rec.get("book_as_of"),
+        "dates_aligned": rec.get("dates_aligned"),
+        "residual_reason": rec.get("residual_reason"),
+        # ⚠ WHAT THE WEIGHT-BASED VIEWS CANNOT SEE — the composition bars and Brinson are built on
+        # start weights, and a sold position has none that is recoverable (see `contributions`).
+        # They report this share instead of quietly omitting it.
+        "realised_share_of_result_pct": c["realised_share_of_result_pct"],
+        "legs": c["legs"],
+    }
+
+
 def _variant_bands(name: str | None, omschrijving: str | None) -> dict:
     """The portfolio's risk profile, and the allocation policy recorded for it.
 
@@ -1620,6 +1705,13 @@ def compute_portfolio_analysis(portfolio_id: int,
         # divided by the axis's `attributable_pct`.
         "book_holdings": _with_start_weights(book["holdings_detail"] if book else [],
                                              (basis_axes or {}).get("_start_weights") or {}),
+        # ⚠ THE HOLDINGS TABLE IS ONLY HALF THE YEAR, AND UNTIL NOW NOTHING SAID SO. Every figure
+        # above it is built from positions the book STILL HOLDS; a name sold in March has no row
+        # and its result is invisible. Measured on BUS_Offensief_Dyn, that is EUR -28,656 — 41% of
+        # the year's movement, and enough on its own to reverse a sector's verdict in the
+        # attribution panel. This block carries it, on the book's own opening capital so held +
+        # sold + income adds to the book's YTD exactly.
+        "realised": _realised_block(portfolio_id),
     }
 
 

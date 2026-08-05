@@ -854,6 +854,74 @@ class AllocationBand(BaseModel):
     updated_at: str | None = None
 
 
+class RealisedContributionLeg(BaseModel):
+    """One name the book SOLD this year, and what that sale contributed to the year.
+
+    ⚠ THERE IS NO WEIGHT HERE, AND ITS ABSENCE IS THE HONEST STATEMENT. A sold parcel's opening
+    value is not recoverable from AIRS's data: `proceeds − Res. YtD` yields its COST BASIS, which
+    for a parcel bought in February is real capital that did not exist on 1 January — feeding it
+    in made the opening-capital gap WORSE (EUR 55,427 → EUR 377,776 on BUS_Offensief_Dyn), and
+    partial sells make it unrecoverable in principle since AIRS restates `Beginwaarde` to the
+    CURRENT quantity. A contribution needs no weight; an allocation effect does, which is why
+    these legs may never enter the composition bars or Brinson.
+    """
+
+    fonds: str | None = None
+    realised_ytd_eur: float | None = None
+    # Share of the BOOK's year, in points, on its own opening capital.
+    contribution_pct: float | None = None
+    # ⚠ Decided by ABSENCE from the holdings, not by presence here — a sale is a realisation, not
+    # a closure, and most sold names are still held (trimmed).
+    closed_out: bool | None = None
+    # Non-zero means part of this gain was made in earlier years and is correctly NOT in the year.
+    prior_year_eur: float | None = None
+    first: str | None = None
+    last: str | None = None
+
+
+class RealisedBlock(BaseModel):
+    """What the paired book realised on sales this year — the leg the holdings table cannot show.
+
+    ⚠ EVERY FIGURE SITS ON ONE DENOMINATOR, `basis_eur` (the book's own `beginvermogen`), so
+    `held_pct + realised_pct + sold_income_pct == book_ytd_pct` exactly. The holdings table weights
+    by each position's share of the PRICED HELD book, which is right for a class return and cannot
+    carry a sold position at all — different question, different denominator.
+
+    ⚠ `available: false` IS NOT "SOLD NOTHING". No pairing, no cached Transacties sheet, or a
+    sheet we could not read — each has its own `note`, and an empty list presented as an answer
+    would hide EUR 28,656 of realised loss on the book this was measured against.
+    """
+
+    available: bool = False
+    portefeuille: str | None = None
+    note: str | None = None
+    basis_eur: float | None = None
+    # ⚠⚠ False on a book with deposits or withdrawals: `result ÷ opening capital` is not a return
+    # there, so the percentages are withheld and only the euro amounts stand. Contributions that
+    # do not add to the figure they decompose are worse than none — each looks reasonable alone.
+    comparable: bool | None = None
+    held_pct: float | None = None
+    realised_pct: float | None = None
+    sold_income_pct: float | None = None
+    total_pct: float | None = None
+    held_eur: float | None = None
+    realised_eur: float | None = None
+    sold_income_eur: float | None = None
+    book_ytd_pct: float | None = None
+    residual_eur: float | None = None
+    reconciles: bool | None = None
+    holdings_as_of: str | None = None
+    book_as_of: str | None = None
+    dates_aligned: bool | None = None
+    residual_reason: str | None = None
+    # ⚠ WHAT THE WEIGHT-BASED VIEWS CANNOT SEE, on the ABSOLUTE result — a realised −28,656 against
+    # a held +75,164 is not "negative coverage"; the question is how much of the movement happened
+    # outside the holdings table. Measured 41% on BUS_Offensief_Dyn, which alone can reverse a
+    # sector's verdict in an attribution built only on what is left.
+    realised_share_of_result_pct: float | None = None
+    legs: list[RealisedContributionLeg] = []
+
+
 class ModelPortfolioAnalysis(BaseModel):
     """A model portfolio's composition beside a benchmark's, on ONE set of buckets.
 
@@ -945,6 +1013,10 @@ class ModelPortfolioAnalysis(BaseModel):
     # scanned, or it was opened as an unpaired basket. Different remedies, and none of them was
     # on screen. Null when there IS a book view.
     book_note: str | None = None
+    # ⚠ THE HALF OF THE YEAR THE HOLDINGS TABLE CANNOT SHOW. Everything above is built from
+    # positions the book STILL HOLDS; a name sold in March has no row and its result is invisible
+    # (BUS_Offensief_Dyn: EUR -28,656, 41% of the year's movement).
+    realised: RealisedBlock | None = None
     # Milliseconds per phase of this request. The modal is seconds long and the browser could
     # only ever see the total — "Loading composition…" with nothing saying which of its eight
     # loads was responsible. Logged to the console on every open.
@@ -2433,7 +2505,14 @@ class AirsAccountReconciliation(BaseModel):
     # ⚠ ASSERTED, NEVER ASSUMED — a total never set against the book's own is an assertion, not a
     # reconciliation. Measured residual EUR 0.04 on a EUR 387,293.75 year.
     residual_vs_book_eur: float | None = None
+    # ⚠ None is UNKNOWN, not False. The held leg is the VOLK holdings snapshot and the result is
+    # the ATT report — two downloads, routinely a day apart — and one day of market movement on a
+    # EUR 1.4m book reads as tens of thousands of "unexplained" residual. See `dates_aligned`.
     reconciles: bool | None = None
+    holdings_as_of: str | None = None
+    book_as_of: str | None = None
+    dates_aligned: bool | None = None
+    residual_reason: str | None = None
 
     # The gap BEFORE the sales are counted, kept so the reader can see how much they closed.
     # ⚠ NOT distributed across the components above.

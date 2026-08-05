@@ -11,6 +11,7 @@ import { Provenance } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
+import RealisedPanel from './RealisedPanel';
 import BucketDetailPanel from './BucketDetailPanel';
 import CompositionDataModal from './CompositionDataModal';
 import OwnerEarningsModal from './OwnerEarningsModal';
@@ -521,6 +522,32 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
 }
 
 type BookHolding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
+
+/** HOW MUCH OF THE YEAR THE WEIGHT-BASED VIEWS CANNOT SEE — the Sector / Region / Currency bars
+ *  and the Brinson table beneath them.
+ *
+ *  ⚠ SHOWN ONLY WHEN IT IS MATERIAL (≥1% of the year's movement). A permanent banner on every
+ *  portfolio is furniture; a reader stops reading it, and it is then worth nothing on the book
+ *  where it matters. Below 1pp the omission cannot change a sector's verdict.
+ *
+ *  ⚠ THE SHARE IS OF THE ABSOLUTE movement, not the net. A realised −28,656 against a held
+ *  +75,164 is not "negative coverage" — the question is how much happened outside these charts,
+ *  and a loss counts as much as a gain. */
+function RealisedCoverageNote({ r }: { r?: ModelPortfolioAnalysis['realised'] }) {
+  const share = r?.available ? r.realised_share_of_result_pct : null;
+  if (share == null || share < 1) return null;
+  return (
+    <p className="text-[11px] text-warn-500 mb-3">
+      ⚠ <span className="font-mono">{share.toFixed(0)}%</span>
+      {' of this book’s year happened in positions it has since SOLD, and these charts cannot show '
+        + 'them: they are weighted by what each position was worth when the year opened, and a sold '
+        + 'position’s opening weight cannot be recovered from AIRS’s data. The bars and the '
+        + 'attribution below therefore describe only what is still held — a sector traded out of '
+        + 'entirely reads as one that was never owned. The sold names and what each contributed are '
+        + 'itemised under Holdings.'}
+    </p>
+  );
+}
 
 /** THE WHOLE PORTFOLIO, one row per instrument, grouped by asset class — what the reader sees
  *  before picking a class. Every long position is here, counted AFTER the certificates are looked
@@ -1420,6 +1447,14 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                  A prompt to click something used to sit here; it told the reader what to do next
                  and nothing about what they hold. Picking a class still narrows this to that
                  class's own breakdown. */
+              /* ⚠ `space-y-8`, NOT the `space-y-4` used between ordinary sibling cards — and it
+                 shipped as a bare fragment, i.e. NO gap at all, which is what put the two flush
+                 against each other. These are not sibling cards; they are the two halves of one
+                 year measured on DIFFERENT denominators (Holdings weights by the priced HELD book,
+                 Sold by the book's OPENING capital). Butted together they read as one continuous
+                 table, and a reader carries the Weight column's meaning straight down into a block
+                 that deliberately has none. The space IS the seam. */
+              <div className="space-y-8">
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
                 onFundamental={setFund}
                 note={data.book_note} bookName={data.book_portefeuille}
@@ -1429,6 +1464,15 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                    as-of 2026-08-01. Stamped with it, the modal called the row's own +111.74%
                    216 days old while the row called it 2. */
                 asOf={data.holdings_as_of ?? data.as_of} />
+              {/* ⚠ THE OTHER HALF OF THE YEAR. Everything in the table above is built from
+                  positions the book STILL HOLDS; a name sold in March has no row and its result
+                  is invisible — measured, 22.5% of one book's year. It sits directly beneath so
+                  the two are read as one accounting, and it carries the check that they add up to
+                  AIRS's own figure. Absent for an unpaired model: only a book trades. */}
+              {data.realised && (
+                <RealisedPanel r={data.realised} asOf={data.holdings_as_of ?? data.as_of} />
+              )}
+              </div>
             ) : sleeve ? (
               /* NON-EQUITY class: its holdings' contribution + a currency chart, no benchmark. */
               <SleeveBreakdown holdings={data.book_holdings ?? []} bucket={sleeve} />
@@ -1437,6 +1481,19 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                  Brinson attribution ("why", from the Attribution button) or a per-bucket drill-down
                  (from a bar) docked full-width below — mutually exclusive. */
               <>
+                {/* ⚠⚠ THESE VIEWS ARE WEIGHT-BASED, AND A SOLD POSITION HAS NO WEIGHT — so the
+                    bars and the attribution below describe only what is still held. That is not a
+                    rounding hole: measured on BUS_Offensief_Dyn, 22.5% of the year's movement was
+                    realised on sales and is absent from every figure in this section.
+                    ⚠ IT CANNOT BE FIXED BY ADDING THEM. A sold parcel's opening value is not
+                    recoverable from AIRS's data (`proceeds − Res. YtD` gives its cost basis, which
+                    for a February purchase is capital that did not exist on 1 January), and
+                    allocation effect is undefined without a start weight. Inventing one
+                    manufactures exactly the confident false finding this modal already documents —
+                    a model holding 6% Healthcare credited +1.73pp for "avoiding" it. So the hole
+                    is STATED, in the same idiom as `unpriced_pct` and `benchmark_coverage_pct`,
+                    and the sold names are itemised in the Holdings view instead. */}
+                <RealisedCoverageNote r={data.realised} />
                 <div className="grid gap-4 lg:grid-cols-3">
                   {(data.axes ?? []).map((a) => (
                     <Chart key={a.axis} axis={a.axis} rows={a.rows}
@@ -1454,6 +1511,12 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                       <AttributionPanel id={id ?? 0} benchmark={data.benchmark ?? 'SP500'} window={why}
                         source={source} portfolioAsOf={data.returns?.portfolio_as_of}
                         benchmarkAsOf={data.returns?.benchmark_as_of}
+                        /* ⚠ The share of the year Brinson structurally cannot see — see the
+                           prop's own note. Only meaningful once the book's transactions have been
+                           read; undefined otherwise, which the panel renders as no notice rather
+                           than as a reassuring 0%. */
+                        realisedSharePct={data.realised?.available
+                          ? data.realised.realised_share_of_result_pct : null}
                         onClose={() => setWhy(null)} />
                     ) : bucket ? (
                       <BucketDetailPanel id={id ?? 0} benchmark={data.benchmark ?? 'SP500'}
