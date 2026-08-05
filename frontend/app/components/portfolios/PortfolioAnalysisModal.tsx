@@ -6,6 +6,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { formatPct, visibleBuckets } from './composition';
 import { allocColor, bucketLabel } from './allocationColors';
+import { classWeightedReturn } from './classReturn';
 import { Provenance } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
@@ -544,9 +545,21 @@ type BookHolding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
  *  ⚠ RETURN IS `own_return_pct`, NOT `return_pct`, FOR THE SAME REASON IN REVERSE. `return_pct` is
  *  the book's value change, and the book knows what the CERTIFICATE did, not what NVIDIA did —
  *  splitting it hands all 135 stocks their wrapper's number (NVIDIA read +0.08% against its own
- *  +2.82%). It follows that the rows do NOT sum to a class return, so no class return is shown in
- *  this table; that figure is a different measure and it lives in the chart legend, where it is
- *  the only one on offer.
+ *  +2.82%).
+ *
+ *  ⚠ THE CLASS ROW AGGREGATES THAT COLUMN, WEIGHTED AT THE WINDOW'S OPEN (added 2026-08-05, on
+ *  request) — `classReturn.ts`. It is emphatically NOT weighted by the `Weight (now)` column
+ *  beside it: that share already contains the return, so the product hands a winner a share of
+ *  the class it never held (measured elsewhere on this data at +58.75% against a true +44.99%).
+ *  The weight is `weight_pct`, the opening-value share, which is also what SleeveBreakdown's
+ *  Contribution column renormalises — so the class figure IS the sum of that column and the two
+ *  views cannot show one class two returns.
+ *
+ *  ⚠ IT NEED NOT EQUAL THE BOOK'S CLASS RETURN IN THE ALLOCATION LEGEND, and that is the honest
+ *  outcome rather than a defect. The legend's figure is the book's own value change, which for a
+ *  looked-through position is the CERTIFICATE's; this one is built from the instrument returns
+ *  actually printed underneath it. Two measures, and each is shown where its own rows are — the
+ *  card on the cell says which one this is.
  *
  *  ⚠ `own_return_pct` IS AIRS'S OWN FIGURE WHEREVER **ANY** AIRS BOOK HAS ONE — the identical
  *  number that book's expanded row shows (Beginwaarde → Huidige waarde plus net dividend). EVERY
@@ -572,8 +585,10 @@ type BookHolding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
  *  marks any row that came from another book. The `Via` column cannot stand in for that marker:
  *  a row can be reached through a certificate and STILL be valued here.
  *
- *  NO CLASS RETURN IN THE GROUP HEADER. Two returns for one class, a few points apart and both
- *  correct, is exactly the pair a reader cannot arbitrate. */
+ *  ⚠ AND IT REPORTS WHAT IT COULD NOT WEIGH. An unpriceable leg leaves both the numerator and the
+ *  denominator, so the class reads as though that weight behaved exactly like the rest — the same
+ *  silent renormalisation the coverage floors elsewhere exist to stop. `coveredPct` is on the
+ *  cell's card and short coverage is marked in amber, never absorbed. */
 type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return';
 
 /** Weights and returns to TWO decimals, always — including the trailing zero. A 0.4% and a 0.44%
@@ -685,6 +700,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
         bucket,
         slice: (slices ?? []).find((s) => s.bucket === bucket),
         rows,
+        // The class's own return: the Return column below, weighted by what each position was
+        // worth when the window OPENED. Never by the Weight (now) column — see `classReturn.ts`.
+        ret: classWeightedReturn(rows),
         // The class as a value-weighted basket, for the Fundamental button on its header. ISIN-
         // bearing rows only: owner earnings are per-company, and cash has no company.
         basket: {
@@ -801,7 +819,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
                     + 'at that date’s rate, so the figure carries the currency leg. The window '
                     + 'opens on 1 January or on the composition’s effective date, whichever is '
                     + 'later. This is the instrument’s own return, not the portfolio’s share of '
-                    + 'it — the rows do not add up to a class return.'} />
+                    + 'it — so the rows do not ADD up to the class figure on the grey row, they '
+                    + 'average into it, weighted by what each position was worth when the window '
+                    + 'opened.'} />
               </th>
             </tr>
           </thead>
@@ -842,10 +862,42 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
                       + 'bucket, so dividing a figure here by a class and expecting a bar will '
                       + 'not work — the difference between the two is what the positions did.'} />
                 </td>
-                {/* Deliberately blank. A class return here would be the book's value change —
-                    a different measure from the instrument returns beneath it, and putting the
-                    two in one column is how a reader ends up trusting neither. */}
-                <td className="pr-4" />
+                {/* ⚠ THE COLUMN BELOW, AGGREGATED — NOT THE BOOK'S VALUE CHANGE, and not the
+                    Weight (now) column times the returns. A dash where nothing in the class had
+                    both an opening weight and a return; a 0.00% there would claim the class went
+                    nowhere. */}
+                <td className={`py-2 pr-4 text-right font-mono text-[11px] font-semibold tabular-nums whitespace-nowrap ${retTone(g.ret.pct)}`}>
+                  {fmtRet(g.ret.pct)}
+                  {/* Coverage short of the class, marked on the number itself. Weight that leaves
+                      an average silently is the failure this whole modal keeps refusing to make;
+                      1pp of slack absorbs float noise without hiding a real gap. */}
+                  {g.ret.pct != null && g.ret.coveredPct < 99 && (
+                    <span className="ml-1 text-warn-400"
+                      title={`Weighted over ${num2(g.ret.coveredPct)}% of ${bucketLabel(g.bucket)}’s opening value — ${g.ret.weighed - g.ret.legs} position(s) could not be priced over this window and left the average.`}>⚠</span>
+                  )}
+                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    what={g.ret.pct == null
+                      ? `Nothing in ${bucketLabel(g.bucket)} can be both weighed and priced over this window.`
+                      : `What ${bucketLabel(g.bucket)} returned over the window, in EUR — the ${g.ret.legs} position${g.ret.legs === 1 ? '' : 's'} below, weighted by what each was worth when it opened.`}
+                    note={g.ret.pct == null
+                      ? 'a dash, never a 0% — “nothing to weigh” and “went nowhere” are different facts'
+                      : `Σ (opening weight × Return), over ${num2(g.ret.coveredPct)}% of the class’s opening value`
+                        + (g.ret.notHeldAtOpen
+                          ? ` · ${g.ret.notHeldAtOpen} row(s) not held at the open`
+                          : '')}
+                    how={'Each position’s share of the class when the WINDOW OPENED (AIRS’s '
+                      + 'Beginwaarde), times its own Return from the column below, summed. ⚠ NOT '
+                      + 'the Weight (now) beside it: today’s share already contains the return, so '
+                      + 'a holding that doubled carries twice the weight it held while it was '
+                      + 'doubling and the product hands the winners a share of the class they '
+                      + 'never had. ⚠ A position with no opening value (cash, or bought since) is '
+                      + 'out of the average — it has exposure today and no share of the opening '
+                      + 'class — and one we could not price leaves both sides, which is what the '
+                      + 'coverage above states. ⚠ This is the ROWS aggregated, so it can differ '
+                      + 'from the class return in the allocation legend: that one is the book’s '
+                      + 'own value change, and for a position held through a certificate the book '
+                      + 'knows what the CERTIFICATE did, not what the instrument did.'} />
+                </td>
               </tr>
               {[...g.rows].sort(cmp).map((h, i) => (
                 <tr key={h.isin ?? `${g.bucket}-${h.name ?? i}`}
@@ -891,7 +943,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, onFundament
                         + 'Allocation bars are drawn from, and the right answer to “how much of my '
                         + 'money is in this now”. ⚠ It is NOT the weight to multiply the Return '
                         + 'by: it already contains the return (a winner has grown into a larger '
-                        + 'share), so the product double-counts. Use the Start weight for that.'} />
+                        + 'share), so the product double-counts. The class row above already does '
+                        + 'that sum on the right weight — each position’s share when the window '
+                        + 'OPENED — so there is nothing here to multiply by hand.'} />
                   </td>
                   {/* An unpriced position shows a dash, never 0% — "we could not price this over
                       the window" and "it did not move" are different facts and a 0 states the

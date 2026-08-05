@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { trace, traceEmpty, traceError, traceRows, traceScope } from '../../lib/debugTrace';
@@ -1274,6 +1274,21 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
    *  non-admin sees each one's ANSWER as plain text and no control to change it. */
   canEdit?: boolean;
 }) {
+  // ⚠ THE 21-ROW TABLE IS BEHIND A SECOND CLICK (2026-08-05, on request). Expanding an account
+  // used to land the reader straight in the full position list, which is the DETAIL — the thing
+  // you go looking for once you already know which book you are in. Collapsed by default, the
+  // expanded row opens on the book's own summary and the rows are one more click away.
+  //
+  // ⚠ COLLAPSED IS NOT EMPTY. The bar carries the Total row's own three figures (holdings, value
+  // now, return), from the identical variables that row renders — not a second aggregation of the
+  // same data, which is exactly the drift this file warns about two comments below. A disclosure
+  // that says only "Current portfolio" gives the reader nothing to decide on and makes the click
+  // mandatory rather than optional.
+  //
+  // ⚠ RESET ON EVERY EXPAND, and that is free: the parent renders this component inside
+  // `{isOpen && …}`, so collapsing the account unmounts it. There is no stale "still open from
+  // last time" state to reason about.
+  const [showRows, setShowRows] = useState(false);
   // Which column's weights the segment/Total returns are weighted by. "start" is the book’s own
   // return; everything else is a HYPOTHETICAL and the UI says so.
   const [basisKey, setBasisKey] = useState<WeightBasis>('start');
@@ -1281,8 +1296,14 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
   // request per holding. Null until it lands, which the cell renders as "…" rather than an empty
   // select that looks like "no options".
   const [linkCtx, setLinkCtx] = useState<LinkCtx | null>(null);
+  // ⚠ FETCHED WHEN THE TABLE IS OPENED, NOT WHEN THE ACCOUNT IS. It feeds the Link dropdowns and
+  // nothing else, so behind a collapsed table it buys a request whose result no one can see —
+  // and expanding an account already costs two (holdings + isins). A reader scanning down the
+  // list now pays for the rows they actually ask for.
+  const linkFetchedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!portefeuille) return;
+    if (!portefeuille || !showRows || linkFetchedFor.current === portefeuille) return;
+    linkFetchedFor.current = portefeuille;
     let live = true;
     void (async () => {
       // The third request an expand fires. Timed alongside the other two so the console accounts
@@ -1293,10 +1314,14 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
           `${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/linkable`);
         console.warn(`[AIRS expand] ${portefeuille}: linkable in ${Math.round(performance.now() - t0)}ms`);
         if (live && r.ok) setLinkCtx(await r.json());
-      } catch { /* the table is still usable without the dropdown */ }
+      } catch {
+        // The table is still usable without the dropdown — but let a re-open try again rather
+        // than pinning the cells on "…" for the life of the expand.
+        linkFetchedFor.current = null;
+      }
     })();
     return () => { live = false; };
-  }, [portefeuille]);
+  }, [portefeuille, showRows]);
   // Persist a manual Class pin (or clear it → Auto), then re-fetch this account so the row
   // re-groups under its new bucket.
   const setBucket = useCallback(async (isin: string, bucket: string | null) => {
@@ -1403,6 +1428,40 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
   const totalReturn = total.returnPct == null ? null : total.returnPct / 100;
   return (
     <div className="space-y-2">
+      {/* ⚠ THE WHOLE BAR IS THE TOGGLE, not a caret you have to hit. The figures on it are the
+          Total row's, so a reader who only wanted the summary has already been answered and the
+          click is genuinely optional. */}
+      <button type="button" onClick={() => setShowRows((v) => !v)}
+        aria-expanded={showRows}
+        className="w-full flex items-center gap-2 text-left text-[11px] px-2 py-1.5 rounded-lg border border-neutral-800/40 bg-card hover:bg-overlay/5 transition-colors">
+        <span className={`text-[8px] text-fg-faint transition-transform ${showRows ? 'rotate-90' : ''}`}>▶</span>
+        <span className="font-medium text-fg-strong">Current portfolio</span>
+        <span className="text-fg-faint">
+          {all.length} holding{all.length === 1 ? '' : 's'}
+        </span>
+        {/* ⚠ THE SAME VARIABLES THE TOTAL ROW PRINTS, through the same formatters — never a
+            second aggregation of `all`. One that merely HAPPENS to agree starts disagreeing the
+            day either side changes, which is the trap the comment above `basis` records. */}
+        <span className="ml-auto flex items-center gap-3 font-mono">
+          <span className="text-fg-soft">{eur(total.valueEur)}</span>
+          {/* ⚠ THE BOOK'S REAL RETURN, EVEN WHEN A HYPOTHETICAL BASIS IS ARMED INSIDE. The
+              control that marks a basis as hypothetical is itself hidden while this is collapsed,
+              so showing the hypothetical here would be the one number on screen with nothing left
+              to qualify it. The chip says a different basis is waiting rather than quietly
+              printing its answer. */}
+          {isHypothetical && (
+            <span className="text-warn-500 font-sans text-[10px]"
+              title={`Inside, the returns are weighted by ${WEIGHT_BASES.find((x) => x.key === basisKey)!.label} — a hypothetical. The figure here is the book's own start-weighted return.`}>
+              ⚠ {WEIGHT_BASES.find((x) => x.key === basisKey)!.label} inside
+            </span>
+          )}
+          <span className={totalReturn == null ? 'text-fg-faint' : tone(totalReturn)}
+            title="The book's own start-weighted total return — the identical figure the Total row inside shows on Start wt.">
+            {totalReturn == null ? '—' : pct(totalReturn * 100)}
+          </span>
+        </span>
+      </button>
+      {showRows && (<>
       {/* Which weights the segment + Total returns use. Four discrete, named options, so this is
           a segmented control rather than a literal slider — a slider would put "Model wt" at an
           unlabelled 3/4 position and make the default indistinguishable from a nudge.
@@ -1814,6 +1873,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
           </tbody>
         </table>
       </div>
+      </>)}
     </div>
   );
 }
