@@ -802,6 +802,7 @@ function sumResults(rows: BookHolding[]) {
     income: add((h) => h.income_eur),
     result: add((h) => h.result_eur),
     contribution: add((h) => h.contribution_pct),
+    mwrResult: cap > 0 ? priced.reduce((s, h) => s + (h.result_eur ?? 0), 0) : null,
     mwr: cap > 0 ? priced.reduce((s, h) => s + (h.result_eur ?? 0), 0) / cap * 100 : null,
     /** How much of the group this ratio speaks for — the rest is legs inside certificates, which
      *  have no flows of their own. */
@@ -995,6 +996,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
     contribution: sum(sold.map((p) => p.contribution_pct)),
     // A closed-out position DOES have an average invested capital — it was held for part of the
     // year, and Modified Dietz weights it by exactly that part.
+    mwrResult: soldCap ? (sum(sold.map((p) => p.result_eur)) ?? 0) : null,
     mwr: soldCap ? (sum(sold.map((p) => p.result_eur)) ?? 0) / soldCap * 100 : null,
   };
   const heldSum = sumResults(holdings);
@@ -1011,6 +1013,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
     // ⚠ Again both sides over the same rows: the held legs we can see flows for, plus the sold
     // ones. A leg inside a certificate is in NEITHER, which is why this is not the book's own
     // money-weighted return and is not labelled as one.
+    mwrResult: (heldCap + (soldCap ?? 0)) > 0
+      ? holdings.reduce((s, h) => s + ((h.avg_capital_eur ?? 0) > 0 ? (h.result_eur ?? 0) : 0), 0)
+        + (sum(sold.map((p) => p.result_eur)) ?? 0)
+      : null,
     mwr: (heldCap + (soldCap ?? 0)) > 0
       ? (holdings.reduce((s, h) => s + ((h.avg_capital_eur ?? 0) > 0 ? (h.result_eur ?? 0) : 0), 0)
         + (sum(sold.map((p) => p.result_eur)) ?? 0)) / (heldCap + (soldCap ?? 0)) * 100
@@ -1337,7 +1343,17 @@ ${num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}
 ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%'} (${eur0n(g.ret.startEur)} of ${eur0n(realised?.basis_eur)}) = ${ppt(g.sum.contribution)}`} />
                 </td>
                 )}
-                {show('moneyweighted') && <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.mwr)}`} title={g.sum.mwrRows < g.rows.length ? `Over the ${g.sum.mwrRows} of ${g.rows.length} holdings the book buys and sells itself — the rest sit inside certificates and have no flows of their own.` : undefined}>{fmtRet(g.sum.mwr)}</td>}
+                {show('moneyweighted') && (
+                <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.mwr)}`}>
+                  {fmtRet(g.sum.mwr)}
+                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    what={`What ${bucketLabel(g.bucket)} returned on the money actually put into it.`}
+                    note="result ÷ average invested capital"
+                    how={`Result ÷ Avg capital invested
+
+${eur0n(g.sum.mwrResult)} ÷ ${eur0n(g.sum.avgcapital)} = ${fmtRet(g.sum.mwr)}${g.sum.mwrRows < g.rows.length ? ` (over the ${g.sum.mwrRows} of ${g.rows.length} holdings the book buys and sells itself — the rest sit inside certificates and have no flows of their own)` : ''}`} />
+                </td>
+                )}
                 {/* ⚠ THE COLUMN BELOW, AGGREGATED — NOT THE BOOK'S VALUE CHANGE, and not the
                     Weight (now) column times the returns. A dash where nothing in the class had
                     both an opening weight and a return; a 0.00% there would claim the class went
@@ -1442,8 +1458,44 @@ ${eur0n(g.ret.resultEur)} ÷ ${eur0n(g.ret.startEur)} = ${fmtRet(g.ret.pct)}`} /
                   {show('realised') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.realised_result_eur)}`}>{eur0n(h.realised_result_eur)}</td>}
                   {show('income') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.income_eur)}`}>{eur0n(h.income_eur)}</td>}
                   {show('result') && <td className={`py-1.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(h.result_eur)}`}>{eur0n(h.result_eur)}</td>}
-                  {show('contribution') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.contribution_pct)}`}>{ppt(h.contribution_pct)}</td>}
-                  {show('moneyweighted') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.money_weighted_return_pct)}`} title={h.money_weighted_return_pct != null ? undefined : h.capital_unknown ? 'Shares were DEPOSITED into this position during the year (AIRS books it Tt = D, Deponering — a split, a bonus issue or a transfer in). Its trade quantities and its holding quantity are then on different bases, so the capital it tied up cannot be worked out. Its euro figures are unaffected.' : 'Held through a certificate — AIRS trades the wrapper, so this position has no purchases of its own to measure a return on.'}>{fmtRet(h.money_weighted_return_pct)}</td>}
+                  {show('contribution') && (
+                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.contribution_pct)}`}>
+                    {ppt(h.contribution_pct)}
+                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                      what={h.contribution_pct == null
+                        ? `${h.name ?? 'This position'} has no result to contribute — it could not be valued over the window.`
+                        : `What ${h.name ?? 'this position'} added to, or took off, the book’s return for the year.`}
+                      note={h.contribution_pct == null ? undefined : 'result ÷ the book’s opening capital'}
+                      how={h.contribution_pct != null
+                        ? `Result ÷ the book’s opening capital
+
+${eur0n(h.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(h.contribution_pct)}`
+                        : `Result ÷ the book’s opening capital
+
+no result — this position could not be valued at both ends of the window, so there is nothing to divide`} />
+                  </td>
+                  )}
+                  {show('moneyweighted') && (
+                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.money_weighted_return_pct)}`}>
+                    {fmtRet(h.money_weighted_return_pct)}
+                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                      what={h.money_weighted_return_pct == null
+                        ? `What ${h.name ?? 'this position'} returned on the money put into it cannot be worked out.`
+                        : `What ${h.name ?? 'this position'} returned on the money actually put into it.`}
+                      note={h.money_weighted_return_pct == null ? undefined : 'result ÷ average invested capital'}
+                      how={h.money_weighted_return_pct != null
+                        ? `Result ÷ Avg capital invested
+
+${eur0n(h.result_eur)} ÷ ${eur0n(h.avg_capital_eur)} = ${fmtRet(h.money_weighted_return_pct)}`
+                        : h.capital_unknown
+                          ? `Result ÷ Avg capital invested
+
+refused — shares were DEPOSITED into this position during the year (AIRS books it Tt = D, Deponering: a split, a bonus issue or a transfer in), so its trade quantities and its holding quantity sit on different bases and the capital it tied up cannot be worked out. Its euro columns are unaffected.`
+                          : `Result ÷ Avg capital invested
+
+no denominator — this position is reached through a certificate, and AIRS trades the certificate rather than what is inside it, so it has no purchases of its own.`} />
+                  </td>
+                  )}
                   {/* An unpriced position shows a dash, never 0% — "we could not price this over
                       the window" and "it did not move" are different facts and a 0 states the
                       wrong one. An interpolated opening mark is flagged per value, because that
@@ -1551,8 +1603,28 @@ ${bookMath(h) ?? (h.own_income_eur ? `(Huidige waarde + ${eur0(h.own_income_eur)
                 {show('realised') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.realised)}`}>{eur0n(soldSum.realised)}</td>}
                 {show('income') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.income)}`}>{eur0n(soldSum.income)}</td>}
                 {show('result') && <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.result)}`}>{eur0n(soldSum.result)}</td>}
-                {show('contribution') && <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.contribution)}`}>{ppt(soldSum.contribution)}</td>}
-                {show('moneyweighted') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.mwr)}`}>{fmtRet(soldSum.mwr)}</td>}
+                {show('contribution') && (
+                <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.contribution)}`}>
+                  {ppt(soldSum.contribution)}
+                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    what={'What the positions sold out during the year added to, or took off, the book’s return.'}
+                    note="result ÷ the book’s opening capital"
+                    how={`Result ÷ the book’s opening capital
+
+${eur0n(soldSum.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(soldSum.contribution)}`} />
+                </td>
+                )}
+                {show('moneyweighted') && (
+                <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.mwr)}`}>
+                  {fmtRet(soldSum.mwr)}
+                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    what={'What the positions sold out during the year returned on the money put into them.'}
+                    note="result ÷ average invested capital"
+                    how={`Result ÷ Avg capital invested
+
+${eur0n(soldSum.mwrResult)} ÷ ${eur0n(soldCap)} = ${fmtRet(soldSum.mwr)}`} />
+                </td>
+                )}
                 <td className="pr-4" />
               </tr>
               {sold.map((p, i) => (
@@ -1581,8 +1653,28 @@ ${bookMath(h) ?? (h.own_income_eur ? `(Huidige waarde + ${eur0(h.own_income_eur)
                   {show('realised') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.realised_result_eur)}`}>{eur0n(p.realised_result_eur)}</td>}
                   {show('income') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.income_eur)}`}>{eur0n(p.income_eur)}</td>}
                   {show('result') && <td className={`py-1.5 text-right font-mono font-semibold tabular-nums ${retTone(p.result_eur)}`}>{eur0n(p.result_eur)}</td>}
-                  {show('contribution') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.contribution_pct)}`}>{ppt(p.contribution_pct)}</td>}
-                  {show('moneyweighted') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.return_pct)}`}>{fmtRet(p.return_pct)}</td>}
+                  {show('contribution') && (
+                  <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.contribution_pct)}`}>
+                    {ppt(p.contribution_pct)}
+                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                      what={`What ${p.name ?? 'this position'} added to, or took off, the book’s return before it was sold.`}
+                      note="result ÷ the book’s opening capital"
+                      how={`Result ÷ the book’s opening capital
+
+${eur0n(p.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(p.contribution_pct)}`} />
+                  </td>
+                  )}
+                  {show('moneyweighted') && (
+                  <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.return_pct)}`}>
+                    {fmtRet(p.return_pct)}
+                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                      what={`What ${p.name ?? 'this position'} returned on the money put into it, over the part of the year it was held.`}
+                      note="result ÷ average invested capital"
+                      how={`Result ÷ Avg capital invested
+
+${eur0n(p.result_eur)} ÷ ${eur0n(p.avg_capital_eur)} = ${fmtRet(p.return_pct)}`} />
+                  </td>
+                  )}
                   <td className="pr-4" />
                 </tr>
               ))}
@@ -1618,8 +1710,28 @@ ${bookMath(h) ?? (h.own_income_eur ? `(Huidige waarde + ${eur0(h.own_income_eur)
                 {show('realised') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.realised)}`}>{eur0n(grand.realised)}</td>}
                 {show('income') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.income)}`}>{eur0n(grand.income)}</td>}
                 {show('result') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.result)}`}>{eur0n(grand.result)}</td>}
-                {show('contribution') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.contribution)}`}>{ppt(grand.contribution)}</td>}
-                {show('moneyweighted') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.mwr)}`}>{fmtRet(grand.mwr)}</td>}
+                {show('contribution') && (
+                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.contribution)}`}>
+                  {ppt(grand.contribution)}
+                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    what={'What every position in this table, held and sold, added up to for the book’s year.'}
+                    note="result ÷ the book’s opening capital"
+                    how={`Result ÷ the book’s opening capital
+
+${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contribution)}`} />
+                </td>
+                )}
+                {show('moneyweighted') && (
+                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.mwr)}`}>
+                  {fmtRet(grand.mwr)}
+                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    what={'What the book returned on the money it actually had at work — over the positions whose purchases and sales we can see.'}
+                    note="result ÷ average invested capital"
+                    how={`Result ÷ Avg capital invested
+
+${eur0n(grand.mwrResult)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`} />
+                </td>
+                )}
                 <td className={`py-2 pr-4 text-right font-mono tabular-nums ${retTone(realised?.book_ytd_pct)}`}>
                   {fmtRet(realised?.book_ytd_pct)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
