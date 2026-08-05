@@ -645,97 +645,109 @@ function RealisedCoverageNote({ r }: { r?: ModelPortfolioAnalysis['realised'] })
 type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution';
 
 /**
- * The five money columns, which the reader turns on and off.
+ * THE MONEY COLUMNS, GROUPED BY THE ANSWER THEY BUILD UP TO.
  *
- * ⚠ ALL FIVE ARE OFF BY DEFAULT (on request). The table opens at six columns — what you hold,
- * how it got there, what class and sector it is, its weight and its return — which fits a screen
- * and answers the question most visits are asking. The money columns are the ones that cost the
- * width, and they are one click away when someone wants to know what a position MADE rather than
- * what it did.
+ * ⚠ A COLUMN ON ITS OWN IS A NUMBER; A GROUP IS AN ARGUMENT. Every figure this table derives is
+ * the end of a short chain, and a reader who wants to check one wants the whole chain, not one
+ * cell of it. Picking columns individually meant assembling that chain by hand and getting it
+ * wrong — turning on Return's denominator without its numerator, say.
  *
- * ⚠ NOT `Weight`, `Sector`, `Via` or `Return`. Those are not part of this group — hiding the
- * Return column would strand the class-row rate with nothing to compare it against, and hiding
- * Sector would break the bars-to-rows link the Sector column exists to provide.
+ *     Return             Result ÷ Beginwaarde
+ *     On money invested  Result ÷ Avg capital invested
+ *     Contribution       Result ÷ the book's opening capital
+ *
+ * ⚠ ALL THREE SHARE `Result`, WHICH IS WHY SELECTION IS STORED AS GROUPS AND THE COLUMNS ARE
+ * DERIVED AS THEIR UNION. Storing columns instead would mean deciding what happens to `Result`
+ * when one of two groups that both need it is switched off — a question with no good answer, and
+ * one this shape never has to ask.
+ *
+ * ⚠ NOTHING IS ON BY DEFAULT. The table opens at six columns, which fits a screen.
  */
-const MONEY_COLUMNS = [
-  // ⚠ THE THREE RAW EUROS THE TWO RATIOS ARE BUILT FROM. With these on, every figure in the table
-  // is checkable rather than assertable:
-  //     Unrealised        = Value now − Beginwaarde
-  //     Result            = Unrealised + Realised + Income
-  //     Return            = Result ÷ Beginwaarde
-  //     On money invested = Result ÷ Avg capital
-  // A percentage whose numerator and denominator are both absent cannot be argued with, and this
-  // table has spent a lot of its life being argued with.
-  { key: 'opening', label: 'Beginwaarde (1 Jan)' },
-  { key: 'valuenow', label: 'Value now' },
-  { key: 'avgcapital', label: 'Avg capital invested' },
-  { key: 'unrealised', label: 'Unrealised' },
-  { key: 'realised', label: 'Realised' },
-  { key: 'income', label: 'Income' },
-  { key: 'result', label: 'Result' },
-  { key: 'contribution', label: 'Contribution' },
-  // ⚠ A DIFFERENT QUESTION FROM `Return`, NOT A BETTER VERSION OF IT. Return divides by AIRS's
-  // restated Beginwaarde and so describes the INSTRUMENT; this divides by the capital actually
-  // tied up and so describes the MONEY. Both belong on screen, which is why this is a column of
-  // its own rather than a redefinition of the one beside it.
-  { key: 'moneyweighted', label: 'On money invested' },
+const COLUMN_GROUPS = [
+  {
+    key: 'return',
+    label: 'How the Return is built',
+    hint: '(Value now − Beginwaarde) + Realised + Income = Result, ÷ Beginwaarde',
+    // ⚠ `Return` itself is NOT here: it is always on. This group supplies the chain BEHIND it, so
+    // ticking it puts the whole derivation on screen beside the answer already showing.
+    cols: ['opening', 'valuenow', 'unrealised', 'realised', 'income', 'result'],
+  },
+  {
+    key: 'onmoney',
+    label: 'How On money invested is built',
+    hint: 'Result ÷ Avg capital invested',
+    cols: ['result', 'avgcapital', 'moneyweighted'],
+  },
+  {
+    key: 'contribution',
+    label: 'How the Contribution is built',
+    hint: 'Result ÷ the book’s opening capital',
+    cols: ['result', 'contribution'],
+  },
 ] as const;
-type MoneyCol = (typeof MONEY_COLUMNS)[number]['key'];
-const DEFAULT_MONEY_COLS: MoneyCol[] = [];
-const MONEY_COLS_KEY = 'bb.analyse.holdings.columns';
+
+type ColumnGroup = (typeof COLUMN_GROUPS)[number]['key'];
+type MoneyCol = (typeof COLUMN_GROUPS)[number]['cols'][number];
+const GROUPS_KEY = 'bb.analyse.holdings.columnGroups';
 
 /**
- * The saved choice, or the default.
+ * The saved choice, or nothing.
  *
  * ⚠ READ DURING THE FIRST RENDER, WHICH IS SAFE *HERE* AND NOT IN GENERAL. Touching
- * `localStorage` in a lazy initialiser is the classic hydration bug — the server renders one thing
- * and the client another. It cannot happen in this table: it is rendered from `{data && …}` after
- * a client-side fetch inside a modal the user opened, so the server never produces it and there is
- * no first paint to mismatch. Doing it in an effect instead would mean a setState inside an
- * effect, which is a cascading render and is exactly what the lint rule objects to.
+ * `localStorage` in a lazy initialiser is the classic hydration bug — the server renders one
+ * thing and the client another. It cannot happen in this table: it is rendered from
+ * `{data && …}` after a client-side fetch inside a modal the user opened, so the server never
+ * produces it and there is no first paint to mismatch. An effect instead would mean a setState
+ * inside an effect, which is the cascading render the lint rule objects to.
  *
- * ⚠ AN UNREADABLE OR CORRUPT VALUE FALLS BACK TO THE DEFAULT rather than throwing. A stored UI
- * preference must never be able to stop the table rendering; the worst it may do is be ignored.
+ * ⚠ THE KEY CHANGED WITH THE SHAPE. It used to store COLUMN keys; storing group keys under the
+ * same name would read an old list as a set of unknown groups. A new key lets the old value be
+ * ignored rather than misread — the reader's choice resets once, which is the cheap failure.
  */
-function readSavedColumns(): Set<MoneyCol> {
-  if (typeof window === 'undefined') return new Set(DEFAULT_MONEY_COLS);
+function readSavedGroups(): Set<ColumnGroup> {
+  if (typeof window === 'undefined') return new Set();
   try {
-    const raw = localStorage.getItem(MONEY_COLS_KEY);
-    if (!raw) return new Set(DEFAULT_MONEY_COLS);
+    const raw = localStorage.getItem(GROUPS_KEY);
+    if (!raw) return new Set();
     const saved = JSON.parse(raw) as unknown;
-    if (!Array.isArray(saved)) return new Set(DEFAULT_MONEY_COLS);
-    const valid = MONEY_COLUMNS.map((c) => c.key) as readonly string[];
-    // ⚠ An EMPTY saved list is a legitimate choice (hide them all) and is honoured — the guard
-    // above is for a value that is not a list at all, not for a short one.
-    return new Set(saved.filter((k): k is MoneyCol => typeof k === 'string' && valid.includes(k)));
+    if (!Array.isArray(saved)) return new Set();
+    const valid = COLUMN_GROUPS.map((g) => g.key) as readonly string[];
+    return new Set(saved.filter((k): k is ColumnGroup => typeof k === 'string' && valid.includes(k)));
   } catch (e) {
     console.warn('[analyse] could not read the saved column choice', e);
-    return new Set(DEFAULT_MONEY_COLS);
+    return new Set();
   }
 }
 
-/** Which money columns are shown, remembered across visits. */
-function useMoneyColumns() {
-  const [cols, setCols] = useState<Set<MoneyCol>>(readSavedColumns);
-  const toggle = (k: MoneyCol) => setCols((prev) => {
+/** Which groups are shown, and the columns that follow from them. */
+function useColumnGroups() {
+  const [groups, setGroups] = useState<Set<ColumnGroup>>(readSavedGroups);
+  const toggle = (k: ColumnGroup) => setGroups((prev) => {
     const next = new Set(prev);
     if (next.has(k)) next.delete(k); else next.add(k);
-    try { localStorage.setItem(MONEY_COLS_KEY, JSON.stringify([...next])); } catch { /* private mode */ }
+    try { localStorage.setItem(GROUPS_KEY, JSON.stringify([...next])); } catch { /* private mode */ }
     return next;
   });
-  return { cols, toggle };
+  // ⚠ THE UNION, RECOMPUTED — never stored. A column belongs to as many groups as need it, and
+  // `Result` belongs to all three; deriving means switching one group off can never take a column
+  // another group still depends on.
+  const cols = new Set<MoneyCol>(
+    COLUMN_GROUPS.filter((g) => groups.has(g.key)).flatMap((g) => g.cols as readonly MoneyCol[]));
+  return { groups, toggle, cols };
 }
 
-/** The +/− control over those columns. ⚠ Closed by a full-screen click catcher rather than a
+/** The +/− control over those groups. ⚠ Closed by a full-screen click catcher rather than a
  *  document listener: this lives inside a modal that already stops propagation in places, and a
- *  listener that the modal swallows leaves a panel nothing can dismiss. */
-function ColumnPicker({ cols, toggle }: { cols: Set<MoneyCol>; toggle: (k: MoneyCol) => void }) {
+ *  listener the modal swallows leaves a panel nothing can dismiss. */
+function ColumnPicker({ groups, toggle }: {
+  groups: Set<ColumnGroup>; toggle: (k: ColumnGroup) => void;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <span className="relative inline-flex">
       <button type="button" onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        title="Add or remove the money columns"
+        title="Show the columns behind each figure"
         className={`cursor-pointer text-[10px] leading-none px-1.5 py-1 rounded border transition-colors ${
           open ? 'border-accent-500/50 text-accent-300 bg-overlay/5'
             : 'border-neutral-800/40 text-fg-subtle hover:text-accent-300 hover:bg-overlay/5'}`}>
@@ -744,13 +756,18 @@ function ColumnPicker({ cols, toggle }: { cols: Set<MoneyCol>; toggle: (k: Money
       {open && (
         <>
           <span className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <span className="absolute right-0 top-full mt-1 z-40 min-w-[11rem] rounded-lg border border-neutral-800/40 bg-popover shadow-xl p-1.5 flex flex-col gap-0.5">
-            {MONEY_COLUMNS.map((c) => (
-              <label key={c.key}
-                className="flex items-center gap-2 px-1.5 py-1 rounded text-[11px] text-fg-soft hover:bg-overlay/5 cursor-pointer">
-                <input type="checkbox" checked={cols.has(c.key)} onChange={() => toggle(c.key)}
-                  className="accent-accent-600" />
-                {c.label}
+          <span className="absolute right-0 top-full mt-1 z-40 w-[20rem] rounded-lg border border-neutral-800/40 bg-popover shadow-xl p-1.5 flex flex-col gap-0.5">
+            {COLUMN_GROUPS.map((g) => (
+              <label key={g.key}
+                className="flex items-start gap-2 px-1.5 py-1.5 rounded hover:bg-overlay/5 cursor-pointer">
+                <input type="checkbox" checked={groups.has(g.key)} onChange={() => toggle(g.key)}
+                  className="accent-accent-600 mt-0.5" />
+                <span className="flex flex-col gap-0.5 min-w-0">
+                  <span className="text-[11px] text-fg-soft">{g.label}</span>
+                  {/* ⚠ THE CHAIN ITSELF, not a description of it. It is what the reader is about
+                      to put on screen, and it says in one line why these columns come together. */}
+                  <span className="text-[10px] font-mono text-fg-faint">{g.hint}</span>
+                </span>
               </label>
             ))}
           </span>
@@ -908,10 +925,13 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
   // ⚠ ONE PREDICATE, USED IN ALL SIX ROW SHAPES (thead, class row, holding row, sold header, sold
   // row, total). The file already warns that the column count is counted by hand in several
-  // places; making them CONDITIONAL multiplies that risk, so every gate reads `show('x')` and
-  // nothing else — a grep for `show(` must return the same five keys in each shape or a figure is
-  // rendering under the wrong heading.
-  const { cols, toggle } = useMoneyColumns();
+  // places; making them CONDITIONAL multiplies that risk, so every gate is a bare `show(<key>)`
+  // and nothing else — the same NINE keys must appear in every shape, or a figure renders under
+  // the wrong heading. Two invariants worth re-checking after any edit here, both mechanical:
+  //   * each shape gates the same nine keys and carries six always-on cells;
+  //   * every key gated below is reachable from at least one entry in `COLUMN_GROUPS`, or the
+  //     column exists and nothing can ever switch it on.
+  const { groups: pickedGroups, toggle, cols } = useColumnGroups();
   const show = (k: MoneyCol) => cols.has(k);
 
   // ⚠ AN EMPTY TABLE MUST NAME ITS OWN CAUSE. "No positions to show for this portfolio" was
@@ -1046,15 +1066,15 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
             what={'Every instrument the portfolio holds, grouped by asset class. A position held '
               + 'through a certificate is listed as the instruments behind it, not as the '
               + 'certificate.'}
-            how={'One row per ISIN. An instrument reached through more than one strategy is a '
-              + 'single row with the weights added, and every strategy it came through is named '
-              + 'in the Via column.'} />
+            how={`one row per ISIN, after the certificates are looked through
+
+${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).length} of them reached through a certificate`} />
         </h4>
         <span className="flex items-center gap-2">
           <span className="text-[10px] font-mono text-fg-faint">
             {holdings.length} positions · {groups.length} classes
           </span>
-          <ColumnPicker cols={cols} toggle={toggle} />
+          <ColumnPicker groups={pickedGroups} toggle={toggle} />
         </span>
       </div>
       {/* ⚠⚠ `overflow-auto` + a HEIGHT, because `sticky` needs a scrollport with room to scroll.
@@ -1092,12 +1112,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                 <Provenance source="airs_model" asOf={asOf} kind="formula" column
                   what={'How the portfolio got into this instrument — its own shares, a strategy '
                     + 'whose certificate was looked through to reach it, or both.'}
-                  how={'“direct” means the book holds it itself. Where there is more than one way '
-                    + 'in, each is sized: the percentages are shares of the whole book and add up '
-                    + 'to this row’s Weight. MasterCard, for example, is 4.06% held outright and '
-                    + '0.16% through the Star certificate — chipped only with the strategy name it '
-                    + 'read as a position the book does not own. Hover for the euro amounts and '
-                    + 'each route’s share of the position itself.'} />
+                  how={`each route in, as a share of the whole book — they sum to that row’s Weight
+
+${holdings.filter((h) => (h.via_names ?? []).length).length} of ${holdings.length} rows arrive through a certificate, the rest are held outright`} />
               </th>
               {/* ⚠ THE SECTOR CHART'S OWN BUCKET, WHICH IS WHY IT IS WORTH A COLUMN — sorting by
                   it lists the rows behind a bar, in the bar's own vocabulary. A raw
@@ -1107,20 +1124,17 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                 Sector{caret('sector')}
                 <Provenance source="yfinance" asOf={asOf} kind="formula" column
                   what={'The sector this instrument is counted in on the Sector chart above.'}
-                  how={'Yahoo’s sector for the ISIN, canonicalised so one sector has one name '
-                    + '(“Financial Services” and “Financials” are the same bucket). A dash means '
-                    + 'there is no sector to show: a fund, whose listing says nothing about what '
-                    + 'it holds, or a holding the grid cannot classify — both are the '
-                    + 'Unclassified share of the chart, not a missing lookup.'} />
+                  how={`Yahoo’s sector for the ISIN, canonicalised so one sector has one name
+
+${new Set(holdings.map((h) => h.sector).filter((s) => s && s !== 'Unclassified')).size} sectors across ${holdings.filter((h) => sectorLabel(h.sector)).length} rows; ${holdings.filter((h) => !sectorLabel(h.sector)).length} have none (a fund, or unclassifiable)`} />
               </th>
               <th className={`text-right w-24 ${th}`} onClick={() => click('weight')}>
                 Weight (now){caret('weight')}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what={'The share of the portfolio held in this instrument, right now.'}
-                  how={'The position’s current EUR value ÷ the portfolio’s total current EUR '
-                    + 'value. A position reached through a certificate takes the certificate’s '
-                    + 'EUR value split by the strategy’s own percentages, so each class subtotal '
-                    + 'equals its share of the chart above.'} />
+                  how={`Huidige waarde ÷ the book’s total Huidige waarde
+
+the ${holdings.length} rows below sum to ${eur0n(grand.valuenow)} = 100.00%`} />
               </th>
               {/* ⚠ THE THREE COMPONENTS, THEN THEIR SUM — the whole point of merging the ledger
                   into this table. A reader who wants to know what a position MADE should not have
@@ -1134,7 +1148,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                 Beginwaarde (1 Jan)
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What this position was worth at the start of the year, on AIRS’s own basis."
-                  how={`Σ (quantity held today × its price on 1 January) · = ${eur0n(grand.opening)}`} />
+                  how={`Σ (quantity held today × its price on 1 January)
+
+= ${eur0n(grand.opening)}`} />
               </th>
 )}
 {show('valuenow') && (
@@ -1142,7 +1158,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                 Value now
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What this position is worth today."
-                  how={`Σ (AIRS’s current valuation) · = ${eur0n(grand.valuenow)}`} />
+                  how={`Σ (AIRS’s current valuation)
+
+= ${eur0n(grand.valuenow)}`} />
               </th>
 )}
 {show('avgcapital') && (
@@ -1150,7 +1168,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                 Avg capital invested
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="The money actually tied up in this position over the year."
-                  how={`Σ (value at the open + each flow × the share of the year still to run) · = ${eur0n(grand.avgcapital)}`} />
+                  how={`Σ (value at the open + each flow × the share of the year still to run)
+
+= ${eur0n(grand.avgcapital)}`} />
               </th>
 )}
 {show('unrealised') && (
@@ -1159,7 +1179,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What this position has gained or lost while the book has held it — on paper, not banked."
                   note="value now − value when the year opened"
-                  how={`Value now − Beginwaarde · ${eur0n(grand.valuenow)} − ${eur0n(grand.opening)} = ${eur0n(grand.unrealised)}`} />
+                  how={`Value now − Beginwaarde
+
+${eur0n(grand.valuenow)} − ${eur0n(grand.opening)} = ${eur0n(grand.unrealised)}`} />
               </th>
 )}
 {show('realised') && (
@@ -1168,7 +1190,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What was banked by actually selling — this year’s part of it."
                   note="AIRS’s Res. YtD, summed over the year’s sales"
-                  how={`Σ Res. YtD over the year’s sales · = ${eur0n(grand.realised)}`} />
+                  how={`Σ Res. YtD over the year’s sales
+
+= ${eur0n(grand.realised)}`} />
               </th>
 )}
 {show('income') && (
@@ -1177,7 +1201,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="The dividends and coupons this position paid the book this year."
                   note="net — gross less withholding tax"
-                  how={`Σ (dividend + withholding tax) · = ${eur0n(grand.income)}`} />
+                  how={`Σ (dividend + withholding tax)
+
+= ${eur0n(grand.income)}`} />
               </th>
 )}
 {show('result') && (
@@ -1186,7 +1212,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What the book actually made on this position this year, in euros."
                   note="unrealised + realised + income"
-                  how={`Unrealised + Realised + Income · ${eur0n(grand.unrealised)} + ${eur0n(grand.realised)} + ${eur0n(grand.income)} = ${eur0n(grand.result)}`} />
+                  how={`Unrealised + Realised + Income
+
+${eur0n(grand.unrealised)} + ${eur0n(grand.realised)} + ${eur0n(grand.income)} = ${eur0n(grand.result)}`} />
               </th>
 )}
 {show('contribution') && (
@@ -1195,7 +1223,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What this position added to, or took off, the book’s return for the year."
                   note="result ÷ the book’s opening capital"
-                  how={`Result ÷ the book’s opening capital · ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contribution)}`} />
+                  how={`Result ÷ the book’s opening capital
+
+${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contribution)}`} />
               </th>
 )}
 {show('moneyweighted') && (
@@ -1204,7 +1234,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What this position returned on the money actually put into it."
                   note="result ÷ average invested capital"
-                  how={`Result ÷ Avg capital invested · ${eur0n(grand.result)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`} />
+                  how={`Result ÷ Avg capital invested
+
+${eur0n(grand.result)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`} />
               </th>
 )}
               <th className={`text-right w-28 pr-4 ${th}`} onClick={() => click('return')}>
@@ -1222,11 +1254,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                   what={'What this instrument itself returned in euros since '
                     + `${anchor ?? 'the year opened'} — independent of how much of it the book `
                     + 'holds.'}
-                  how={'AIRS’s own (Huidige waarde + net income) ÷ Beginwaarde − 1. ⚠ The opening '
-                    + 'value is restated to today’s quantity, so this measures the INSTRUMENT, not '
-                    + 'your timing — a stock bought in June is still measured from January. A row '
-                    + 'marked ƒ was priced off our own EUR series instead. ⚠ These rates do not '
-                    + 'combine into the class row: each sits on its own denominator.'} />
+                  how={`(Huidige waarde + net income) ÷ Beginwaarde − 1, per row
+
+a row marked ƒ is priced off our own EUR series instead; the class rows below divide their own Result by their own Beginwaarde`} />
               </th>
             </tr>
           </thead>
@@ -1273,12 +1303,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                     what={`${g.bucket}'s share of the book TODAY.`}
                     note={g.slice ? 'the allocation chart’s own figure — cash included'
                       : 'summed from the rows below'}
-                    how={'Read from the same figure the Allocation bars above are drawn from, so '
-                      + 'the two cannot disagree. It counts every class INCLUDING cash, which '
-                      + 'is why the classes sum to 100% here. ⚠ The Sector / Region / Currency '
-                      + 'bars are weighted at the window’s OPEN and over the holdings that HAVE a '
-                      + 'bucket, so dividing a figure here by a class and expecting a bar will '
-                      + 'not work — the difference between the two is what the positions did.'} />
+                    how={`Σ Huidige waarde of this class ÷ the book’s total
+
+${num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}% — the same figure the Allocation bar above is drawn from`} />
                 </td>
                 {/* The class's own four euro columns, summed — so a reader can see which CLASS
                     made the money, not only which position. */}
@@ -1305,17 +1332,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                        in the table: the Weight column is today's share (85.38% where the opening
                        share is 82.98%), which is why nobody could reconstruct it. Verified on
                        every class of both measured books, to the third decimal. */
-                    how={'⚠ THE COLUMN THAT ADDS UP — every class on the book’s own opening '
-                      + 'capital, so these sum to its return exactly, positions sold during the '
-                      + 'year included. '
-                      + (openingShare != null && g.ret.pct != null
-                        ? `It is the Return beside it, scaled to the book: ${fmtRet(g.ret.pct)} × `
-                          + `${num2(openingShare)}% (this class’s share of the book’s opening `
-                          + `capital, ${eur0n(g.ret.startEur)} of ${eur0n(realised?.basis_eur)}) `
-                          + `= ${ppt(g.sum.contribution)}. ⚠ That share is NOT the Weight column — `
-                          + 'Weight is today’s share, and the two differ by everything the '
-                          + 'positions did in between.'
-                        : '')} />
+                    how={`Return × this class’s share of the book’s opening capital
+
+${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%'} (${eur0n(g.ret.startEur)} of ${eur0n(realised?.basis_eur)}) = ${ppt(g.sum.contribution)}`} />
                 </td>
                 )}
                 {show('moneyweighted') && <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.mwr)}`} title={g.sum.mwrRows < g.rows.length ? `Over the ${g.sum.mwrRows} of ${g.rows.length} holdings the book buys and sells itself — the rest sit inside certificates and have no flows of their own.` : undefined}>{fmtRet(g.sum.mwr)}</td>}
@@ -1356,12 +1375,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                        and deployed it on 5 January. On those true weights it composes exactly:
                        4.03% × 1102.77% + 95.97% × 0% = 44.4624%, AIRS's own figure. Which is
                        precisely why none of the three may be multiplied by another. */
-                    how={'Result ÷ what this class was worth when the year opened. ⚠ It will not '
-                      + 'tie to the book’s return, and must not be multiplied by the Weight beside '
-                      + 'it: that weight is today’s share, while this denominator is AIRS’s '
-                      + 'opening values restated to today’s quantities — which can come out larger '
-                      + 'than the book’s own opening capital. Contribution is the column that '
-                      + 'composes.'} />
+                    how={`Result ÷ what this class was worth when the year opened
+
+${eur0n(g.ret.resultEur)} ÷ ${eur0n(g.ret.startEur)} = ${fmtRet(g.ret.pct)}`} />
                 </td>
               </tr>
               {[...g.rows].sort(cmp).map((h, i) => (
@@ -1412,13 +1428,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
                       what={`${h.name ?? 'This holding'}'s share of the book TODAY.`}
                       note="Huidige waarde ÷ the book’s total Huidige waarde"
-                      how={'AIRS’s own current valuation as a share of the book — what the '
-                        + 'Allocation bars are drawn from, and the right answer to “how much of my '
-                        + 'money is in this now”. ⚠ It is NOT the weight to multiply the Return '
-                        + 'by: it already contains the return (a winner has grown into a larger '
-                        + 'share), so the product double-counts. The class row above already does '
-                        + 'that sum on the right weight — each position’s share when the window '
-                        + 'OPENED — so there is nothing here to multiply by hand.'} />
+                      how={`Huidige waarde ÷ the book’s total Huidige waarde\n\n`
+                        + `${eur0n(h.current_value_eur)} ÷ ${eur0n(grand.valuenow)} = `
+                        + `${num2(h.weight_now_pct ?? 0)}%`} />
                   </td>
                   {/* ⚠ EVERY ONE A DASH WHERE THERE IS NOTHING, NEVER A €0. "Nothing was sold" and
                       "the sale broke even" are different facts, and on a money column the second
@@ -1492,34 +1504,16 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                                 ? `(Huidige waarde + ${eur0(h.own_income_eur)} net dividend) ÷ Beginwaarde − 1`
                                 : 'Huidige waarde ÷ Beginwaarde − 1')}`}
                       how={blendHow(h)
-                        ? (`${blendHow(h)} — every route in, valued by the book that holds it. `
-                          + '⚠ Those percentages are shares of THIS POSITION’s opening value, not '
-                          + 'of the book: the book shares are the Via column and add up to the '
-                          + 'Weight. Opening value, because a leg that rose carries a bigger share '
-                          + 'of the position today than it held while it was rising. ⚠ Two books '
-                          + 'can differ sharply on one instrument — AIRS’s Beginwaarde is the '
-                          + 'year-open value, or the PURCHASE value for a position opened during '
-                          + 'the year.')
+                        ? `Σ (each route’s share of this position × that route’s own return)
+
+${blendHow(h)}`
                         : h.own_return_source === 'yfinance'
-                        ? ('No AIRS book values this row — the certificate it sits in wraps a '
-                          + 'strategy with no paired account, or it has no opening value anywhere. '
-                          + 'AIRS values the WRAPPER, not what is inside it, and splitting the '
-                          + 'certificate’s value change across its holdings would hand every one '
-                          + 'of them the wrapper’s number (NVIDIA once read +0.08% against its own '
-                          + '+2.82%). So it is priced off the instrument’s own EUR series, at the '
-                          + 'same anchor, with the same split adjustment and per-date FX.')
-                        : h.own_return_book && h.own_return_book !== bookName
-                          ? (`Held inside a certificate wrapping ${h.own_return_book}, so that book `
-                            + `holds the shares and values them: ${bookMath(h) ?? 'Huidige waarde ÷ Beginwaarde − 1'}`
-                            + `. Expand ${h.own_return_book} on the portfolios list for the same `
-                            + 'number. ⚠ A POSITION result, so it carries that book’s purchase date '
-                            + '— Beginwaarde is the year-open value, or the PURCHASE value if the '
-                            + 'position was opened during the year, so two books can read '
-                            + 'differently on one instrument and both be right.')
-                          : ('AIRS’s own valuation at both ends of the window, plus any dividend it '
-                            + 'paid, net of withholding. This is the IDENTICAL number the Return '
-                            + 'column shows when you expand this portfolio on the portfolios list — '
-                            + 'same formula, same income journal, so the two cannot disagree.')} />
+                          ? `our own EUR close series — no AIRS book values this row
+
+${fmtRet(h.own_return_pct)} since ${h.own_return_from ?? 'the year opened'}`
+                          : `(Huidige waarde + net income) ÷ Beginwaarde − 1${h.own_return_book && h.own_return_book !== bookName ? `, as valued by ${h.own_return_book}` : ''}
+
+${bookMath(h) ?? (h.own_income_eur ? `(Huidige waarde + ${eur0(h.own_income_eur)} net dividend) ÷ Beginwaarde − 1` : 'Huidige waarde ÷ Beginwaarde − 1')} = ${fmtRet(h.own_return_pct)}`} />
                   </td>
                 </tr>
               ))}
@@ -1631,13 +1625,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what="The book’s own return for the year, from AIRS."
                     note="cumulatief_rendement — flow-aware, the system of record"
-                    how={reconciled
-                      ? 'Set beside the Contribution total to its left, which is built from every '
-                        + 'row in this table. The two agreeing is the check that no part of the '
-                        + 'year is missing from the list — including the positions sold during it, '
-                        + 'which have no row of their own until they are given one.'
-                      : 'Set beside the Contribution total to its left. ⚠ The two do NOT agree, so '
-                        + 'some part of the year is not accounted for by the rows above.'} />
+                    how={`AIRS’s own cumulatief_rendement, set against the Contribution total to its left
+
+${ppt(grand.contribution)} from these rows vs ${fmtRet(realised?.book_ytd_pct)} from AIRS${reconciled ? ' — they agree' : ' — they do NOT agree'}`} />
                 </td>
               </tr>
             </tfoot>

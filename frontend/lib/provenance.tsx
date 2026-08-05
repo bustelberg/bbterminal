@@ -120,7 +120,13 @@ function ProvenanceCard({ source, asOf, note, how, kind, column, what }: {
               {kind === 'copied'
                 ? <>Copied straight from {s.label}{asOf ? ` (${asOf})` : ''}, as reported — not computed here.</>
                 : kind === 'formula'
-                  ? <>A formula on the data{how ? <>: <span className="text-fg">{trimStop(how)}</span></> : <> we compute here</>}.</>
+                  /* ⚠ `whitespace-pre-wrap` SO A FORMULA CAN BREATHE. The best formula cards state
+                     the rule and then the same rule with this row's own numbers under it — and a
+                     blank line between the two is what makes them read as one thing said twice
+                     rather than as one long sentence. In a plain span every run of whitespace
+                     collapses to one character, so the separation has to be permitted here; it
+                     changes nothing for the single-line cards, which contain no runs to preserve. */
+                  ? <>A formula on the data{how ? <>: <span className="text-fg whitespace-pre-wrap">{trimStop(how)}</span></> : <> we compute here</>}.</>
                   : how}
             </span>
           </Field>
