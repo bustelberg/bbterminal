@@ -842,6 +842,14 @@ class BookHoldingDetail(BaseModel):
     # Separate keys so the UI attributes it instead of asserting it.
     via_holding_names: list[str] = []
     via_holding_name: str | None = None
+    # ── "lookthrough" means `money_weighted_return_pct` was measured in `capital_book` — the child
+    # book that ACTUALLY bought this stock — rather than in the book being viewed, which only ever
+    # bought the certificate. ⚠ It is therefore the STRATEGY's return on its money, not this book's:
+    # this book's own experience depends on when IT bought the wrapper. Same compromise the Return
+    # column already makes, so the two agree instead of each being wrong differently. The euro
+    # capital is scaled to this book's slice of the child's position; the rate is not scaled.
+    capital_source: str | None = None
+    capital_book: str | None = None
     via_money_weighted_return_pct: float | None = None
     via_avg_capital_eur: float | None = None
     # ⚠ THE INSTRUMENT'S OWN EUR RETURN — NOT `return_pct`, AND THE DIFFERENCE IS THE WHOLE POINT.

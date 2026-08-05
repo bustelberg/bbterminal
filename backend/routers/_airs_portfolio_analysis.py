@@ -1321,11 +1321,11 @@ def _realised_block(portfolio_id: int) -> dict:
     # realised leg is UNKNOWN, and an empty "Sold this year" list would state that the book sold
     # nothing, which on BUS_Offensief_Dyn would hide EUR 28,656 of realised loss.
     if rec.get("realised_ytd_eur") is None:
+        from airs_transacties import LOAD_TRANSACTIONS_HINT  # noqa: PLC0415
         return {"available": False, "portefeuille": link["portefeuille"],
                 "note": (rec.get("realised_note")
                          or "This book's transactions have not been fetched yet, so what it "
-                            "realised on sales is unknown. Load them on /portfolios → expand this "
-                            "book → Transactions.")}
+                            f"realised on sales is unknown. {LOAD_TRANSACTIONS_HINT}")}
 
     ledger = _position_ledger(link["portefeuille"], rec)
     c = contributions(rec)
@@ -1372,7 +1372,51 @@ def _realised_block(portfolio_id: int) -> dict:
     }
 
 
-def _via_capital(h: dict, by_name: dict) -> dict:
+def _child_book_ledgers(holdings: list[dict]) -> dict[str, dict]:
+    """`{child book: {instrument: ledger position}}` for every certificate this book looks through.
+
+    ⚠⚠ THE LOOK-THROUGH IS THE ONLY HONEST WAY TO GET A PER-STOCK INVESTED CAPITAL, because the
+    flows exist — just not in this book. Bustelberg bought ONE certificate; `StarTopSelectie OFF
+    DYN` is the book that actually bought Shopify, and it has Shopify's purchases, its dates and
+    its sizes. Splitting the certificate's capital by today's weights (the obvious shortcut) hands
+    every leg the identical number and measures nothing per stock. This reads the real thing.
+
+    ⚠ IT IS THE STRATEGY'S MONEY-WEIGHTED RETURN, NOT THIS BOOK'S, and the tooltip must say so.
+    Bustelberg's own experience depends on when IT bought the certificate; the strategy's depends
+    on when IT bought Shopify. They are different questions and only the second is answerable from
+    stored flows. This is the same compromise `own_return_pct` already makes — that column is
+    likewise the child book's number — so the two columns stay consistent with each other.
+
+    ⚠ ONE LEDGER PER CHILD BOOK, not per leg: `_position_ledger` is several queries and a
+    reconciliation, and a 22-leg certificate would otherwise pay for them 22 times.
+    """
+    from routers._airs_return_reconciliation import account_return_reconciliation  # noqa: PLC0415
+
+    books: set[str] = set()
+    for h in holdings:
+        for s in h.get("sources") or []:
+            if s.get("label") is not None and s.get("book"):
+                books.add(str(s["book"]))
+    out: dict[str, dict] = {}
+    for b in sorted(books):
+        try:
+            rec = account_return_reconciliation(b)
+            # No transactions for the child means no flows, so no Modified Dietz — the same gap
+            # one level down, and it refuses the same way rather than inventing a denominator.
+            if rec.get("realised_ytd_eur") is None:
+                _log.warning("[analysis] look-through into %s has no invested capital: its "
+                             "transactions have never been fetched", b)
+                out[b] = {}
+                continue
+            led = _position_ledger(b, rec)
+            out[b] = {p["name"]: p for p in (led.get("positions") or []) if p.get("name")}
+        except Exception as e:  # noqa: BLE001 — a child book must never break the parent's modal
+            _log.warning("[analysis] look-through into %s failed (%s: %s)", b, type(e).__name__, e)
+            out[b] = {}
+    return out
+
+
+def _via_capital(h: dict, by_name: dict, child_ledgers: dict[str, dict] | None = None) -> dict:
     """The certificate's own invested-capital figures, for a leg held through exactly one.
 
     ⚠ A LEG INSIDE A CERTIFICATE HAS NO FLOWS OF ITS OWN — AIRS trades the wrapper. That makes its
@@ -1390,8 +1434,35 @@ def _via_capital(h: dict, by_name: dict) -> dict:
         return {}
     # Held directly as well as through the wrapper — `sources` carries one entry per route in, and
     # a `label` of None is the book's own shares.
-    if any(s.get("label") is None for s in (h.get("sources") or [])):
+    srcs = [s for s in (h.get("sources") or []) if s.get("label") is not None]
+    if len(srcs) != 1 or len(srcs) != len(h.get("sources") or []):
         return {}
+    src = srcs[0]
+
+    # ── FIRST CHOICE: the child book's OWN position, which has this instrument's real purchases.
+    child = (child_ledgers or {}).get(str(src.get("book") or "")) or {}
+    pos = child.get(h.get("name") or "") or {}
+    if pos.get("return_pct") is not None:
+        # ⚠ THE RATE TRANSFERS, THE EUROS DO NOT. The child book put its own money in; this book
+        # owns a SLICE of that position, so the capital is scaled by the slice — otherwise the
+        # column reports the strategy's balance sheet inside someone else's portfolio. Scaling
+        # both sides leaves the rate untouched, which is the point.
+        book_val = float(src.get("book_current_value_eur") or 0)
+        share = (float(src.get("value_eur") or 0) / book_val) if book_val > 0 else None
+        cap = pos.get("avg_capital_eur")
+        return {
+            "via_holding_name": names[0],
+            "capital_source": "lookthrough",
+            "capital_book": src.get("book"),
+            "money_weighted_return_pct": pos.get("return_pct"),
+            "avg_capital_eur": (round(cap * share, 2)
+                                if (cap is not None and share is not None) else None),
+            # Unscaled, so the card can show whose position was actually measured.
+            "via_avg_capital_eur": cap,
+        }
+
+    # ── FALLBACK: no flows in the child, so only the WRAPPER can be measured. One figure for the
+    # whole certificate, shipped under its own key and never as this leg's return.
     led = by_name.get(names[0]) or {}
     if led.get("return_pct") is None:
         return {}
@@ -1991,6 +2062,8 @@ def _with_results(holdings: list[dict], realised: dict) -> list[dict]:
     # holdings. A leg reached through a certificate has no buys or sells of its own — AIRS trades
     # the WRAPPER — so there is no "money you put in" to divide by, and `None` is the honest
     # answer rather than the certificate's flows split across its contents.
+    # ONE ledger per child book, built before the loop — see `_child_book_ledgers`.
+    child_ledgers = _child_book_ledgers(holdings)
     out = []
     for h in holdings:
         start, cur = h.get("start_value_eur"), h.get("current_value_eur")
@@ -2060,7 +2133,7 @@ def _with_results(holdings: list[dict], realised: dict) -> list[dict]:
                     # measurement copied 22 times. Shopify did not return -3.86% on the money —
                     # the certificate did. So it ships under its OWN key, for the tooltip to
                     # attribute, and `money_weighted_return_pct` stays null.
-                    **_via_capital(h, by_name),
+                    **_via_capital(h, by_name, child_ledgers),
                     "contribution_pct": (total / basis * 100.0)
                     if (total is not None and basis) else None,
                     # ⚠ 0%, NOT a dash — same reason as the price leg above, and same direction:

@@ -8640,6 +8640,10 @@ export interface components {
             avg_capital_eur?: number | null;
             /** Bucket */
             bucket: string;
+            /** Capital Book */
+            capital_book?: string | null;
+            /** Capital Source */
+            capital_source?: string | null;
             /**
              * Capital Unknown
              * @default false

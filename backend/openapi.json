@@ -3727,6 +3727,28 @@
             "title": "Bucket",
             "type": "string"
           },
+          "capital_book": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capital Book"
+          },
+          "capital_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capital Source"
+          },
           "capital_unknown": {
             "default": false,
             "title": "Capital Unknown",

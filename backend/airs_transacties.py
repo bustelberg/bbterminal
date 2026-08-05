@@ -78,6 +78,15 @@ import pandas as pd
 # check is the only thing standing between a typo here and a silent "this book never traded".
 TRANSACTIES_RAPPORT_TYPE = "TRANS"
 
+# ⚠⚠ THE PAGE IS `/management-dashboard`. THERE IS NO `/portfolios` ROUTE — it 404s. Several
+# refusals tell a reader to go and load a book's transactions, and an instruction that lands on a
+# 404 is worse than none: it reads as "the feature is broken" rather than "there is a step to
+# take", and the reader has no way to tell which. Written ONCE and imported, because it was
+# hardcoded in two refusals and both were wrong in the same way — a second copy is a second place
+# for the path to rot. (`/portfolios` also survives as shorthand in docstrings across this package;
+# harmless there, misleading the moment it is copied into a user-facing string.)
+LOAD_TRANSACTIONS_HINT = ("Load them on /management-dashboard → expand this book → Transactions.")
+
 # What a column holds, decided from the dtype pandas inferred. Display-level only: it decides
 # alignment and formatting, never meaning.
 KIND_NUMBER = "number"

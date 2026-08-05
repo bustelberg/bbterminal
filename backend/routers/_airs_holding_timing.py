@@ -42,10 +42,10 @@ def holding_timing(portfolio_id: int, holding_name: str) -> dict:
     cached = (supabase.table("airs_transactie_snapshot").select("columns,kinds,rows")
               .eq("portefeuille", portefeuille).limit(1).execute().data or [])
     if not cached:
+        from airs_transacties import LOAD_TRANSACTIONS_HINT  # noqa: PLC0415
         return {"available": False, "name": holding_name,
                 "note": "This book's transactions have not been fetched yet, so what it traded "
-                        "cannot be read. Load them on /portfolios → expand this book → "
-                        "Transactions."}
+                        f"cannot be read. {LOAD_TRANSACTIONS_HINT}"}
     sheet = ParsedSheet(columns=cached[0].get("columns") or [],
                         kinds=cached[0].get("kinds") or {}, rows=cached[0].get("rows") or [])
 

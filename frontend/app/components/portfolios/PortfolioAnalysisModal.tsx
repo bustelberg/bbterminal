@@ -1481,7 +1481,9 @@ no result — this position could not be valued at both ends of the window, so t
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.money_weighted_return_pct)}`}>
                     {fmtRet(h.money_weighted_return_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                      what={h.money_weighted_return_pct != null
+                      what={h.capital_source === 'lookthrough'
+                        ? `What ${h.capital_book ?? 'the strategy behind the certificate'} made on the money it put into ${h.name ?? 'this position'} — this book holds it through a certificate.`
+                        : h.money_weighted_return_pct != null
                         ? `What ${h.name ?? 'this position'} returned on the money actually put into it.`
                         /* Lead with the cause, not with the absence — "cannot be worked out" for
                            every blank sends a reader to open the card just to learn which of five
@@ -1492,7 +1494,17 @@ no result — this position could not be valued at both ends of the window, so t
                             ? 'Cash is not bought and sold, so there is no invested capital to measure against.'
                             : `What ${h.name ?? 'this position'} returned on the money put into it cannot be worked out.`}
                       note={h.money_weighted_return_pct == null ? undefined : 'result ÷ average invested capital'}
-                      how={h.money_weighted_return_pct != null
+                      how={/* ⚠ A LOOKED-THROUGH FIGURE MUST NAME THE BOOK IT WAS MEASURED IN.
+                              This book never bought the stock — it bought the certificate — so the
+                              rate is the STRATEGY's on its own money, and the arithmetic behind it
+                              belongs to the child book, not to the `Result` euros in this row. */
+                        h.capital_source === 'lookthrough'
+                        ? `Result ÷ Avg capital invested, measured in ${h.capital_book ?? 'the child book'}
+
+${eur0n(h.via_avg_capital_eur)} of average invested capital there → ${fmtRet(h.money_weighted_return_pct)}
+
+This book never bought ${h.name ?? 'this stock'} — it bought ${h.via_holding_name ?? 'the certificate'}. So this is what ${h.capital_book ?? 'the strategy'} made on the money IT put in, which is the only per-stock figure the flows can support. Your own timing into the certificate is not in it. The ${eur0n(h.avg_capital_eur)} beside it is your slice of that position; scaling both sides leaves the rate unchanged.`
+                        : h.money_weighted_return_pct != null
                         ? `Result ÷ Avg capital invested
 
 ${eur0n(h.result_eur)} ÷ ${eur0n(h.avg_capital_eur)} = ${fmtRet(h.money_weighted_return_pct)}`
