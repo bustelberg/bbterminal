@@ -3954,6 +3954,47 @@
             ],
             "title": "Unrealised Eur"
           },
+          "via_avg_capital_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Via Avg Capital Eur"
+          },
+          "via_holding_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Via Holding Name"
+          },
+          "via_holding_names": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Via Holding Names",
+            "type": "array"
+          },
+          "via_money_weighted_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Via Money Weighted Return Pct"
+          },
           "via_names": {
             "default": [],
             "items": {

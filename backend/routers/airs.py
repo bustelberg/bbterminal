@@ -834,6 +834,16 @@ class BookHoldingDetail(BaseModel):
     # its holding quantity are on different bases. False with a blank value = it is a leg inside a
     # certificate, which has no flows of its own at all. Same `None`, different facts.
     capital_unknown: bool = False
+    # ── THE CERTIFICATE'S OWN INVESTED-CAPITAL FIGURES, for a leg that can never have its own.
+    # ⚠⚠ THIS IS NOT THE LEG'S RETURN AND MUST NOT BE SHOWN IN THE LEG'S COLUMN. AIRS bought ONE
+    # certificate, so every leg inside it shares a single flow history: put it in the column and
+    # all 22 StarTopSelectie legs read −3.86%, which looks like 22 per-stock measurements and is
+    # one measurement copied 22 times. Shopify did not return −3.86% on the money; the wrapper did.
+    # Separate keys so the UI attributes it instead of asserting it.
+    via_holding_names: list[str] = []
+    via_holding_name: str | None = None
+    via_money_weighted_return_pct: float | None = None
+    via_avg_capital_eur: float | None = None
     # ⚠ THE INSTRUMENT'S OWN EUR RETURN — NOT `return_pct`, AND THE DIFFERENCE IS THE WHOLE POINT.
     # `return_pct` is the book's value change, and the book does not know what NVIDIA did: it knows
     # what the CERTIFICATE holding NVIDIA did. Splitting that certificate's start and current value

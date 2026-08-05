@@ -1073,6 +1073,20 @@ ${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).le
           <ColumnPicker groups={pickedGroups} toggle={toggle} />
         </span>
       </div>
+      {/* ⚠⚠ THE SERVER ALREADY WROTE THE REASON AND THIS MODAL WAS THROWING IT AWAY. When the
+          realised block is unavailable there are no flows at all, so every capital-derived column
+          is blank for a book-level reason — and `realised.note` names which of the three it is
+          (not paired · read failed · transactions never fetched, the one the reader can FIX, with
+          the steps). Measured on AzieTopSelectie: a whole book of OUTRIGHT holdings (Tencent,
+          Alibaba, Samsung) showed a blank "On money invested" and the per-cell tooltip claimed
+          they were reached through a certificate — a wrapper that does not exist.
+          ⚠ RENDER THE AUTHORED NOTE, NEVER A LOCAL GUESS. Re-deriving the cause from flags here
+          would be a second source of truth for one fact, and it is the copy that goes stale. */}
+      {realised && !realised.available && realised.note && (
+        <p className="mb-2 text-[11px] text-warn-500">
+          “On money invested” is blank for every row here — {realised.note}
+        </p>
+      )}
       {/* ⚠⚠ `overflow-auto` + a HEIGHT, because `sticky` needs a scrollport with room to scroll.
           This was `overflow-x-auto` with a `sticky top-0` thead, and the sticky was DEAD: setting
           `overflow-x` forces `overflow-y` to `auto` as well, so this div became a scroll container
@@ -1467,19 +1481,53 @@ no result — this position could not be valued at both ends of the window, so t
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.money_weighted_return_pct)}`}>
                     {fmtRet(h.money_weighted_return_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                      what={h.money_weighted_return_pct == null
-                        ? `What ${h.name ?? 'this position'} returned on the money put into it cannot be worked out.`
-                        : `What ${h.name ?? 'this position'} returned on the money actually put into it.`}
+                      what={h.money_weighted_return_pct != null
+                        ? `What ${h.name ?? 'this position'} returned on the money actually put into it.`
+                        /* Lead with the cause, not with the absence — "cannot be worked out" for
+                           every blank sends a reader to open the card just to learn which of five
+                           things happened. */
+                        : h.via_money_weighted_return_pct != null
+                          ? `Held through ${h.via_holding_name ?? 'a certificate'}, which has the purchases — this leg has none of its own.`
+                          : h.bucket === CASH_BUCKET
+                            ? 'Cash is not bought and sold, so there is no invested capital to measure against.'
+                            : `What ${h.name ?? 'this position'} returned on the money put into it cannot be worked out.`}
                       note={h.money_weighted_return_pct == null ? undefined : 'result ÷ average invested capital'}
                       how={h.money_weighted_return_pct != null
                         ? `Result ÷ Avg capital invested
 
 ${eur0n(h.result_eur)} ÷ ${eur0n(h.avg_capital_eur)} = ${fmtRet(h.money_weighted_return_pct)}`
-                        : h.capital_unknown
+                        /* ⚠ THE BOOK-LEVEL CAUSE IS TESTED FIRST AND MUST STAY FIRST. With no
+                           transactions loaded, `capital_unknown` is false for EVERY row, so the
+                           certificate branch would win by default and tell a reader that an
+                           outright holding sits inside a wrapper. Three causes, one blank. */
+                        : realised && !realised.available
                           ? `Result ÷ Avg capital invested
 
+no denominator — ${realised.note ?? 'this book has no readable transactions, so there are no flows to weigh the capital by.'} Nothing is wrong with this position; every other column is unaffected.`
+                          : h.capital_unknown
+                            ? `Result ÷ Avg capital invested
+
 refused — shares were DEPOSITED into this position during the year (AIRS books it Tt = D, Deponering: a split, a bonus issue or a transfer in), so its trade quantities and its holding quantity sit on different bases and the capital it tied up cannot be worked out. Its euro columns are unaffected.`
-                          : `Result ÷ Avg capital invested
+                            /* ⚠ THE WRAPPER'S NUMBER, ATTRIBUTED — NEVER ASSERTED AS THIS ROW'S.
+                               AIRS bought one certificate, so this figure is identical for all of
+                               its legs: it measures the certificate, not the stock. Stated as the
+                               certificate's, it answers "why is this blank"; put in the cell it
+                               would be 22 copies of one number wearing 22 different names. */
+                            : h.via_money_weighted_return_pct != null
+                              ? `Result ÷ Avg capital invested
+
+no denominator for ${h.name ?? 'this position'} — it is reached through ${h.via_holding_name ?? 'a certificate'}${(h.via_names ?? []).length ? ` (${h.via_names!.join(', ')})` : ''}, and AIRS trades the certificate rather than what is inside it, so this leg has no purchases of its own.
+
+What CAN be measured is the certificate: it returned ${fmtRet(h.via_money_weighted_return_pct)} on ${eur0n(h.via_avg_capital_eur)} of average invested capital. That is one figure for the whole wrapper — every stock inside it shares the same purchases, so it is not this stock's own.`
+                              /* Cash is not bought and sold, so "capital invested" has no meaning
+                                 for it — a different fact from a missing measurement, and the
+                                 certificate wording would be plainly false for the book's own
+                                 Effectenrekening line. */
+                              : h.bucket === CASH_BUCKET
+                                ? `Result ÷ Avg capital invested
+
+does not apply — cash is not bought and sold, so there is no invested capital to weigh a return against. Its return is 0% by construction and its drag is already carried in the class and book totals.`
+                                : `Result ÷ Avg capital invested
 
 no denominator — this position is reached through a certificate, and AIRS trades the certificate rather than what is inside it, so it has no purchases of its own.`} />
                   </td>

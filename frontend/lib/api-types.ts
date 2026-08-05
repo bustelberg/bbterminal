@@ -8693,6 +8693,17 @@ export interface components {
             start_value_eur?: number | null;
             /** Unrealised Eur */
             unrealised_eur?: number | null;
+            /** Via Avg Capital Eur */
+            via_avg_capital_eur?: number | null;
+            /** Via Holding Name */
+            via_holding_name?: string | null;
+            /**
+             * Via Holding Names
+             * @default []
+             */
+            via_holding_names?: string[];
+            /** Via Money Weighted Return Pct */
+            via_money_weighted_return_pct?: number | null;
             /**
              * Via Names
              * @default []

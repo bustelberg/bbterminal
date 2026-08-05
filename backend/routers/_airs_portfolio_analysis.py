@@ -590,7 +590,7 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                        "start_value_eur": float(r.get("start_value_eur") or 0)}]
         if not target:
             # held directly — no strategy in between
-            out.append({**r, "via_names": [], "sources": direct_src})
+            out.append({**r, "via_names": [], "via_holding_names": [], "sources": direct_src})
             continue
         child = _positions_of(target, _datum_of(target))
         inner = sum(float(c.get("percentage") or 0) for c in child)
@@ -598,7 +598,7 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
             # A certificate with nothing behind it stays whole, so the book holds IT — the route in
             # is direct, and labelling it with the strategy it wraps would claim a look-through
             # that did not happen.
-            out.append({**r, "via_names": [], "sources": direct_src})
+            out.append({**r, "via_names": [], "via_holding_names": [], "sources": direct_src})
             continue
         cur = float(r.get("current_value_eur") or 0)
         start = float(r.get("start_value_eur") or 0)
@@ -622,6 +622,12 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                 # record of it once its value has been split across the model behind it.
                 "via_names": ([r["linked_portfolio_name"]]
                               if r.get("linked_portfolio_name") else []),
+                # ⚠ THE CERTIFICATE'S OWN AIRS NAME, which `via_names` does NOT carry — that is
+                # the STRATEGY's name ("StarTopSelectie Offensief"), while the ledger is keyed by
+                # the INSTRUMENT the book actually traded ("Star Selection Index"). Without it a
+                # leg cannot find the flows it arrived through, and the only honest thing left to
+                # say about its invested capital is nothing at all.
+                "via_holding_names": ([r["holding_name"]] if r.get("holding_name") else []),
                 # ...and HOW MUCH came that way. `via_names` alone cannot distinguish a position
                 # held entirely through a certificate from one that is 96% the book's own shares.
                 # ⚠ `model_id` RIDES ALONG, because the route's return has to come from the book
@@ -1198,6 +1204,9 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             "sector": sec,
             "currency": cur,
             "via_names": via,
+            # The certificate INSTRUMENT names behind those routes. Parallel to `via_names` (the
+            # strategies) because only this one keys the book's ledger — see `_via_capital`.
+            "via_holding_names": r.get("via_holding_names") or [],
             # ⚠ THE ROUTES IN, EACH AS A SHARE OF THE BOOK — so they SUM to `weight_now_pct`, the
             # column beside them. A share of the ROW ("96% direct") answers a different question and
             # ties to nothing else on screen; it rides along in the UI's tooltip instead. Each also
@@ -1363,6 +1372,36 @@ def _realised_block(portfolio_id: int) -> dict:
     }
 
 
+def _via_capital(h: dict, by_name: dict) -> dict:
+    """The certificate's own invested-capital figures, for a leg held through exactly one.
+
+    ⚠ A LEG INSIDE A CERTIFICATE HAS NO FLOWS OF ITS OWN — AIRS trades the wrapper. That makes its
+    money-weighted return genuinely unknowable, and this does NOT invent one: it attributes the
+    WRAPPER's, under keys the tooltip can label. The blank column stays blank.
+
+    ⚠ ONLY WHEN THERE IS EXACTLY ONE ROUTE IN. A stock reached through two certificates has two
+    different invested-capital experiences, and "the" wrapper figure does not exist — naming one
+    of them would pick a winner at random. Same rule for a leg the book ALSO holds directly: the
+    row is then part its own position and part the certificate's, so a single wrapper figure would
+    describe only some of it.
+    """
+    names = h.get("via_holding_names") or []
+    if len(names) != 1 or len(h.get("via_names") or []) != 1:
+        return {}
+    # Held directly as well as through the wrapper — `sources` carries one entry per route in, and
+    # a `label` of None is the book's own shares.
+    if any(s.get("label") is None for s in (h.get("sources") or [])):
+        return {}
+    led = by_name.get(names[0]) or {}
+    if led.get("return_pct") is None:
+        return {}
+    return {
+        "via_holding_name": names[0],
+        "via_money_weighted_return_pct": led.get("return_pct"),
+        "via_avg_capital_eur": led.get("avg_capital_eur"),
+    }
+
+
 def _position_ledger(portefeuille: str, rec: dict) -> dict:
     """The book's whole year, one row per instrument — the merged held+sold list.
 
@@ -1383,6 +1422,9 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
     rows = (supabase.table("airs_transactie_snapshot").select("columns,kinds,rows")
             .eq("portefeuille", portefeuille).limit(1).execute().data or [])
     if not rows:
+        # Unreachable in practice — `_realised_block` already refuses on `realised_ytd_eur is None`
+        # and never calls this. Kept as a floor, and deliberately NOT given its own "reason" field:
+        # the reason is authored once, upstream, where the refusal actually happens.
         return {"positions": [], "capital_coverage_ratio": None, "avg_capital_eur": None}
     sheet = ParsedSheet(columns=rows[0].get("columns") or [], kinds=rows[0].get("kinds") or {},
                         rows=rows[0].get("rows") or [])
@@ -2010,6 +2052,15 @@ def _with_results(holdings: list[dict], realised: dict) -> list[dict]:
                     # that KLA-Tencor — held outright — was inside a certificate, which is simply
                     # untrue and sends them looking for a wrapper that does not exist.
                     "capital_unknown": bool(led.get("capital_unknown")),
+                    # ── THE WRAPPER'S OWN FIGURE, for a leg that can never have one.
+                    # ⚠⚠ IT IS NOT THIS LEG'S RETURN AND MUST NEVER BE PUT IN THIS LEG'S COLUMN.
+                    # AIRS bought ONE certificate; splitting its capital by today's weights would
+                    # hand every leg the identical number (measured: all 22 StarTopSelectie legs
+                    # would read -3.86%), which looks like 22 per-stock measurements and is one
+                    # measurement copied 22 times. Shopify did not return -3.86% on the money —
+                    # the certificate did. So it ships under its OWN key, for the tooltip to
+                    # attribute, and `money_weighted_return_pct` stays null.
+                    **_via_capital(h, by_name),
                     "contribution_pct": (total / basis * 100.0)
                     if (total is not None and basis) else None,
                     # ⚠ 0%, NOT a dash — same reason as the price leg above, and same direction:
