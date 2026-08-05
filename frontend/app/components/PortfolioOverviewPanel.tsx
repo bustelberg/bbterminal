@@ -140,10 +140,13 @@ const MIN_REAL_HOLDINGS = 5;
 const canAnalyse = (r: AirsPortfolioOverview) =>
   r.fixed_portfolio_id != null || (r.holdings ?? 0) >= MIN_REAL_HOLDINGS;
 
+// ⚠ KEEP IN STEP WITH `airs_vermogen.REPORTS` — a code with no label here renders as a bare
+// mnemonic in the "missing reports" gap list, which reads as a bug rather than as a named report.
 const REPORT_LABELS: Record<string, string> = {
   att: 'Rendement',
   volk: 'Vermogensoverzicht',
   mut: 'Mutaties',
+  trans: 'Transacties',
   model: 'Model',
 };
 

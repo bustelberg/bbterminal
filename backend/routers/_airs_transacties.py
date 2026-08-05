@@ -31,9 +31,13 @@ from deps import supabase
 _log = logging.getLogger(__name__)
 
 # ⚠ THE SAME WINDOW THE REST OF THE PANEL IS MEASURED OVER — 1 January to today, exactly what
-# `refresh_one_portfolio` and the fleet scan pass for ATT/VOLK/MUT/MODEL. A transactions list on a
+# `refresh_one_portfolio` and the fleet scan pass for every report. A transactions list on a
 # different window from the returns beside it invites a reader to explain one with the other, and
 # the arithmetic would not work.
+# ⚠ AND `scan_one` CALLS THIS RATHER THAN REUSING ITS OWN `van`/`tot`: a snapshot stored under any
+# other window is one `account_transactions` treats as not-this-answer, so it would re-download on
+# every open and the scan's work would be invisible. They are equal today — relying on that is how
+# they come apart the first time a caller passes a custom range.
 def ytd_window() -> tuple[str, str]:
     today = date.today()
     return f"{today.year}-01-01", today.isoformat()

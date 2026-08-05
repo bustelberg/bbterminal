@@ -2056,8 +2056,8 @@ async def airs_portfolio_refresh(portefeuille: str, cascade: bool = True):
     the twelve lines it stores and leaves the instruments behind them as stale as they were.
     Measured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.
 
-    ⚠ SO THIS IS NOT ALWAYS "a few seconds" ANY MORE — it is four downloads per account in the
-    chain. Each one's outcome comes back in `cascaded` rather than being folded into a single
+    ⚠ SO THIS IS NOT ALWAYS "a few seconds" ANY MORE — it is FIVE downloads per account in the
+    chain (Rendement, Vermogensoverzicht, Mutaties, Transacties, Model). Each one's outcome comes back in `cascaded` rather than being folded into a single
     status, because a parent refreshed against a child that failed is not fresh. `cascade=false`
     refreshes only the named account.
 

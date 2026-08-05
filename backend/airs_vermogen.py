@@ -132,9 +132,19 @@ def _record_roster(names: list[str]) -> None:
                      type(e).__name__, e)
 
 
-# The four reports an account needs for every figure on the portfolios page to describe the same
+# The reports an account needs for every figure on the portfolios page to describe the same
 # moment. Order is display order, not fetch order.
-REPORTS = ("att", "volk", "mut", "model")
+#
+# ⚠ `trans` JOINED THIS LIST ON 2026-08-05 AND THAT IS A DELIBERATE RE-DEFINITION OF "COMPLETE".
+# Transacties used to be fetched ONLY when someone opened the Transactions panel, so after months
+# of daily fleet scans exactly TWO of 44 books had ever had theirs stored — and every figure that
+# needs flows (invested capital, money-weighted return, the realised leg, the whole look-through
+# into a certificate) was silently unavailable everywhere else. A report nothing routinely fetches
+# is a report that does not exist in practice.
+# Two consequences, both wanted: every account now reads INCOMPLETE until re-scanned (it genuinely
+# is — it is missing a report we now require), and the incremental pass at `needed = set(REPORTS)`
+# stops skipping those books, so the fleet scan backfills transactions on its own.
+REPORTS = ("att", "volk", "mut", "trans", "model")
 
 
 def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
@@ -521,7 +531,7 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     # bare count — and regex-ing that back out of "BUS_X (Vermogensoverzicht: RuntimeError: …)"
     # would be parsing a message we formatted ourselves one line earlier.
     errors: list[dict] = []
-    holdings = mutaties = model_weights = 0
+    holdings = mutaties = transacties = model_weights = 0
     as_of = tot
 
     from airs_scanner import AirsNoData  # noqa: PLC0415
@@ -529,7 +539,8 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     def _step_detail(code: str) -> str:
         """What the successful download actually yielded — the number that makes "ok" verifiable."""
         return {"att": "stored", "volk": f"{holdings} holdings as of {as_of}",
-                "mut": f"{mutaties} mutations", "model": f"{model_weights} model weights",
+                "mut": f"{mutaties} mutations", "trans": f"{transacties} transactions",
+                "model": f"{model_weights} model weights",
                 }.get(code, "")
 
     def _say(report: str, status: str, detail: str = "") -> None:
@@ -588,6 +599,30 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
         nonlocal mutaties
         mutaties = _save_mutaties(name, van, tot)
 
+    def _trans() -> None:
+        nonlocal transacties
+        from airs_scanner import AirsNoData  # noqa: PLC0415
+        from routers._airs_transacties import _fetch_live, _store, ytd_window  # noqa: PLC0415
+
+        # ⚠⚠ `ytd_window()`, NOT THIS SCAN'S `van`/`tot`. The Transactions panel treats a snapshot
+        # of a DIFFERENT window as not-this-answer and re-fetches — so storing under any other
+        # window writes a row the panel will never accept, and every open would go back out to
+        # AIRS as if nothing had been cached. The two happen to be equal today; relying on that is
+        # how they drift apart the first time a caller passes a custom range.
+        tvan, ttot = ytd_window()
+        try:
+            sheet = _fetch_live(name, tvan, ttot)
+        except AirsNoData:
+            # ⚠ STORE THE EMPTY SNAPSHOT, THEN RE-RAISE. `_step` turns `AirsNoData` into `no_data`
+            # and counts the account complete; without the write the book would be marked complete
+            # while holding nothing, so the panel would re-download on every single open. Same
+            # bargain `account_transactions` already strikes — one behaviour, two entry points.
+            from airs_transacties import ParsedSheet  # noqa: PLC0415
+            _store(name, tvan, ttot, ParsedSheet())
+            raise
+        _store(name, tvan, ttot, sheet)
+        transacties = len(sheet.rows)
+
     def _model() -> None:
         nonlocal model_weights
         model_weights = _save_model_weights(name, van, tot)
@@ -595,10 +630,12 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     _step("att", "Rendement", _att)
     _step("volk", "Vermogensoverzicht", _volk)
     _step("mut", "Mutaties", _mut)
+    _step("trans", "Transacties", _trans)
     _step("model", "Model", _model)
 
     return {"reports_ok": ok, "holdings": holdings, "mutaties": mutaties,
-            "model_weights": model_weights, "as_of": as_of, "errors": errors}
+            "transacties": transacties, "model_weights": model_weights,
+            "as_of": as_of, "errors": errors}
 
 
 def _save_holdings(portefeuille: str, as_of: str, holdings) -> int:
@@ -1107,6 +1144,10 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True) -> dict:
                 "status": "ok" if ("att" in sub["reports_ok"] or "volk" in sub["reports_ok"])
                 else "error",
                 "holdings_rows": sub["holdings"],
+                # The reason the cascade exists at all: this child is the book that actually
+                # trades what the parent holds through a certificate, so its Transacties are what
+                # make the parent's look-through possible.
+                "transacties_rows": sub.get("transacties"),
                 "as_of": sub["as_of"],
                 "errors": [f"{e['report']}: {e['error_type']}: {e['message']}"
                            for e in sub["errors"]],
@@ -1129,6 +1170,8 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True) -> dict:
             "model_weight_rows": res["model_weights"],
             "rendement_stored": "att" in ok,
             "vermogen_stored": "volk" in ok,
+            "transacties_stored": "trans" in ok,
+            "transacties_rows": res.get("transacties"),
             "reports_ok": ok,
             "complete": len(ok) == len(REPORTS),
             # Formatted for the single-row toast; the structured form rides along beside it.
