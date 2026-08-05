@@ -500,6 +500,20 @@ def download_mutaties_sync(portfolio_name: str, datum_van: str, datum_tot: str) 
     return _download_report_sync(portfolio_name, datum_van, datum_tot, code)
 
 
+def download_transacties_sync(portfolio_name: str, datum_van: str, datum_tot: str) -> bytes:
+    """Download the Transacties report — what the book BOUGHT and SOLD over [van, tot].
+
+    ⚠ `TRANS` IS A PROBED CODE, NOT A READ SHEET. The probe above recorded that it returns an XLS
+    (unlike `MUTA`/`MUTATIES`/`GRB`/…, which return an empty body), and that is ALL that is known
+    about it — no column has ever been measured. `airs_transacties.parse_transacties` therefore
+    imposes no schema; see its docstring for why guessing one is the failure to avoid.
+    """
+    from airs_transacties import TRANSACTIES_RAPPORT_TYPE  # noqa: PLC0415  (avoid an import cycle)
+
+    code = os.environ.get("AIRS_TRANSACTIES_RAPPORT_TYPE", "").strip() or TRANSACTIES_RAPPORT_TYPE
+    return _download_report_sync(portfolio_name, datum_van, datum_tot, code)
+
+
 def download_model_sync(portfolio_name: str, datum_van: str, datum_tot: str) -> bytes:
     """Download the MODEL report — a DYNAMIC portfolio's own model weights.
 

@@ -1,7 +1,49 @@
 # Open follow-ups — resume here
 
 Running list of unfinished / offered-but-not-built work, newest context first.
-Last updated **2026-07-13**. Delete items as they're done.
+Last updated **2026-08-05**. Delete items as they're done.
+
+---
+
+## 📋 AIRS Transacties — measured on ONE account. Two things still unverified.
+
+Built 2026-08-05: `/portfolios` → expand an account → **Transactions** (the sheet, cached in
+`airs_transactie_snapshot`) and **Total return** (the year, built from held + sold positions and
+checked against AIRS's own `beleggingsresultaat`). `TRANS` is confirmed to be Transacties; the
+columns are documented in `airs_transacties`'s docstring from a real download.
+
+Measured on AITopSelectie OFF DYN: held 380,986.94 + realised 6,306.85 + sold-name income 0.00 =
+**387,293.79** against the book's **387,293.75** — residual **€0.04** — and 38.729379% against
+AIRS's own 38.729375%.
+
+**✅ 1. `Res. YtD` vs `proceeds − Kostprijs` — RESOLVED, on real data (BUS_Offensief_Dyn).** The
+first book measured (AITopSelectie) had `Res. voorg. jr.` = 0.00 on every row, so the two formulas
+agreed exactly and it could not arbitrate. Bustelberg Offensief settles it — 12 of its 13 sold
+names carry prior-year amounts (Novo Nordisk −24,866.94, Wolters Kluwer −20,819.13):
+
+```
+Res. YtD                 -28,656.47   -> total +69,792.94  =  +5.83%   AIRS: +5.83%  ✓
+Res. voorg. jr.          -97,919.73
+proceeds - Kostprijs    -126,576.20   -> total -28,126.79  =  -2.35%              ✗
+identity: proceeds - cost == Res. YtD + Res. voorg. jr., to -0.00
+```
+
+The intuitive formula is **8pp out and the wrong sign**, and looks entirely plausible. Keep
+`Res. YtD`. (The book's own YTD moves as it is re-scanned — these are 2026-08-05 mid-session; the
+identity and the size of the error are what matter, not the exact totals.)
+
+**⚠ 2. `Tt='D'` is uninterpreted.** One row: KLA-Tencor, 2026-06-12, 369 shares, every money column
+`0.0`. KLA split 9:1 in 2026, so a corporate action is the obvious reading — and obvious is not
+measured. It carries no money, so it is excluded from every total and **counted** (surfaced in the
+panel). If a `D` ever arrives carrying a value, that count is what will show it.
+
+**Not yet done, now that the data exists:**
+- Mark a holding bought or sold mid-year on the positions table — `Beginwaarde` of 0 has an
+  explanation now, and `startWeights` could tell a genuine mid-year purchase from a data gap.
+- `start_gap_eur` is still reported as the NET of two opposite effects (positions sold out, minus
+  AIRS restating `Beginwaarde` to the current quantity). The buy rows can now separate them.
+- `kosten` is 0 on all 53 accounts, so whether costs sit inside `cumulatief_rendement` but outside
+  `beleggingsresultaat` is untested. If a book ever charges them, the residual is where it shows.
 
 ---
 

@@ -2287,6 +2287,181 @@ async def airs_account_isins(portefeuille: str):
     return await resolve_account_isins_async(portefeuille)
 
 
+class AirsAccountTransactions(BaseModel):
+    """One account's AIRS Transacties, as the SHEET — no schema imposed on it.
+
+    ⚠ THE COLUMNS ARE DATA HERE, NOT A CONTRACT. `rapport_types=TRANS` returns an XLS (probed
+    2026-07-23) and no column of it has ever been measured, so this endpoint reports the report:
+    `columns` in the sheet's own order, `kinds` giving each one's pandas-inferred type, and `rows`
+    keyed by column name. Naming fields against a sheet nobody has read is how `Bedrag` gets
+    charted where `Bedrag eur` belonged — one word apart, and the wrong one is a plausible number
+    rather than an error. See `airs_transacties` for the full reasoning and for what replaces this
+    once the sheet has been seen.
+
+    ⚠ `source` AND `note` ARE THE ANSWER'S OWN PROVENANCE. An empty `rows` means one of three very
+    different things — the book did not trade, AIRS has no such report for it, or we could not ask
+    — and an empty table with nothing beside it asserts the first.
+    """
+
+    portefeuille: str
+    datum_van: str
+    datum_tot: str
+    columns: list[str] = []
+    # column -> 'number' | 'date' | 'text'
+    kinds: dict[str, str] = {}
+    # ⚠ Values are float | str | null and NEVER NaN — a blank Excel cell is float NaN, which is not
+    # JSON and which `str()` renders as the TRUTHY string "nan".
+    rows: list[dict[str, float | str | None]] = []
+    # When the stored snapshot was fetched. Null on a live answer — the UI says "cached" only when
+    # there is a date to show for it.
+    cached_at: str | None = None
+    # 'cache' | 'live' | 'unavailable'
+    source: str
+    note: str | None = None
+
+
+@router.get("/api/airs/accounts/{portefeuille}/transactions",
+            response_model=AirsAccountTransactions)
+async def airs_account_transactions(portefeuille: str, refresh: bool = False):
+    """What this book BOUGHT and SOLD this year — the AIRS Transacties report.
+
+    The three reports already stored say what a book holds (VOLK), what it earned (MUT) and what
+    its strategy asks for (MODEL). None says what it DID, so a position that appeared mid-year, one
+    sold out entirely, and a weight that drifted purely on price all look the same from outside.
+
+    Served from the stored snapshot; `refresh=true` (or a stale window, or nothing stored) goes out
+    to AIRS. A live fetch is seconds behind a headless session, which is why the panel is behind a
+    click and the answer says whether it was cached.
+    """
+    import asyncio  # noqa: PLC0415
+
+    from routers._airs_transacties import account_transactions  # noqa: PLC0415
+
+    return await asyncio.to_thread(account_transactions, portefeuille, refresh)
+
+
+class AirsRealisedLeg(BaseModel):
+    """One instrument's realised result this year, summed over its sales.
+
+    ⚠ `closed_out` IS DECIDED BY ABSENCE FROM THE HOLDINGS, NOT BY PRESENCE HERE. A sale is a
+    REALISATION, not a closure — Synopsys was trimmed on 2026-01-22 and is still held — so a name
+    can legitimately appear both here and in the positions table above.
+    """
+
+    fonds: str
+    sales: int = 0
+    quantity: float = 0.0
+    proceeds_eur: float = 0.0
+    cost_eur: float = 0.0
+    # ⚠ AIRS's own `Res. YtD`, never `proceeds − cost`: the two differ by `prior_year_eur` on any
+    # position carried across a year end, and they coincide on every book bought entirely this
+    # year — so the account this was validated on could not have told them apart.
+    realised_ytd_eur: float = 0.0
+    prior_year_eur: float = 0.0
+    first: str | None = None
+    last: str | None = None
+    closed_out: bool = False
+
+
+class AirsAccountReconciliation(BaseModel):
+    """The book's own YTD, lined up against what its positions — held AND sold — explain.
+
+    ⚠ THE TWO NUMBERS ARE ALREADY ON SCREEN A FEW LINES APART AND THEY DISAGREE. Measured
+    2026-08-05 over 39 accounts, **23 disagree by more than 1pp** (BUS_FTS_BEPOFF_DYN: the book
+    made -4.57%, its open positions +3.27pp more than that). Both are correct answers to different
+    questions, and a reader given both with no arithmetic between them cannot arbitrate.
+
+    ⚠ EVERY COMPONENT IS A EURO AMOUNT. The two percentages are measured on different opening
+    capitals, so they do not subtract into anything meaningful — `gap_pp` is reported for
+    orientation and is deliberately named in POINTS, never divided into.
+    """
+
+    portefeuille: str
+    as_of: str | None = None
+    # The ATT period the book side covers, and how many monthly rows it spans.
+    periode: str | None = None
+    months: int | None = None
+
+    # ── The book's own year, from AIRS. Authoritative; never recomputed here.
+    book_return_pct: float | None = None
+    # ⚠ `beleggingsresultaat`, NOT end − begin: the difference is deposits, and a book that took
+    # EUR 1m mid-year would report the deposit as profit.
+    book_result_eur: float | None = None
+    book_start_eur: float | None = None
+    book_end_eur: float | None = None
+    deposits_eur: float = 0.0
+    withdrawals_eur: float = 0.0
+    costs_eur: float = 0.0
+    book_reconciles: bool | None = None
+
+    # ── What the positions still held explain, on the positions table's own basis.
+    open_return_pct: float | None = None
+    open_result_eur: float | None = None
+    open_start_eur: float | None = None
+    open_end_eur: float | None = None
+    open_priced: int = 0
+    open_unpriced: int = 0
+
+    # ── Measured, so it leaves the residual: income paid by funds no longer held.
+    sold_income_eur: float = 0.0
+    sold_funds: list[str] = []
+
+    # ── What the sales realised this year, from the cached Transacties sheet.
+    # ⚠ None is NOT zero. No sheet cached means the realised result is UNKNOWN; publishing 0 would
+    # hand the open positions' figure to the reader as the year's total.
+    realised_ytd_eur: float | None = None
+    realised_names: int = 0
+    realised_note: str | None = None
+    realised: list[AirsRealisedLeg] = []
+    buys_eur: float | None = None
+    buy_count: int | None = None
+
+    # ⚠ THE NET OF TWO OPPOSITE EFFECTS, and labelled as such rather than as "closed positions":
+    # a position sold outright leaves opening value in the book with no row to carry it, while
+    # AIRS restating `Beginwaarde` to the CURRENT quantity inflates the rows for anything bought
+    # into during the year. On AITopSelectie the net is NEGATIVE.
+    start_gap_eur: float | None = None
+
+    # ── The year, built from the positions: held + realised + income from names no longer held.
+    total_result_eur: float | None = None
+    # ⚠⚠ ONLY ON A FLOW-FREE BOOK. `result ÷ opening capital` reproduces `cumulatief_rendement`
+    # exactly (measured: 38.729379% against AIRS's 38.729375%) when nothing was paid in or out,
+    # and is undefined the moment something was — AzTopSelectie opened at ZERO and took EUR 1m.
+    # `return_basis` says which case the reader is in: 'opening_capital' | 'flows' | 'unavailable'.
+    total_return_pct: float | None = None
+    return_basis: str | None = None
+    # ⚠ ASSERTED, NEVER ASSUMED — a total never set against the book's own is an assertion, not a
+    # reconciliation. Measured residual EUR 0.04 on a EUR 387,293.75 year.
+    residual_vs_book_eur: float | None = None
+    reconciles: bool | None = None
+
+    # The gap BEFORE the sales are counted, kept so the reader can see how much they closed.
+    # ⚠ NOT distributed across the components above.
+    unexplained_eur: float | None = None
+    gap_pp: float | None = None
+    # Cached Transacties rows. None = never fetched.
+    transaction_rows: int | None = None
+    # Transaction types the parser does not interpret, with counts (measured: {'D': 1}, a
+    # quantity-only row carrying no money). Counted rather than assumed harmless.
+    unknown_transaction_types: dict[str, int] = {}
+
+
+@router.get("/api/airs/accounts/{portefeuille}/return-reconciliation",
+            response_model=AirsAccountReconciliation)
+async def airs_account_return_reconciliation(portefeuille: str):
+    """Why this book's own YTD is not the YTD its open positions add up to.
+
+    Reads both sides from the loaders the other panels already use — `_year_perf` for the book,
+    `account_holdings` for the positions — so the reconciliation cannot quietly disagree with
+    either of the figures it is reconciling.
+    """
+    import asyncio  # noqa: PLC0415
+
+    from routers._airs_return_reconciliation import account_return_reconciliation  # noqa: PLC0415
+
+    return await asyncio.to_thread(account_return_reconciliation, portefeuille)
+
+
 @router.get("/api/airs/accounts/{portefeuille}/linkable", response_model=LinkableContext)
 async def airs_account_linkable_portfolios(portefeuille: str):
     """What an ACCOUNT's holdings may be linked to — the same dropdown the model-portfolio

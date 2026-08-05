@@ -1002,6 +1002,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/return-reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Return Reconciliation
+         * @description Why this book's own YTD is not the YTD its open positions add up to.
+         *
+         *     Reads both sides from the loaders the other panels already use — `_year_perf` for the book,
+         *     `account_holdings` for the positions — so the reconciliation cannot quietly disagree with
+         *     either of the figures it is reconciling.
+         */
+        get: operations["airs_account_return_reconciliation_api_airs_accounts__portefeuille__return_reconciliation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Transactions
+         * @description What this book BOUGHT and SOLD this year — the AIRS Transacties report.
+         *
+         *     The three reports already stored say what a book holds (VOLK), what it earned (MUT) and what
+         *     its strategy asks for (MODEL). None says what it DID, so a position that appeared mid-year, one
+         *     sold out entirely, and a weight that drifted purely on price all look the same from outside.
+         *
+         *     Served from the stored snapshot; `refresh=true` (or a stale window, or nothing stored) goes out
+         *     to AIRS. A live fetch is seconds behind a headless session, which is why the panel is behind a
+         *     click and the answer says whether it was cached.
+         */
+        get: operations["airs_account_transactions_api_airs_accounts__portefeuille__transactions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/allocation-bands": {
         parameters: {
             query?: never;
@@ -7517,6 +7569,174 @@ export interface components {
             display_name?: string | null;
         };
         /**
+         * AirsAccountReconciliation
+         * @description The book's own YTD, lined up against what its positions — held AND sold — explain.
+         *
+         *     ⚠ THE TWO NUMBERS ARE ALREADY ON SCREEN A FEW LINES APART AND THEY DISAGREE. Measured
+         *     2026-08-05 over 39 accounts, **23 disagree by more than 1pp** (BUS_FTS_BEPOFF_DYN: the book
+         *     made -4.57%, its open positions +3.27pp more than that). Both are correct answers to different
+         *     questions, and a reader given both with no arithmetic between them cannot arbitrate.
+         *
+         *     ⚠ EVERY COMPONENT IS A EURO AMOUNT. The two percentages are measured on different opening
+         *     capitals, so they do not subtract into anything meaningful — `gap_pp` is reported for
+         *     orientation and is deliberately named in POINTS, never divided into.
+         */
+        AirsAccountReconciliation: {
+            /** As Of */
+            as_of?: string | null;
+            /** Book End Eur */
+            book_end_eur?: number | null;
+            /** Book Reconciles */
+            book_reconciles?: boolean | null;
+            /** Book Result Eur */
+            book_result_eur?: number | null;
+            /** Book Return Pct */
+            book_return_pct?: number | null;
+            /** Book Start Eur */
+            book_start_eur?: number | null;
+            /** Buy Count */
+            buy_count?: number | null;
+            /** Buys Eur */
+            buys_eur?: number | null;
+            /**
+             * Costs Eur
+             * @default 0
+             */
+            costs_eur?: number;
+            /**
+             * Deposits Eur
+             * @default 0
+             */
+            deposits_eur?: number;
+            /** Gap Pp */
+            gap_pp?: number | null;
+            /** Months */
+            months?: number | null;
+            /** Open End Eur */
+            open_end_eur?: number | null;
+            /**
+             * Open Priced
+             * @default 0
+             */
+            open_priced?: number;
+            /** Open Result Eur */
+            open_result_eur?: number | null;
+            /** Open Return Pct */
+            open_return_pct?: number | null;
+            /** Open Start Eur */
+            open_start_eur?: number | null;
+            /**
+             * Open Unpriced
+             * @default 0
+             */
+            open_unpriced?: number;
+            /** Periode */
+            periode?: string | null;
+            /** Portefeuille */
+            portefeuille: string;
+            /**
+             * Realised
+             * @default []
+             */
+            realised?: components["schemas"]["AirsRealisedLeg"][];
+            /**
+             * Realised Names
+             * @default 0
+             */
+            realised_names?: number;
+            /** Realised Note */
+            realised_note?: string | null;
+            /** Realised Ytd Eur */
+            realised_ytd_eur?: number | null;
+            /** Reconciles */
+            reconciles?: boolean | null;
+            /** Residual Vs Book Eur */
+            residual_vs_book_eur?: number | null;
+            /** Return Basis */
+            return_basis?: string | null;
+            /**
+             * Sold Funds
+             * @default []
+             */
+            sold_funds?: string[];
+            /**
+             * Sold Income Eur
+             * @default 0
+             */
+            sold_income_eur?: number;
+            /** Start Gap Eur */
+            start_gap_eur?: number | null;
+            /** Total Result Eur */
+            total_result_eur?: number | null;
+            /** Total Return Pct */
+            total_return_pct?: number | null;
+            /** Transaction Rows */
+            transaction_rows?: number | null;
+            /** Unexplained Eur */
+            unexplained_eur?: number | null;
+            /**
+             * Unknown Transaction Types
+             * @default {}
+             */
+            unknown_transaction_types?: {
+                [key: string]: number;
+            };
+            /**
+             * Withdrawals Eur
+             * @default 0
+             */
+            withdrawals_eur?: number;
+        };
+        /**
+         * AirsAccountTransactions
+         * @description One account's AIRS Transacties, as the SHEET — no schema imposed on it.
+         *
+         *     ⚠ THE COLUMNS ARE DATA HERE, NOT A CONTRACT. `rapport_types=TRANS` returns an XLS (probed
+         *     2026-07-23) and no column of it has ever been measured, so this endpoint reports the report:
+         *     `columns` in the sheet's own order, `kinds` giving each one's pandas-inferred type, and `rows`
+         *     keyed by column name. Naming fields against a sheet nobody has read is how `Bedrag` gets
+         *     charted where `Bedrag eur` belonged — one word apart, and the wrong one is a plausible number
+         *     rather than an error. See `airs_transacties` for the full reasoning and for what replaces this
+         *     once the sheet has been seen.
+         *
+         *     ⚠ `source` AND `note` ARE THE ANSWER'S OWN PROVENANCE. An empty `rows` means one of three very
+         *     different things — the book did not trade, AIRS has no such report for it, or we could not ask
+         *     — and an empty table with nothing beside it asserts the first.
+         */
+        AirsAccountTransactions: {
+            /** Cached At */
+            cached_at?: string | null;
+            /**
+             * Columns
+             * @default []
+             */
+            columns?: string[];
+            /** Datum Tot */
+            datum_tot: string;
+            /** Datum Van */
+            datum_van: string;
+            /**
+             * Kinds
+             * @default {}
+             */
+            kinds?: {
+                [key: string]: string;
+            };
+            /** Note */
+            note?: string | null;
+            /** Portefeuille */
+            portefeuille: string;
+            /**
+             * Rows
+             * @default []
+             */
+            rows?: {
+                [key: string]: number | string | null;
+            }[];
+            /** Source */
+            source: string;
+        };
+        /**
          * AirsHoldingIsin
          * @description One account holding, with the ISIN we believe it is — and how much to believe it.
          *
@@ -7730,6 +7950,57 @@ export interface components {
             withdrawals_eur?: number | null;
             /** Ytd Pct */
             ytd_pct?: number | null;
+        };
+        /**
+         * AirsRealisedLeg
+         * @description One instrument's realised result this year, summed over its sales.
+         *
+         *     ⚠ `closed_out` IS DECIDED BY ABSENCE FROM THE HOLDINGS, NOT BY PRESENCE HERE. A sale is a
+         *     REALISATION, not a closure — Synopsys was trimmed on 2026-01-22 and is still held — so a name
+         *     can legitimately appear both here and in the positions table above.
+         */
+        AirsRealisedLeg: {
+            /**
+             * Closed Out
+             * @default false
+             */
+            closed_out?: boolean;
+            /**
+             * Cost Eur
+             * @default 0
+             */
+            cost_eur?: number;
+            /** First */
+            first?: string | null;
+            /** Fonds */
+            fonds: string;
+            /** Last */
+            last?: string | null;
+            /**
+             * Prior Year Eur
+             * @default 0
+             */
+            prior_year_eur?: number;
+            /**
+             * Proceeds Eur
+             * @default 0
+             */
+            proceeds_eur?: number;
+            /**
+             * Quantity
+             * @default 0
+             */
+            quantity?: number;
+            /**
+             * Realised Ytd Eur
+             * @default 0
+             */
+            realised_ytd_eur?: number;
+            /**
+             * Sales
+             * @default 0
+             */
+            sales?: number;
         };
         /**
          * AllocationBand
@@ -12140,6 +12411,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LinkableContext"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_account_return_reconciliation_api_airs_accounts__portefeuille__return_reconciliation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccountReconciliation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_account_transactions_api_airs_accounts__portefeuille__transactions_get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccountTransactions"];
                 };
             };
             /** @description Validation Error */

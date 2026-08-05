@@ -12,6 +12,8 @@ import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 import AllocationBandsModal from './portfolios/AllocationBandsModal';
+import AccountTransactions from './portfolios/AccountTransactions';
+import AccountTotalReturn from './portfolios/AccountTotalReturn';
 import { type Basket } from './portfolios/types';
 import { allocColor, bucketLabel, BUCKET_ORDER } from './portfolios/allocationColors';
 import {
@@ -912,10 +914,25 @@ export default function PortfolioOverviewPanel() {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={7} className="px-3 py-3 bg-inset">
+                        <td colSpan={7} className="px-3 py-3 bg-inset space-y-2">
                           <Holdings d={detail[r.dynamic_portefeuille]} i={isins[r.dynamic_portefeuille]}
                             portefeuille={r.dynamic_portefeuille} onOverride={refreshIsins}
                             canEdit={isAdmin} />
+                          {/* ⚠ WHAT THE BOOK DID, beneath what it holds. The positions answer
+                              "where is the money now"; only this answers "how did it get there" —
+                              a name that appeared mid-year, one sold out entirely, and a weight
+                              that drifted purely on price look identical without it.
+                              ⚠ ITS OWN COLLAPSED SECTION, AND ITS OWN LAZY FETCH: the first open
+                              of an account goes out to AIRS behind the shared headless session
+                              and takes seconds, so it must not ride on expanding the row. */}
+                          <AccountTransactions portefeuille={r.dynamic_portefeuille} />
+                          {/* ⚠ THE TWO PANELS ABOVE ARE HALVES OF ONE YEAR, AND THEY DISAGREE
+                              WITH THE ROW'S OWN YTD UNTIL BOTH ARE COUNTED. Measured across 39
+                              accounts, the held positions alone miss the book's own figure by
+                              more than 1pp on 23 of them; adding what was SOLD closes
+                              AITopSelectie to €0.04 on a €387k year. This is where that sum is
+                              done — and checked against AIRS rather than asserted. */}
+                          <AccountTotalReturn portefeuille={r.dynamic_portefeuille} />
                         </td>
                       </tr>
                     )}

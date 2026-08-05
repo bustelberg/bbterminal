@@ -114,6 +114,14 @@ export type AirsAccount = components['schemas']['AirsAccount'];
 export type AirsAccountDetail = components['schemas']['AirsAccountDetail'];
 export type AirsPortfolioOverview = components['schemas']['AirsPortfolioOverview'];
 export type AirsAccountIsins = components['schemas']['AirsAccountIsins'];
+/** One account's AIRS Transacties, as the SHEET — `columns` are DATA, not a contract. No column of
+ *  the TRANS report has been measured yet, so the backend imposes no schema on it; see
+ *  `backend/airs_transacties.py` for why guessing one is the failure to avoid. */
+export type AirsAccountTransactions = components['schemas']['AirsAccountTransactions'];
+/** A book's year built from its positions — held AND sold — set against AIRS's own figure.
+ *  ⚠ `realised_ytd_eur` of null is NOT zero: it means no Transacties sheet is cached, so the
+ *  realised leg is unknown and there is no total to show. */
+export type AirsAccountReconciliation = components['schemas']['AirsAccountReconciliation'];
 export type AirsHoldingSegment = components['schemas']['AirsHoldingSegment'];
 export type AirsHoldingIsin = components['schemas']['AirsHoldingIsin'];
 export type AirsAccountModelLink = components['schemas']['AirsAccountModelLink'];
