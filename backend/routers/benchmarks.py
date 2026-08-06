@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from deps import supabase
+from routers import _blend_cache
 from ingest.api_usage import track_api_call
 from ingest.constants import DATA_CUTOFF
 from ingest.prices import _fetch_price_from_api, _parse_price_series
@@ -847,7 +848,15 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
         if not r["done"]:
             # ⚠ AN ANSWER, NOT A NON-EVENT. "nothing to do" read as though the button had failed to
             # do anything; what it means is that every feed was already loaded.
+            #
+            # It is also why the cache is NOT dropped here: nothing was written, so every cached
+            # benchmark blend is still correct and throwing them away would cost ~25s of rebuild
+            # to reach the identical answer.
             return f"{name} — already up to date"
+        # ⚠ WE JUST CHANGED WHAT EVERY BENCHMARK BLEND WOULD COMPUTE. This company may be a
+        # constituent of any index, so the cached lines are stale from this moment; the writer
+        # clearing them is what makes the cache safe to keep for 30 minutes at a time.
+        _blend_cache.invalidate()
         span = _span(cid)
         return (f"{name} — loaded {span}" if span
                 else f"{name} — loaded {r['rows']:,} data points")
@@ -1026,6 +1035,11 @@ async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str =
         # is a `metric_data` write; a reader is being told how much arrived, not how our storage
         # counts it. `failed` is only mentioned when there were failures: a trailing "0 failed" on
         # every clean run is noise that teaches the eye to skip the part that matters.
+        # Same rule as the per-company job: drop the cached blends only if something was actually
+        # written. A fill with no work (the AEX case, which spends zero API calls) leaves every
+        # cached line correct, and clearing them would buy nothing but a rebuild.
+        if ok:
+            _blend_cache.invalidate()
         return (f"{label} — {ok} companies loaded"
                 + (f", {failed} failed" if failed else "")
                 + f", {rows:,} data points"

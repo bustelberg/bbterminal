@@ -17,6 +17,7 @@ import asyncio
 import contextvars
 import logging
 from collections import defaultdict
+from routers._blend_cache import cached_blend
 from routers._sse import sse_message as event
 import queue as _queue
 
@@ -514,6 +515,7 @@ async def ingest_fundamental_coverage(body: FundamentalIngestRequest):
 
 
 @router.post("/api/earnings/fundamental-coverage")
+@cached_blend("fundamental-coverage")
 async def fundamental_coverage(body: FundamentalCoverageRequest):
     """Which of a portfolio's holdings a fundamentals view can reach, BY WEIGHT, and why not.
 
@@ -555,6 +557,7 @@ BLEND_LABELS = {
 
 
 @router.post("/api/earnings/fundamental-blend")
+@cached_blend("fundamental-blend")
 async def fundamental_blend(body: FundamentalCoverageRequest):
     """A portfolio's fundamentals, blended — with the rule that each metric actually requires.
 
@@ -788,6 +791,7 @@ async def _blend_inputs(body: FundamentalCoverageRequest) -> tuple[list[dict], d
 
 
 @router.post("/api/earnings/fundamental-blend-metrics")
+@cached_blend("fundamental-blend-metrics")
 async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
     """The portfolio as ONE pseudo-company, in the exact shape `/by-isin/{isin}/metrics` returns.
 
@@ -1633,6 +1637,7 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
 
 
 @router.post("/api/earnings/margin-inputs")
+@cached_blend("margin-inputs")
 async def margin_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the FCF-SBC margin, per holding: Revenue, Free Cash Flow and Stock
     Based Compensation per fiscal year, in the company's own reporting currency (millions).
@@ -1703,6 +1708,7 @@ async def margin_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/debt-ratio-inputs")
+@cached_blend("debt-ratio-inputs")
 async def debt_ratio_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the LTD / (Total Assets − Goodwill) ratio, per holding: Long-Term
     Debt, Total Assets and Goodwill per fiscal year, in the company's own reporting currency
@@ -1779,6 +1785,7 @@ async def debt_ratio_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/cash-return-inputs")
+@cached_blend("cash-return-inputs")
 async def cash_return_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind Cash return on capital, per holding: Free Cash Flow, non-current
     (long-term) liabilities and total equity per fiscal year, in the company's own reporting
@@ -1867,6 +1874,7 @@ async def cash_return_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/interest-burden-inputs")
+@cached_blend("interest-burden-inputs")
 async def interest_burden_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the interest-burden ratio, per holding: Interest expense and
     Operating income per fiscal year, in the company's own reporting currency (millions).
@@ -1942,6 +1950,7 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/sbc-ocf-inputs")
+@cached_blend("sbc-ocf-inputs")
 async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the SBC/OCF ratio, per holding: Stock-Based Compensation and
     Operating Cash Flow per fiscal year, in the company's own reporting currency (millions).
@@ -2017,6 +2026,7 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/capex-margin-inputs")
+@cached_blend("capex-margin-inputs")
 async def capex_margin_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the Capex margin, per holding: Capex and Revenue per fiscal year, in
     the company's own reporting currency (millions).
@@ -2091,6 +2101,7 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/gross-margin-inputs")
+@cached_blend("gross-margin-inputs")
 async def gross_margin_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the Gross margin, per holding: Gross Profit and Revenue per fiscal
     year, in the company's own reporting currency (millions).
@@ -2175,6 +2186,7 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/cash-conversion-inputs")
+@cached_blend("cash-conversion-inputs")
 async def cash_conversion_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind Cash conversion, per holding: Free Cash Flow and Net Income per
     fiscal year, in the company's own reporting currency (millions).
@@ -2259,6 +2271,7 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/fcf-sbc-yield-inputs")
+@cached_blend("fcf-sbc-yield-inputs")
 async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the FCF-SBC yield, per holding: Free Cash Flow, Stock-Based
     Compensation and Market Cap per fiscal year, in the company's own reporting currency (millions).
@@ -2388,6 +2401,7 @@ async def growth_estimates_by_isin(isin: str, force: bool = False):
 
 
 @router.post("/api/earnings/dividend-yield-inputs")
+@cached_blend("dividend-yield-inputs")
 async def dividend_yield_inputs(body: FundamentalCoverageRequest):
     """The two base lines behind the dividend yield, per holding: Dividends per Share and the
     fiscal year-end share price, per fiscal year, in the company's own reporting currency.
