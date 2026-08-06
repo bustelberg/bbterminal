@@ -18,6 +18,7 @@ import contextvars
 import logging
 from collections import defaultdict
 from routers._blend_cache import cached_blend
+from routers._earnings_pg import rows_by_company_via_copy
 from routers._sse import sse_message as event
 import queue as _queue
 
@@ -1359,7 +1360,19 @@ def _codes_and_rule(metric: str, cadence: str) -> tuple[list[str] | None, str | 
 def _rows_by_company(company_ids: list[int], codes: list[str]) -> dict[int, list[dict]]:
     """{company_id: rows} for the named codes across MANY companies — the read the benchmark work
     is bounded by. See `_metrics_by_company` for the measurement and for why this is chunked AND
-    paged, ordered on a unique key, and advances by what came back."""
+    paged, ordered on a unique key, and advances by what came back.
+
+    ⚠ ONE COPY FIRST, THIS PAGER AS THE FALLBACK. The paged path below is correct but its cost is
+    ROUND TRIPS: PostgREST caps a response at 1,000 rows (a server setting, 1,000 on cloud), and
+    one metric across ACWI is ~16,300 rows — ~20 requests, times 27 metric reads across the tab's
+    cards. `rows_by_company_via_copy` streams the same rows over one connection and returns the
+    identical shape, or None when it cannot run (no `SUPABASE_DB_URL`, no psycopg, any error) —
+    so this is a pure speed-up with no second behaviour to keep in step.
+    """
+    fast = rows_by_company_via_copy(company_ids, codes, _BLEND_START)
+    if fast is not None:
+        return fast
+
     raw: dict[int, list[dict]] = defaultdict(list)
     for i in range(0, len(company_ids), IN_CHUNK_SIZE):
         chunk = company_ids[i:i + IN_CHUNK_SIZE]
