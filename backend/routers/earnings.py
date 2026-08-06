@@ -1274,11 +1274,15 @@ def _metric_by_year(company_id: int, metric: str, cadence: str = "annual") -> di
     return _latest_per_year(_metric_rows(company_id, metric))
 
 
-def _latest_per_year(rows: list[dict]) -> dict[str, float]:
-    """{fiscal year: the LATEST observation in it} — the annual bucketing rule, stated once.
+def _latest_per_year_dated(rows: list[dict]) -> dict[str, tuple[str, float]]:
+    """{fiscal year: (period-END date, value)} — the annual bucketing rule, stated once.
 
-    Shared by the per-company reader and the bulk one below, so a benchmark's series and a
-    holding's cannot come to disagree about which observation a year is.
+    ⚠ THE DATE IS KEPT BECAUSE A YEAR LABEL CANNOT BE CONVERTED. Anything that has to price a
+    fiscal year in another currency needs the date the period actually ENDED — a September filer's
+    "2025" is not 31 December 2025, and converting it at the calendar year-end applies an FX rate
+    from three months after the figure was struck. `_latest_per_year` is this with the date
+    dropped, so the two can never bucket a year differently (see
+    `_benchmark_fundamental_grid`, which is the caller that needs the date).
     """
     by: dict[str, tuple[str, float]] = {}
     for m in rows:
@@ -1289,7 +1293,16 @@ def _latest_per_year(rows: list[dict]) -> dict[str, float]:
         y = d[:4]
         if y not in by or d > by[y][0]:
             by[y] = (d, float(v))
-    return {y: v for y, (_d, v) in by.items()}
+    return by
+
+
+def _latest_per_year(rows: list[dict]) -> dict[str, float]:
+    """{fiscal year: the LATEST observation in it} — the annual bucketing rule, stated once.
+
+    Shared by the per-company reader and the bulk one below, so a benchmark's series and a
+    holding's cannot come to disagree about which observation a year is.
+    """
+    return {y: v for y, (_d, v) in _latest_per_year_dated(rows).items()}
 
 
 def _metrics_by_company(company_ids: list[int], metric: str,

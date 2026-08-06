@@ -1226,7 +1226,7 @@ class HoldingTiming(BaseModel):
     # ── The same three lines in percent, over ONE base: what the position held on 1 January was
     #    worth. Because it is one base the identity survives the division —
     #    `buy_hold_pct + timing_pp == actual_pct`. Null where nothing was held at the open.
-    #    ⚠ `actual_pct` is NOT the `On money invested` column: that is Modified Dietz over the
+    #    ⚠ `actual_pct` is NOT the `Money-weighted` column: that is Modified Dietz over the
     #    TIME-WEIGHTED average capital, a different denominator.
     open_value_eur: float | None = None
     buy_hold_pct: float | None = None
@@ -1249,12 +1249,12 @@ class HoldingTiming(BaseModel):
 @router.get("/api/airs/model-portfolios/{portfolio_id}/holding-timing",
             response_model=HoldingTiming)
 async def airs_holding_timing(portfolio_id: int, name: str):
-    """Why one holding's `On money invested` differs from its `Return` — trade by trade.
+    """Why one holding's `Money-weighted` return differs from its `Instrument return` — trade by trade.
 
-    `Return` erases your timing on purpose (it divides by AIRS's opening value restated to today's
-    quantity, so a share bought in June is still measured from January); `On money invested` is
-    driven by it. This decomposes the gap: what the position you held on 1 January would have made
-    untouched, and what each buy and sell added or cost against that.
+    `Instrument return` erases your timing on purpose (it divides by AIRS's opening value restated
+    to today's quantity, so a share bought in June is still measured from January); `Money-weighted`
+    is driven by it. This decomposes the gap: what the position you held on 1 January would have
+    made untouched, and what each buy and sell added or cost against that.
     """
     import asyncio  # noqa: PLC0415
 

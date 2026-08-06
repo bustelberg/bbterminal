@@ -628,9 +628,18 @@ type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution';
  * cell of it. Picking columns individually meant assembling that chain by hand and getting it
  * wrong — turning on Return's denominator without its numerator, say.
  *
- *     Return             Result ÷ Beginwaarde
- *     On money invested  Result ÷ Avg capital invested
+ *     Instrument return  Result ÷ Beginwaarde
+ *     Money-weighted     Result ÷ Avg capital invested
  *     Contribution       Result ÷ the book's opening capital
+ *
+ * ⚠ `Instrument return` IS NOT A TIME-WEIGHTED RETURN AND MUST NOT BE RELABELLED AS ONE. A TWR
+ * chains sub-period returns across every flow; this divides ONE period's Result by a Beginwaarde
+ * that prices TODAY's share count at its 1 January price. That restatement erases timing — which
+ * is the same INTENT as a TWR and is why the name is tempting — but it does so with a known bias a
+ * real TWR does not have: a mid-year buy is valued at January's price, overstating by
+ * `q_bought × (p_buy − p_open)` (measured on KLA: EUR 1,146 — see `backend/airs_timing.py`).
+ * `Money-weighted` beside it IS its technical name: Modified Dietz over average invested capital,
+ * `money_weighted_return_pct` on the wire.
  *
  * ⚠ ALL THREE SHARE `Result`, WHICH IS WHY SELECTION IS STORED AS GROUPS AND THE COLUMNS ARE
  * DERIVED AS THEIR UNION. Storing columns instead would mean deciding what happens to `Result`
@@ -638,10 +647,10 @@ type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution';
  * one this shape never has to ask.
  *
  * ⚠ NOTHING IS ON BY DEFAULT. The table opens at seven columns — Name, Via, Sector, Weight
- * (now), On money invested and Return, plus the row number — which fits a screen and answers
+ * (now), Money-weighted and Instrument return, plus the row number — which fits a screen and answers
  * what most visits are asking: what you hold, and what your money did with it.
  *
- * ⚠ TWO COLUMNS SIT OUTSIDE THE GROUPS AND ARE ALWAYS ON: `Return` and `On money invested`.
+ * ⚠ TWO COLUMNS SIT OUTSIDE THE GROUPS AND ARE ALWAYS ON: `Instrument return` and `Money-weighted`.
  * They are the two ANSWERS; every group here is a DERIVATION, and a derivation with its answer
  * hidden explains nothing. Ticking a group puts the chain on screen beside the figure it
  * produces, which is the only arrangement in which a reader can check one against the other.
@@ -649,7 +658,7 @@ type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution';
 const COLUMN_GROUPS = [
   {
     key: 'return',
-    label: 'How the Return is built',
+    label: 'How the Instrument return is built',
     hint: '(Value now − Beginwaarde) + Realised + Income = Result, ÷ Beginwaarde',
     // ⚠ `Return` itself is NOT here: it is always on. This group supplies the chain BEHIND it, so
     // ticking it puts the whole derivation on screen beside the answer already showing.
@@ -657,7 +666,7 @@ const COLUMN_GROUPS = [
   },
   {
     key: 'onmoney',
-    label: 'How On money invested is built',
+    label: 'How Money-weighted is built',
     hint: 'Result ÷ Avg capital invested',
     // ⚠ `moneyweighted` itself is NOT here — like `Return`, that column is always on, and this
     // group supplies the chain BEHIND it. Listing it would put a key in the union that nothing
@@ -1078,13 +1087,13 @@ ${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).le
           is blank for a book-level reason — and `realised.note` names which of the three it is
           (not paired · read failed · transactions never fetched, the one the reader can FIX, with
           the steps). Measured on AzieTopSelectie: a whole book of OUTRIGHT holdings (Tencent,
-          Alibaba, Samsung) showed a blank "On money invested" and the per-cell tooltip claimed
+          Alibaba, Samsung) showed a blank "Money-weighted" and the per-cell tooltip claimed
           they were reached through a certificate — a wrapper that does not exist.
           ⚠ RENDER THE AUTHORED NOTE, NEVER A LOCAL GUESS. Re-deriving the cause from flags here
           would be a second source of truth for one fact, and it is the copy that goes stale. */}
       {realised && !realised.available && realised.note && (
         <p className="mb-2 text-[11px] text-warn-500">
-          “On money invested” is blank for every row here — {realised.note}
+          “Money-weighted” is blank for every row here — {realised.note}
         </p>
       )}
       {/* ⚠⚠ `overflow-auto` + a HEIGHT, because `sticky` needs a scrollport with room to scroll.
@@ -1239,16 +1248,18 @@ ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contributi
               </th>
 )}
               <th className="text-right w-32 py-2 font-medium">
-                On money invested
+                Money-weighted
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what="What this position returned on the money actually put into it."
+                  what={'What this position returned on the money actually put into it — a '
+                    + 'money-weighted return (Modified Dietz), so WHEN you bought and sold is '
+                    + 'part of the answer.'}
                   note="result ÷ average invested capital"
                   how={`Result ÷ Avg capital invested
 
 ${eur0n(grand.result)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`} />
               </th>
-              <th className={`text-right w-28 pr-4 ${th}`} onClick={() => click('return')}>
-                Return{caret('return')}
+              <th className={`text-right w-32 pr-4 ${th}`} onClick={() => click('return')}>
+                Instrument return{caret('return')}
                 {/* ⚠ `airs_volk`, NOT `yfinance`. This header claimed yfinance while the rows
                     beneath it are AIRS's own valuation — each row's card names its actual source
                     correctly, so the column header disagreed with almost every cell under it. The
@@ -1261,8 +1272,10 @@ ${eur0n(grand.result)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`} />
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what={'What this instrument itself returned in euros since '
                     + `${anchor ?? 'the year opened'} — independent of how much of it the book `
-                    + 'holds.'}
+                    + 'holds, and independent of when you traded it.'}
                   how={`(Huidige waarde + net income) ÷ Beginwaarde − 1, per row
+
+Beginwaarde prices TODAY’s share count at its 1 January price, which is what erases your timing — so this is NOT a chained time-weighted return: a share bought in June is still measured from January. Money-weighted, beside it, is the same Result over the capital actually tied up.
 
 a row marked ƒ is priced off our own EUR series instead; the class rows below divide their own Result by their own Beginwaarde`} />
               </th>
@@ -2163,13 +2176,20 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
                       <SleeveTile bucket={selected} slices={data.allocation} />
                     )}
                     {/* Attribution (Brinson) is an EQUITY analysis — offered ONLY on the Stocks
-                        sleeve, never on a bond/cash/fund sleeve or the whole-portfolio view. Same
-                        box size as the return tile (items-stretch + centred label). */}
-                    {selected === 'Equity' && (
+                        sleeve, never on a bond/cash/fund sleeve or the whole-portfolio view.
+
+                        ⚠ ITS HEIGHT IS ITS OWN, NOT BORROWED FROM A SIBLING. This used to carry no
+                        vertical padding at all and took its size from `items-stretch` against the
+                        `SleeveTile` beside it — which is exactly the tile the line above removes on
+                        Stocks (2026-08-05). On the ONE sleeve this button renders on, its only
+                        source of height had gone, so it collapsed to a squat text-xs strip. Box
+                        metrics are copied from `SleeveTile` and the min-height stands in for the
+                        two lines of content that tile has and a one-word button does not. */}
+                    {selected === EQUITY_BUCKET && (
                       <button type="button"
                         onClick={() => { setBucket(null); setWhy(why === 'ytd' ? null : 'ytd'); }}
                         title="Why? — break the excess into allocation vs selection (Brinson-Fachler attribution)."
-                        className={`cursor-pointer rounded-lg border px-4 flex items-center justify-center text-xs font-medium transition-colors ${
+                        className={`cursor-pointer rounded-lg border px-4 py-3 min-w-[10rem] min-h-[4.25rem] flex items-center justify-center text-xs font-medium transition-colors ${
                           why === 'ytd'
                             ? 'bg-accent-600 text-white border-transparent'
                             : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300 hover:border-accent-500/50'}`}>

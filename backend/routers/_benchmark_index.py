@@ -52,12 +52,26 @@ _CLOSE_METRIC = "close_price"
 _CLOSE_SOURCE = "gurufocus"
 
 
-def _members(label: str) -> list[dict]:
+def _members(label: str, *, require_market_cap: bool = True) -> list[dict]:
     """The index's companies, deduped to ONE ROW PER COMPANY (see the module header).
 
     The price currency comes from the EXCHANGE, not from `market_cap_currency` — they are
     different fields and can disagree, and it is the exchange's currency the close is
     quoted in.
+
+    ⚠ `require_market_cap=False` KEEPS THE CONSTITUENTS THIS OTHERWISE DELETES, and it exists for
+    a caller that LISTS the index rather than weighting it. The default drops any company with no
+    stored `market_cap_eur`, which is right here — the index is cap-weighted, so a member with no
+    cap cannot be given a weight and silently taking a share of the others' would be worse. But
+    "cannot be weighted" is not "is not a constituent": on the AEX the three it removes are
+    **Shell, Unilever and RELX** (LSE listings GuruFocus does not cover), so a table built on the
+    default shows 22 rows and calls it the AEX. `_benchmark_fundamental_grid` passes False to list
+    all 25 and mark the three as unpriceable, which is the honest form for a grid of figures.
+
+    ⚠ THE DEDUPE SURVIVES EITHER WAY. It keeps the highest-cap row per company NAME, and a missing
+    cap reads as 0 there — so an unfiltered call still folds share classes (GOOGL+GOOG are one
+    company) and still prefers the row that has a cap. Removing the filter cannot resurrect a
+    duplicate.
     """
     uni = (supabase.table("universe").select("universe_id")
            .eq("label", label).limit(1).execute().data or [])
@@ -73,12 +87,13 @@ def _members(label: str) -> list[dict]:
 
     rows: list[dict] = []
     for i in range(0, len(ids), IN_CHUNK_SIZE):
-        rows += (supabase.table("company")
-                 .select("company_id,company_name,gurufocus_ticker,isin,market_cap_eur,"
-                         "exchange_id")
-                 .in_("company_id", ids[i:i + IN_CHUNK_SIZE])
-                 .is_("delisted_at", "null").is_("out_of_scope_at", "null")
-                 .not_.is_("market_cap_eur", "null").execute().data or [])
+        q = (supabase.table("company")
+             .select("company_id,company_name,gurufocus_ticker,isin,market_cap_eur,exchange_id")
+             .in_("company_id", ids[i:i + IN_CHUNK_SIZE])
+             .is_("delisted_at", "null").is_("out_of_scope_at", "null"))
+        if require_market_cap:
+            q = q.not_.is_("market_cap_eur", "null")
+        rows += (q.execute().data or [])
     for r in rows:
         r["currency"] = ccy_by_exch.get(r.get("exchange_id"))
 

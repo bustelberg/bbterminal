@@ -98,6 +98,14 @@ export type ReconstructedIndex = components['schemas']['ReconstructedIndex'];
 /** Per-constituent Long Equity measures for a benchmark — a second, slower call than the index
  *  itself, so the price table renders first and these fill in. */
 export type ConstituentFundamentals = components['schemas']['ConstituentFundamentals'];
+/** The VALUES behind `ConstituentFundamentals`' spans: every constituent x every line x every
+ *  period, in EUR, with the period's own market cap so a cross-section can be weighted.
+ *  ⚠ `cadence: 'quarterly'` is TRAILING TWELVE MONTHS, not the raw quarter — both slider axes are
+ *  12-month figures, so moving the quarter changes the as-of date and never the unit. */
+export type FundamentalGrid = components['schemas']['FundamentalGrid'];
+export type FundamentalGridColumn = components['schemas']['FundamentalGridColumn'];
+export type FundamentalGridRow = components['schemas']['FundamentalGridRow'];
+export type FundamentalGridPeriod = components['schemas']['FundamentalGridPeriod'];
 export type IndexMember = components['schemas']['IndexMember'];
 
 /** The four soundness charts — price vs fair value, yield, ROIC vs WACC, safety.

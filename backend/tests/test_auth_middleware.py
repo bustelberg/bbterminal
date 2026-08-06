@@ -144,7 +144,10 @@ class TestManagementDashboardForUsers:
 
     def test_the_page_s_reads_are_allowed(self, monkeypatch):
         for path in ("/api/airs/portfolios/overview",
-                     "/api/airs/accounts/BUS_X/holdings",
+                     # ⚠ `/accounts/{p}/isins`, NOT `/holdings` — see
+                     # TestExpandingAnAccountIsAdminOnly. This list said `/holdings` until
+                     # 2026-08-06, which is exactly the access the Overview row now withholds.
+                     "/api/airs/accounts/BUS_X/isins",
                      "/api/airs/model-portfolios/correlations",
                      "/api/airs/model-portfolios/7/analysis",
                      "/api/asset-pipeline/fundamentals/isin/US0378331005",
@@ -198,6 +201,53 @@ class TestManagementDashboardForUsers:
     def test_these_reads_still_need_a_token(self, monkeypatch):
         assert _run(monkeypatch, "GET", "/api/airs/portfolios/overview", None) == (401, False)
         assert _run(monkeypatch, "POST", "/api/airs/basket/analysis", None) == (401, False)
+
+
+class TestExpandingAnAccountIsAdminOnly:
+    """Opening a row in the /management-dashboard Overview is admin-only (2026-08-06).
+
+    The summary table stays user-readable — what is withheld is the book behind a row: its
+    positions and their EUR values, its mutations, the reconciliation, the link picker.
+
+    ⚠ THESE ARE THE RULE, NOT THE HIDDEN `<tr>`. The frontend drops the row's click handler for a
+    non-admin, which is presentation; every one of these URLs is still sitting in a bundle that
+    user downloads. If this class goes green while the panel is restricted, the restriction is
+    real; if only the panel changes, it is a suggestion."""
+
+    EXPANDED = ("/api/airs/accounts/BUS_X/holdings",
+                "/api/airs/accounts/BUS_X/transactions",
+                "/api/airs/accounts/BUS_X/return-reconciliation",
+                "/api/airs/accounts/BUS_X/linkable")
+
+    def test_every_sub_resource_the_expanded_row_opens_is_denied(self, monkeypatch):
+        for path in self.EXPANDED:
+            assert _run(monkeypatch, "GET", path, "user") == (403, False), path
+
+    def test_an_admin_still_gets_all_of_them(self, monkeypatch):
+        for path in self.EXPANDED:
+            assert _run(monkeypatch, "GET", path, "admin") == (200, True), path
+
+    def test_isins_stays_readable_because_analyse_shares_it(self, monkeypatch):
+        """⚠ THE ONE THAT MUST NOT BE SWEPT UP, and the reason this is a pattern list rather than
+        an `/api/airs/accounts/` prefix. A non-admin keeps the Analyse button, and for a book with
+        no paired model portfolio `/isins` is the ONLY way it gets a basket to analyse
+        (`openModal` in PortfolioOverviewPanel). A prefix would take that away silently."""
+        assert _run(monkeypatch, "GET", "/api/airs/accounts/BUS_X/isins", "user") == (200, True)
+
+    def test_the_account_name_may_contain_anything_url_safe(self, monkeypatch):
+        """⚠ AIRS's `Portefeuille` is a 24-char legacy code with underscores and digits, and it
+        arrives percent-encoded. A pattern anchored on a narrower character class would match the
+        tidy test id and miss the real ones — i.e. pass here and allow in production."""
+        for pid in ("BUS_WTS_StMerken_Dyn", "BUS_BM_AAN_kw_USD_2026_d", "MoTopSelectie_FX", "7"):
+            assert _run(monkeypatch, "GET", f"/api/airs/accounts/{pid}/holdings",
+                        "user") == (403, False), pid
+
+    def test_the_deny_does_not_leak_onto_neighbouring_paths(self, monkeypatch):
+        """The patterns are anchored at both ends: they must not catch the accounts LIST, nor a
+        deeper path that merely starts the same way."""
+        assert _run(monkeypatch, "GET", "/api/airs/accounts", "user") == (200, True)
+        assert _run(monkeypatch, "GET", "/api/airs/model-portfolios/7/positions",
+                    "user") == (200, True)
 
 
 class TestH1_EarningsRefreshNeedsAuth:

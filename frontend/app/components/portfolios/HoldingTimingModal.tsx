@@ -10,9 +10,9 @@ import { TL, buildTimeline, shortDay } from './timingTimeline';
 /**
  * WHY THE TRADING MATTERED — one holding's year, split into "doing nothing" and "each decision".
  *
- * ⚠ IT ANSWERS THE QUESTION THE TWO RETURN COLUMNS RAISE AND CANNOT SETTLE. `Return` is what the
- * INSTRUMENT did (AIRS's opening value restated to today's quantity, so timing is erased on
- * purpose); `On money invested` is what YOUR money did, and the gap between them IS the trading.
+ * ⚠ IT ANSWERS THE QUESTION THE TWO RETURN COLUMNS RAISE AND CANNOT SETTLE. `Instrument return` is
+ * what the INSTRUMENT did (AIRS's opening value restated to today's quantity, so timing is erased
+ * on purpose); `Money-weighted` is what YOUR money did, and the gap between them IS the trading.
  * Neither says which trade, or by how much. This does:
  *
  *     buy & hold        what the position you held on 1 January would have made, untouched

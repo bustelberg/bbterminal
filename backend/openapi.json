@@ -5590,6 +5590,276 @@
         "title": "FundamentalCoverageRequest",
         "type": "object"
       },
+      "FundamentalGrid": {
+        "description": "Every constituent x every line x every period, in EUR.\n\n\u26a0 `membership_as_of` IS `today` AND THAT IS A REAL LIMIT, NOT A FORMALITY: scrubbing to 2016\nshows 2016's figures for the companies in the index NOW. Surfaced so the grid can say so.",
+        "properties": {
+          "by_period": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FundamentalGridPeriod"
+            },
+            "title": "By Period",
+            "type": "object"
+          },
+          "cadence": {
+            "title": "Cadence",
+            "type": "string"
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/FundamentalGridColumn"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "covered": {
+            "title": "Covered",
+            "type": "integer"
+          },
+          "enrolled_members": {
+            "default": 0,
+            "title": "Enrolled Members",
+            "type": "integer"
+          },
+          "fillable": {
+            "default": 0,
+            "title": "Fillable",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "members": {
+            "title": "Members",
+            "type": "integer"
+          },
+          "membership_as_of": {
+            "title": "Membership As Of",
+            "type": "string"
+          },
+          "min_coverage_pct": {
+            "title": "Min Coverage Pct",
+            "type": "number"
+          },
+          "periods": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Periods",
+            "type": "array"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/FundamentalGridRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "weight_cap_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Cap Pct"
+          }
+        },
+        "required": [
+          "label",
+          "cadence",
+          "periods",
+          "columns",
+          "members",
+          "covered",
+          "rows",
+          "by_period",
+          "membership_as_of",
+          "min_coverage_pct"
+        ],
+        "title": "FundamentalGrid",
+        "type": "object"
+      },
+      "FundamentalGridColumn": {
+        "description": "One line, and what an INDEX-LEVEL total may do with it. `agg` is `sum` for a flow or a\nsnapshot (revenue, market cap) and `weighted_mean` for a rate (ROIC %) \u2014 summing percentages\nacross 500 companies produces a number in the thousands that still renders as a percent.\n\n`unit` says whether the figure is currency at all: `millions` / `per_share` are EUR-converted,\n`shares` (a count) and `percent` (already a rate) are NOT \u2014 see the \u26a0\u26a0 in\n`_benchmark_fundamental_grid`, where converting them produced a plausible wrong share count.",
+        "properties": {
+          "agg": {
+            "title": "Agg",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "unit",
+          "agg"
+        ],
+        "title": "FundamentalGridColumn",
+        "type": "object"
+      },
+      "FundamentalGridPeriod": {
+        "description": "What the index looked like in ONE period. `weights_usable` is the gate the table reads\nbefore showing any weight or total \u2014 see `_benchmark_fundamental_grid.MIN_COVERAGE_PCT`.",
+        "properties": {
+          "cap_covered_pct": {
+            "title": "Cap Covered Pct",
+            "type": "number"
+          },
+          "covered": {
+            "title": "Covered",
+            "type": "integer"
+          },
+          "covered_pct": {
+            "title": "Covered Pct",
+            "type": "number"
+          },
+          "members": {
+            "title": "Members",
+            "type": "integer"
+          },
+          "total_market_cap_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Market Cap Eur"
+          },
+          "weights_usable": {
+            "title": "Weights Usable",
+            "type": "boolean"
+          },
+          "with_market_cap": {
+            "title": "With Market Cap",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "covered",
+          "members",
+          "covered_pct",
+          "with_market_cap",
+          "cap_covered_pct",
+          "weights_usable"
+        ],
+        "title": "FundamentalGridPeriod",
+        "type": "object"
+      },
+      "FundamentalGridRow": {
+        "description": "One constituent. `v` is EUR (what the grid shows), `n` the figure as REPORTED, `fx` the rate\napplied \u2014 shipped together so the conversion can be checked rather than trusted.",
+        "properties": {
+          "company_id": {
+            "title": "Company Id",
+            "type": "integer"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "fx": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Fx",
+            "type": "object"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "n": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "type": "object"
+            },
+            "title": "N",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "v": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "type": "object"
+            },
+            "title": "V",
+            "type": "object"
+          }
+        },
+        "required": [
+          "company_id",
+          "v",
+          "n",
+          "fx"
+        ],
+        "title": "FundamentalGridRow",
+        "type": "object"
+      },
       "FundamentalIngestRequest": {
         "description": "One uncovered holding to try to ingest fundamentals for. `name` seeds the `company` row\nwhen one must be created (a `no_company` holding); `force` re-asks GuruFocus past the cache.",
         "properties": {
@@ -6685,6 +6955,100 @@
           "csv_isins_not_in_universe"
         ],
         "title": "IsinCompareResponse",
+        "type": "object"
+      },
+      "JobStarted": {
+        "description": "Just the handle. Everything else arrives on `/api/jobs/{id}/stream`.",
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "label"
+        ],
+        "title": "JobStarted",
+        "type": "object"
+      },
+      "JobView": {
+        "properties": {
+          "api_calls": {
+            "default": 0,
+            "title": "Api Calls",
+            "type": "integer"
+          },
+          "cancel_requested": {
+            "default": false,
+            "title": "Cancel Requested",
+            "type": "boolean"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          },
+          "done": {
+            "default": 0,
+            "title": "Done",
+            "type": "integer"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "status",
+          "created_at"
+        ],
+        "title": "JobView",
         "type": "object"
       },
       "LatestCloseResponse": {
@@ -14384,7 +14748,7 @@
     },
     "/api/airs/model-portfolios/{portfolio_id}/holding-timing": {
       "get": {
-        "description": "Why one holding's `On money invested` differs from its `Return` \u2014 trade by trade.\n\n`Return` erases your timing on purpose (it divides by AIRS's opening value restated to today's\nquantity, so a share bought in June is still measured from January); `On money invested` is\ndriven by it. This decomposes the gap: what the position you held on 1 January would have made\nuntouched, and what each buy and sell added or cost against that.",
+        "description": "Why one holding's `Money-weighted` return differs from its `Instrument return` \u2014 trade by trade.\n\n`Instrument return` erases your timing on purpose (it divides by AIRS's opening value restated\nto today's quantity, so a share bought in June is still measured from January); `Money-weighted`\nis driven by it. This decomposes the gap: what the position you held on 1 January would have\nmade untouched, and what each buy and sell added or cost against that.",
         "operationId": "airs_holding_timing_api_airs_model_portfolios__portfolio_id__holding_timing_get",
         "parameters": [
           {
@@ -15071,7 +15435,7 @@
     },
     "/api/airs/portfolios/{portefeuille}/refresh": {
       "post": {
-        "description": "Re-scan ONE portfolio's AIRS reports \u2014 and the books it is BUILT FROM.\n\n\u26a0 A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another\nstrategy, and everything shown through one \u2014 the looked-through holdings, their returns, the\nattribution \u2014 is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads\nthe twelve lines it stores and leaves the instruments behind them as stale as they were.\nMeasured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.\n\n\u26a0 SO THIS IS NOT ALWAYS \"a few seconds\" ANY MORE \u2014 it is four downloads per account in the\nchain. Each one's outcome comes back in `cascaded` rather than being folded into a single\nstatus, because a parent refreshed against a child that failed is not fresh. `cascade=false`\nrefreshes only the named account.\n\nSerialized against the full scan via the module lock; returns `{status: busy}` if a fleet\nrefresh is in flight.",
+        "description": "Re-scan ONE portfolio's AIRS reports \u2014 and the books it is BUILT FROM.\n\n\u26a0 A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another\nstrategy, and everything shown through one \u2014 the looked-through holdings, their returns, the\nattribution \u2014 is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads\nthe twelve lines it stores and leaves the instruments behind them as stale as they were.\nMeasured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.\n\n\u26a0 SO THIS IS NOT ALWAYS \"a few seconds\" ANY MORE \u2014 it is FIVE downloads per account in the\nchain (Rendement, Vermogensoverzicht, Mutaties, Transacties, Model). Each one's outcome comes back in `cascaded` rather than being folded into a single\nstatus, because a parent refreshed against a child that failed is not fresh. `cascade=false`\nrefreshes only the named account.\n\nSerialized against the full scan via the module lock; returns `{status: busy}` if a fleet\nrefresh is in flight.",
         "operationId": "airs_portfolio_refresh_api_airs_portfolios__portefeuille__refresh_post",
         "parameters": [
           {
@@ -18225,6 +18589,69 @@
         ]
       }
     },
+    "/api/benchmarks/company/{company_id}/fundamentals/ingest/job": {
+      "post": {
+        "description": "The per-row Fetch button \u2014 same work as the by-ISIN endpoint above, as a cancellable JOB.\n\n\u26a0\u26a0 KEYED ON `company_id`, AND IT USED TO BE KEYED ON ISIN \u2014 WHICH SILENTLY DISABLED THE BUTTON\nFOR 12 OF THE S&P's 501 CONSTITUENTS. The by-ISIN form exists because in the OLD constituent\ntable `company_id` was secretly an `analysis_id` (the price machinery keys on that name), so an\nid off the row 404'd against `company`. That warning is real and still on the endpoint above \u2014\nit just does not apply here: the fundamentals grid is built from `_members()`, which IS the\ncompany world, so its `company_id` is genuine.\n\nKeeping the ISIN detour cost reachability for no safety. Assurant (`company_id` 6414, NYSE,\n`AIZ`) has every field an ingest needs and no ISIN, so its Fetch button was greyed out with a\ntooltip about an identifier the fetch does not actually require. `company.isin` is nullable and\npopulated opportunistically; `company_id` is the primary key.\n\n\u26a0\u26a0 `feeds=\"statements\"` IS ONE API CALL AND FILLS THE WHOLE GRID. Every one of the nineteen\ncolumns the fundamentals grid draws \u2014 market cap included, as\n`annuals__Valuation and Quality__Market Cap` \u2014 comes out of `fetch_financials`. The other two\nfeeds (analyst estimates, indicators) contribute NOTHING to that table; they supply the Long\nEquity modal's forward EPS and indicator series.\n\nSo the default `all` spends three calls of which two change nothing on the grid. That is the\nright default for \"load this company properly\", and the wrong one for the triage pass this\nparameter exists for: read the caps cheaply, then spend the other two calls only on the\nconstituents whose weight makes them worth it.\n\n\u26a0 THERE IS NO \"MARKET CAP ONLY\" AND THERE CANNOT BE. GuruFocus returns one financials blob;\nthe cap arrives inside it along with revenue, equity and ROIC. `statements` is the smallest\nunit that exists \u2014 asking for less would mean discarding data we have already paid for.\n\n\u26a0 WHY A JOB FOR THREE API CALLS. Not for the progress bar: for the CANCEL, and for the fact\nthat several rows can now be fetched at once. The plain endpoint holds one HTTP request open\nfor as long as GuruFocus takes and gives the caller no way to stop it \u2014 abort the fetch and the\nserver keeps going, having already decided to spend the quota. Here the three feeds are\nseparated by a `should_stop` check, so Cancel takes effect at the next feed boundary and\nwhatever was already written stays written (`needs()` will pick the rest up next time).\n\n\u26a0 THE OLD ENDPOINT STAYS. It is what `scripts/` and any external caller use, and it is the\nhonest shape for a caller that wants one blocking answer. This is the same `ingest_company`\nunderneath \u2014 \"ingest\" must not come to mean two different things depending on which button\nyou pressed.",
+        "operationId": "ingest_company_fundamentals_job_api_benchmarks_company__company_id__fundamentals_ingest_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feeds",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "title": "Feeds",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Company Fundamentals Job",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
     "/api/benchmarks/index/{label}": {
       "delete": {
         "description": "Delete the LIVE universe behind one reconstructed benchmark, so Fill can rebuild it.\n\nThe inverse of Fill's first step, for watching the whole path run: the benchmark drops to 0\nmembers and the next Fill re-runs the label's template, re-enqueues what needs resolving and\nre-caps what is already priced.\n\n\u26a0 MEMBERSHIP ONLY. Prices, the asset grid and market caps are shared with every other surface\nand expensive to rebuild \u2014 see `reset_benchmark`, which also refuses a frozen snapshot, a\nuniverse with derived children, and any label Fill has no template to rebuild (SP500).\n\n422 carries the refusal's reason; it is always a sentence about this label, not a generic error.",
@@ -18378,10 +18805,63 @@
         ]
       }
     },
-    "/api/benchmarks/index/{label}/fundamentals/ingest": {
+    "/api/benchmarks/index/{label}/fundamentals/grid": {
       "get": {
-        "description": "Backfill every constituent that is missing a feed \u2014 SSE, one frame per company.\n\n\u26a0 SSE, NOT A REQUEST THAT RETURNS AT THE END. This is ~3 GuruFocus calls per company over\nhundreds of companies; a silent five-minute POST is indistinguishable from a hung one, and the\noperator needs to see WHICH company it is on when it stalls. Same shape as the AIRS scan.\n\n\u26a0 IT REPORTS THE QUOTA BEFORE IT STARTS AND THE SKIPS AS IT GOES. A region at zero means every\nfurther call is wasted, and a company on an unsubscribed exchange is a refusal with a reason \u2014\nnever a failure.\n\n`limit` spends the budget in tranches; 0 is everything that needs it.",
-        "operationId": "ingest_index_fundamentals_api_benchmarks_index__label__fundamentals_ingest_get",
+        "description": "Every constituent's fundamentals for every period, with the cap that weights each one.\n\nThe VALUES behind `/fundamentals`, which reports only which periods we hold. Rows are\ncompanies, columns are lines, and the period is the slider \u2014 because weighting is\ncross-sectional: FY2021's weights need every constituent's FY2021 cap at once.\n\n`cadence` is `annual` (fiscal years) or `quarterly`, which \u2014 as everywhere else in this app \u2014\nmeans **trailing twelve months**, not the raw quarter. That keeps both slider axes on one\n12-month basis, so moving the quarter changes the as-of date and never the unit.\n\nReturned whole, not per period: it is one bulk read per line over data one GuruFocus call\nalready brought, and the reader's whole interaction is dragging a slider.",
+        "operationId": "benchmark_fundamental_grid_api_benchmarks_index__label__fundamentals_grid_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cadence",
+            "required": false,
+            "schema": {
+              "default": "annual",
+              "title": "Cadence",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundamentalGrid"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Benchmark Fundamental Grid",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/benchmarks/index/{label}/fundamentals/ingest/job": {
+      "post": {
+        "description": "Backfill every constituent missing the data this page shows, as a cancellable JOB.\n\n\u26a0 IT REPLACED AN SSE ENDPOINT RATHER THAN JOINING ONE. The old\n`GET \u2026/fundamentals/ingest` streamed the same work to a bespoke progress box in the panel, and\nhad the defect every such endpoint here had: the client was not attached to the work. Navigate\naway and the box vanished while the thread carried on spending quota \u2014 on this run, hundreds of\ncalls with no way to stop them. Keeping both would have left two transports for one fill and\ntwo places for \"ingest\" to come to mean different things.\n\n\u26a0 CANCEL LANDS BETWEEN COMPANIES, NOT MID-COMPANY. `_one` checks first thing, so a press stops\neverything still queued at once while the eight already in flight finish the company they are\non. That is the boundary where the database is consistent \u2014 and on a 206-company run it is the\ndifference between stopping now and spending the rest of the index.\n\n\u26a0 IT REPORTS THE QUOTA BEFORE IT STARTS AND THE SKIPS AS IT GOES. A region at zero means every\nfurther call is wasted, and a company on an unsubscribed exchange is a refusal with a reason \u2014\nnever a failure.\n\n\u26a0\u26a0 `feeds=\"statements\"` (THE DEFAULT) NARROWS **TWO** THINGS, AND NARROWING ONLY ONE IS A BUG.\nA fill makes two independent decisions: WHO is in the work list (`needs`, which returns anyone\nmissing any of three sentinels) and WHICH feeds run for each. Narrowing only the second leaves\ncompanies selected because they lack estimates or indicators \u2014 for whom the narrowed action\nruns nothing at all. Measured on SP500: 216 companies need a feed, 206 need statements, so 10\nwould have been iterated, spent zero calls, and reported \"nothing to do\", which reads as a\nbroken button rather than as a deliberate scope.\n\nSo the selection narrows too, to `need_fin`. Measured cost: **637 feed-calls over 216\ncompanies \u2192 206 over 206**, a 68% saving for an identical result on this page, because all\nnineteen columns of the fundamentals grid come from the statements feed alone.\n\nWhat is given up: nothing bulk-loads analyst estimates or indicators any more. They are still\nreachable per company where they are actually drawn \u2014 `/api/earnings/{cid}/refresh` takes a\n`source` \u2014 and `feeds=all` here restores the old behaviour for a deliberate full load.\n\n`limit` spends the budget in tranches; 0 is everything that needs it.",
+        "operationId": "ingest_index_fundamentals_job_api_benchmarks_index__label__fundamentals_ingest_job_post",
         "parameters": [
           {
             "in": "path",
@@ -18401,13 +18881,25 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "feeds",
+            "required": false,
+            "schema": {
+              "default": "statements",
+              "title": "Feeds",
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/JobStarted"
+                }
               }
             },
             "description": "Successful Response"
@@ -18423,7 +18915,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Ingest Index Fundamentals",
+        "summary": "Ingest Index Fundamentals Job",
         "tags": [
           "benchmarks"
         ]
@@ -22595,6 +23087,117 @@
         "tags": [
           "universe"
         ]
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "description": "Running jobs plus recently finished ones (15 minutes).\n\nThis is what a page reload re-attaches to: without it, a job started before a refresh keeps\nrunning with nothing on screen to say so.",
+        "operationId": "list_jobs_api_jobs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/JobView"
+                  },
+                  "title": "Response List Jobs Api Jobs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Jobs"
+      }
+    },
+    "/api/jobs/{job_id}/cancel": {
+      "post": {
+        "description": "Ask a job to stop at its next safe point.\n\n\u26a0 200 WITH `cancel_requested`, NOT A PROMISE THAT IT STOPPED. The worker halts between units of\nwork \u2014 between two GuruFocus feeds \u2014 so a job mid-feed keeps going for a few seconds. Reporting\nit as already cancelled would make the row disappear while its API calls were still in flight.",
+        "operationId": "cancel_job_api_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Job"
+      }
+    },
+    "/api/jobs/{job_id}/stream": {
+      "get": {
+        "description": "SSE: every event after `after`, then the live tail, then close.\n\n\u26a0 `after` IS WHAT MAKES THIS RE-ATTACHABLE. A reconnecting client passes the last sequence it\nsaw and gets the gap, so a reload \u2014 or a second tab \u2014 shows the run's history rather than\njoining mid-sentence with no idea what came before.\n\n\u26a0 A DISCONNECT DOES NOT CANCEL. Closing this stream stops the reporting and nothing else; see\nthe module docstring in `jobs.py`. Cancel is an explicit POST.",
+        "operationId": "stream_job_api_jobs__job_id__stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Job"
       }
     },
     "/api/leonteq/equities": {

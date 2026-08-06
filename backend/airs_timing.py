@@ -1,11 +1,15 @@
 """Did the trading help? — one position's year, split into "doing nothing" and "each decision".
 
 WHY THIS EXISTS
-    The holdings table shows two returns for a position and they disagree: `Return` is what the
-    INSTRUMENT did (AIRS's Beginwaarde restated to today's quantity, so your timing is erased on
-    purpose), and `On money invested` is what YOUR money did (Modified Dietz, so timing is the
-    whole point). Measured, KLA-Tencor is +54.37% as an instrument and +56.67% on the money. The
-    gap says trading helped, and says nothing about WHICH trade or by how much.
+    The holdings table shows two returns for a position and they disagree: `Instrument return` is
+    what the INSTRUMENT did (AIRS's Beginwaarde restated to today's quantity, so your timing is
+    erased on purpose), and `Money-weighted` is what YOUR money did (Modified Dietz, so timing is
+    the whole point). Measured, KLA-Tencor is +54.37% as an instrument and +56.67% on the money.
+    The gap says trading helped, and says nothing about WHICH trade or by how much.
+
+    ⚠ `Instrument return` IS DELIBERATELY NOT CALLED A TIME-WEIGHTED RETURN. It erases timing with
+    the same INTENT as a TWR, but it does not chain sub-period returns — it restates the opening
+    quantity, which carries the bias the next warning describes. A true TWR does not have it.
 
 THE DECOMPOSITION, AND IT IS EXACT
 
@@ -113,7 +117,7 @@ class TimingAnalysis:
     open_value_eur: float | None = None
     buy_hold_pct: float | None = None
     timing_pp: float | None = None
-    # ⚠ THE MONEY'S RETURN ON THE CAPITAL IT STARTED WITH — it is NOT the `On money invested`
+    # ⚠ THE MONEY'S RETURN ON THE CAPITAL IT STARTED WITH — it is NOT the `Money-weighted`
     # column, which is Modified Dietz over the TIME-WEIGHTED average capital. Same spirit, different
     # denominator, so they will differ where money went in mid-year; presenting either as the other
     # would put a third number on the screen claiming to be the second.

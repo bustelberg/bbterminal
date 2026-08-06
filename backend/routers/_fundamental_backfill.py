@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Callable
 
 from deps import supabase
 from index_universe.acwi.exchange_map import is_gf_subscribed_exchange
@@ -127,11 +128,25 @@ def eligible(c: dict) -> str | None:
     return None
 
 
-def ingest_company(c: dict, *, force: bool = False) -> dict:
+def ingest_company(c: dict, *, force: bool = False,
+                   on_step: Callable[[str, int, int], None] | None = None,
+                   should_stop: Callable[[], bool] | None = None) -> dict:
     """Run the feeds this company is missing. Returns {done: [...], rows: n, error: str|None}.
 
     ⚠ IT NEVER RAISES. One company's failure must not end a 400-company run, and a caller streaming
     progress needs the reason on the row rather than as a dead connection.
+
+    `on_step(tag, index, total)` fires BEFORE each feed, so a progress bar moves when the work
+    starts rather than when it finishes — three feeds that each take seconds otherwise look frozen
+    and then jump.
+
+    ⚠ `should_stop` IS THE ONLY REASON CANCEL CAN WORK, and it is checked BETWEEN feeds, never
+    during one. A GuruFocus fetch either completes and is written or does not; stopping between
+    them leaves the database in a state it could have reached on its own (a company with
+    statements and no estimates is exactly what a half-run backfill has always produced, and
+    `needs()` will pick it up next time). Interrupting mid-write would not be. The stop is
+    reported as `stopped` on the result rather than as an error — it is an outcome the caller
+    asked for.
     """
     from ingest.earnings import (  # noqa: PLC0415
         fetch_analyst_estimates, fetch_financials, fetch_indicators,
@@ -141,17 +156,32 @@ def ingest_company(c: dict, *, force: bool = False) -> dict:
     cid, tic = c["company_id"], c["gurufocus_ticker"]
     done: list[str] = []
     rows = 0
+    # ⚠ WHAT WAS SPENT, NOT WHAT WAS ASKED FOR. A feed that hits a fresh cache loads rows and
+    # costs NOTHING, so counting the feeds we ran would overstate the bill — `EarningsResult`
+    # carries the real number and this passes it up. The quota is monthly and finite; a caller
+    # showing a user "3 API calls" for a run that spent zero teaches them to distrust the figure.
+    calls = 0
+    feeds = [(flag, fn, tag) for flag, fn, tag in
+             (("need_fin", fetch_financials, "fin"),
+              ("need_est", fetch_analyst_estimates, "est"),
+              ("need_ind", fetch_indicators, "ind"))
+             if force or c.get(flag, True)]
     try:
-        for flag, fn, tag in (("need_fin", fetch_financials, "fin"),
-                              ("need_est", fetch_analyst_estimates, "est"),
-                              ("need_ind", fetch_indicators, "ind")):
-            if not (force or c.get(flag, True)):
-                continue
+        for i, (_flag, fn, tag) in enumerate(feeds, 1):
+            if should_stop is not None and should_stop():
+                return {"done": done, "rows": rows, "calls": calls, "error": None, "stopped": True}
+            if on_step is not None:
+                on_step(tag, i, len(feeds))
             r = fn(supabase, cid, tic, exch)
             n = getattr(r, "rows_loaded", 0) or 0
             rows += n
+            calls += getattr(r, "api_calls", 0) or 0
             done.append(f"{tag} {n}")
-        return {"done": done, "rows": rows, "error": None}
+        return {"done": done, "rows": rows, "calls": calls, "error": None, "stopped": False}
     except Exception as e:  # noqa: BLE001
         _log.warning("[backfill] %s:%s failed — %s: %s", exch, tic, type(e).__name__, e)
-        return {"done": done, "rows": rows, "error": f"{type(e).__name__}: {str(e)[:120]}"}
+        # ⚠ THE COUNT SURVIVES THE FAILURE. A run that spent two calls and then threw still spent
+        # them; reporting 0 because it ended badly would hide exactly the quota you most want to
+        # know about.
+        return {"done": done, "rows": rows, "calls": calls,
+                "error": f"{type(e).__name__}: {str(e)[:120]}", "stopped": False}

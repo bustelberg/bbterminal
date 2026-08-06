@@ -616,7 +616,21 @@ export default function PortfolioOverviewPanel() {
     }
   };
 
+  /**
+   * ⚠ ADMIN ONLY (2026-08-06). The expanded row is the ACCOUNT's own book — its positions and
+   * their EUR values, its mutations for the year, and the reconciliation against AIRS. The table
+   * above it is a summary; this is the money.
+   *
+   * ⚠ THE GUARD IS HERE AS WELL AS ON THE ROW, and neither is the access rule. Making the `<tr>`
+   * inert covers the click, but `expand` is a plain function on a component a non-admin renders —
+   * anything that reaches it later (a keyboard handler, a deep link, an "expand all") would walk
+   * straight past a `cursor-default`. The rule that actually holds is on the server: the four
+   * sub-resources this opens are admin-only in `_auth_middleware.py`, so the worst a bypassed UI
+   * can do is render an empty panel. `/isins` is NOT among them — the Analyse button shares it and
+   * non-admins keep Analyse.
+   */
   const expand = async (p: string) => {
+    if (!isAdmin) return;
     setOpen(open === p ? null : p);
     if (detail[p] || open === p) return;
     await loadDetail(p);
@@ -684,8 +698,10 @@ export default function PortfolioOverviewPanel() {
             Portfolios{rows ? ` · ${view.length}` : ''}
           </h3>
           <p className="text-[11px] text-fg-faint mt-0.5 max-w-3xl">
-            Named from the Fixed portfolio; figures from AIRS, year to date. Expand a row for
-            holdings.
+            {'Named from the Fixed portfolio; figures from AIRS, year to date.'}
+            {/* Only an admin can open a row, so only an admin is told to — an instruction that
+                does not work is worse than none. */}
+            {isAdmin && ' Expand a row for holdings.'}
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
@@ -798,8 +814,15 @@ export default function PortfolioOverviewPanel() {
                 const isOpen = open === r.dynamic_portefeuille;
                 return (
                   <Fragment key={r.dynamic_portefeuille}>
-                    <tr onClick={() => void expand(r.dynamic_portefeuille)}
-                      className="group hover:bg-accent-500/10 transition-colors cursor-pointer">
+                    {/* ⚠ THE ROW IS ONLY A CONTROL FOR AN ADMIN. For everyone else it carries no
+                        handler and no pointer — the accent hover is what says "this opens", so
+                        leaving it on a row that cannot open reads as a broken table rather than a
+                        restricted one. `group` stays either way: the action cells inside still
+                        reveal on hover. */}
+                    <tr onClick={isAdmin ? () => void expand(r.dynamic_portefeuille) : undefined}
+                      className={`group transition-colors ${isAdmin
+                        ? 'hover:bg-accent-500/10 cursor-pointer'
+                        : 'hover:bg-overlay/[0.02]'}`}>
                       <td className="px-3 py-1.5 text-right font-mono text-fg-faint tabular-nums">
                         {rowNo + 1}
                       </td>

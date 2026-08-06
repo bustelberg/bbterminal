@@ -4,6 +4,7 @@ import "./globals.css";
 import Sidebar from "./components/Sidebar";
 import DialogHost from "./components/DialogHost";
 import LoadingTracker from "./components/LoadingTracker";
+import JobToaster from "./components/jobs/JobToaster";
 import { createClient } from "../lib/supabase/server";
 
 const geistSans = Geist({
@@ -63,6 +64,10 @@ export default async function RootLayout({
         <div className="flex-1 min-w-0 min-h-0 overflow-auto">{children}</div>
         <DialogHost />
         <LoadingTracker />
+        {/* Background-job progress. Here rather than in a page because a job outlives the panel
+            that started it — mounted in a page it would unmount on the first route change and take
+            the progress with it while the server kept working. Renders nothing when idle. */}
+        <JobToaster />
       </body>
     </html>
   );

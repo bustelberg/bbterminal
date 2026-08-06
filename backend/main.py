@@ -41,6 +41,7 @@ from routers import (
     indicators as _indicators_router,
     ingest_runs as _ingest_runs_router,
     isin_compare as _isin_compare_router,
+    jobs as _jobs_router,
     leonteq as _leonteq_router,
     longequity as _longequity_router,
     momentum as _momentum_pkg,
@@ -157,6 +158,9 @@ for _r in (
     _universe_templates_router.router,
     _timezone_router.router,
     _isin_compare_router.router,
+    # Generic job transport (list / watch / cancel). Starting a job stays with the router that
+    # owns the work — see `routers/jobs.py` for why there is no generic starter.
+    _jobs_router.router,
     _asset_pipeline_router.router,
     _admin_router.router,
     # Momentum splits into four sub-routers (signals, backtest_stream,

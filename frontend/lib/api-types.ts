@@ -1355,12 +1355,12 @@ export interface paths {
         };
         /**
          * Airs Holding Timing
-         * @description Why one holding's `On money invested` differs from its `Return` — trade by trade.
+         * @description Why one holding's `Money-weighted` return differs from its `Instrument return` — trade by trade.
          *
-         *     `Return` erases your timing on purpose (it divides by AIRS's opening value restated to today's
-         *     quantity, so a share bought in June is still measured from January); `On money invested` is
-         *     driven by it. This decomposes the gap: what the position you held on 1 January would have made
-         *     untouched, and what each buy and sell added or cost against that.
+         *     `Instrument return` erases your timing on purpose (it divides by AIRS's opening value restated
+         *     to today's quantity, so a share bought in June is still measured from January); `Money-weighted`
+         *     is driven by it. This decomposes the gap: what the position you held on 1 January would have
+         *     made untouched, and what each buy and sell added or cost against that.
          */
         get: operations["airs_holding_timing_api_airs_model_portfolios__portfolio_id__holding_timing_get"];
         put?: never;
@@ -1716,8 +1716,8 @@ export interface paths {
          *     the twelve lines it stores and leaves the instruments behind them as stale as they were.
          *     Measured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.
          *
-         *     ⚠ SO THIS IS NOT ALWAYS "a few seconds" ANY MORE — it is four downloads per account in the
-         *     chain. Each one's outcome comes back in `cascaded` rather than being folded into a single
+         *     ⚠ SO THIS IS NOT ALWAYS "a few seconds" ANY MORE — it is FIVE downloads per account in the
+         *     chain (Rendement, Vermogensoverzicht, Mutaties, Transacties, Model). Each one's outcome comes back in `cascaded` rather than being folded into a single
          *     status, because a parent refreshed against a child that failed is not fresh. `cascade=false`
          *     refreshes only the named account.
          *
@@ -3135,6 +3135,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/benchmarks/company/{company_id}/fundamentals/ingest/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Company Fundamentals Job
+         * @description The per-row Fetch button — same work as the by-ISIN endpoint above, as a cancellable JOB.
+         *
+         *     ⚠⚠ KEYED ON `company_id`, AND IT USED TO BE KEYED ON ISIN — WHICH SILENTLY DISABLED THE BUTTON
+         *     FOR 12 OF THE S&P's 501 CONSTITUENTS. The by-ISIN form exists because in the OLD constituent
+         *     table `company_id` was secretly an `analysis_id` (the price machinery keys on that name), so an
+         *     id off the row 404'd against `company`. That warning is real and still on the endpoint above —
+         *     it just does not apply here: the fundamentals grid is built from `_members()`, which IS the
+         *     company world, so its `company_id` is genuine.
+         *
+         *     Keeping the ISIN detour cost reachability for no safety. Assurant (`company_id` 6414, NYSE,
+         *     `AIZ`) has every field an ingest needs and no ISIN, so its Fetch button was greyed out with a
+         *     tooltip about an identifier the fetch does not actually require. `company.isin` is nullable and
+         *     populated opportunistically; `company_id` is the primary key.
+         *
+         *     ⚠⚠ `feeds="statements"` IS ONE API CALL AND FILLS THE WHOLE GRID. Every one of the nineteen
+         *     columns the fundamentals grid draws — market cap included, as
+         *     `annuals__Valuation and Quality__Market Cap` — comes out of `fetch_financials`. The other two
+         *     feeds (analyst estimates, indicators) contribute NOTHING to that table; they supply the Long
+         *     Equity modal's forward EPS and indicator series.
+         *
+         *     So the default `all` spends three calls of which two change nothing on the grid. That is the
+         *     right default for "load this company properly", and the wrong one for the triage pass this
+         *     parameter exists for: read the caps cheaply, then spend the other two calls only on the
+         *     constituents whose weight makes them worth it.
+         *
+         *     ⚠ THERE IS NO "MARKET CAP ONLY" AND THERE CANNOT BE. GuruFocus returns one financials blob;
+         *     the cap arrives inside it along with revenue, equity and ROIC. `statements` is the smallest
+         *     unit that exists — asking for less would mean discarding data we have already paid for.
+         *
+         *     ⚠ WHY A JOB FOR THREE API CALLS. Not for the progress bar: for the CANCEL, and for the fact
+         *     that several rows can now be fetched at once. The plain endpoint holds one HTTP request open
+         *     for as long as GuruFocus takes and gives the caller no way to stop it — abort the fetch and the
+         *     server keeps going, having already decided to spend the quota. Here the three feeds are
+         *     separated by a `should_stop` check, so Cancel takes effect at the next feed boundary and
+         *     whatever was already written stays written (`needs()` will pick the rest up next time).
+         *
+         *     ⚠ THE OLD ENDPOINT STAYS. It is what `scripts/` and any external caller use, and it is the
+         *     honest shape for a caller that wants one blocking answer. This is the same `ingest_company`
+         *     underneath — "ingest" must not come to mean two different things depending on which button
+         *     you pressed.
+         */
+        post: operations["ingest_company_fundamentals_job_api_benchmarks_company__company_id__fundamentals_ingest_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/benchmarks/index/{label}": {
         parameters: {
             query?: never;
@@ -3212,7 +3271,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/benchmarks/index/{label}/fundamentals/ingest": {
+    "/api/benchmarks/index/{label}/fundamentals/grid": {
         parameters: {
             query?: never;
             header?: never;
@@ -3220,22 +3279,77 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Ingest Index Fundamentals
-         * @description Backfill every constituent that is missing a feed — SSE, one frame per company.
+         * Benchmark Fundamental Grid
+         * @description Every constituent's fundamentals for every period, with the cap that weights each one.
          *
-         *     ⚠ SSE, NOT A REQUEST THAT RETURNS AT THE END. This is ~3 GuruFocus calls per company over
-         *     hundreds of companies; a silent five-minute POST is indistinguishable from a hung one, and the
-         *     operator needs to see WHICH company it is on when it stalls. Same shape as the AIRS scan.
+         *     The VALUES behind `/fundamentals`, which reports only which periods we hold. Rows are
+         *     companies, columns are lines, and the period is the slider — because weighting is
+         *     cross-sectional: FY2021's weights need every constituent's FY2021 cap at once.
+         *
+         *     `cadence` is `annual` (fiscal years) or `quarterly`, which — as everywhere else in this app —
+         *     means **trailing twelve months**, not the raw quarter. That keeps both slider axes on one
+         *     12-month basis, so moving the quarter changes the as-of date and never the unit.
+         *
+         *     Returned whole, not per period: it is one bulk read per line over data one GuruFocus call
+         *     already brought, and the reader's whole interaction is dragging a slider.
+         */
+        get: operations["benchmark_fundamental_grid_api_benchmarks_index__label__fundamentals_grid_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/index/{label}/fundamentals/ingest/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Index Fundamentals Job
+         * @description Backfill every constituent missing the data this page shows, as a cancellable JOB.
+         *
+         *     ⚠ IT REPLACED AN SSE ENDPOINT RATHER THAN JOINING ONE. The old
+         *     `GET …/fundamentals/ingest` streamed the same work to a bespoke progress box in the panel, and
+         *     had the defect every such endpoint here had: the client was not attached to the work. Navigate
+         *     away and the box vanished while the thread carried on spending quota — on this run, hundreds of
+         *     calls with no way to stop them. Keeping both would have left two transports for one fill and
+         *     two places for "ingest" to come to mean different things.
+         *
+         *     ⚠ CANCEL LANDS BETWEEN COMPANIES, NOT MID-COMPANY. `_one` checks first thing, so a press stops
+         *     everything still queued at once while the eight already in flight finish the company they are
+         *     on. That is the boundary where the database is consistent — and on a 206-company run it is the
+         *     difference between stopping now and spending the rest of the index.
          *
          *     ⚠ IT REPORTS THE QUOTA BEFORE IT STARTS AND THE SKIPS AS IT GOES. A region at zero means every
          *     further call is wasted, and a company on an unsubscribed exchange is a refusal with a reason —
          *     never a failure.
          *
+         *     ⚠⚠ `feeds="statements"` (THE DEFAULT) NARROWS **TWO** THINGS, AND NARROWING ONLY ONE IS A BUG.
+         *     A fill makes two independent decisions: WHO is in the work list (`needs`, which returns anyone
+         *     missing any of three sentinels) and WHICH feeds run for each. Narrowing only the second leaves
+         *     companies selected because they lack estimates or indicators — for whom the narrowed action
+         *     runs nothing at all. Measured on SP500: 216 companies need a feed, 206 need statements, so 10
+         *     would have been iterated, spent zero calls, and reported "nothing to do", which reads as a
+         *     broken button rather than as a deliberate scope.
+         *
+         *     So the selection narrows too, to `need_fin`. Measured cost: **637 feed-calls over 216
+         *     companies → 206 over 206**, a 68% saving for an identical result on this page, because all
+         *     nineteen columns of the fundamentals grid come from the statements feed alone.
+         *
+         *     What is given up: nothing bulk-loads analyst estimates or indicators any more. They are still
+         *     reachable per company where they are actually drawn — `/api/earnings/{cid}/refresh` takes a
+         *     `source` — and `feeds=all` here restores the old behaviour for a deliberate full load.
+         *
          *     `limit` spends the budget in tranches; 0 is everything that needs it.
          */
-        get: operations["ingest_index_fundamentals_api_benchmarks_index__label__fundamentals_ingest_get"];
-        put?: never;
-        post?: never;
+        post: operations["ingest_index_fundamentals_job_api_benchmarks_index__label__fundamentals_ingest_job_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5656,6 +5770,80 @@ export interface paths {
          *     Destructive + admin-gated; the frontend confirms first.
          */
         post: operations["prune_universe_api_isin_compare_prune_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Jobs
+         * @description Running jobs plus recently finished ones (15 minutes).
+         *
+         *     This is what a page reload re-attaches to: without it, a job started before a refresh keeps
+         *     running with nothing on screen to say so.
+         */
+        get: operations["list_jobs_api_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Job
+         * @description Ask a job to stop at its next safe point.
+         *
+         *     ⚠ 200 WITH `cancel_requested`, NOT A PROMISE THAT IT STOPPED. The worker halts between units of
+         *     work — between two GuruFocus feeds — so a job mid-feed keeps going for a few seconds. Reporting
+         *     it as already cancelled would make the row disappear while its API calls were still in flight.
+         */
+        post: operations["cancel_job_api_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Job
+         * @description SSE: every event after `after`, then the live tail, then close.
+         *
+         *     ⚠ `after` IS WHAT MAKES THIS RE-ATTACHABLE. A reconnecting client passes the last sequence it
+         *     saw and gets the gap, so a reload — or a second tab — shows the run's history rather than
+         *     joining mid-sentence with no idea what came before.
+         *
+         *     ⚠ A DISCONNECT DOES NOT CANCEL. Closing this stream stops the reporting and nothing else; see
+         *     the module docstring in `jobs.py`. Cancel is an explicit POST.
+         */
+        get: operations["stream_job_api_jobs__job_id__stream_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -9317,6 +9505,125 @@ export interface components {
             universe?: string | null;
         };
         /**
+         * FundamentalGrid
+         * @description Every constituent x every line x every period, in EUR.
+         *
+         *     ⚠ `membership_as_of` IS `today` AND THAT IS A REAL LIMIT, NOT A FORMALITY: scrubbing to 2016
+         *     shows 2016's figures for the companies in the index NOW. Surfaced so the grid can say so.
+         */
+        FundamentalGrid: {
+            /** By Period */
+            by_period: {
+                [key: string]: components["schemas"]["FundamentalGridPeriod"];
+            };
+            /** Cadence */
+            cadence: string;
+            /** Columns */
+            columns: components["schemas"]["FundamentalGridColumn"][];
+            /** Covered */
+            covered: number;
+            /**
+             * Enrolled Members
+             * @default 0
+             */
+            enrolled_members?: number;
+            /**
+             * Fillable
+             * @default 0
+             */
+            fillable?: number;
+            /** Label */
+            label: string;
+            /** Members */
+            members: number;
+            /** Membership As Of */
+            membership_as_of: string;
+            /** Min Coverage Pct */
+            min_coverage_pct: number;
+            /** Periods */
+            periods: string[];
+            /** Rows */
+            rows: components["schemas"]["FundamentalGridRow"][];
+            /** Weight Cap Pct */
+            weight_cap_pct?: number | null;
+        };
+        /**
+         * FundamentalGridColumn
+         * @description One line, and what an INDEX-LEVEL total may do with it. `agg` is `sum` for a flow or a
+         *     snapshot (revenue, market cap) and `weighted_mean` for a rate (ROIC %) — summing percentages
+         *     across 500 companies produces a number in the thousands that still renders as a percent.
+         *
+         *     `unit` says whether the figure is currency at all: `millions` / `per_share` are EUR-converted,
+         *     `shares` (a count) and `percent` (already a rate) are NOT — see the ⚠⚠ in
+         *     `_benchmark_fundamental_grid`, where converting them produced a plausible wrong share count.
+         */
+        FundamentalGridColumn: {
+            /** Agg */
+            agg: string;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Note */
+            note?: string | null;
+            /** Unit */
+            unit: string;
+        };
+        /**
+         * FundamentalGridPeriod
+         * @description What the index looked like in ONE period. `weights_usable` is the gate the table reads
+         *     before showing any weight or total — see `_benchmark_fundamental_grid.MIN_COVERAGE_PCT`.
+         */
+        FundamentalGridPeriod: {
+            /** Cap Covered Pct */
+            cap_covered_pct: number;
+            /** Covered */
+            covered: number;
+            /** Covered Pct */
+            covered_pct: number;
+            /** Members */
+            members: number;
+            /** Total Market Cap Eur */
+            total_market_cap_eur?: number | null;
+            /** Weights Usable */
+            weights_usable: boolean;
+            /** With Market Cap */
+            with_market_cap: number;
+        };
+        /**
+         * FundamentalGridRow
+         * @description One constituent. `v` is EUR (what the grid shows), `n` the figure as REPORTED, `fx` the rate
+         *     applied — shipped together so the conversion can be checked rather than trusted.
+         */
+        FundamentalGridRow: {
+            /** Company Id */
+            company_id: number;
+            /** Currency */
+            currency?: string | null;
+            /** Fx */
+            fx: {
+                [key: string]: number;
+            };
+            /** Isin */
+            isin?: string | null;
+            /** N */
+            n: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+            /** Name */
+            name?: string | null;
+            /** Ticker */
+            ticker?: string | null;
+            /** V */
+            v: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+        };
+        /**
          * FundamentalIngestRequest
          * @description One uncovered holding to try to ingest fundamentals for. `name` seeds the `company` row
          *     when one must be created (a `no_company` holding); `force` re-asks GuruFocus past the cache.
@@ -9756,6 +10063,53 @@ export interface components {
             universe_member_count: number;
             /** Unmatched Count */
             unmatched_count: number;
+        };
+        /**
+         * JobStarted
+         * @description Just the handle. Everything else arrives on `/api/jobs/{id}/stream`.
+         */
+        JobStarted: {
+            /** Job Id */
+            job_id: string;
+            /** Label */
+            label: string;
+        };
+        /** JobView */
+        JobView: {
+            /**
+             * Api Calls
+             * @default 0
+             */
+            api_calls?: number;
+            /**
+             * Cancel Requested
+             * @default false
+             */
+            cancel_requested?: boolean;
+            /** Created At */
+            created_at: number;
+            /**
+             * Done
+             * @default 0
+             */
+            done?: number;
+            /** Ended At */
+            ended_at?: number | null;
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Status */
+            status: string;
+            /** Summary */
+            summary?: string | null;
+            /**
+             * Total
+             * @default 0
+             */
+            total?: number;
         };
         /** LatestCloseResponse */
         LatestCloseResponse: {
@@ -15611,6 +15965,40 @@ export interface operations {
             };
         };
     };
+    ingest_company_fundamentals_job_api_benchmarks_company__company_id__fundamentals_ingest_job_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+                feeds?: string;
+            };
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     benchmark_reconstructed_index_api_benchmarks_index__label__get: {
         parameters: {
             query?: {
@@ -15708,10 +16096,10 @@ export interface operations {
             };
         };
     };
-    ingest_index_fundamentals_api_benchmarks_index__label__fundamentals_ingest_get: {
+    benchmark_fundamental_grid_api_benchmarks_index__label__fundamentals_grid_get: {
         parameters: {
             query?: {
-                limit?: number;
+                cadence?: string;
             };
             header?: never;
             path: {
@@ -15727,7 +16115,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["FundamentalGrid"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_index_fundamentals_job_api_benchmarks_index__label__fundamentals_ingest_job_post: {
+        parameters: {
+            query?: {
+                limit?: number;
+                feeds?: string;
+            };
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStarted"];
                 };
             };
             /** @description Validation Error */
@@ -18779,6 +19201,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PruneResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_jobs_api_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"][];
+                };
+            };
+        };
+    };
+    cancel_job_api_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_job_api_jobs__job_id__stream_get: {
+        parameters: {
+            query?: {
+                after?: number;
+            };
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
