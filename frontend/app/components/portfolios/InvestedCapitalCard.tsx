@@ -15,7 +15,7 @@ import { type Target } from './HoldingsRevenueModal';
 import InvestedCapitalInputsModal from './InvestedCapitalInputsModal';
 import { investedCapitalIndexByYear, investedCapitalSeries } from './investedCapitalData';
 import { paddedLogDomain , xToPeriod } from './marginData';
-import { benchNote, rebaseOnto, useBenchInputs, type BenchTarget } from './benchSeries';
+import { benchNote, rebaseSeries, useBenchInputs, type BenchTarget } from './benchSeries';
 import { type CashReturnInputs } from './cashReturnData';
 
 /**
@@ -31,12 +31,14 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
   /**
    * The index drawn beside the book — same endpoint, same helper. See `benchSeries`.
    *
-   * ⚠ THE ONLY CARD THAT CANNOT ALWAYS DRAW IT. For a portfolio this chart is a rebased growth
-   * INDEX (100 at the first year) and an index of the S&P sits on the same axis honestly. For a
-   * SINGLE COMPANY it is a currency LEVEL — invested capital in EUR millions — and an index at
-   * 100 beside it is two scales on one axis, i.e. the dual-axis mistake with the second axis
-   * hidden. So the benchmark is drawn only in index mode, and its absence says so rather than
-   * looking like a data gap.
+   * This used to read "the only card that cannot always draw it": for a portfolio the chart was a
+   * growth INDEX an index could sit beside honestly, while for a SINGLE COMPANY it was a currency
+   * LEVEL, and an index at 100 next to EUR millions is two scales on one axis — the dual-axis
+   * mistake with the second axis hidden.
+   *
+   * ⚠ THAT NO LONGER APPLIES, because BOTH lines are now indexed to 100 on their shared anchor
+   * (see `rebaseSeries` below) and the actual amounts moved to the hover. The two are on one
+   * honest axis in either mode, so the benchmark draws for a single company too.
    */
   benchTarget?: BenchTarget | null;
 }) {
@@ -76,32 +78,59 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
   }, [data, isAgg]);
 
   const [benchData, benchErr] = useBenchInputs<CashReturnInputs>('cash-return-inputs', benchTarget);
-  /** The index's own blended series, REBASED onto ours — see `rebaseOnto` for why it must be.
-   *  Null when the two share no period; there is then nothing to anchor a scale on. */
-  const benchByYr = useMemo(() => {
-    if (!benchData) return null;
-    const own = new Map(points.map((p) => [p.year, p.value as number | null]));
-    return rebaseOnto(investedCapitalIndexByYear(benchData.rows), own);
-  }, [benchData, points]);
+  /** The index's own blended series, left RAW — `rebaseSeries` below indexes both lines together.
+   *  It used to be pre-scaled onto ours via `rebaseOnto`; doing both would transform it twice. */
+  const benchByYr = useMemo(
+    () => (benchData ? investedCapitalIndexByYear(benchData.rows) : null), [benchData]);
 
   const fit = useMemo(() => logLinearFit(points), [points]);
-  const note = benchNote(benchTarget, benchData, benchErr, benchByYr);
+
+  /** ⚠⚠ INDEXED AXIS, ACTUAL HOVER — the same rule as the three growth cards, and for the same
+   *  reason: invested capital is a LEVEL, so a company's EUR base and a blended index cannot share
+   *  a raw axis. Both are rebased to 100 on the first year they share with positive values; the
+   *  real EUR amount rides along for the tooltip, because "this company deploys EUR X of capital"
+   *  is the fact that makes CROIC's denominator interpretable. Refuses (→ absolute) rather than
+   *  anchoring on a zero or negative base. */
+  const ownByYr = useMemo(
+    () => new Map(points.map((p) => [p.year, p.value as number | null])), [points]);
+  const indexed = useMemo(() => rebaseSeries(ownByYr, benchByYr), [ownByYr, benchByYr]);
+
+  const note = benchNote(benchTarget, benchData, benchErr, benchByYr)
+    ?? (benchByYr && !indexed
+      ? 'No year in common with a positive value — showing absolute, not indexed'
+      : null);
 
   const chartData = useMemo(() => {
     const trendByYear = new Map(fit.trend.map((t) => [t.year, t.value]));
+    const plotOwn = indexed?.own ?? ownByYr;
+    const plotBench = indexed ? indexed.bench : benchByYr;
+    // The trend is fitted on the RAW series, so it takes the same multiplier as its own line.
+    const trendScale = indexed ? 100 / (ownByYr.get(indexed.anchor) as number) : 1;
     const years = new Set<number>(points.map((p) => p.year));
-    if (benchByYr) for (const y of benchByYr.keys()) years.add(y);
-    const byYear = new Map(points.map((p) => [p.year, p.value]));
-    return [...years].sort((a, b) => a - b).map((year) => ({
-      year,
-      value: (byYear.get(year) ?? 0) > 0 ? byYear.get(year) as number : null,
-      trend: trendByYear.get(year) ?? null,
-      bench: benchByYr ? benchByYr.get(year) ?? null : null,
-    }));
-  }, [points, fit, benchByYr]);
+    if (plotBench) for (const y of plotBench.keys()) years.add(y);
+    return [...years].sort((a, b) => a - b).map((year) => {
+      const v = plotOwn.get(year) ?? null;
+      const b = plotBench ? plotBench.get(year) ?? null : null;
+      const t = trendByYear.get(year);
+      return {
+        year,
+        value: v != null && v > 0 ? v : null,
+        trend: t != null ? t * trendScale : null,
+        bench: b != null && b > 0 ? b : null,
+        // Tooltip only, and ONLY for a single company: in `isAgg` mode `points` is already a
+        // blended index (there is no portfolio capital base), so its "raw" is just another index.
+        // The benchmark is always a blend, so it never has one either.
+        rawValue: isIndex ? null : (ownByYr.get(year) ?? null),
+      };
+    });
+  }, [points, fit, indexed, ownByYr, benchByYr, isIndex]);
   const logDomain = useMemo(() =>
     paddedLogDomain(chartData.flatMap((d) => [d.value, d.trend, d.bench]).filter((v): v is number => v != null)),
   [chartData]);
+
+  /** ⚠ AN INDEX IS A BARE NUMBER — see the same guard in `MetricGrowthCard`. `fmt` scales to
+   *  M/B/T, so left to it an index of 100 renders as "100M" and reads as an amount. */
+  const fmtIndex = (v: number | null | undefined, dp = 0) => (v == null ? '—' : v.toFixed(dp));
 
   const fmt = (v: number | null | undefined) => {
     if (v == null) return '—';
@@ -147,11 +176,26 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
                 <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
                 <YAxis scale="log" domain={logDomain ?? ['dataMin', 'dataMax']} allowDataOverflow
-                  tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: number) => fmt(v)} width={60} />
+                  tick={{ fontSize: 11, fill: chartTheme.axisTick }}
+                  tickFormatter={(v: number) => (indexed ? fmtIndex(v) : fmt(v))} width={60} />
+                {/* ⚠ THE HOVER READS THE ACTUAL AMOUNT, NOT THE AXIS — see `MetricGrowthCard`. The
+                    plotted number is an index; the EUR figure rides on the row and is what gets
+                    shown, with the index in parentheses so the point stays identifiable. A blend
+                    has no actual amount (there is no portfolio capital base), so it shows the
+                    index alone. */}
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v, name) => [`${ccy}${fmt(typeof v === 'number' ? v : null)}`,
-                    name === 'trend' ? 'Trend'
-                      : name === 'bench' ? `${benchTarget?.universe ?? 'Benchmark'} (rebased)` : 'Invested capital']} />
+                  formatter={(v, name, item) => {
+                    const row = item?.payload as { rawValue?: number | null } | undefined;
+                    const plotted = typeof v === 'number' ? v : null;
+                    const label = name === 'trend' ? 'Trend'
+                      : name === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : 'Invested capital';
+                    if (!indexed) return [`${ccy}${fmt(plotted)}`, label];
+                    // Indexed axis: only our own line, and only for a single company, has an
+                    // actual amount behind it. Trend, benchmark and blend do not.
+                    const raw = name === 'value' ? row?.rawValue ?? null : null;
+                    if (raw == null) return [fmtIndex(plotted, 1), label];
+                    return [`${ccy}${fmt(raw)}  (index ${fmtIndex(plotted, 1)})`, label];
+                  }} />
                 <Line dataKey="value" name="value" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
                 <Line dataKey="trend" name="trend" type="monotone" stroke={chartTheme.warn} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
                 {/* ⚠ THE BENCHMARK IS GREEN ON ALL FOURTEEN CHARTS — see `MetricGrowthCard` for the
@@ -165,9 +209,11 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
               <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.warn }} />Trend (R² {fit.r2 == null ? '—' : fit.r2.toFixed(2)})</span>
               {benchByYr && (
                 <span className="flex items-center gap-1.5"
-                  title="The index's blended invested capital, scaled to meet this line at the first period both cover. On a log axis that is a vertical shift — the growth rate, which is the comparison, is untouched.">
+                  title={indexed
+                    ? `Both lines are indexed to 100 at ${indexed.anchor}, the first year they share. Only the growth is being compared — hover any point for the actual amount.`
+                    : 'Absolute amounts: the two series share no year with a positive value, so there is no honest base to index them on.'}>
                   <span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />
-                  {benchTarget?.universe} (rebased)
+                  {benchTarget?.universe}
                 </span>
               )}
               {note && (

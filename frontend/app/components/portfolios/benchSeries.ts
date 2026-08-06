@@ -140,33 +140,52 @@ export function mergeSeries(
 }
 
 /**
- * A benchmark LEVEL series, scaled to start where the subject's does — the only honest way to put
- * an index beside a level on ONE axis.
+ * Rebase one or both level series to 100 at a COMMON anchor — the axis the level cards actually
+ * plot. Returns the indexed maps plus the anchor year, or null when nothing can be anchored.
  *
  * ⚠ THE RATIO CARDS NEED NOTHING LIKE THIS; the level cards cannot do without it. A margin is a %
  * and the two lines are already in the same unit. Revenue is EUR millions for one company and a
- * rebased blend index for the S&P — drawn raw they are two scales on one axis, i.e. the dual-axis
+ * blended index for the S&P — drawn raw they are two scales on one axis, i.e. the dual-axis
  * mistake with the second axis hidden, and the reader would compare a company against 100.
  *
- * Both level cards are on a LOG axis, where a multiplicative rebase is a pure vertical shift: the
- * SHAPE — the growth rate, which is the whole comparison — is untouched. The anchor is the first
- * period BOTH series have (never each series' own first point, which would silently compare
- * different starting years), so the lines meet there by construction and diverge by their growth.
+ * The level cards are on a LOG axis, where a multiplicative rebase is a pure vertical shift: the
+ * SHAPE — the growth rate, which is the whole comparison — is untouched. That is what makes it
+ * safe to index BOTH lines rather than scale one onto the other, which is what this replaced
+ * (`rebaseOnto`, removed once nothing called it): stretching the index to a company's absolute
+ * level put a true-looking but meaningless number on the benchmark line, and someone reading it
+ * as absolute is how you conclude the S&P's revenue is EUR 300bn. Indexed, neither line pretends
+ * to be an amount, and the actual values live in the hover.
  *
- * Returns null when they share no period: with nothing to anchor on, any scale factor is invented.
- * Every caller labels the line "(rebased)" — a scaled series that reads as an absolute one is how
- * someone concludes the S&P's revenue is EUR 300bn.
+ * ⚠⚠ THE ANCHOR IS THE FIRST YEAR THE SERIES SHARE, NEVER EACH SERIES' OWN FIRST POINT. A company
+ * whose data starts in 2018 rebased on 2018, drawn against an index rebased on 2015, compares a
+ * seven-year path against a four-year one and calls the difference performance. Same rule, and the
+ * same reason, as `rebaseOnto` — which this replaces on the level cards, because indexing BOTH
+ * sides is honest where scaling one onto the other only looks like it.
+ *
+ * ⚠ BOTH VALUES AT THE ANCHOR MUST BE > 0. Dividing by zero is obvious; dividing by a NEGATIVE is
+ * the dangerous one, because it silently FLIPS the series and the chart still renders — a company
+ * whose FCF/share began negative would appear to collapse as it recovered. This is not
+ * hypothetical: the dividend-per-share card was dropped from this tab precisely because its series
+ * starts at 0.00 and the level rebase cannot survive it.
+ *
+ * ⚠ REFUSES RATHER THAN INVENTING ONE. A null here means the caller keeps ABSOLUTE values, which
+ * is the honest fallback — the raw number is always true, it just is not comparable.
  */
-export function rebaseOnto(
-  bench: Map<number, number | null>, own: Map<number, number | null>,
-): Map<number, number | null> | null {
-  const anchor = [...bench.keys()].sort((a, b) => a - b).find((x) => {
-    const b = bench.get(x); const o = own.get(x);
-    return b != null && o != null && b > 0 && o > 0;
-  });
+export function rebaseSeries(
+  own: Map<number, number | null>, bench: Map<number, number | null> | null,
+): { own: Map<number, number | null>; bench: Map<number, number | null> | null; anchor: number } | null {
+  const usable = (m: Map<number, number | null>, x: number) => {
+    const v = m.get(x);
+    return v != null && v > 0;
+  };
+  const anchor = [...own.keys()].sort((a, b) => a - b)
+    .find((x) => usable(own, x) && (!bench || usable(bench, x)));
   if (anchor == null) return null;
-  const k = (own.get(anchor) as number) / (bench.get(anchor) as number);
-  return new Map([...bench].map(([x, v]) => [x, v == null ? null : v * k]));
+  const scale = (m: Map<number, number | null>) => {
+    const base = m.get(anchor) as number;
+    return new Map([...m].map(([x, v]) => [x, v == null || v <= 0 ? null : (v / base) * 100]));
+  };
+  return { own: scale(own), bench: bench ? scale(bench) : null, anchor };
 }
 
 /** Both series' values, for a shared y-domain — a benchmark drawn off-axis is worse than none. */

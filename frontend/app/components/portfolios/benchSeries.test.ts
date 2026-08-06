@@ -1,62 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { benchNote, mergeSeries, rebaseOnto, withBench, type BenchTarget } from './benchSeries';
+import { benchNote, mergeSeries, rebaseSeries, withBench, type BenchTarget } from './benchSeries';
 
 /**
- * The two pure halves of the Long Equity benchmark overlay.
+ * The pure halves of the Long Equity benchmark overlay.
  *
- * `rebaseOnto` is the one that can lie. The ratio cards need nothing (a margin is a % on both
+ * `rebaseSeries` is the one that can lie. The ratio cards need nothing (a margin is a % on both
  * sides); the LEVEL cards put a company's EUR millions beside an index and would otherwise be two
- * scales on one axis. Scaling the index to meet the line at the first SHARED period is what makes
- * that honest — and the anchor has to be shared, or the two lines start in different years and the
- * gap between them is an artefact of the anchor rather than of the businesses.
+ * scales on one axis. Indexing BOTH to 100 at the first SHARED year is what makes that honest —
+ * the anchor has to be shared, or the two lines start in different years and the gap between them
+ * is an artefact of the anchor rather than of the businesses.
  */
 
 const m = (o: Record<number, number | null>) => new Map(
   Object.entries(o).map(([k, v]) => [Number(k), v] as [number, number | null]));
-
-describe('rebaseOnto', () => {
-  it('scales the benchmark to meet ours at the first shared period', () => {
-    const own = m({ 2020: 500, 2021: 600 });
-    const bench = m({ 2020: 100, 2021: 110 });
-    const out = rebaseOnto(bench, own);
-    expect(out?.get(2020)).toBe(500);          // meets there by construction
-    expect(out?.get(2021)).toBe(550);          // +10% on the index, off the anchored base
-  });
-
-  it('anchors on the first SHARED period, not on each series own first point', () => {
-    // The index reaches back further. Anchoring on its own 2018 would draw it from a base our
-    // line never had, and the visible gap would be a fact about the anchor, not the companies.
-    const own = m({ 2020: 500, 2021: 600 });
-    const bench = m({ 2018: 50, 2019: 80, 2020: 100, 2021: 110 });
-    const out = rebaseOnto(bench, own);
-    expect(out?.get(2020)).toBe(500);
-    expect(out?.get(2018)).toBe(250);          // 50 x (500/100) — earlier history is kept, scaled
-  });
-
-  it('keeps the benchmark growth rate exactly — a rebase is a scale, never a reshape', () => {
-    const own = m({ 2020: 7 });
-    const bench = m({ 2020: 100, 2021: 130, 2022: 169 });
-    const out = rebaseOnto(bench, own)!;
-    expect((out.get(2021) as number) / (out.get(2020) as number)).toBeCloseTo(1.3, 12);
-    expect((out.get(2022) as number) / (out.get(2021) as number)).toBeCloseTo(1.3, 12);
-  });
-
-  it('refuses when the two share no period — any factor there is invented', () => {
-    expect(rebaseOnto(m({ 2010: 100 }), m({ 2020: 500 }))).toBeNull();
-  });
-
-  it('skips a period where either side is null or non-positive as the anchor', () => {
-    // A log axis cannot plot <= 0, and dividing by one would blow the scale up.
-    const own = m({ 2019: 0, 2020: null, 2021: 400 });
-    const bench = m({ 2019: 100, 2020: 105, 2021: 110 });
-    expect(rebaseOnto(bench, own)?.get(2021)).toBe(400);
-  });
-
-  it('carries nulls through as nulls rather than as zeros', () => {
-    const out = rebaseOnto(m({ 2020: 100, 2021: null }), m({ 2020: 500 }));
-    expect(out?.get(2021)).toBeNull();
-  });
-});
 
 describe('mergeSeries', () => {
   it('spans the UNION of periods, so the index keeps its own history', () => {
@@ -123,5 +79,65 @@ describe('withBench', () => {
 
   it('is just our own values when nothing is selected', () => {
     expect(withBench([3, 4], null)).toEqual([3, 4]);
+  });
+});
+
+/**
+ * `rebaseSeries` is what the four LEVEL cards now plot: both lines indexed to 100 on a shared
+ * anchor, with the actual values moved to the hover. It replaced `rebaseOnto` (since removed, once
+ * nothing called it), so it inherits the rule that one existed for — a shared anchor — plus one
+ * that helper never had to face: it divides by BOTH series' base, not just the benchmark's, so a
+ * zero or negative base is its own failure mode.
+ */
+describe('rebaseSeries', () => {
+  it('indexes both lines to 100 at the first shared year', () => {
+    const own = m({ 2020: 500, 2021: 600 });
+    const bench = m({ 2020: 100, 2021: 110 });
+    const out = rebaseSeries(own, bench)!;
+    expect(out.anchor).toBe(2020);
+    expect(out.own.get(2020)).toBe(100);
+    expect(out.bench?.get(2020)).toBe(100);
+    expect(out.own.get(2021)).toBe(120);          // +20%
+    expect(out.bench?.get(2021)).toBeCloseTo(110, 12);
+  });
+
+  it('anchors on the first SHARED year, not on each series own first point', () => {
+    // Ours starts in 2020. Anchoring the index on its own 2018 would compare a five-year path
+    // against a two-year one and read the difference as performance.
+    const own = m({ 2020: 500, 2021: 600 });
+    const bench = m({ 2018: 50, 2019: 80, 2020: 100, 2021: 110 });
+    const out = rebaseSeries(own, bench)!;
+    expect(out.anchor).toBe(2020);
+    expect(out.bench?.get(2018)).toBe(50);        // earlier history kept, on the 2020 base
+    expect(out.bench?.get(2020)).toBe(100);
+  });
+
+  it('preserves growth exactly — indexing is a scale, never a reshape', () => {
+    const out = rebaseSeries(m({ 2020: 7, 2021: 9.1, 2022: 11.83 }), null)!;
+    expect((out.own.get(2021) as number) / (out.own.get(2020) as number)).toBeCloseTo(1.3, 12);
+    expect((out.own.get(2022) as number) / (out.own.get(2021) as number)).toBeCloseTo(1.3, 12);
+  });
+
+  it('refuses a NEGATIVE base rather than flipping the series', () => {
+    // FCF/share genuinely goes negative. Dividing by it inverts the line and the chart still
+    // renders — a company recovering from negative FCF would appear to collapse.
+    expect(rebaseSeries(m({ 2020: -5, 2021: 10 }), null)?.anchor).toBe(2021);
+    expect(rebaseSeries(m({ 2020: -5 }), null)).toBeNull();
+  });
+
+  it('refuses a ZERO base — this is what cost the dividend-per-share card', () => {
+    expect(rebaseSeries(m({ 2020: 0 }), null)).toBeNull();
+  });
+
+  it('refuses when the two share no year with both values positive', () => {
+    expect(rebaseSeries(m({ 2020: 500 }), m({ 2010: 100 }))).toBeNull();
+    expect(rebaseSeries(m({ 2020: 500 }), m({ 2020: 0, 2021: 100 }))).toBeNull();
+  });
+
+  it('indexes a lone series when no benchmark is selected', () => {
+    const out = rebaseSeries(m({ 2019: 200, 2020: 250 }), null)!;
+    expect(out.anchor).toBe(2019);
+    expect(out.own.get(2020)).toBe(125);
+    expect(out.bench).toBeNull();
   });
 });

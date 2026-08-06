@@ -14,7 +14,7 @@ import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
 import HoldingsIngestPanel from './HoldingsIngestPanel';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
 import { paddedLogDomain , xToPeriod } from './marginData';
-import { benchNote, rebaseOnto } from './benchSeries';
+import { benchNote, rebaseSeries } from './benchSeries';
 
 /**
  * One "Long Equity" growth card: a metric per fiscal year on a LOG axis with an exponential-trend
@@ -169,23 +169,49 @@ export default function MetricGrowthCard({
   const points = useMemo(
     () => extractPoints(metrics ?? [], cfg.codes, cadence), [metrics, cfg, cadence]);
 
-  /** The index's own series, through the IDENTICAL extraction, then scaled to meet ours — see
-   *  `rebaseOnto`. A ratio card needs no rebase: both lines are already the same unit (%). */
+  /** The index's own series, through the IDENTICAL extraction, and left RAW.
+   *
+   *  ⚠ NO LONGER SCALED ONTO OURS. It used to go through `rebaseOnto`, which stretched the index
+   *  to meet this company's absolute level; now `rebaseSeries` indexes BOTH lines to 100 on their
+   *  shared anchor, so pre-scaling here would transform the benchmark twice and the second scale
+   *  would silently cancel the first. `rebaseOnto` still exists for callers that plot an absolute
+   *  axis. A ratio card needs neither: both lines are already the same unit (%). */
   const benchByX = useMemo(() => {
     if (!benchMetrics) return null;
     const raw = new Map<number, number | null>(
       extractPoints(benchMetrics, cfg.codes, cadence).map((p) => [p.year, p.value]));
-    if (!raw.size) return null;
-    if (isRatio) return raw;
-    return rebaseOnto(raw, new Map(points.map((p) => [p.year, p.value as number | null])));
-  }, [benchMetrics, cfg, cadence, isRatio, points]);
+    return raw.size ? raw : null;
+  }, [benchMetrics, cfg, cadence]);
 
-  /** ⚠ THE FOURTH ABSENCE, WHICH ONLY THE LEVEL CARDS HAVE: the index and this series may share no
-   *  period, and `rebaseOnto` then refuses rather than inventing a scale factor. `benchNote`
-   *  reports it as an empty series; the extra clause names the real cause. */
+  /**
+   * ⚠⚠ THE AXIS IS INDEXED, THE HOVER IS ACTUAL. A level card plots BOTH lines rebased to 100 at
+   * the first year they share, so a company and an index are compared on their growth — the only
+   * thing they have in common — while the tooltip still reads out the real number, so the level is
+   * never lost. That is what lets `Shares outstanding` be both "is this company diluting?" and
+   * "15,004.7M shares", which the absolute-only axis could not do against a benchmark.
+   *
+   * ⚠ A RATIO IS NEVER REBASED. Margins and ROIC are already the same unit on both lines; indexing
+   * a percentage to 100 would destroy the one axis that is directly readable.
+   *
+   * ⚠ AND IT FALLS BACK TO ABSOLUTE RATHER THAN GUESSING. `rebaseSeries` refuses when there is no
+   * shared year with both values positive; the raw series is still true, just not comparable, so
+   * that is what gets drawn (and `indexed` says so, for the axis label and the tooltip).
+   */
+  const { indexed, ownByX, benchRawByX } = useMemo(() => {
+    const own = new Map(points.map((p) => [p.year, p.value as number | null]));
+    if (isRatio) return { indexed: null, ownByX: own, benchRawByX: benchByX };
+    return { indexed: rebaseSeries(own, benchByX), ownByX: own, benchRawByX: benchByX };
+  }, [points, isRatio, benchByX]);
+
+  /** ⚠ THE FOURTH ABSENCE, WHICH ONLY THE LEVEL CARDS HAVE: the two series may share no year where
+   *  both values are positive, and `rebaseSeries` then refuses rather than inventing a base. The
+   *  card still draws — in absolute units, which is the honest fallback — so this says which basis
+   *  is on screen instead of reporting an empty series. */
   const note = benchLabel
     ? benchNote({ universe: benchLabel, cadence }, benchMetrics, benchErr ?? null, benchByX)
-      ?? (benchByX ? null : `${benchLabel}: no period in common to scale it on`)
+      ?? (benchByX && !isRatio && !indexed
+        ? `${benchLabel}: no year in common with a positive value — showing absolute, not indexed`
+        : null)
     : null;
 
   // Present only when the blend saw this metric and still drew nothing — the one case where
@@ -198,28 +224,53 @@ export default function MetricGrowthCard({
 
   const chartData = useMemo(() => {
     const trendByYear = new Map(fit.trend.map((t) => [t.year, t.value]));
-    const byYear = new Map(points.map((p) => [p.year, p.value]));
+    // What the LINES use: the indexed maps when we could anchor, the raw ones when we could not.
+    const plotOwn = indexed?.own ?? ownByX;
+    const plotBench = indexed ? indexed.bench : benchRawByX;
+    // The trend is fitted on the RAW series, so it has to ride the same multiplier as the line it
+    // belongs to — otherwise the dashed fit floats off its own data.
+    const trendScale = indexed ? 100 / ((ownByX.get(indexed.anchor) as number)) : 1;
     // ⚠ The x UNION, not our own periods: an index reaches back further than most books, and
     // clipping it to ours would redraw the benchmark's history whenever a holding changed.
     const xs = new Set<number>(points.map((p) => p.year));
-    if (benchByX) for (const x of benchByX.keys()) xs.add(x);
+    if (plotBench) for (const x of plotBench.keys()) xs.add(x);
     return [...xs].sort((a, b) => a - b).map((year) => {
-      const v = byYear.get(year) ?? null;
-      const b = benchByX ? benchByX.get(year) ?? null : null;
+      const v = plotOwn.get(year) ?? null;
+      const b = plotBench ? plotBench.get(year) ?? null : null;
+      const t = trendByYear.get(year);
       return {
         year,
         // A log axis can't plot ≤ 0; a linear ratio can (ROIC can be negative), so keep it.
         value: isRatio ? v : (v != null && v > 0 ? v : null),
-        trend: isRatio ? null : (trendByYear.get(year) ?? null),
+        trend: isRatio ? null : (t != null ? t * trendScale : null),
         bench: isRatio ? b : (b != null && b > 0 ? b : null),
+        // Carried for the tooltip only — never plotted.
+        //
+        // ⚠ ONLY A SINGLE COMPANY HAS ONE. A portfolio's series is ALREADY a blended index from
+        // the backend (`currency: null` — there is no portfolio revenue), so its "raw" is just a
+        // differently-anchored index; printing it beside ours would show two index numbers and
+        // call one of them actual. Null here means the tooltip shows the index alone, which is
+        // the whole truth available. The benchmark is always a blend, so it never has one.
+        rawValue: isAgg ? null : (ownByX.get(year) ?? null),
       };
     });
-  }, [points, fit, isRatio, benchByX]);
+  }, [points, fit, isRatio, indexed, ownByX, benchRawByX, isAgg]);
 
   // Log axis: pad the domain (multiplicatively) so the min/max points + trend endpoints don't clip.
   const logDomain = useMemo(() =>
     paddedLogDomain(chartData.flatMap((d) => [d.value, d.trend, d.bench]).filter((v): v is number => v != null)),
   [chartData]);
+
+  /**
+   * ⚠⚠ AN INDEX IS A BARE NUMBER — 100, NEVER "100M" AND NEVER "EUR 100". `fmt` below is
+   * UNIT-AWARE, and once the axis became an index it started dressing index values as the
+   * quantity they were derived from: revenue and shares (unit `millions`/`shares`) fell through
+   * to the B/T/M scaler and rendered an index of 100 as "100M", while `per_share` escaped only by
+   * accident of having its own branch. A reader has no way to tell that apart from a real amount.
+   * So anything ON the indexed axis goes through here instead, and the currency prefix is dropped
+   * with it — the actual amounts live in the hover, which is the point of the split.
+   */
+  const fmtIndex = (v: number | null | undefined, dp = 0) => (v == null ? '—' : v.toFixed(dp));
 
   const fmt = (v: number | null | undefined) => {
     if (v == null) return '—';
@@ -323,14 +374,34 @@ export default function MetricGrowthCard({
                 ) : (
                   // Log scale: an exponential (constant-%) growth trend draws as a straight line.
                   <YAxis scale="log" domain={logDomain ?? ['dataMin', 'dataMax']} allowDataOverflow
-                    tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: number) => fmt(v)} width={60} />
+                    tick={{ fontSize: 11, fill: chartTheme.axisTick }}
+                    tickFormatter={(v: number) => (indexed ? fmtIndex(v) : fmt(v))} width={60} />
                 )}
+                {/* ⚠ THE HOVER READS THE ACTUAL NUMBER, NOT THE AXIS. With the lines indexed, the
+                    plotted value is "112.4" — true but not a fact about the company. The raw value
+                    rides along on the row (`rawValue`/`rawBench`) and is what gets shown, with the
+                    index in parentheses so the point on screen is still identifiable. When the
+                    rebase refused, plotted IS raw and the parenthetical is dropped rather than
+                    printed twice. A blended index has no raw value at all — `currency: null`,
+                    there is no portfolio share count — so it correctly shows the index alone. */}
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v, name) => [`${ccy}${fmt(typeof v === 'number' ? v : null)}`,
-                    name === 'trend' ? 'Trend'
-                      : name === 'bench'
-                        ? `${benchLabel ?? 'Benchmark'}${isRatio ? '' : ' (rebased)'}`
-                        : cfg.title]} />
+                  formatter={(v, name, item) => {
+                    const row = item?.payload as { rawValue?: number | null } | undefined;
+                    const plotted = typeof v === 'number' ? v : null;
+                    const label = name === 'trend' ? 'Trend'
+                      : name === 'bench' ? (benchLabel ?? 'Benchmark')
+                        : cfg.title;
+                    // A ratio is already in real units; so is the absolute fallback when the
+                    // rebase refused. Both print exactly as they did before indexing existed.
+                    if (isRatio || !indexed) return [`${ccy}${fmt(plotted)}`, label];
+                    // Everything else on this chart is an INDEX. Only our own line, and only for a
+                    // single company, has an actual value behind it — the trend, the benchmark and
+                    // a blended portfolio do not, and inventing one for them is how an index comes
+                    // to be read as an amount.
+                    const raw = name === 'value' ? row?.rawValue ?? null : null;
+                    if (raw == null) return [fmtIndex(plotted, 1), label];
+                    return [`${ccy}${fmt(raw)}  (index ${fmtIndex(plotted, 1)})`, label];
+                  }} />
                 {isRatio && <ReferenceLine y={0} stroke={chartTheme.zeroLine} />}
                 {isRatio && avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 <Line dataKey="value" name="value" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
@@ -353,9 +424,11 @@ export default function MetricGrowthCard({
               {benchByX && (
                 <span className="flex items-center gap-1.5"
                   title={isRatio ? undefined
-                    : 'The index blended the same way, scaled to meet this line at the first period both cover. On a log axis that is a vertical shift — the growth rate, which is the comparison, is untouched.'}>
+                    : indexed
+                      ? `Both lines are indexed to 100 at ${indexed.anchor}, the first year they share. Only the growth is being compared — hover any point for the actual value.`
+                      : 'Absolute values: the two series share no year with a positive value, so there is no honest base to index them on.'}>
                   <span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />
-                  {benchLabel}{isRatio ? '' : ' (rebased)'}
+                  {benchLabel}
                 </span>
               )}
               {note && (
