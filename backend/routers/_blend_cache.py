@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import threading
 from typing import Any, Callable
 
 # Reused, not reimplemented: one LRU+TTL with one set of eviction semantics. It is generic
@@ -97,13 +98,78 @@ def invalidate() -> int:
 
     Deliberately not selective: a fundamentals ingest can touch any constituent of any index, and
     working out which labels a given company belongs to would be a second, subtler mapping to keep
-    in step. The whole cache is at most `_MAX_ENTRIES` and costs seconds to rebuild lazily.
+    in step. Both caches are small and cost seconds to rebuild lazily.
+
+    ⚠ THE METRIC-READ CACHE GOES TOO. It holds the very rows an ingest just rewrote, so keeping it
+    would rebuild "fresh" responses on top of stale fundamentals — the one outcome worse than not
+    caching at all, because it looks like it worked.
     """
-    n = _cache.size()
+    n = _cache.size() + _metrics_cache.size()
     _cache.clear()
+    _metrics_cache.clear()
     if n:
         _log.info("[blend-cache] invalidated %d entr%s", n, "y" if n == 1 else "ies")
     return n
+
+
+# ── Metric-read dedupe: the SAME line fetched by several cards at once ──────────────────────────
+#
+# ⚠⚠ THIS EXISTS TO DEDUPE A BURST, NOT TO PERSIST. Measured on the Long Equity tab: it issues 27
+#   metric reads but only 18 are DISTINCT — `sbc` is read by five cards (margin, cash-return,
+#   sbc-ocf, cash-conversion, fcf-sbc-yield), `fcf` by four, `revenue` by three. The cards fire
+#   together, so those duplicates are concurrent, not sequential. Hence a SHORT ttl and a small
+#   cap: persisting across loads is the response cache's job, and holding ~1,500 companies x ~11
+#   periods per metric for longer than the burst is memory for nothing.
+#
+# ⚠ SINGLE-FLIGHT IS THE WHOLE MECHANISM. Without it the five `sbc` callers all miss at the same
+#   instant and all five compute — a plain cache would save nothing on the one load that hurts.
+#   THREADING primitives, not asyncio: these reads run inside `asyncio.to_thread`, so the
+#   contending callers are worker THREADS.
+_metrics_cache: _LruTtlCache[Any] = _LruTtlCache(max_size=32, ttl_seconds=60.0)
+_metrics_lock = threading.Lock()
+_metrics_inflight: dict[tuple, threading.Event] = {}
+# A read that outlives this is pathological; waiting longer would hold a worker thread hostage to
+# a request that has probably already failed. On timeout the waiter just computes it itself.
+_INFLIGHT_TIMEOUT = 60.0
+
+
+def cached_metric_read(company_ids: list[int], metric: str, cadence: str,
+                       compute: Callable[[], Any]) -> Any:
+    """`compute()` once per (metric, cadence, exact company set); concurrent callers share it.
+
+    ⚠ THE COMPANY SET IS IN THE KEY AS A TUPLE, NOT A HASH. A hash collision here would serve one
+    universe's fundamentals as another's — silently, and only for whoever hit the collision. The
+    tuple is ~12KB for ACWI, which against a 32-entry cap is nothing.
+
+    ⚠ A WAITER WHOSE OWNER FAILED RECOMPUTES rather than inheriting the failure. Unlike the
+    response layer, these are five cards asking for one line: a transient fault should cost the
+    one caller that hit it, not every card on the tab.
+    """
+    key = (metric, cadence, tuple(company_ids))
+    hit = _metrics_cache.get(key)
+    if hit is not None:
+        return hit
+
+    with _metrics_lock:
+        event = _metrics_inflight.get(key)
+        owner = event is None
+        if owner:
+            event = threading.Event()
+            _metrics_inflight[key] = event
+
+    if not owner:
+        event.wait(timeout=_INFLIGHT_TIMEOUT)      # type: ignore[union-attr]
+        hit = _metrics_cache.get(key)
+        return hit if hit is not None else compute()
+
+    try:
+        result = compute()
+        _metrics_cache.put(key, result)
+        return result
+    finally:
+        with _metrics_lock:
+            _metrics_inflight.pop(key, None)
+        event.set()                                 # type: ignore[union-attr]
 
 
 def cached_blend(endpoint: str) -> Callable:

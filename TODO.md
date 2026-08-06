@@ -352,3 +352,52 @@ real delisting.
       stock-vs-stock; portfolio mode = the Allocation×Selection matrix only,
       prices-only). Confirm nothing still triggers the heavy member-metrics
       aggregate before building this.
+
+## 11. Long Equity benchmark performance (2026-08-06)
+
+Context: selecting ACWI as the benchmark on the Long Equity tab fires ~11 requests
+(one per card) over 1,514 constituents. All three items below are **shipped and
+ruff/tsc/eslint clean**; what is missing is production measurement, not code.
+
+- [ ] **Confirm `SUPABASE_DB_URL` is set on Railway.** Without it the new COPY path
+      in `routers/_earnings_pg.py` is INERT and everything silently keeps using the
+      PostgREST pager (`common.pg` logs one warning at startup saying so). This is
+      the single highest-value check — the COPY win scales with round-trip latency,
+      which is ~2ms locally and 50–200ms to Supabase cloud.
+- [ ] **Re-benchmark the tab INTERLEAVED, not in blocks.** Local block-measurements
+      contradicted each other (COPY+dedupe 6.04s vs dedupe-only 4.55s), which is the
+      ~15% run-to-run spread CLAUDE.md already warns about. A 4-way interleaved
+      benchmark (PostgREST / +dedupe / COPY / COPY+dedupe, ≥3 rounds) is the only way
+      to get a trustworthy number. **Do this on prod, or at least with a warm DB** —
+      the local figures understate COPY by design.
+
+### What was built (all in place, no follow-up needed unless the above says otherwise)
+
+1. **Response cache** — `routers/_blend_cache.py`, `@cached_blend` on 13 endpoints.
+   Verified: 1.99s → 6.8ms on a repeat; portfolio/holdings requests are NEVER cached;
+   `openapi.json` byte-identical; `invalidate()` wired to both fundamentals ingest jobs
+   and fires only when data was actually written.
+2. **COPY transport** — `routers/_earnings_pg.py::rows_by_company_via_copy`, tried first
+   in `_rows_by_company` with the pager as fallback. Verified **identical output**
+   (`dict == dict`, 1,512 companies / 16,336 rows) and 3.2× on the raw read locally.
+3. **Metric-read dedupe** — `cached_metric_read` with THREAD-based single-flight (the
+   reads run inside `asyncio.to_thread`). The tab issues 27 metric reads of which only
+   18 are distinct (`sbc` ×5, `fcf` ×4, `revenue` ×3). 60s TTL, 32-entry cap: it exists
+   to dedupe a concurrent burst, not to persist — persistence is the response cache's job.
+
+### Measured dead ends — do NOT redo these
+
+- **Collapsing the ~11 card requests into one endpoint is NOT worth it.** The only work
+  all 13 endpoints share is `_load_and_expand_members` = **0.100s** (1.3s of 16.6s = 8%);
+  the rest is each endpoint reading its own metric codes. And the cards already run
+  concurrently (16.6s of work in 11.1s), so serialising them inside one handler would make
+  cold wall-clock *worse* unless it re-implements the same fan-out internally.
+  ⚠ An earlier claim that this was worth ~72% came from subtracting `_blend_inputs` (1.08s)
+  from `*-inputs` endpoints that **never call it** — they call `_load_and_expand_members`.
+- **Truncating a benchmark to the top 90% of cap does NOT work for these charts.** Measured
+  on ACWI 2025: levels and ratios are 7–53% off (revenue sum −11%, net margin +11%,
+  net income/share +53%), because the dropped tail is a systematically different business
+  mix (EM/financials/industrials, lower margin), not "the same companies, smaller".
+  Single-year cap-weighted *growth* IS accurate (−0.11pp ACWI, +0.60pp SP500), and a
+  properly chained per-year version lands at +1.15% (SP500) / −5.42% (ACWI) over a decade —
+  so it is only defensible for growth-based series, and only if labelled on the chart.

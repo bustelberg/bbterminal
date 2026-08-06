@@ -17,7 +17,7 @@ import asyncio
 import contextvars
 import logging
 from collections import defaultdict
-from routers._blend_cache import cached_blend
+from routers._blend_cache import cached_blend, cached_metric_read
 from routers._earnings_pg import rows_by_company_via_copy
 from routers._sse import sse_message as event
 import queue as _queue
@@ -1244,7 +1244,15 @@ def _prefetch(company_ids: list[int], metrics: tuple[str, ...], cadence: str = "
     for m in metrics:
         key = (m, cadence)
         if key not in cache:
-            cache[key] = _metrics_by_company(company_ids, m, cadence)
+            # ⚠ DEDUPED ACROSS CONCURRENT REQUESTS, NOT JUST WITHIN THIS ONE. `_PREFETCH` is a
+            # contextvar, so it only stops a single request re-reading a line it already has —
+            # but the Long Equity tab fires ~11 requests AT ONCE and they overlap heavily: 27
+            # metric reads of which only 18 are distinct, with `sbc` wanted by five cards and
+            # `fcf` by four. `cached_metric_read` collapses those to one read plus four waits.
+            cache[key] = cached_metric_read(
+                company_ids, m, cadence,
+                lambda m=m: _metrics_by_company(company_ids, m, cadence),
+            )
     _PREFETCH.set(cache)
 
 
