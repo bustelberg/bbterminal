@@ -2340,6 +2340,17 @@
             ],
             "title": "Bars"
           },
+          "company_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Id"
+          },
           "continent": {
             "anyOf": [
               {
@@ -2372,6 +2383,17 @@
               }
             ],
             "title": "Currency"
+          },
+          "delisted_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delisted At"
           },
           "domicile_country": {
             "anyOf": [
@@ -2410,6 +2432,116 @@
             ],
             "title": "First Date"
           },
+          "gf_company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gf Company Name"
+          },
+          "gf_exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gf Exchange"
+          },
+          "gf_has_dividends": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gf Has Dividends"
+          },
+          "gf_has_financials": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gf Has Financials"
+          },
+          "gf_price_bars": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gf Price Bars"
+          },
+          "gf_price_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gf Price From"
+          },
+          "gf_price_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gf Price To"
+          },
+          "gf_ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gf Ticker"
+          },
+          "gf_volume_bars": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gf Volume Bars"
+          },
+          "gf_volume_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gf Volume To"
+          },
           "identity_status": {
             "anyOf": [
               {
@@ -2420,6 +2552,17 @@
               }
             ],
             "title": "Identity Status"
+          },
+          "illiquid_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Illiquid At"
           },
           "is_default": {
             "anyOf": [
@@ -2606,6 +2749,28 @@
             ],
             "title": "Openfigi Type"
           },
+          "orphaned_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orphaned At"
+          },
+          "out_of_scope_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Out Of Scope At"
+          },
           "parquet_path": {
             "anyOf": [
               {
@@ -2686,6 +2851,14 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "universes": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Universes",
+            "type": "array"
           },
           "volume_from": {
             "anyOf": [

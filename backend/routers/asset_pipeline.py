@@ -90,6 +90,56 @@ class AssetGridRow(BaseModel):
     leonteq_currency: str | None = None
     leonteq_product_type: str | None = None
     leonteq_verified: bool = False
+    # Benchmark universes this asset belongs to (SP500, ACWI, AEX, Leonteq …), from
+    # `universe_asset_membership` via the `asset_grid` view.
+    #
+    # ⚠ THESE ARE THE `universe` ROWS, NOT `asset_universe`. The latter is the saved liquidity
+    # screen this same page offers under "Universes" — a different table with a `universe_id`
+    # column pointing at a different parent. Nothing here joins the two.
+    #
+    # ⚠ DEFAULTS TO `[]`, NEVER None, matching the view's `COALESCE(..., '{}')`: "in no benchmark"
+    # is the normal case for most of the 16,613 rows and is an answer, not missing data.
+    universes: list[str] = []
+    # ── The company world, joined by ISIN in the view. All None for the ~14,000 asset rows with no
+    #    `company` behind them (bonds, futures, most ETFs) — an answer, not a gap.
+    #
+    # ⚠ `company_id` IS THE KEY `metric_data` HANGS OFF — every GuruFocus price, volume and
+    #    fundamental line. It is what lets a caller start from this grid and still reach the
+    #    fundamentals, and it is the last dependency keeping the `company` table alive.
+    company_id: int | None = None
+    gf_company_name: str | None = None
+    # The EXCHANGE:TICKER halves of the GuruFocus symbol. ⚠ Not the same as `yahoo_symbol` —
+    # separate id spaces joined only by ISIN, and GuruFocus may hold a different listing.
+    gf_ticker: str | None = None
+    gf_exchange: str | None = None
+    # Three-valued on purpose: None = never looked, False = looked and there is nothing.
+    gf_has_financials: bool | None = None
+    gf_has_dividends: bool | None = None
+    # Price-status markers. Each excludes the row from the freshness measure; `delisted_at` also
+    # drops it from price refreshes.
+    delisted_at: str | None = None
+    illiquid_at: str | None = None
+    out_of_scope_at: str | None = None
+    orphaned_at: str | None = None
+    # ── GuruFocus's OWN price/volume series (`metric_data`), aggregated in
+    #    `company_price_coverage`. Refreshed by the price phase, which is the only writer.
+    #
+    # ⚠⚠ THESE ARE A DIFFERENT VENDOR FROM `bars`/`price_from`/`price_to` ABOVE, WHICH ARE
+    #    YAHOO'S. `/backtest` and `/schedule` price off GuruFocus; the AIRS portfolios and the
+    #    asset benchmarks price off Yahoo. A row with 5,529 Yahoo bars says NOTHING about whether
+    #    the momentum engine can price it — measured on SMIC, which had a full GuruFocus series
+    #    throughout while its Yahoo row sat unresolved. Never merge the two into one "bars".
+    #
+    # ⚠ `gf_price_to` IS A `target_date` (the trading day), not a write timestamp — `metric_data`
+    #    is append-only in `recorded_at` but NOT in `target_date`, since late-published closes are
+    #    written under their true earlier date.
+    gf_price_from: str | None = None
+    gf_price_to: str | None = None
+    gf_price_bars: int | None = None
+    # Volume is a separate upsert with its own retry path, so a count that diverges from
+    # `gf_price_bars` is real information about a half-completed refresh, not noise.
+    gf_volume_to: str | None = None
+    gf_volume_bars: int | None = None
 
 
 class AssetGridResponse(BaseModel):

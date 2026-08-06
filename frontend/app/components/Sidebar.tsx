@@ -44,7 +44,6 @@ const navItems: NavEntry[] = [
   { href: '/airs-portfolio', label: 'AIRS Portfolio' },
   { href: '/request_gurufocus', label: 'Request GuruFocus' },
   { href: '/benchmarks', label: 'Benchmarks' },
-  { href: '/companies', label: 'Companies' },
   { href: '/isin-compare', label: 'ISIN Compare' },
   { href: '/asset-pipeline', label: 'Asset Pipeline' },
   { href: '/alphalab', label: 'AlphaLab' },

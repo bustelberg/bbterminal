@@ -137,13 +137,71 @@ COPY (
 
 
 def _universe_company_ids(label: str) -> list[int]:
+    """Every company in the universe.
+
+    ⚠⚠ PAGED, AND THE UNPAGED VERSION WAS A LIVE PRODUCTION BUG THAT LOCAL DEV COULD NOT SEE.
+    This was a bare `.execute()`. PostgREST caps a response at 1,000 rows on Supabase cloud and
+    10,000 locally, and truncates SILENTLY — so every local run returned all 1,998 ACWI rows and
+    looked correct, while production built the ACWI index from about half its constituents and
+    Leonteq from 1,000 of 1,639. A cap-weighted index over an arbitrary half of its members is not
+    a slightly-off number; it is a different index, and nothing anywhere reported a problem.
+
+    ⚠ ORDERED ON THE PK. Postgres makes no promise about row order across separate LIMIT/OFFSET
+    queries, so an unordered page boundary serves some rows twice and skips others — which is how
+    the (since-removed) membership backfill script came to report the S&P at 28, 411 and 503
+    members on three consecutive runs of identical code.
+
+    ⚠ ADVANCE BY WHAT CAME BACK, break on an empty page. `len(rows) < page` is only correct while
+    the server's cap is at least the page size, which is precisely the assumption that failed here.
+    """
     uni = (supabase.table("universe").select("universe_id")
            .eq("label", label).limit(1).execute().data or [])
     if not uni:
         return []
-    mem = (supabase.table("universe_membership").select("company_id")
-           .eq("universe_id", uni[0]["universe_id"]).execute().data or [])
-    return sorted({m["company_id"] for m in mem})
+    out: set[int] = set()
+    off = 0
+    while True:
+        rows = (supabase.table("universe_membership").select("company_id")
+                .eq("universe_id", uni[0]["universe_id"])
+                .order("company_id").range(off, off + 999).execute().data or [])
+        if not rows:
+            break
+        out.update(r["company_id"] for r in rows)
+        off += len(rows)
+    return sorted(out)
+
+
+def _universe_analysis_ids(label: str) -> list[int]:
+    """The universe's constituents as ASSET ids, straight from `universe_asset_membership`.
+
+    ⚠ `universe_asset_membership` IS A VIEW, NOT A TABLE (migration 20260806060000). It IS the
+    three-hop join `universe_membership.company_id -> company.isin -> asset_execution.isin`,
+    evaluated live, so it cannot drift from the membership it mirrors. It was briefly a
+    backfilled table and that was a mistake: nothing wrote to it except a manual script, and it
+    was measurably stale within hours of being populated while two read paths — this one and the
+    `/asset-pipeline` Benchmarks chips — already depended on it. Measured cost of the view on the
+    full grid: 28.0 ms against the table's 29.9-33.9 ms, i.e. none.
+
+    ⚠ PAGED AND ORDERED, for the same reason as `_universe_company_ids` — ACWI is 1,723 rows here
+    and PostgREST silently caps at 1,000 on cloud. Ordering on `analysis_id` alone is safe ONLY
+    because of the `.eq(universe_id)` filter above it: the view is DISTINCT on the pair, so the
+    key is unique within one universe. A reader that drops that filter needs its own tiebreaker.
+    """
+    uni = (supabase.table("universe").select("universe_id")
+           .eq("label", label).limit(1).execute().data or [])
+    if not uni:
+        return []
+    out: set[int] = set()
+    off = 0
+    while True:
+        rows = (supabase.table("universe_asset_membership").select("analysis_id")
+                .eq("universe_id", uni[0]["universe_id"])
+                .order("analysis_id").range(off, off + 999).execute().data or [])
+        if not rows:
+            break
+        out.update(r["analysis_id"] for r in rows)
+        off += len(rows)
+    return sorted(out)
 
 
 def members(label: str) -> tuple[list[dict], dict]:
@@ -158,26 +216,45 @@ def members(label: str) -> tuple[list[dict], dict]:
     it twice (11.3% of the S&P's weight, fictional). Deduped on the COMPANY name, keeping the
     largest cap, exactly as `_benchmark_index._members` does.
     """
+    # ⚠⚠ TWO DIFFERENT COUNTS, AND CONFLATING THEM WOULD HIDE THE THING COVERAGE EXISTS TO SHOW.
+    #   `universe_members` is the size of the INDEX and still comes from the company world, because
+    #   that is where membership is authored. `universe_asset_membership` is what we could bridge
+    #   into the asset world — smaller by construction (ACWI 1,723 of 1,982; the gap is India and
+    #   the UK, where GuruFocus can supply no ISIN). Taking the denominator from the asset table
+    #   would make `covered_pct` read ~100% while a fifth of ACWI was missing: the bridge loss
+    #   would vanish into the number designed to report exactly that kind of loss.
     ids = _universe_company_ids(label)
     if not ids:
         return [], {"universe_members": 0, "priced": 0, "covered_pct": None}
 
-    companies: list[dict] = []
-    for i in range(0, len(ids), IN_CHUNK_SIZE):
-        companies += (supabase.table("company")
-                      .select("company_id,company_name,isin")
-                      .in_("company_id", ids[i:i + IN_CHUNK_SIZE])
-                      .is_("delisted_at", "null").is_("out_of_scope_at", "null")
-                      .execute().data or [])
+    grid_rows: list[dict] = []
+    for i in range(0, len(aids := _universe_analysis_ids(label)), IN_CHUNK_SIZE):
+        grid_rows += (supabase.table("asset_grid")
+                      .select("isin,analysis_id,yahoo_symbol,name,gf_company_name,currency,"
+                              "market_cap_eur,market_cap_currency,status,bars,is_default,"
+                              "delisted_at,out_of_scope_at")
+                      .in_("analysis_id", aids[i:i + IN_CHUNK_SIZE]).execute().data or [])
 
-    isins = sorted({c["isin"] for c in companies if c.get("isin")})
-    grid: dict[str, dict] = {}
-    for i in range(0, len(isins), IN_CHUNK_SIZE):
-        for r in (supabase.table("asset_grid")
-                  .select("isin,analysis_id,yahoo_symbol,currency,market_cap_eur,status,bars")
-                  .in_("isin", isins[i:i + IN_CHUNK_SIZE]).execute().data or []):
-            if r.get("status") == "ok" and r.get("analysis_id") and (r.get("bars") or 0) > 0:
-                grid[r["isin"]] = r
+    # ⚠ ONE ROW PER ANALYSIS ASSET, NOT PER LISTING. `asset_grid` is one row per EXECUTION, so a
+    #   company traded on several venues appears several times — measured on the S&P, 501 assets
+    #   come back as 506 rows. Keeping all of them would weight those companies twice. `is_default`
+    #   marks the execution the pipeline chose; where it is unset, the deepest price history wins,
+    #   which is deterministic rather than whichever row the database returned first.
+    grid: dict[int, dict] = {}
+    for r in grid_rows:
+        if r.get("status") != "ok" or not r.get("analysis_id") or (r.get("bars") or 0) <= 0:
+            continue
+        # The company-world status markers now ride on the grid (migration 20260806030000), so
+        # the delisted / out-of-scope exclusion no longer needs a second read of `company`.
+        if r.get("delisted_at") or r.get("out_of_scope_at"):
+            continue
+        prev = grid.get(r["analysis_id"])
+        better = (prev is None
+                  or (bool(r.get("is_default")) and not bool(prev.get("is_default")))
+                  or (bool(r.get("is_default")) == bool(prev.get("is_default"))
+                      and (r.get("bars") or 0) > (prev.get("bars") or 0)))
+        if better:
+            grid[r["analysis_id"]] = r
 
     # WHERE THE CAP CAME FROM AND WHEN — for the panel's per-row provenance, not for the maths.
     # `asset_grid` carries `market_cap_eur` and its currency but not the native figure or the
@@ -185,30 +262,40 @@ def members(label: str) -> tuple[list[dict], dict]:
     # (`_benchmark_refresh._caps`). Surfaced because a cap is a fetched number with an age, and a
     # weight computed off a three-week-old cap is a three-week-old weight — invisible otherwise.
     caps: dict[int, dict] = {}
-    aids = sorted({g["analysis_id"] for g in grid.values() if g.get("analysis_id")})
-    for i in range(0, len(aids), IN_CHUNK_SIZE):
+    priced_aids = sorted(grid)
+    for i in range(0, len(priced_aids), IN_CHUNK_SIZE):
         for r in (supabase.table("asset_analysis")
                   .select("analysis_id,market_cap_native,market_cap_currency,"
                           "market_cap_checked_at")
-                  .in_("analysis_id", aids[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                  .in_("analysis_id", priced_aids[i:i + IN_CHUNK_SIZE]).execute().data or []):
             caps[r["analysis_id"]] = r
 
+    # ⚠⚠ ONE COMPANY, ONE ROW — AND THE ASSET WORLD DOES NOT MAKE THIS UNNECESSARY. Keying
+    #   membership on `analysis_id` collapses a company's LISTINGS, not its SHARE CLASSES: those
+    #   have different ISINs, hence different assets. Measured on the S&P after the repoint,
+    #   Alphabet is still two rows (`US02079K3059` and `US02079K1079`) each carrying the FULL
+    #   ~EUR 3.9tn cap, and Fox Corp likewise. Dropping this dedupe would add ~11% of fictional
+    #   weight to the index — the exact figure `_benchmark_index` records for the same trap.
+    #
+    # ⚠ THE KEY PREFERS `gf_company_name`, THE COMPANY-WORLD NAME, so the dedupe behaves exactly as
+    #   it did before the repoint. It falls back to the asset name for a constituent with no
+    #   company row — those cannot collide with a share-class sibling, since a sibling would have
+    #   brought a company row with it.
     by_name: dict[str, dict] = {}
-    for c in companies:
-        g = grid.get(c.get("isin") or "")
-        cap = float((g or {}).get("market_cap_eur") or 0)
-        if not g or cap <= 0:
-            continue                      # not in the asset grid, or no cap to weight it by
-        prov = caps.get(g["analysis_id"]) or {}
-        key = (c.get("company_name") or "").strip().lower()
+    for aid, g in grid.items():
+        cap = float(g.get("market_cap_eur") or 0)
+        if cap <= 0:
+            continue                      # no cap to weight it by
+        prov = caps.get(aid) or {}
+        key = ((g.get("gf_company_name") or g.get("name") or "").strip().lower())
         prev = by_name.get(key)
         if prev is None or cap > float(prev["market_cap_eur"]):
             by_name[key] = {
                 # `_window_rows` looks prices up under this key — here it is the analysis_id.
-                "company_id": g["analysis_id"],
-                "company_name": c.get("company_name"),
+                "company_id": aid,
+                "company_name": g.get("gf_company_name") or g.get("name"),
                 "gurufocus_ticker": g.get("yahoo_symbol"),   # the loop's field name; a yf symbol
-                "isin": c["isin"],
+                "isin": g.get("isin"),
                 "currency": g.get("currency"),
                 "market_cap_eur": cap,
                 # Provenance only — nothing downstream weights off these.

@@ -76,11 +76,6 @@ const tiles: Tile[] = [
     label: 'Benchmarks',
     description: 'Manage index benchmarks (SPY, ACWI, …) — add tickers, fetch prices, and inspect coverage.',
   },
-  {
-    href: '/companies',
-    label: 'Companies',
-    description: 'Searchable, filterable company table with inline edit, add, and delete (cascades metric and weight rows).',
-  },
 ];
 
 export default async function Home() {

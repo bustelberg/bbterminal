@@ -8304,12 +8304,16 @@ export interface components {
             asset_class?: string | null;
             /** Bars */
             bars?: number | null;
+            /** Company Id */
+            company_id?: number | null;
             /** Continent */
             continent?: string | null;
             /** Country */
             country?: string | null;
             /** Currency */
             currency?: string | null;
+            /** Delisted At */
+            delisted_at?: string | null;
             /** Domicile Country */
             domicile_country?: string | null;
             /** Exchange */
@@ -8318,8 +8322,30 @@ export interface components {
             execution_id: number;
             /** First Date */
             first_date?: string | null;
+            /** Gf Company Name */
+            gf_company_name?: string | null;
+            /** Gf Exchange */
+            gf_exchange?: string | null;
+            /** Gf Has Dividends */
+            gf_has_dividends?: boolean | null;
+            /** Gf Has Financials */
+            gf_has_financials?: boolean | null;
+            /** Gf Price Bars */
+            gf_price_bars?: number | null;
+            /** Gf Price From */
+            gf_price_from?: string | null;
+            /** Gf Price To */
+            gf_price_to?: string | null;
+            /** Gf Ticker */
+            gf_ticker?: string | null;
+            /** Gf Volume Bars */
+            gf_volume_bars?: number | null;
+            /** Gf Volume To */
+            gf_volume_to?: string | null;
             /** Identity Status */
             identity_status?: string | null;
+            /** Illiquid At */
+            illiquid_at?: string | null;
             /** Is Default */
             is_default?: boolean | null;
             /** Is Leveraged */
@@ -8359,6 +8385,10 @@ export interface components {
             openfigi_ticker?: string | null;
             /** Openfigi Type */
             openfigi_type?: string | null;
+            /** Orphaned At */
+            orphaned_at?: string | null;
+            /** Out Of Scope At */
+            out_of_scope_at?: string | null;
             /** Parquet Path */
             parquet_path?: string | null;
             /** Parquet Rows */
@@ -8375,6 +8405,11 @@ export interface components {
             short_multiplier?: number | null;
             /** Status */
             status: string;
+            /**
+             * Universes
+             * @default []
+             */
+            universes?: string[];
             /** Volume From */
             volume_from?: string | null;
             /** Volume To */
