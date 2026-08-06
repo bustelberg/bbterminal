@@ -5963,12 +5963,34 @@
             ],
             "title": "Currency"
           },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
           "fx": {
             "additionalProperties": {
               "type": "number"
             },
             "title": "Fx",
             "type": "object"
+          },
+          "gf_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gf Url"
           },
           "isin": {
             "anyOf": [
@@ -6012,6 +6034,28 @@
               }
             ],
             "title": "Ticker"
+          },
+          "unavailable": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable"
+          },
+          "unavailable_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Label"
           },
           "v": {
             "additionalProperties": {

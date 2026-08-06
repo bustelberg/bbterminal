@@ -9635,10 +9635,14 @@ export interface components {
             company_id: number;
             /** Currency */
             currency?: string | null;
+            /** Exchange */
+            exchange?: string | null;
             /** Fx */
             fx: {
                 [key: string]: number;
             };
+            /** Gf Url */
+            gf_url?: string | null;
             /** Isin */
             isin?: string | null;
             /** N */
@@ -9651,6 +9655,10 @@ export interface components {
             name?: string | null;
             /** Ticker */
             ticker?: string | null;
+            /** Unavailable */
+            unavailable?: string | null;
+            /** Unavailable Label */
+            unavailable_label?: string | null;
             /** V */
             v: {
                 [key: string]: {

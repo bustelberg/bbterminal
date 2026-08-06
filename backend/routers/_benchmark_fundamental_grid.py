@@ -170,26 +170,69 @@ def _values_with_dates(cids: list[int], metric: str, cadence: str) -> dict[int, 
     return out
 
 
+def _unavailable_label(reason: str | None) -> str | None:
+    """The two-word badge for `eligible()`'s refusal, or None when the row is fetchable.
+
+    ⚠ CLASSIFIED HERE, NOT IN THE BROWSER. The alternative is the frontend regex-matching
+    `eligible()`'s prose to pick a label, which silently changes the badge the day someone rewords
+    that sentence — and rewording a message is exactly the kind of edit nobody re-tests.
+
+    Two kinds, because they are two different situations for whoever is looking:
+      * UNSUB   — the VENUE is outside the GuruFocus subscription. Nothing to do; it applies to
+                  every constituent on that exchange at once and no call will ever succeed.
+      * NO GF   — this one company has no GuruFocus ticker or no exchange on file. A data gap on
+                  our side, fixable by mapping the row.
+    """
+    if not reason:
+        return None
+    return "UNSUB" if reason.endswith("outside the GuruFocus subscription") else "NO GF"
+
+
 def _tickers(cids: list[int]) -> dict[int, dict]:
     """The identity columns that are always on screen — ticker and the currency the figures are in.
 
     ⚠ THE CURRENCY IS THE EXCHANGE'S, and it is pinned beside the ticker for a reason: it is what
     makes two native cells incomparable. Once every value column is EUR the column stops being a
     warning and becomes an explanation of the tooltip.
+
+    ⚠ THE EXCHANGE IS NOT DECORATION — IT IS HALF THE IDENTIFIER. GuruFocus addresses a stock as
+    `EXCHANGE:TICKER`, and a bare ticker is ambiguous across venues, so the exchange is what makes
+    the ticker resolvable at all. It is also what makes the link below constructible.
+
+    ⚠ THE URL IS BUILT HERE, NOT IN THE BROWSER. `_build_symbol` drops the prefix for US venues
+    (`AAPL`, not `NASDAQ:AAPL`) and runs `normalize_gurufocus_ticker`, which zero-pads HKSE codes
+    to five digits, strips IST/BKK suffixes and turns the `BRK/B` class-share separator into
+    `BRK.B`. Re-implementing that in TypeScript would be a second copy of a mapping that already
+    has one home — and every one of those rules is a case where the naive `EXCHANGE:TICKER` link
+    would 404.
     """
     from deps import IN_CHUNK_SIZE  # noqa: PLC0415
 
-    ccy_by_exch = {e["exchange_id"]: e["currency_code"] for e in
-                   (supabase.table("gurufocus_exchange")
-                    .select("exchange_id,currency_code").execute().data or [])}
+    from ingest.prices import _build_symbol  # noqa: PLC0415
+
+    exch = {e["exchange_id"]: e for e in
+            (supabase.table("gurufocus_exchange")
+             .select("exchange_id,exchange_code,currency_code").execute().data or [])}
     out: dict[int, dict] = {}
     for i in range(0, len(cids), IN_CHUNK_SIZE):
         for c in (supabase.table("company")
                   .select("company_id,gurufocus_ticker,exchange_id")
                   .in_("company_id", cids[i:i + IN_CHUNK_SIZE]).execute().data or []):
+            e = exch.get(c.get("exchange_id")) or {}
+            ticker, code = c.get("gurufocus_ticker"), e.get("exchange_code")
+            url = None
+            if ticker and code:
+                # Best-effort: a normalization that raises must not take the whole grid down over
+                # one row's link. A missing URL renders as plain text, which is the honest state.
+                try:
+                    url = f"https://www.gurufocus.com/stock/{_build_symbol(ticker, code)}/summary"
+                except Exception:  # noqa: BLE001
+                    url = None
             out[c["company_id"]] = {
-                "ticker": c.get("gurufocus_ticker"),
-                "currency": ccy_by_exch.get(c.get("exchange_id")),
+                "ticker": ticker,
+                "exchange": code,
+                "currency": e.get("currency_code"),
+                "gf_url": url,
             }
     return out
 
@@ -234,6 +277,37 @@ def fundamental_grid(label: str, cadence: str = "annual") -> dict:
     by_cid = {m["company_id"]: m for m in members if m.get("company_id")}
     cids = sorted(by_cid)
     ident = _tickers(cids)
+
+    # ── Why a row can never be filled — computed ONCE and used for both the per-row badge and the
+    #    `fillable` count below, so the badge and the button cannot contradict each other.
+    #
+    # ⚠⚠ AN EMPTY ROW HAS TWO MEANINGS AND THE GRID COULD NOT TELL THEM APART. "Nobody has fetched
+    #   this yet" and "this can never be fetched" both rendered as dashes. The second is the more
+    #   common one on a global index — 236 of ACWI's 1,998 constituents — and it is not a gap to
+    #   close, it is an answer: GuruFocus sells no data for that venue, so no amount of pressing
+    #   Fetch will ever fill the row. Leaving them identical invites exactly the wasted effort the
+    #   subscription check exists to prevent.
+    #
+    # ⚠ THE REASON IS PER EXCHANGE, NOT PER COMPANY. `eligible` refuses on
+    #   `is_gf_subscribed_exchange`, so every constituent on LSE/NSE/ASX is refused as a block
+    #   BEFORE any call is spent — one fact about a venue, not 236 separate discoveries. That is
+    #   why the badge can be shown without asking GuruFocus anything.
+    #
+    # ⚠ SAME `eligible` THE FILL CALLS, deliberately. A second implementation here would be a
+    #   second definition of "can this be fetched", and the badge would drift from the button.
+    unavailable: dict[int, str] = {}
+    # ⚠ `company_rows` RETURNS dict[company_id, row], NOT A LIST — and `needs()` below requires
+    #   that shape too (it calls `.items()`). Iterating it directly yields the integer KEYS, which
+    #   `eligible` then fails on; an empty-LIST fallback breaks `needs` the same way.
+    fill_comps: dict[int, dict] = {}
+    try:
+        fill_comps = company_rows(cids)
+        unavailable = {cid: why for cid, c in fill_comps.items()
+                       if (why := eligible(c)) is not None}
+    except Exception as e:  # noqa: BLE001
+        # A missing badge is a smaller wrong than a failed grid: the row falls back to plain
+        # dashes, which is what it showed before this existed.
+        _log.warning("[grid] could not resolve per-row availability: %s", e)
     # ⚠⚠ THE DENOMINATOR IS NOT THE INDEX, AND THE TOTAL ROW WOULD OTHERWISE SAY IT WAS.
     #
     # `_members` drops any constituent with no stored `market_cap_eur` — see its own module note:
@@ -313,6 +387,11 @@ def fundamental_grid(label: str, cadence: str = "annual") -> dict:
             "company_id": cid, "isin": (m.get("isin") or "").strip().upper() or None,
             "name": m.get("company_name"),
             "ticker": ident.get(cid, {}).get("ticker"), "currency": ccy,
+            "exchange": ident.get(cid, {}).get("exchange"),
+            "gf_url": ident.get(cid, {}).get("gf_url"),
+            # None when the row is fetchable — absent from the payload for ~88% of constituents.
+            "unavailable": unavailable.get(cid),
+            "unavailable_label": _unavailable_label(unavailable.get(cid)),
             "v": v, "n": n, "fx": rates,
         })
 
@@ -330,7 +409,8 @@ def fundamental_grid(label: str, cadence: str = "annual") -> dict:
     # So it calls the same `needs`/`eligible` the job calls. Not duplicated logic — the same
     # functions, which is what makes the number guaranteed to match rather than merely close.
     try:
-        fill_comps = company_rows(sorted(by_cid))
+        # `fill_comps` is the read done above for the per-row badges — reused, not repeated, so
+        # the count and the badges are computed from one snapshot of the company table.
         fillable = sum(1 for c in needs(fill_comps)
                        if c.get("need_fin") and eligible(c) is None)
     except Exception as e:  # noqa: BLE001

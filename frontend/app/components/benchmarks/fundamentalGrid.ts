@@ -231,7 +231,12 @@ export function measureWidthRem(label: string): number {
  *  fail, every column after the gap silently takes its neighbour's width. Weight is unconditional
  *  (see `weightPct`), so this is a constant rather than the flag it briefly was. */
 export function fixedWidthsRem(withFetch: boolean): number[] {
-  //      #  Company  [Fetch]  Ticker  Ccy  Cap (€)  Weight
+  //      #  Company  [Fetch]  Exch  Ticker  Ccy  Cap (€)  Weight
+  //
+  // ⚠ EXCHANGE SITS LEFT OF TICKER BECAUSE IT IS THE OTHER HALF OF THE IDENTIFIER, not a detail
+  // about it: GuruFocus addresses a stock as `EXCHANGE:TICKER` and a bare ticker is ambiguous
+  // across venues. 5rem fits the longest codes in use (`NASDAQ`, `OTCPK`) without wrapping —
+  // a wrapped header is the layout break this table's fixed widths exist to prevent.
   //
   // ⚠ THE 3rem `#` COLUMN IS ALSO THE STICKY OFFSET. It and Company both pin when the table
   // scrolls sideways, so Company sticks at `left-[3rem]` — this number and that class have to
@@ -247,7 +252,7 @@ export function fixedWidthsRem(withFetch: boolean): number[] {
   // other two feeds are reachable where they are displayed — `/api/earnings/{cid}/refresh` has a
   // per-source refresh on the page that draws them — so offering them here only spent two extra
   // calls on data this grid cannot render.
-  return withFetch ? [3, 16, 4.5, 5.5, 4, 7, 6] : [3, 16, 5.5, 4, 7, 6];
+  return withFetch ? [3, 16, 4.5, 5, 5.5, 4, 7, 6] : [3, 16, 5, 5.5, 4, 7, 6];
 }
 
 /** Every column's width, in order, plus the total the table itself must be set to — `table-fixed`

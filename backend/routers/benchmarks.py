@@ -573,7 +573,22 @@ class FundamentalGridRow(BaseModel):
     isin: str | None = None
     name: str | None = None
     ticker: str | None = None
+    # The other half of the GuruFocus identifier — a bare ticker is ambiguous across venues.
+    exchange: str | None = None
     currency: str | None = None
+    # Built server-side by `_tickers`, because `_build_symbol` drops the prefix for US venues and
+    # normalizes the ticker (HKSE zero-pad, `BRK/B` -> `BRK.B`). None when the row has no ticker
+    # or no exchange, in which case the UI shows plain text rather than a dead link.
+    gf_url: str | None = None
+    # Why this row can NEVER be filled, or None when it can. From the same `eligible()` the fill
+    # job calls — an unsubscribed exchange, no GuruFocus ticker, or no exchange at all. It is the
+    # difference between "nobody has fetched this yet" and "this cannot be fetched", which without
+    # it render identically as dashes.
+    unavailable: str | None = None
+    # The badge text for `unavailable` — `UNSUB` (the venue is outside the subscription, so it is
+    # true of every constituent on that exchange) or `NO GF` (this row has no GuruFocus ticker or
+    # exchange). Classified server-side so the UI never has to pattern-match a prose message.
+    unavailable_label: str | None = None
     v: dict[str, dict[str, float]]
     n: dict[str, dict[str, float]]
     fx: dict[str, float]
@@ -895,7 +910,18 @@ async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str =
     )
 
     def _work(ctx) -> str:
-        ids = sorted({m["company_id"] for m in _members(label) if m.get("company_id")})
+        # ⚠⚠ `require_market_cap=False` IS LOAD-BEARING, AND THE DEFAULT MAKES THIS JOB
+        #   SELF-DEFEATING. `_members` drops any constituent with no stored `market_cap_eur` —
+        #   correct for a cap-weighted index, catastrophic here, because the market cap comes out
+        #   of the SAME statements blob this job fetches. So "has no cap" and "needs fetching" are
+        #   very nearly the same set, and filtering on the former removes exactly the companies
+        #   the job exists to load. Measured on the S&P: the grid offered 10 fillable, the work
+        #   list came back 0, and the button reported "0 loaded" while each of those 10 fetched
+        #   fine from its own per-row Fetch (which is keyed by company_id and never consults this
+        #   list). The grid computes `fillable` with the same flag; the two MUST agree, or the
+        #   button promises work it then refuses to do.
+        ids = sorted({m["company_id"] for m in _members(label, require_market_cap=False)
+                      if m.get("company_id")})
         comps = company_rows(ids)
         todo = needs(comps)
         # ⚠ SELECTION AND ACTION NARROW TOGETHER — see the ⚠⚠ in the docstring. Dropping the

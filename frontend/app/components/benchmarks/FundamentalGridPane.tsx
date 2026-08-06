@@ -584,7 +584,13 @@ table, market cap included, for every year and both the annual and trailing-twel
                   Fetch
                 </th>
               )}
-              <th className="text-left px-2 py-2 font-medium whitespace-nowrap">Ticker</th>
+              <th className="text-left px-2 py-2 font-medium whitespace-nowrap" title="GuruFocus exchange code.
+The other half of the identifier — GuruFocus addresses a stock as EXCHANGE:TICKER, and a bare ticker is
+ambiguous across venues. US listings are the exception: GuruFocus addresses those by ticker alone.">Exch</th>
+              <th className="text-left px-2 py-2 font-medium whitespace-nowrap" title="GuruFocus ticker — click to
+open the company's GuruFocus summary page. The link is built server-side because the symbol is not simply
+EXCHANGE:TICKER: US venues drop the prefix, HKSE codes are zero-padded to five digits, and a class share like
+BRK/B becomes BRK.B.">Ticker</th>
               <th className="text-left px-2 py-2 font-medium whitespace-nowrap" title="The currency the figures are
 reported in. Every value column is converted to EUR; this is what the native tooltip is in.">Ccy</th>
               <th className={`text-right px-2 whitespace-nowrap ${th}`} onClick={() => click('market_cap')}
@@ -679,7 +685,10 @@ reported in. Every value column is converted to EUR; this is what the native too
                   </button>
                 </td>
               )}
-              <td /><td />
+              {/* Exch · Ticker · Ccy — the identity columns, which a total has no value for. The
+                  count here must track `fixedWidthsRem`: one short and every figure after it
+                  shifts a column left, silently, still rendering as a plausible number. */}
+              <td /><td /><td />
               <td className="px-2 py-2 text-right font-mono tabular-nums text-fg-strong whitespace-nowrap">
                 {fmtMillions(totalCap)}
               </td>
@@ -732,22 +741,70 @@ reported in. Every value column is converted to EUR; this is what the native too
                   {/* ⚠ `truncate` NOW THAT THE WIDTH IS FIXED. Under auto layout the column grew
                       to fit "Koninklijke Ahold Delhaize"; under fixed layout a nowrap name simply
                       overflows into the Ticker column beside it. The full name is on the title. */}
-                  <td className="px-3 py-1.5 text-fg truncate sticky left-[3rem] bg-card z-10"
+                  {/* ⚠ THE BADGE LIVES HERE, IN THE STICKY NAME CELL, ON PURPOSE. This table
+                      scrolls sideways through nineteen metric columns, and the moment you are
+                      asking "why is this row empty?" you are looking at those columns — a badge
+                      in Exch, Ticker or Fetch has scrolled out of view by then. This column pins.
+                      It also has to be visible to NON-ADMINS, which rules out the Fetch column
+                      (admin-only), and it has to cover "no GuruFocus ticker" too, which rules out
+                      hanging it off the Exch cell — a row refused for having no exchange has
+                      nothing to badge there. */}
+                  <td className="px-3 py-1.5 text-fg sticky left-[3rem] bg-card z-10"
                     title={ident.name ?? undefined}>
-                    {ident.name ?? '—'}
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <span className="truncate">{ident.name ?? '—'}</span>
+                      {ident.unavailable_label && (
+                        <span
+                          className="shrink-0 text-[9px] leading-none px-1 py-0.5 rounded border
+                                     border-warn-500/40 bg-warn-500/10 text-warn-300 font-medium
+                                     tracking-wide cursor-help"
+                          title={`${ident.unavailable}.\n\nThis row cannot be filled — the dashes `
+                            + 'are an answer, not a gap. Being outside the subscription is a fact '
+                            + 'about the EXCHANGE, so it applies to every constituent listed '
+                            + 'there and no fetch is attempted for any of them.'}>
+                          {ident.unavailable_label}
+                        </span>
+                      )}
+                    </span>
                   </td>
                   {isAdmin && (
                     <td className="px-2 py-1.5">
-                      <FetchButton
-                        busy={fetching.has(id)}
-                        title={`ONE GuruFocus call. Loads every column of this table for ${
-                          ident.name ?? `company ${id}`} — market cap included — for every year, `
-                          + 'annual and trailing-twelve-month.'}
-                        onClick={() => void fetchOne(id, ident.name ?? null)} />
+                      {/* ⚠ NO BUTTON ON A ROW THAT CANNOT BE FETCHED. The backend refuses these
+                          before spending a call, so pressing it was always free — but it returned
+                          a refusal that read like a failure, and offering an action that never
+                          works is how a real gap and a permanent answer come to look alike. The
+                          badge in the name cell says why. */}
+                      {ident.unavailable_label
+                        ? <span className="text-fg-faint text-[10px]">—</span>
+                        : (
+                          <FetchButton
+                            busy={fetching.has(id)}
+                            title={`ONE GuruFocus call. Loads every column of this table for ${
+                              ident.name ?? `company ${id}`} — market cap included — for every year, `
+                              + 'annual and trailing-twelve-month.'}
+                            onClick={() => void fetchOne(id, ident.name ?? null)} />
+                        )}
                     </td>
                   )}
+                  <td className="px-2 py-1.5 font-mono text-fg-faint truncate"
+                    title={ident.exchange ?? undefined}>
+                    {ident.exchange ?? '—'}
+                  </td>
+                  {/* ⚠ PLAIN TEXT WHEN THERE IS NO URL, NEVER A DEAD LINK. `gf_url` is null when
+                      the row has no ticker or no exchange, and an anchor that goes nowhere reads
+                      as "GuruFocus has no page for this" rather than "we could not build one".
+                      `rel="noreferrer"` because `target="_blank"` without it hands the opened tab
+                      a `window.opener` handle back to this app. */}
                   <td className="px-2 py-1.5 font-mono text-fg-subtle truncate">
-                    {ident.ticker ?? '—'}
+                    {ident.gf_url && ident.ticker
+                      ? (
+                        <a href={ident.gf_url} target="_blank" rel="noreferrer"
+                          className="text-accent-400 hover:text-accent-300 hover:underline"
+                          title={`Open ${ident.ticker} on GuruFocus`}>
+                          {ident.ticker}
+                        </a>
+                      )
+                      : ident.ticker ?? '—'}
                   </td>
                   <td className="px-2 py-1.5 font-mono text-fg-faint truncate">
                     {ident.currency ?? '—'}
