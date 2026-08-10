@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
@@ -349,6 +350,50 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   const totalCap = summary?.total_market_cap_eur ?? null;
   const usable = summary?.weights_usable ?? false;
 
+  /**
+   * ⚠⚠ ROW VIRTUALIZATION — AND THE REASON IS THE SLIDER, NOT THE SCROLLBAR.
+   *
+   * ACWI is 1,949 constituents x ~26 columns, so the table was **~50,000 `<td>` elements**, all
+   * mounted. Scrolling that is merely heavy; the slider is what made it painful, because moving
+   * the period changes EVERY cell's text — so each tick reconciled the entire 50,000-node tree and
+   * rebuilt every cell's `title` string. There is no fetch involved (both cadences are held in
+   * `byCadence`), which is exactly why this reads as the UI being stuck rather than as loading.
+   *
+   * With ~40 rows mounted, a tick re-renders about 1,000 cells instead of 50,000.
+   *
+   * ⚠ PADDING ROWS, NOT ABSOLUTE POSITIONING. TanStack's own table example positions each `<tr>`
+   * absolutely with a transform — which cannot work here: this table is `table-fixed` over a
+   * `<colgroup>`, and it has two STICKY columns (`#` and Company). Taking the rows out of the
+   * table's flow throws away the colgroup widths and the sticky offsets together. A spacer row
+   * above and below keeps every row a normal table row; the same pattern `AssetPipelineTable` uses
+   * over 16,150 instruments.
+   *
+   * ⚠ THE TOTAL ROW IS NOT VIRTUALIZED. It is one row, it is the denominator every weight below
+   * divides by, and it must render at every scroll position — it sits ahead of the top spacer.
+   *
+   * ⚠ `measureElement` RATHER THAN A FIXED HEIGHT, because the row height is not a constant here:
+   * this app scales its whole UI off `html { font-size }` and steps it down at three breakpoints
+   * (17.5 -> 16 -> 15 -> 14px), so a hardcoded estimate would be right on a desktop and drift on a
+   * phone. Every row is a single line by construction (`truncate` inside fixed widths), so the
+   * measurements converge to one value immediately and cannot oscillate.
+   */
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 32,
+    // ⚠ GENEROUS ON PURPOSE. The virtualizer measures the scroll container, whose top is the
+    // sticky header rather than the first data row, so its idea of the offset runs ahead of the
+    // real one by the header + Total row. That error is CONSTANT (it does not grow with scrolling)
+    // and a couple of rows wide; the overscan absorbs it rather than leaving a gap at the seam.
+    overscan: 16,
+  });
+  const vItems = rowVirtualizer.getVirtualItems();
+  const padTop = vItems.length ? vItems[0].start : 0;
+  const padBottom = vItems.length
+    ? rowVirtualizer.getTotalSize() - vItems[vItems.length - 1].end
+    : 0;
+
   const click = (k: string) => {
     if (k === sortKey) setDir((d) => (d === 'desc' ? 'asc' : 'desc'));
     else { setSortKey(k); setDir('desc'); }
@@ -529,7 +574,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
           after, and the arrival of data changes only what is inside it. The cost is some empty
           space under a short index (AEX has 22 rows); the alternative is the page moving under the
           reader every time they open an index. */}
-      <div className="overflow-auto h-[65vh] border border-neutral-800/40 rounded-lg">
+      <div ref={scrollRef} className="overflow-auto h-[65vh] border border-neutral-800/40 rounded-lg">
         {empty ? (
           <p className={`px-3 py-3 text-xs ${err && !data ? 'text-neg-300' : 'text-fg-subtle'}`}>
             {emptyMessage}
@@ -722,7 +767,19 @@ reported in. Every value column is converted to EUR; this is what the native too
                 );
               })}
             </tr>
-            {rows.map(({ id, ident, cur }, i) => {
+            {/* ⚠ THE SPACERS CARRY THE HEIGHT OF EVERY ROW NOT MOUNTED, so the scrollbar and the
+                scroll position describe the whole index rather than the visible window.
+                `colSpan` is `widths.length` — the colgroup's own length, so it cannot fall out of
+                step with the column count the way a hardcoded number would. */}
+            {padTop > 0 && (
+              <tr aria-hidden><td colSpan={widths.length} style={{ height: padTop }} /></tr>
+            )}
+            {vItems.map((vi) => {
+              const { id, ident, cur } = rows[vi.index];
+              // ⚠ THE RANK COMES FROM THE VIRTUAL INDEX, NOT FROM THE MAP POSITION. `vItems` is a
+              // window into the list, so its own index starts at 0 wherever you have scrolled to —
+              // using it would number every screen 1..40 and quietly renumber the index.
+              const i = vi.index;
               // ⚠ IDENTITY FROM THE UNION, NUMBERS FROM THE CURRENT BASIS. `cur` is null for a
               // company this cadence cannot answer for — the row stays, every figure is a dash.
               // ⚠ AGAINST `totalCap` UNCONDITIONALLY — no longer gated on `usable`. The gate said
@@ -731,7 +788,10 @@ reported in. Every value column is converted to EUR; this is what the native too
               // the very number it was asked to show. What stays gated is the line aggregates.
               const w = cur ? weightPct(cur, period, totalCap) : null;
               return (
-                <tr key={id} className="hover:bg-overlay/[0.02] transition-colors">
+                // `data-index` + the measure ref are what let the virtualizer learn the real row
+                // height instead of trusting `estimateSize` — see the ⚠ on the virtualizer.
+                <tr key={id} data-index={i} ref={rowVirtualizer.measureElement}
+                  className="hover:bg-overlay/[0.02] transition-colors">
                   {/* The position in the list as shown — 1-based, so it reads as a rank rather
                       than an index. Pinned alongside the name; see the header's ⚠. */}
                   <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fg-faint
@@ -839,6 +899,9 @@ reported in. Every value column is converted to EUR; this is what the native too
                 </tr>
               );
             })}
+            {padBottom > 0 && (
+              <tr aria-hidden><td colSpan={widths.length} style={{ height: padBottom }} /></tr>
+            )}
           </tbody>
         </table>
         </>
