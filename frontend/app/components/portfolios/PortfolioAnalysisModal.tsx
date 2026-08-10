@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
@@ -914,6 +914,194 @@ function FundamentalButton({ onOpen, title, className = '' }: {
   );
 }
 
+/**
+ * One position → one row per ROUTE IN: what the book holds outright, and what it holds through
+ * each certificate.
+ *
+ * ⚠⚠ THE SPLIT IS EXACT WHERE IT MATTERS AND ALLOCATED WHERE IT CANNOT BE, AND THE LINE BETWEEN
+ * THE TWO IS NOT A DETAIL. `_expand_book_rows` stamps each route with its OWN `value_eur` and
+ * `start_value_eur` at the moment it splits the certificate, so Weight, Beginwaarde and Value now
+ * are the route's real figures, not a share of anything. What the payload does NOT carry per route
+ * is the result breakdown, so:
+ *
+ *   * `Realised` and `Avg capital` go ENTIRELY to the direct leg. A leg inside a certificate has
+ *     no purchases of its own — the file says so wherever money-weighted is computed, and it is
+ *     why `mwr` excludes such rows. The book's ledger for this ISIN is its own trading; the
+ *     certificate's internal dealing belongs to the book behind it.
+ *   * `Unrealised` and `Income` are allocated on the OPENING-VALUE share, which is the closest
+ *     thing to a share count: both accrue per share held, and the opening value is what each route
+ *     held at the window's start.
+ *
+ * ⚠ EVERY COLUMN STILL SUMS TO THE ORIGINAL ROW. Each partition is exhaustive — the direct leg
+ * takes exactly what the via legs do not — so a class subtotal, the grand total and the
+ * reconciliation line are identical whether the split happened or not. That is the property that
+ * makes this a view of the same book rather than a second set of numbers.
+ *
+ * ⚠ A ROW WITH ONE ROUTE IS RETURNED UNTOUCHED, not split into a one-element partition: the
+ * allocation arithmetic below can only lose precision, and there is nothing to gain from running
+ * it on a position that arrived one way.
+ */
+function splitByRoute(h: BookHolding): BookHolding[] {
+  const routes = h.sources ?? [];
+  if (routes.length < 2) return [h];
+  const via = routes.filter((r) => r.label);
+  const direct = routes.filter((r) => !r.label);
+  if (!via.length) return [h];
+
+  const openOf = (rs: typeof routes) => rs.reduce((s, r) => s + (r.start_value_eur ?? 0), 0);
+  const totalOpen = openOf(routes);
+  // No opening value anywhere (a position opened during the year) — there is no share to allocate
+  // the result terms on, and inventing one would put euros somewhere they may not belong.
+  if (!(totalOpen > 0)) return [h];
+
+  const share = (rs: typeof routes) => openOf(rs) / totalOpen;
+  const cut = (v: number | null | undefined, f: number) => (v == null ? null : v * f);
+  const leg = (rs: typeof routes, label: string | null): BookHolding => {
+    const f = share(rs);
+    const isDirect = label == null;
+    const unreal = cut(h.unrealised_eur, f);
+    const income = cut(h.income_eur, f);
+    // ⚠ FLOWS FOLLOW THE DIRECT LEG, WHOLE. See the ⚠⚠ above.
+    const realised = isDirect ? (h.realised_result_eur ?? null) : (h.realised_result_eur == null ? null : 0);
+    const result = [unreal, realised, income].some((v) => v != null)
+      ? (unreal ?? 0) + (realised ?? 0) + (income ?? 0) : null;
+    return {
+      ...h,
+      // ⚠ THE LEG KEEPS THE INSTRUMENT'S NAME. Splitting Mastercard by route yields two rows that
+      // are both still Mastercard — one held outright, one inside a certificate — and the Via
+      // column is what tells them apart. Renaming the via leg after its wrapper made the row claim
+      // to BE the strategy, which is only true of a FOLDED row (several legs, in
+      // `collapseByCertificate`) and which sent the timing popup looking for a strategy in the
+      // book's instruments.
+      name: h.name,
+      weight_now_pct: rs.reduce((s, r) => s + (r.weight_now_pct ?? 0), 0),
+      weight_pct: rs.reduce((s, r) => s + (r.weight_now_pct ?? 0), 0),
+      start_value_eur: openOf(rs),
+      current_value_eur: rs.reduce((s, r) => s + (r.value_eur ?? 0), 0),
+      unrealised_eur: unreal,
+      realised_result_eur: realised,
+      income_eur: income,
+      result_eur: result,
+      // Additive across the legs by construction: they share one denominator, the book's opening
+      // capital, so the shares of a contribution are the shares of its numerator.
+      contribution_pct: cut(h.contribution_pct, f),
+      avg_capital_eur: isDirect ? (h.avg_capital_eur ?? null) : null,
+      money_weighted_return_pct: isDirect ? (h.money_weighted_return_pct ?? null) : null,
+      own_return_pct: (result != null && openOf(rs) > 0) ? (result / openOf(rs)) * 100 : null,
+      sources: rs as BookHolding['sources'],
+      via_names: label ? [label] : [],
+      via_holding_name: label ? h.via_holding_name : null,
+    };
+  };
+  const legs: BookHolding[] = [];
+  if (direct.length && openOf(direct) > 0) legs.push(leg(direct, null));
+  // One row per certificate, so two wrappers holding the same stock fold into their own rows.
+  for (const label of [...new Set(via.map((r) => r.label!))]) {
+    legs.push(leg(via.filter((r) => r.label === label), label));
+  }
+  // ⚠ NEVER RETURN NOTHING. If every route rounded to a zero opening the position still exists and
+  // its euros are still in the book's totals; dropping it would delete them.
+  return legs.length ? legs : [h];
+}
+
+/** The ONE certificate a row arrives through, or null when it is the book's own. Applied AFTER
+ *  `splitByRoute`, so by here every row has a single route. */
+function soleVia(h: BookHolding): string | null {
+  const routes = h.sources ?? [];
+  if (routes.length) return routes.length === 1 && routes[0].label ? routes[0].label : null;
+  const names = h.via_names ?? [];
+  return names.length === 1 ? names[0] : null;
+}
+
+/**
+ * Fold every position reached through one certificate into a single row for that certificate.
+ *
+ * ⚠⚠ WITHIN A CLASS, NEVER ACROSS ONE. The key is `(bucket, certificate)`, so a wrapper whose
+ * stocks span two asset classes yields a row in each. The class subtotals, the allocation chart
+ * and the grand total are then bit-for-bit what they were with the rows expanded — collapsing is
+ * a change to what the reader SEES, and it must not be a change to what anything SUMS.
+ *
+ * ⚠ THE AGGREGATE IS `sumResults`, THE SAME FUNCTION THE CLASS ROWS USE. A second summation here
+ * would be a second place for the money-weighted numerator/denominator rule to drift — and that
+ * rule is the subtle one: only rows that HAVE an average invested capital may contribute their
+ * result to that ratio, which on a book with certificates is 22 of 52 rows.
+ *
+ * ⚠ THE RATES ARE RECOMPUTED FROM THE SUMS, NEVER AVERAGED. `Σ result ÷ Σ opening` is the class
+ * row's own rule; averaging the legs' percentages would weight a EUR 900 position the same as a
+ * EUR 9m one.
+ */
+/**
+ * The rows this file MADE UP — a folded certificate, not a position the book can trade.
+ *
+ * ⚠ A WEAKSET, NOT A FLAG ON THE ROW. `BookHolding` is generated from the OpenAPI schema, so an
+ * extra field would either be a lie in the type or a cast at every read; and identity is exactly
+ * what is being asked here, which is what a WeakSet answers. Entries vanish with the rows.
+ *
+ * ⚠ IT GATES THE TIMING POPUP. That popup asks "what would holding still have made", which needs a
+ * position the book actually holds — so on a folded row it answered "This instrument is not in the
+ * book's current holdings", which is true of the STRATEGY and reads as a broken row. A strategy is
+ * not an instrument and has no trades of its own to have mattered.
+ */
+const SYNTHETIC_ROWS = new WeakSet<object>();
+const isSynthetic = (h: BookHolding) => SYNTHETIC_ROWS.has(h);
+
+function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
+  const groups = new Map<string, { label: string; rows: BookHolding[] }>();
+  const kept: BookHolding[] = [];
+  // ⚠ SPLIT FIRST, THEN FOLD. A position held BOTH outright and through a certificate — Mastercard
+  // in Bustelberg Offensief, direct and via StarTopSelectie — is two different holdings wearing
+  // one row. Folding it whole would move the book's own shares into the wrapper; leaving it whole
+  // would leave the wrapper's shares outside the row that claims to be the wrapper. Only the split
+  // lets each euro end up where it actually is.
+  for (const h of rows.flatMap(splitByRoute)) {
+    const label = soleVia(h);
+    if (!label) { kept.push(h); continue; }
+    const key = `${h.bucket ?? ''} ${label}`;
+    const g = groups.get(key) ?? { label, rows: [] };
+    g.rows.push(h);
+    groups.set(key, g);
+  }
+  const folded: BookHolding[] = [];
+  for (const { label, rows: legs } of groups.values()) {
+    // ⚠ ONE LEG IS NOT A COLLAPSE. Folding it would rename a real position after its wrapper and
+    // hide its ISIN, its sector and its Fundamental button, for no reduction in rows.
+    if (legs.length < 2) { kept.push(...legs); continue; }
+    const s = sumResults(legs);
+    const weight = legs.reduce((a, h) => a + (h.weight_now_pct ?? 0), 0);
+    const row: BookHolding = {
+      // Spread a real leg so every field this row type carries exists; everything that describes
+      // the POSITION rather than the wrapper is overridden below.
+      ...legs[0],
+      name: label,
+      // ⚠ NO ISIN AND NO SECTOR. A basket of stocks is not an instrument: an ISIN would open a
+      // Fundamental for whichever leg happened to be first, and a sector would claim the whole
+      // wrapper sits in one. `—` is the honest cell.
+      isin: null,
+      sector: null,
+      weight_now_pct: weight,
+      weight_pct: weight,
+      start_value_eur: s.opening,
+      current_value_eur: s.valuenow,
+      unrealised_eur: s.unrealised,
+      realised_result_eur: s.realised,
+      income_eur: s.income,
+      result_eur: s.result,
+      contribution_pct: s.contribution,
+      avg_capital_eur: s.avgcapital,
+      money_weighted_return_pct: s.mwr,
+      own_return_pct: (s.result != null && s.opening) ? (s.result / s.opening) * 100 : null,
+      // The row IS the certificate now, so it is no longer reached "through" anything.
+      sources: [],
+      via_names: [],
+      via_holding_name: null,
+    };
+    // ⚠ MARKED AS MADE UP. It is a strategy, not a tradeable position — see `SYNTHETIC_ROWS`.
+    SYNTHETIC_ROWS.add(row);
+    folded.push(row);
+  }
+  return [...kept, ...folded];
+}
+
 function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, onTiming, onFundamental }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
   /** ⚠ THE POSITIONS THAT NO LONGER HAVE A ROW — sold out entirely during the year. They are the
@@ -936,6 +1124,26 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
 }) {
   const [sortKey, setSortKey] = useState<HoldingSortKey>('weight');
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
+  /**
+   * Whether positions inside a held certificate are listed individually.
+   *
+   * ⚠ ON BY DEFAULT, because looking through IS what this table is for — the charts above it are
+   * drawn through the certificates and a table that did not would disagree with them. The toggle
+   * exists for the other question: when a book holds another book, its twenty-odd stocks bury the
+   * handful of positions this book actually chose, and "what do I hold" is answered better by one
+   * line naming the strategy.
+   */
+  const [lookThrough, setLookThrough] = useState(true);
+  /** How many rows the fold would remove — 0 when nothing is reached through a certificate, which
+   *  is what hides the toggle rather than offering a control that does nothing. */
+  // ⚠ `Math.max(0, …)` BECAUSE THE FOLD ALSO SPLITS. A position held both directly and through a
+  // certificate becomes two rows before either is folded, so on a book with one such position and
+  // nothing else to collapse the net change can be zero — and a toggle that removes no rows has
+  // nothing to offer.
+  const foldable = useMemo(
+    () => Math.max(0, holdings.length - collapseByCertificate(holdings).length), [holdings]);
+  const shownHoldings = useMemo(
+    () => (lookThrough ? holdings : collapseByCertificate(holdings)), [holdings, lookThrough]);
   // ⚠ ONE PREDICATE, USED IN ALL SIX ROW SHAPES (thead, class row, holding row, sold header, sold
   // row, total). The file already warns that the column count is counted by hand in several
   // places; making them CONDITIONAL multiplies that risk, so every gate is a bare `show(<key>)`
@@ -960,9 +1168,12 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
 
   // Classes in the chart's own order, so the eye moves between them without re-reading.
   const order = (slices ?? []).map((s) => s.bucket);
-  const groups = [...new Set([...order, ...holdings.map((h) => h.bucket)])]
+  // ⚠ FROM `shownHoldings`, NOT `holdings` — the fold is keyed on `(bucket, certificate)`, so
+  // every class contains exactly the same euros either way and these subtotals are unchanged by
+  // the toggle. That is the invariant that lets it be a view control rather than a second answer.
+  const groups = [...new Set([...order, ...shownHoldings.map((h) => h.bucket)])]
     .map((bucket) => {
-      const rows = holdings.filter((h) => h.bucket === bucket);
+      const rows = shownHoldings.filter((h) => h.bucket === bucket);
       return {
         bucket,
         slice: (slices ?? []).find((s) => s.bucket === bucket),
@@ -1090,8 +1301,25 @@ ${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).le
         </h4>
         <span className="flex items-center gap-2">
           <span className="text-[10px] font-mono text-fg-faint">
-            {holdings.length} positions · {groups.length} classes
+            {shownHoldings.length} positions · {groups.length} classes
           </span>
+          {/* ⚠ HIDDEN WHEN NOTHING WOULD FOLD, rather than offered and inert. A book that holds no
+              other book has no certificate legs to collapse, and a checkbox that visibly changes
+              nothing teaches the reader to distrust the ones that do.
+              ⚠ IT SAYS WHAT IT WILL DO, WITH THE COUNT. "Look through certificates" alone leaves
+              the reader to press it to find out; naming the rows makes it a decision. */}
+          {foldable > 0 && (
+            <label className="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-pointer"
+              title={'A holding that is itself another portfolio is listed as the instruments '
+                + 'behind it. Untick to fold each one back into a single row naming the strategy '
+                + '— the class subtotals, the chart and the total are identical either way, '
+                + 'because the fold happens inside a class and never across one.'}>
+              <input type="checkbox" checked={lookThrough}
+                onChange={() => setLookThrough((v) => !v)} className="accent-accent-600" />
+              Look through certificates
+              <span className="font-mono text-fg-faint">({foldable})</span>
+            </label>
+          )}
           <ColumnPicker groups={pickedGroups} toggle={toggle} />
         </span>
       </div>
@@ -1418,12 +1646,32 @@ ${eur0n(g.ret.resultEur)} ÷ ${eur0n(g.ret.startEur)} = ${fmtRet(g.ret.pct)}`} /
 ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%'} (${eur0n(g.ret.startEur)} of ${eur0n(realised?.basis_eur)}) = ${ppt(g.sum.contribution)}`} />
                 </td>
               </tr>
+              {/* ⚠⚠ THE ROUTE IS PART OF THE ROW KEY BELOW, AND THE BACKEND'S `merge_by_isin`
+                  EXPLAINS WHY THAT IS NOT OPTIONAL. That function merges the book to one leg per
+                  ISIN for exactly this reason — its own docstring names this error and warns that
+                  React documents a duplicate key as free to duplicate or DROP a row, i.e. a
+                  holdings list that silently omits a position. `splitByRoute` deliberately undoes
+                  that merge, so the uniqueness it guaranteed has to be restored here: the direct
+                  leg keys as `ISIN|`, the certificate leg as `ISIN|StarTopSelectie Offensief`, and
+                  a folded row (no ISIN) as its certificate's name, unique within a class. `i`
+                  remains only for a row with neither an ISIN nor a name.
+
+                  ⚠ AND A FOLDED ROW IS NOT CLICKABLE. The timing popup asks what holding still
+                  would have made, which needs a position the book can trade; on a strategy it
+                  answered "This instrument is not in the book's current holdings" — true of the
+                  strategy, and reading as a broken row. See `SYNTHETIC_ROWS`. */}
               {[...g.rows].sort(cmp).map((h, i) => (
-                <tr key={h.isin ?? `${g.bucket}-${h.name ?? i}`}
-                  onClick={onTiming && h.name ? () => onTiming(h.name!) : undefined}
-                  title={onTiming && h.name ? `Why the trading mattered for ${h.name}` : undefined}
+                <tr key={[h.isin ?? h.name ?? `${g.bucket}-${i}`,
+                  (h.via_names ?? []).join(',')].join('|')}
+                  onClick={onTiming && h.name && !isSynthetic(h) ? () => onTiming(h.name!) : undefined}
+                  title={onTiming && h.name && !isSynthetic(h)
+                    ? `Why the trading mattered for ${h.name}`
+                    : isSynthetic(h)
+                      ? `${h.name} — the positions this book holds through that strategy, added up`
+                      : undefined}
                   className={`group border-b border-neutral-800/[0.15] last:border-0 transition-colors ${
-                    onTiming && h.name ? 'cursor-pointer hover:bg-accent-500/[0.07]' : 'hover:bg-overlay/[0.03]'}`}>
+                    onTiming && h.name && !isSynthetic(h)
+                      ? 'cursor-pointer hover:bg-accent-500/[0.07]' : 'hover:bg-overlay/[0.03]'}`}>
                   <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[10px] text-fg-faint tabular-nums">{i + 1}</td>
                   {/* ⚠ IN THE NAME CELL, NOT A NEW COLUMN. The header's colSpans are counted by
                       hand across four places in this table (group row, thead, body, tfoot); a
@@ -2024,6 +2272,29 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
  *  `_benchmark_index.INDEX_CAP_PCT` — not here, and not per-caller. */
 const BENCHMARKS = ['SP500', 'ACWI', 'AEX'] as const;
 
+/**
+ * The one class every control in this modal's header wears — Refresh, the benchmark select and
+ * Close.
+ *
+ * ⚠ ONE CONSTANT, NOT THREE COPIES OF THE SAME CLASSES. They had drifted into three sizes: the
+ * buttons at `text-xs px-3 py-1.5` and the select at `text-[11px] px-2 py-1`, so the row read as
+ * two heights and three shapes. Three literals is three places for the next edit to land in one
+ * of them.
+ *
+ * ⚠ `bg-page` ON ALL THREE, INCLUDING THE BUTTONS. A `<select>` cannot be transparent — the
+ * browser paints its own field — so leaving the buttons unfilled is what made them look like a
+ * different KIND of control beside it. Filling all three is the only way they match.
+ *
+ * ⚠ ONE IDLE INK TOO (`text-fg-soft`), and the accent is reserved for hover. Refresh carried
+ * `text-accent-400` at rest, which read as the primary action of a dialog whose actual subject is
+ * the analysis below it — and set it apart from the two controls it is supposed to sit level with.
+ * Its icon is what identifies it.
+ *
+ * Per-control additions stay at the call site: the select's width, the button's disabled state.
+ */
+const HEADER_CTL = 'cursor-pointer text-xs px-3 py-1.5 rounded-lg border border-neutral-700 '
+  + 'bg-page text-fg-soft transition-colors hover:text-accent-300 hover:border-accent-500/50';
+
 export default function PortfolioAnalysisModal({
   id, name, basket, onRefresh, refreshing = false, refreshTitle, refreshTick = null,
   refreshSeq = 0, onClose,
@@ -2168,21 +2439,24 @@ export default function PortfolioAnalysisModal({
             {onRefresh && (
               <button type="button" onClick={onRefresh} disabled={refreshing}
                 title={refreshTitle} aria-label="Refresh this portfolio"
-                className="cursor-pointer inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-neutral-700 text-accent-400 hover:border-accent-500/50 hover:bg-overlay/5 transition-colors disabled:opacity-50 disabled:cursor-wait whitespace-nowrap">
+                className={`${HEADER_CTL} inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-wait`}>
                 <RefreshIcon spinning={refreshing} size={12} />
                 {refreshing ? 'Refreshing…' : 'Refresh'}
               </button>
             )}
+            {/* ⚠ THE CAPTION SITS OUTSIDE THE CONTROL, which is what lets the select match the two
+                buttons exactly. Put inside — as a bare `Benchmark SP500` pill — it would make this
+                control wider and taller than its neighbours for no gain, and the select still has
+                its `aria-label` for anyone not reading the caption. */}
             <label className="flex items-center gap-1.5 text-[11px] text-fg-muted">
               Benchmark
               <select value={benchmark} aria-label="Benchmark"
                 onChange={(e) => { setData(null); setError(null); setBucket(null); setBenchmark(e.target.value); }}
-                className="cursor-pointer bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[11px] font-mono text-fg focus:border-accent-500 w-[6.5rem]">
+                className={`${HEADER_CTL} font-mono w-[7rem] focus:border-accent-500`}>
                 {BENCHMARKS.map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
             </label>
-            <button type="button" onClick={onClose}
-              className="cursor-pointer text-xs px-3 py-1.5 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 transition-colors">
+            <button type="button" onClick={onClose} className={HEADER_CTL}>
               Close
             </button>
           </div>
