@@ -13,6 +13,7 @@ other three back the broker-scan flow.
 from __future__ import annotations
 
 import asyncio
+import gzip
 import io
 import re
 from routers import _airs_portfolio_store as store
@@ -24,7 +25,7 @@ from datetime import UTC, datetime
 from datetime import date as dt_date
 
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -500,6 +501,78 @@ async def airs_model_portfolio_ytd_explain(portfolio_id: int, year: int | None =
     return await explain_portfolio_ytd_async(portfolio_id, year)
 
 
+class CorrelationInstrument(BaseModel):
+    """One instrument that fed the correlation matrices, and how it was priced.
+
+    ⚠ THREE STATES, AND COLLAPSING ANY TWO WOULD MISREAD THE MATRIX. Measured 2026-08-10 over the
+    44 listed models and their 245 distinct ISINs:
+
+        direct       230   an `asset_execution` with a yfinance series, EUR-converted per date
+        lookthrough    9   a Leonteq certificate that IS another model; priced from that model's
+                           own curve, because the certificate has no price of its own to fetch
+        unpriced       6   no series at all — its weight is what the 60% coverage floor is
+                           measured over, so these rows are the reason a portfolio can be refused
+
+    The look-through nine (Star Selection, and the Europa/AI/Dividend/Familie/Merken/Momentum/
+    Azie/Vastgoed TopSelectie certificates) look unpriceable in the database and are not. A table
+    that showed only "priced / not priced" would report the largest of them — Star Selection, held
+    by 12 models — as missing data.
+    """
+
+    isin: str
+    # AIRS's own name for the line. This table is read against the AIRS model, so its vocabulary
+    # wins; `asset_name` is ours, kept for the rows where the two disagree.
+    name: str | None = None
+    asset_name: str | None = None
+    symbol: str | None = None
+    currency: str | None = None
+    analysis_id: int | None = None
+    state: str                       # direct | lookthrough | unpriced
+    # Which key in `series.values` charts this row. `null` for an unpriced instrument — there is
+    # no series, and pointing at an empty one would draw a flat line where the answer is "none".
+    series_key: str | None = None
+    # The model a certificate wraps. Set even when that model could not be priced either, because
+    # "wraps AI-TopSelectie, which is itself under-covered" is a different fact from "unknown".
+    linked_portfolio_id: int | None = None
+    linked_label: str | None = None
+    # ⚠ EUR for a real listing, an INDEX BASED AT 100 for a look-through — not the same kind of
+    # number, so the chart must label them differently. `null` when there is nothing to plot.
+    unit: str | None = None
+    # ⚠ THE VENUE'S MEDIAN DAILY TRADED VALUE, IN EUR — the column that tells you whether to
+    # believe the row above it. A near-untraded listing still yields 251 bars a year, so nothing
+    # else here would look wrong; its closes are simply stale against the real market, and a
+    # correlation of DAILY RETURNS is the statistic that damages most. See `_median_adv` for the
+    # measured case (Hermès on Hanover, EUR 4,946/day, held by 19 of 44 models).
+    med_adv_eur: float | None = None
+    # ⚠ WHERE THE NUMBERS CAME FROM — TWO VENDORS, NOT ONE. `price_source` is yfinance for every
+    # priced row on this page: GuruFocus (`metric_data`) prices the /benchmarks index and the
+    # momentum engine and NEVER enters this path, because the AIRS books live in the ISIN/asset
+    # world. `fx_source` is the second vendor a "which source?" question usually forgets — a EUR
+    # level for a USD holding is a yfinance close multiplied by an ECB rate. `null` on a EUR
+    # holding (no conversion occurs); "per holding" on a look-through, which is a basket whose
+    # constituents each convert on their own rate.
+    price_source: str | None = None
+    fx_source: str | None = None
+    in_portfolios: int = 0           # DISTINCT models (one model may list an ISIN twice)
+    weight_pct_sum: float = 0.0      # Σ of its weights across those models
+    observations: int = 0
+    first_date: str | None = None
+    last_date: str | None = None
+
+
+class CorrelationSeries(BaseModel):
+    """Every charted series on ONE shared date axis — see `_series_block` for the measurement
+    that chose this encoding over the obvious `[[date, value], …]` (452 KB raw against 1,270 KB).
+
+    `values[key][i]` is the level on `dates[i]`, or `null` for a day that instrument did not
+    trade. ⚠ A null is a foreign holiday, NOT a zero: the axis is the union of every instrument's
+    trading days, so rendering nulls as 0 draws a spike to the floor on every one of them.
+    """
+
+    dates: list[str] = []
+    values: dict[str, list[float | None]] = {}
+
+
 class PortfolioCorrelationMatrix(BaseModel):
     """Pairwise Pearson correlation of the LISTED model portfolios' daily EUR returns, for two
     windows. Same return series the /portfolios YTD column is read off, correlated pairwise-
@@ -530,17 +603,38 @@ class PortfolioCorrelationMatrix(BaseModel):
     ytd_obs: list[int]
     trailing_12m: list[list[float | None]]
     trailing_12m_obs: list[int]
+    # Every instrument behind the numbers above, and its charted series. Shipped WITH the matrix
+    # rather than from a second endpoint: both are built from one price load (the only expensive
+    # part of this request), so a second endpoint would repeat that load AND open the door to the
+    # table describing a slightly different set of inputs than the matrix consumed.
+    instruments: list[CorrelationInstrument] = []
+    series: CorrelationSeries = CorrelationSeries()
 
 
 @router.get("/api/airs/model-portfolios/correlations",
             response_model=PortfolioCorrelationMatrix)
-async def airs_model_portfolio_correlations(year: int | None = None):
-    """YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models."""
+async def airs_model_portfolio_correlations(request: Request, year: int | None = None):
+    """YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models,
+    plus every instrument that fed them and its price series.
+
+    ⚠ GZIPPED HERE RATHER THAN BY A `GZipMiddleware`, for the reason `/api/benchmarks/…/grid`
+    records: this app is SSE-heavy, and compression sits between a stream and its client and
+    buffers. The instrument series are ~450 KB of JSON and compress to ~207 KB; the matrices
+    alone are a few KB. `Accept-Encoding` is honoured, not assumed — `/documentation` publishes
+    curl quick-starts against this API, and curl does not send it by default.
+    """
     from routers._airs_portfolio_correlation import (  # noqa: PLC0415
         compute_portfolio_correlations_async,
     )
 
-    return await compute_portfolio_correlations_async(year)
+    payload = await compute_portfolio_correlations_async(year)
+    # ⚠ THE MODEL STILL VALIDATES. Returning a `Response` skips FastAPI's `response_model` check,
+    # and this schema is what `npm run gen:types` builds the frontend's types from.
+    body = PortfolioCorrelationMatrix.model_validate(payload).model_dump_json().encode()
+    if "gzip" in (request.headers.get("accept-encoding") or "").lower():
+        return Response(content=gzip.compress(body, 1), media_type="application/json",
+                        headers={"Content-Encoding": "gzip"})
+    return Response(content=body, media_type="application/json")
 
 
 class CompositionHolding(BaseModel):

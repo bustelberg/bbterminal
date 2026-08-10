@@ -1360,21 +1360,30 @@ ${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).le
           {/* ⚠ `[&_th]:bg-card` IS LOAD-BEARING, not belt-and-braces. A background on `<thead>`
               alone does not paint reliably under `border-collapse`, so the group rows (`bg-inset`)
               scroll THROUGH the header and the two sets of text overlap. The cells carry it. */}
+          {/* ⚠ EVERY COLUMN IS 1.2x ITS ORIGINAL WIDTH (2026-08-10, on request), which is why these
+              are arbitrary rem values rather than Tailwind steps: the scale jumps 6 -> 7 -> 8rem,
+              so snapping 1.2x to the nearest class would widen some columns by 1.17x and others by
+              1.33x and quietly redistribute the table. The two that DID land on a step keep it
+              (w-10 -> w-12 = 2.5 -> 3rem, w-40 -> w-48 = 10 -> 12rem).
+
+              ⚠ THE WIDTHS LIVE ONLY HERE. The body cells set none, so they follow the header —
+              which is what makes a change like this one edit per column instead of two, and also
+              why a `<td>` that grows its own width would silently desynchronise the pair. */}
           <thead className="text-[11px] uppercase tracking-wide text-fg-faint bg-card [&_th]:bg-card sticky top-0 z-20">
             <tr className="border-b border-neutral-800/40">
-              <th className="text-right w-10 pl-4 pr-2 py-2 font-medium">#</th>
+              <th className="text-right w-12 pl-4 pr-2 py-2 font-medium">#</th>
               {/* ⚠ A FLOOR IS REQUIRED HERE BECAUSE THE CELL BELOW IS `max-w-0`. That is what lets
                   a long instrument name truncate instead of stretching the table — but it also
                   makes Name the column an auto-layout table takes slack FROM first, and with
                   twelve columns there was none left: on a book whose Via column carries certificate
                   chips, Name collapsed to a single letter per row. `min-w` is the only thing
                   standing between "truncates gracefully" and "shows nothing". */}
-              <th className={`text-left min-w-[13rem] ${th}`} onClick={() => click('name')}>Name{caret('name')}</th>
+              <th className={`text-left min-w-[15.6rem] ${th}`} onClick={() => click('name')}>Name{caret('name')}</th>
               {/* ⚠ CAPPED. The chips truncate INDIVIDUALLY (max-w-[9rem] each) but the column
                   itself had no bound, so a row with three routes in was free to demand 30rem —
                   taken straight out of Name. Bounded here, the chips wrap within the column
                   instead of eating the table. */}
-              <th className="text-left w-40 max-w-[10rem] py-2 font-medium">
+              <th className="text-left w-48 max-w-[12rem] py-2 font-medium">
                 Via
                 <Provenance source="airs_model" asOf={asOf} kind="formula" column
                   what={'How the portfolio got into this instrument — its own shares, a strategy '
@@ -1387,7 +1396,7 @@ ${holdings.filter((h) => (h.via_names ?? []).length).length} of ${holdings.lengt
                   it lists the rows behind a bar, in the bar's own vocabulary. A raw
                   `asset_grid.sector` here would say "Financial Services" under a bar saying
                   "Financials" and read as two different exposures. */}
-              <th className={`text-left w-36 ${th}`} onClick={() => click('sector')}>
+              <th className={`text-left w-[10.8rem] ${th}`} onClick={() => click('sector')}>
                 Sector{caret('sector')}
                 <Provenance source="yfinance" asOf={asOf} kind="formula" column
                   what={'The sector this instrument is counted in on the Sector chart above.'}
@@ -1395,7 +1404,7 @@ ${holdings.filter((h) => (h.via_names ?? []).length).length} of ${holdings.lengt
 
 ${new Set(holdings.map((h) => h.sector).filter((s) => s && s !== 'Unclassified')).size} sectors across ${holdings.filter((h) => sectorLabel(h.sector)).length} rows; ${holdings.filter((h) => !sectorLabel(h.sector)).length} have none (a fund, or unclassifiable)`} />
               </th>
-              <th className={`text-right w-24 ${th}`} onClick={() => click('weight')}>
+              <th className={`text-right w-[7.2rem] ${th}`} onClick={() => click('weight')}>
                 Weight (now){caret('weight')}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what={'The share of the portfolio held in this instrument, right now.'}
@@ -1411,7 +1420,7 @@ the ${holdings.length} rows below sum to ${eur0n(grand.valuenow)} = 100.00%`} />
                   every figure below shifts a cell right, silently — a contribution renders
                   perfectly well under "Return". */}
 {show('opening') && (
-              <th className="text-right w-32 py-2 font-medium">
+              <th className="text-right w-[9.6rem] py-2 font-medium">
                 Beginwaarde (1 Jan)
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What this position was worth at the start of the year, on AIRS’s own basis."
@@ -1421,7 +1430,7 @@ the ${holdings.length} rows below sum to ${eur0n(grand.valuenow)} = 100.00%`} />
               </th>
 )}
 {show('valuenow') && (
-              <th className="text-right w-28 py-2 font-medium">
+              <th className="text-right w-[8.4rem] py-2 font-medium">
                 Value now
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What this position is worth today."
@@ -1431,7 +1440,7 @@ the ${holdings.length} rows below sum to ${eur0n(grand.valuenow)} = 100.00%`} />
               </th>
 )}
 {show('avgcapital') && (
-              <th className="text-right w-32 py-2 font-medium">
+              <th className="text-right w-[9.6rem] py-2 font-medium">
                 Avg capital invested
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="The money actually tied up in this position over the year."
@@ -1441,7 +1450,7 @@ the ${holdings.length} rows below sum to ${eur0n(grand.valuenow)} = 100.00%`} />
               </th>
 )}
 {show('unrealised') && (
-              <th className="text-right w-28 py-2 font-medium">
+              <th className="text-right w-[8.4rem] py-2 font-medium">
                 Unrealised
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What this position has gained or lost while the book has held it — on paper, not banked."
@@ -1452,7 +1461,7 @@ ${eur0n(grand.valuenow)} − ${eur0n(grand.opening)} = ${eur0n(grand.unrealised)
               </th>
 )}
 {show('realised') && (
-              <th className="text-right w-28 py-2 font-medium">
+              <th className="text-right w-[8.4rem] py-2 font-medium">
                 Realised
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What was banked by actually selling — this year’s part of it."
@@ -1463,7 +1472,7 @@ ${eur0n(grand.valuenow)} − ${eur0n(grand.opening)} = ${eur0n(grand.unrealised)
               </th>
 )}
 {show('income') && (
-              <th className="text-right w-24 py-2 font-medium">
+              <th className="text-right w-[7.2rem] py-2 font-medium">
                 Income
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="The dividends and coupons this position paid the book this year."
@@ -1474,7 +1483,7 @@ ${eur0n(grand.valuenow)} − ${eur0n(grand.opening)} = ${eur0n(grand.unrealised)
               </th>
 )}
 {show('result') && (
-              <th className="text-right w-28 py-2 font-medium">
+              <th className="text-right w-[8.4rem] py-2 font-medium">
                 Result
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what="What the book actually made on this position this year, in euros."
@@ -1484,7 +1493,7 @@ ${eur0n(grand.valuenow)} − ${eur0n(grand.opening)} = ${eur0n(grand.unrealised)
 ${eur0n(grand.unrealised)} + ${eur0n(grand.realised)} + ${eur0n(grand.income)} = ${eur0n(grand.result)}`} />
               </th>
 )}
-              <th className="text-right w-32 py-2 font-medium">
+              <th className="text-right w-[9.6rem] py-2 font-medium">
                 Money-weighted
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
                   what={'What this position returned on the money actually put into it — a '

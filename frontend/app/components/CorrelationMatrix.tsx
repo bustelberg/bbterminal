@@ -6,6 +6,7 @@ import { apiFetch } from '../../lib/apiFetch';
 import { trace, traceEmpty, traceError } from '../../lib/debugTrace';
 import { API_URL } from '../../lib/apiUrl';
 import type { PortfolioCorrelationMatrix } from '../../lib/types/api';
+import CorrelationInstruments from './CorrelationInstruments';
 import { sliceMatrix } from './correlationFilter';
 import { VARIANT_FILTERS } from './portfolioVariants';
 import type { Variant } from './portfolioVariants';
@@ -249,6 +250,10 @@ export default function CorrelationMatrix() {
     // whatever portfolio count crosses the new number next; `isolation: isolate` creates a
     // stacking context so every z-index in here is compared only against its siblings, and the
     // table can rank its own headers however it likes without competing with the page.
+    //
+    // ⚠ THE INSTRUMENTS TABLE IS A SIBLING SECTION, NOT A CHILD OF THIS ONE — it must not inherit
+    // either the z-index band above or the horizontal `overflow-auto` the matrix scrolls in.
+    <div className="space-y-4">
     <section className="isolate bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
@@ -442,5 +447,8 @@ export default function CorrelationMatrix() {
         </>
       )}
     </section>
+
+    {data && <CorrelationInstruments data={data} win={win} />}
+    </div>
   );
 }

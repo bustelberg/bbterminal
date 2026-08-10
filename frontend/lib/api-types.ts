@@ -1210,7 +1210,14 @@ export interface paths {
         };
         /**
          * Airs Model Portfolio Correlations
-         * @description YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models.
+         * @description YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models,
+         *     plus every instrument that fed them and its price series.
+         *
+         *     ⚠ GZIPPED HERE RATHER THAN BY A `GZipMiddleware`, for the reason `/api/benchmarks/…/grid`
+         *     records: this app is SSE-heavy, and compression sits between a stream and its client and
+         *     buffers. The instrument series are ~450 KB of JSON and compress to ~207 KB; the matrices
+         *     alone are a few KB. `Accept-Encoding` is honoured, not assumed — `/documentation` publishes
+         *     curl quick-starts against this API, and curl does not send it by default.
          */
         get: operations["airs_model_portfolio_correlations_api_airs_model_portfolios_correlations_get"];
         put?: never;
@@ -9152,6 +9159,73 @@ export interface components {
                 };
             };
         };
+        /**
+         * CorrelationInstrument
+         * @description One instrument that fed the correlation matrices, and how it was priced.
+         *
+         *     ⚠ THREE STATES, AND COLLAPSING ANY TWO WOULD MISREAD THE MATRIX. Measured 2026-08-10 over the
+         *     44 listed models and their 245 distinct ISINs:
+         *
+         *         direct       230   an `asset_execution` with a yfinance series, EUR-converted per date
+         *         lookthrough    9   a Leonteq certificate that IS another model; priced from that model's
+         *                            own curve, because the certificate has no price of its own to fetch
+         *         unpriced       6   no series at all — its weight is what the 60% coverage floor is
+         *                            measured over, so these rows are the reason a portfolio can be refused
+         *
+         *     The look-through nine (Star Selection, and the Europa/AI/Dividend/Familie/Merken/Momentum/
+         *     Azie/Vastgoed TopSelectie certificates) look unpriceable in the database and are not. A table
+         *     that showed only "priced / not priced" would report the largest of them — Star Selection, held
+         *     by 12 models — as missing data.
+         */
+        CorrelationInstrument: {
+            /** Analysis Id */
+            analysis_id?: number | null;
+            /** Asset Name */
+            asset_name?: string | null;
+            /** Currency */
+            currency?: string | null;
+            /** First Date */
+            first_date?: string | null;
+            /** Fx Source */
+            fx_source?: string | null;
+            /**
+             * In Portfolios
+             * @default 0
+             */
+            in_portfolios?: number;
+            /** Isin */
+            isin: string;
+            /** Last Date */
+            last_date?: string | null;
+            /** Linked Label */
+            linked_label?: string | null;
+            /** Linked Portfolio Id */
+            linked_portfolio_id?: number | null;
+            /** Med Adv Eur */
+            med_adv_eur?: number | null;
+            /** Name */
+            name?: string | null;
+            /**
+             * Observations
+             * @default 0
+             */
+            observations?: number;
+            /** Price Source */
+            price_source?: string | null;
+            /** Series Key */
+            series_key?: string | null;
+            /** State */
+            state: string;
+            /** Symbol */
+            symbol?: string | null;
+            /** Unit */
+            unit?: string | null;
+            /**
+             * Weight Pct Sum
+             * @default 0
+             */
+            weight_pct_sum?: number;
+        };
         /** CorrelationRequest */
         CorrelationRequest: {
             /** Backtest Run Id */
@@ -9181,6 +9255,29 @@ export interface components {
             /** Results */
             results: components["schemas"]["DiversifierResult"][];
             strategy: components["schemas"]["StrategyStats"];
+        };
+        /**
+         * CorrelationSeries
+         * @description Every charted series on ONE shared date axis — see `_series_block` for the measurement
+         *     that chose this encoding over the obvious `[[date, value], …]` (452 KB raw against 1,270 KB).
+         *
+         *     `values[key][i]` is the level on `dates[i]`, or `null` for a day that instrument did not
+         *     trade. ⚠ A null is a foreign holiday, NOT a zero: the axis is the union of every instrument's
+         *     trading days, so rendering nulls as 0 draws a spike to the floor on every one of them.
+         */
+        CorrelationSeries: {
+            /**
+             * Dates
+             * @default []
+             */
+            dates?: string[];
+            /**
+             * Values
+             * @default {}
+             */
+            values?: {
+                [key: string]: (number | null)[];
+            };
         };
         /** CreateBenchmarkRequest */
         CreateBenchmarkRequest: {
@@ -11142,12 +11239,24 @@ export interface components {
              * @default []
              */
             codes?: string[];
+            /**
+             * Instruments
+             * @default []
+             */
+            instruments?: components["schemas"]["CorrelationInstrument"][];
             /** Labels */
             labels: string[];
             /** Min Overlap Days */
             min_overlap_days: number;
             /** Portfolio Ids */
             portfolio_ids: number[];
+            /**
+             * @default {
+             *       "dates": [],
+             *       "values": {}
+             *     }
+             */
+            series?: components["schemas"]["CorrelationSeries"];
             /** Trailing 12M */
             trailing_12m: (number | null)[][];
             /** Trailing 12M Obs */

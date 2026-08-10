@@ -4516,6 +4516,194 @@
         "title": "ConstituentFundamentals",
         "type": "object"
       },
+      "CorrelationInstrument": {
+        "description": "One instrument that fed the correlation matrices, and how it was priced.\n\n\u26a0 THREE STATES, AND COLLAPSING ANY TWO WOULD MISREAD THE MATRIX. Measured 2026-08-10 over the\n44 listed models and their 245 distinct ISINs:\n\n    direct       230   an `asset_execution` with a yfinance series, EUR-converted per date\n    lookthrough    9   a Leonteq certificate that IS another model; priced from that model's\n                       own curve, because the certificate has no price of its own to fetch\n    unpriced       6   no series at all \u2014 its weight is what the 60% coverage floor is\n                       measured over, so these rows are the reason a portfolio can be refused\n\nThe look-through nine (Star Selection, and the Europa/AI/Dividend/Familie/Merken/Momentum/\nAzie/Vastgoed TopSelectie certificates) look unpriceable in the database and are not. A table\nthat showed only \"priced / not priced\" would report the largest of them \u2014 Star Selection, held\nby 12 models \u2014 as missing data.",
+        "properties": {
+          "analysis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Id"
+          },
+          "asset_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Name"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "first_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Date"
+          },
+          "fx_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Source"
+          },
+          "in_portfolios": {
+            "default": 0,
+            "title": "In Portfolios",
+            "type": "integer"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "last_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Date"
+          },
+          "linked_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked Label"
+          },
+          "linked_portfolio_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked Portfolio Id"
+          },
+          "med_adv_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Med Adv Eur"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "observations": {
+            "default": 0,
+            "title": "Observations",
+            "type": "integer"
+          },
+          "price_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Source"
+          },
+          "series_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Key"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "weight_pct_sum": {
+            "default": 0.0,
+            "title": "Weight Pct Sum",
+            "type": "number"
+          }
+        },
+        "required": [
+          "isin",
+          "state"
+        ],
+        "title": "CorrelationInstrument",
+        "type": "object"
+      },
       "CorrelationRequest": {
         "properties": {
           "backtest_run_id": {
@@ -4581,6 +4769,39 @@
           "results"
         ],
         "title": "CorrelationResponse",
+        "type": "object"
+      },
+      "CorrelationSeries": {
+        "description": "Every charted series on ONE shared date axis \u2014 see `_series_block` for the measurement\nthat chose this encoding over the obvious `[[date, value], \u2026]` (452 KB raw against 1,270 KB).\n\n`values[key][i]` is the level on `dates[i]`, or `null` for a day that instrument did not\ntrade. \u26a0 A null is a foreign holiday, NOT a zero: the axis is the union of every instrument's\ntrading days, so rendering nulls as 0 draws a spike to the floor on every one of them.",
+        "properties": {
+          "dates": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Dates",
+            "type": "array"
+          },
+          "values": {
+            "additionalProperties": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "default": {},
+            "title": "Values",
+            "type": "object"
+          }
+        },
+        "title": "CorrelationSeries",
         "type": "object"
       },
       "CreateBenchmarkRequest": {
@@ -9510,6 +9731,14 @@
             "title": "Codes",
             "type": "array"
           },
+          "instruments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CorrelationInstrument"
+            },
+            "title": "Instruments",
+            "type": "array"
+          },
           "labels": {
             "items": {
               "type": "string"
@@ -9527,6 +9756,13 @@
             },
             "title": "Portfolio Ids",
             "type": "array"
+          },
+          "series": {
+            "$ref": "#/components/schemas/CorrelationSeries",
+            "default": {
+              "dates": [],
+              "values": {}
+            }
           },
           "trailing_12m": {
             "items": {
@@ -14618,7 +14854,7 @@
     },
     "/api/airs/model-portfolios/correlations": {
       "get": {
-        "description": "YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models.",
+        "description": "YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models,\nplus every instrument that fed them and its price series.\n\n\u26a0 GZIPPED HERE RATHER THAN BY A `GZipMiddleware`, for the reason `/api/benchmarks/\u2026/grid`\nrecords: this app is SSE-heavy, and compression sits between a stream and its client and\nbuffers. The instrument series are ~450 KB of JSON and compress to ~207 KB; the matrices\nalone are a few KB. `Accept-Encoding` is honoured, not assumed \u2014 `/documentation` publishes\ncurl quick-starts against this API, and curl does not send it by default.",
         "operationId": "airs_model_portfolio_correlations_api_airs_model_portfolios_correlations_get",
         "parameters": [
           {

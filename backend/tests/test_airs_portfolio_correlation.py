@@ -12,6 +12,7 @@ from routers._airs_portfolio_correlation import (
     MIN_OVERLAP_DAYS,
     _matrix,
     _returns_from_curve,
+    _series_block,
 )
 
 
@@ -78,3 +79,58 @@ class TestReturnsFromCurve:
         series = [("2026-01-02", 100.0), ("2026-01-03", 101.0)]
         rets = _returns_from_curve([(0.4, series)], "2026-01-02", total_w=1.0)
         assert rets is None
+
+
+class TestSeriesBlock:
+    """The encoding the instrument table charts from — one shared date axis, per-key columns.
+
+    ⚠ THE ENCODING IS A MEASUREMENT, NOT A STYLE CHOICE. See `_series_block`: the obvious
+    `[[date, value], …]` per instrument costs 1,270 KB raw against this shape's 452 KB on the
+    real book, because it repeats a 10-byte date string once per instrument per trading day.
+    """
+
+    def test_one_axis_is_the_union_and_a_gap_is_null_not_zero(self):
+        # ⚠ THE ASSERTION THIS CLASS EXISTS FOR. Two venues on different calendars: A trades on
+        # the 6th, B does not. B's column must carry None there — a 0.0 would be a price of zero,
+        # which the sparkline draws as a crash to the floor and back on every foreign holiday.
+        eur = {
+            1: [("2026-01-02", 10.0), ("2026-01-06", 12.0)],
+            2: [("2026-01-02", 100.0), ("2026-01-05", 101.0)],
+        }
+        inst = {
+            "A": {"series_key": "a:1", "state": "direct"},
+            "B": {"series_key": "a:2", "state": "direct"},
+        }
+        block = _series_block(inst, eur, {}, "2026-01-01")
+
+        assert block["dates"] == ["2026-01-02", "2026-01-05", "2026-01-06"]
+        assert block["values"]["a:1"] == [10.0, None, 12.0]
+        assert block["values"]["a:2"] == [100.0, 101.0, None]
+
+    def test_it_trims_to_the_window_start(self):
+        eur = {1: [("2025-06-01", 5.0), ("2026-01-02", 10.0)]}
+        block = _series_block({"A": {"series_key": "a:1"}}, eur, {}, "2026-01-01")
+        assert block["dates"] == ["2026-01-02"]
+        assert block["values"]["a:1"] == [10.0]
+
+    def test_a_lookthrough_key_reads_the_wrapped_models_curve(self):
+        # ⚠ `p:` NOT `a:` — a certificate has no asset series of its own. The two id spaces are
+        # disjoint sets of small integers, so keying them both as bare numbers would collide
+        # analysis_id 7 with portfolio 7 and chart one as the other.
+        eur = {7: [("2026-01-02", 50.0)]}
+        look = {7: [("2026-01-02", 100.0), ("2026-01-03", 103.0)]}
+        block = _series_block({"C": {"series_key": "p:7"}}, eur, look, "2026-01-01")
+        assert block["values"] == {"p:7": [100.0, 103.0]}
+
+    def test_an_unpriced_instrument_contributes_no_column(self):
+        # series_key is None; it must not appear as an empty column, which would chart as a
+        # flat line where the honest answer is "there is no series".
+        block = _series_block({"D": {"series_key": None, "state": "unpriced"}}, {}, {}, "2026-01-01")
+        assert block == {"dates": [], "values": {}}
+
+    def test_two_instruments_sharing_one_listing_share_one_column(self):
+        # Deduped on the key, so a listing held under two ISINs is not stored (or shipped) twice.
+        eur = {1: [("2026-01-02", 10.0)]}
+        inst = {"A": {"series_key": "a:1"}, "B": {"series_key": "a:1"}}
+        block = _series_block(inst, eur, {}, "2026-01-01")
+        assert list(block["values"]) == ["a:1"]
