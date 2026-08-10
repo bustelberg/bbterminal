@@ -231,7 +231,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
   const ck = `${reloadKey}-${cadence}`;
   return (
     <>
-    <div className="flex items-center gap-2 mb-3 text-[10px]">
+    <div className="flex items-center gap-2 mb-3 text-[11px]">
       <span className="text-fg-faint">Periods</span>
       <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden">
         {([
@@ -272,7 +272,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
             + 'run through the SAME formula as the portfolio, so the two lines are comparable. '
             + 'Only constituents whose fundamentals are ingested contribute — the coverage floor '
             + 'applies to the index exactly as it does to the book.'}
-          className="cursor-pointer bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-[10px] font-mono text-fg focus:border-accent-500">
+          className="cursor-pointer bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-[11px] font-mono text-fg focus:border-accent-500">
           {BENCHMARKS.map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
       )}

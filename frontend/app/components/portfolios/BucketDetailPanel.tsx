@@ -66,7 +66,7 @@ export function Holdings({ rows }: { rows: Name[] }) {
   // on its OWN state (your names and the index's are independent lists).
   const [key, setKey] = useState<SortKey>('weight');
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
-  if (!rows.length) return <p className="text-[11px] text-fg-faint py-1">Nothing held here.</p>;
+  if (!rows.length) return <p className="text-[12px] text-fg-faint py-1">Nothing held here.</p>;
 
   const sorted = [...rows].sort((a, b) => {
     const av = SORT_VAL[key](a);
@@ -91,10 +91,10 @@ export function Holdings({ rows }: { rows: Name[] }) {
   const th = 'py-1 font-medium cursor-pointer select-none whitespace-nowrap hover:text-fg-soft';
 
   return (
-    <table className="w-full text-[11px] table-fixed">
+    <table className="w-full text-[12px] table-fixed">
       <HoldingsCols />
       <thead>
-        <tr className="text-fg-faint text-[10px] uppercase tracking-wide">
+        <tr className="text-fg-faint text-[11px] uppercase tracking-wide">
           {/* Not sortable: the rank IS the position under the ACTIVE sort, so clicking it could
               only mean "sort by the current sort". It renumbers whenever the sort changes. */}
           <th className="pr-1 text-right font-normal">#</th>
@@ -207,7 +207,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
           {AXIS_LABEL[axis] ?? axis}: <span className="font-mono">{bucket}</span>
         </h4>
         <button onClick={onClose}
-          className="cursor-pointer text-[11px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 shrink-0">
+          className="cursor-pointer text-[12px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 shrink-0">
           ✕
         </button>
       </div>
@@ -220,7 +220,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
       {!loading && !error && attr && (
         <>
           {row && (
-            <div className="text-[11px] text-fg-soft mb-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+            <div className="text-[12px] text-fg-soft mb-3 flex flex-wrap items-center gap-x-4 gap-y-1">
               {attr?.start && (
                 <span className="font-mono text-fg-muted">Since {attr.start}</span>
               )}
@@ -238,7 +238,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
           )}
 
           {nonAttributable && (
-            <p className="text-[11px] text-fg-faint mb-2">
+            <p className="text-[12px] text-fg-faint mb-2">
               Funds, cash and unclassified holdings are not a sector bet, so this bucket is not
               decomposed — just the holdings in it.
             </p>
@@ -250,7 +250,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
                   used — stacked on narrow ones. */}
               <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
                 <div>
-                  <p className="text-[11px] font-medium text-fg-muted mb-1">
+                  <p className="text-[12px] font-medium text-fg-muted mb-1">
                     Your holdings <span className="text-fg-faint">({row.portfolio_holdings?.length ?? 0})</span>
                     {shared(row.portfolio_holdings) > 0 && (
                       <span className="text-accent-400"> · {shared(row.portfolio_holdings)} in both</span>
@@ -259,7 +259,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
                   <Holdings rows={row.portfolio_holdings ?? []} />
                 </div>
                 <div>
-                  <p className="text-[11px] font-medium text-fg-muted mb-1">
+                  <p className="text-[12px] font-medium text-fg-muted mb-1">
                     {benchmark} constituents{' '}
                     <span className="text-fg-faint">({row.benchmark_holdings?.length ?? 0})</span>
                     {shared(row.benchmark_holdings) > 0 && (
@@ -270,16 +270,16 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
                 </div>
               </div>
               {(row.portfolio_holdings ?? []).some((h) => h.in_both) && (
-                <p className="text-[10px] text-fg-faint flex items-center gap-1.5 mt-3">
+                <p className="text-[11px] text-fg-faint flex items-center gap-1.5 mt-3">
                   <span className="w-1.5 h-1.5 rounded-full bg-accent-500 inline-block shrink-0" />
                   marked rows are held in both your portfolio and {benchmark} (a share class counts as the same company)
                 </p>
               )}
             </>
           ) : nonAttributable ? (
-            <table className="w-full text-[11px]">
+            <table className="w-full text-[12px]">
               <thead>
-                <tr className="text-fg-faint text-[10px] uppercase tracking-wide">
+                <tr className="text-fg-faint text-[11px] uppercase tracking-wide">
                   <th className="py-1 pr-2 text-left font-medium">Name</th>
                   <th className="py-1 px-2 text-right font-medium">Weight</th>
                   <th className="py-1 px-2 text-right font-medium">Return</th>
@@ -298,7 +298,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
               </tbody>
             </table>
           ) : (
-            <p className="text-[11px] text-fg-faint">
+            <p className="text-[12px] text-fg-faint">
               No holdings behind this bucket in the YTD window.
             </p>
           )}

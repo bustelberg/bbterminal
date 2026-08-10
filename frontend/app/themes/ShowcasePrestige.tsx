@@ -102,7 +102,7 @@ export default function ShowcasePrestige({ theme }: { theme: PrestigeTheme }) {
           <div className="flex items-center gap-2.5 px-2 py-3 mb-3">
             <span className="inline-block h-7 w-7" style={{ backgroundImage: C.grad, borderRadius: '9px' }} />
             <span className="text-sm font-semibold tracking-tight">BBTerminal</span>
-            <span className="ml-auto text-[9px] uppercase tracking-[0.2em]" style={{ color: C.gold }}>Pro</span>
+            <span className="ml-auto text-[10px] uppercase tracking-[0.2em]" style={{ color: C.gold }}>Pro</span>
           </div>
           {['Dashboard', 'Backtest', 'Schedule', 'Companies', 'Universe', 'Earnings', 'FX Rates'].map((n, i) => (
             <div key={n} className="px-3 py-2 text-sm font-medium" style={i === 0 ? { ...sborder(C.card, '11px'), color: C.fg } : { color: C.fgMuted, borderRadius: '11px' }}>{n}</div>
@@ -124,7 +124,7 @@ export default function ShowcasePrestige({ theme }: { theme: PrestigeTheme }) {
           <div className="px-6 py-7 space-y-6 max-w-[1100px]">
             {/* Hero card — animated conic edge + gradient display type */}
             <div className="pcard p-7" style={{ background: C.card, borderRadius: C.radius, boxShadow: 'var(--t-card-shadow)' }}>
-              <div className="text-[11px] uppercase tracking-[0.32em] mb-3" style={{ color: C.gold }}>Private wealth · momentum</div>
+              <div className="text-[12px] uppercase tracking-[0.32em] mb-3" style={{ color: C.gold }}>Private wealth · momentum</div>
               <h1 className="text-4xl font-semibold tracking-tight leading-[1.05]" style={gradText}>Momentum Portfolio</h1>
               <p className="text-sm mt-3 max-w-2xl leading-relaxed" style={{ color: C.fgMuted }}>{theme.tagline}</p>
               <div className="flex flex-wrap gap-2.5 mt-5">

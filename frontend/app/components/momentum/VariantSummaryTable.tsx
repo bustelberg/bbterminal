@@ -464,7 +464,7 @@ function VariantRow({
           <StatusBadge status={status} />
           <span className={isActive ? 'text-fg-strong font-medium' : ''}>{label}</span>
           {status === 'cancelled' && (
-            <span className="text-[10px] text-fg-subtle italic">cancelled</span>
+            <span className="text-[11px] text-fg-subtle italic">cancelled</span>
           )}
           {clickable && onAddToSchedule && (
             <button
@@ -474,14 +474,14 @@ function VariantRow({
                 onAddToSchedule(variantKey, label);
               }}
               title="Save this variant as a scheduled strategy. The pipeline will keep its current-picks snapshot up to date on every tick."
-              className="ml-2 text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border border-accent-500/30 text-accent-300 bg-accent-500/10 hover:bg-accent-500/20 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="ml-2 text-[11px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded border border-accent-500/30 text-accent-300 bg-accent-500/10 hover:bg-accent-500/20 opacity-0 group-hover:opacity-100 transition-opacity"
             >
               + Schedule
             </button>
           )}
         </div>
         {status === 'error' && outcome?.status === 'error' && (
-          <div className="text-[10px] text-neg-400 mt-0.5 font-mono">{outcome.message}</div>
+          <div className="text-[11px] text-neg-400 mt-0.5 font-mono">{outcome.message}</div>
         )}
       </td>
       <SummaryCells

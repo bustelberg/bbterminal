@@ -213,7 +213,7 @@ export default function AttributionMatrix({ basketA, basketB }: { basketA: Baske
                   <div key={idx} className="rounded-lg border border-neutral-800/40 overflow-hidden">
                     <div className="px-3 py-2 border-b border-neutral-800/40 flex items-center justify-between gap-2">
                       <span className="text-xs font-medium truncate" style={{ color: idx === 0 ? C_A : C_B }}>{side.name}</span>
-                      <span className="text-fg-faint text-[11px] shrink-0">
+                      <span className="text-fg-faint text-[12px] shrink-0">
                         {members.length} holdings{unpriced > 0 ? <span className="text-warn-300"> · {unpriced} no price</span> : ''}
                       </span>
                     </div>

@@ -325,13 +325,13 @@ function TimelinePanel({
             {/* Spacer for the year-axis row in the scroll panel. Same
                 height as the year-axis cells so the first sector label
                 lines up with the first sector row. */}
-            <div className="text-[9px] font-mono" aria-hidden="true">&nbsp;</div>
+            <div className="text-[10px] font-mono" aria-hidden="true">&nbsp;</div>
             {sectors.map((sec, sIdx) => {
               const color = colorForSector(sec, sIdx);
               return (
                 <div
                   key={`label-${sec}`}
-                  className="flex items-center mt-1.5 h-5 pr-3 text-[11px] text-fg-soft truncate gap-1.5"
+                  className="flex items-center mt-1.5 h-5 pr-3 text-[12px] text-fg-soft truncate gap-1.5"
                 >
                   <span className="inline-block w-2 h-2 rounded-sm shrink-0" style={{ background: color }} />
                   <span className="truncate">{sec}</span>
@@ -353,7 +353,7 @@ function TimelinePanel({
                   return (
                     <div
                       key={`yax-${m}`}
-                      className="text-[9px] text-fg-faint font-mono shrink-0"
+                      className="text-[10px] text-fg-faint font-mono shrink-0"
                       style={{
                         width: cellWidth,
                         borderLeft: isYear ? '1px solid rgba(20,40,90,0.14)' : undefined,
@@ -487,7 +487,7 @@ function TimelinePanel({
                     {fmtPct(cagr)}
                   </span>
                 </div>
-                <div className="text-fg-faint text-[10px] mt-1">
+                <div className="text-fg-faint text-[11px] mt-1">
                   equal-weighted across this sector&apos;s holdings
                 </div>
               </>

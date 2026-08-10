@@ -19,7 +19,7 @@ export default function DailyToggle({ on, onChange, note }: {
 }) {
   return (
     <button type="button" onClick={() => onChange(!on)} aria-pressed={on} title={note}
-      className={`cursor-pointer shrink-0 text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+      className={`cursor-pointer shrink-0 text-[11px] px-1.5 py-0.5 rounded border transition-colors ${
         on
           ? 'bg-accent-600 text-white border-transparent'
           : 'border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300'}`}>

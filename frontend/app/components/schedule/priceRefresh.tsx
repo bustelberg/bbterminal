@@ -71,7 +71,7 @@ export function useStockRefresh(onSuccess?: () => void | Promise<void>) {
 export function PriceRefreshPanel({ result, onClose }: { result: PriceRefreshResult | { error: string }; onClose: () => void }) {
   if ('error' in result) {
     return (
-      <div className="flex items-center justify-between gap-2 text-[11px] font-mono text-neg-300">
+      <div className="flex items-center justify-between gap-2 text-[12px] font-mono text-neg-300">
         <span className="truncate">Refresh failed: {result.error}</span>
         <button type="button" onClick={onClose} className="text-fg-faint hover:text-fg-soft shrink-0">✕</button>
       </div>
@@ -87,7 +87,7 @@ export function PriceRefreshPanel({ result, onClose }: { result: PriceRefreshRes
       ? `${newest.join(', ') || '—'} … ${oldest.join(', ') || '—'}`
       : `no dates (${response.source})`;
   return (
-    <div className="flex items-center gap-2 text-[11px] font-mono">
+    <div className="flex items-center gap-2 text-[12px] font-mono">
       <span className="text-fg-faint shrink-0">{request.method}</span>
       <span className="text-fg-muted truncate min-w-0" title={url}>{url}</span>
       <span className="text-fg-faint shrink-0">·</span>

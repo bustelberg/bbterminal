@@ -68,7 +68,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
         <div className="flex items-start justify-between gap-4 mb-3">
           <div>
             <h3 className="text-sm font-semibold text-fg-strong">{name}</h3>
-            <p className="text-[11px] text-fg-faint">
+            <p className="text-[12px] text-fg-faint">
               What the trading was worth — against having left the position alone.
             </p>
           </div>
@@ -92,7 +92,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
                   <tr>
                     <td className="px-3 py-2 text-fg-soft">
                       Doing nothing
-                      <span className="ml-2 text-[10px] text-fg-faint">
+                      <span className="ml-2 text-[11px] text-fg-faint">
                         holding the {num(d.qty_open)} share{d.qty_open === 1 ? '' : 's'} you had on
                         {' '}1 January, untouched — €{num2(d.price_open_eur)} → €{num2(d.price_now_eur)}
                       </span>
@@ -107,7 +107,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
                   <tr>
                     <td className="px-3 py-2 text-fg-soft">
                       What the trading changed
-                      <span className="ml-2 text-[10px] text-fg-faint">
+                      <span className="ml-2 text-[11px] text-fg-faint">
                         {traded === 0 ? 'no trades this year'
                           : `${traded} trade${traded === 1 ? '' : 's'}, itemised below`}
                       </span>
@@ -123,7 +123,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
                     <td className="px-3 py-2 text-fg-strong">
                       What the money actually made
                       {!!d.income_eur && (
-                        <span className="ml-2 text-[10px] font-normal text-fg-faint">
+                        <span className="ml-2 text-[11px] font-normal text-fg-faint">
                           plus {eur(d.income_eur)} of dividends, not in these lines
                         </span>
                       )}
@@ -144,7 +144,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
                 that opened this modal. KLA reads +54% there and +93% here, both correct, and a
                 percent with no stated base is how a reader concludes one of them is broken. */}
             {d.open_value_eur != null ? (
-              <p className="text-[10px] text-fg-faint">
+              <p className="text-[11px] text-fg-faint">
                 Percentages are of {eur(d.open_value_eur)} — what the {num(d.qty_open)} shares you
                 held on 1 January were worth. One base for all three lines, which is what lets them
                 add up. It is not the base behind the Holdings table’s two return columns, so these
@@ -153,7 +153,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
             ) : (
               /* qty_open = 0. Measured: AITopSelectie bought its whole KLA position on 5 January.
                  A 0% here would read as "the decisions did not matter" when they were everything. */
-              <p className="text-[10px] text-fg-faint">
+              <p className="text-[11px] text-fg-faint">
                 No percentages: nothing was held when the year opened — the whole position was
                 bought during it — so there is no starting value to be a percentage of. The euro
                 figures are unaffected, and each trade still shows how far the price moved after it.
@@ -163,7 +163,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
             {/* ⚠ THE VERDICT IN A SENTENCE. A reader who has to subtract two numbers to learn
                 whether the trading helped has been given data, not an answer. */}
             {traded > 0 && (
-              <p className="text-[11px] text-fg-soft">
+              <p className="text-[12px] text-fg-soft">
                 {timing >= 0
                   ? <>Trading <span className="text-pos-400 font-medium">added {eur(timing)}</span>{' '}
                     against leaving the position alone.</>
@@ -238,7 +238,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
                     {shortDay(tl.end)} · €{num2(d.price_now_eur)}
                   </text>
                 </svg>
-                <p className="text-[9.5px] text-fg-faint px-1 leading-snug">
+                <p className="text-[10.5px] text-fg-faint px-1 leading-snug">
                   Each point is a price we hold — the opening value, what you actually traded at,
                   and today. The lines between them connect those observations; they are not the
                   path the price took.
@@ -253,7 +253,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
             {traded > 0 && (
               <div className="rounded-lg border border-neutral-800/40 overflow-x-auto">
                 <table className="w-full text-xs whitespace-nowrap">
-                  <thead className="bg-card [&_th]:bg-card text-[10px] uppercase tracking-wide text-fg-faint">
+                  <thead className="bg-card [&_th]:bg-card text-[11px] uppercase tracking-wide text-fg-faint">
                     <tr className="border-b border-neutral-800/40">
                       <th className="px-3 py-1.5 text-left font-medium">Date</th>
                       <th className="px-3 py-1.5 text-left font-medium">Decision</th>
@@ -288,7 +288,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
                               the row says so — otherwise the share count and price look wrong
                               against the contract note. */}
                           {t.rescaled && (
-                            <span className="ml-2 text-[9px] text-warn-500"
+                            <span className="ml-2 text-[10px] text-warn-500"
                               title={`Converted to today's share basis (${num2(d.split_ratio ?? 1)}:1 split) so it can be compared with the current price. The euro amount is unchanged.`}>
                               split-adjusted
                             </span>
@@ -313,7 +313,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
               </div>
             )}
 
-            <div className="text-[10px] space-y-1">
+            <div className="text-[11px] space-y-1">
               {d.reconciles ? (
                 <p className="text-pos-400">
                   ✓ The two lines add to the third exactly — this is a decomposition of the

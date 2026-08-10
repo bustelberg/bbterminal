@@ -131,12 +131,12 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
   if (!rows?.length) return null;
   return (
     <div>
-      <h5 className="text-[11px] font-semibold text-fg-strong">{title}</h5>
-      <p className="text-[10px] text-fg-faint mb-1">{hint}</p>
+      <h5 className="text-[12px] font-semibold text-fg-strong">{title}</h5>
+      <p className="text-[11px] text-fg-faint mb-1">{hint}</p>
       {/* `table-fixed` + this colgroup pin the numeric columns to a fixed width and let the Name
           column take the rest and TRUNCATE — without it the table sizes to its content and, in the
           narrower dock, spills past its grid cell and overlaps the neighbouring list. */}
-      <table className="w-full text-[11px] table-fixed">
+      <table className="w-full text-[12px] table-fixed">
         {/* ⚠ Widened for the per-cell ⓘ. Every numeric column now carries a 14px chip plus its
             gap OUTSIDE the digits, and at the old `w-9` the weight column could not fit "4.7%"
             and an icon — under `table-fixed` that does not wrap, it spills over the neighbour. */}
@@ -149,7 +149,7 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
         {/* Three bare percentages in a row (10.0% · +59.2% · +5.92%) are unreadable without
             labels — worse than an unexplained header, because there is nothing to hover. */}
         <thead>
-          <tr className="text-fg-faint text-[9px] uppercase tracking-wide">
+          <tr className="text-fg-faint text-[10px] uppercase tracking-wide">
             <th className="py-0.5 pr-2 text-left font-medium">Name</th>
             <th className="py-0.5 px-1 text-right font-medium whitespace-nowrap">
               Weight
@@ -243,7 +243,7 @@ function BucketNames({ row, bucket, benchmark }: {
     <div className="space-y-2">
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
         <div>
-          <p className="text-[11px] font-medium text-fg-muted mb-1">
+          <p className="text-[12px] font-medium text-fg-muted mb-1">
             Your holdings <span className="text-fg-faint">({mine.length})</span>
             {shared(mine) > 0 && <span className="text-accent-400"> · {shared(mine)} in both</span>}
             {mine.length > 0 && (
@@ -253,14 +253,14 @@ function BucketNames({ row, bucket, benchmark }: {
           {mine.length
             ? <Holdings rows={mine} />
             : (
-              <p className="text-[11px] text-fg-subtle py-1">
+              <p className="text-[12px] text-fg-subtle py-1">
                 {`You hold nothing in ${bucket} — the whole effect is the decision not to own it, `}
                 {'which is why Selection and Interaction are zero on this row.'}
               </p>
             )}
         </div>
         <div>
-          <p className="text-[11px] font-medium text-fg-muted mb-1">
+          <p className="text-[12px] font-medium text-fg-muted mb-1">
             {benchmark} constituents <span className="text-fg-faint">({theirs.length})</span>
             {shared(theirs) > 0 && <span className="text-accent-400"> · {shared(theirs)} in both</span>}
             {theirs.length > 0 && (
@@ -270,7 +270,7 @@ function BucketNames({ row, bucket, benchmark }: {
           {theirs.length
             ? <Holdings rows={theirs} />
             : (
-              <p className="text-[11px] text-fg-subtle py-1">
+              <p className="text-[12px] text-fg-subtle py-1">
                 {`${benchmark} holds nothing in ${bucket}, so there is no index return to judge `}
                 {'your picks against — the whole effect is allocation.'}
               </p>
@@ -278,7 +278,7 @@ function BucketNames({ row, bucket, benchmark }: {
         </div>
       </div>
       {mine.some((h) => h.in_both) && (
-        <p className="text-[10px] text-fg-faint flex items-center gap-1.5">
+        <p className="text-[11px] text-fg-faint flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-accent-500 inline-block shrink-0" />
           marked rows are held in both your portfolio and {benchmark} (a share class counts as the
           same company)
@@ -356,13 +356,13 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
         <div className="flex items-center gap-2 shrink-0">
           <select value={axis}
             onChange={(e) => { setData(null); setOpenBucket(null); setAxis(e.target.value as Axis); }}
-            className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[11px] text-fg focus:border-accent-500">
+            className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[12px] text-fg focus:border-accent-500">
             <option value="sector">by Sector</option>
             <option value="region">by Region</option>
             <option value="currency">by Currency</option>
           </select>
           <button type="button" onClick={onClose}
-            className="cursor-pointer text-[11px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 transition-colors">
+            className="cursor-pointer text-[12px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 transition-colors">
             Hide
           </button>
         </div>
@@ -378,11 +378,11 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       {data && (
         <>
           {data.note && (
-            <p className="text-[11px] text-warn-300 mb-2">⚠ {data.note}</p>
+            <p className="text-[12px] text-warn-300 mb-2">⚠ {data.note}</p>
           )}
           {/* ⚠ The identity IS the decomposition. If it fails, these are just three columns. */}
           {!data.reconciles && (
-            <p className="text-[11px] text-neg-300 mb-2">
+            <p className="text-[12px] text-neg-300 mb-2">
               {'⚠ The effects do not sum to the excess (residual '}
               {pct(data.residual_pct, 4)}
               {'). This is NOT a valid decomposition — do not read the rows below as one.'}
@@ -408,9 +408,9 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               so the two cannot drift — a strip above the table restated all three permanently,
               so the panel carried every formula twice. */}
           <div className="overflow-auto rounded-lg border border-neutral-800/40 mb-3">
-            <table className="w-full text-[11px]">
+            <table className="w-full text-[12px]">
               <thead className="bg-card">
-                <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                   <Th align="left" label={w}
                     prov={<Provenance source="derived" column kind="formula" note={`the ${w}s`}
                       what={`The ${w}s the excess is split across — including the ones ${benchmark} holds and you do NOT, because choosing not to own something is a decision the numbers can price.`}
@@ -484,7 +484,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       className={`cursor-pointer transition-colors ${
                         open ? 'bg-accent-500/[0.07]' : 'hover:bg-overlay/[0.02]'}`}>
                       <td className="px-2 py-1.5 text-fg whitespace-nowrap">
-                        <span className={`inline-block w-3 text-[9px] ${open ? 'text-accent-400' : 'text-fg-faint'}`}>
+                        <span className={`inline-block w-3 text-[10px] ${open ? 'text-accent-400' : 'text-fg-faint'}`}>
                           {open ? '▾' : '▸'}
                         </span>
                         {r.bucket}

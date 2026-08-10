@@ -226,7 +226,7 @@ export default function UsersPage() {
                 <td className="px-5 py-2 text-fg font-mono">{u.email ?? '—'}</td>
                 <td className="px-3 py-2">
                   <span
-                    className={`inline-block px-2 py-0.5 text-[10px] font-medium rounded-md ${
+                    className={`inline-block px-2 py-0.5 text-[11px] font-medium rounded-md ${
                       u.role === 'admin'
                         ? 'bg-accent-500/15 text-accent-300 border border-accent-500/30'
                         : 'bg-neutral-700/30 text-fg-muted border border-neutral-700/50'

@@ -152,7 +152,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : points.length === 0 ? (
-        <p className="text-[11px] text-fg-faint py-16 text-center">No invested-capital figures ingested for this {isAgg ? 'portfolio' : 'company'}.</p>
+        <p className="text-[12px] text-fg-faint py-16 text-center">No invested-capital figures ingested for this {isAgg ? 'portfolio' : 'company'}.</p>
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
@@ -174,9 +174,9 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
+                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
                 <YAxis scale="log" domain={logDomain ?? ['dataMin', 'dataMax']} allowDataOverflow
-                  tick={{ fontSize: 11, fill: chartTheme.axisTick }}
+                  tick={{ fontSize: 12, fill: chartTheme.axisTick }}
                   tickFormatter={(v: number) => (indexed ? fmtIndex(v) : fmt(v))} width={60} />
                 {/* ⚠ THE HOVER READS THE ACTUAL AMOUNT, NOT THE AXIS — see `MetricGrowthCard`. The
                     plotted number is an index; the EUR figure rides on the row and is what gets

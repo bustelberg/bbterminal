@@ -51,7 +51,7 @@ export default function FeeWaterfallPanel({
       }
       bodyClassName="px-5 py-4 space-y-3"
     >
-        <p className="text-[11px] text-fg-subtle leading-relaxed">
+        <p className="text-[12px] text-fg-subtle leading-relaxed">
           Each row is one year <span className="text-fg-soft">in isolation</span>. Off that year&apos;s
           gross return, <span className="text-fg-soft">Leonteq&apos;s fees</span>{' '}come off first
           (transaction {cfg.transaction_bps}bps/trade + annual {cfg.leonteq_annual_bps}bps, final year
@@ -113,7 +113,7 @@ export default function FeeWaterfallPanel({
           </table>
         </div>
 
-        <p className="text-[11px] text-fg-faint">
+        <p className="text-[12px] text-fg-faint">
           Per-year returns compound to the cumulative totals — they don&apos;t add up linearly. Each
           year&apos;s &quot;Net to client&quot; is after all fees; the cumulative gross (net) is the
           parenthetical on each stat above.

@@ -636,11 +636,11 @@ export default function Sidebar({ initialUser }: Props) {
                   {email}
                 </span>
                 {isImpersonating ? (
-                  <span className="text-[9px] uppercase tracking-wider text-warn-400 shrink-0" title="Switch back from the menu">
+                  <span className="text-[10px] uppercase tracking-wider text-warn-400 shrink-0" title="Switch back from the menu">
                     impersonating
                   </span>
                 ) : role === 'admin' ? (
-                  <span className="text-[9px] uppercase tracking-wider text-accent-400 shrink-0">admin</span>
+                  <span className="text-[10px] uppercase tracking-wider text-accent-400 shrink-0">admin</span>
                 ) : null}
                 <svg className="w-3 h-3 text-fg-subtle shrink-0" viewBox="0 0 20 20" fill="currentColor">
                   <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
@@ -650,14 +650,14 @@ export default function Sidebar({ initialUser }: Props) {
               {accountMenuOpen && (
                 <div className="absolute bottom-full left-0 right-0 mb-1 bg-elevated border border-neutral-700 rounded-lg shadow-xl overflow-hidden">
                   <div className="px-3 py-2 border-b border-neutral-800/60">
-                    <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-0.5">Signed in as</div>
+                    <div className="text-[11px] uppercase tracking-wider text-fg-subtle mb-0.5">Signed in as</div>
                     <div className="text-xs text-fg font-mono truncate">{email}</div>
                   </div>
 
                   {/* Stored sessions — instant switch via setSession() */}
                   {otherStored.length > 0 && (
                     <div>
-                      <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-fg-subtle border-t border-neutral-800/60">
+                      <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider text-fg-subtle border-t border-neutral-800/60">
                         Switch to (instant)
                       </div>
                       {otherStored.map((s) => (
@@ -671,7 +671,7 @@ export default function Sidebar({ initialUser }: Props) {
                             <div className="text-xs text-fg truncate">{s.email}</div>
                           </div>
                           <span
-                            className={`text-[9px] uppercase tracking-wider shrink-0 ${
+                            className={`text-[10px] uppercase tracking-wider shrink-0 ${
                               s.role === 'admin' ? 'text-accent-400' : 'text-fg-subtle'
                             }`}
                           >
@@ -687,7 +687,7 @@ export default function Sidebar({ initialUser }: Props) {
                       in the multi-session store automatically. */}
                   {role === 'admin' && newUsers.length > 0 && (
                     <div>
-                      <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-fg-subtle border-t border-neutral-800/60">
+                      <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider text-fg-subtle border-t border-neutral-800/60">
                         Sign in as (first time)
                       </div>
                       {newUsers.map((u) => (
@@ -701,7 +701,7 @@ export default function Sidebar({ initialUser }: Props) {
                             <div className="text-xs text-fg truncate">{u.email}</div>
                           </div>
                           <span
-                            className={`text-[9px] uppercase tracking-wider shrink-0 ${
+                            className={`text-[10px] uppercase tracking-wider shrink-0 ${
                               u.role === 'admin' ? 'text-accent-400' : 'text-fg-subtle'
                             }`}
                           >
@@ -714,7 +714,7 @@ export default function Sidebar({ initialUser }: Props) {
 
                   {/* Empty-state: admin with no other accounts at all. */}
                   {role === 'admin' && otherStored.length === 0 && newUsers.length === 0 && (
-                    <div className="px-3 py-2 text-[11px] text-fg-subtle border-t border-neutral-800/60">
+                    <div className="px-3 py-2 text-[12px] text-fg-subtle border-t border-neutral-800/60">
                       No other accounts — add one in{' '}
                       <Link href="/users" className="text-accent-400 hover:underline" onClick={() => setAccountMenuOpen(false)}>
                         Users

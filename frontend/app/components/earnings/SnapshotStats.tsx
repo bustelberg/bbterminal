@@ -774,7 +774,7 @@ export default function SnapshotStats({
             <div className="text-fg-muted text-xs font-semibold uppercase tracking-wider mb-2 flex items-center justify-between gap-2">
               <span>{sec.title}</span>
               {hasB && (labelA || labelB) && (
-                <span className="text-[10px] normal-case font-mono tracking-normal flex items-center gap-3">
+                <span className="text-[11px] normal-case font-mono tracking-normal flex items-center gap-3">
                   {labelA && <span className="text-accent-400">{labelA}</span>}
                   {labelB && <span className="text-warn-400">{labelB}</span>}
                 </span>
@@ -868,7 +868,7 @@ function ValueCell({
         {cell.cadence && <InfoTip text={cadenceHoverText(cell.cadence)} />}
       </span>
       {cell.date && (
-        <span className="block text-fg-subtle text-[10px] font-mono">{cell.date}</span>
+        <span className="block text-fg-subtle text-[11px] font-mono">{cell.date}</span>
       )}
     </span>
   );

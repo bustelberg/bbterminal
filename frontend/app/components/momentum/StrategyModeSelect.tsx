@@ -37,7 +37,7 @@ export default function StrategyModeSelect({
         <option value="sector_etf">Sector ETF (per-sector benchmark)</option>
       </select>
       {selectionMode === 'sector_etf' && (
-        <div className="text-[10px] mt-1 max-w-xs">
+        <div className="text-[11px] mt-1 max-w-xs">
           {sectorEtfsLoading ? (
             <span className="text-fg-subtle">loading sector mapping…</span>
           ) : sectorEtfsError ? (

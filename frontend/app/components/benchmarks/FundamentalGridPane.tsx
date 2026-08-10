@@ -44,7 +44,7 @@ function FetchButton({ busy, title, onClick }: {
 }) {
   return (
     <button type="button" onClick={onClick} disabled={busy} title={title}
-      className="cursor-pointer text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40
+      className="cursor-pointer text-[11px] px-1.5 py-0.5 rounded border border-neutral-800/40
                  text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 transition-colors
                  disabled:opacity-40 disabled:cursor-not-allowed">
       {busy ? '…' : 'Fetch'}
@@ -455,7 +455,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   return (
     <div className="space-y-3">
       {/* ── Year slider. */}
-      <div className="flex items-center gap-4 flex-wrap text-[11px]">
+      <div className="flex items-center gap-4 flex-wrap text-[12px]">
         <label className="flex items-center gap-2">
           <span className="text-fg-faint w-10">Year</span>
           <input type="range" min={0} max={Math.max(0, axes.years.length - 1)} value={yearIdx}
@@ -475,7 +475,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
           not a cadence toggle beside a quarter picker. Those were two controls whose product
           included combinations that do not exist (there is no "2025" period in the quarterly
           payload), and picking one showed an empty table. Here every position resolves. */}
-      <div className="flex items-center gap-2 text-[11px]">
+      <div className="flex items-center gap-2 text-[12px]">
         <span className="text-fg-faint w-10">Period</span>
         <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden">
           {([null, 1, 2, 3, 4] as const).map((qq) => {
@@ -509,7 +509,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
       </div>
 
       {/* ── What this cross-section is, and how much of the index it covers. */}
-      <div className="flex items-baseline gap-3 flex-wrap text-[11px]">
+      <div className="flex items-baseline gap-3 flex-wrap text-[12px]">
         <span className="text-sm font-semibold text-fg-strong">
           {period ? periodTitle(period) : '—'}
         </span>
@@ -534,7 +534,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
           through to the coverage sentence would have printed "caps cover 88% of 25, floor 60%" on
           the AEX — an explanation that contradicts itself, and a reader sent to fix something that
           was never the problem. */}
-      <div className="text-[11px] leading-5">
+      <div className="text-[12px] leading-5">
         <p className="h-5 truncate text-warn-300"
           title={coverageShort
             ? `Market caps cover ${summary?.cap_covered_pct ?? 0}% of the ${data?.members ?? 0} `
@@ -623,7 +623,7 @@ sliders never change it, because the running order is anchored to a fixed period
                   button that fetches what its own table shows is the rule worth keeping. */}
               {isAdmin && (
                 <th className="px-2 py-2 font-medium text-left whitespace-nowrap
-                               text-[10px] text-fg-faint"
+                               text-[11px] text-fg-faint"
                   title="ONE GuruFocus call. Loads the statements blob — every column in this
 table, market cap included, for every year and both the annual and trailing-twelve-month views.">
                   Fetch
@@ -722,7 +722,7 @@ reported in. Every value column is converted to EUR; this is what the native too
                         + 'spend and a Cancel appear bottom-right.'
                       : 'Nothing is missing as of this table’s last load. Pressing re-checks '
                         + 'against the database and costs no API calls if that is still true.'}
-                    className="cursor-pointer text-[10px] px-1.5 py-0.5 rounded border
+                    className="cursor-pointer text-[11px] px-1.5 py-0.5 rounded border
                                border-neutral-700 text-fg-subtle hover:text-accent-300
                                hover:border-accent-500/50 transition-colors whitespace-nowrap
                                disabled:opacity-40 disabled:cursor-wait">
@@ -761,7 +761,7 @@ reported in. Every value column is converted to EUR; this is what the native too
                     {/* ⚠ A SHORT COLUMN SAYS SO. An aggregate built from a third of the index
                         reads identically to one built from all of it. */}
                     {a && summary && a.contributors < summary.covered && (
-                      <span className="ml-1 text-[9px] text-warn-400">{a.contributors}</span>
+                      <span className="ml-1 text-[10px] text-warn-400">{a.contributors}</span>
                     )}
                   </td>
                 );
@@ -815,7 +815,7 @@ reported in. Every value column is converted to EUR; this is what the native too
                       <span className="truncate">{ident.name ?? '—'}</span>
                       {ident.unavailable_label && (
                         <span
-                          className="shrink-0 text-[9px] leading-none px-1 py-0.5 rounded border
+                          className="shrink-0 text-[10px] leading-none px-1 py-0.5 rounded border
                                      border-warn-500/40 bg-warn-500/10 text-warn-300 font-medium
                                      tracking-wide cursor-help"
                           title={`${ident.unavailable}.\n\nThis row cannot be filled — the dashes `
@@ -835,7 +835,7 @@ reported in. Every value column is converted to EUR; this is what the native too
                           works is how a real gap and a permanent answer come to look alike. The
                           badge in the name cell says why. */}
                       {ident.unavailable_label
-                        ? <span className="text-fg-faint text-[10px]">—</span>
+                        ? <span className="text-fg-faint text-[11px]">—</span>
                         : (
                           <FetchButton
                             busy={fetching.has(id)}

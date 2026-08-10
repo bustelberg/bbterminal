@@ -80,7 +80,7 @@ export function Stat({ label, value, tone, color, info }: {
   return (
     <div className="rounded-lg border border-neutral-800/40 bg-inset px-3 py-2 min-w-[6.5rem]"
       style={color ? { borderLeft: `3px solid ${color}` } : undefined}>
-      <div className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-fg-muted">{label}{info}</div>
+      <div className="flex items-center gap-1 text-[12px] uppercase tracking-wide text-fg-muted">{label}{info}</div>
       <div className={`font-mono text-xl font-semibold leading-tight ${color ? '' : (tone ?? 'text-fg-strong')}`}
         style={color ? { color } : undefined}>{value}</div>
     </div>
@@ -298,8 +298,8 @@ export default function MetricGrowthCard({
         // would send the reader to spend GuruFocus quota on data that is already in the database.
         // State the fact and the reason, and open the per-holding table instead.
         <div className="py-16 flex flex-col items-center gap-2 text-center px-2">
-          <p className="text-[11px] text-fg-soft">{reportingLine(blendNote, cfg.noun)}.</p>
-          <p className="text-[11px] text-fg-faint">No portfolio line: {whyNoLine(blendNote)}</p>
+          <p className="text-[12px] text-fg-soft">{reportingLine(blendNote, cfg.noun)}.</p>
+          <p className="text-[12px] text-fg-faint">No portfolio line: {whyNoLine(blendNote)}</p>
           <button type="button" onClick={() => setShowHoldings(true)}
             className="text-xs px-3 py-1 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
             See per holding
@@ -314,14 +314,14 @@ export default function MetricGrowthCard({
           noun={cfg.noun} onIngested={onReloadMetrics ?? onIngested} />
       ) : points.length === 0 ? (
         <div className="py-16 flex flex-col items-center gap-3 text-center px-4">
-          <p className="text-[11px] text-fg-faint">No {cfg.noun} ingested for this company.</p>
+          <p className="text-[12px] text-fg-faint">No {cfg.noun} ingested for this company.</p>
           {ingestIsin && (busy ? (
             <span className="text-xs text-fg-subtle">Fetching from GuruFocus…</span>
           ) : outcome ? (
             <>
               <p className="text-xs text-warn-300 max-w-[28ch]">{outcome}</p>
               <button type="button" onClick={ingest}
-                className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
+                className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
                 Try again
               </button>
             </>
@@ -367,14 +367,14 @@ export default function MetricGrowthCard({
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowHoldings(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
+                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
                 {isRatio ? (
-                  <YAxis tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                  <YAxis tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                     tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 ) : (
                   // Log scale: an exponential (constant-%) growth trend draws as a straight line.
                   <YAxis scale="log" domain={logDomain ?? ['dataMin', 'dataMax']} allowDataOverflow
-                    tick={{ fontSize: 11, fill: chartTheme.axisTick }}
+                    tick={{ fontSize: 12, fill: chartTheme.axisTick }}
                     tickFormatter={(v: number) => (indexed ? fmtIndex(v) : fmt(v))} width={60} />
                 )}
                 {/* ⚠ THE HOVER READS THE ACTUAL NUMBER, NOT THE AXIS. With the lines indexed, the

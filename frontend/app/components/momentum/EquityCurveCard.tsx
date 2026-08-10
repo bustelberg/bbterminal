@@ -421,7 +421,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
                 )}
                 {hasVariantPicker && pickerOpen && cmp.kind === 'saved' && cmp.allVariants && (
                   <div className="absolute left-0 top-full mt-1 w-64 bg-card border border-neutral-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
-                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-fg-subtle border-b border-neutral-800/60">
+                    <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-fg-subtle border-b border-neutral-800/60">
                       Variants ({cmp.allVariants.length})
                     </div>
                     {cmp.allVariants.map((v, idx) => {
@@ -435,7 +435,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
                           className={`w-full text-left px-3 py-2 text-xs hover:bg-overlay/[0.03] disabled:opacity-100 disabled:cursor-default flex items-center justify-between gap-2 ${isCurrent ? 'bg-accent-500/10 text-accent-300' : 'text-fg'}`}
                         >
                           <span className="truncate">{v.label}</span>
-                          {isCurrent && <span className="text-[10px] text-accent-400">current</span>}
+                          {isCurrent && <span className="text-[11px] text-accent-400">current</span>}
                         </button>
                       );
                     })}
@@ -467,7 +467,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
               <div className="absolute left-0 mt-1 w-72 bg-card border border-neutral-700 rounded-lg shadow-xl z-50 max-h-80 overflow-auto">
                 {benchmarkOptions.length > 0 && (
                   <div>
-                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-fg-subtle border-b border-neutral-800/60">Benchmarks</div>
+                    <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-fg-subtle border-b border-neutral-800/60">Benchmarks</div>
                     {benchmarkOptions.map((b) => {
                       const already = comparisons.some((c) => c.kind === 'benchmark' && c.benchmarkId === b.benchmark_id);
                       return (
@@ -480,7 +480,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
                         >
                           <span className="font-mono text-warn-300">{b.ticker}</span>
                           <span className="text-fg-subtle truncate">{b.name}</span>
-                          {already && <span className="ml-auto text-[10px] text-fg-faint">added</span>}
+                          {already && <span className="ml-auto text-[11px] text-fg-faint">added</span>}
                         </button>
                       );
                     })}
@@ -488,7 +488,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
                 )}
                 {savedRuns.length > 0 && (
                   <div>
-                    <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-fg-subtle border-t border-b border-neutral-800/60">Saved Backtests</div>
+                    <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-fg-subtle border-t border-b border-neutral-800/60">Saved Backtests</div>
                     {savedRuns.map((r) => {
                       const already = comparisons.some((c) => c.kind === 'saved' && c.runId === r.run_id);
                       const isLoaded = r.run_id === loadedRunId;
@@ -502,8 +502,8 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
                           title={isLoaded ? 'Currently loaded as the active strategy' : undefined}
                         >
                           <span className="truncate">{r.name}</span>
-                          {isLoaded && <span className="ml-auto text-[10px] text-fg-faint">active</span>}
-                          {!isLoaded && already && <span className="ml-auto text-[10px] text-fg-faint">added</span>}
+                          {isLoaded && <span className="ml-auto text-[11px] text-fg-faint">active</span>}
+                          {!isLoaded && already && <span className="ml-auto text-[11px] text-fg-faint">added</span>}
                         </button>
                       );
                     })}
@@ -516,13 +516,13 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
             )}
           </div>
           {alignedSeries.windowStart && alignedSeries.windowEnd && alignedSeries.series.length > 1 && (
-            <span className="text-[11px] text-fg-subtle font-mono ml-auto">
+            <span className="text-[12px] text-fg-subtle font-mono ml-auto">
               aligned {alignedSeries.windowStart} → {alignedSeries.windowEnd}
             </span>
           )}
         </div>
         {benchStatus && (
-          <div className={`mt-2 text-[11px] flex items-center gap-1.5 ${
+          <div className={`mt-2 text-[12px] flex items-center gap-1.5 ${
             benchStatus.tone === 'ok' ? 'text-pos-400' : benchStatus.tone === 'warn' ? 'text-warn-400' : 'text-accent-300'
           }`}>
             {addingSeriesId != null ? (

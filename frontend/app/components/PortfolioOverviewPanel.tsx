@@ -672,7 +672,7 @@ export default function PortfolioOverviewPanel() {
           <h3 className="text-sm font-semibold text-fg-strong">
             Portfolios{rows ? ` · ${view.length}` : ''}
           </h3>
-          <p className="text-[11px] text-fg-faint mt-0.5 max-w-3xl">
+          <p className="text-[12px] text-fg-faint mt-0.5 max-w-3xl">
             {'Named from the Fixed portfolio; figures from AIRS, year to date.'}
             {/* Only an admin can open a row, so only an admin is told to — an instruction that
                 does not work is worse than none. */}
@@ -732,7 +732,7 @@ export default function PortfolioOverviewPanel() {
           upgrade (nicknames, Brinson attribution, the bucket drill-downs), and it sits beside
           Refresh all rather than blocking the page. */}
       {refreshMsg && (
-        <div className={`text-[11px] rounded-lg px-3 py-1.5 border ${
+        <div className={`text-[12px] rounded-lg px-3 py-1.5 border ${
           refreshMsg.kind === 'error' ? 'text-neg-300 bg-neg-500/10 border-neg-500/20'
             : refreshMsg.kind === 'warn' ? 'text-warn-300 bg-warn-500/10 border-warn-500/20'
               : refreshMsg.kind === 'ok' ? 'text-pos-300 bg-pos-500/10 border-pos-500/20'
@@ -763,7 +763,7 @@ export default function PortfolioOverviewPanel() {
               own box so the page never scrolls sideways. */}
           <table className="w-full text-xs whitespace-nowrap">
             <thead className="bg-card z-10 [&_th]:bg-card">
-              <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+              <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                 {/* ⚠ A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
                     or re-sorted, which is the point — it is there to say "the 14th row", so two
                     people can talk about the same line. `text-right` so the digits align. */}
@@ -810,7 +810,7 @@ export default function PortfolioOverviewPanel() {
                             <button
                               onClick={(e) => { e.stopPropagation(); void openModal(r); }}
                               disabled={opening === r.dynamic_portefeuille}
-                              className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg disabled:opacity-50"
+                              className="inline-flex items-center text-[11px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg disabled:opacity-50"
                             >
                               {opening === r.dynamic_portefeuille ? '…' : 'Analyse'}
                             </button>
@@ -853,7 +853,7 @@ export default function PortfolioOverviewPanel() {
                             className="text-left hover:text-accent-300 hover:underline decoration-dotted underline-offset-2">
                             {r.name}
                             {r.name_is_custom && (
-                              <span className="text-accent-400 text-[9px] leading-none ml-1 align-middle">✎</span>
+                              <span className="text-accent-400 text-[10px] leading-none ml-1 align-middle">✎</span>
                             )}
                           </button>
                         ) : (
@@ -868,7 +868,7 @@ export default function PortfolioOverviewPanel() {
                             figures are still real — they just do not all describe the same date,
                             and the badge names exactly which one is stale. */}
                         {(r.missing_reports?.length ?? 0) > 0 && (
-                          <span className="ml-1.5 text-[10px] text-warn-300"
+                          <span className="ml-1.5 text-[11px] text-warn-300"
                             title={`This account's last scan did not retrieve: ${r.missing_reports!
                               .map((c) => REPORT_LABELS[c] ?? c).join(', ')}. Its other figures are from the newer scan, so the row mixes dates — ${
                               // Don't send a reader to a button their role does not render.
@@ -1016,7 +1016,7 @@ function SortTh({ label, k, sortKey, sortDir, onSort, align = 'left', title }: {
         className={'inline-flex items-center gap-1 hover:text-accent-400 transition-colors '
           + (active ? 'text-fg-soft' : '')}>
         {label}
-        <span className={'text-[8px] ' + (active ? 'text-accent-400' : 'text-fg-faint/40')}>
+        <span className={'text-[9px] ' + (active ? 'text-accent-400' : 'text-fg-faint/40')}>
           {active ? (sortDir === 'asc' ? '▲' : '▼') : '▾'}
         </span>
       </button>
@@ -1049,7 +1049,7 @@ function BucketBadge({ bucket, isin, overridden, onOverride }: {
       title={overridden ? 'Class manually set — pick “Auto” to revert to the calculated class.' : 'Auto-classified — click to override the Class.'}>
       {dot}
       <span className="text-fg-soft">{bucketLabel(bucket)}</span>
-      {overridden && <span className="text-accent-400 text-[9px] leading-none">✎</span>}
+      {overridden && <span className="text-accent-400 text-[10px] leading-none">✎</span>}
       {/* The picker overlays the whole cell, invisible, so the badge stays the visible affordance. */}
       <select
         aria-label="Set Class"
@@ -1136,7 +1136,7 @@ function IsinCell({ r, onPin }: {
         <button type="button" disabled={!onPin}
           onClick={(e) => { e.stopPropagation(); void onPin?.(r.holding_name, r.isin); }}
           title="ISIN set by hand — AIRS gives this holding none. Click to change or clear it."
-          className="text-accent-400 text-[9px] leading-none ml-1 align-middle hover:text-accent-300">
+          className="text-accent-400 text-[10px] leading-none ml-1 align-middle hover:text-accent-300">
           ✎
         </button>
       )}
@@ -1396,8 +1396,8 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
     }
     if (portefeuille && onOverride) await onOverride(portefeuille);
   }, [portefeuille, onOverride]);
-  if (!d) return <p className="text-[11px] text-fg-subtle">Loading holdings…</p>;
-  if (!d.rows?.length) return <p className="text-[11px] text-fg-subtle">No holdings snapshot stored.</p>;
+  if (!d) return <p className="text-[12px] text-fg-subtle">Loading holdings…</p>;
+  if (!d.rows?.length) return <p className="text-[12px] text-fg-subtle">No holdings snapshot stored.</p>;
   const byName = new Map((i?.rows ?? []).map((r) => [r.holding_name, r]));
 
   // Grouped by the CALCULATED Class (the `bucket`, incl. manual overrides), in the backend's order
@@ -1479,8 +1479,8 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
           click is genuinely optional. */}
       <button type="button" onClick={() => setShowRows((v) => !v)}
         aria-expanded={showRows}
-        className="w-full flex items-center gap-2 text-left text-[11px] px-2 py-1.5 rounded-lg border border-neutral-800/40 bg-card hover:bg-overlay/5 transition-colors">
-        <span className={`text-[8px] text-fg-faint transition-transform ${showRows ? 'rotate-90' : ''}`}>▶</span>
+        className="w-full flex items-center gap-2 text-left text-[12px] px-2 py-1.5 rounded-lg border border-neutral-800/40 bg-card hover:bg-overlay/5 transition-colors">
+        <span className={`text-[9px] text-fg-faint transition-transform ${showRows ? 'rotate-90' : ''}`}>▶</span>
         <span className="font-medium text-fg-strong">Current portfolio</span>
         <span className="text-fg-faint">
           {all.length} holding{all.length === 1 ? '' : 's'}
@@ -1496,7 +1496,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
               to qualify it. The chip says a different basis is waiting rather than quietly
               printing its answer. */}
           {isHypothetical && (
-            <span className="text-warn-500 font-sans text-[10px]"
+            <span className="text-warn-500 font-sans text-[11px]"
               title={`Inside, the returns are weighted by ${WEIGHT_BASES.find((x) => x.key === basisKey)!.label} — a hypothetical. The figure here is the book's own start-weighted return.`}>
               ⚠ {WEIGHT_BASES.find((x) => x.key === basisKey)!.label} inside
             </span>
@@ -1512,7 +1512,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
           a segmented control rather than a literal slider — a slider would put "Model wt" at an
           unlabelled 3/4 position and make the default indistinguishable from a nudge.
           ⚠ ONLY "Start wt" is the book's own return; the rest are clearly-marked hypotheticals. */}
-      <div className="flex items-center gap-2 flex-wrap text-[10px]">
+      <div className="flex items-center gap-2 flex-wrap text-[11px]">
         <span className="text-fg-faint">Weight returns by</span>
         <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden">
           {WEIGHT_BASES.map((b) => (
@@ -1547,7 +1547,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
             width the table still grows and the box still scrolls. */}
         <table className="w-full text-xs whitespace-nowrap">
           <thead className="bg-card z-20 [&_th]:bg-card">
-            <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+            <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
               <th className="px-3 py-1.5 font-medium text-left">Fund</th>
               <th className="px-3 py-1.5 font-medium text-left"
                 title="AIRS's own ISIN-code where the book carries one (exact), else matched by name to a Fixed portfolio position, else pinned by hand. Always price-checked against that instrument's own close. ⚠ = the price disagrees; ? = no series, so nothing cross-checks it.">

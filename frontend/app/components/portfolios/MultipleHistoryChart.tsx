@@ -114,8 +114,8 @@ export default function MultipleHistoryChart({
         <h4 className="text-base font-semibold text-fg-strong">
           {hasForward ? `${b.multiple} — forward & trailing` : `${b.multiple} — trailing`}
         </h4>
-        <span className="text-[11px] text-fg-faint">since {fromYear} · median dashed</span>
-        <span className="text-[11px] text-fg-muted"
+        <span className="text-[12px] text-fg-faint">since {fromYear} · median dashed</span>
+        <span className="text-[12px] text-fg-muted"
           title={hasForward
             ? "The forward line is GuruFocus's own published forward-P/E indicator, not our arithmetic. Dividing the close by it recovers the CURRENT fiscal year's consensus EPS — so early in a year it looks ~12 months ahead, and by December it prices earnings nearly banked."
             : 'No analyst publishes a free-cash-flow forecast — capex is not forecast — so there is no forward multiple to draw on this basis, at any date.'}>
@@ -149,7 +149,7 @@ export default function MultipleHistoryChart({
 
       <div>
         {data.length < 2 ? (
-          <p className="text-[11px] text-fg-faint py-16 text-center">
+          <p className="text-[12px] text-fg-faint py-16 text-center">
             No priced history on this basis — the multiple needs both a close and a reported
             {' '}{b.perShare} at the same date.
           </p>
@@ -164,9 +164,9 @@ export default function MultipleHistoryChart({
                 <XAxis dataKey="t" type="number" scale="time" domain={['dataMin', 'dataMax']}
                   ticks={years} interval="preserveStartEnd"
                   tickFormatter={(t: number) => String(new Date(t).getUTCFullYear())}
-                  tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
+                  tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
                 <YAxis domain={paddedDomain(scaleSet)} allowDataOverflow width={52}
-                  tick={{ fontSize: 11, fill: chartTheme.axisTick }}
+                  tick={{ fontSize: 12, fill: chartTheme.axisTick }}
                   tickFormatter={(v: number) => `${v.toFixed(0)}×`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle}
                   labelStyle={{ color: chartTheme.axisLabel }}

@@ -365,7 +365,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         <button key={k} type="button" onClick={() => switchBasis(k)}
           aria-pressed={basis === k}
           title={`${BASIS[k].perShare} — ${BASIS[k].what}.`}
-          className={`px-2.5 py-1 text-[11px] font-medium transition-colors ${
+          className={`px-2.5 py-1 text-[12px] font-medium transition-colors ${
             basis === k ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-overlay/5'}`}>
           {BASIS[k].tab}
         </button>
@@ -378,7 +378,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   if (!points.some((p) => p.price != null) || !points.some((p) => p.value != null)) {
     return (
       <div className="py-16 flex flex-col items-center gap-3">
-        <p className="text-[11px] text-fg-faint text-center">
+        <p className="text-[12px] text-fg-faint text-center">
           No share price / {b.perShare} history ingested for {name ?? isin}.
         </p>
         {basisSwitch}
@@ -409,14 +409,14 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
       <div className="flex items-baseline gap-2 flex-wrap">
         <h4 className="text-base font-semibold text-fg-strong">Price vs {b.perShare}</h4>
         {idx.anchor != null && (
-          <span className="text-[11px] text-fg-faint">
+          <span className="text-[12px] text-fg-faint">
             indexed to 100 at FY{idx.anchor} · log scale
           </span>
         )}
         {hiddenByLog > 0 && (
           // Named, not dropped: on a linear axis these plotted below zero, and a cash-burn or loss
           // year vanishing without a word is exactly the observation a reader must not lose.
-          <span className="text-[11px] text-warn-300"
+          <span className="text-[12px] text-warn-300"
             title="A log axis has no room for zero or a negative value. Those years are also excluded from the trend fit, for the same reason — a loss has no logarithm.">
             ⚠ {hiddenByLog} {b.negativeYear} year{hiddenByLog > 1 ? 's' : ''} not plottable on a log axis
           </span>
@@ -449,7 +449,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         {idx.anchor == null ? (
           // Rebasing off a cash-burn or loss year divides by a negative and flips every later
           // point, so a company with no positive year gets no index at all — see `rebase`.
-          <p className="text-[11px] text-fg-faint py-16 text-center">
+          <p className="text-[12px] text-fg-faint py-16 text-center">
             No fiscal year has both a positive price and positive {b.perShare}, so there is no base to index from.
           </p>
         ) : (
@@ -463,13 +463,13 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
                     numeric ticks would invent 2025.5 as though something were reported there. */}
                 <XAxis dataKey="year" type="number" domain={['dataMin', 'dataMax']}
                   ticks={yearTicks} allowDecimals={false} interval="preserveStartEnd"
-                  tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
+                  tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
                 {/* ⚠ LOG SCALE, WHICH IS THE POINT: the fit is log-linear, so a constant-growth
                     series is a STRAIGHT line here and the R² above it becomes something the reader
                     can check by eye rather than take on trust. On a linear axis a 0.4 and a 0.95
                     both look like curves. */}
                 <YAxis scale="log" domain={logDomain ?? ['dataMin', 'dataMax']} allowDataOverflow
-                  tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={52}
+                  tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={52}
                   tickFormatter={(v: number) => v.toFixed(0)} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
                   // A fractional x is today, not a fiscal year — printing "2025.8" as the heading
@@ -520,7 +520,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
       <div className="flex items-baseline gap-2 flex-wrap">
         <h4 className="text-base font-semibold text-fg-strong">{b.yieldTitle}</h4>
-        <span className="text-[11px] text-fg-faint">{b.perShare} ÷ year-end price · average dashed</span>
+        <span className="text-[12px] text-fg-faint">{b.perShare} ÷ year-end price · average dashed</span>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -546,8 +546,8 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           <ComposedChart data={yields} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
             style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
             <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-            <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
-            <YAxis domain={paddedDomain(yieldValues)} tick={{ fontSize: 11, fill: chartTheme.axisTick }}
+            <XAxis dataKey="year" tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+            <YAxis domain={paddedDomain(yieldValues)} tick={{ fontSize: 12, fill: chartTheme.axisTick }}
               width={52} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
             <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
               formatter={(v) => [typeof v === 'number' ? `${v.toFixed(2)}%` : '—', b.yieldTitle]} />

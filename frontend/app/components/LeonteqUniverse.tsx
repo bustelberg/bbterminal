@@ -482,7 +482,7 @@ export default function LeonteqUniverse() {
                         <div key={ind.name} className="px-5 py-3">
                           <div className="flex items-baseline gap-3 mb-2">
                             <span className="text-xs font-medium text-fg-soft">{ind.name}</span>
-                            <span className="text-[10px] text-fg-subtle font-mono">{ind.company_count}</span>
+                            <span className="text-[11px] text-fg-subtle font-mono">{ind.company_count}</span>
                           </div>
                           <div className="flex flex-wrap gap-1.5">
                             {ind.companies.map((c, idx) => (
@@ -518,7 +518,7 @@ export default function LeonteqUniverse() {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="bg-page border border-neutral-800/40 rounded-lg px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-fg-subtle">{label}</div>
+      <div className="text-[11px] uppercase tracking-wider text-fg-subtle">{label}</div>
       <div className="font-mono text-sm text-fg mt-0.5 truncate">{value}</div>
     </div>
   );
@@ -528,11 +528,11 @@ function CompanyChip({ c }: { c: Company }) {
   const inner = (
     <>
       <span className="text-fg truncate max-w-[220px]" title={c.name}>{c.name}</span>
-      {c.ticker && <span className="text-fg-subtle font-mono text-[10px]">{c.ticker}</span>}
+      {c.ticker && <span className="text-fg-subtle font-mono text-[11px]">{c.ticker}</span>}
     </>
   );
   const className =
-    'bg-page border border-neutral-800/60 rounded px-2 py-1 flex items-baseline gap-1.5 text-[11px] hover:border-accent-500/40 transition-colors';
+    'bg-page border border-neutral-800/60 rounded px-2 py-1 flex items-baseline gap-1.5 text-[12px] hover:border-accent-500/40 transition-colors';
   if (c.gurufocus_url) {
     return (
       <a
@@ -543,7 +543,7 @@ function CompanyChip({ c }: { c: Company }) {
         title={`${c.name}${c.isin ? ` · ${c.isin}` : ''} — open on GuruFocus`}
       >
         {inner}
-        <span className="text-accent-400 text-[9px]">↗</span>
+        <span className="text-accent-400 text-[10px]">↗</span>
       </a>
     );
   }

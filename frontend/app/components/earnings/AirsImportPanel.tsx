@@ -170,7 +170,7 @@ export default function AirsImportPanel({
                   </div>
                   {!r.dropped && (
                     <div className="flex items-center gap-2 mt-1.5">
-                      <span className="text-fg-faint text-[11px] shrink-0">→</span>
+                      <span className="text-fg-faint text-[12px] shrink-0">→</span>
                       <CompanyPicker
                         companies={companies}
                         selected={sel}
@@ -178,13 +178,13 @@ export default function AirsImportPanel({
                         className="flex-1 min-w-0"
                       />
                       {r.companyId != null ? (
-                        <span className="text-[11px] shrink-0 w-24 text-right">
+                        <span className="text-[12px] shrink-0 w-24 text-right">
                           {r.score != null
                             ? <span className={scoreColor(r.score)}>match {r.score.toFixed(0)}%</span>
                             : <span className="text-accent-300">manual</span>}
                         </span>
                       ) : (
-                        <span className="text-[11px] text-neg-300 shrink-0 w-24 text-right">no match</span>
+                        <span className="text-[12px] text-neg-300 shrink-0 w-24 text-right">no match</span>
                       )}
                     </div>
                   )}

@@ -79,7 +79,7 @@ export default function YearlySubplotsGrid({
 
   const legend =
     mode === 'cumulative' ? (
-      <span className="flex items-center gap-3 text-[11px] text-fg-subtle">
+      <span className="flex items-center gap-3 text-[12px] text-fg-subtle">
         <span className="inline-flex items-center gap-1.5">
           <span className="inline-block w-2.5 h-0.5 rounded" style={{ background: strategyColor }} />
           Strategy
@@ -90,7 +90,7 @@ export default function YearlySubplotsGrid({
         </span>
       </span>
     ) : (
-      <span className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
+      <span className="flex items-center gap-1.5 text-[12px] text-fg-subtle">
         <span className="inline-block w-2.5 h-0.5 rounded" style={{ background: ALPHA_COLOR }} />
         Strategy − Universe (% points)
       </span>
@@ -102,7 +102,7 @@ export default function YearlySubplotsGrid({
       rightSlot={
         <span className="flex items-center gap-3">
           <span
-            className="inline-flex items-center gap-1 text-[11px] font-mono"
+            className="inline-flex items-center gap-1 text-[12px] font-mono"
             title={
               mode === 'cumulative'
                 ? 'Years with a positive vs negative return'
@@ -193,9 +193,9 @@ function YearMiniChart({
   return (
     <div className={`bg-page/60 ${borderClass} rounded-lg p-2`}>
       <div className="flex items-center justify-between mb-1 px-1">
-        <span className="text-[11px] text-fg-muted font-mono">{subplot.year}</span>
+        <span className="text-[12px] text-fg-muted font-mono">{subplot.year}</span>
         {headline != null && (
-          <span className="flex items-center gap-1 text-[11px] font-mono">
+          <span className="flex items-center gap-1 text-[12px] font-mono">
             {beat && (
               <span
                 className="text-pos-400"
@@ -215,7 +215,7 @@ function YearMiniChart({
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
           <XAxis dataKey="date" hide />
           <YAxis
-            tick={{ fill: chartTheme.axisTick, fontSize: 9 }}
+            tick={{ fill: chartTheme.axisTick, fontSize: 10 }}
             tickLine={false}
             axisLine={false}
             width={28}

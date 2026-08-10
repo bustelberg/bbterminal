@@ -153,11 +153,11 @@ export default function AssetDividendModal({
 
   const panel = (label: string, data: Point[], color: string, unit: string) => (
     <div className="flex-1 min-w-[320px]">
-      <div className="text-[10px] uppercase tracking-wide text-fg-faint mb-1">{label}</div>
+      <div className="text-[11px] uppercase tracking-wide text-fg-faint mb-1">{label}</div>
       {data.length > 0 ? (
         <LwLineChart data={data} scale="linear" unit={unit} color={color} />
       ) : (
-        <div className="w-full aspect-[16/9] max-h-[72vh] min-h-[300px] flex items-center justify-center text-center px-6 text-[11px] text-fg-faint border border-neutral-800/40 rounded-lg">
+        <div className="w-full aspect-[16/9] max-h-[72vh] min-h-[300px] flex items-center justify-center text-center px-6 text-[12px] text-fg-faint border border-neutral-800/40 rounded-lg">
           {payments?.fx_from
             ? <>Every payment predates our FX coverage (from {payments.fx_from}).</>
             : <>No FX rate available to convert {ccy || 'this currency'}.</>}
@@ -179,7 +179,7 @@ export default function AssetDividendModal({
               <span className="text-sm font-mono text-fg-soft">{isin}</span>
               {row.name && <span className="text-sm text-fg-soft truncate">{row.name}</span>}
             </div>
-            <div className="text-[11px] text-fg-faint mt-0.5">
+            <div className="text-[12px] text-fg-faint mt-0.5">
               GuruFocus
               {payments?.symbol && ` · ${payments.symbol}`}
               {companyId != null ? ` · company #${companyId}` : listingOnly ? ' · listing (no company row)' : ''}
@@ -196,7 +196,7 @@ export default function AssetDividendModal({
                 title="Each payment as declared, or the trailing annual total (the sum of the last k payments). The trailing total is the one that compares across instruments — a quarterly payer's single payment is a quarter of an annual payer's.">
                 {(['each', 'ttm'] as PayMode[]).map((m) => (
                   <button key={m} type="button" onClick={() => setPayMode(m)}
-                    className={`text-[11px] px-2.5 py-1 rounded-md transition-colors ${
+                    className={`text-[12px] px-2.5 py-1 rounded-md transition-colors ${
                       payMode === m ? 'bg-accent-600 text-white' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/[0.04]'}`}>
                     {m === 'each' ? 'per payment' : 'trailing 12m'}
                   </button>
@@ -217,7 +217,7 @@ export default function AssetDividendModal({
             payments, Zurich 63 with a five-year hole. Warn, don't hide — and the
             trailing-12m line is suppressed wherever its window would span a gap. */}
         {!busy && !blocked && notHome && rows.length > 0 && (
-          <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2 text-[11px] text-warn-300 mb-3">
+          <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2 text-[12px] text-warn-300 mb-3">
             <span className="font-semibold">Not this row’s own listing.</span>{' '}
             GuruFocus has no {row.currency ?? 'local'} line for this ISIN, so these payments come
             from {payments?.symbol ?? 'another listing'}. Same security, same per-unit amounts
@@ -228,7 +228,7 @@ export default function AssetDividendModal({
         )}
 
         {busy && (
-          <p className="text-[11px] text-fg-subtle py-16 text-center">
+          <p className="text-[12px] text-fg-subtle py-16 text-center">
             {resolving ? 'Resolving this ISIN with GuruFocus…' : 'Loading payments…'}
           </p>
         )}
@@ -236,7 +236,7 @@ export default function AssetDividendModal({
         {!busy && blocked && (
           <div className="py-16 text-center max-w-2xl mx-auto space-y-2">
             <p className="text-sm text-fg-soft">No payment history available for this ISIN.</p>
-            <p className="text-[11px] text-fg-faint">{UNRESOLVED[blocked] ?? `Unresolved (${blocked}).`}</p>
+            <p className="text-[12px] text-fg-faint">{UNRESOLVED[blocked] ?? `Unresolved (${blocked}).`}</p>
           </div>
         )}
 
@@ -246,7 +246,7 @@ export default function AssetDividendModal({
         {empty && !error && (
           <div className="py-16 text-center max-w-2xl mx-auto space-y-2">
             <p className="text-sm text-fg-soft">This {listingOnly ? 'fund' : 'company'} pays nothing out.</p>
-            <p className="text-[11px] text-fg-faint">
+            <p className="text-[12px] text-fg-faint">
               GuruFocus returned no payments at all for {payments?.symbol ?? 'this listing'}.
               {listingOnly
                 ? ' An ACCUMULATING ETF reinvests its income into NAV instead of distributing it, so an empty history here is the answer — not a data gap.'
@@ -267,7 +267,7 @@ export default function AssetDividendModal({
                   {panel('EUR', eur, chartTheme.pos, 'EUR')}
                 </div>
               )}
-            <div className="text-[10px] text-fg-faint">
+            <div className="text-[11px] text-fg-faint">
               {native.length} {payMode === 'ttm' ? 'trailing totals' : 'payments'}
               {' · '}{dates[0]} → {dates.at(-1)}
               {' · '}Cash per unit held, as declared. Split-adjusted to today’s share basis, so the

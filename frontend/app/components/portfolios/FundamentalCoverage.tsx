@@ -220,7 +220,7 @@ function ExclusionSection({ title, weight, rows, statuses, busyAll, onIngest, on
             onClick={() => onIngestAll(rows)}
             disabled={anyBusy}
             title="Fetch the GuruFocus fundamentals for every ingestable holding in this section."
-            className="text-[11px] px-2 py-0.5 rounded-lg border border-accent-600/40 text-accent-400 hover:bg-overlay/5 disabled:opacity-50"
+            className="text-[12px] px-2 py-0.5 rounded-lg border border-accent-600/40 text-accent-400 hover:bg-overlay/5 disabled:opacity-50"
           >
             {busyAll ? 'Ingesting…' : `Ingest all (${distinctIngestable.size})`}
           </button>
@@ -229,7 +229,7 @@ function ExclusionSection({ title, weight, rows, statuses, busyAll, onIngest, on
       <div className="overflow-auto rounded-lg border border-neutral-800/40">
         <table className="w-auto text-xs whitespace-nowrap">
           <thead className="bg-card">
-            <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+            <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
               <th className="px-3 py-1.5 font-medium text-left">Instrument</th>
               <th className="px-3 py-1.5 font-medium text-right">Weight</th>
               <th className="px-3 py-1.5 font-medium text-left">Why not</th>
@@ -253,9 +253,9 @@ function ExclusionSection({ title, weight, rows, statuses, busyAll, onIngest, on
                   <td className="px-3 py-1.5 text-fg-soft">
                     <span className="inline-block max-w-[28ch] truncate align-bottom"
                       title={r.name ?? ''}>{r.name ?? '—'}</span>
-                    {r.isin && <span className="text-fg-faint font-mono text-[10px] ml-2">{r.isin}</span>}
+                    {r.isin && <span className="text-fg-faint font-mono text-[11px] ml-2">{r.isin}</span>}
                     {r.via_certificate && (
-                      <span className="text-fg-faint text-[10px] ml-2 italic"
+                      <span className="text-fg-faint text-[11px] ml-2 italic"
                         title={`Looked through the linked certificate "${r.via_certificate}".`}>
                         via {r.via_certificate}
                       </span>
@@ -269,7 +269,7 @@ function ExclusionSection({ title, weight, rows, statuses, busyAll, onIngest, on
                       // A subscription gap is a hard "can't buy this" — a badge, not prose, so it
                       // reads as a distinct state at a glance (mirrors the /companies UNSUBSCRIBED
                       // badge).
-                      <span className="inline-block text-[9px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded border bg-warn-500/15 text-warn-300 border-warn-500/25">
+                      <span className="inline-block text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded border bg-warn-500/15 text-warn-300 border-warn-500/25">
                         Unsubscribed
                       </span>
                     ) : (
@@ -278,12 +278,12 @@ function ExclusionSection({ title, weight, rows, statuses, busyAll, onIngest, on
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-1.5 font-mono text-[11px] text-fg-subtle">
+                  <td className="px-3 py-1.5 font-mono text-[12px] text-fg-subtle">
                     {/* Prefer the listing the ingest actually resolved to — a `no_company` row has
                         no exchange/ticker on the coverage side until then. */}
                     {gfExchange || <span className="text-fg-faint">—</span>}
                   </td>
-                  <td className="px-3 py-1.5 font-mono text-[11px]">
+                  <td className="px-3 py-1.5 font-mono text-[12px]">
                     {gfTicker ? (
                       // The GuruFocus summary page for this listing. Same URL rule the rest of the
                       // app uses (US names go bare, everything else exchange-prefixed).
@@ -299,10 +299,10 @@ function ExclusionSection({ title, weight, rows, statuses, busyAll, onIngest, on
                     <td className="px-3 py-1.5">
                       {canIngest && (
                         st?.busy ? (
-                          <span className="text-[10px] text-fg-faint">ingesting…</span>
+                          <span className="text-[11px] text-fg-faint">ingesting…</span>
                         ) : st?.status ? (
                           <span className="inline-flex items-center gap-1.5">
-                            <span className={`text-[10px] ${INGEST_BADGE[st.status]?.tone ?? 'text-fg-muted'}`}
+                            <span className={`text-[11px] ${INGEST_BADGE[st.status]?.tone ?? 'text-fg-muted'}`}
                               title={st.detail}>
                               {INGEST_BADGE[st.status]?.label ?? st.status}
                             </span>
@@ -310,7 +310,7 @@ function ExclusionSection({ title, weight, rows, statuses, busyAll, onIngest, on
                             {st.status !== 'ingested' && (
                               <button type="button" onClick={() => onIngest(r.isin as string, r.name)}
                                 disabled={busyAll}
-                                className="text-[10px] text-accent-400 hover:underline disabled:opacity-50">
+                                className="text-[11px] text-accent-400 hover:underline disabled:opacity-50">
                                 retry
                               </button>
                             )}
@@ -321,7 +321,7 @@ function ExclusionSection({ title, weight, rows, statuses, busyAll, onIngest, on
                             onClick={() => onIngest(r.isin as string, r.name)}
                             disabled={busyAll}
                             title="Fetch this holding's GuruFocus fundamentals and load them."
-                            className="text-[11px] px-2 py-0.5 rounded-lg border border-accent-600/40 text-accent-400 hover:bg-overlay/5 disabled:opacity-50"
+                            className="text-[12px] px-2 py-0.5 rounded-lg border border-accent-600/40 text-accent-400 hover:bg-overlay/5 disabled:opacity-50"
                           >
                             Ingest
                           </button>

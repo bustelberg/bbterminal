@@ -112,7 +112,7 @@ export default function ScheduledStrategiesCard({ sched, readOnly = false }: { s
                           {s.name || 'MomentumTopSelectie'}
                         </span>
                         {!s.enabled && (
-                          <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-neutral-500/10 text-fg-muted border-neutral-500/30">
+                          <span className="text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-neutral-500/10 text-fg-muted border-neutral-500/30">
                             paused
                           </span>
                         )}
@@ -122,7 +122,7 @@ export default function ScheduledStrategiesCard({ sched, readOnly = false }: { s
                         {strategyChips(s.config, s.frequency).map((c) => (
                           <span
                             key={c.text}
-                            className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium"
+                            className="text-[11px] px-1.5 py-0.5 rounded-full border font-medium"
                             style={chipStyle(c.hue)}
                           >
                             {c.text}
@@ -162,7 +162,7 @@ export default function ScheduledStrategiesCard({ sched, readOnly = false }: { s
                       <button
                         type="button"
                         onClick={() => void setUserVisible(s.id, !s.user_visible)}
-                        className={`text-[10px] px-2 py-1 rounded-lg border transition-colors ${
+                        className={`text-[11px] px-2 py-1 rounded-lg border transition-colors ${
                           s.user_visible
                             ? 'bg-pos-500/10 text-pos-300 border-pos-500/30 hover:bg-pos-500/20'
                             : 'text-fg-muted border-neutral-700 hover:bg-overlay/5'

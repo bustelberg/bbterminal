@@ -104,7 +104,7 @@ export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTar
     throw new Error(j?.detail ?? j?.status ?? `HTTP ${r.status}`);
   };
 
-  const section = 'text-[11px] uppercase tracking-wide text-fg-muted';
+  const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
   const derived = { label: 'FCF-SBC yield', of: (r: FcfSbcYieldRow, y: string) => fcfSbcYieldOf(r.fcf[y], r.sbc[y], r.market_cap[y]) };
 
   return (
@@ -115,13 +115,13 @@ export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTar
         <div className="flex items-baseline gap-3 px-6 py-4 border-b border-neutral-800/40">
           <h2 className="text-fg-strong font-medium">Holdings — FCF-SBC yield inputs by year</h2>
           {portfolioName && <span className="text-sm text-fg-soft truncate max-w-[24ch]" title={portfolioName}>{portfolioName}</span>}
-          {data && <span className="text-[11px] text-fg-faint">{data.rows.length} companies</span>}
-          {benchLabel && <span className="text-[11px]" style={{ color: chartTheme.pos }}>vs {benchLabel}</span>}
+          {data && <span className="text-[12px] text-fg-faint">{data.rows.length} companies</span>}
+          {benchLabel && <span className="text-[12px]" style={{ color: chartTheme.pos }}>vs {benchLabel}</span>}
           <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-5">
-          <p className="text-[11px] text-fg-faint">Free Cash Flow, SBC and market cap as reported (millions, native currency). Yield = (FCF − SBC) ÷ Market cap.</p>
+          <p className="text-[12px] text-fg-faint">Free Cash Flow, SBC and market cap as reported (millions, native currency). Yield = (FCF − SBC) ÷ Market cap.</p>
 
           <div className="space-y-1.5">
             <h3 className={section}>{portfolioName ? `${portfolioName} — ` : ''}inputs by year</h3>
@@ -144,7 +144,7 @@ export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTar
                       the benchmark line, so a table longer than the contributing set is not a
                       mismatch — it IS the gap, and the `weight` line renormalises over what is
                       left, period by period. */}
-                  <p className="text-[10px] text-fg-faint">
+                  <p className="text-[11px] text-fg-faint">
                     {bench.rows.length} constituents ·{' '}
                     {bench.rows.filter((r) => r.status === 'ok').length} with figures feed the line,
                     renormalised each period

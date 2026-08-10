@@ -188,29 +188,29 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
     // is laid out from the same fixed columns so the two cannot drift apart.
     <div className="shrink-0 w-[41rem] max-w-full">
       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-        <span className="text-[10px] uppercase tracking-wide text-fg-faint">Allocation</span>
+        <span className="text-[11px] uppercase tracking-wide text-fg-faint">Allocation</span>
         {/* The profile read off AIRS's own portfolio name — the same classifier the correlation
             matrix filters by. Shown because the bands below are only meaningful once the reader
             knows WHICH policy is being drawn. */}
         {variant && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-overlay/5 text-fg-muted"
+          <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-overlay/5 text-fg-muted"
             title={`Read from this model's own AIRS name. The bands drawn over the bars are the ${variant} allocation policy.`}>
             {variant}
           </span>
         )}
         {onSelect && (selected
           ? <button type="button" onClick={() => onSelect(null)}
-              className="cursor-pointer text-[10px] text-accent-400 hover:text-accent-300">
+              className="cursor-pointer text-[11px] text-accent-400 hover:text-accent-300">
               filtering to {bucketLabel(selected)} — show all ✕
             </button>
-          : <span className="text-[10px] text-fg-faint">click a class to filter the charts</span>)}
+          : <span className="text-[11px] text-fg-faint">click a class to filter the charts</span>)}
       </div>
       {/* ⚠ A SECOND THING IS ON THE CHART, SO IT IS NAMED. The bar is what the portfolio holds;
           the three stripes are what the policy permits. Without this line they read as gridlines
           and the target tick as noise. Only rendered when there IS a policy — the products with
           no risk profile draw no stripes and get no legend for them. */}
       {bandOf.size > 0 && (
-        <div className="flex items-center gap-3.5 text-[10px] text-fg-faint mb-1.5">
+        <div className="flex items-center gap-3.5 text-[11px] text-fg-faint mb-1.5">
           {/* ⚠ ONE ENTRY PER STRIPE, AND EACH SWATCH IS THAT STRIPE AT ROW SCALE — a legend drawn
               differently from the thing it names is one more thing to map.
 
@@ -247,14 +247,14 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
           {AXIS_TICKS.map((t) => (
             <span key={t} className="absolute bottom-0 flex flex-col items-center"
               style={{ left: `${t}%`, transform: t === 0 ? 'none' : t === 100 ? 'translateX(-100%)' : 'translateX(-50%)' }}>
-              <span className="text-[9px] text-fg-faint tabular-nums leading-none mb-0.5">{t}</span>
+              <span className="text-[10px] text-fg-faint tabular-nums leading-none mb-0.5">{t}</span>
               <span className="w-px h-1 bg-neutral-700/60" />
             </span>
           ))}
         </span>
-        <span className="w-12 shrink-0 text-[9px] text-fg-faint text-right leading-none">%</span>
+        <span className="w-12 shrink-0 text-[10px] text-fg-faint text-right leading-none">%</span>
         <span className="w-7 shrink-0" />
-        <span className="w-14 shrink-0 text-[9px] text-fg-faint text-right leading-none">YTD</span>
+        <span className="w-14 shrink-0 text-[10px] text-fg-faint text-right leading-none">YTD</span>
       </div>
       {/* ⚠ NO LEGEND. One series, and every bar is directly labelled with the class it belongs to —
           a legend box would map colours to names the row already prints. (The composition charts
@@ -283,7 +283,7 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
                 toggle ? 'cursor-pointer' : ''} ${
                 active ? 'bg-accent-500/10' : 'hover:bg-overlay/[0.03]'} ${
                 selected && !active ? 'opacity-45' : ''}`}>
-              <span className={`w-[6.5rem] shrink-0 truncate text-[11px] ${
+              <span className={`w-[6.5rem] shrink-0 truncate text-[12px] ${
                 active ? 'font-medium text-fg-strong' : 'text-fg-muted'}`}>{bucketLabel(s.bucket)}</span>
               {/* ⚠ THIS IS A BULLET CHART, AND ITS ONE RULE IS THAT THE MEASURE IS THINNER THAN
                   THE RANGE. The policy marks run the FULL height of the track while the bar is a
@@ -353,7 +353,7 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
                   bar's end sits past a grey cap — true, and easy to miss on the row you scroll by.
                   The value goes amber and the ⚠ names the bound it crossed. Amber, not red: a
                   weight outside its band is a thing to look at, not a fault. */}
-              <span className={`w-12 shrink-0 text-right font-mono text-[11px] tabular-nums ${
+              <span className={`w-12 shrink-0 text-right font-mono text-[12px] tabular-nums ${
                 breach(s) ? 'text-warn-500 font-semibold' : 'text-fg-soft'}`}>
                 {s.pct.toFixed(2)}%
               </span>
@@ -362,7 +362,7 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
                   AIRS stores. "66% in one bond ETF" and "66% across sixty names" draw an identical
                   bar and are not the same portfolio; the count is the only thing here that
                   separates them. */}
-              <span className="w-7 shrink-0 text-right text-[10px] text-fg-faint tabular-nums">
+              <span className="w-7 shrink-0 text-right text-[11px] text-fg-faint tabular-nums">
                 {(s.holdings ?? 0) > 0 ? `(${s.holdings})` : ''}
               </span>
               {/* ⚠ POINTS, NOT PERCENT, AND THE FIGURE CHANGED WITH THE UNIT. This showed the
@@ -371,7 +371,7 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
                   a lie; the number is now the class's CONTRIBUTION, on the book's own opening
                   capital, which is the thing that legitimately adds. Its own return is still in
                   the Holdings table below, in the column labelled Return. */}
-              <span className={`w-16 shrink-0 text-right font-mono text-[11px] tabular-nums ${retTone(s.contribution_pct)}`}
+              <span className={`w-16 shrink-0 text-right font-mono text-[12px] tabular-nums ${retTone(s.contribution_pct)}`}
                 title={`${bucketLabel(s.bucket)} added ${ppt(s.contribution_pct)} to the book’s year.`
                   + ` Its own return was ${fmtRet(s.return_pct)} — a rate on its own opening value,`
                   + ' which is why the two differ and why only this one adds up.'}>
@@ -387,7 +387,7 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
             missing -2.384pp is eight names it no longer holds. Printed only when there IS a
             remainder, so a book that sold nothing does not carry a permanent 0.00pp footnote. */}
         {soldContribution != null && Math.abs(soldContribution) >= 0.005 && (
-          <div className="flex items-center gap-2 pt-1 mt-1 border-t border-neutral-800/40 text-[10px]">
+          <div className="flex items-center gap-2 pt-1 mt-1 border-t border-neutral-800/40 text-[11px]">
             <span className="text-fg-faint">Sold during the year — no longer a holding</span>
             <span className={`ml-auto font-mono tabular-nums ${retTone(soldContribution)}`}>
               {ppt(soldContribution)}
@@ -404,7 +404,7 @@ function Chip({ label, value, valueClass, hint }: {
 }) {
   return (
     <div className="bg-elevated border border-neutral-800/40 rounded-lg px-3 py-1.5 min-w-[6rem]" title={hint}>
-      <div className="text-[9px] uppercase tracking-wide text-fg-faint">{label}</div>
+      <div className="text-[10px] uppercase tracking-wide text-fg-faint">{label}</div>
       <div className={`text-sm font-mono font-semibold ${valueClass}`}>{value}</div>
     </div>
   );
@@ -455,11 +455,11 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
         <h4 className="text-sm font-semibold text-fg-strong">{AXIS_LABEL[axis] ?? axis}</h4>
         <button type="button" onClick={() => setShowData(true)}
           title="Show every holding behind these bars, at the weight each bar counted it at — and what the percentages are a share of."
-          className="ml-auto cursor-pointer text-[10px] px-1.5 py-0.5 rounded-md border border-neutral-800/40 text-fg-faint hover:text-accent-300 hover:border-accent-500/50 transition-colors">
+          className="ml-auto cursor-pointer text-[11px] px-1.5 py-0.5 rounded-md border border-neutral-800/40 text-fg-faint hover:text-accent-300 hover:border-accent-500/50 transition-colors">
           Data
         </button>
       </div>
-      <p className="text-[11px] text-fg-faint mt-0.5">{AXIS_NOTE[axis]}</p>
+      <p className="text-[12px] text-fg-faint mt-0.5">{AXIS_NOTE[axis]}</p>
       {/* ⚠ ONLY THE UNPRICED HOLDINGS GET A WARNING, AND THIS IS THE WHOLE DISTINCTION. A fund, a
           bond and a cash line have no sector by definition — they are not Stocks in our own
           classification and have their own slice of the allocation chart, so counting them as
@@ -467,7 +467,7 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
           looked like a defect. An unpriced STOCK is the real hole: it is missing from a bucket
           that should contain it, which makes that bucket read low. */}
       {(unpricedPct ?? 0) > 0.005 && (
-        <p className="text-[11px] text-warn-300 mt-0.5"
+        <p className="text-[12px] text-warn-300 mt-0.5"
           title="Real holdings, in real buckets, that we have no price series for. They are absent from the bars, so the buckets they belong to read lower than they are. Open Data for the names.">
           ⚠ {unpricedPct!.toFixed(1)}% held but unpriceable — missing from these bars
         </p>
@@ -478,7 +478,7 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
           line. A percentage phrased as an absence gets heard as a data-quality problem, so the
           line now says which holdings they are and why they are legitimately absent. */}
       {excludedWeight > 0.005 && (
-        <p className="text-[11px] text-fg-faint mt-0.5"
+        <p className="text-[12px] text-fg-faint mt-0.5"
           title="Funds, bonds and cash have no sector of their own — they are their own slices of the allocation chart above. Open Data for the names.">
           Excludes {excludedWeight.toFixed(1)}% in funds, bonds and cash — no{' '}
           {AXIS_LABEL[axis]?.toLowerCase() ?? axis} to place
@@ -490,14 +490,14 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
           benchmark={benchmark} name={name} onClose={() => setShowData(false)} />
       )}
       {sectorEmpty ? (
-        <p className="text-[11px] text-fg-subtle py-8 text-center">
+        <p className="text-[12px] text-fg-subtle py-8 text-center">
           Nothing to show — the current selection holds no equity, and sector is an equity-only view.
         </p>
       ) : (<>
       {/* Legend (two series ⇒ mandatory — identity is never colour-alone): a filled bar is the
           model, a tick is the benchmark. Blue + amber is the CVD-separated pair (ΔE 103) — see
           the file header; text wears text tokens, the swatches carry the colour. */}
-      <div className="chart-legend flex items-center gap-4 text-[10px] text-fg-faint mt-2 mb-2">
+      <div className="chart-legend flex items-center gap-4 text-[11px] text-fg-faint mt-2 mb-2">
         <span className="flex items-center gap-1.5">
           <span className="inline-block w-3.5 h-2 rounded-sm" style={{ background: SERIES.portfolio }} />
           Portfolio
@@ -522,7 +522,7 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
               title={`${r.bucket}  ·  Portfolio ${p.toFixed(1)}%  vs  ${benchmark} ${b.toFixed(1)}%  ·  tilt ${tilt >= 0 ? '+' : ''}${tilt.toFixed(1)}pp`}
               className={`group flex cursor-pointer items-center gap-2.5 rounded-md -mx-1.5 px-1.5 py-1 text-left transition-colors ${
                 active ? 'bg-accent-500/10' : 'hover:bg-overlay/[0.03]'}`}>
-              <span className={`w-[6.5rem] shrink-0 truncate text-[11px] ${
+              <span className={`w-[6.5rem] shrink-0 truncate text-[12px] ${
                 active ? 'font-medium text-fg-strong' : 'text-fg-muted'}`}>{r.bucket}</span>
               {/* Fixed 0–100% scale — a bar's length IS its share of the sleeve, not its rank
                   against the biggest bucket. */}
@@ -538,8 +538,8 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
               </span>
               {/* Colour-coded to the series they belong to (portfolio blue / benchmark amber), so
                   the value ties to its bar without reading the legend. */}
-              <span className="w-9 shrink-0 text-right font-mono text-[11px]" style={{ color: SERIES.portfolio }}>{pct(p)}</span>
-              <span className="w-9 shrink-0 text-right font-mono text-[10px]" style={{ color: SERIES.benchmark }}>{pct(b)}</span>
+              <span className="w-9 shrink-0 text-right font-mono text-[12px]" style={{ color: SERIES.portfolio }}>{pct(p)}</span>
+              <span className="w-9 shrink-0 text-right font-mono text-[11px]" style={{ color: SERIES.benchmark }}>{pct(b)}</span>
             </button>
           );
         })}
@@ -756,7 +756,7 @@ function ColumnPicker({ groups, toggle }: {
       <button type="button" onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         title="Show the columns behind each figure"
-        className={`cursor-pointer text-[10px] leading-none px-1.5 py-1 rounded border transition-colors ${
+        className={`cursor-pointer text-[11px] leading-none px-1.5 py-1 rounded border transition-colors ${
           open ? 'border-accent-500/50 text-accent-300 bg-overlay/5'
             : 'border-neutral-800/40 text-fg-subtle hover:text-accent-300 hover:bg-overlay/5'}`}>
         + columns
@@ -771,10 +771,10 @@ function ColumnPicker({ groups, toggle }: {
                 <input type="checkbox" checked={groups.has(g.key)} onChange={() => toggle(g.key)}
                   className="accent-accent-600 mt-0.5" />
                 <span className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-[11px] text-fg-soft">{g.label}</span>
+                  <span className="text-[12px] text-fg-soft">{g.label}</span>
                   {/* ⚠ THE CHAIN ITSELF, not a description of it. It is what the reader is about
                       to put on screen, and it says in one line why these columns come together. */}
-                  <span className="text-[10px] font-mono text-fg-faint">{g.hint}</span>
+                  <span className="text-[11px] font-mono text-fg-faint">{g.hint}</span>
                 </span>
               </label>
             ))}
@@ -908,7 +908,7 @@ function FundamentalButton({ onOpen, title, className = '' }: {
     <button type="button"
       onClick={(e) => { e.stopPropagation(); onOpen(); }}
       title={title}
-      className={`cursor-pointer text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap transition-colors ${className}`}>
+      className={`cursor-pointer text-[11px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap transition-colors ${className}`}>
       Fundamental
     </button>
   );
@@ -1161,8 +1161,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
   // shows the rows, because THAT view reads the account directly and needs no pairing.
   if (!holdings.length) return (
     <div className="py-8 px-6 text-center space-y-1">
-      <p className="text-[11px] text-fg-subtle">No valued positions to show here.</p>
-      {note && <p className="text-[11px] text-fg-faint max-w-xl mx-auto">{note}</p>}
+      <p className="text-[12px] text-fg-subtle">No valued positions to show here.</p>
+      {note && <p className="text-[12px] text-fg-faint max-w-xl mx-auto">{note}</p>}
     </div>
   );
 
@@ -1300,7 +1300,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
 ${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).length} of them reached through a certificate`} />
         </h4>
         <span className="flex items-center gap-2">
-          <span className="text-[10px] font-mono text-fg-faint">
+          <span className="text-[11px] font-mono text-fg-faint">
             {shownHoldings.length} positions · {groups.length} classes
           </span>
           {/* ⚠ HIDDEN WHEN NOTHING WOULD FOLD, rather than offered and inert. A book that holds no
@@ -1309,7 +1309,7 @@ ${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).le
               ⚠ IT SAYS WHAT IT WILL DO, WITH THE COUNT. "Look through certificates" alone leaves
               the reader to press it to find out; naming the rows makes it a decision. */}
           {foldable > 0 && (
-            <label className="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-pointer"
+            <label className="flex items-center gap-1.5 text-[11px] text-fg-muted cursor-pointer"
               title={'A holding that is itself another portfolio is listed as the instruments '
                 + 'behind it. Untick to fold each one back into a single row naming the strategy '
                 + '— the class subtotals, the chart and the total are identical either way, '
@@ -1333,7 +1333,7 @@ ${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).le
           ⚠ RENDER THE AUTHORED NOTE, NEVER A LOCAL GUESS. Re-deriving the cause from flags here
           would be a second source of truth for one fact, and it is the copy that goes stale. */}
       {realised && !realised.available && realised.note && (
-        <p className="mb-2 text-[11px] text-warn-500">
+        <p className="mb-2 text-[12px] text-warn-500">
           “Money-weighted” is blank for every row here — {realised.note}
         </p>
       )}
@@ -1353,7 +1353,7 @@ ${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).le
           {/* ⚠ `[&_th]:bg-card` IS LOAD-BEARING, not belt-and-braces. A background on `<thead>`
               alone does not paint reliably under `border-collapse`, so the group rows (`bg-inset`)
               scroll THROUGH the header and the two sets of text overlap. The cells carry it. */}
-          <thead className="text-[10px] uppercase tracking-wide text-fg-faint bg-card [&_th]:bg-card sticky top-0 z-20">
+          <thead className="text-[11px] uppercase tracking-wide text-fg-faint bg-card [&_th]:bg-card sticky top-0 z-20">
             <tr className="border-b border-neutral-800/40">
               <th className="text-right w-10 pl-4 pr-2 py-2 font-medium">#</th>
               {/* ⚠ A FLOOR IS REQUIRED HERE BECAUSE THE CELL BELOW IS `max-w-0`. That is what lets
@@ -1536,7 +1536,7 @@ ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contributi
                   <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 align-middle"
                     style={{ background: allocColor(g.bucket) }} />
                   {bucketLabel(g.bucket)}
-                  <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[10px] font-normal text-fg-muted">
+                  <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[11px] font-normal text-fg-muted">
                     {g.rows.length}
                   </span>
                   {/* ⚠ WEIGHTED BY WHAT IS BEING BLENDED, over the members that CAN be blended.
@@ -1672,7 +1672,7 @@ ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%
                   className={`group border-b border-neutral-800/[0.15] last:border-0 transition-colors ${
                     onTiming && h.name && !isSynthetic(h)
                       ? 'cursor-pointer hover:bg-accent-500/[0.07]' : 'hover:bg-overlay/[0.03]'}`}>
-                  <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[10px] text-fg-faint tabular-nums">{i + 1}</td>
+                  <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[11px] text-fg-faint tabular-nums">{i + 1}</td>
                   {/* ⚠ IN THE NAME CELL, NOT A NEW COLUMN. The header's colSpans are counted by
                       hand across four places in this table (group row, thead, body, tfoot); a
                       fourteenth column here shifts every figure one cell right, silently — a
@@ -1899,10 +1899,10 @@ no result — this position could not be valued at both ends of the window, so t
                 <td className="py-2 font-medium text-fg-strong" colSpan={3}>
                   <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 align-middle bg-neutral-600" />
                   No longer held
-                  <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[10px] font-normal text-fg-muted">
+                  <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[11px] font-normal text-fg-muted">
                     {sold.length}
                   </span>
-                  <span className="ml-2 text-[10px] font-normal text-fg-faint">
+                  <span className="ml-2 text-[11px] font-normal text-fg-faint">
                     sold out during the year
                   </span>
                 </td>
@@ -1940,16 +1940,16 @@ ${eur0n(soldSum.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(soldSum.contri
               </tr>
               {sold.map((p, i) => (
                 <tr key={p.name ?? i} className="border-b border-neutral-800/[0.15] last:border-0 hover:bg-overlay/[0.03] transition-colors">
-                  <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[10px] text-fg-faint tabular-nums">{i + 1}</td>
+                  <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[11px] text-fg-faint tabular-nums">{i + 1}</td>
                   <td className="py-1.5 pr-3 text-fg max-w-0" colSpan={3} title={p.name}>
                     <span className="truncate inline-block max-w-full align-bottom">{p.name}</span>
-                    <span className="ml-2 text-[9px] text-fg-faint">
+                    <span className="ml-2 text-[10px] text-fg-faint">
                       {p.first_sale === p.last_sale ? p.first_sale : `${p.first_sale} → ${p.last_sale}`}
                     </span>
                     {/* ⚠ THE REASON THE REALISED FIGURE IS AIRS'S `Res. YtD` AND NOT proceeds − cost:
                         part of this gain was made in earlier years and is correctly not counted. */}
                     {!!p.prior_year_eur && (
-                      <span className="ml-2 text-[9px] text-warn-500"
+                      <span className="ml-2 text-[10px] text-warn-500"
                         title={`${eur0n(p.prior_year_eur)} of this position's realised result was earned in EARLIER years and is correctly not in this year's figure.`}>
                         {eur0n(p.prior_year_eur)} prior yr
                       </span>
@@ -2005,7 +2005,7 @@ ${eur0n(p.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(p.contribution_p
                 <td className="pl-4" />
                 <td className="py-2 text-fg-strong" colSpan={3}>
                   The book’s year
-                  <span className="ml-2 font-normal text-[10px] text-fg-faint">
+                  <span className="ml-2 font-normal text-[11px] text-fg-faint">
                     {holdings.length + sold.length} positions, everything it held or sold
                   </span>
                 </td>
@@ -2056,7 +2056,7 @@ ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contributi
           remains is the one that always mattered — both figures have to exist for the sentence to
           claim anything. */}
       {grand.contribution != null && realised?.book_ytd_pct != null && (
-        <div className="px-4 py-2 border-t border-neutral-800/40 text-[10px]">
+        <div className="px-4 py-2 border-t border-neutral-800/40 text-[11px]">
           {reconciled ? (
             <span className="text-pos-400">
               ✓ These positions account for the whole year — the Contribution column adds to
@@ -2103,7 +2103,7 @@ function ViaChips({ names, sources }: { names: string[]; sources?: BookHolding['
       <span className="flex flex-wrap items-center gap-1" title={title}>
         {routes.map((r) => (
           <span key={r.label ?? '__direct'}
-            className={`px-1.5 py-0.5 rounded-md text-[10px] whitespace-nowrap flex items-baseline gap-1 ${
+            className={`px-1.5 py-0.5 rounded-md text-[11px] whitespace-nowrap flex items-baseline gap-1 ${
               r.label ? 'bg-accent-500/10 text-accent-400' : 'bg-overlay/5 text-fg-muted'}`}>
             <span className="max-w-[9rem] truncate">{r.label ?? 'direct'}</span>
             <span className="font-mono opacity-80">{num2(r.weight_now_pct)}%</span>
@@ -2113,18 +2113,18 @@ function ViaChips({ names, sources }: { names: string[]; sources?: BookHolding['
     );
   }
 
-  if (!names.length) return <span className="text-[10px] text-fg-faint" title={title || undefined}>direct</span>;
+  if (!names.length) return <span className="text-[11px] text-fg-faint" title={title || undefined}>direct</span>;
   const shown = names.slice(0, 2);
   return (
     <span className="flex flex-wrap items-center gap-1" title={title}>
       {shown.map((n) => (
         <span key={n}
-          className="px-1.5 py-0.5 rounded-md bg-accent-500/10 text-accent-400 text-[10px] whitespace-nowrap max-w-[11rem] truncate">
+          className="px-1.5 py-0.5 rounded-md bg-accent-500/10 text-accent-400 text-[11px] whitespace-nowrap max-w-[11rem] truncate">
           {n}
         </span>
       ))}
       {names.length > shown.length && (
-        <span className="text-[10px] text-fg-faint">+{names.length - shown.length}</span>
+        <span className="text-[11px] text-fg-faint">+{names.length - shown.length}</span>
       )}
     </span>
   );
@@ -2137,7 +2137,7 @@ function SleeveTile({ bucket, slices }: { bucket: string; slices?: AllocSlice[] 
   return (
     <div className="bg-elevated border border-neutral-800/40 rounded-lg px-4 py-3 min-w-[10rem] flex flex-col justify-center">
       <div className={`text-2xl font-mono font-semibold ${retTone(s?.return_pct)}`}>{fmtRet(s?.return_pct)}</div>
-      <div className="text-[10px] text-fg-faint">YTD (€)</div>
+      <div className="text-[11px] text-fg-faint">YTD (€)</div>
     </div>
   );
 }
@@ -2204,7 +2204,7 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
   const ccy = [...ccyMap.entries()].map(([c, p]) => ({ ccy: c, pct: p })).sort((a, b) => b.pct - a.pct);
 
   if (!rows.length) return (
-    <p className="text-[11px] text-fg-subtle py-8 text-center">
+    <p className="text-[12px] text-fg-subtle py-8 text-center">
       No priced holdings in {bucketLabel(bucket)}.
     </p>
   );
@@ -2215,9 +2215,9 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
       <section className="bg-card border border-neutral-800/40 rounded-xl p-4 lg:col-span-2">
         <h4 className="text-sm font-semibold text-fg-strong">Performance</h4>
         <div className="mt-3 overflow-x-auto">
-          <table className="w-full text-[11px]">
+          <table className="w-full text-[12px]">
             <thead>
-              <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+              <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                 <th className={`${th} pr-2 text-left`} onClick={() => click('name')}>Name{caret('name')}</th>
                 <th className={`${th} px-2 text-right`} onClick={() => click('weight')}>Weight{caret('weight')}</th>
                 <th className={`${th} px-2 text-right`} onClick={() => click('return')}>Return{caret('return')}</th>
@@ -2247,7 +2247,7 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
         <h4 className="text-sm font-semibold text-fg-strong">Currency</h4>
         <div className="mt-3 flex flex-col gap-1.5">
           {ccy.map((c) => (
-            <div key={c.ccy} className="flex items-center gap-2 text-[11px]">
+            <div key={c.ccy} className="flex items-center gap-2 text-[12px]">
               <span className="w-12 shrink-0 font-mono text-fg-muted">{c.ccy}</span>
               {/* Fixed 0–100% scale — a bar's length IS the currency's share of the sleeve. */}
               <span className="relative flex-1 h-[16px] rounded bg-inset">
@@ -2277,7 +2277,7 @@ const BENCHMARKS = ['SP500', 'ACWI', 'AEX'] as const;
  * Close.
  *
  * ⚠ ONE CONSTANT, NOT THREE COPIES OF THE SAME CLASSES. They had drifted into three sizes: the
- * buttons at `text-xs px-3 py-1.5` and the select at `text-[11px] px-2 py-1`, so the row read as
+ * buttons at `text-xs px-3 py-1.5` and the select at `text-[12px] px-2 py-1`, so the row read as
  * two heights and three shapes. Three literals is three places for the next edit to land in one
  * of them.
  *
@@ -2422,7 +2422,7 @@ export default function PortfolioAnalysisModal({
           <div className="min-w-0">
             <h3 className="text-base font-mono font-semibold text-fg-strong">{name}</h3>
             {data?.weight_note && (
-              <p className="text-[11px] text-warn-300 mt-0.5">⚠ {data.weight_note}</p>
+              <p className="text-[12px] text-warn-300 mt-0.5">⚠ {data.weight_note}</p>
             )}
           </div>
           {/* ⚠ ORDER IS REFRESH · BENCHMARK · CLOSE. Refresh sits leftmost of the three because it
@@ -2448,7 +2448,7 @@ export default function PortfolioAnalysisModal({
                 buttons exactly. Put inside — as a bare `Benchmark SP500` pill — it would make this
                 control wider and taller than its neighbours for no gain, and the select still has
                 its `aria-label` for anyone not reading the caption. */}
-            <label className="flex items-center gap-1.5 text-[11px] text-fg-muted">
+            <label className="flex items-center gap-1.5 text-[12px] text-fg-muted">
               Benchmark
               <select value={benchmark} aria-label="Benchmark"
                 onChange={(e) => { setData(null); setError(null); setBucket(null); setBenchmark(e.target.value); }}
@@ -2467,7 +2467,7 @@ export default function PortfolioAnalysisModal({
             frozen one and the reader presses it again. A TAIL, not a log — the log is the
             console, which is where the per-holding arithmetic goes. */}
         {refreshing && refreshTick && (
-          <p className="text-[11px] text-fg-faint font-mono truncate mb-2" title={refreshTick}>
+          <p className="text-[12px] text-fg-faint font-mono truncate mb-2" title={refreshTick}>
             {refreshTick}
           </p>
         )}
@@ -2544,7 +2544,7 @@ export default function PortfolioAnalysisModal({
                 payload still reports `looked_through_pct` / `opaque_pct` / `looked_through` for
                 anyone reading the API. It is simply not announced on screen. */}
             {!sleeve && (data.benchmark_coverage_pct ?? 100) < 97 && (
-              <p className="text-[11px] text-warn-300 mb-3">
+              <p className="text-[12px] text-warn-300 mb-3">
                 {'⚠ This index is rebuilt from '}
                 <span className="font-mono">{data.benchmark_priced}</span>
                 {' of its '}

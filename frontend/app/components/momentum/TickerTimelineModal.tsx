@@ -301,7 +301,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
               <h2 className="text-fg-strong text-base font-semibold font-mono">{ticker || '—'}</h2>
               {exchange && (
                 <span
-                  className="text-[10px] text-fg-subtle"
+                  className="text-[11px] text-fg-subtle"
                   title={EXCHANGE_NAMES[exchange.toUpperCase()] ?? exchange}
                 >
                   {exchange}
@@ -371,7 +371,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
             <div className={`font-mono ${summary.compoundReturnPct != null && summary.compoundReturnPct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
               {fmtPct(summary.compoundReturnPct)}
             </div>
-            <div className={`text-[10px] font-mono mt-0.5 flex items-center gap-1 ${summary.cagrPct != null && summary.cagrPct >= 0 ? 'text-pos-500/80' : 'text-neg-500/80'}`}>
+            <div className={`text-[11px] font-mono mt-0.5 flex items-center gap-1 ${summary.cagrPct != null && summary.cagrPct >= 0 ? 'text-pos-500/80' : 'text-neg-500/80'}`}>
               <span className="text-fg-subtle">CAGR</span>
               <span>{fmtPct(summary.cagrPct)}</span>
               <CellInfoTip>
@@ -391,7 +391,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
             <div className="font-mono text-pos-400">
               {fmtPct(summary.bestRet)}
               {summary.bestRetMonth && (
-                <span className="text-fg-subtle text-[10px] ml-1">{summary.bestRetMonth}</span>
+                <span className="text-fg-subtle text-[11px] ml-1">{summary.bestRetMonth}</span>
               )}
             </div>
           </div>
@@ -405,7 +405,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
             <div className="font-mono text-neg-400">
               {fmtPct(summary.worstRet)}
               {summary.worstRetMonth && (
-                <span className="text-fg-subtle text-[10px] ml-1">{summary.worstRetMonth}</span>
+                <span className="text-fg-subtle text-[11px] ml-1">{summary.worstRetMonth}</span>
               )}
             </div>
           </div>
@@ -427,7 +427,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
                 />
                 {/* Hover tooltip */}
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-10 pointer-events-none">
-                  <div className="bg-popover border border-neutral-700 rounded-md px-2 py-1.5 text-[11px] whitespace-nowrap shadow-xl">
+                  <div className="bg-popover border border-neutral-700 rounded-md px-2 py-1.5 text-[12px] whitespace-nowrap shadow-xl">
                     <div className="font-mono text-fg-soft">{c.date}</div>
                     {c.held ? (
                       <>
@@ -461,7 +461,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
               return (
                 <div
                   key={`ax-${c.date}`}
-                  className="text-[9px] text-fg-faint font-mono shrink-0 text-left"
+                  className="text-[10px] text-fg-faint font-mono shrink-0 text-left"
                   style={{ width: 8 }}
                 >
                   {showYear ? thisYear : ''}
@@ -590,7 +590,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
                           {!breakdown && <div className="text-xs text-fg-subtle">Click again to load breakdown.</div>}
                           {breakdown?.status === 'loading' && (
                             <div className="space-y-1.5">
-                              <div className="flex items-center justify-between text-[11px] text-fg-muted">
+                              <div className="flex items-center justify-between text-[12px] text-fg-muted">
                                 <span className="flex items-center gap-2">
                                   <svg className="animate-spin w-3 h-3 text-accent-400" viewBox="0 0 24 24" fill="none">
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -607,7 +607,7 @@ export default function TickerTimelineModal({ result, companyId, exchangeByCompa
                                 />
                               </div>
                               {breakdown.message && (
-                                <div className="text-[11px] text-fg-subtle font-mono">{breakdown.message}</div>
+                                <div className="text-[12px] text-fg-subtle font-mono">{breakdown.message}</div>
                               )}
                             </div>
                           )}

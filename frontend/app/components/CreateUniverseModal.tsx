@@ -19,7 +19,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       <label className="flex items-center justify-between gap-3 text-xs text-fg-muted">
         <span>{label}</span>{children}
       </label>
-      {hint && <p className="text-[10px] text-fg-faint leading-tight">{hint}</p>}
+      {hint && <p className="text-[11px] text-fg-faint leading-tight">{hint}</p>}
     </div>
   );
 }

@@ -80,7 +80,7 @@ export default function SbcOcfCard({ holdingsTarget, holdingsName, benchTarget }
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : ratioByYr.size === 0 ? (
-        <p className="text-[11px] text-fg-faint py-16 text-center">No SBC / operating-cash-flow figures ingested to compute a ratio.</p>
+        <p className="text-[12px] text-fg-faint py-16 text-center">No SBC / operating-cash-flow figures ingested to compute a ratio.</p>
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
@@ -98,8 +98,8 @@ export default function SbcOcfCard({ holdingsTarget, holdingsName, benchTarget }
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
-                <YAxis domain={paddedDomain(withBench(ratioByYr.values(), benchByYr))} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+                <YAxis domain={paddedDomain(withBench(ratioByYr.values(), benchByYr))} tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
                   formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : 'SBC / OCF']} />

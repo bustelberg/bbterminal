@@ -65,15 +65,15 @@ function ExcludedTable({ rows, title, note, axisWord, p2, tone }: {
 }) {
   return (
     <div className="space-y-1">
-      <h3 className={`text-[11px] font-medium ${tone === 'warn' ? 'text-warn-300' : 'text-fg-strong'}`}>
+      <h3 className={`text-[12px] font-medium ${tone === 'warn' ? 'text-warn-300' : 'text-fg-strong'}`}>
         {title}
       </h3>
-      <p className="text-[11px] text-fg-faint">{note}</p>
+      <p className="text-[12px] text-fg-faint">{note}</p>
       <div className={`overflow-auto rounded-lg border ${
         tone === 'warn' ? 'border-warn-500/25' : 'border-neutral-800/40'}`}>
         <table className="w-full text-xs">
           <thead className="bg-page">
-            <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+            <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
               <th className="px-3 py-1.5 font-medium text-left">Holding</th>
               <th className="px-3 py-1.5 font-medium text-left">ISIN</th>
               <th className="px-3 py-1.5 font-medium text-right">Weight</th>
@@ -87,9 +87,9 @@ function ExcludedTable({ rows, title, note, axisWord, p2, tone }: {
                 <td className="px-3 py-1 text-fg-soft truncate max-w-0" title={e.name ?? undefined}>
                   {e.name ?? '—'}
                 </td>
-                <td className="px-3 py-1 font-mono text-[10px] text-fg-faint">{e.isin ?? '—'}</td>
+                <td className="px-3 py-1 font-mono text-[11px] text-fg-faint">{e.isin ?? '—'}</td>
                 <td className="px-3 py-1 text-right font-mono text-fg">{p2(e.weight_pct)}</td>
-                <td className={`px-3 py-1 text-[10px] ${
+                <td className={`px-3 py-1 text-[11px] ${
                   tone === 'warn' ? 'text-warn-300' : 'text-fg-muted'}`}>
                   {reasonLabel(e, axisWord)}
                 </td>
@@ -161,7 +161,7 @@ export default function CompositionDataModal({
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-3">
-          <p className="text-[11px] text-fg-faint">
+          <p className="text-[12px] text-fg-faint">
             {basis}{positions ? ` ${positions} positions in that total.` : ''}
             {' '}Each holding is listed at the weight this chart counted it at, so a bucket&apos;s rows
             add up to its bar exactly — both figures are printed below. Full precision, nothing
@@ -174,7 +174,7 @@ export default function CompositionDataModal({
               unpriceable holding has no return. Both vanish from the chart. Discovering that from
               a total that does not feel right is how a reader stops trusting the panel. */}
           {(unpricedPct ?? 0) > 0.005 && (
-            <div className="rounded-lg border border-warn-500/25 bg-warn-500/[0.07] px-3 py-2 text-[11px] text-fg-soft">
+            <div className="rounded-lg border border-warn-500/25 bg-warn-500/[0.07] px-3 py-2 text-[12px] text-fg-soft">
               <span className="text-warn-300 font-medium">
                 ⚠ {unpricedPct!.toFixed(2)}% of the book is held but unpriceable.
               </span>
@@ -187,7 +187,7 @@ export default function CompositionDataModal({
               this read as a data-quality problem with the stocks; the holdings involved are funds
               and cash, which have no {axisWord} by nature. */}
           {naWeight > 0.005 && (
-            <p className="text-[11px] text-fg-faint">
+            <p className="text-[12px] text-fg-faint">
               The bars exclude <span className="font-mono">{naWeight.toFixed(2)}%</span> held in
               funds, bonds and cash — those have no {axisWord} of their own and are their own
               slices of the allocation chart. Everything else on this basis is on a bar. A position
@@ -199,7 +199,7 @@ export default function CompositionDataModal({
           <div className="overflow-auto rounded-lg border border-neutral-800/40">
             <table className="w-full text-xs">
               <thead className="bg-page sticky top-0 z-10">
-                <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                   <th className="px-3 py-1.5 font-medium text-left">{AXIS_LABEL[axis] ?? axis} / holding</th>
                   <th className="px-3 py-1.5 font-medium text-left">ISIN</th>
                   <th className="px-3 py-1.5 font-medium text-left">Class</th>
@@ -238,7 +238,7 @@ export default function CompositionDataModal({
                                 : `· ${hs.length} holding${hs.length === 1 ? '' : 's'}`}
                             </span>
                             {notDrawn && (
-                              <span className="text-[10px] text-warn-300 font-normal"
+                              <span className="text-[11px] text-warn-300 font-normal"
                                 title="Below the chart's display threshold — this row is in the totals but not drawn as a bar.">
                                 not drawn
                               </span>
@@ -262,15 +262,15 @@ export default function CompositionDataModal({
                             {(h.via_names?.length ?? 0) > 0 && (
                               // A looked-through leg is not a line AIRS stores — naming the
                               // certificate is the only way to find the row back in the book.
-                              <span className="ml-1.5 text-[10px] text-accent-400"
+                              <span className="ml-1.5 text-[11px] text-accent-400"
                                 title={`Reached through ${(h.via_names ?? []).join(' · ')}`}>
                                 via {h.via_names?.[0]}
                                 {(h.via_names?.length ?? 0) > 1 ? ` +${(h.via_names?.length ?? 0) - 1}` : ''}
                               </span>
                             )}
                           </td>
-                          <td className="px-3 py-1 font-mono text-[10px] text-fg-faint">{h.isin ?? '—'}</td>
-                          <td className="px-3 py-1 text-[10px] text-fg-muted">{h.asset_class ?? '—'}</td>
+                          <td className="px-3 py-1 font-mono text-[11px] text-fg-faint">{h.isin ?? '—'}</td>
+                          <td className="px-3 py-1 text-[11px] text-fg-muted">{h.asset_class ?? '—'}</td>
                           <td className="px-3 py-1 text-right font-mono text-fg">{p2(h.weight_pct)}</td>
                           <td /><td />
                         </tr>
@@ -284,7 +284,7 @@ export default function CompositionDataModal({
                   <td className="px-3 py-1.5 font-medium text-fg-strong" colSpan={3}>
                     Total · {legs} holdings
                     {undrawn > 0 && (
-                      <span className="ml-2 text-[10px] font-normal text-fg-faint">
+                      <span className="ml-2 text-[11px] font-normal text-fg-faint">
                         ({undrawn} bucket{undrawn === 1 ? '' : 's'} below the chart&apos;s threshold, included here)
                       </span>
                     )}
@@ -319,7 +319,7 @@ export default function CompositionDataModal({
                 allocation chart above.`} />
           )}
 
-          <p className="text-[11px] text-fg-faint">
+          <p className="text-[12px] text-fg-faint">
             The {benchmark} column is the bar only. Its constituents are per-bucket and there are
             hundreds of them, so they stay one click away: close this and click a bar to open that
             bucket&apos;s holdings on both sides — the weights there are these weights.

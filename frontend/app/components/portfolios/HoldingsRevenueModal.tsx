@@ -429,7 +429,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onFe
             that has left the screen makes the period columns unreadable — and the footer IS the
             plotted line, which is the one row you want in view while reading any other. */}
         <thead className="bg-page sticky top-0 z-20">
-          <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40 [&>th]:cursor-pointer [&>th]:select-none [&>th:hover]:text-fg-soft">
+          <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40 [&>th]:cursor-pointer [&>th]:select-none [&>th:hover]:text-fg-soft">
             {/* Company takes the slack so the table fills the width; periods keep natural size.
                 ⚠ z ABOVE ITS OWN ROW: this cell pins in BOTH directions, so it has to outrank the
                 sticky header beside it and the sticky name cells below it. */}
@@ -514,7 +514,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                   <span className="truncate" title={r.name}>{r.name}</span>
                   {blend.excluded.has(r) && (
                     <span
-                      className="shrink-0 text-[9px] leading-none px-1 py-0.5 rounded border
+                      className="shrink-0 text-[10px] leading-none px-1 py-0.5 rounded border
                                  border-warn-500/40 bg-warn-500/10 text-warn-300 font-medium
                                  tracking-wide cursor-help"
                       title={`Not in the ${metricLabel} line: ${blend.excluded.get(r)}`}>
@@ -523,10 +523,10 @@ market cap it was weighted by in that period, and the weight that produced.">
                   )}
                 </span>
               </td>
-              <td className="px-3 py-1.5 font-mono text-[11px] text-fg-subtle whitespace-nowrap">
+              <td className="px-3 py-1.5 font-mono text-[12px] text-fg-subtle whitespace-nowrap">
                 <Ident w="w-14">{r.exchange ?? '—'}</Ident>
               </td>
-              <td className="px-3 py-1.5 font-mono text-[11px] whitespace-nowrap">
+              <td className="px-3 py-1.5 font-mono text-[12px] whitespace-nowrap">
                 <Ident w="w-[4.75rem]">
                   {r.ticker
                     ? <a href={guruFocusUrl(r.ticker, r.exchange)} target="_blank" rel="noopener noreferrer"
@@ -539,7 +539,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                   <span className="inline-block w-14 text-right tabular-nums">{capBn(r.market_cap_eur)}</span>
                 </td>
               )}
-              <td className="px-3 py-1.5 font-mono text-[11px] text-fg-subtle whitespace-nowrap">
+              <td className="px-3 py-1.5 font-mono text-[12px] text-fg-subtle whitespace-nowrap">
                 <Ident w="w-9">{r.currency ?? '—'}</Ident>
               </td>
               {/* ⚠ ONLY ON A ROW THAT HAS THE LINES. An `unsubscribed` / `no_data` row spans the
@@ -561,15 +561,15 @@ market cap it was weighted by in that period, and the weight that produced.">
               <td className="px-3 py-1.5 whitespace-nowrap align-top">
                 {r.status !== 'unsubscribed' && r.status !== 'no_data' && (
                   <span className="block">
-                    <span className="block text-[11px] text-fg-subtle">
+                    <span className="block text-[12px] text-fg-subtle">
                       {metricLabel}
                       {valueIsCurrency && view === 'reported' && r.currency
                         ? ` (${r.currency})` : ''}
                     </span>
                     {hasPeriodCap && (
-                      <span className="block text-[10px] leading-tight text-fg-dim">cap (EUR)</span>
+                      <span className="block text-[11px] leading-tight text-fg-dim">cap (EUR)</span>
                     )}
-                    <span className="block text-[10px] leading-tight text-fg-faint">weight</span>
+                    <span className="block text-[11px] leading-tight text-fg-faint">weight</span>
                   </span>
                 )}
               </td>
@@ -582,22 +582,22 @@ market cap it was weighted by in that period, and the weight that produced.">
               ) : r.status === 'no_data' ? (
                 <td colSpan={data.years.length} className="px-3 py-1.5">
                   {ingest[r.isin]?.busy ? (
-                    <span className="text-[11px] text-fg-faint">fetching…</span>
+                    <span className="text-[12px] text-fg-faint">fetching…</span>
                   ) : onFetch ? (
                     <span className="inline-flex items-center gap-2">
                       <button type="button" onClick={() => void fetchOne(r.isin, r.name)}
                         title="Fetch this company's financials from GuruFocus."
-                        className="cursor-pointer text-[11px] px-2 py-0.5 rounded-lg border border-accent-600/40 text-accent-400 hover:bg-overlay/5">
+                        className="cursor-pointer text-[12px] px-2 py-0.5 rounded-lg border border-accent-600/40 text-accent-400 hover:bg-overlay/5">
                         Fetch financials
                       </button>
                       {ingest[r.isin]?.msg && (
-                        <span className="text-[10px] text-warn-300" title={ingest[r.isin]?.msg}>
+                        <span className="text-[11px] text-warn-300" title={ingest[r.isin]?.msg}>
                           {ingest[r.isin]?.msg}
                         </span>
                       )}
                     </span>
                   ) : (
-                    <span className="text-[11px] text-fg-faint">no {noun} ingested</span>
+                    <span className="text-[12px] text-fg-faint">no {noun} ingested</span>
                   )}
                 </td>
               ) : (
@@ -635,7 +635,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                           cap behind it and the row stays two lines. Dimmer than the weight
                           because it is the input and the weight is the answer. */}
                       {hasPeriodCap && (
-                        <span className="block text-[10px] leading-tight text-fg-dim">
+                        <span className="block text-[11px] leading-tight text-fg-dim">
                           <Cell>{cap == null ? ' ' : capBn(cap)}</Cell>
                         </span>
                       )}
@@ -652,7 +652,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                           rewrite of this file ever normalises whitespace, this is the byte that
                           quietly breaks — the symptom is figures sitting half a line off their
                           neighbours in any row with a gap year, which reads as a CSS problem. */}
-                      <span className="block text-[10px] leading-tight text-fg-faint">
+                      <span className="block text-[11px] leading-tight text-fg-faint">
                         <Cell>{w == null ? ' ' : `${w.toFixed(2)}%`}</Cell>
                       </span>
                     </td>
@@ -715,11 +715,11 @@ divide by that period's own Σ cap instead, on the line directly below this row'
                 Rebased and YoY are an index and a percentage. A reader noticing the missing "(USD)"
                 has noticed the real reason the blend works the way it does. */}
             <td className="px-3 py-1.5 whitespace-nowrap align-top font-normal">
-              <span className="block text-[11px] text-fg-subtle">{metricLabel}</span>
+              <span className="block text-[12px] text-fg-subtle">{metricLabel}</span>
               {hasPeriodCap && (
-                <span className="block text-[10px] leading-tight text-fg-dim">Σ cap (EUR)</span>
+                <span className="block text-[11px] leading-tight text-fg-dim">Σ cap (EUR)</span>
               )}
-              <span className="block text-[10px] leading-tight text-fg-faint">covered</span>
+              <span className="block text-[11px] leading-tight text-fg-faint">covered</span>
             </td>
             {/* ⚠ THE ROW THAT MAKES THE TABLE CHECKABLE — and it is only a sum in one of the three
                 views. Reported: nothing to total, the columns are different currencies. Rebased:
@@ -757,7 +757,7 @@ divide by that period's own Σ cap instead, on the line directly below this row'
                       because the index was worth less in 2015, which is exactly the fact that
                       weighting by today's cap threw away. */}
                   {hasPeriodCap && (
-                    <span className="block text-[10px] leading-tight text-fg-dim">
+                    <span className="block text-[11px] leading-tight text-fg-dim">
                       <Cell>{blend.denom[y] == null ? ' ' : capBn(blend.denom[y])}</Cell>
                     </span>
                   )}
@@ -765,7 +765,7 @@ divide by that period's own Σ cap instead, on the line directly below this row'
                       shares OF. The column of weights sums to 100% within a period by
                       construction; this says what share of the index that 100% actually is. A
                       period under the floor is greyed with the rest of the cell. */}
-                  <span className="block text-[10px] leading-tight text-fg-faint">
+                  <span className="block text-[11px] leading-tight text-fg-faint">
                     <Cell>{lv == null ? ' ' : `${lv.covered.toFixed(0)}%`}</Cell>
                   </span>
                 </td>
@@ -889,7 +889,7 @@ export default function HoldingsRevenueModal({
     throw new Error(j?.detail ?? j?.status ?? `HTTP ${r.status}`);
   };
 
-  const section = 'text-[11px] uppercase tracking-wide text-fg-muted';
+  const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
   /**
    * ⚠ A ONE-ROW MATRIX IS THE PLOTTED TABLE AGAIN. On a single company the line IS that company's
    * reported figures, so the "as reported" table repeats every number above it and adds a 100.00%
@@ -912,7 +912,7 @@ export default function HoldingsRevenueModal({
               otherwise take the GuruFocus listing + reporting currency with it, and those are how
               a reader checks the figures against the source. */}
           {only ? (
-            <span className="text-[11px] text-fg-faint font-mono">
+            <span className="text-[12px] text-fg-faint font-mono">
               {only.exchange ?? '—'}
               {only.ticker && <>
                 {' '}
@@ -921,14 +921,14 @@ export default function HoldingsRevenueModal({
               </>}
               {only.currency && ` · ${only.currency}`}
             </span>
-          ) : data && <span className="text-[11px] text-fg-faint">{data.rows.length} companies</span>}
-          {benchLabel && <span className="text-[11px]" style={{ color: chartTheme.pos }}>vs {benchLabel}</span>}
+          ) : data && <span className="text-[12px] text-fg-faint">{data.rows.length} companies</span>}
+          {benchLabel && <span className="text-[12px]" style={{ color: chartTheme.pos }}>vs {benchLabel}</span>}
           <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-5">
           {/* 0 — the switch, above everything it governs. */}
-          <div className="flex items-center gap-2 text-[10px]">
+          <div className="flex items-center gap-2 text-[11px]">
             <div className="inline-flex rounded-lg border border-neutral-700 overflow-hidden">
               {VIEWS.map(([k, label, note]) => (
                 <button key={k} type="button" onClick={() => setView(k)} title={note}
@@ -980,7 +980,7 @@ export default function HoldingsRevenueModal({
                       spans every constituent while the line renormalises over the covered ones
                       period by period; and a constituent with no stored cap is not in the index at
                       all — systematically the names GuruFocus does not cover. */}
-                  <p className="text-[10px] text-fg-faint">
+                  <p className="text-[11px] text-fg-faint">
                     {bench.rows.length} constituents ·{' '}
                     <span className="underline decoration-dotted underline-offset-2"
                       title="company.market_cap_eur as stored today. Full cap — not free-float, and not capped per constituent the way the published index is. Not backed out to the start of the window either, so a company that has since grown carries its post-growth weight over its whole history.">

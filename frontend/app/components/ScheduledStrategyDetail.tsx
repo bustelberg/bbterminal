@@ -217,24 +217,24 @@ export default function ScheduledStrategyDetail({
                 minYear={2002}
                 maxYear={new Date().getUTCFullYear() + 1}
               />
-              <span className="inline-flex items-center gap-1.5 text-[11px] text-fg-subtle">
+              <span className="inline-flex items-center gap-1.5 text-[12px] text-fg-subtle">
                 <span className="inline-block w-3 border-t-2 border-dashed border-neg-400" />
                 marker on the curve
               </span>
               {!isCustom && (
-                <span className="text-[11px] text-fg-faint">defaults to scheduled date</span>
+                <span className="text-[12px] text-fg-faint">defaults to scheduled date</span>
               )}
               {isCustom && (
                 <button
                   type="button"
                   disabled={savingStartDate}
                   onClick={() => void saveStartDate('')}
-                  className="text-[11px] text-fg-subtle hover:text-fg-soft underline disabled:opacity-50"
+                  className="text-[12px] text-fg-subtle hover:text-fg-soft underline disabled:opacity-50"
                 >
                   reset
                 </button>
               )}
-              {savingStartDate && <span className="text-[11px] text-accent-300">saving…</span>}
+              {savingStartDate && <span className="text-[12px] text-accent-300">saving…</span>}
             </div>
             )}
 

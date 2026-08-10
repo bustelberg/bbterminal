@@ -267,7 +267,7 @@ export default function SummaryStats({
           {alignedSeries.series.filter((s) => s.kind !== 'benchmark').map((s) => (
             s.topDrawdowns.length > 0 && (
               <div key={s.id}>
-                <div className="text-[11px] font-medium mb-2 flex items-center gap-2">
+                <div className="text-[12px] font-medium mb-2 flex items-center gap-2">
                   <span className="inline-block w-2 h-2 rounded-full" style={{ background: s.color }} />
                   <span className="text-fg-muted uppercase tracking-wide">Top drawdowns</span>
                 </div>
@@ -280,7 +280,7 @@ export default function SummaryStats({
                           <div className="w-2 h-2 rounded-full" style={{ background: s.color, opacity: alpha }} />
                           <span className="font-mono text-sm font-medium" style={{ color: s.color }}>{dd.drawdown_pct.toFixed(1)}%</span>
                         </div>
-                        <div className="text-[10px] text-fg-subtle font-mono">
+                        <div className="text-[11px] text-fg-subtle font-mono">
                           {dd.peak_date} to {dd.trough_date}
                           {dd.recovery_date ? ` (recovered ${dd.recovery_date})` : ' (ongoing)'}
                         </div>
@@ -311,7 +311,7 @@ function toneClass(v: number, good: number, bad: number): string {
 function Stat({ label, info, tone, children }: { label: string; info: ReactNode; tone?: string; children: ReactNode }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wide text-fg-faint flex items-center">
+      <div className="text-[11px] uppercase tracking-wide text-fg-faint flex items-center">
         {label}<CellInfoTip>{info}</CellInfoTip>
       </div>
       <div className={`font-mono text-sm ${tone ?? 'text-fg-soft'}`}>{children}</div>

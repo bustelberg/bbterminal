@@ -117,7 +117,7 @@ const MATCH_TONE: Record<string, string> = {
 function MissingBadge() {
   return (
     <span title="Requested but this source found nothing"
-      className="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border bg-neg-500/10 text-neg-400 border-neg-500/20">
+      className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border bg-neg-500/10 text-neg-400 border-neg-500/20">
       missing
     </span>
   );
@@ -125,15 +125,15 @@ function MissingBadge() {
 
 function MatchBadge({ status }: { status?: string | null }) {
   if (status === 'verified')
-    return <span title="OpenFIGI confirms the resolved instrument" className={`text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${MATCH_TONE.verified}`}>✓ Match</span>;
+    return <span title="OpenFIGI confirms the resolved instrument" className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${MATCH_TONE.verified}`}>✓ Match</span>;
   if (status === 'mismatch')
-    return <span title="OpenFIGI names a different company — likely wrong resolution" className={`text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${MATCH_TONE.mismatch}`}>⚠ Mismatch</span>;
+    return <span title="OpenFIGI names a different company — likely wrong resolution" className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${MATCH_TONE.mismatch}`}>⚠ Mismatch</span>;
   return <span className="text-fg-faint" title="No OpenFIGI name to compare">—</span>;
 }
 
 function SourceBadge({ source }: { source: keyof typeof SOURCE_TONE }) {
   return (
-    <span className={`text-[8px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border ${SOURCE_TONE[source]}`}>
+    <span className={`text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border ${SOURCE_TONE[source]}`}>
       {source}
     </span>
   );
@@ -426,7 +426,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
         <div ref={scrollRef} className="overflow-auto rounded-lg border border-neutral-800/40 max-h-[70vh]">
           <table className="w-full text-xs">
             <thead className="bg-card sticky top-0 z-10">
-              <tr className="bg-card text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40 align-top">
+              <tr className="bg-card text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40 align-top">
                 {COLS.map((c) => (
                   <th key={c.key} title={c.title}
                     onClick={() => clickSort(c.key)}
@@ -713,7 +713,7 @@ function ReasonBadge({ reason }: { reason: keyof typeof DIV_REASON }) {
   const r = DIV_REASON[reason];
   return (
     <span title={r.title}
-      className={`text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border cursor-help ${r.tone}`}>
+      className={`text-[10px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border cursor-help ${r.tone}`}>
       {r.label}
     </span>
   );
@@ -741,7 +741,7 @@ function DividendCell({ entry, onOpen }: { entry?: DividendCoverageEntry; onOpen
     return (
       <button type="button" onClick={onOpen}
         title="Resolve this ISIN to a GuruFocus listing and fetch its dividends (one API call, cached forever — including the misses)."
-        className="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 transition-colors">
+        className="text-[11px] px-2 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 transition-colors">
         Fetch
       </button>
     );
@@ -760,7 +760,7 @@ function DividendCell({ entry, onOpen }: { entry?: DividendCoverageEntry; onOpen
   return (
     <button type="button" onClick={onOpen}
       title="Cash paid per unit held — the payment history, in native currency and EUR. Fetched from GuruFocus on first open and cached."
-      className="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-accent-400 transition-colors hover:border-accent-500/50">
+      className="text-[11px] px-2 py-0.5 rounded border border-neutral-700 text-accent-400 transition-colors hover:border-accent-500/50">
       View
     </button>
   );
@@ -787,7 +787,7 @@ function FinancialCell({ r, entry, label, onOpen }: {
   return (
     <button type="button" onClick={onOpen}
       title={`${label} in millions — the listing's trading currency and EUR. Fetched from GuruFocus on first open and cached (one blob carries every line, and it's shared with the earnings pipeline, so the second column on the same company is free).`}
-      className="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-accent-400 transition-colors hover:border-accent-500/50">
+      className="text-[11px] px-2 py-0.5 rounded border border-neutral-700 text-accent-400 transition-colors hover:border-accent-500/50">
       View
     </button>
   );
@@ -833,7 +833,7 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, onFinancial, me
           {r.leonteq_verified
             ? (
               <span title="In the uploaded Leonteq (lynqs) list"
-                className="align-middle text-[8px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-accent-600/15 text-accent-400 border-accent-600/30">
+                className="align-middle text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-accent-600/15 text-accent-400 border-accent-600/30">
                 Leonteq ✓
               </span>
             )
@@ -869,7 +869,7 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, onFinancial, me
                 target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
                 className="text-accent-400 hover:underline">{r.analysis_symbol}</a>
               {r.yahoo_symbol && r.yahoo_symbol !== r.analysis_symbol && (
-                <span className="ml-1.5 text-[10px] text-fg-faint" title="Tradable listing (execution)">via {r.yahoo_symbol}</span>
+                <span className="ml-1.5 text-[11px] text-fg-faint" title="Tradable listing (execution)">via {r.yahoo_symbol}</span>
               )}
             </>
           ) : yfinanceMissing ? <MissingBadge /> : (r.yahoo_symbol ?? '—')}
@@ -881,7 +881,7 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, onFinancial, me
             <span className="inline-flex items-center gap-1 max-w-[160px] align-bottom" title={r.sector ?? ''}>
               <span className="truncate">{sectorLabel(r.sector) || '—'}</span>
               {r.short_multiplier != null && (
-                <span className="shrink-0 text-[9px] font-mono font-semibold px-1 py-0.5 rounded bg-neg-500/15 text-neg-300 border border-neg-500/20"
+                <span className="shrink-0 text-[10px] font-mono font-semibold px-1 py-0.5 rounded bg-neg-500/15 text-neg-300 border border-neg-500/20"
                   title={`Inverse ${r.short_multiplier}× leverage`}>−{r.short_multiplier}×</span>
               )}
             </span>
@@ -896,7 +896,7 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, onFinancial, me
               title={crossListed ? `Domiciled in ${r.domicile_country} · lists in ${r.listing_country}` : (r.country ?? '')}>
               <span className="truncate">{r.country ?? '—'}</span>
               {crossListed && (
-                <span className="shrink-0 text-[10px] text-fg-faint">via {r.listing_country}</span>
+                <span className="shrink-0 text-[11px] text-fg-faint">via {r.listing_country}</span>
               )}
             </span>
           )}
@@ -931,7 +931,7 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, onFinancial, me
               <span className="flex items-center gap-1">
                 {(r.universes ?? []).map((u) => (
                   <span key={u} style={universeStyles.get(u) ?? FALLBACK_STYLE}
-                    className="text-[10px] px-1.5 py-0.5 rounded border font-medium" title={u}>
+                    className="text-[11px] px-1.5 py-0.5 rounded border font-medium" title={u}>
                     {u}
                   </span>
                 ))}
@@ -943,12 +943,12 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, onFinancial, me
           <div className="flex items-center gap-1.5">
             {hasSeries && (
               <button type="button" onClick={onChart} title="View native + EUR price & volume charts"
-                className="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-accent-400 hover:border-accent-500/50 transition-colors">
+                className="text-[11px] px-2 py-0.5 rounded border border-neutral-700 text-accent-400 hover:border-accent-500/50 transition-colors">
                 Chart
               </button>
             )}
             <button type="button" onClick={onResolve} title="Fetch OpenFIGI + yfinance for this row now"
-              className="text-[10px] px-2 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 transition-colors">
+              className="text-[11px] px-2 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 transition-colors">
               Resolve
             </button>
           </div>
@@ -990,7 +990,7 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, onFinancial, me
                   ? `Not this row's own listing — GuruFocus has no ${r.currency ?? 'local'} line for this ISIN, so we use ${dividend.exchange}:${dividend.gurufocus_ticker}. The amounts are right (GuruFocus reports the declaration currency on every listing), but the payment history may be incomplete.`
                   : undefined}>
                 {dividend.gurufocus_ticker}
-                {dividend.is_home === false && <span className="ml-1 text-[9px]" aria-hidden>⚠</span>}
+                {dividend.is_home === false && <span className="ml-1 text-[10px]" aria-hidden>⚠</span>}
               </span>
             )
             : <span className="text-fg-faint">—</span>}

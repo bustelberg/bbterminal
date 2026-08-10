@@ -75,8 +75,8 @@ export default function AccountTransactions({ portefeuille }: { portefeuille: st
     <div className="space-y-2">
       <button type="button" onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="w-full flex items-center gap-2 text-left text-[11px] px-2 py-1.5 rounded-lg border border-neutral-800/40 bg-card hover:bg-overlay/5 transition-colors">
-        <span className={`text-[8px] text-fg-faint transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+        className="w-full flex items-center gap-2 text-left text-[12px] px-2 py-1.5 rounded-lg border border-neutral-800/40 bg-card hover:bg-overlay/5 transition-colors">
+        <span className={`text-[9px] text-fg-faint transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
         <span className="font-medium text-fg-strong">Transactions</span>
         <span className="text-fg-faint">
           {/* ⚠ BEFORE THE FIRST OPEN WE DO NOT KNOW THE COUNT, AND SAYING SO BEATS SHOWING "0".
@@ -88,7 +88,7 @@ export default function AccountTransactions({ portefeuille }: { portefeuille: st
                 : `${rows.length} row${rows.length === 1 ? '' : 's'}`}
         </span>
         {data && (
-          <span className="ml-auto flex items-center gap-2 text-[10px] text-fg-faint">
+          <span className="ml-auto flex items-center gap-2 text-[11px] text-fg-faint">
             <span>{data.datum_van} → {data.datum_tot}</span>
             {/* ⚠ A CACHED ANSWER SHOWN AS FRESH IS HOW A STALE FIGURE GETS TRUSTED. Same rule the
                 model-portfolio positions follow. */}
@@ -103,13 +103,13 @@ export default function AccountTransactions({ portefeuille }: { portefeuille: st
               the difference between "did not trade", "AIRS has no such report" and "could not
               ask". Amber, because every one of those is something to notice rather than an error. */}
           {data?.note && (
-            <p className="text-[10px] text-warn-500 px-1">{data.note}</p>
+            <p className="text-[11px] text-warn-500 px-1">{data.note}</p>
           )}
           {/* ⚠ THE ACTION IS OFFERED ON THE FAILURE PATH TOO. The auto-load fires once and then
               stops (a loop against a failing AIRS session helps nobody), so without this a
               transient failure could only be cleared by collapsing the whole account row. */}
           {(data || err) && (
-            <div className="flex items-center gap-2 text-[10px] px-1">
+            <div className="flex items-center gap-2 text-[11px] px-1">
               <button type="button" disabled={loading} onClick={() => void load(true)}
                 title="Re-download this book's Transacties from AIRS. Seconds, behind the shared AIRS session — the stored snapshot is served until it lands."
                 className="px-2 py-1 rounded-md border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 disabled:opacity-50 transition-colors">
@@ -125,10 +125,10 @@ export default function AccountTransactions({ portefeuille }: { portefeuille: st
               )}
             </div>
           )}
-          {loading && !data && <p className="text-[11px] text-fg-subtle px-1">Loading transactions…</p>}
-          {err && <p className="text-[11px] text-neg-400 px-1">{err}</p>}
+          {loading && !data && <p className="text-[12px] text-fg-subtle px-1">Loading transactions…</p>}
+          {err && <p className="text-[12px] text-neg-400 px-1">{err}</p>}
           {data && !columns.length && !data.note && (
-            <p className="text-[11px] text-fg-subtle px-1">
+            <p className="text-[12px] text-fg-subtle px-1">
               This book has no transactions in this period.
             </p>
           )}
@@ -137,7 +137,7 @@ export default function AccountTransactions({ portefeuille }: { portefeuille: st
             <div className="overflow-x-auto rounded-lg border border-neutral-800/40">
               <table className="w-full text-xs whitespace-nowrap">
                 <thead className="bg-card [&_th]:bg-card">
-                  <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                  <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                     <th className="px-3 py-1.5 font-medium text-right w-10">#</th>
                     {columns.map((c) => (
                       <th key={c}
@@ -151,7 +151,7 @@ export default function AccountTransactions({ portefeuille }: { portefeuille: st
                 <tbody className="divide-y divide-neutral-800/20">
                   {rows.map((r, i) => (
                     <tr key={i} className="hover:bg-overlay/[0.02]">
-                      <td className="px-3 py-1.5 text-right font-mono text-[10px] text-fg-faint tabular-nums">
+                      <td className="px-3 py-1.5 text-right font-mono text-[11px] text-fg-faint tabular-nums">
                         {i + 1}
                       </td>
                       {columns.map((c) => {

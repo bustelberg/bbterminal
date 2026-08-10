@@ -78,11 +78,11 @@ export default function UniverseCard({
                 <h3 className="text-fg-strong text-base font-semibold">{u.label}</h3>
               )}
               {u.is_derived ? (
-                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-500/15 text-accent-300 border border-accent-500/30">
+                <span className="text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent-500/15 text-accent-300 border border-accent-500/30">
                   Derived{u.parent_label ? ` · from ${u.parent_label}` : ''}
                 </span>
               ) : (
-                <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-neutral-700/40 text-fg-soft border border-neutral-700/60">
+                <span className="text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-neutral-700/40 text-fg-soft border border-neutral-700/60">
                   Base
                 </span>
               )}
@@ -95,7 +95,7 @@ export default function UniverseCard({
             {filterPills.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {filterPills.map((p, i) => (
-                  <span key={i} className="text-[11px] px-1.5 py-0.5 rounded bg-accent-500/10 border border-accent-500/20 text-accent-300 font-mono">
+                  <span key={i} className="text-[12px] px-1.5 py-0.5 rounded bg-accent-500/10 border border-accent-500/20 text-accent-300 font-mono">
                     {p}
                   </span>
                 ))}

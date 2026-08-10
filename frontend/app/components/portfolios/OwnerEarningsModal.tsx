@@ -136,7 +136,7 @@ export default function OwnerEarningsModal({
               leaves the cash-flow statement, so reported FCF flatters anyone paying in equity;
               ticked by default, because the uncorrected figure is the flattering one. */}
           {tab === 'longequity' && (
-            <label className="ml-auto flex items-center gap-2 text-[11px] text-fg-soft cursor-pointer"
+            <label className="ml-auto flex items-center gap-2 text-[12px] text-fg-soft cursor-pointer"
               title="Subtract stock-based compensation from free cash flow before computing FCF margin, FCF yield, cash return on capital and FCF / Net Income. ⚠ No effect on ROIC, which is GuruFocus's own published ratio — there is no numerator of ours to adjust.">
               <input type="checkbox" checked={sbcCorrection}
                 onChange={(e) => setSbcCorrection(e.target.checked)}

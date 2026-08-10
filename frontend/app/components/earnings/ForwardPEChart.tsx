@@ -259,8 +259,8 @@ function ForwardPEChartInner({
             }
             : undefined}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-          <XAxis dataKey="date" tick={{ fontSize: 10, fill: chartTheme.axisTick }} tickFormatter={(v: string) => v.slice(0, 7)} />
-          <YAxis tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: number) => `${v.toFixed(0)}x`} />
+          <XAxis dataKey="date" tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: string) => v.slice(0, 7)} />
+          <YAxis tick={{ fontSize: 12, fill: chartTheme.axisTick }} tickFormatter={(v: number) => `${v.toFixed(0)}x`} />
           {memberSeriesA || memberSeriesB ? (
             <Tooltip content={
               <PEBreakdownTooltip

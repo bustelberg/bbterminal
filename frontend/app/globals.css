@@ -236,9 +236,18 @@ body {
 
 html {
   /* Base UI scale. Everything is rem/em-based off this, so this single value
-     behaves like a global browser-zoom level (17.5px ≈ the old 22px at ~80%
-     zoom). Single knob: nudge this value to rescale the whole UI. */
-  font-size: 17.5px;
+     behaves like a global browser-zoom level. Single knob: nudge this value to
+     rescale the whole UI.
+
+     ⚠ RAISED 17.5px → 19px (2026-08-10, on request) — roughly +8.5% everywhere.
+     The three steps below moved up the same ladder (16→17.5, 15→16, 14→15), so
+     each viewport keeps the proportion it had rather than the desktop growing
+     while a phone stays put.
+
+     ⚠ THIS IS THE ONLY PLACE TO CHANGE IT. Everything is rem/em, so a per-
+     component font bump would scale that component out of step with the padding
+     and borders around it — which is the whole reason the scale is one knob. */
+  font-size: 19px;
   background: var(--color-page);
   /* Stop iOS Safari from auto-inflating text on rotate, which would break the
      careful rem scale below. */
@@ -252,9 +261,9 @@ html {
    spacing, type — so dense data fits a tablet or phone without per-component
    breakpoints. (The `data-density` presets still override when explicitly set,
    since their `:root[...]` selector outranks this `html` one.) */
-@media (max-width: 1024px) { html { font-size: 16px; } }
-@media (max-width: 640px)  { html { font-size: 15px; } }
-@media (max-width: 380px)  { html { font-size: 14px; } }
+@media (max-width: 1024px) { html { font-size: 17.5px; } }
+@media (max-width: 640px)  { html { font-size: 16px; } }
+@media (max-width: 380px)  { html { font-size: 15px; } }
 
 /* On phones, trim the generous `px-8` page-header / section gutters (2rem each
    side) down so content gets the width back. Scoped to the small breakpoint;

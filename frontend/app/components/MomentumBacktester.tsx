@@ -520,7 +520,7 @@ export default function MomentumBacktester() {
               <h2 className="text-fg-soft text-xs font-semibold uppercase tracking-wider">
                 Strategy parameters
               </h2>
-              <span className="text-[10px] text-fg-subtle">
+              <span className="text-[11px] text-fg-subtle">
                 {selectionMode === 'random'
                   ? 'Random baseline · trials run independently with sequential seeds'
                   : selectionMode === 'all'
@@ -699,7 +699,7 @@ export default function MomentumBacktester() {
                     type="button"
                     onClick={() => void handleScheduleLoadedRun()}
                     title="Add this saved backtest to /schedule as a live strategy the pipeline keeps up to date."
-                    className="ml-auto text-[11px] font-medium uppercase tracking-wider px-2 py-1 rounded border border-accent-500/40 text-accent-300 bg-accent-500/10 hover:bg-accent-500/20 transition-colors"
+                    className="ml-auto text-[12px] font-medium uppercase tracking-wider px-2 py-1 rounded border border-accent-500/40 text-accent-300 bg-accent-500/10 hover:bg-accent-500/20 transition-colors"
                   >
                     + Schedule
                   </button>

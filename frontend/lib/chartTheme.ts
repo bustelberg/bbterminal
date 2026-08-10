@@ -47,12 +47,12 @@ export const chartTheme = {
   // ── Tooltip surfaces (recharts contentStyle / labelStyle / itemStyle).
   //    White surfaces with a soft cool-gray hairline + a whisper shadow. ────
   tooltip: {                // momentum / backtest — elevated surface
-    contentStyle: { background: '#ffffff', border: '1px solid #e6e9ef', borderRadius: 8, fontSize: 13, boxShadow: '0 8px 24px -14px rgba(17,24,39,0.18)' },
+    contentStyle: { background: '#ffffff', border: '1px solid #e6e9ef', borderRadius: 8, fontSize: 14, boxShadow: '0 8px 24px -14px rgba(17,24,39,0.18)' },
     labelStyle: { color: '#6c757f' },
     itemStyle: { color: '#283039' },
   },
   tooltipPopover: {         // sparkline / fx / indicators — popover surface
-    contentStyle: { backgroundColor: '#ffffff', border: '1px solid #e9ecf1', borderRadius: '8px', fontSize: 12, boxShadow: '0 8px 24px -14px rgba(17,24,39,0.16)' },
+    contentStyle: { backgroundColor: '#ffffff', border: '1px solid #e9ecf1', borderRadius: '8px', fontSize: 13, boxShadow: '0 8px 24px -14px rgba(17,24,39,0.16)' },
     labelStyle: { color: '#6c757f' },
   },
   tooltipCard: {            // /earnings — card surface

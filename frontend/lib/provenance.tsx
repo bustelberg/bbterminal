@@ -53,7 +53,7 @@ function FreshnessPill({ tone, label }: { tone: SnapshotTone; label: string }) {
       : tone === 'ok' ? 'bg-neutral-500/10 text-fg-muted border-neutral-700/40'
         : 'bg-pos-500/15 text-pos-600 border-pos-500/40';
   return (
-    <span className={`px-1.5 py-px rounded-full text-[9px] font-medium border whitespace-nowrap ${cls}`}>
+    <span className={`px-1.5 py-px rounded-full text-[10px] font-medium border whitespace-nowrap ${cls}`}>
       {tone === 'fresh' ? 'current' : label}
     </span>
   );

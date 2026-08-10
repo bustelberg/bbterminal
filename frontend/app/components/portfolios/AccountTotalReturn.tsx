@@ -81,8 +81,8 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
   return (
     <div className="space-y-2">
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
-        className="w-full flex items-center gap-2 text-left text-[11px] px-2 py-1.5 rounded-lg border border-neutral-800/40 bg-card hover:bg-overlay/5 transition-colors">
-        <span className={`text-[8px] text-fg-faint transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+        className="w-full flex items-center gap-2 text-left text-[12px] px-2 py-1.5 rounded-lg border border-neutral-800/40 bg-card hover:bg-overlay/5 transition-colors">
+        <span className={`text-[9px] text-fg-faint transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
         <span className="font-medium text-fg-strong">Total return</span>
         <span className="text-fg-faint">
           {loading ? 'loading…'
@@ -112,11 +112,11 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
 
       {open && (
         <div className="space-y-2">
-          {loading && !d && <p className="text-[11px] text-fg-subtle px-1">Loading…</p>}
-          {err && <p className="text-[11px] text-neg-400 px-1">{err}</p>}
+          {loading && !d && <p className="text-[12px] text-fg-subtle px-1">Loading…</p>}
+          {err && <p className="text-[12px] text-neg-400 px-1">{err}</p>}
           {needsTx && (
             <div className="flex items-start gap-2 px-1">
-              <p className="text-[11px] text-warn-500">
+              <p className="text-[12px] text-warn-500">
                 This book’s transactions have not been fetched, so what it realised on sales is
                 unknown — and the positions it still holds are only part of the year. Open
                 <strong> Transactions</strong> above to load them, then reload here.
@@ -125,12 +125,12 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                   who has just loaded the transactions in the panel above should not have to
                   discover that by collapsing this one. */}
               <button type="button" disabled={loading} onClick={() => void load()}
-                className="shrink-0 px-2 py-1 rounded-md border border-neutral-800/40 text-[10px] text-fg-subtle hover:bg-overlay/5 disabled:opacity-50 transition-colors">
+                className="shrink-0 px-2 py-1 rounded-md border border-neutral-800/40 text-[11px] text-fg-subtle hover:bg-overlay/5 disabled:opacity-50 transition-colors">
                 {loading ? 'Reloading…' : 'Reload'}
               </button>
             </div>
           )}
-          {d?.realised_note && <p className="text-[11px] text-warn-500 px-1">{d.realised_note}</p>}
+          {d?.realised_note && <p className="text-[12px] text-warn-500 px-1">{d.realised_note}</p>}
 
           {d && !needsTx && (
             <div className="rounded-lg border border-neutral-800/40 overflow-hidden">
@@ -146,7 +146,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                   <tr className="bg-overlay/[0.04] font-semibold">
                     <td className="px-3 py-2 text-fg-strong">
                       Total result
-                      <span className="ml-2 font-normal text-[10px] text-fg-faint">
+                      <span className="ml-2 font-normal text-[11px] text-fg-faint">
                         the year, from the positions
                       </span>
                     </td>
@@ -157,7 +157,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                   <tr className="border-t border-neutral-800/40">
                     <td className="px-3 py-2 text-fg-soft">
                       AIRS’s own result
-                      <span className="ml-2 text-[10px] text-fg-faint">
+                      <span className="ml-2 text-[11px] text-fg-faint">
                         beleggingsresultaat — the system of record
                       </span>
                     </td>
@@ -169,7 +169,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                   <tr>
                     <td className="px-3 py-2 text-fg-muted">
                       Residual
-                      <span className="ml-2 text-[10px] text-fg-faint">
+                      <span className="ml-2 text-[11px] text-fg-faint">
                         {d.reconciles ? 'rounding' : 'NOT explained by the positions'}
                       </span>
                     </td>
@@ -183,7 +183,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
           )}
 
           {d && !needsTx && (
-            <div className="grid gap-2 sm:grid-cols-2 text-[11px]">
+            <div className="grid gap-2 sm:grid-cols-2 text-[12px]">
               <Stat label="Total YTD return" value={d.total_return_pct != null ? pct(d.total_return_pct) : '—'}
                 tone={d.total_return_pct != null ? tone(d.total_return_pct) : 'text-fg-faint'}
                 note={d.return_basis === 'opening_capital'
@@ -203,7 +203,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
               corporate action carrying no money or something new that belongs in the total, and
               only a visible count can ever tell the two apart. */}
           {d && Object.keys(d.unknown_transaction_types ?? {}).length > 0 && (
-            <p className="text-[10px] text-warn-500 px-1">
+            <p className="text-[11px] text-warn-500 px-1">
               {Object.entries(d.unknown_transaction_types ?? {}).map(([t, n]) => `${n}× “${t}”`).join(', ')}
               {' '}transaction row(s) are not interpreted and carry no money on the sheets measured
               so far — excluded from every total above, and counted here so a future one that does
@@ -215,7 +215,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
             <div className="overflow-x-auto rounded-lg border border-neutral-800/40">
               <table className="w-full text-xs whitespace-nowrap">
                 <thead className="bg-card [&_th]:bg-card">
-                  <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                  <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                     <th className="px-3 py-1.5 font-medium text-left">Sold</th>
                     <th className="px-3 py-1.5 font-medium text-right">Sales</th>
                     <th className="px-3 py-1.5 font-medium text-right">Quantity</th>
@@ -237,14 +237,14 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                             held — they were trimmed. Only a name absent from the positions table
                             is genuinely out, and that is what this badge means. */}
                         {l.closed_out && (
-                          <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[9px] text-fg-muted"
+                          <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[10px] text-fg-muted"
                             title="No longer in the positions table — this position was closed out.">
                             closed
                           </span>
                         )}
                         {/* ⚠ THE WHOLE REASON `Res. YtD` IS USED RATHER THAN proceeds − cost. */}
                         {!!l.prior_year_eur && (
-                          <span className="ml-2 text-[9px] text-warn-500"
+                          <span className="ml-2 text-[10px] text-warn-500"
                             title={`${eur(l.prior_year_eur)} of this gain was made in earlier years and is correctly NOT in this year's total.`}>
                             {eur(l.prior_year_eur)} prior yr
                           </span>
@@ -257,7 +257,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                       <td className={`px-3 py-1.5 text-right font-mono tabular-nums ${tone(l.realised_ytd_eur)}`}>
                         {eur(l.realised_ytd_eur)}
                       </td>
-                      <td className="px-3 py-1.5 text-fg-faint text-[10px]">
+                      <td className="px-3 py-1.5 text-fg-faint text-[11px]">
                         {l.first === l.last ? l.first : `${l.first} → ${l.last}`}
                       </td>
                     </tr>
@@ -277,7 +277,7 @@ function Row({ label, sub, eur: v }: { label: string; sub?: string; eur?: number
     <tr>
       <td className="px-3 py-1.5 text-fg-soft">
         {label}
-        {sub && <span className="ml-2 text-[10px] text-fg-faint">{sub}</span>}
+        {sub && <span className="ml-2 text-[11px] text-fg-faint">{sub}</span>}
       </td>
       <td className={`px-3 py-1.5 text-right font-mono tabular-nums ${tone(v)}`}>{eur(v)}</td>
     </tr>
@@ -289,9 +289,9 @@ function Stat({ label, value, note, tone: t }: {
 }) {
   return (
     <div className="rounded-lg border border-neutral-800/40 bg-card px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wide text-fg-faint">{label}</div>
+      <div className="text-[11px] uppercase tracking-wide text-fg-faint">{label}</div>
       <div className={`font-mono text-lg ${t}`}>{value}</div>
-      <div className="text-[10px] text-fg-faint mt-0.5">{note}</div>
+      <div className="text-[11px] text-fg-faint mt-0.5">{note}</div>
     </div>
   );
 }

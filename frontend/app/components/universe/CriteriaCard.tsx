@@ -15,7 +15,7 @@ export default function CriteriaCard({ criteria }: { criteria: CriterionDef[] })
           <div key={c.key} className="text-xs text-fg-muted flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-accent-500/60 shrink-0" />
             {c.label}
-            <span className="text-fg-faint font-mono text-[10px]">{c.min_years ?? 1}y</span>
+            <span className="text-fg-faint font-mono text-[11px]">{c.min_years ?? 1}y</span>
             {c.description && <InfoTip text={c.description} />}
           </div>
         ))}

@@ -182,13 +182,13 @@ function FxHistoryChart({ currency, history, loading, refreshing, onClose }: {
               <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
               <XAxis
                 dataKey="date"
-                tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
+                tick={{ fill: chartTheme.axisTick, fontSize: 12 }}
                 tickLine={false}
                 interval={Math.max(0, Math.floor(chartData.length / 8) - 1)}
                 tickFormatter={(d: string) => d.slice(0, 7)}
               />
               <YAxis
-                tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
+                tick={{ fill: chartTheme.axisTick, fontSize: 12 }}
                 tickLine={false}
                 domain={yDomain}
                 tickFormatter={(v: number) => v.toFixed(decimals)}

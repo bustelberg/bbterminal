@@ -53,7 +53,7 @@ function LwChart({ data, priceKey, volKey, priceColor, volColor, scale, priceUni
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: chartTheme.axisTick, fontSize: 10, attributionLogo: false,
+        textColor: chartTheme.axisTick, fontSize: 11, attributionLogo: false,
       },
       grid: { vertLines: { visible: false }, horzLines: { color: chartTheme.grid } },
       // Price axis on the LEFT so its labels reserve a gutter there — otherwise
@@ -127,7 +127,7 @@ function LwChart({ data, priceKey, volKey, priceColor, volColor, scale, priceUni
     <div className="relative">
       <div ref={wrapRef} className="w-full aspect-[16/9] max-h-[72vh] min-h-[300px]" />
       <div ref={tipRef} style={{ display: 'none' }}
-        className="pointer-events-none absolute z-10 bg-popover border border-neutral-800/40 rounded px-2 py-1 text-[10px] font-mono leading-tight shadow" />
+        className="pointer-events-none absolute z-10 bg-popover border border-neutral-800/40 rounded px-2 py-1 text-[11px] font-mono leading-tight shadow" />
     </div>
   );
 }
@@ -156,9 +156,9 @@ export default function AssetDualChart({ analysisId, scale = 'log' }: { analysis
     return () => { cancelled = true; };
   }, [analysisId]);
 
-  if (error) return <div className="text-[11px] text-neg-300">Chart failed: {error}</div>;
-  if (!data) return <div className="text-[11px] text-fg-faint">Loading charts…</div>;
-  if (data.length === 0) return <div className="text-[11px] text-fg-faint">No stored series.</div>;
+  if (error) return <div className="text-[12px] text-neg-300">Chart failed: {error}</div>;
+  if (!data) return <div className="text-[12px] text-fg-faint">Loading charts…</div>;
+  if (data.length === 0) return <div className="text-[12px] text-fg-faint">No stored series.</div>;
 
   const ccy = meta?.native_currency ?? '';
   const hasEur = data.some((d) => d.close_eur != null);
@@ -167,27 +167,27 @@ export default function AssetDualChart({ analysisId, scale = 'log' }: { analysis
     <div className="space-y-1">
       <div className="flex gap-4 flex-wrap">
         <div className="flex-1 min-w-[320px]">
-          <div className="text-[10px] uppercase tracking-wide text-fg-faint mb-1">Native{ccy ? ` (${ccy})` : ''}</div>
+          <div className="text-[11px] uppercase tracking-wide text-fg-faint mb-1">Native{ccy ? ` (${ccy})` : ''}</div>
           <LwChart
             data={data} priceKey="close" volKey="volume" priceUnit={ccy} scale={scale}
             priceColor={chartTheme.accentStrong} volColor={chartTheme.accent} volFmt={fmtShares}
           />
         </div>
         <div className="flex-1 min-w-[320px]">
-          <div className="text-[10px] uppercase tracking-wide text-fg-faint mb-1">EUR</div>
+          <div className="text-[11px] uppercase tracking-wide text-fg-faint mb-1">EUR</div>
           {hasEur ? (
             <LwChart
               data={data} priceKey="close_eur" volKey="volume_eur" priceUnit="EUR" scale={scale}
               priceColor={chartTheme.pos} volColor={chartTheme.pos} volFmt={fmtEur}
             />
           ) : (
-            <div className="w-full aspect-[16/9] max-h-[72vh] min-h-[300px] flex items-center justify-center text-[11px] text-fg-faint border border-neutral-800/40 rounded-lg">
+            <div className="w-full aspect-[16/9] max-h-[72vh] min-h-[300px] flex items-center justify-center text-[12px] text-fg-faint border border-neutral-800/40 rounded-lg">
               No FX rate available to convert this currency.
             </div>
           )}
         </div>
       </div>
-      <div className="text-[10px] text-fg-faint">
+      <div className="text-[11px] text-fg-faint">
         Left: native currency &amp; raw volume (shares). Right: prices in EUR (ECB rates), volume as EUR turnover (price×shares; crypto = converted notional).
         {' · '}Scroll to zoom, drag to pan, double-click to reset.
         {meta && meta.total > meta.points ? ` · ${data.length.toLocaleString()} of ${meta.total.toLocaleString()} bars (downsampled).` : ''}

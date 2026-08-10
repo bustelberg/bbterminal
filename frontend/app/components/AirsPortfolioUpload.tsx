@@ -453,10 +453,10 @@ export default function AirsPortfolioUpload() {
               </div>
               {errorDetail && (
                 <details className="mt-2">
-                  <summary className="text-fg-subtle text-[11px] cursor-pointer hover:text-fg-soft">
+                  <summary className="text-fg-subtle text-[12px] cursor-pointer hover:text-fg-soft">
                     Show technical details
                   </summary>
-                  <pre className="mt-2 text-[10px] text-fg-subtle font-mono whitespace-pre-wrap break-all bg-scrim/30 border border-neutral-800 rounded p-2">
+                  <pre className="mt-2 text-[11px] text-fg-subtle font-mono whitespace-pre-wrap break-all bg-scrim/30 border border-neutral-800 rounded p-2">
                     {errorDetail}
                   </pre>
                 </details>
@@ -572,7 +572,7 @@ export default function AirsPortfolioUpload() {
               <Spinner className="h-5 w-5" />
               <span className="text-sm"><LoadingDots label={loadStage} /></span>
             </div>
-            <span className="text-[11px] font-mono text-fg-faint">
+            <span className="text-[12px] font-mono text-fg-faint">
               {loadElapsed}s elapsed{loadElapsed >= 5 ? ' · the saved-portfolios query can take a few seconds' : ''}
             </span>
           </div>
@@ -649,7 +649,7 @@ function VermogenJobCard() {
       <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-sm font-medium text-fg-strong">Daily Vermogensoverzicht refresh</h2>
-          <p className="text-[11px] text-fg-subtle mt-0.5">
+          <p className="text-[12px] text-fg-subtle mt-0.5">
             Working days 10:00 Amsterdam · re-discovers the live portfolio list, stores each portfolio&apos;s Rendement + Vermogensoverzicht.
             {s?.next_run_at && <> Next run <span className="font-mono text-fg-muted">{fmtDateTime(s.next_run_at)}</span>.</>}
           </p>
@@ -705,7 +705,7 @@ function VermogenJobCard() {
               {showErrors ? '▾' : '▸'} {s.errors.length} portfolio{s.errors.length === 1 ? '' : 's'} failed
             </button>
             {showErrors && (
-              <ul className="mt-1 ml-3 space-y-0.5 text-[11px] text-fg-subtle font-mono">
+              <ul className="mt-1 ml-3 space-y-0.5 text-[12px] text-fg-subtle font-mono">
                 {s.errors.map((e, i) => <li key={i} className="truncate" title={e}>{e}</li>)}
               </ul>
             )}
@@ -798,7 +798,7 @@ function CrmRelatiesCard() {
             {filteredRows.length !== data.row_count && <> of {data.row_count}</>} relation{data.row_count === 1 ? '' : 's'}
           </h2>
           {data.as_of_date && (
-            <p className="text-[11px] text-fg-subtle mt-0.5">
+            <p className="text-[12px] text-fg-subtle mt-0.5">
               As of <span className="font-mono text-fg-muted">{data.as_of_date}</span>
               {data.byte_size != null && <> · {Math.round(data.byte_size / 1024)} KB raw</>}
             </p>

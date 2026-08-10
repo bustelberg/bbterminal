@@ -96,7 +96,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
           {(Object.keys(MODES) as CapitalMode[]).map((k) => (
             <button key={k} type="button" onClick={() => setMode(k)} aria-pressed={mode === k}
               title={`${MODES[k].title} — ${MODES[k].what}. ${MODES[k].where}`}
-              className={`px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+              className={`px-2.5 py-0.5 text-[12px] font-medium transition-colors ${
                 mode === k ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-overlay/5'}`}>
               {MODES[k].tab}
             </button>
@@ -109,7 +109,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : ratioByYr.size === 0 ? (
-        <p className="text-[11px] text-fg-faint py-16 text-center">
+        <p className="text-[12px] text-fg-faint py-16 text-center">
           {M.derived
             ? 'No FCF / capital figures ingested to compute a ratio.'
             : 'GuruFocus reports no ROIC for these holdings.'}
@@ -132,8 +132,8 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
                 style={{ cursor: M.derived ? 'pointer' : 'default' }}
                 onClick={() => { if (M.derived) setShowInputs(true); }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
-                <YAxis domain={paddedDomain(withBench(ratioByYr.values(), benchByYr))} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+                <YAxis domain={paddedDomain(withBench(ratioByYr.values(), benchByYr))} tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
                   formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : M.title]} />

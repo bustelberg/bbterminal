@@ -107,7 +107,7 @@ export default function HoldingsIngestPanel({ target, metric, noun, onIngested }
   if (phase === 'idle') {
     return (
       <div className="py-16 flex flex-col items-center gap-3 text-center px-4">
-        <p className="text-[11px] text-fg-faint">No {noun} ingested for this portfolio.</p>
+        <p className="text-[12px] text-fg-faint">No {noun} ingested for this portfolio.</p>
         {err && <p className="text-xs text-neg-300 max-w-[30ch] break-words">{err}</p>}
         <button type="button" onClick={run}
           title={`Fetch every holding's financials from GuruFocus, one at a time, then list which ones have ${noun}.`}
@@ -123,33 +123,33 @@ export default function HoldingsIngestPanel({ target, metric, noun, onIngested }
   return (
     <div className="rounded-lg border border-neutral-800/40 bg-inset p-3 space-y-2 min-w-0">
       <div className="flex items-center gap-2 min-w-0">
-        <span className="text-[11px] text-fg-soft truncate min-w-0">
+        <span className="text-[12px] text-fg-soft truncate min-w-0">
           {phase === 'planning' ? 'Checking holdings…'
             : phase === 'running' ? `Fetching ${at} / ${plan?.queue.length ?? 0}`
               : counts ? `${counts.present} of ${counts.total} have ${noun}` : ''}
         </span>
         {phase === 'running' ? (
           <button type="button" onClick={() => { stop.current = true; }}
-            className="ml-auto shrink-0 text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
+            className="ml-auto shrink-0 text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
             Stop
           </button>
         ) : phase === 'done' ? (
           <span className="ml-auto shrink-0 flex items-center gap-1.5">
             {counts && counts.present > 0 && onIngested && (
               <button type="button" onClick={onIngested} title="Reload the charts."
-                className="text-[11px] px-2 py-0.5 rounded-lg border border-accent-600/40 text-accent-400 hover:bg-overlay/5">
+                className="text-[12px] px-2 py-0.5 rounded-lg border border-accent-600/40 text-accent-400 hover:bg-overlay/5">
                 Reload
               </button>
             )}
             <button type="button" onClick={run} title="Retry the holdings that came back empty."
-              className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
+              className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
               Again
             </button>
           </span>
         ) : null}
       </div>
 
-      {err && <p className="text-[11px] text-neg-300 break-words">{err}</p>}
+      {err && <p className="text-[12px] text-neg-300 break-words">{err}</p>}
 
       {/* One line per holding: present, or not — `unsubscribed` called out because it is the one
           absence an ingest can never fix. Everything else that explains an absence is the title. */}
@@ -158,7 +158,7 @@ export default function HoldingsIngestPanel({ target, metric, noun, onIngested }
           {plan.rows.map((row) => {
             const b = badgeFor(row, attempts[row.key], present.has(row.key));
             return (
-              <li key={row.key} className="flex items-baseline gap-2 min-w-0 text-[11px]"
+              <li key={row.key} className="flex items-baseline gap-2 min-w-0 text-[12px]"
                 title={b.note ? `${row.name} — ${b.note}` : row.name}>
                 <span className="flex-1 min-w-0 truncate text-fg-soft">{row.name}</span>
                 <span className={`shrink-0 font-mono ${TONE[b.tone]}`}>{b.label}</span>

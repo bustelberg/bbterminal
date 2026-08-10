@@ -658,7 +658,7 @@ export default function EarningsDashboard() {
                     className={`w-16 bg-page border rounded-lg px-2 py-1 text-fg-strong text-sm font-mono text-center outline-none transition-colors ${startYearError ? 'border-neg-500 focus:border-neg-500 focus:ring-1 focus:ring-neg-500/30' : 'border-neutral-700 focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30'}`}
                   />
                   {startYearError && (
-                    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 text-neg-400 text-[10px] whitespace-nowrap">{startYearError}</div>
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 text-neg-400 text-[11px] whitespace-nowrap">{startYearError}</div>
                   )}
                 </div>
                 <button

@@ -324,7 +324,7 @@ export default function BenchmarksPanel() {
           <button type="button" onClick={() => void refresh(INDICES.map((i) => i.label))}
             disabled={refreshing.size > 0}
             title="For each index, in order: gather its constituents, get every one's market cap from Yahoo, then each one's start-of-year price and current price. Minutes per index — every step is logged to the browser console as it happens. Runs one index at a time; concurrent Yahoo callers are how a constituent lands on the wrong listing."
-            className="ml-auto text-[11px] px-2.5 py-1 rounded-lg bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-50">
+            className="ml-auto text-[12px] px-2.5 py-1 rounded-lg bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-50">
             {refreshing.size > 1 ? 'Refreshing…' : 'Refresh all'}
           </button>
         )}
@@ -332,7 +332,7 @@ export default function BenchmarksPanel() {
 
 
       {runMsg && (
-        <div className={`text-[11px] rounded-lg px-3 py-1.5 border ${
+        <div className={`text-[12px] rounded-lg px-3 py-1.5 border ${
           runMsg.kind === 'warn'
             ? 'text-warn-300 bg-warn-500/10 border-warn-500/20'
             : 'text-fg-subtle bg-overlay/[0.03] border-neutral-800/40'}`}>
@@ -356,7 +356,7 @@ export default function BenchmarksPanel() {
         <div className="overflow-auto rounded-lg border border-neutral-800/40">
           <table className="w-full text-xs">
             <thead className="bg-card">
-              <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+              <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                 <th className="px-3 py-1.5 font-medium text-left">Benchmark</th>
                 <th className="px-3 py-1.5 font-medium text-right">Members</th>
                 <th className="px-3 py-1.5 font-medium text-right">YTD (€)</th>
@@ -394,7 +394,7 @@ export default function BenchmarksPanel() {
                             <button type="button" disabled={refreshing.size > 0 || deleting != null}
                               onClick={(e) => { e.stopPropagation(); void refresh([ix.label]); }}
                               title={`Refresh ${ix.name}: gather its constituents, get every one's market cap from Yahoo, then each one's start-of-year price and current price. Takes minutes — every step is logged to the browser console as it happens.`}
-                              className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
+                              className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
                               {refreshing.has(ix.label) && refreshing.size === 1 ? 'Refreshing…' : 'Refresh'}
                             </button>
                             {/* Only where Refresh can put it back — see `rebuildable`. */}
@@ -403,7 +403,7 @@ export default function BenchmarksPanel() {
                                 onClick={(e) => { e.stopPropagation(); void del(ix.label, d?.member_count); }}
                                 title={`Delete the ${ix.name} universe so Refresh can be watched rebuilding it. Membership only — prices and market caps are untouched.`}
                                 aria-label={`Delete the ${ix.name} universe`}
-                                className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-800/40 text-fg-faint hover:text-neg-400 hover:border-neg-500/40 disabled:opacity-50">
+                                className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-800/40 text-fg-faint hover:text-neg-400 hover:border-neg-500/40 disabled:opacity-50">
                                 {deleting === ix.label ? '…' : 'Delete'}
                               </button>
                             )}
@@ -442,7 +442,7 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
           constituents the fill would then refuse. In the Total row's Fetch cell it is the
           all-companies form of the per-company button directly above it, and the grid counts what
           the fill will actually do. This line is now just the index's own provenance. */}
-      <div className="flex items-center gap-3 flex-wrap text-[11px]">
+      <div className="flex items-center gap-3 flex-wrap text-[12px]">
         <span className="text-fg-soft">
           <span className="font-mono text-fg">{d.priced_of_universe}</span> priced ·{' '}
           weights as of <span className="font-mono">{d.start_date}</span>
@@ -451,7 +451,7 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
 
       {/* A corrected price is a CLAIM. Show it — never adjust silently. */}
       {(d.split_adjusted?.length ?? 0) > 0 && (
-        <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2 text-[11px] text-warn-300">
+        <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2 text-[12px] text-warn-300">
           <span className="font-semibold">Split-adjusted on the fly:</span>{' '}
           {d.split_adjusted!.map((s) => `${s.ticker} ×${s.factor.toFixed(3)}`).join(' · ')}.
           Our stored closes are not split-adjusted and cannot self-heal (the ingest only
@@ -460,7 +460,7 @@ function IndexDetail({ d }: { d: ReconstructedIndex }) {
         </div>
       )}
 
-      <p className="text-[10px] text-fg-faint leading-relaxed">
+      <p className="text-[11px] text-fg-faint leading-relaxed">
         {d.note} Weights are as of the <strong>start of the year</strong>: weighting by
         today&apos;s market cap is look-ahead bias — it retroactively overweights whatever
         went up.{' '}

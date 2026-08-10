@@ -99,28 +99,28 @@ function FCFShareChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, t
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
         <div className="flex items-center gap-1">
-          <div className="text-[11px]" style={{ color: COLOR_A }}>CAGR{aTag} (positive only)</div>
+          <div className="text-[12px]" style={{ color: COLOR_A }}>CAGR{aTag} (positive only)</div>
           <div className="font-mono text-xs" style={{ color: COLOR_A }}>{fmtPct(cagrA)}</div>
         </div>
         <div className="flex items-center gap-1">
-          <div className="text-fg-subtle text-[11px]">Latest{aTag}</div>
+          <div className="text-fg-subtle text-[12px]">Latest{aTag}</div>
           <div className="font-mono text-xs" style={{ color: COLOR_A }}>{latestA == null ? '—' : `€${fmtNum(latestA, 2)}`}</div>
         </div>
         {hasB && seriesB.length > 0 && (
           <>
             <div className="flex items-center gap-1">
-              <div className="text-[11px]" style={{ color: COLOR_B }}>CAGR {labelB ?? 'B'} (positive only)</div>
+              <div className="text-[12px]" style={{ color: COLOR_B }}>CAGR {labelB ?? 'B'} (positive only)</div>
               <div className="font-mono text-xs" style={{ color: COLOR_B }}>{fmtPct(cagrB)}</div>
             </div>
             <div className="flex items-center gap-1">
-              <div className="text-fg-subtle text-[11px]">Latest {labelB ?? 'B'}</div>
+              <div className="text-fg-subtle text-[12px]">Latest {labelB ?? 'B'}</div>
               <div className="font-mono text-xs" style={{ color: COLOR_B }}>{latestB == null ? '—' : `€${fmtNum(latestB, 2)}`}</div>
             </div>
           </>
         )}
         {hasB && seriesB.length === 0 && loadingB && (
           <div className="flex items-center gap-1.5">
-            <div className="text-fg-subtle text-[11px]">Loading {labelB ?? 'B'}</div>
+            <div className="text-fg-subtle text-[12px]">Loading {labelB ?? 'B'}</div>
             <Spinner size={10} />
           </div>
         )}
@@ -136,9 +136,9 @@ function FCFShareChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, t
             }
             : undefined}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-          <XAxis dataKey="date" tick={{ fontSize: 10, fill: chartTheme.axisTick }} tickFormatter={(v: string) => v.slice(0, 4)} />
+          <XAxis dataKey="date" tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: string) => v.slice(0, 4)} />
           <YAxis
-            tick={{ fontSize: 11, fill: chartTheme.axisTick }}
+            tick={{ fontSize: 12, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => `€${v.toFixed(1)}`}
           />
           {hasNegative && <ReferenceLine y={0} stroke={chartTheme.axisTick} strokeDasharray="3 3" />}

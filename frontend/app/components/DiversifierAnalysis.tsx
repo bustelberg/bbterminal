@@ -516,13 +516,13 @@ function OptimizeCard({ result: r, title, onSetIsin }: {
               <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
               <XAxis
                 dataKey="date"
-                tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
+                tick={{ fill: chartTheme.axisTick, fontSize: 12 }}
                 tickLine={false}
                 interval={Math.max(0, Math.floor(chartData.length / 10) - 1)}
                 tickFormatter={(d: string) => (typeof d === 'string' ? d.slice(0, 7) : '')}
               />
               <YAxis
-                tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
+                tick={{ fill: chartTheme.axisTick, fontSize: 12 }}
                 tickLine={false}
                 scale={logScale ? 'log' : 'linear'}
                 domain={logScale ? ['auto', 'auto'] : undefined}
@@ -539,7 +539,7 @@ function OptimizeCard({ result: r, title, onSetIsin }: {
                 }}
               />
               <Legend
-                wrapperStyle={{ fontSize: 12, color: chartTheme.axisLabel }}
+                wrapperStyle={{ fontSize: 13, color: chartTheme.axisLabel }}
                 formatter={(v) => seriesLabel(String(v))}
               />
               <Line type="monotone" dataKey={logScale ? 'beforeG' : 'before'} stroke={chartTheme.universe} strokeWidth={1.5} strokeDasharray="4 3" dot={false} name={logScale ? 'beforeG' : 'before'} />

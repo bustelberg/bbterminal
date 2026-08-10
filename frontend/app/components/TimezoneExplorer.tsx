@@ -47,7 +47,7 @@ function AmsCell({ t, dim = false }: { t: AmsTime; dim?: boolean }) {
     <span className={dim ? 'text-fg-faint' : 'text-fg-strong font-medium'}>
       <span className="font-mono">{t.time}</span>
       {t.day_offset !== 0 && (
-        <sup className="ml-0.5 text-[9px] text-warn-400" title={t.day_offset < 0 ? 'Previous Amsterdam day' : 'Next Amsterdam day'}>
+        <sup className="ml-0.5 text-[10px] text-warn-400" title={t.day_offset < 0 ? 'Previous Amsterdam day' : 'Next Amsterdam day'}>
           {t.day_offset > 0 ? `+${t.day_offset}d` : `${t.day_offset}d`}
         </sup>
       )}
@@ -210,7 +210,7 @@ export default function TimezoneExplorer() {
                     <td className="px-4 py-2.5">
                       <span className="font-mono font-medium text-fg-strong">{r.exchange_code}</span>
                       {r.exchange_name && <span className="ml-2 text-fg-muted text-xs">{r.exchange_name}</span>}
-                      {r.currency && <span className="ml-2 text-fg-faint text-[10px] font-mono">{r.currency}</span>}
+                      {r.currency && <span className="ml-2 text-fg-faint text-[11px] font-mono">{r.currency}</span>}
                     </td>
                     <td className="px-3 py-2.5 text-fg-muted">{r.country || '—'}</td>
                     <td className="px-3 py-2.5 text-right font-mono text-fg-muted">{r.company_count}</td>
@@ -218,32 +218,32 @@ export default function TimezoneExplorer() {
                       <>
                         <td className="px-3 py-2.5 text-fg-muted">
                           <span className="font-mono">{r.hours.local_open}–{r.hours.local_close}</span>
-                          <span className="ml-2 text-fg-faint text-[10px]" title={r.hours.timezone}>
+                          <span className="ml-2 text-fg-faint text-[11px]" title={r.hours.timezone}>
                             {r.hours.timezone.split('/').pop()?.replace('_', ' ')}
                           </span>
                           {r.hours.lunch_start && (
-                            <span className="ml-2 text-fg-faint text-[10px]" title="Lunch break (no trading)">
+                            <span className="ml-2 text-fg-faint text-[11px]" title="Lunch break (no trading)">
                               lunch {r.hours.lunch_start}–{r.hours.lunch_end}
                             </span>
                           )}
                           {r.hours.trading_week !== 'Mon–Fri' && (
-                            <span className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-medium bg-warn-500/15 text-warn-300 border border-warn-500/25" title="Trades on a non-Mon–Fri week">
+                            <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium bg-warn-500/15 text-warn-300 border border-warn-500/25" title="Trades on a non-Mon–Fri week">
                               {r.hours.trading_week}
                             </span>
                           )}
                           {!r.hours.observes_dst && (
-                            <span className="ml-2 text-fg-faint text-[10px]" title="This exchange's timezone does not observe daylight-saving, so its Amsterdam time shifts by an hour between our seasons.">
+                            <span className="ml-2 text-fg-faint text-[11px]" title="This exchange's timezone does not observe daylight-saving, so its Amsterdam time shifts by an hour between our seasons.">
                               no DST
                             </span>
                           )}
                         </td>
                         <td className="px-3 py-2.5">
                           <div><AmsCell t={r.hours[`amsterdam_${season}`].open} /></div>
-                          <div className="text-[10px]"><AmsCell t={r.hours[`amsterdam_${other}`].open} dim /> <span className="text-fg-faint">{other === 'winter' ? 'CET' : 'CEST'}</span></div>
+                          <div className="text-[11px]"><AmsCell t={r.hours[`amsterdam_${other}`].open} dim /> <span className="text-fg-faint">{other === 'winter' ? 'CET' : 'CEST'}</span></div>
                         </td>
                         <td className="px-3 py-2.5">
                           <div><AmsCell t={r.hours[`amsterdam_${season}`].close} /></div>
-                          <div className="text-[10px]"><AmsCell t={r.hours[`amsterdam_${other}`].close} dim /> <span className="text-fg-faint">{other === 'winter' ? 'CET' : 'CEST'}</span></div>
+                          <div className="text-[11px]"><AmsCell t={r.hours[`amsterdam_${other}`].close} dim /> <span className="text-fg-faint">{other === 'winter' ? 'CET' : 'CEST'}</span></div>
                         </td>
                       </>
                     ) : (

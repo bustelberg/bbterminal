@@ -55,7 +55,7 @@ export default function CollapsibleCard({
           {title}
         </h3>
         {rightSlot != null && (
-          <div className="text-[11px] text-fg-subtle ml-3 flex items-center gap-2 flex-wrap">{rightSlot}</div>
+          <div className="text-[12px] text-fg-subtle ml-3 flex items-center gap-2 flex-wrap">{rightSlot}</div>
         )}
       </div>
       {!collapsed && (

@@ -157,11 +157,11 @@ export default function AssetFinancialModal({
 
   const panel = (label: string, pts: Point[], color: string, unit: string) => (
     <div className="flex-1 min-w-[320px]">
-      <div className="text-[10px] uppercase tracking-wide text-fg-faint mb-1">{label}</div>
+      <div className="text-[11px] uppercase tracking-wide text-fg-faint mb-1">{label}</div>
       {pts.length > 0 ? (
         <LwLineChart data={pts} scale="linear" unit={unit} color={color} />
       ) : (
-        <div className="w-full aspect-[16/9] max-h-[72vh] min-h-[300px] flex items-center justify-center text-center px-6 text-[11px] text-fg-faint border border-neutral-800/40 rounded-lg">
+        <div className="w-full aspect-[16/9] max-h-[72vh] min-h-[300px] flex items-center justify-center text-center px-6 text-[12px] text-fg-faint border border-neutral-800/40 rounded-lg">
           {data?.fx_from
             ? <>Every period predates our FX coverage (from {data.fx_from}).</>
             : <>No FX rate available to convert {ccy || 'this currency'}.</>}
@@ -183,7 +183,7 @@ export default function AssetFinancialModal({
               <span className="text-sm font-mono text-fg-soft">{isin}</span>
               {row.name && <span className="text-sm text-fg-soft truncate">{row.name}</span>}
             </div>
-            <div className="text-[11px] text-fg-faint mt-0.5">
+            <div className="text-[12px] text-fg-faint mt-0.5">
               GuruFocus
               {data?.symbol && ` · ${data.symbol}`}
               {(ccy || nonCurrency) && ` · reported in ${scale}`}
@@ -200,7 +200,7 @@ export default function AssetFinancialModal({
               <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5">
                 {(['annual', 'quarterly'] as Cadence[]).map((c) => (
                   <button key={c} type="button" onClick={() => setCadence(c)}
-                    className={`text-[11px] px-2.5 py-1 rounded-md transition-colors ${
+                    className={`text-[12px] px-2.5 py-1 rounded-md transition-colors ${
                       cadence === c ? 'bg-accent-600 text-white' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/[0.04]'}`}>
                     {c}
                   </button>
@@ -217,7 +217,7 @@ export default function AssetFinancialModal({
         {error && (
           <div className="py-16 text-center max-w-2xl mx-auto space-y-2">
             <p className="text-sm text-fg-soft">No revenue series for this row.</p>
-            <p className="text-[11px] text-fg-faint">{error}</p>
+            <p className="text-[12px] text-fg-faint">{error}</p>
           </div>
         )}
 
@@ -225,7 +225,7 @@ export default function AssetFinancialModal({
             the history length — GuruFocus converts financials into the listing's own
             currency. Worth a louder warning. */}
         {!loading && !error && notHome && rows.length > 0 && (
-          <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2 text-[11px] text-warn-300 mb-3">
+          <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2 text-[12px] text-warn-300 mb-3">
             <span className="font-semibold">Not this row’s own listing.</span>{' '}
             These figures come from {data?.symbol}, and GuruFocus reports financials in the{' '}
             <strong>listing’s</strong>{' '}currency — converted per fiscal period, not the company’s
@@ -234,7 +234,7 @@ export default function AssetFinancialModal({
           </div>
         )}
 
-        {loading && <p className="text-[11px] text-fg-subtle py-16 text-center">Loading {phrase}…</p>}
+        {loading && <p className="text-[12px] text-fg-subtle py-16 text-center">Loading {phrase}…</p>}
 
         {/* A SCALAR: one figure, no series. Showing it as a single-point chart would dress
             a number up as a trend, so it is shown as a number. */}
@@ -242,8 +242,8 @@ export default function AssetFinancialModal({
           <div className="py-16 text-center max-w-2xl mx-auto space-y-3">
             <div className="text-5xl font-semibold text-fg-strong font-mono">{pct(scalar!)}</div>
             <p className="text-sm text-fg-soft">{title} · {data?.symbol}</p>
-            {data?.note && <p className="text-[11px] text-fg-faint">{data.note}</p>}
-            <p className="text-[11px] text-fg-faint">
+            {data?.note && <p className="text-[12px] text-fg-faint">{data.note}</p>}
+            <p className="text-[12px] text-fg-faint">
               A single consensus figure — GuruFocus publishes no series for it, so there is
               nothing to chart. It is a forecast of the growth <em>rate</em>, not of earnings,
               and being a rate it is not currency: there is no EUR version.
@@ -260,7 +260,7 @@ export default function AssetFinancialModal({
             <p className="text-sm text-fg-soft">
               {title} does not apply to this company.
             </p>
-            <p className="text-[11px] text-fg-faint">
+            <p className="text-[12px] text-fg-faint">
               GuruFocus renders its income statement with the{' '}
               <strong>{data?.template ?? 'industry'}</strong> template, which has no “{phrase}”
               line{data?.template === 'bank' ? ' — a bank has no cost of goods sold, so it reports Interest Income and Net Interest Income instead' : ''}.
@@ -298,7 +298,7 @@ export default function AssetFinancialModal({
                     perShare ? 'EUR/sh' : 'EUR M')}
                 </div>
               )}
-            <div className="text-[10px] text-fg-faint">
+            <div className="text-[11px] text-fg-faint">
               {native.length} {cadence} periods · {rows[0].date} → {rows.at(-1)?.date}
               {' · '}Values are {isCount
                 ? <>a <strong>share count</strong> in millions — <em>not</em>{' '}currency, so there is no EUR

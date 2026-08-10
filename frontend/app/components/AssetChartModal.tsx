@@ -28,7 +28,7 @@ export default function AssetChartModal({ row, onClose }: { row: AssetGridRow; o
               <span className="text-base font-mono font-semibold text-fg-strong">{row.analysis_symbol ?? row.yahoo_symbol ?? row.isin}</span>
               {row.name && <span className="text-sm text-fg-soft truncate">{row.name}</span>}
             </div>
-            <div className="text-[11px] text-fg-faint mt-0.5 font-mono">
+            <div className="text-[12px] text-fg-faint mt-0.5 font-mono">
               {span ? `${span} · ` : ''}{(row.bars ?? 0).toLocaleString()} bars
               {' · '}
               <button type="button" onClick={() => setScale((s) => (s === 'log' ? 'linear' : 'log'))}

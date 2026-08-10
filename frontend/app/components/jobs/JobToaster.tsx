@@ -140,14 +140,14 @@ function JobCard({ job }: { job: JobToast }) {
             refusal and a cache hit both legitimately spend nothing, and a 0 on every one of those
             cards trains the eye to skip the number on the cards where it matters. */}
         {job.apiCalls > 0 && (
-          <span className="text-[10px] font-mono px-1 rounded bg-overlay/10 text-fg-muted
+          <span className="text-[11px] font-mono px-1 rounded bg-overlay/10 text-fg-muted
                            shrink-0"
             title={`${job.apiCalls} GuruFocus API call${job.apiCalls === 1 ? '' : 's'} spent from `
               + 'this month’s quota. Cached feeds and refusals cost nothing and are not counted.'}>
             {job.apiCalls} call{job.apiCalls === 1 ? '' : 's'}
           </span>
         )}
-        <span className={`text-[10px] font-mono ${tone.label}`}>
+        <span className={`text-[11px] font-mono ${tone.label}`}>
           {/* The press is acknowledged the moment it happens, even though the worker stops at its
               next safe point a few seconds later. */}
           {job.cancelRequested && running ? 'cancelling…'
@@ -181,7 +181,7 @@ function JobCard({ job }: { job: JobToast }) {
           FY2010–FY2025"); `message` is the last progress line, which for a finished ingest is the
           per-feed breakdown ("statements 36,378 · estimates 164"). That breakdown is what you need
           the moment one feed comes back empty, and nothing else on screen would tell you which. */}
-      <p className={`text-[11px] truncate ${tone.text}`}
+      <p className={`text-[12px] truncate ${tone.text}`}
         title={[job.summary, job.message].filter(Boolean).join('\n') || undefined}>
         {job.summary || job.message}
       </p>
@@ -191,7 +191,7 @@ function JobCard({ job }: { job: JobToast }) {
           <button type="button" onClick={() => void cancelJob(job.id)}
             title="Stop this job at its next safe point. Whatever has already been written stays
 written — it is not rolled back — and re-running picks up where it left off."
-            className="cursor-pointer text-[10px] px-2 py-0.5 rounded border border-neutral-700
+            className="cursor-pointer text-[11px] px-2 py-0.5 rounded border border-neutral-700
                        text-fg-subtle hover:text-warn-300 hover:border-warn-500/50
                        transition-colors">
             Cancel
@@ -199,7 +199,7 @@ written — it is not rolled back — and re-running picks up where it left off.
         )}
         {!running && (
           <button type="button" onClick={() => dismissJob(job.id)}
-            className="cursor-pointer text-[10px] px-2 py-0.5 rounded border border-neutral-700
+            className="cursor-pointer text-[11px] px-2 py-0.5 rounded border border-neutral-700
                        text-fg-subtle hover:bg-overlay/5 transition-colors">
             Dismiss
           </button>

@@ -122,7 +122,7 @@ export function RatioInputsTable<R extends InputsRow>({
     <div className="overflow-auto rounded-lg border border-neutral-800/40">
       <table className="w-full text-xs">
         <thead className="bg-page">
-          <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40 [&>th]:cursor-pointer [&>th]:select-none [&>th:hover]:text-fg-soft">
+          <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40 [&>th]:cursor-pointer [&>th]:select-none [&>th:hover]:text-fg-soft">
             <th className="px-3 py-1.5 font-medium text-left sticky left-0 bg-page z-10 w-full" onClick={() => toggle('name')}>Company{caret('name')}</th>
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('exchange')}>GF exch{caret('exchange')}</th>
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('ticker')}>Ticker{caret('ticker')}</th>
@@ -143,12 +143,12 @@ export function RatioInputsTable<R extends InputsRow>({
                 <td className="px-3 py-1 text-fg-soft sticky left-0 bg-card z-10 max-w-[22ch]">
                   <span className="block truncate" title={r.name}>{r.name}</span>
                 </td>
-                <td className="px-3 py-1 font-mono text-[11px] text-fg-subtle whitespace-nowrap">{r.exchange ?? '—'}</td>
-                <td className="px-3 py-1 font-mono text-[11px] whitespace-nowrap">
+                <td className="px-3 py-1 font-mono text-[12px] text-fg-subtle whitespace-nowrap">{r.exchange ?? '—'}</td>
+                <td className="px-3 py-1 font-mono text-[12px] whitespace-nowrap">
                   {r.ticker ? <a href={guruFocusUrl(r.ticker, r.exchange)} target="_blank" rel="noopener noreferrer" className="text-accent-400 hover:underline">{r.ticker} ↗</a> : '—'}
                 </td>
                 <td className="px-3 py-1 text-right font-mono text-fg-muted whitespace-nowrap">{r.weight_pct.toFixed(1)}%</td>
-                <td className="px-3 py-1 font-mono text-[11px] text-fg-subtle whitespace-nowrap">{r.currency ?? '—'}</td>
+                <td className="px-3 py-1 font-mono text-[12px] text-fg-subtle whitespace-nowrap">{r.currency ?? '—'}</td>
               </>
             );
             if (r.status !== 'ok') {
@@ -160,13 +160,13 @@ export function RatioInputsTable<R extends InputsRow>({
                       title={`${r.ticker ?? ''}@${r.exchange ?? '?'} is on an exchange outside our GuruFocus subscription.`}>Unsubscribed</td>
                   ) : (
                     <td colSpan={years.length + 1} className="px-3 py-1">
-                      {ingest[r.isin]?.busy ? <span className="text-[11px] text-fg-faint">fetching…</span> : onFetch ? (
+                      {ingest[r.isin]?.busy ? <span className="text-[12px] text-fg-faint">fetching…</span> : onFetch ? (
                         <span className="inline-flex items-center gap-2">
                           <button type="button" onClick={() => fetchOne(r.isin, r.name)}
-                            className="text-[11px] px-2 py-0.5 rounded-lg border border-accent-600/40 text-accent-400 hover:bg-overlay/5">Fetch financials</button>
-                          {ingest[r.isin]?.msg && <span className="text-[10px] text-warn-300" title={ingest[r.isin]?.msg}>{ingest[r.isin]?.msg}</span>}
+                            className="text-[12px] px-2 py-0.5 rounded-lg border border-accent-600/40 text-accent-400 hover:bg-overlay/5">Fetch financials</button>
+                          {ingest[r.isin]?.msg && <span className="text-[11px] text-warn-300" title={ingest[r.isin]?.msg}>{ingest[r.isin]?.msg}</span>}
                         </span>
-                      ) : <span className="text-[11px] text-fg-faint">no figures ingested</span>}
+                      ) : <span className="text-[12px] text-fg-faint">no figures ingested</span>}
                     </td>
                   )}
                 </tr>
