@@ -220,11 +220,23 @@ class TestTwoClocks:
         # ⚠ BUS_Offensief_Dyn reconciles to EUR 0.05 with its two sides nominally a day apart. The
         # market plainly did not move it, so suppressing a proven agreement on a calendar
         # technicality would discard the evidence the check exists to produce.
+        #
+        # ⚠ THE FIRST ASSERTION USED TO READ `abs(...) > 1  # this book genuinely differs`, WHICH
+        # CONTRADICTED THE COMMENT TWO LINES ABOVE IT. `BOOK` is BUS_Offensief_Dyn — the residual
+        # is EUR 0.04, i.e. it IS the near-tie this test is named for, not a book that differs.
+        # Asserting the opposite made the case indistinguishable from the exact-tie one below (both
+        # `reconciles is True`), so the pair proved one thing twice and the misaligned-but-agreeing
+        # path — the whole point — was never actually checked. The materially-different book is the
+        # test above this one, at EUR −57,330.
         book = {**BOOK, "periode": "2026-08-05"}
         r = reconcile(book, OPEN, realised_ytd_eur=REALISED_YTD, holdings_as_of="2026-08-04")
-        assert abs(r.residual_vs_book_eur) > 1        # this book genuinely differs
+        assert abs(r.residual_vs_book_eur) < 1        # a proven agreement, to four cents
+        assert r.dates_aligned is False
+        assert r.reconciles is True                   # ...and it still counts as one
+        # The exact tie, for the boundary: nothing about a zero residual depends on the fuzz above.
         book_tie = {**book, "beleggingsresultaat": 387293.79}
         r2 = reconcile(book_tie, OPEN, realised_ytd_eur=REALISED_YTD, holdings_as_of="2026-08-04")
+        assert r2.residual_vs_book_eur == pytest.approx(0.0, abs=1e-9)
         assert r2.dates_aligned is False
         assert r2.reconciles is True                  # a tie is a tie
         assert r2.residual_reason is None

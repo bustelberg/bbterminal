@@ -147,10 +147,15 @@ def _kind_of(s: pd.Series) -> str:
 def parse_transacties(file_bytes: bytes) -> ParsedSheet:
     """Every row on the sheet, unfiltered and unsummed, with each column's own name and type.
 
-    ⚠ NOTHING IS DROPPED AND NOTHING IS RENAMED. A filter here would need to know what the rows
-    MEAN, and that is precisely what has not been measured yet. `airs_mutaties` splits parse from
-    `direct_result` for the same reason — a caller that wants to see what was ignored can only do
-    so if the parser did not do the ignoring.
+    ⚠ NO ROW WITH DATA IN IT IS DROPPED, AND NOTHING IS RENAMED. A filter here would need to know
+    what the rows MEAN, and that is precisely what has not been measured yet. `airs_mutaties`
+    splits parse from `direct_result` for the same reason — a caller that wants to see what was
+    ignored can only do so if the parser did not do the ignoring.
+
+    ⚠ THE ONE EXCEPTION IS THE WHOLLY EMPTY ROW (see below), and it is an exception because it
+    needs no knowledge of meaning: a row where every cell is blank cannot be a transaction under
+    any reading. That is a different claim from "this row looks unimportant", which is the
+    judgement this parser refuses to make.
     """
     df = pd.read_excel(BytesIO(file_bytes))
     # ⚠ HEADERS ARRIVE WITH TRAILING SPACES ON SOME AIRS EXPORTS, and " Fonds" is a different key

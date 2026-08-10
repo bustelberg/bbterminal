@@ -51,23 +51,54 @@ class TestNothingIsLost:
 
 class TestTheNanTrap:
     """A blank Excel cell is float NaN. `str()` renders it "nan", which is TRUTHY — the same trap
-    that once counted a cash line as a holding."""
+    that once counted a cash line as a holding.
+
+    ⚠ EVERY FIXTURE HERE CARRIES A SECOND, POPULATED COLUMN, and that is not padding. The parser
+    drops a WHOLLY empty row as a spacer (AIRS pads exports with blank lines between sections), so
+    a single-column fixture testing "the blank cell becomes None" builds a row that is entirely
+    blank — which is deleted before any assertion can look at it. These three read `rows[1]` and
+    got IndexError. Keeping one real value in the row is what makes the blank cell OBSERVABLE, and
+    it is the difference between testing the NaN guard and testing the spacer rule by accident.
+    """
 
     def test_a_blank_text_cell_is_none_not_the_string_nan(self):
-        sheet = parse_transacties(_xlsx(pd.DataFrame({"Fonds": ["ASML", None]})))
+        sheet = parse_transacties(_xlsx(pd.DataFrame({
+            "Tt": ["A", "V"], "Fonds": ["ASML", None]})))
         assert sheet.rows[1]["Fonds"] is None
         assert sheet.rows[1]["Fonds"] != "nan"
 
     def test_a_blank_number_cell_is_none_not_nan(self):
-        sheet = parse_transacties(_xlsx(pd.DataFrame({"Aantal": [10.0, None]})))
+        sheet = parse_transacties(_xlsx(pd.DataFrame({
+            "Fonds": ["ASML", "KPN"], "Aantal": [10.0, None]})))
         v = sheet.rows[1]["Aantal"]
         assert v is None
         # NaN != NaN — if a NaN leaked through, this is what would catch it.
         assert not (isinstance(v, float) and v != v)
 
     def test_the_literal_string_nan_is_also_treated_as_blank(self):
-        sheet = parse_transacties(_xlsx(pd.DataFrame({"Fonds": ["nan"]})))
+        sheet = parse_transacties(_xlsx(pd.DataFrame({"Tt": ["A"], "Fonds": ["nan"]})))
         assert sheet.rows[0]["Fonds"] is None
+
+
+class TestASpacerRowIsNotATransaction:
+    """The rule the three tests above kept tripping over, asserted directly instead of by
+    accident — AIRS pads some exports with blank lines between sections, and counting them would
+    report trades that never happened."""
+
+    def test_a_wholly_empty_row_is_dropped(self):
+        sheet = parse_transacties(_xlsx(pd.DataFrame({
+            "Tt": ["A", None, "V"], "Fonds": ["ASML", None, "KPN"]})))
+        assert len(sheet.rows) == 2
+        assert [r["Fonds"] for r in sheet.rows] == ["ASML", "KPN"]
+
+    def test_a_row_with_one_value_is_kept(self):
+        """⚠ THE TEST THAT KEEPS THE RULE NARROW. "Mostly empty" is not "empty": a transaction
+        carrying only a date is still a transaction, and dropping it would lose a row the reader
+        can see in the AIRS export."""
+        sheet = parse_transacties(_xlsx(pd.DataFrame({
+            "Tt": ["A", None], "Fonds": ["ASML", "KPN"]})))
+        assert len(sheet.rows) == 2
+        assert sheet.rows[1]["Tt"] is None
 
 
 class TestTyping:

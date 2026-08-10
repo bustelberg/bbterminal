@@ -107,15 +107,39 @@ class TestItFlowsThroughTheLedger:
     def _trades(self):
         return [Trade(fonds="KLA", kind="buy", datum="2026-02-03", eur=16567.08, quantity=14.0)]
 
+    def _income(self):
+        """⚠⚠ THE DIVIDEND IS NOT OPTIONAL FURNITURE — IT IS PART OF THE FIGURE THIS TEST ASSERTS.
+
+        `result_eur` is `held + realised + INCOME`, so a fixture passing `{}` here computes a
+        return on price alone while asserting a percentage measured on the real book, which
+        carried its dividend. That fixture reproduced NEITHER documented number: 56.38% against
+        the +56.67% above, and 39.60% against the +39.81%. Both short by the same 0.52% — a
+        numerator shortfall, since the two denominators differ (EUR 32,762 and EUR 46,641) and no
+        error in the day-weighting could move both by one ratio. Restoring the income puts both
+        back on the cent.
+
+        MEASURED from `airs_mutatie`, BUS_Offensief_Dyn / KLA-Tencor, through the same
+        `direct_result` production feeds to `build_ledger` as `income_by_name`:
+
+            2026-03-03   Dividend  +50.75   Dividendbelasting   -7.61
+            2026-06-02   Dividend  +61.21   Dividendbelasting   -9.18
+            gross 111.96   tax -16.78   NET 95.17
+
+        ⚠ NET, AND THE TAX IS ALREADY NEGATIVE — AIRS books withholding as a negative amount, so
+        the net is `gross + tax`. Subtracting it instead would take the withholding off twice and
+        understate every foreign holding by exactly that much.
+        """
+        return {"KLA": 95.17}
+
     def test_without_the_ratio_the_position_is_refused(self):
-        led = build_ledger(self._rows(), self._trades(), {}, 1197811.04, Y0, END,
+        led = build_ledger(self._rows(), self._trades(), self._income(), 1197811.04, Y0, END,
                            unknown_names={"KLA"})
         p = led.positions[0]
         assert p.capital_unknown is True
         assert money_weighted_return_pct(p) is None
 
     def test_with_the_ratio_it_is_computed(self):
-        led = build_ledger(self._rows(), self._trades(), {}, 1197811.04, Y0, END,
+        led = build_ledger(self._rows(), self._trades(), self._income(), 1197811.04, Y0, END,
                            unknown_names={"KLA"}, splits={"KLA": 10.0})
         p = led.positions[0]
         assert p.capital_unknown is False
@@ -123,12 +147,28 @@ class TestItFlowsThroughTheLedger:
         assert p.opening_eur == pytest.approx(34146.96 * 170 / 310, abs=1.0)
         assert money_weighted_return_pct(p) == pytest.approx(56.67, abs=0.1)
 
+    def test_the_income_is_inside_the_return_not_beside_it(self):
+        """⚠ THE GUARD THAT KEEPS THE FIXTURE HONEST. Without it, someone restoring `{}` here
+        turns `test_with_the_ratio_it_is_computed` red by 0.29pp — a gap small enough to look like
+        a rounding tolerance and be "fixed" by widening `abs=`, which would silently drop the
+        dividend out of a money-weighted RETURN. Naming the dependency makes that impossible."""
+        with_income = build_ledger(self._rows(), self._trades(), self._income(), 1197811.04,
+                                   Y0, END, unknown_names={"KLA"}, splits={"KLA": 10.0})
+        without = build_ledger(self._rows(), self._trades(), {}, 1197811.04,
+                               Y0, END, unknown_names={"KLA"}, splits={"KLA": 10.0})
+        p, q = with_income.positions[0], without.positions[0]
+        assert p.income_eur == pytest.approx(95.17)
+        assert p.result_eur - q.result_eur == pytest.approx(95.17, abs=0.01)
+        # Same capital either way — a dividend is a RESULT, never a further investment.
+        assert p.avg_capital_eur == pytest.approx(q.avg_capital_eur)
+        assert money_weighted_return_pct(q) == pytest.approx(56.38, abs=0.01)
+
     def test_the_euro_result_is_identical_either_way(self):
         """⚠ ONLY QUANTITIES WERE EVER AMBIGUOUS. A split moves no money, so nothing in the euro
         columns may shift when one is detected — if it did, the rescale would be touching the
         result rather than the basis."""
-        a = build_ledger(self._rows(), self._trades(), {}, 1197811.04, Y0, END,
+        a = build_ledger(self._rows(), self._trades(), self._income(), 1197811.04, Y0, END,
                          unknown_names={"KLA"})
-        b = build_ledger(self._rows(), self._trades(), {}, 1197811.04, Y0, END,
+        b = build_ledger(self._rows(), self._trades(), self._income(), 1197811.04, Y0, END,
                          unknown_names={"KLA"}, splits={"KLA": 10.0})
         assert a.positions[0].result_eur == pytest.approx(b.positions[0].result_eur)

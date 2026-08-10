@@ -65,7 +65,12 @@ class TestTheLadder:
 
         monkeypatch.setattr(links, "list_account_links", lambda: {
             "accounts": [{"portefeuille": "X_DYN", "model_portfolio_id": 7}]})
-        monkeypatch.setattr(hisin, "resolve_account_isins", lambda p: {"rows": pre})
+        # ⚠ `**_kw` BECAUSE `resolve_account_isins` GREW A `freshen` KEYWORD (default True) and this
+        # caller passes False. A positional-only stub raises TypeError the moment production starts
+        # naming the argument — which is what took these nine tests, and five more in
+        # `test_airs_portfolio_analysis`, red. `TestWrappedBookMarks` below pins the VALUE, so
+        # widening here does not lose the invariant.
+        monkeypatch.setattr(hisin, "resolve_account_isins", lambda p, **_kw: {"rows": pre})
         monkeypatch.setattr(pa, "_expand_book_rows", lambda rows: post)
         # The wrapped books are stubbed here; they have their own tests below and their own DB hops.
         monkeypatch.setattr(pa, "_wrapped_book_marks", lambda ids: dict(wrapped or {}))
@@ -255,12 +260,21 @@ class TestWrappedBookMarks:
         monkeypatch.setattr(links, "list_account_links", lambda: {"accounts": [
             {"portefeuille": "A_DYN", "model_portfolio_id": 1},
             {"portefeuille": "B_DYN", "model_portfolio_id": 2}]})
-        monkeypatch.setattr(hisin, "resolve_account_isins", lambda pf: {
-            "as_of": "2026-07-30",
-            "rows": [{"isin": "US1", "holding_name": "NVIDIA", "start_value_eur": 100.0,
-                      "current_value_eur": 110.0 if pf == "A_DYN" else 150.0}]})
+        seen: list[dict] = []
+
+        def _resolve(pf, **kw):
+            seen.append({"portefeuille": pf, **kw})
+            return {"as_of": "2026-07-30",
+                    "rows": [{"isin": "US1", "holding_name": "NVIDIA", "start_value_eur": 100.0,
+                              "current_value_eur": 110.0 if pf == "A_DYN" else 150.0}]}
+
+        monkeypatch.setattr(hisin, "resolve_account_isins", _resolve)
         monkeypatch.setattr(accounts, "account_holdings", lambda pf: {"rows": []})
         out = pa._wrapped_book_marks({1, 2})
+        # ⚠ `freshen=False` IS LOAD-BEARING HERE IN A WAY IT IS NOT ELSEWHERE. This path reads ONE
+        # book PER WRAPPED MODEL, so the default (True) would fire a live AIRS scrape per
+        # certificate — a chart with three wrapped models becomes three scrapes on every open.
+        assert all(c["freshen"] is False for c in seen), seen
         assert out[1]["US1"]["return_pct"] == pytest.approx(10.0)
         assert out[2]["US1"]["return_pct"] == pytest.approx(50.0)
         assert out[1]["US1"]["portefeuille"] == "A_DYN"
@@ -275,7 +289,7 @@ class TestWrappedBookMarks:
 
         monkeypatch.setattr(links, "list_account_links", lambda: {
             "accounts": [{"portefeuille": "A_DYN", "model_portfolio_id": 1}]})
-        monkeypatch.setattr(hisin, "resolve_account_isins", lambda pf: {
+        monkeypatch.setattr(hisin, "resolve_account_isins", lambda pf, **_kw: {
             "as_of": "2026-07-30",
             "rows": [{"isin": "CASH1", "holding_name": "Effectenrekening",
                       "start_value_eur": 0.0, "current_value_eur": 31072.23},
@@ -296,7 +310,7 @@ class TestWrappedBookMarks:
 
         monkeypatch.setattr(links, "list_account_links", lambda: {
             "accounts": [{"portefeuille": "A_DYN", "model_portfolio_id": 1}]})
-        monkeypatch.setattr(hisin, "resolve_account_isins", lambda pf: {
+        monkeypatch.setattr(hisin, "resolve_account_isins", lambda pf, **_kw: {
             "as_of": "2026-07-30",
             "rows": [{"isin": "US1", "holding_name": "Shell", "start_value_eur": 100.0,
                       "current_value_eur": 110.0}]})

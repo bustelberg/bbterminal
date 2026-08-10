@@ -528,7 +528,22 @@ class TestBookWeighting:
 
         monkeypatch.setattr(links, "list_account_links", lambda: {
             "accounts": ([{"portefeuille": "X_DYN", "model_portfolio_id": 7}] if link else [])})
-        monkeypatch.setattr(hisin, "resolve_account_isins", lambda p: {"rows": rows})
+
+        # ⚠ THE STUB TAKES `**kw` AND THE TEST BELOW ASSERTS WHAT ARRIVED IN IT, rather than the
+        # stub simply widening to swallow anything. `resolve_account_isins` gained a `freshen`
+        # keyword (default TRUE) and this caller passes FALSE — a real decision, not plumbing: a
+        # truthy `freshen` re-scrapes the account from AIRS live, so the default would put a
+        # minutes-long network scrape inside a chart render. A `lambda p, **_k:` alone would keep
+        # these five tests green through exactly that regression, since none of them can see the
+        # argument. Capturing it is what makes the stub's tolerance safe.
+        calls: list[dict] = []
+
+        def _resolve(portefeuille, **kw):
+            calls.append({"portefeuille": portefeuille, **kw})
+            return {"rows": rows}
+
+        monkeypatch.setattr(hisin, "resolve_account_isins", _resolve)
+        self.calls = calls
         # ⚠ THE LOOK-THROUGH HOP, WHICH READS THE DATABASE. `_book_port_items` expands certificates
         # that ARE other models before classifying, and that path holds its own Supabase handle —
         # so without this the test builds a real client and, on a developer machine, queries
@@ -550,6 +565,16 @@ class TestBookWeighting:
         # — the exact failure mode conftest's guard describes, arriving through a hop these tests
         # predate. Stubbing the named function is what the guard's docstring prescribes.
         monkeypatch.setattr(pa, "_book_snapshot_date", lambda pf: None)
+        # ⚠ AND THE THIRD ONE, 2026-08-10 — `_book_port_items` now also reads the Mutaties journal
+        # (`_airs_accounts._direct_result`) so a class subtotal carries dividends like the rows
+        # above it and the tile below it. That is the right change and it is the third database hop
+        # to arrive through a module these tests predate; each one broke them the same way. Stubbed
+        # to the loader's OWN empty answer — `({}, {"gross": None, …})`, what it returns for an
+        # account with no mutations — so a holding simply earns no income, which is the blank the
+        # UI shows anyway. These five assert WEIGHTING and CLASSIFICATION; income is covered by
+        # `test_book_return_source`.
+        monkeypatch.setattr("routers._airs_accounts._direct_result",
+                            lambda pf, names: ({}, {"gross": None, "tax": None, "funds": None}))
         # The classification grid — yfinance attributes, the SAME source the model side uses.
         monkeypatch.setattr(pa, "_grid", lambda isins: {
             "US1": {"sector": "Technology", "msci_region": "North America",
@@ -606,3 +631,18 @@ class TestBookWeighting:
     def test_no_book_returns_none_so_the_caller_falls_back(self, monkeypatch):
         self._wire(monkeypatch, rows=[], link=False)
         assert pa._book_port_items(7, {}) is None
+
+    def test_the_book_is_read_from_cache_never_rescraped_to_draw_a_chart(self, monkeypatch):
+        """⚠ `freshen=False` IS THE WHOLE POINT OF THE ARGUMENT — the default is True.
+
+        Drawing the composition bars must not reach out to AIRS. `resolve_account_isins(…,
+        freshen=True)` re-downloads the account's Vermogensoverzicht, which is a slow scrape of a
+        third-party site; hanging that off a chart render makes opening the Analyse modal take
+        minutes and hammers AIRS once per open. The stored snapshot is the right source here — a
+        composition is a picture of what is held, and refreshing it is the Refresh button's job.
+        """
+        self._wire(monkeypatch, rows=[
+            {"isin": "US1", "current_value_eur": 100, "asset_class": "Equity"},
+        ])
+        pa._book_port_items(7, {})
+        assert self.calls == [{"portefeuille": "X_DYN", "freshen": False}]

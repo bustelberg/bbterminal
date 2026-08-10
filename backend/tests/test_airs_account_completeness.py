@@ -115,11 +115,27 @@ class TestAbsenceIsNeverAnAssertion:
 class TestTheReportSetIsNotDuplicated:
     def test_the_gate_reads_the_refresh_s_own_list(self):
         """Two copies would drift the moment a fifth report is added — and the drift would show up
-        as accounts silently missing from the page, not as an error."""
+        as accounts silently missing from the page, not as an error.
+
+        ⚠ THIS TEST USED TO END `assert set(REPORTS) == {"att", "volk", "mut", "model"}` — i.e. IT
+        WAS THE SECOND COPY IT WARNS ABOUT, and it drifted exactly as predicted the day `trans` (a
+        fifth report) was added. A literal here does not pin the gate to the list; it pins the list
+        to a date. What is actually worth asserting is that there is ONE definition and the gate
+        reads it, which is below and cannot rot.
+        """
         import inspect
 
         assert "REPORTS" in inspect.getsource(A._complete_accounts)
-        assert set(REPORTS) == {"att", "volk", "mut", "model"}
+        assert len(set(REPORTS)) == len(REPORTS), f"a report is listed twice: {REPORTS}"
+
+    def test_an_account_is_complete_only_with_EVERY_report(self, monkeypatch):
+        """The gate's behaviour, derived from `REPORTS` rather than restated — so adding a sixth
+        report changes what this test demands without anyone editing it."""
+        stamp = "2026-07-29T11:00:00Z"
+        _wire(monkeypatch, [{"portefeuille": "BUS_A", "reports_ok": ALL, "reports_at": stamp},
+                            *[{"portefeuille": f"SHORT_{r}", "reports_at": stamp,
+                               "reports_ok": [x for x in ALL if x != r]} for r in REPORTS]])
+        assert A._complete_accounts() == {"bus_a"}
 
 
 class TestRetrievedIsNotTheSameAsNonEmpty:
@@ -222,15 +238,24 @@ class TestTheMarkerNamesTheGap:
         assert A._missing_reports() == {}
 
     def test_it_names_exactly_what_did_not_arrive(self, monkeypatch):
-        # The 13 accounts from the measurement: Rendement fine, Vermogensoverzicht absent.
-        _wire(monkeypatch, [{"portefeuille": "BUS_B", "reports_ok": ["att", "mut", "model"],
-                             "reports_at": self.NOW}])
+        """The 13 accounts from the measurement: Rendement fine, Vermogensoverzicht absent.
+
+        ⚠ THE MISSING REPORT IS REMOVED FROM `REPORTS`, NOT SPELLED OUT BESIDE IT. Listing the
+        three that DID arrive is a second copy of the report set: when `trans` was added this read
+        `{"bus_b": ["volk"]}` against an answer of `["volk", "trans"]` — a red test for a correct
+        change, because the fixture claimed an account had every report but one and no longer did.
+        """
+        _wire(monkeypatch, [{"portefeuille": "BUS_B", "reports_at": self.NOW,
+                             "reports_ok": [r for r in ALL if r != "volk"]}])
         assert A._missing_reports() == {"bus_b": ["volk"]}
 
     def test_several_missing_come_back_in_report_order(self, monkeypatch):
-        """Display order, so two rows short of the same pair read identically."""
+        """Display order, so two rows short of the same pair read identically.
+
+        ⚠ `REPORTS`'s ORDER IS THE ASSERTION — `sorted()` here would pass while the page rendered
+        them alphabetically, which is the one thing this test exists to prevent."""
         _wire(monkeypatch, [{"portefeuille": "BUS_C", "reports_ok": ["att"], "reports_at": self.NOW}])
-        assert A._missing_reports()["bus_c"] == ["volk", "mut", "model"]
+        assert A._missing_reports()["bus_c"] == [r for r in REPORTS if r != "att"]
 
     def test_a_never_measured_account_is_not_reported_as_missing(self, monkeypatch):
         """⚠ Absence of evidence is not evidence of a gap — the same rule the filter had. A row
