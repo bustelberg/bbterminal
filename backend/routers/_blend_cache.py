@@ -172,6 +172,62 @@ def cached_metric_read(company_ids: list[int], metric: str, cadence: str,
         event.set()                                 # type: ignore[union-attr]
 
 
+def cached_grid(label: str, cadence: str, compute: Callable[[], Any]) -> Any:
+    """The fundamentals GRID for one (label, cadence), computed once and shared.
+
+    ⚠ IT LIVES IN `_cache`, NOT IN A CACHE OF ITS OWN, SO `invalidate()` DROPS IT. That is the
+    whole reason this is here rather than a `functools.lru_cache` next to the endpoint: pressing
+    Fetch or Fill ingests fundamentals and the grid legitimately changes, and both ingest jobs
+    already call `invalidate()`. A second cache would be a second thing to remember to clear, and
+    the failure mode is a table that silently keeps showing dashes for a row that just filled in —
+    which reads as the button not working.
+
+    ⚠ SINGLE-FLIGHT, FOR THE SAME REASON THE METRIC READ HAS IT. The pane fetches on mount and the
+    period control fetches the other cadence; a reader who opens an index, presses Q3 and goes back
+    can have two of these in flight against a cold cache. They are the most expensive read on the
+    page, and computing the same one twice is the case worth spending a lock on.
+
+    ⚠ THE KEY HAS NO USER DIMENSION — see `cache_key`. An index's constituents and their filed
+    figures are the same for every viewer; nothing in this payload branches on role. The `isAdmin`
+    difference is entirely in the browser (which columns render), not in what the server returns.
+
+    ⚠ THE VALUE IS SHARED BY REFERENCE AND MUST BE TREATED AS IMMUTABLE, exactly as the blend
+    responses are. The endpoint stores the FINISHED gzipped bytes, which are immutable anyway and
+    are smaller than the payload object they came from — see `_encoded` in `benchmarks.py`.
+
+    ⚠ IT SHARES `_MAX_ENTRIES` WITH THE BLENDS, and its entries are the biggest here (ACWI is
+    ~5 MB compressed). The real grid key space is small — 3 labels x 2 cadences — so the two
+    together stay inside the cap; what an eviction costs is a rebuild, never a wrong answer.
+    """
+    key = ("fundamental-grid", label, cadence)
+    hit = _cache.get(key)
+    if hit is not None:
+        return hit
+
+    with _metrics_lock:
+        event = _metrics_inflight.get(key)
+        owner = event is None
+        if owner:
+            event = threading.Event()
+            _metrics_inflight[key] = event
+
+    if not owner:
+        event.wait(timeout=_INFLIGHT_TIMEOUT)          # type: ignore[union-attr]
+        hit = _cache.get(key)
+        # ⚠ A WAITER WHOSE OWNER FAILED RECOMPUTES rather than inheriting the failure — same
+        # judgement as `cached_metric_read`. A transient fault should cost the caller that hit it.
+        return hit if hit is not None else compute()
+
+    try:
+        result = compute()
+        _cache.put(key, result)
+        return result
+    finally:
+        with _metrics_lock:
+            _metrics_inflight.pop(key, None)
+        event.set()                                    # type: ignore[union-attr]
+
+
 def cached_blend(endpoint: str) -> Callable:
     """Decorate a `(body: FundamentalCoverageRequest)` endpoint so benchmark requests are cached.
 

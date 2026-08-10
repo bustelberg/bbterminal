@@ -19,6 +19,14 @@ metered monthly quota. A cheap wrong answer here costs money.
 
 So these tests do not check coverage logic. They check that the reader keeps asking until the
 table is exhausted, against a fake that truncates the way the real one does.
+
+⚠ THE PAGER IS NOW THE FALLBACK — `_has` tries ONE `SELECT DISTINCT` COPY first, because the paged
+path's cost scales with the SERIES LENGTH to answer a boolean (ACWI: at least 95 round trips per
+sentinel, before the pages an indicator series adds). The fixture below disables that fast path
+explicitly, so these tests keep testing the thing they were written for. `TestTheFastPathIsA
+FastPathOnly` covers the seam between them, and it is the part that can hurt: a `set()` returned on
+failure would be indistinguishable from "none of them have it", which is the direction that spends
+GuruFocus quota re-fetching data we hold.
 """
 from __future__ import annotations
 
@@ -44,12 +52,19 @@ def _rows(companies: int, per_company: int, code: str) -> list[dict]:
 
 @pytest.fixture
 def _patched(monkeypatch):
-    """`_has` reads the module-level `supabase`; hand it a truncating fake."""
+    """`_has` reads the module-level `supabase`; hand it a truncating fake.
+
+    ⚠ AND THE COPY FAST PATH IS TURNED OFF, DELIBERATELY. `_has` asks Postgres directly first and
+    only pages when that returns None — so on a machine with `SUPABASE_DB_URL` set these tests
+    would silently exercise a real database instead of the pager they exist to pin. Forcing None
+    here is what makes them a test of the fallback rather than a test of the environment.
+    """
     def _install(rows: list[dict]):
         from routers import _fundamental_backfill as fb
 
         fake = FakeSupabase({"metric_data": rows}, max_rows=_CAP)
         monkeypatch.setattr(fb, "supabase", fake)
+        monkeypatch.setattr(fb, "company_ids_with_metric_via_copy", lambda *_a, **_k: None)
         return fb
     return _install
 
@@ -92,3 +107,42 @@ class TestTheProbePages:
         # correct while the server's cap is >= the page size, which is the assumption that failed.
         fb = _patched([])
         assert fb._has([100, 101], "anything") == set()
+
+
+class TestTheFastPathIsAFastPathOnly:
+    """The COPY seam: it may only make `_has` quicker, never change what it answers."""
+
+    def test_a_copy_answer_is_taken_without_touching_postgrest(self, monkeypatch):
+        # The whole point: when the direct connection is available, the pager must not run at all.
+        # A fake with NO rows stands in for it — if the pager ran, the answer would be empty.
+        from routers import _fundamental_backfill as fb
+
+        monkeypatch.setattr(fb, "supabase", FakeSupabase({"metric_data": []}, max_rows=_CAP))
+        monkeypatch.setattr(fb, "company_ids_with_metric_via_copy", lambda *_a, **_k: {7, 8})
+        assert fb._has([7, 8, 9], "annuals__Cashflow Statement__Free Cash Flow") == {7, 8}
+
+    def test_an_empty_copy_answer_is_an_answer_not_a_fallback(self, monkeypatch):
+        # ⚠ `set()` MEANS "NONE OF THEM HAVE IT" AND `None` MEANS "ASK THE OTHER WAY". Collapsing
+        # the two is the bug this asserts against: if an empty COPY result fell through to the
+        # pager, every genuinely-empty probe would pay the full paged read to learn the same thing.
+        from routers import _fundamental_backfill as fb
+
+        calls: list[str] = []
+        fake = FakeSupabase({"metric_data": _rows(2, 4, "x")}, max_rows=_CAP)
+        monkeypatch.setattr(fb, "supabase", fake)
+        monkeypatch.setattr(fb, "company_ids_with_metric_via_copy",
+                            lambda *_a, **_k: calls.append("copy") or set())
+        assert fb._has([100, 101], "x") == set()
+        assert calls == ["copy"], "the COPY path did not run"
+
+    def test_a_refusal_falls_back_and_still_finds_them(self, monkeypatch):
+        # ⚠ A FALL-BACK IS A SLOW ANSWER, NEVER A WRONG ONE. `needs()` reads this to decide what to
+        # spend GuruFocus quota on, so an unconfigured or broken direct connection must degrade to
+        # the paged read — not to "nobody has anything", which re-fetches the whole index.
+        from routers import _fundamental_backfill as fb
+
+        code = "annuals__Cashflow Statement__Free Cash Flow"
+        monkeypatch.setattr(fb, "supabase",
+                            FakeSupabase({"metric_data": _rows(3, 30, code)}, max_rows=_CAP))
+        monkeypatch.setattr(fb, "company_ids_with_metric_via_copy", lambda *_a, **_k: None)
+        assert fb._has([100, 101, 102], code) == {100, 101, 102}

@@ -3290,8 +3290,36 @@ export interface paths {
          *     means **trailing twelve months**, not the raw quarter. That keeps both slider axes on one
          *     12-month basis, so moving the quarter changes the as-of date and never the unit.
          *
-         *     Returned whole, not per period: it is one bulk read per line over data one GuruFocus call
+         *     Returned whole, not per period: it is ONE bulk read for every line over data one GuruFocus call
          *     already brought, and the reader's whole interaction is dragging a slider.
+         *
+         *     ⚠ CACHED IN-PROCESS, AND DROPPED BY THE INGEST JOBS. Both Fetch buttons call
+         *     `_blend_cache.invalidate()` when they have written something, so a filled row shows up on the
+         *     reload the pane does anyway. See `cached_grid` for why this must not be a `Cache-Control`
+         *     header: a copy in the browser is one no invalidation of ours can reach.
+         *
+         *     ⚠⚠ GZIPPED HERE RATHER THAN APP-WIDE, AND THAT IS DELIBERATE. ACWI's payload is **16.5 MB** of
+         *     JSON — 1,949 constituents x 12 periods x 19 lines, each carrying its EUR value, its native
+         *     figure and the rate between them — and it compresses to **5.3 MB** in 0.21s (level 1; level 6
+         *     reaches 4.5 MB for three times the CPU, which is the wrong trade for a number this size). By
+         *     the time the server work below is measured in hundreds of milliseconds, the transfer IS the
+         *     load time, and no amount of query tuning touches it.
+         *
+         *     A `GZipMiddleware` on the app would have covered this endpoint and every other one — and this
+         *     app is SSE-heavy (ingest, scanner, backtest, every live dashboard). Compression sits between a
+         *     stream and its client and buffers; the whole point of those endpoints is that a frame arrives
+         *     when it is produced. One endpoint that ships megabytes is not a reason to put a buffer in front
+         *     of the ones that ship bytes.
+         *
+         *     ⚠ THE `Accept-Encoding` HEADER IS HONOURED, NOT ASSUMED. Every browser sends it and `requests`
+         *     sends it by default, but a plain `curl` does NOT — and `/documentation` publishes curl
+         *     quick-starts against this API. Shipping gzip to a client that did not ask for it hands it
+         *     binary it will render as mojibake.
+         *
+         *     ⚠ THE MODEL STILL VALIDATES. Returning a `Response` skips FastAPI's `response_model` check, so
+         *     it is run explicitly below — the schema is what `npm run gen:types` generates the frontend's
+         *     types from, and an endpoint that silently stops conforming to its own contract is worse than a
+         *     slow one. It costs 0.06s on the largest payload here, and only on a cache miss.
          */
         get: operations["benchmark_fundamental_grid_api_benchmarks_index__label__fundamentals_grid_get"];
         put?: never;

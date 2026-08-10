@@ -68,6 +68,7 @@ WHY THIS EXISTS, AND WHY IT IS NOT THE COVERAGE TABLE
 from __future__ import annotations
 
 import logging
+from time import perf_counter as _perf
 
 from deps import supabase
 from routers._benchmark_fundamentals import COLUMNS, normalise_cadence
@@ -141,32 +142,46 @@ def _period_label(date: str) -> str:
     return f"{date[:4]}-Q{(int(date[5:7]) - 1) // 3 + 1}"
 
 
-def _values_with_dates(cids: list[int], metric: str, cadence: str) -> dict[int, dict[str, tuple[str, float]]]:
-    """{company_id: {period label: (period-END date, native value)}} for ONE line.
+def _values_with_dates(cids: list[int], metrics: list[str], cadence: str,
+                       ) -> dict[str, dict[int, dict[str, tuple[str, float]]]]:
+    """{metric: {company_id: {period label: (period-END date, native value)}}} for EVERY line.
 
     ⚠ THE DATE COMES BACK BECAUSE THE VALUE CANNOT BE CONVERTED WITHOUT IT — see the module header.
     Both branches reuse the bucketing that `_metric_by_year` reads through, so this cannot come to
     disagree with the charts about which observation a period is: the annual path IS
     `_latest_per_year`'s rule (it is the same function with the date retained), and the quarterly
     path is `_ttm_by_period` asked for dates instead of labels.
+
+    ⚠⚠ ALL NINETEEN LINES IN **ONE** READ, WHICH IS WHY THIS TAKES A LIST. It used to be called
+    once per column, i.e. nineteen bulk reads — and on the COPY transport each one opens its own
+    Postgres connection, so ACWI paid nineteen handshakes and nineteen scans of the same index over
+    the same ~1,900 constituents to fetch rows that sit side by side in the same table.
+    `rows_by_metric` unions the codes; the bucketing below is unchanged and still per metric,
+    because the roll-up RULE is per metric (a balance is `last`, a flow is `sum`).
+
+    ⚠ A METRIC `rows_by_metric` REFUSED IS ABSENT, NOT EMPTY. On the quarterly basis a line with no
+    declared TTM roll-up is omitted rather than guessed at (`_codes_and_rule` has logged which);
+    the caller renders that as a column of dashes, exactly as it did before.
     """
     from routers.earnings import (  # noqa: PLC0415
-        _codes_and_rule, _latest_per_year_dated, _rows_by_company, _ttm_by_period,
+        _codes_and_rule, _latest_per_year_dated, _ttm_by_period, rows_by_metric,
     )
 
-    codes, rule = _codes_and_rule(metric, cadence)
-    if codes is None:
-        # No declared TTM roll-up — the line is omitted from the quarterly basis rather than
-        # guessed at. `_codes_and_rule` has already logged which one.
-        return {}
-    raw = _rows_by_company(cids, codes)
-    out: dict[int, dict[str, tuple[str, float]]] = {}
-    for cid, rows in raw.items():
-        if rule is None:
-            out[cid] = dict(_latest_per_year_dated(rows))
-        else:
-            out[cid] = {_period_label(d): (d, v)
-                        for d, v in _ttm_by_period(rows, rule, key="date").items()}
+    raw_by_metric = rows_by_metric(cids, metrics, cadence)
+    out: dict[str, dict[int, dict[str, tuple[str, float]]]] = {}
+    for metric, raw in raw_by_metric.items():
+        # ⚠ ASKED OF `_codes_and_rule`, NOT OF `_TTM_RULE` DIRECTLY — the same call `rows_by_metric`
+        # made to choose the codes, so the roll-up applied here cannot drift from the codes read.
+        # It is a pair of dict lookups; re-deriving the rule is free, restating it is not.
+        _codes, rule = _codes_and_rule(metric, cadence)
+        per_company: dict[int, dict[str, tuple[str, float]]] = {}
+        for cid, rows in raw.items():
+            if rule is None:
+                per_company[cid] = dict(_latest_per_year_dated(rows))
+            else:
+                per_company[cid] = {_period_label(d): (d, v)
+                                    for d, v in _ttm_by_period(rows, rule, key="date").items()}
+        out[metric] = per_company
     return out
 
 
@@ -256,6 +271,17 @@ def fundamental_grid(label: str, cadence: str = "annual") -> dict:
         company_rows, eligible, needs,
     )
 
+    # ⚠ TIMED PER STEP, AND AT `warning` SO IT IS ACTUALLY VISIBLE. uvicorn leaves the ROOT logger
+    # at WARNING in production, so an `info` line here would be invisible in the one environment
+    # whose latency is the reason any of this matters (a Railway->Supabase round trip is 50-200ms
+    # against ~2ms locally, so a step's share of the total is not the same in the two places).
+    # One line per load of a page a reader opens deliberately is not noise.
+    t0 = _perf()
+    marks: list[str] = []
+
+    def _step(name: str) -> None:
+        marks.append(f"{name} {_perf() - t0:.2f}s")
+
     cad = normalise_cadence(cadence)
     # ⚠ READ FROM `_benchmark_index`, NEVER RESTATED. A second list of which indices cap is a
     # second thing to forget to update — and the failure is silent, because an uncapped weight is a
@@ -276,7 +302,9 @@ def fundamental_grid(label: str, cadence: str = "annual") -> dict:
 
     by_cid = {m["company_id"]: m for m in members if m.get("company_id")}
     cids = sorted(by_cid)
+    _step("members")
     ident = _tickers(cids)
+    _step("tickers")
 
     # ── Why a row can never be filled — computed ONCE and used for both the per-row badge and the
     #    `fillable` count below, so the badge and the button cannot contradict each other.
@@ -308,6 +336,7 @@ def fundamental_grid(label: str, cadence: str = "annual") -> dict:
         # A missing badge is a smaller wrong than a failed grid: the row falls back to plain
         # dashes, which is what it showed before this existed.
         _log.warning("[grid] could not resolve per-row availability: %s", e)
+    _step("availability")
     # ⚠⚠ THE DENOMINATOR IS NOT THE INDEX, AND THE TOTAL ROW WOULD OTHERWISE SAY IT WAS.
     #
     # `_members` drops any constituent with no stored `market_cap_eur` — see its own module note:
@@ -328,10 +357,9 @@ def fundamental_grid(label: str, cadence: str = "annual") -> dict:
                                          .execute().data or [{}])[0].get("universe_id"))
                      .execute().data or [])})
 
-    # ── One bulk read per line, and `_values_with_dates` is where the cadence is honoured.
-    per_metric: dict[str, dict[int, dict[str, tuple[str, float]]]] = {}
-    for col in COLUMNS:
-        per_metric[col["key"]] = _values_with_dates(cids, col["key"], cad)
+    # ── ONE bulk read for every line, and `_values_with_dates` is where the cadence is honoured.
+    per_metric = _values_with_dates(cids, [c["key"] for c in COLUMNS], cad)
+    _step("metric rows")
 
     # ── The FX window has to reach the OLDEST period end we are about to convert. A rate lookup
     #    falls back to the most recent EARLIER rate, so a window that starts after a period leaves
@@ -341,6 +369,36 @@ def fundamental_grid(label: str, cadence: str = "annual") -> dict:
     currencies = {ident.get(c, {}).get("currency") for c in cids}
     fx = (_fx_to_eur({c for c in currencies if c}, min(dates), max(dates))
           if dates else {})
+    _step("fx")
+
+    # ⚠⚠ THE RATE LOOKUP IS MEMOISED, AND THE REASON IS ITS SHAPE, NOT ITS COST PER CALL.
+    #
+    # `_rate` falls back to "the most recent rate on or before this date" with a list comprehension
+    # over every date it holds plus a `max()` — O(n) in the FX history, which here is ~2,800 daily
+    # rows per currency. That is fine for the handful of lookups its other callers make and
+    # quadratic-ish for this one: a fiscal PERIOD END is very often a market holiday (31 December
+    # above all), so most cells take the slow branch, and there is one cell per
+    # company x line x period — on ACWI, on the order of 10^5 scans of 10^3 dates.
+    #
+    # The saving is possible because the ARGUMENTS repeat almost perfectly. Every constituent in a
+    # currency shares the same handful of period-end dates, so the distinct `(currency, date)`
+    # pairs number in the low thousands against ~10^5 calls.
+    #
+    # ⚠ IT DELEGATES TO `_rate`, NEVER REIMPLEMENTS IT. That function owns the minor-unit rule
+    # (`GBp` is pence: resolve to GBP, scale the RATE by 100) and the on-or-before fallback. A
+    # second copy here is how the ÷100 comes to be applied in one place and not the other, which is
+    # a hundredfold error that still looks like a number.
+    #
+    # ⚠ `None` IS CACHED TOO, and must be — "no rate on or before this period end" is the answer
+    # that drops a cell, and re-deriving it is the same O(n) scan. Hence the sentinel rather than
+    # `if key not in memo`-by-truthiness.
+    _rate_memo: dict[tuple[str | None, str], float | None] = {}
+
+    def _rate_for(ccy: str | None, when: str) -> float | None:
+        key = (ccy, when)
+        if key not in _rate_memo:
+            _rate_memo[key] = _rate(fx, ccy, when)
+        return _rate_memo[key]
 
     # ── Assemble per company. `v` is EUR (what the table shows and what any total is built from),
     #    `n` the figure as reported, `fx` the rate applied — so a reader can check the conversion
@@ -368,7 +426,7 @@ def fundamental_grid(label: str, cadence: str = "annual") -> dict:
                     v.setdefault(period, {})[key] = native
                     n.setdefault(period, {})[key] = native
                     continue
-                rate = _rate(fx, ccy, date)
+                rate = _rate_for(ccy, date)
                 if rate is None:
                     # No rate on or before this period end. Recorded as a MISS, never as the native
                     # figure passed through — an unconverted JPY revenue sitting in a EUR column is
@@ -408,15 +466,29 @@ def fundamental_grid(label: str, cadence: str = "annual") -> dict:
     #
     # So it calls the same `needs`/`eligible` the job calls. Not duplicated logic — the same
     # functions, which is what makes the number guaranteed to match rather than merely close.
+    #
+    # ⚠⚠ `feeds=("fin",)` — ONE SENTINEL, AND THE OTHER TWO WERE PURE WASTE HERE. Each sentinel is
+    # its own read of `metric_data`, and the only flag this line reads is `need_fin`; the estimates
+    # and indicator probes were computed and discarded on every grid load. They are also the
+    # expensive two — `indicator_q_forward_pe_ratio` is ~526 rows per company against Free Cash
+    # Flow's ~28 — so on ACWI this was the largest single cost of opening the pane. Narrowing it
+    # cannot change the answer: `needs` drops a company only when EVERY probed feed is present, and
+    # a company with `need_fin` false is dropped under either scope, so the sum is identical.
+    #
+    # ⚠ THE BULK FILL NARROWS THE SAME WAY under its default `feeds="statements"`, which is what
+    # keeps this count and that button's work list the same set. See the ⚠⚠ on `fill_index_
+    # fundamentals`: selection and action have to narrow together or the run iterates rows it has
+    # nothing to do for.
     try:
         # `fill_comps` is the read done above for the per-row badges — reused, not repeated, so
         # the count and the badges are computed from one snapshot of the company table.
-        fillable = sum(1 for c in needs(fill_comps)
+        fillable = sum(1 for c in needs(fill_comps, feeds=("fin",))
                        if c.get("need_fin") and eligible(c) is None)
     except Exception as e:  # noqa: BLE001
         # A count is not worth failing the grid over; the button falls back to no number.
         _log.warning("[grid] could not count the fillable constituents: %s", e)
         fillable = 0
+    _step("fillable")
 
     ordered = sorted(periods)
     by_period = {p: _period_summary(rows, p, len(by_cid), capped=cap_pct is not None)
@@ -425,6 +497,13 @@ def fundamental_grid(label: str, cadence: str = "annual") -> dict:
     # stable across slider positions so a row does not move under the cursor while scrubbing.
     last = ordered[-1] if ordered else None
     rows.sort(key=lambda r: -((r["v"].get(last) or {}).get("market_cap") or 0.0) if last else 0.0)
+    _step("assemble")
+    # ⚠ CUMULATIVE MARKS, NOT PER-STEP DURATIONS — so the line reads as a timeline and the total is
+    # simply the last number. Which STEP dominates is the whole question when this feels slow, and
+    # the answer differs by environment: locally the round trips are ~2ms and the assembly loop
+    # shows; against Supabase the reads do.
+    _log.warning("[grid] %s %s: %d constituents, %d periods in %.2fs — %s",
+                 label, cad, len(by_cid), len(ordered), _perf() - t0, " | ".join(marks))
     return {
         "label": label,
         "cadence": cad,

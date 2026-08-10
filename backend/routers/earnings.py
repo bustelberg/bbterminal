@@ -1365,6 +1365,52 @@ def _codes_and_rule(metric: str, cadence: str) -> tuple[list[str] | None, str | 
     return [c.replace("annuals__", "quarterly__") for c in codes], rule
 
 
+def rows_by_metric(company_ids: list[int], metrics: list[str],
+                   cadence: str = "annual") -> dict[str, dict[int, list[dict]]]:
+    """`{metric: {company_id: rows}}` for MANY metrics in **ONE** read.
+
+    ⚠⚠ THE UNIT OF COST IS THE READ, NOT THE METRIC. `_rows_by_company` is already one bulk read
+    per line, which is what made the benchmark tabs viable at all — but a caller wanting all
+    nineteen fundamentals lines still paid nineteen of them, and on the COPY transport each one
+    opens its OWN Postgres connection (`common.pg._run_copy` connects, sets `statement_timeout`,
+    streams, disconnects). Nineteen TCP+TLS+auth handshakes to Supabase is most of a second before
+    a single row moves, and the nineteen scans hit the same `(company_id, metric_code)` index over
+    the same ~1,900 constituents. One `metric_code = ANY(...)` over the union does all of it once.
+
+    ⚠ THE CODES ARE DISJOINT ACROSS METRICS, which is what makes the split back out unambiguous —
+    `_METRIC_CODES` maps each line to its own GuruFocus spellings (there are two or three per line,
+    for the capitalized and lowercase section cohorts) and no code appears under two keys. A code
+    that ever did would land in both buckets here; it would also mean two lines are the same line.
+
+    ⚠ ORDER IS PRESERVED, AND IT MATTERS. `_rows_by_company` sorts on
+    `(company_id, target_date, metric_code)`; filtering a list keeps relative order, so each
+    metric's per-company rows arrive exactly as its own query would have returned them. That is
+    load-bearing rather than tidy: `_latest_per_year_dated` keeps the LAST row it sees for a
+    period, so a different order can pick a different value.
+
+    ⚠ A METRIC WITH NO TTM RULE IS ABSENT FROM THE RESULT on the quarterly basis, never present as
+    an empty dict — `_codes_and_rule` refuses it rather than guessing a roll-up, and the caller
+    must be able to tell "refused" from "we hold nothing".
+    """
+    codes_by_metric: dict[str, list[str]] = {}
+    for metric in metrics:
+        codes, _rule = _codes_and_rule(metric, cadence)
+        if codes:
+            codes_by_metric[metric] = codes
+    if not codes_by_metric:
+        return {}
+    metric_by_code = {code: metric
+                      for metric, codes in codes_by_metric.items() for code in codes}
+    raw = _rows_by_company(company_ids, sorted(metric_by_code))
+    out: dict[str, dict[int, list[dict]]] = {m: defaultdict(list) for m in codes_by_metric}
+    for cid, rows in raw.items():
+        for r in rows:
+            metric = metric_by_code.get(r["metric_code"])
+            if metric is not None:
+                out[metric][cid].append(r)
+    return out
+
+
 def _rows_by_company(company_ids: list[int], codes: list[str]) -> dict[int, list[dict]]:
     """{company_id: rows} for the named codes across MANY companies — the read the benchmark work
     is bounded by. See `_metrics_by_company` for the measurement and for why this is chunked AND

@@ -17,12 +17,13 @@ carry each sector at a time.
 from __future__ import annotations
 
 import asyncio
+import gzip
 import itertools
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from deps import supabase
@@ -629,7 +630,7 @@ class FundamentalGrid(BaseModel):
 
 
 @router.get("/api/benchmarks/index/{label}/fundamentals/grid", response_model=FundamentalGrid)
-async def benchmark_fundamental_grid(label: str, cadence: str = "annual"):
+async def benchmark_fundamental_grid(request: Request, label: str, cadence: str = "annual"):
     """Every constituent's fundamentals for every period, with the cap that weights each one.
 
     The VALUES behind `/fundamentals`, which reports only which periods we hold. Rows are
@@ -640,12 +641,67 @@ async def benchmark_fundamental_grid(label: str, cadence: str = "annual"):
     means **trailing twelve months**, not the raw quarter. That keeps both slider axes on one
     12-month basis, so moving the quarter changes the as-of date and never the unit.
 
-    Returned whole, not per period: it is one bulk read per line over data one GuruFocus call
+    Returned whole, not per period: it is ONE bulk read for every line over data one GuruFocus call
     already brought, and the reader's whole interaction is dragging a slider.
+
+    ⚠ CACHED IN-PROCESS, AND DROPPED BY THE INGEST JOBS. Both Fetch buttons call
+    `_blend_cache.invalidate()` when they have written something, so a filled row shows up on the
+    reload the pane does anyway. See `cached_grid` for why this must not be a `Cache-Control`
+    header: a copy in the browser is one no invalidation of ours can reach.
+
+    ⚠⚠ GZIPPED HERE RATHER THAN APP-WIDE, AND THAT IS DELIBERATE. ACWI's payload is **16.5 MB** of
+    JSON — 1,949 constituents x 12 periods x 19 lines, each carrying its EUR value, its native
+    figure and the rate between them — and it compresses to **5.3 MB** in 0.21s (level 1; level 6
+    reaches 4.5 MB for three times the CPU, which is the wrong trade for a number this size). By
+    the time the server work below is measured in hundreds of milliseconds, the transfer IS the
+    load time, and no amount of query tuning touches it.
+
+    A `GZipMiddleware` on the app would have covered this endpoint and every other one — and this
+    app is SSE-heavy (ingest, scanner, backtest, every live dashboard). Compression sits between a
+    stream and its client and buffers; the whole point of those endpoints is that a frame arrives
+    when it is produced. One endpoint that ships megabytes is not a reason to put a buffer in front
+    of the ones that ship bytes.
+
+    ⚠ THE `Accept-Encoding` HEADER IS HONOURED, NOT ASSUMED. Every browser sends it and `requests`
+    sends it by default, but a plain `curl` does NOT — and `/documentation` publishes curl
+    quick-starts against this API. Shipping gzip to a client that did not ask for it hands it
+    binary it will render as mojibake.
+
+    ⚠ THE MODEL STILL VALIDATES. Returning a `Response` skips FastAPI's `response_model` check, so
+    it is run explicitly below — the schema is what `npm run gen:types` generates the frontend's
+    types from, and an endpoint that silently stops conforming to its own contract is worse than a
+    slow one. It costs 0.06s on the largest payload here, and only on a cache miss.
     """
     from routers._benchmark_fundamental_grid import fundamental_grid  # noqa: PLC0415
+    from routers._benchmark_fundamentals import normalise_cadence  # noqa: PLC0415
 
-    return await asyncio.to_thread(fundamental_grid, label, cadence)
+    # ⚠ THE KEY IS THE NORMALISED CADENCE, NOT THE RAW QUERY STRING. `normalise_cadence` maps
+    # anything that is not "quarterly" onto "annual", so `?cadence=annual`, `?cadence=` and a typo
+    # all produce the SAME payload — keying on the raw string would store it three times and
+    # compute it three times to prove it.
+    cad = normalise_cadence(cadence)
+
+    def _encoded() -> bytes:
+        """The gzipped JSON — this is what the cache holds, and it is smaller than the dict.
+
+        ⚠ THE COMPRESSED BYTES, NOT THE PAYLOAD OBJECT. Caching the dict would hold ~250,000
+        Python floats across ~60,000 dicts for ACWI, which costs far more resident memory than the
+        5.3 MB this is — and it would still pay validation and serialisation on every hit. Caching
+        the finished bytes makes a cache hit a memcpy. `_MAX_ENTRIES` is 24 and the entries are
+        big; this is the version that fits.
+        """
+        payload = fundamental_grid(label, cad)
+        body = FundamentalGrid.model_validate(payload).model_dump_json().encode()
+        return gzip.compress(body, 1)
+
+    blob = await asyncio.to_thread(_blend_cache.cached_grid, label, cad, _encoded)
+    accepts = "gzip" in (request.headers.get("accept-encoding") or "").lower()
+    if accepts:
+        return Response(content=blob, media_type="application/json",
+                        headers={"Content-Encoding": "gzip"})
+    # ⚠ DECOMPRESSED ON THE WAY OUT, never stored twice. This branch is a curl session, not the
+    # app, so it may pay for the round trip through gzip rather than double the cache's footprint.
+    return Response(content=gzip.decompress(blob), media_type="application/json")
 
 
 class CompanyIngestResult(BaseModel):
@@ -932,11 +988,21 @@ async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str =
         ids = sorted({m["company_id"] for m in _members(label, require_market_cap=False)
                       if m.get("company_id")})
         comps = company_rows(ids)
-        todo = needs(comps)
+        # ⚠ THE PROBE NARROWS TOO, NOT ONLY THE SELECTION. Each sentinel is its own read of
+        # `metric_data`; under `statements` the est/ind flags are cleared two lines below without
+        # ever being read, so probing them was two thirds of this read thrown away — and they are
+        # the expensive two (`indicator_q_forward_pe_ratio` is ~526 rows per company against Free
+        # Cash Flow's ~28). The result is identical: `needs` drops a company only when every
+        # PROBED feed is present, and the filter below keeps only `need_fin` anyway.
+        todo = needs(comps, feeds=("fin",) if feeds == "statements" else None)
         # ⚠ SELECTION AND ACTION NARROW TOGETHER — see the ⚠⚠ in the docstring. Dropping the
         # companies that need only estimates/indicators is what stops the run iterating rows
         # it has nothing to do for; clearing the two flags is what stops it fetching feeds this
         # page cannot render. Either alone is incoherent.
+        #
+        # ⚠ THE TWO FLAGS ARE STILL SET EXPLICITLY, AND THAT IS NOT REDUNDANT NOW THAT THEY ARE
+        # UNPROBED. `ingest_company` reads `c.get(flag, True)` — an ABSENT flag means "fetch it",
+        # so without this line a narrowed run would spend all three calls per company.
         if feeds == "statements":
             todo = [{**c, "need_est": False, "need_ind": False}
                     for c in todo if c.get("need_fin")]

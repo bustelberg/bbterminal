@@ -25,6 +25,7 @@ from typing import Callable
 
 from deps import supabase
 from index_universe.acwi.exchange_map import is_gf_subscribed_exchange
+from routers._earnings_pg import company_ids_with_metric_via_copy
 
 _log = logging.getLogger(__name__)
 
@@ -74,7 +75,19 @@ def _has(cids: list[int], metric_code: str) -> set[int]:
     The cost is real and accepted: proving 214 booleans reads ~112k rows, about 110 requests. It
     runs on a panel load and before a bulk run, not per company, and a cheap wrong answer here
     spends API quota — which is the more expensive mistake.
+
+    ⚠ ONE `DISTINCT` COPY FIRST, THIS PAGER AS THE FALLBACK — same contract as `_rows_by_company`.
+    The paragraph above is what the fallback still costs, and on ACWI (~1,900 constituents) it is
+    four times the SP500 figure: **95 round trips per sentinel at the very least**, before the
+    pages an indicator series adds. That was the single largest component of the fundamentals
+    grid's load time. `company_ids_with_metric_via_copy` asks the database for the distinct ids
+    instead of reading every row to infer them, and returns `None` — never an empty set — when it
+    cannot run, so a fall-back is a slow answer and never a wrong one.
     """
+    fast = company_ids_with_metric_via_copy(cids, metric_code)
+    if fast is not None:
+        return fast
+
     out: set[int] = set()
     for i in range(0, len(cids), 20):
         chunk = cids[i:i + 20]
@@ -100,13 +113,31 @@ def company_rows(cids: list[int]) -> dict[int, dict]:
     return out
 
 
-def needs(comps: dict[int, dict]) -> list[dict]:
-    """Each company annotated with which of the three feeds it is missing; complete ones dropped."""
+def needs(comps: dict[int, dict], feeds: tuple[str, ...] | None = None) -> list[dict]:
+    """Each company annotated with which feeds it is missing; complete ones dropped.
+
+    `feeds` names the SENTINELS to probe — `None` (the default) means all three, which is what a
+    caller wanting a company chartable end to end needs.
+
+    ⚠ EACH SENTINEL IS ITS OWN READ OF `metric_data`, SO ASKING FOR ONE COSTS A THIRD OF ASKING FOR
+    THREE. Two callers only ever look at `need_fin`: the fundamentals grid, which counts the
+    fillable constituents, and the bulk fill under its default `feeds="statements"`, which
+    immediately clears `need_est`/`need_ind` again. Probing all three for them was a third of the
+    work used and two thirds thrown away — and `ind`'s sentinel is the expensive one
+    (`indicator_q_forward_pe_ratio` is ~526 rows per company against Free Cash Flow's ~28).
+
+    ⚠ AN UNPROBED FEED IS ABSENT FROM THE ROW, NEVER PRESENT AS `False`. `ingest_company` reads
+    `c.get(flag, True)` — a missing flag means "fetch it", which is the safe default for a caller
+    that did not ask. A `False` we never verified would be a claim the feed is already loaded, and
+    would silently stop it ever being fetched. Every caller that hands these rows to
+    `ingest_company` either probes all three or sets the rest explicitly.
+    """
+    keys = tuple(feeds) if feeds else tuple(SENTINELS)
     cids = sorted(comps)
-    have = {k: _has(cids, code) for k, code in SENTINELS.items()}
+    have = {k: _has(cids, SENTINELS[k]) for k in keys}
     out = []
     for cid, c in comps.items():
-        flags = {f"need_{k}": cid not in have[k] for k in SENTINELS}
+        flags = {f"need_{k}": cid not in have[k] for k in keys}
         if any(flags.values()):
             out.append({**c, **flags})
     return out

@@ -37,10 +37,16 @@ WHY REBUILD SOMETHING WE ALREADY HAVE
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
+import logging
 from datetime import date, timedelta
 
 from asset_pipeline.fx import SUBUNIT
+from common.pg import _db_url, _run_copy
 from deps import IN_CHUNK_SIZE, supabase
+
+_log = logging.getLogger(__name__)
 
 # The `universe.label` of the reconstructed membership (Wikipedia + OpenFIGI, the /sp500 page).
 SP500_LABEL = "SP500"
@@ -181,6 +187,53 @@ def _closes(company_ids: list[int], start: str, end: str) -> dict[int, list[tupl
     return out
 
 
+def _fx_to_eur_via_copy(cur: list[str], start: str,
+                        end: str) -> dict[str, dict[str, float]] | None:
+    """`{currency: {date: units per EUR}}` in ONE COPY, or None to fall back to the pager.
+
+    `cur` is already the MAJOR-currency list `_fx_to_eur` built (`GBp` resolved to `GBP`), so this
+    takes no view on minor units — that would be a second place for the pence rule to live.
+
+    ⚠ A ZERO RATE IS DROPPED, exactly as the paged path drops a falsy one. Not because zero is
+    implausible but because dividing by it raises, and a rate is the DENOMINATOR of every
+    conversion here (`eur = native / rate`).
+
+    ⚠ None ON ANY FAILURE, NEVER A PARTIAL DICT. A currency missing from this map has no EUR
+    series, so its constituents silently leave the index and the weights renormalise over the rest
+    — the failure `_airs_portfolio_perf._fx` measured, where two environments reported different
+    returns off identical code. Falling back to the pager is slow; returning half the currencies
+    would be wrong and would look like a number.
+    """
+    if not _db_url() or not cur:
+        return None
+    sql = ("COPY (SELECT currency_code, rate_date, rate FROM fx_rate "
+           "WHERE currency_code = ANY(%s) AND rate_date BETWEEN %s AND %s) "
+           "TO STDOUT WITH (FORMAT csv)")
+    try:
+        buf = _run_copy(sql, (cur, start, end))
+    except Exception as e:  # noqa: BLE001 — a fast path must never be the reason a page 500s
+        _log.warning("[bench-index] FX COPY failed, falling back to PostgREST: %s: %s",
+                     type(e).__name__, e)
+        return None
+    if buf is None:
+        return None
+    out: dict[str, dict[str, float]] = {}
+    if buf.getbuffer().nbytes == 0:
+        return out
+    for row in csv.reader(io.TextIOWrapper(buf, encoding="utf-8", newline="")):
+        if len(row) != 3:
+            continue
+        code, rate_date, rate = row
+        # COPY writes NULL as an empty field; `float("")` raises, and a missing rate is a real
+        # state in this table (a currency whose feed had a gap that day).
+        if not rate:
+            continue
+        val = float(rate)
+        if val:
+            out.setdefault(code, {})[rate_date] = val
+    return out
+
+
 def _fx_to_eur(currencies: set[str], start: str, end: str) -> dict[str, dict[str, float]]:
     """{currency: {date: units per EUR}} — the same `fx_rate` table the rest of the app uses.
 
@@ -203,6 +256,18 @@ def _fx_to_eur(currencies: set[str], start: str, end: str) -> dict[str, dict[str
     # Keyed by base too: `_rate` resolves the same way, and the divisor is applied there.
     cur = sorted({SUBUNIT.get(c, (c, 1.0))[0]
                   for c in currencies if c and c != "EUR"})
+    # ⚠ ONE COPY FIRST, THE PAGER BELOW AS THE FALLBACK — same contract as every other COPY loader
+    # here: it returns the identical shape or None, so nothing downstream can tell which ran.
+    #
+    # ⚠ THE PAGING IS CORRECT AND ITS COST IS ROUND TRIPS. A daily rate for a global index is
+    # ~260 rows per currency per year, so the fundamentals grid's window (2015 -> today, ~27
+    # currencies) is ~77,000 rows — **77 sequential requests** against PostgREST's 1,000-row cap,
+    # each paying a full network latency. That is not a truncation risk (the loop above is right);
+    # it is simply the largest remaining round-trip cost on that page. A COPY streams the lot over
+    # one connection.
+    fast = _fx_to_eur_via_copy(cur, start, end)
+    if fast is not None:
+        return fast
     for i in range(0, len(cur), IN_CHUNK_SIZE):
         chunk = cur[i:i + IN_CHUNK_SIZE]
         off = 0
