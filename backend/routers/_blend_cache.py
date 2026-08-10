@@ -133,43 +133,97 @@ _metrics_inflight: dict[tuple, threading.Event] = {}
 _INFLIGHT_TIMEOUT = 60.0
 
 
-def cached_metric_read(company_ids: list[int], metric: str, cadence: str,
-                       compute: Callable[[], Any]) -> Any:
-    """`compute()` once per (metric, cadence, exact company set); concurrent callers share it.
+def cached_metric_reads(company_ids: list[int], metrics: list[str], cadence: str,
+                        compute_many: Callable[[list[str]], dict[str, Any]]) -> dict[str, Any]:
+    """SEVERAL lines at once — cached and single-flighted per metric, but READ in one go.
+
+    ⚠ THIS REPLACED A SINGLE-METRIC `cached_metric_read`, WHICH IS GONE RATHER THAN KEPT BESIDE IT.
+    Two implementations of one cache is two sets of eviction and single-flight semantics to keep in
+    step, and the one that drifts is whichever has fewer callers. A caller wanting one line passes
+    a list of one.
+
+    It exists because the two savings it has to deliver pull in opposite directions:
+
+      * ACROSS requests, the tab's thirteen cards want 30 metrics of which only 18 are DISTINCT
+        (`sbc` is wanted by five cards, `fcf` by four). Those must collapse to one read each —
+        which is what the per-metric key and the in-flight map already do.
+      * WITHIN a request, an endpoint wanting five lines should not open five Postgres
+        connections. On the COPY transport each read is its own connect + TLS + auth, so a
+        naive "one read per metric" costs 18 handshakes for the tab.
+
+    ⚠⚠ AND THE OBVIOUS IMPLEMENTATION OF THE SECOND DESTROYS THE FIRST. Batching per endpoint —
+    each card reading its own metrics together — means the five cards that want `sbc` each fetch
+    it, so 18 shared reads become 30 unshared ones. That is SLOWER than what it replaces, while
+    looking like an optimisation.
+
+    So the batch is over what THIS caller is missing and nobody else is already fetching: cache
+    hits are taken, metrics another thread owns are waited on, and only the remainder — the ones
+    this caller claims — go into a single `compute_many`.
+
+    ⚠ `compute_many` MUST RETURN A KEY FOR EVERY METRIC IT IS GIVEN, empty when there is nothing.
+    A missing key is cached as nothing at all, so every later caller re-reads it — which converts
+    a refused line (a quarterly metric with no TTM roll-up) into a permanent per-request query.
+
+    ⚠ THE EVENTS ARE RELEASED IN A `finally`, AND THAT IS NOT BOILERPLATE. This call owns SEVERAL
+    in-flight keys at once; if `compute_many` raises and they are not all set, every waiter on any
+    of them blocks for the full `_INFLIGHT_TIMEOUT` (60s) — one failed read stalling the whole tab
+    for a minute. The single-metric version could get away with less because it only ever held one.
 
     ⚠ THE COMPANY SET IS IN THE KEY AS A TUPLE, NOT A HASH. A hash collision here would serve one
-    universe's fundamentals as another's — silently, and only for whoever hit the collision. The
-    tuple is ~12KB for ACWI, which against a 32-entry cap is nothing.
-
-    ⚠ A WAITER WHOSE OWNER FAILED RECOMPUTES rather than inheriting the failure. Unlike the
-    response layer, these are five cards asking for one line: a transient fault should cost the
-    one caller that hit it, not every card on the tab.
+    universe's fundamentals as another's — silently, and only for whoever hit the collision. It is
+    ~12KB for ACWI, which against a 32-entry cap is nothing; it is now built ONCE per call rather
+    than per metric (eighteen times per prefetch) purely to construct a key.
     """
-    key = (metric, cadence, tuple(company_ids))
-    hit = _metrics_cache.get(key)
-    if hit is not None:
-        return hit
+    ids_key = tuple(company_ids)
+    out: dict[str, Any] = {}
+    pending: list[str] = []
+    # `dict.fromkeys` rather than a set: a caller listing a metric twice must not make the batch
+    # order (and so the failure it reports) depend on set iteration order.
+    for m in dict.fromkeys(metrics):
+        hit = _metrics_cache.get((m, cadence, ids_key))
+        if hit is not None:
+            out[m] = hit
+        else:
+            pending.append(m)
+    if not pending:
+        return out
 
+    # ⚠ ONE PASS UNDER THE LOCK FOR ALL OF THEM. Claiming them one at a time would let two
+    # callers interleave and each end up owning half of a batch the other is waiting on.
+    owned: list[str] = []
+    waiting: list[tuple[str, threading.Event]] = []
     with _metrics_lock:
-        event = _metrics_inflight.get(key)
-        owner = event is None
-        if owner:
-            event = threading.Event()
-            _metrics_inflight[key] = event
+        for m in pending:
+            key = (m, cadence, ids_key)
+            event = _metrics_inflight.get(key)
+            if event is None:
+                _metrics_inflight[key] = threading.Event()
+                owned.append(m)
+            else:
+                waiting.append((m, event))
 
-    if not owner:
-        event.wait(timeout=_INFLIGHT_TIMEOUT)      # type: ignore[union-attr]
-        hit = _metrics_cache.get(key)
-        return hit if hit is not None else compute()
+    if owned:
+        try:
+            produced = compute_many(owned)
+            for m in owned:
+                if m in produced:
+                    _metrics_cache.put((m, cadence, ids_key), produced[m])
+                    out[m] = produced[m]
+        finally:
+            with _metrics_lock:
+                events = [_metrics_inflight.pop((m, cadence, ids_key), None) for m in owned]
+            for event in events:
+                if event is not None:
+                    event.set()
 
-    try:
-        result = compute()
-        _metrics_cache.put(key, result)
-        return result
-    finally:
-        with _metrics_lock:
-            _metrics_inflight.pop(key, None)
-        event.set()                                 # type: ignore[union-attr]
+    for m, event in waiting:
+        event.wait(timeout=_INFLIGHT_TIMEOUT)
+        hit = _metrics_cache.get((m, cadence, ids_key))
+        # ⚠ A WAITER WHOSE OWNER FAILED RECOMPUTES — just this one line, not the whole batch.
+        # Same judgement as the single-metric version: a transient fault costs the caller that hit
+        # it, not every card on the tab.
+        out[m] = hit if hit is not None else compute_many([m]).get(m, {})
+    return out
 
 
 def cached_grid(label: str, cadence: str, compute: Callable[[], Any]) -> Any:

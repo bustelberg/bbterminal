@@ -17,7 +17,7 @@ import asyncio
 import contextvars
 import logging
 from collections import defaultdict
-from routers._blend_cache import cached_blend, cached_metric_read
+from routers._blend_cache import cached_blend, cached_metric_reads
 from routers._earnings_pg import rows_by_company_via_copy
 from routers._sse import sse_message as event
 import queue as _queue
@@ -1241,18 +1241,29 @@ def _prefetch(company_ids: list[int], metrics: tuple[str, ...], cadence: str = "
     if not company_ids:
         return
     cache = _PREFETCH.get() or {}
-    for m in metrics:
-        key = (m, cadence)
-        if key not in cache:
-            # ⚠ DEDUPED ACROSS CONCURRENT REQUESTS, NOT JUST WITHIN THIS ONE. `_PREFETCH` is a
-            # contextvar, so it only stops a single request re-reading a line it already has —
-            # but the Long Equity tab fires ~11 requests AT ONCE and they overlap heavily: 27
-            # metric reads of which only 18 are distinct, with `sbc` wanted by five cards and
-            # `fcf` by four. `cached_metric_read` collapses those to one read plus four waits.
-            cache[key] = cached_metric_read(
-                company_ids, m, cadence,
-                lambda m=m: _metrics_by_company(company_ids, m, cadence),
-            )
+    want = [m for m in dict.fromkeys(metrics) if (m, cadence) not in cache]
+    if not want:
+        return
+    # ⚠ DEDUPED ACROSS CONCURRENT REQUESTS, NOT JUST WITHIN THIS ONE. `_PREFETCH` is a contextvar,
+    # so it only stops a single request re-reading a line it already has — but the Long Equity tab
+    # fires ~13 requests AT ONCE and they overlap heavily: 30 metric reads of which only 18 are
+    # distinct, with `sbc` wanted by five cards and `fcf` by four. `cached_metric_reads` collapses
+    # those to one read plus four waits.
+    #
+    # ⚠⚠ AND IT READS THE ONES THIS CALLER CLAIMS IN **ONE** QUERY. Per metric, each read is its
+    # own COPY — its own connect + TLS + auth against Supabase — so the tab paid 18 handshakes for
+    # rows that sit side by side in `metric_data`. Measured on ACWI (1,949 constituents, the 18
+    # distinct lines): 18 Postgres connections -> 1, values identical. Locally that is 1.68s ->
+    # 1.56s because a Docker connection is ~2ms; the saving is the handshakes, so it lands in
+    # production and barely shows here — the same shape as the fundamentals grid's own read.
+    #
+    # ⚠ THE BATCH IS NOT SIMPLY `want`. See `cached_metric_reads`: batching everything this
+    # endpoint wants would re-fetch the lines the other twelve cards are already fetching, turning
+    # 18 shared reads into 30 unshared ones. It batches what this caller MISSES and OWNS.
+    for m, series in cached_metric_reads(
+            company_ids, want, cadence,
+            lambda ms: metrics_by_company_bulk(company_ids, ms, cadence)).items():
+        cache[(m, cadence)] = series
     _PREFETCH.set(cache)
 
 
@@ -1363,6 +1374,33 @@ def _codes_and_rule(metric: str, cadence: str) -> tuple[list[str] | None, str | 
         _log.warning("[earnings] no TTM rule for %r — omitted", metric)
         return None, None
     return [c.replace("annuals__", "quarterly__") for c in codes], rule
+
+
+def metrics_by_company_bulk(company_ids: list[int], metrics: list[str],
+                            cadence: str = "annual") -> dict[str, dict[int, dict[str, float]]]:
+    """`{metric: {company_id: {period: value}}}` — the BULK twin of `_metrics_by_company`.
+
+    Same answer as calling that function once per metric, in one read instead of one per metric.
+    The bucketing is the same expression, reached through the same `_codes_and_rule`, so the two
+    cannot come to disagree about which observation a period is.
+
+    ⚠ A REFUSED METRIC COMES BACK AS `{}`, NOT ABSENT — deliberately UNLIKE `rows_by_metric`, which
+    omits it. That is the shape `_metrics_by_company` already returns for a quarterly line with no
+    declared TTM roll-up, and matching it is what lets this drop into the caching layer without a
+    third meaning for "nothing here": every requested metric gets a key, so a caller cannot tell a
+    refusal from an empty read and neither can be mistaken for "not yet fetched".
+    """
+    raw_by_metric = rows_by_metric(company_ids, metrics, cadence)
+    out: dict[str, dict[int, dict[str, float]]] = {}
+    for metric in metrics:
+        raw = raw_by_metric.get(metric)
+        if raw is None:
+            out[metric] = {}
+            continue
+        _codes, rule = _codes_and_rule(metric, cadence)
+        out[metric] = {cid: (_ttm_by_period(rows, rule) if rule else _latest_per_year(rows))
+                       for cid, rows in raw.items()}
+    return out
 
 
 def rows_by_metric(company_ids: list[int], metrics: list[str],

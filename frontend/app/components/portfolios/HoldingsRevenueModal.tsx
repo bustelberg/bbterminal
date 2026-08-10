@@ -133,6 +133,11 @@ function MatrixTable({ data, fmt, noun, view, onFetch }: {
    */
   const blend = useMemo(() => {
     const parts: { w: number; idx: Record<string, number> }[] = [];
+    // ⚠ KEYED ON THE ROW OBJECT, NOT ON THE ISIN. A payload can carry the same ISIN twice (a model
+    // listing one instrument at two weights — VTopSelectie holds CapitaLand at 2% and 3%), and an
+    // ISIN key would give both rows the first one's weight. `rows` below is a sort of these same
+    // objects, so identity is stable for the render.
+    const partOf = new Map<Row, { w: number; idx: Record<string, number> }>();
     let total = 0;
     for (const r of data.rows) {
       const periods = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort();
@@ -147,19 +152,52 @@ function MatrixTable({ data, fmt, noun, view, onFetch }: {
       if (!(base > 0)) continue;              // matches `_prepare`'s non_positive_base drop
       const idx: Record<string, number> = {};
       for (const p of periods) idx[p] = 100 * (r.revenue[p] as number) / base;
-      parts.push({ w, idx });
+      const part = { w, idx };
+      parts.push(part);
+      partOf.set(r, part);
     }
     const level: Record<string, { value: number; covered: number }> = {};
+    // ⚠⚠ THE DENOMINATOR IN FORCE FOR EACH PERIOD, AND IT IS WHY A PER-YEAR WEIGHT EXISTS AT ALL.
+    // The weighted average below divides by the weight that REPORTED this period, not by the
+    // table's total — so a company's real share of the line moves from year to year even though
+    // its cap here is a single stored number. A company absent in 2015 and present in 2020 lifts
+    // everyone else's share in 2015 and dilutes it in 2020. The `Weight` column (cap ÷ Σcap) is
+    // therefore not the weight used in ANY period; `weightAt` below is.
+    const denom: Record<string, number> = {};
     for (const y of data.years) {
       const hit = parts.filter((p) => p.idx[y] != null);
       const w = hit.reduce((a, p) => a + p.w, 0);
       if (w > 0) {
+        denom[y] = w;
         level[y] = { value: hit.reduce((a, p) => a + p.w * p.idx[y], 0) / w,
           covered: 100 * w / total };
       }
     }
-    return { level, contributors: parts.length };
+    return { level, denom, partOf, contributors: parts.length };
   }, [data]);
+
+  /**
+   * One row's share of the plotted line IN THAT PERIOD — the number the second line of each cell
+   * shows.
+   *
+   * ⚠ IT IS READ OFF `blend`, NEVER RECOMPUTED. Same `w`, same per-period denominator, so the
+   * weights shown are the weights the footer actually used. A second derivation "the same way" is
+   * how a table comes to disagree with the line it exists to explain.
+   *
+   * ⚠ NULL WHERE THE ROW DID NOT CONTRIBUTE, never 0. Three ways that happens and all of them mean
+   * "this row is not in this period's average": it has no value that period, it has no weight, or
+   * `_prepare` dropped it for a non-positive base (100 × v/0 is undefined). A 0% would read as a
+   * holding so small it did not matter, which is a different claim.
+   *
+   * By construction this column sums to 100.00% within any period — which is what makes the cells
+   * checkable against the footer.
+   */
+  const weightAt = (r: Row, y: string): number | null => {
+    const p = blend.partOf.get(r);
+    const d = blend.denom[y];
+    if (!p || !d || p.idx[y] == null) return null;
+    return 100 * p.w / d;
+  };
 
   /** The value a period column shows for one row, under the current view. */
   const cellOf = (r: Row, y: string): number | null => {
@@ -230,7 +268,18 @@ function MatrixTable({ data, fmt, noun, view, onFetch }: {
                 Mkt cap €bn{caret('cap')}
               </th>
             )}
-            <th className="px-3 py-1.5 font-medium text-right whitespace-nowrap" onClick={() => toggle('weight')}>Weight{caret('weight')}</th>
+            {/* ⚠ NOT THE WEIGHT ANY PERIOD ACTUALLY USES — that is the second line inside each
+                period cell. This is the row's share of the whole table (cap ÷ Σcap), which is
+                what makes the sort and the footer total meaningful; the average in any given
+                period renormalises over whoever reported it, so the two differ by more the
+                thinner the period. Saying so here is the difference between two weights and one
+                weight that looks wrong. */}
+            <th className="px-3 py-1.5 font-medium text-right whitespace-nowrap" onClick={() => toggle('weight')}
+              title="Share of this table: cap ÷ the total of the Mkt cap column. ⚠ NOT the weight
+used in any single period — a period renormalises over the companies that reported it, and that
+figure is the small second line inside each period cell.">
+              Weight{caret('weight')}
+            </th>
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('ccy')}>Ccy{caret('ccy')}</th>
             {/* ⚠ A FIXED WIDTH, SO THE VIEW SWITCH MOVES NUMBERS AND NOTHING ELSE. "6.3B", "108.6"
                 and "+8.6%" are different lengths, and on an auto-layout table every column
@@ -238,7 +287,16 @@ function MatrixTable({ data, fmt, noun, view, onFetch }: {
                 exactly what makes two views hard to compare. 6rem holds the longest of the three
                 at this size; the Company column still absorbs the slack. */}
             {data.years.map((y) => (
-              <th key={y} className="px-3 py-1.5 font-medium text-right whitespace-nowrap w-24" onClick={() => toggle(y)}>{y}{caret(y)}</th>
+              <th key={y} className="px-3 py-1.5 font-medium text-right whitespace-nowrap w-24"
+                onClick={() => toggle(y)}
+                title={`${y}. Each cell carries the figure on top and, beneath it, that company’s `
+                  + 'share of the weight behind THIS period’s line — which moves from period to '
+                  + 'period as companies enter and leave the average, even though the Weight '
+                  + 'column beside the name is a single stored number. The second line sums to '
+                  + '100% down the column; the footer says what share of the index that is. '
+                  + 'Sorting still ranks on the figure, not the weight.'}>
+                {y}{caret(y)}
+              </th>
             ))}
           </tr>
         </thead>
@@ -289,12 +347,29 @@ function MatrixTable({ data, fmt, noun, view, onFetch }: {
                   )}
                 </td>
               ) : (
-                data.years.map((y) => (
-                  <td key={y} className="px-3 py-1.5 text-right font-mono text-fg-soft whitespace-nowrap"
-                    title={view === 'reported' ? undefined : `${fmt(r.revenue[y])} as reported`}>
-                    <Cell>{cellText(cellOf(r, y))}</Cell>
-                  </td>
-                ))
+                data.years.map((y) => {
+                  // ⚠ THE WEIGHT SITS UNDER THE VALUE IT WEIGHTS, not in a column of its own,
+                  // because the two are only meaningful as a pair: the line is Σ(weight × value)
+                  // and reading a company's contribution means multiplying two numbers that have
+                  // to be adjacent. It is the second line rather than the first because the value
+                  // is what the column is named after and what sorting ranks on.
+                  const w = weightAt(r, y);
+                  return (
+                    <td key={y} className="px-3 py-1.5 text-right font-mono text-fg-soft whitespace-nowrap"
+                      title={`${w == null
+                        ? 'Not in this period’s average.'
+                        : `${w.toFixed(2)}% of the weight behind this period’s line`}`
+                        + (view === 'reported' ? '' : ` · ${fmt(r.revenue[y])} as reported`)}>
+                      <span className="block"><Cell>{cellText(cellOf(r, y))}</Cell></span>
+                      {/* ⚠ A NON-BREAKING SPACE, NOT AN EMPTY STRING, WHERE THERE IS NO WEIGHT. An
+                          empty span collapses to zero height, so a row with a gap year would be
+                          shorter than its neighbours and the table would ripple. */}
+                      <span className="block text-[10px] leading-tight text-fg-faint">
+                        <Cell>{w == null ? ' ' : `${w.toFixed(2)}%`}</Cell>
+                      </span>
+                    </td>
+                  );
+                })
               )}
             </tr>
           ))}
@@ -309,7 +384,13 @@ function MatrixTable({ data, fmt, noun, view, onFetch }: {
                 : view === 'yoy'
                   ? 'The plotted line’s own period-on-period change. NOT the average of the column above: the chart averages rebased levels, never growth rates.'
                   : undefined}>
-              {view === 'rebased' ? 'Weighted (= the line)' : view === 'yoy' ? 'Line YoY' : 'Total'}
+              <span className="block">
+                {view === 'rebased' ? 'Weighted (= the line)' : view === 'yoy' ? 'Line YoY' : 'Total'}
+              </span>
+              {/* Names the second line every period cell in this row now carries. */}
+              <span className="block text-[10px] leading-tight font-normal text-fg-faint">
+                covered
+              </span>
             </td>
             <td className="px-3 py-1.5" />
             <td className="px-3 py-1.5" />
@@ -348,10 +429,20 @@ function MatrixTable({ data, fmt, noun, view, onFetch }: {
                     : `${lv.covered.toFixed(1)}% of the contributing weight reported this period`
                       + (thin ? ` — under the ${MIN_YEAR_COVERAGE_PCT}% floor, so the chart omits it`
                         : '')}>
-                  <Cell>
-                    {value == null ? '' : view === 'rebased' ? value.toFixed(1)
-                      : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`}
-                  </Cell>
+                  <span className="block">
+                    <Cell>
+                      {value == null ? ' ' : view === 'rebased' ? value.toFixed(1)
+                        : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`}
+                    </Cell>
+                  </span>
+                  {/* ⚠ COVERAGE, PROMOTED OUT OF THE TOOLTIP — it is the footer's second line
+                      because every cell above it now has one, and because it is what the weights
+                      above are shares OF. The column of weights sums to 100% within a period by
+                      construction; this says what share of the index that 100% actually is. A
+                      period under the floor is greyed with the rest of the cell. */}
+                  <span className="block text-[10px] leading-tight text-fg-faint">
+                    <Cell>{lv == null ? ' ' : `${lv.covered.toFixed(0)}%`}</Cell>
+                  </span>
                 </td>
               );
             })}
@@ -567,17 +658,22 @@ export default function HoldingsRevenueModal({
                     · {bench.rows.filter((r) => r.status === 'ok').length} with {noun} feed the line,
                     renormalised each period
                   </p>
-                  {/* ⚠ THE DROPPED NAMES STAY IN THE OPEN. Absent from the table and absent from a
-                      note, a missing constituent reads as a weight the index really has. */}
-                  {bench.weight_basis && bench.weight_basis.excluded.length > 0 && (
-                    <p className="text-[10px] text-warn-300"
-                      title={`Not in the index at any weight. The remaining ${bench.weight_basis.weighted} are renormalised to 100%, so every weight shown is larger than that constituent's share of the real index.`}>
-                      {bench.weight_basis.excluded.length}/{bench.weight_basis.members} excluded,
-                      weights renormalised:{' '}
-                      {bench.weight_basis.excluded
-                        .map((x) => `${x.name ?? '?'} (${x.reason})`).join(' · ')}
-                    </p>
-                  )}
+                  {/* ⚠ THE EXCLUDED-CONSTITUENT LINE WAS REMOVED ON REQUEST (2026-08-10). It named
+                      every dropped constituent inline — `470/1998 excluded, weights renormalised:
+                      BANCO ESPIRITO SANTO CLASS N SA (delisted) · …` — which is fine for the AEX's
+                      three and unreadable for ACWI's 470, where it buried the table under a wall of
+                      names.
+
+                      ⚠ THE FACT IT REPORTED IS STILL TRUE AND IS NOW UNSTATED ON THIS SCREEN: a
+                      constituent with no stored market cap is not in the index at ANY weight, so
+                      the weights shown are renormalised over the survivors and every one of them
+                      is larger than that constituent's share of the real index. Measured on ACWI,
+                      that is ~22% of the published membership, and it goes a whole market at a time
+                      (NSE 157, SHSE 83, LSE 72, SZSE 61) rather than at random.
+
+                      `weight_basis` is still computed and still on the API response — nothing was
+                      removed from `_benchmark_index.weight_basis` — so a compact form (a count, with
+                      the names in a tooltip) can be put back without touching the backend. */}
                   <MatrixTable data={bench} fmt={fmtM} noun={noun} view={view} />
                 </>
               )}

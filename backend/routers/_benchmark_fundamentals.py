@@ -103,19 +103,26 @@ def constituent_fundamentals(company_ids: list[int], cadence: str = "annual") ->
     exactly what this toggle exists to make visible; before it, the two cadences could only be
     compared by opening a chart.
     """
-    from routers.earnings import _metrics_by_company  # noqa: PLC0415  (cycle at module import)
+    from routers.earnings import metrics_by_company_bulk  # noqa: PLC0415  (cycle at module import)
 
     if not company_ids:
         return {}
+    # ⚠ ONE READ FOR ALL NINETEEN LINES, NOT ONE PER LINE. The module header above says "one bulk
+    # read per line, never per company", which is what fixed the 44.5s-per-metric loop — but on the
+    # COPY transport each of those reads opens its OWN Postgres connection (connect + TLS + auth),
+    # so nineteen of them is nineteen handshakes to fetch rows that sit side by side in
+    # `metric_data`. `metrics_by_company_bulk` is the same answer, unioned into one query; the
+    # bucketing is `_metrics_by_company`'s own expression, reached through the same
+    # `_codes_and_rule`, so this pane cannot come to disagree with the charts about a period.
     out: dict[int, dict] = {}
-    for key in _KEYS:
-        for cid, series in _metrics_by_company(company_ids, key, cadence).items():
+    for key, by_company in metrics_by_company_bulk(company_ids, list(_KEYS), cadence).items():
+        for cid, series in by_company.items():
             if not series:
                 continue
             periods = sorted(series)
             out.setdefault(cid, {})[key] = {
                 "from": periods[0], "to": periods[-1], "n": len(periods),
             }
-    _log.warning("[bench-fund] %s: %d companies x %d raw lines in %d bulk reads — %d companies "
-                 "carry at least one", cadence, len(company_ids), len(_KEYS), len(_KEYS), len(out))
+    _log.warning("[bench-fund] %s: %d companies x %d raw lines in ONE bulk read — %d companies "
+                 "carry at least one", cadence, len(company_ids), len(_KEYS), len(out))
     return out
