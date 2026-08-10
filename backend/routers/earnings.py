@@ -718,9 +718,16 @@ def _bulk_blend_rows(cids: list[int], metrics: list[str], cadence: str) -> list[
     return out
 
 
-def _blend_rows(rows: list[dict], covered: list[dict]) -> dict:
+def _blend_rows(rows: list[dict], covered: list[dict],
+                caps: dict[int, dict[str, float]] | None = None) -> dict:
     """The blend itself, over rows already fetched. Pure of I/O, so the plain endpoint and the
-    streaming one cannot drift: they differ only in HOW the rows arrive."""
+    streaming one cannot drift: they differ only in HOW the rows arrive.
+
+    `caps` is `period_caps_eur` for an INDEX — the market cap as at each fiscal period, so each
+    period is weighted by what the constituents were worth THEN. `None` for a portfolio, where a
+    holding weight is not a market cap and does not vary by period; `_weight_at` reads the absence
+    as "one basis for every period". See `_fundamental_blend._weight_at`.
+    """
     from routers._fundamental_blend import blend_series, explain_empty  # noqa: PLC0415
 
     by_metric: dict[str, dict[int, dict[str, float]]] = {}
@@ -741,6 +748,8 @@ def _blend_rows(rows: list[dict], covered: list[dict]) -> dict:
         base_code = _FORECAST_BASE.get(code)
         base_by_company = by_metric.get(base_code, {}) if base_code else {}
         blend_members = [{"weight": r["weight_pct"],
+                          # Absent for a portfolio — see the `caps` note on this function.
+                          **({"weights": caps.get(r["company_id"], {})} if caps else {}),
                           "points": per_company.get(r["company_id"], {}),
                           "base_points": base_by_company.get(r["company_id"], {})}
                          for r in covered]
@@ -812,18 +821,24 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
     covered, cov = await _blend_inputs(body)
 
     def _build() -> dict:
+        # ⚠ AN INDEX IS WEIGHTED BY THE CAP IT HAD IN EACH PERIOD; A BOOK BY ITS HOLDING WEIGHT.
+        # Only a universe has a market cap history to weight by — and only for a universe is
+        # `weight_pct` a cap share in the first place (see `_load_and_expand_members`), so this is
+        # the same branch that decides what the weight MEANS, not a new one.
+        caps = (period_caps_eur([r["company_id"] for r in covered], body.cadence)
+                if body.universe else None)
         if body.metrics:
             # ⚠ SAME BLEND, DIFFERENT READ. Only the fetch changes — `_blend_rows` is untouched, so
             # a narrowed request cannot blend by a different rule than a full one.
             rows = _bulk_blend_rows([r["company_id"] for r in covered], body.metrics, body.cadence)
-            return _blend_rows(rows, covered)
+            return _blend_rows(rows, covered, caps)
         # The PORTFOLIO path takes the same cadence as the single-company one, through the same
         # roll-up — otherwise a book's Long Equity tab would ignore a toggle its holdings honour.
         load = (_ttm_metric_rows if body.cadence == "quarterly" else _company_metric_rows)
         rows = []
         for r in covered:
             rows += load(r["company_id"])
-        return _blend_rows(rows, covered)
+        return _blend_rows(rows, covered, caps)
 
     return _blend_envelope(await asyncio.to_thread(_build), covered, cov)
 
@@ -1403,6 +1418,69 @@ def metrics_by_company_bulk(company_ids: list[int], metrics: list[str],
     return out
 
 
+def period_caps_eur(company_ids: list[int],
+                    cadence: str = "annual") -> dict[int, dict[str, float]]:
+    """`{company_id: {period: market cap in EUR}}` — the cap AS AT each fiscal period.
+
+    The weighting basis for anything that aggregates a cross-section of history. `market_cap_eur`
+    on `company` is TODAY's cap, and weighting 2018's revenue by it is look-ahead bias: measured on
+    the S&P, 30.6% of index weight sits in the wrong place in FY2018, with NVIDIA carried at 7.35%
+    of a year it was 0.68% of. GuruFocus publishes `Market Cap` per fiscal period, so the period's
+    cap is READ rather than reconstructed from a price ratio.
+
+    ⚠⚠ THE FX RATE IS THE PERIOD'S OWN END, WHICH IS THE ONLY REASON THIS CAN BE DONE AT ALL.
+    GuruFocus reports financials in the LISTING's trading currency, per fiscal period — so an ACWI
+    cross-section is 19 currencies and summing them raw over-weights Japan by ~150x. Apple's FY2025
+    ends in September; converting it at 31 December's rate applies a rate struck three months after
+    the figure. `_values_with_dates` keeps the real period-end date for exactly this, and this
+    function is the reason it takes a list of metrics rather than one.
+
+    ⚠⚠ THE RESULT IS ABSOLUTE EUR, NOT MILLIONS, AND THE CONVERSION IS THE WHOLE POINT OF THIS
+    LINE. GuruFocus financials are in MILLIONS; `company.market_cap_eur` is a plain EUR amount, and
+    every consumer of that field divides by 1e9 to print billions. Returning millions here would
+    render a EUR 2.9tn company as "EUR 2,890" — a number small enough to look like a rounding
+    convention rather than a factor of a million.
+
+    ⚠ A NON-POSITIVE OR UNCONVERTIBLE CAP IS ABSENT, NEVER 0. Absent means "this company has no
+    weight in this period and is left out of it"; a 0 would put it in the denominator as a company
+    worth nothing. Same rule the grid follows for a missing rate.
+
+    ⚠ THE CURRENCY IS LOOKED UP HERE, NOT PASSED IN, AND THAT IS DELIBERATE. A caller handing over
+    the wrong map does not fail — it converts a JPY cap at the USD rate and returns a plausible
+    number roughly 150x out, which then becomes a weight. The lookup is one chunked read against
+    the same `gurufocus_exchange` join every other consumer uses, and it makes the function
+    impossible to misuse.
+    """
+    from routers._benchmark_fundamental_grid import _values_with_dates  # noqa: PLC0415
+    from routers._benchmark_index import _fx_to_eur, _rate  # noqa: PLC0415
+
+    if not company_ids:
+        return {}
+    currency_by_cid: dict[int, str | None] = {}
+    for i in range(0, len(company_ids), IN_CHUNK_SIZE):
+        for c in (supabase.table("company")
+                  .select("company_id,gurufocus_exchange:gurufocus_exchange(currency_code)")
+                  .in_("company_id", company_ids[i:i + IN_CHUNK_SIZE]).execute().data or []):
+            currency_by_cid[c["company_id"]] = (
+                ((c.get("gurufocus_exchange") or {}) or {}).get("currency_code"))
+    dated = _values_with_dates(company_ids, ["market_cap"], cadence).get("market_cap", {})
+    dates = [d for per in dated.values() for d, _v in per.values()]
+    if not dates:
+        return {}
+    fx = _fx_to_eur({c for c in currency_by_cid.values() if c}, min(dates), max(dates))
+    out: dict[int, dict[str, float]] = {}
+    for cid, per in dated.items():
+        ccy = currency_by_cid.get(cid)
+        for period, (date, native) in per.items():
+            if not native or native <= 0:
+                continue
+            rate = _rate(fx, ccy, date)
+            if rate is None:
+                continue
+            out.setdefault(cid, {})[period] = (native / rate) * 1e6
+    return out
+
+
 def rows_by_metric(company_ids: list[int], metrics: list[str],
                    cadence: str = "annual") -> dict[str, dict[int, list[dict]]]:
     """`{metric: {company_id: rows}}` for MANY metrics in **ONE** read.
@@ -1689,6 +1767,13 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
         # benchmark overlay let it be pointed at an index.
         _prefetch([c["company_id"] for c in comp.values() if c.get("company_id")],
                   (metric,), body.cadence)
+        # ⚠ INDEX ONLY — the per-period cap is a weighting basis, and for a portfolio the weight is
+        # a holding percentage with no market cap behind it (same branch as `market_cap_eur`
+        # below). This is what lets the table show the cap the weight beside it was divided out of,
+        # per period, instead of one of today's figures repeated across twelve columns.
+        caps = (period_caps_eur([c["company_id"] for c in comp.values() if c.get("company_id")],
+                                body.cadence)
+                if body.universe else {})
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -1725,6 +1810,14 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
                 # holding's weight, which is not a market cap at all, so the field is omitted
                 # rather than filled with a number that would be read as one.
                 **({"market_cap_eur": weight_by[ci]} if body.universe else {}),
+                # ⚠ THE CAP AS AT EACH PERIOD — what the per-period weight is actually computed
+                # from, so the division shown in the cell can be checked rather than trusted.
+                # Sparse on purpose: a period with no filed cap is ABSENT, and the reader sees a
+                # dash for both cap and weight because that company is left out of that period's
+                # average entirely. Padding it with today's figure would mix two bases inside one
+                # column with nothing on screen to tell them apart.
+                **({"market_cap_by_period": caps.get(c["company_id"], {})}
+                   if body.universe else {}),
             })
         rows.sort(key=lambda r: -r["weight_pct"])
         out = {"years": sorted(years), "rows": rows, "holdings": len(members)}

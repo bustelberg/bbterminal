@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
@@ -29,6 +30,17 @@ type Row = {
   /** INDEX ROWS ONLY — the numerator the weight beside it was divided out of (cap ÷ Σcap).
    *  Absent on a portfolio, where the weight is a holding weight and no cap is involved. */
   market_cap_eur?: number | null;
+  /**
+   * INDEX ROWS ONLY — the market cap as at each fiscal period, in EUR, converted at that
+   * period's own end date (`period_caps_eur`).
+   *
+   * ⚠ THIS, NOT `market_cap_eur`, IS WHAT WEIGHTS EACH PERIOD. Weighting 2018's revenue by today's
+   * cap is look-ahead bias: measured on the S&P, NVIDIA is carried at 7.46% of a year it was 0.63%
+   * of. Absent for a portfolio (a holding weight has no market cap behind it), and SPARSE within
+   * an index — a period with no filed cap is missing rather than padded, because the company is
+   * then left out of that period's average entirely.
+   */
+  market_cap_by_period?: Record<string, number>;
 };
 /** Universe requests only: how the weights were arrived at, and who fell out. See the backend's
  *  `weight_basis` — the names it lists are NOT in the index at any weight. */
@@ -91,6 +103,26 @@ const Cell = ({ children }: { children: React.ReactNode }) => (
   <span className="inline-block w-[4.5rem] text-right tabular-nums">{children}</span>
 );
 
+/**
+ * The same trick for the IDENTITY columns — exchange, ticker, currency, cap.
+ *
+ * ⚠⚠ THIS IS WHAT MAKES VIRTUALIZATION SAFE ON AN AUTO-LAYOUT TABLE, and without it the table
+ * visibly rebuilds as you scroll. `table-auto` sizes a column from the content it can SEE, and a
+ * virtualized body only mounts ~40 rows — so a window containing `NASDAQ` and `GOOGL` gives wider
+ * columns than one containing `NYSE` and `A`, and every column to the right of them slides as the
+ * rows recycle. It is the same defect the period columns were already fixed for ("A FIXED WIDTH,
+ * SO THE VIEW SWITCH MOVES NUMBERS AND NOTHING ELSE"), arriving by a different route: there the
+ * content changed under a fixed row set, here the row set changes under fixed content.
+ *
+ * Fixing the CONTENT width fixes it under any layout algorithm, which is why this is a span rather
+ * than a `w-*` on the `<th>` — on an auto table that class is a suggestion the browser may ignore.
+ * The alternative is `table-fixed` + a colgroup (what the fundamentals grid does), which would
+ * also mean giving up the `w-full`/`max-w-0` pair that lets Company absorb the slack.
+ */
+const Ident = ({ w, children }: { w: string; children: React.ReactNode }) => (
+  <span className={`inline-block ${w} truncate align-bottom`}>{children}</span>
+);
+
 const VIEWS: [View, string, string][] = [
   ['reported', 'Reported', 'The figures as filed, in each company’s own reporting currency.'],
   ['rebased', 'Rebased', 'Each company indexed to 100 at ITS OWN first period — exactly what the '
@@ -100,10 +132,27 @@ const VIEWS: [View, string, string][] = [
     + 'period-on-period change, not the average of the column above it.'],
 ];
 
-function MatrixTable({ data, fmt, noun, view, onFetch }: {
+function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onFetch }: {
   data: Resp;
   fmt: (v: number | null | undefined) => string;
   noun: string;
+  /** The chart's own name — 'Revenue', 'FCF / share', 'ROIC'. Names the FIRST line of every period
+   *  cell, so the three stacked numbers are all identified rather than only the two derived ones.
+   *  Display-cased by the caller (`seriesLabel`); `noun` is the lowercase prose form and reads
+   *  wrong as a column label. */
+  metricLabel: string;
+  /**
+   * Whether this metric's figures are MONEY — `millions` / `per_share`, never `percent` or
+   * `shares`.
+   *
+   * ⚠ DECIDED FROM THE DECLARED UNIT, NEVER SNIFFED FROM THE NAME. Same rule and same two members
+   * as the backend's `_benchmark_fundamental_grid._CURRENCY_UNITS`: a share COUNT is a plain
+   * number in millions like the currency lines around it, and `EPS (Diluted)` does not contain the
+   * words "per share". Getting it wrong here only mislabels a column — getting it wrong there
+   * divides a share count by an FX rate — but it is the same question and it gets the same answer
+   * from the same place.
+   */
+  valueIsCurrency: boolean;
   /** ⚠ OWNED BY THE MODAL, NOT HERE — one switch drives the book's table and the index's together.
    *  Two independent switches would let a reader compare a rebased index against reported euros
    *  and read the gap as a finding. */
@@ -132,49 +181,124 @@ function MatrixTable({ data, fmt, noun, view, onFetch }: {
    * the floor decision that rides on it — would be wrong by that ratio.
    */
   const blend = useMemo(() => {
-    const parts: { w: number; idx: Record<string, number> }[] = [];
+    /**
+     * This row's weight IN THIS PERIOD — the mirror of the backend's `_fundamental_blend
+     * ._weight_at`, and it has to stay one because the footer below reproduces the plotted line
+     * the server computed. An index weights by the cap it HAD in that period; a portfolio has no
+     * cap history, so its single holding weight applies to every period. The absence of
+     * `market_cap_by_period` is the signal for the second case.
+     *
+     * Null (never 0) when an index constituent has no cap that period: it is left out of that
+     * period's average entirely, numerator and denominator both.
+     */
+    const wAt = (r: Row, y: string): number | null => {
+      const per = r.market_cap_by_period;
+      if (per) {
+        const v = per[y];
+        return v && v > 0 ? v : null;
+      }
+      const w = r.market_cap_eur ?? r.weight_pct;
+      return w && w > 0 ? w : null;
+    };
+    /**
+     * Why a row contributes NOTHING to the line — row-level, so it holds for every period.
+     *
+     * ⚠⚠ THIS EXISTS BECAUSE THE ABSENCE LOOKED LIKE A BUG. Measured on AITopSelectie OFF FX:
+     * Advanced Micro Devices is a 5% holding whose FCF/share the table happily lists, and whose
+     * weight line was simply blank in every period. The reason is real and one line up — its first
+     * reported period (2015) is **−0.411**, and a LEVEL series is rebased to 100 at its own first
+     * point, so `100 × v ÷ −0.411` inverts every later point: AMD's 2020 `+0.644` would plot as
+     * −157, a collapse that exists only in the arithmetic. `_prepare` drops it for exactly this
+     * (`non_positive_base`) and the blend never sees it.
+     *
+     * That is the right maths and it was silent, which is the one thing this table must never be:
+     * a blank a reader cannot account for gets read as a broken cell, and the next move is to go
+     * re-ingest data that is already there.
+     */
+    const excluded = new Map<Row, string>();
+    const parts: { r: Row; idx: Record<string, number> }[] = [];
     // ⚠ KEYED ON THE ROW OBJECT, NOT ON THE ISIN. A payload can carry the same ISIN twice (a model
     // listing one instrument at two weights — VTopSelectie holds CapitaLand at 2% and 3%), and an
     // ISIN key would give both rows the first one's weight. `rows` below is a sort of these same
     // objects, so identity is stable for the render.
-    const partOf = new Map<Row, { w: number; idx: Record<string, number> }>();
-    let total = 0;
+    const partOf = new Map<Row, { r: Row; idx: Record<string, number> }>();
+    /**
+     * ⚠⚠ COVERAGE IS MEASURED ON THE **STABLE** WEIGHT, NOT THE PER-PERIOD CAP — mirroring
+     * `_fundamental_blend.blend_series`, and it is the difference between the 80% floor working
+     * and doing nothing at all.
+     *
+     * The per-period cap comes out of the same GuruFocus blob as the figure, so a company that has
+     * not filed FY2026 has no FY2026 cap either. Measuring coverage with it divides the filers by
+     * the filers and reads ~100% in exactly the period where almost nobody has reported — which is
+     * how FY2026 came to draw a full-height point made almost entirely of NVIDIA.
+     *
+     * Measured on the S&P: FY2026 is 13.4% covered on this basis and was reading 100.0% on the
+     * per-period one.
+     */
+    const coverW: Record<string, number> = {};
+    let coverTotal = 0;
+    const stableW = (r: Row): number => {
+      const w = r.market_cap_eur ?? r.weight_pct;
+      return w && w > 0 ? w : 0;
+    };
     for (const r of data.rows) {
       const periods = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort();
-      const w = r.market_cap_eur ?? r.weight_pct;
-      if (!periods.length || !w) continue;
+      if (!periods.length) {
+        // Nothing filed at all — the row already says so via `status`, so no second badge.
+        continue;
+      }
       // ⚠ COUNTED IN THE DENOMINATOR **BEFORE** THE BASE TEST, because that is the order
-      // `blend_series` uses: it takes `total_w` over every member handed to it, and `_prepare`
+      // `blend_series` uses: it takes the total over every member handed to it, and `_prepare`
       // drops the non-positive bases afterwards. Filtering first would shrink the denominator,
       // lift every coverage figure, and let a period slip over the floor that the chart omits.
-      total += w;
+      coverTotal += stableW(r);
       const base = r.revenue[periods[0]] as number;
-      if (!(base > 0)) continue;              // matches `_prepare`'s non_positive_base drop
+      if (!(base > 0)) {                      // matches `_prepare`'s non_positive_base drop
+        excluded.set(r, `its first reported period (${periods[0]}) is `
+          + `${base === 0 ? 'zero' : 'negative'} at ${base}, and a level series is indexed to 100 `
+          + 'at its own first point — dividing by it would invert every later point rather than '
+          + 'show growth. The figures below are still this company’s; only the blended line '
+          + 'leaves it out.');
+        continue;
+      }
       const idx: Record<string, number> = {};
       for (const p of periods) idx[p] = 100 * (r.revenue[p] as number) / base;
-      const part = { w, idx };
+      const part = { r, idx };
       parts.push(part);
       partOf.set(r, part);
     }
     const level: Record<string, { value: number; covered: number }> = {};
     // ⚠⚠ THE DENOMINATOR IN FORCE FOR EACH PERIOD, AND IT IS WHY A PER-YEAR WEIGHT EXISTS AT ALL.
-    // The weighted average below divides by the weight that REPORTED this period, not by the
-    // table's total — so a company's real share of the line moves from year to year even though
-    // its cap here is a single stored number. A company absent in 2015 and present in 2020 lifts
-    // everyone else's share in 2015 and dilutes it in 2020. The `Weight` column (cap ÷ Σcap) is
-    // therefore not the weight used in ANY period; `weightAt` below is.
+    // Two things move it: the constituents that REPORTED that period, and — now that the basis is
+    // the period's own market cap — what each of them was worth at the time. NVIDIA is 0.63% of
+    // FY2018 and 7.46% by today's cap; only the first is a fact about 2018.
     const denom: Record<string, number> = {};
     for (const y of data.years) {
-      const hit = parts.filter((p) => p.idx[y] != null);
-      const w = hit.reduce((a, p) => a + p.w, 0);
-      if (w > 0) {
-        denom[y] = w;
-        level[y] = { value: hit.reduce((a, p) => a + p.w * p.idx[y], 0) / w,
-          covered: 100 * w / total };
+      let num = 0;
+      let den = 0;
+      for (const p of parts) {
+        if (p.idx[y] == null) continue;
+        const w = wAt(p.r, y);
+        if (!w) continue;                     // no cap that period ⇒ out of that period entirely
+        num += w * p.idx[y];
+        den += w;
+        // ⚠ THE STABLE WEIGHT, accumulated for the SAME rows the average used — see the ⚠⚠ above.
+        coverW[y] = (coverW[y] ?? 0) + stableW(p.r);
+      }
+      if (den > 0) {
+        denom[y] = den;
+        level[y] = { value: num / den, covered: 100 * (coverW[y] ?? 0) / (coverTotal || 1) };
       }
     }
-    return { level, denom, partOf, contributors: parts.length };
+    return { level, denom, partOf, wAt, excluded, contributors: parts.length };
   }, [data]);
+
+  /** The cap the weight beneath it was divided out of — the middle line of a period cell.
+   *  Index only; a portfolio has no market cap behind its holding weights. */
+  const capAt = (r: Row, y: string): number | null => r.market_cap_by_period?.[y] ?? null;
+  /** Whether the payload carries per-period caps at all. A book stays two-line. */
+  const hasPeriodCap = data.rows.some(
+    (r) => r.market_cap_by_period && Object.keys(r.market_cap_by_period).length > 0);
 
   /**
    * One row's share of the plotted line IN THAT PERIOD — the number the second line of each cell
@@ -196,7 +320,8 @@ function MatrixTable({ data, fmt, noun, view, onFetch }: {
     const p = blend.partOf.get(r);
     const d = blend.denom[y];
     if (!p || !d || p.idx[y] == null) return null;
-    return 100 * p.w / d;
+    const w = blend.wAt(r, y);
+    return w ? 100 * w / d : null;
   };
 
   /** The value a period column shows for one row, under the current view. */
@@ -240,6 +365,43 @@ function MatrixTable({ data, fmt, noun, view, onFetch }: {
     return [...data.rows].sort((a, b) => cmp(get(a), get(b), sort.dir));
   }, [data, sort]);
 
+  /**
+   * ⚠⚠ ROW VIRTUALIZATION — AND THIS TABLE HAS ITS OWN SCROLL BOX BECAUSE OF IT.
+   *
+   * It used to scroll inside the modal BODY, which holds the book's matrix and the index's
+   * stacked together. Virtualizing against a shared scroll parent means each table's offsets are
+   * measured from a container it does not start at, so both need a `scrollMargin` that changes
+   * whenever the notes above them wrap. Giving each matrix its own bounded box removes the problem
+   * rather than compensating for it, and it is also better to read: the header and the total row
+   * stay put while you scroll 1,514 constituents.
+   *
+   * Measured on ACWI revenue: 1,514 rows x 12 periods is **45,420 cells** with the weight line
+   * added (27,252 before it). ~40 rows mounted turns that into ~1,200.
+   *
+   * ⚠ `measureElement` RATHER THAN A FIXED ESTIMATE, because the rows here are genuinely NOT all
+   * the same height — an `unsubscribed` or `no_data` row spans the period columns with a single
+   * line of text and no weight beneath it, so it is shorter than a normal two-line row. That is
+   * the case a hardcoded `estimateSize` gets wrong, and on an index it is hundreds of rows.
+   */
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer<HTMLDivElement, HTMLTableRowElement>({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 56,               // a three-line row at the default rem scale
+    // The virtualizer measures from the container top, which is the sticky header rather than the
+    // first data row. That error is constant and about a row wide; the overscan absorbs it.
+    overscan: 14,
+  });
+  const vItems = rowVirtualizer.getVirtualItems();
+  const padTop = vItems.length ? vItems[0].start : 0;
+  const padBottom = vItems.length
+    ? rowVirtualizer.getTotalSize() - vItems[vItems.length - 1].end
+    : 0;
+  /** ⚠ MUST TRACK THE HEADER EXACTLY — a spacer one short leaves the table free to re-fit its
+   *  columns around the gap, which is the jitter `Ident` exists to prevent. Company, GF exch,
+   *  Ticker, [Mkt cap], Ccy, Line, then one per period. */
+  const colCount = 5 + (hasCap ? 1 : 0) + data.years.length;
+
   const fetchOne = async (isin: string, name: string) => {
     if (!onFetch) return;
     setIngest((s) => ({ ...s, [isin]: { busy: true } }));
@@ -254,12 +416,24 @@ function MatrixTable({ data, fmt, noun, view, onFetch }: {
   };
 
   return (
-    <div className="overflow-auto rounded-lg border border-neutral-800/40">
+    /* ⚠ `max-h-`, NOT `h-`. The grid's own note argues the opposite ("a fixed height means the box
+       is the same size before and after"), and the reason it does not apply here is that this
+       modal stacks TWO of these: a fixed 46vh each would leave the AEX's 22 rows sitting in a
+       half-empty box above another half-empty box, in a dialog that is only 84vh tall. A book of
+       twenty holdings is the common case and it should not have to scroll past dead space to
+       reach the index below it. The cost — the box growing once as the fetch lands — is paid
+       inside a modal that opened on a loading line anyway. */
+    <div ref={scrollRef} className="overflow-auto max-h-[46vh] rounded-lg border border-neutral-800/40">
       <table className="w-full text-xs">
-        <thead className="bg-page">
+        {/* ⚠ STICKY, NOW THAT THE BOX SCROLLS ITSELF. Scrolling 1,514 constituents past a header
+            that has left the screen makes the period columns unreadable — and the footer IS the
+            plotted line, which is the one row you want in view while reading any other. */}
+        <thead className="bg-page sticky top-0 z-20">
           <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40 [&>th]:cursor-pointer [&>th]:select-none [&>th:hover]:text-fg-soft">
-            {/* Company takes the slack so the table fills the width; periods keep natural size. */}
-            <th className="px-3 py-1.5 font-medium text-left sticky left-0 bg-page z-10 w-full" onClick={() => toggle('name')}>Company{caret('name')}</th>
+            {/* Company takes the slack so the table fills the width; periods keep natural size.
+                ⚠ z ABOVE ITS OWN ROW: this cell pins in BOTH directions, so it has to outrank the
+                sticky header beside it and the sticky name cells below it. */}
+            <th className="px-3 py-1.5 font-medium text-left sticky left-0 bg-page z-30 w-full" onClick={() => toggle('name')}>Company{caret('name')}</th>
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('exchange')}>GF exch{caret('exchange')}</th>
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('ticker')}>Ticker{caret('ticker')}</th>
             {hasCap && (
@@ -268,19 +442,41 @@ function MatrixTable({ data, fmt, noun, view, onFetch }: {
                 Mkt cap €bn{caret('cap')}
               </th>
             )}
-            {/* ⚠ NOT THE WEIGHT ANY PERIOD ACTUALLY USES — that is the second line inside each
-                period cell. This is the row's share of the whole table (cap ÷ Σcap), which is
-                what makes the sort and the footer total meaningful; the average in any given
-                period renormalises over whoever reported it, so the two differ by more the
-                thinner the period. Saying so here is the difference between two weights and one
-                weight that looks wrong. */}
-            <th className="px-3 py-1.5 font-medium text-right whitespace-nowrap" onClick={() => toggle('weight')}
-              title="Share of this table: cap ÷ the total of the Mkt cap column. ⚠ NOT the weight
-used in any single period — a period renormalises over the companies that reported it, and that
-figure is the small second line inside each period cell.">
-              Weight{caret('weight')}
-            </th>
+            {/* ⚠ THE `Weight` COLUMN WAS REMOVED (2026-08-10, on request) — the weight now lives
+                inside every period cell, on the basis that period actually used. Keeping both put
+                two different percentages under one word on one screen: this one was today's cap
+                over the table's total, the cell's is that period's cap over that period's
+                reporters. For an index the column was simply the wrong one of the two.
+
+                ⚠ WHAT WENT WITH IT, ON THE **BOOK'S** TABLE ONLY: its total was the share of the
+                whole book these companies make up — under 100%, because cash, bonds and anything
+                unpriceable are in that denominator and are not listed here. The per-cell weight
+                cannot say that: it renormalises over whoever reported, so it sums to 100% by
+                construction. If "these holdings are 87% of the portfolio" is wanted back, it
+                belongs as a line under the table, not as a column that looks like the cell weight.
+
+                ⚠ `sort.key` STILL DEFAULTS TO `'weight'` AND THAT IS DELIBERATE, not a leftover.
+                It is the order the server already returns (`rows.sort` by weight desc), so the
+                table opens biggest-first; it is simply no longer reachable from a header, because
+                there is no header for it to be wrong about. */}
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('ccy')}>Ccy{caret('ccy')}</th>
+            {/* ⚠ THE LINE-LABEL COLUMN — names the three numbers stacked in every period cell.
+                It sits LAST of the identity columns so it is adjacent to the figures it names.
+
+                ⚠ IT IS NOT STICKY, AND IT CANNOT BE. Company is the only pinned column because it
+                is also the `w-full`/`max-w-0` slack absorber — its rendered width is decided by
+                layout, so nothing after it has a left offset CSS could be given. Scrolled right to
+                2024 these labels are off screen; the three lines keep a fixed ORDER
+                (figure, cap, weight) for exactly that reason, and the footer repeats the names.
+
+                ⚠ NOT SORTABLE — it holds no data. Every other header here toggles a sort, so this
+                one deliberately drops the pointer/hover affordance rather than looking dead. */}
+            <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap
+                           cursor-default hover:!text-fg-faint"
+              title="What each of the three numbers in a period cell is: the figure itself, the
+market cap it was weighted by in that period, and the weight that produced.">
+              Line
+            </th>
             {/* ⚠ A FIXED WIDTH, SO THE VIEW SWITCH MOVES NUMBERS AND NOTHING ELSE. "6.3B", "108.6"
                 and "+8.6%" are different lengths, and on an auto-layout table every column
                 re-measures on each switch — the row you were reading slides sideways, which is
@@ -301,24 +497,82 @@ figure is the small second line inside each period cell.">
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={`${r.isin}-${i}`} className="border-b border-neutral-800/20 hover:bg-overlay/[0.02]">
+          {padTop > 0 && <tr aria-hidden><td colSpan={colCount} style={{ height: padTop }} /></tr>}
+          {vItems.map((vi) => {
+            const r = rows[vi.index];
+            const i = vi.index;
+            return (
+            <tr key={`${r.isin}-${i}`} data-index={i} ref={rowVirtualizer.measureElement}
+              className="border-b border-neutral-800/20 hover:bg-overlay/[0.02]">
+              {/* ⚠ THE BADGE LIVES IN THE PINNED NAME CELL, like the fundamentals grid's. The
+                  moment you are asking "why is this row's weight empty?" you are scrolled right
+                  looking at the empty cells, and a badge in any other column has gone with them.
+                  `shrink-0` + `truncate` so a long name yields space to it rather than pushing it
+                  out. */}
               <td className="px-3 py-1.5 text-fg-soft sticky left-0 bg-card z-10 max-w-0">
-                <span className="block truncate" title={r.name}>{r.name}</span>
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <span className="truncate" title={r.name}>{r.name}</span>
+                  {blend.excluded.has(r) && (
+                    <span
+                      className="shrink-0 text-[9px] leading-none px-1 py-0.5 rounded border
+                                 border-warn-500/40 bg-warn-500/10 text-warn-300 font-medium
+                                 tracking-wide cursor-help"
+                      title={`Not in the ${metricLabel} line: ${blend.excluded.get(r)}`}>
+                      NOT IN LINE
+                    </span>
+                  )}
+                </span>
               </td>
-              <td className="px-3 py-1.5 font-mono text-[11px] text-fg-subtle whitespace-nowrap">{r.exchange ?? '—'}</td>
+              <td className="px-3 py-1.5 font-mono text-[11px] text-fg-subtle whitespace-nowrap">
+                <Ident w="w-14">{r.exchange ?? '—'}</Ident>
+              </td>
               <td className="px-3 py-1.5 font-mono text-[11px] whitespace-nowrap">
-                {r.ticker
-                  ? <a href={guruFocusUrl(r.ticker, r.exchange)} target="_blank" rel="noopener noreferrer"
-                      className="text-accent-400 hover:underline" title="Open the GuruFocus page">{r.ticker} ↗</a>
-                  : '—'}
+                <Ident w="w-[4.75rem]">
+                  {r.ticker
+                    ? <a href={guruFocusUrl(r.ticker, r.exchange)} target="_blank" rel="noopener noreferrer"
+                        className="text-accent-400 hover:underline" title="Open the GuruFocus page">{r.ticker} ↗</a>
+                    : '—'}
+                </Ident>
               </td>
-              {hasCap && <td className="px-3 py-1.5 text-right font-mono text-fg-muted whitespace-nowrap">{capBn(r.market_cap_eur)}</td>}
-              {/* ⚠ TWO DECIMALS, MATCHING THE SERVER. `weight_pct` is rounded to 2 there, and
-                  printing 1 here made cap ÷ Σcap fail to reproduce the number beside it — on the
-                  one table whose purpose is that the division can be checked. */}
-              <td className="px-3 py-1.5 text-right font-mono text-fg-muted whitespace-nowrap">{r.weight_pct.toFixed(2)}%</td>
-              <td className="px-3 py-1.5 font-mono text-[11px] text-fg-subtle whitespace-nowrap">{r.currency ?? '—'}</td>
+              {hasCap && (
+                <td className="px-3 py-1.5 text-right font-mono text-fg-muted whitespace-nowrap">
+                  <span className="inline-block w-14 text-right tabular-nums">{capBn(r.market_cap_eur)}</span>
+                </td>
+              )}
+              <td className="px-3 py-1.5 font-mono text-[11px] text-fg-subtle whitespace-nowrap">
+                <Ident w="w-9">{r.currency ?? '—'}</Ident>
+              </td>
+              {/* ⚠ ONLY ON A ROW THAT HAS THE LINES. An `unsubscribed` / `no_data` row spans the
+                  period columns with a single line of text, so labelling lines it does not have
+                  would make it taller than the answer it carries. The cell still renders, because
+                  a skipped `<td>` would shift every period column left on that row. */}
+              {/* ⚠⚠ THE CURRENCY IS ONLY SHOWN WHERE THE NUMBER IS ACTUALLY MONEY, which is what
+                  makes it worth showing at all. Three tests, and each excludes a real case here:
+                    * the UNIT — `percent` (ROIC) and `shares` are not currency amounts, and a
+                      share count is a plain number in millions exactly like the money lines;
+                    * the VIEW — only `Reported` is in the company's own currency. `Rebased` is an
+                      INDEX (100 at its own first period) and `YoY` is a percentage; putting "USD"
+                      against either would relabel a ratio as money, which is the same class of
+                      error as the `… %` line the backend's `_ITEMS` bans outright;
+                    * the ROW — each company reports in its OWN currency, so this belongs per row
+                      and could never be a column heading.
+                  The cap is always EUR by construction (`period_caps_eur` converts at each
+                  period's own end date), so it is stated flatly rather than conditionally. */}
+              <td className="px-3 py-1.5 whitespace-nowrap align-top">
+                {r.status !== 'unsubscribed' && r.status !== 'no_data' && (
+                  <span className="block">
+                    <span className="block text-[11px] text-fg-subtle">
+                      {metricLabel}
+                      {valueIsCurrency && view === 'reported' && r.currency
+                        ? ` (${r.currency})` : ''}
+                    </span>
+                    {hasPeriodCap && (
+                      <span className="block text-[10px] leading-tight text-fg-dim">cap (EUR)</span>
+                    )}
+                    <span className="block text-[10px] leading-tight text-fg-faint">weight</span>
+                  </span>
+                )}
+              </td>
               {r.status === 'unsubscribed' ? (
                 // Can't fetch it — exchange outside the GuruFocus subscription.
                 <td colSpan={data.years.length} className="px-3 py-1.5 text-warn-300"
@@ -354,16 +608,50 @@ figure is the small second line inside each period cell.">
                   // to be adjacent. It is the second line rather than the first because the value
                   // is what the column is named after and what sorting ranks on.
                   const w = weightAt(r, y);
+                  const cap = capAt(r, y);
                   return (
+                    // ⚠ THE REASON MUST BE THE ACTUAL ONE. This tooltip used to assert "no cap
+                    // filed for it" for every empty weight — true for an index constituent missing
+                    // a period cap, and flatly WRONG for a row the rebase excluded (AMD on
+                    // FCF/share), which is the more common case on a book. A confident wrong
+                    // explanation is worse than none: it sends the reader to fix a cap that was
+                    // never the problem.
                     <td key={y} className="px-3 py-1.5 text-right font-mono text-fg-soft whitespace-nowrap"
                       title={`${w == null
-                        ? 'Not in this period’s average.'
-                        : `${w.toFixed(2)}% of the weight behind this period’s line`}`
+                        ? (blend.excluded.has(r)
+                          ? `Not in the ${metricLabel} line at all: ${blend.excluded.get(r)}`
+                          : r.revenue[y] == null
+                            ? 'Nothing filed for this period, so it is out of this period’s average.'
+                            : 'No market cap filed for this period, so it is out of both the '
+                              + 'numerator and the denominator of this period’s average.')
+                        : `${w.toFixed(2)}% of this period’s line`
+                          + (cap != null ? ` — cap €${(cap / 1e9).toFixed(1)}bn as at this period `
+                            + '÷ the Σ cap on the total row' : '')}`
                         + (view === 'reported' ? '' : ` · ${fmt(r.revenue[y])} as reported`)}>
                       <span className="block"><Cell>{cellText(cellOf(r, y))}</Cell></span>
-                      {/* ⚠ A NON-BREAKING SPACE, NOT AN EMPTY STRING, WHERE THERE IS NO WEIGHT. An
-                          empty span collapses to zero height, so a row with a gap year would be
-                          shorter than its neighbours and the table would ripple. */}
+                      {/* ⚠ THE CAP THAT PERIOD, NOT TODAY'S — the numerator of the percentage
+                          under it, so the division can be checked against the total row rather
+                          than trusted. Only on an index; a book's holding weight has no market
+                          cap behind it and the row stays two lines. Dimmer than the weight
+                          because it is the input and the weight is the answer. */}
+                      {hasPeriodCap && (
+                        <span className="block text-[10px] leading-tight text-fg-dim">
+                          <Cell>{cap == null ? ' ' : capBn(cap)}</Cell>
+                        </span>
+                      )}
+                      {/* ⚠ ` `, NOT `''` AND NOT A PLAIN `' '`. A block box whose only content
+                          is COLLAPSIBLE whitespace generates no line box and is zero pixels tall,
+                          so a company with a gap year would get a one-line cell among two-line
+                          ones — and a `<td>` centres its content, so every figure in that row
+                          would sit half a line off from its neighbours. A no-break space is not
+                          collapsible.
+
+                          ⚠ IT IS A LITERAL U+00A0 IN THIS FILE AND IT IS INVISIBLE HERE. Written
+                          as `' '` it reads back as the character, so there is nothing on
+                          screen to distinguish it from the plain space it must not be. If a bulk
+                          rewrite of this file ever normalises whitespace, this is the byte that
+                          quietly breaks — the symptom is figures sitting half a line off their
+                          neighbours in any row with a gap year, which reads as a CSS problem. */}
                       <span className="block text-[10px] leading-tight text-fg-faint">
                         <Cell>{w == null ? ' ' : `${w.toFixed(2)}%`}</Cell>
                       </span>
@@ -372,9 +660,14 @@ figure is the small second line inside each period cell.">
                 })
               )}
             </tr>
-          ))}
+            );
+          })}
+          {padBottom > 0 && <tr aria-hidden><td colSpan={colCount} style={{ height: padBottom }} /></tr>}
         </tbody>
-        <tfoot>
+        {/* ⚠ PINNED TO THE BOTTOM OF THE BOX. In `rebased` this row IS the plotted line, so it is
+            the one thing a reader checks every other row against — scrolling it out of view is
+            what made the old unbounded table hard to use on an index. */}
+        <tfoot className="sticky bottom-0 z-20">
           {/* Sum of the shown companies' weights — under 100% because cash / bonds / any holding
               we can't price aren't listed. */}
           <tr className="border-t border-neutral-800/40 bg-page font-semibold text-fg-strong">
@@ -384,28 +677,50 @@ figure is the small second line inside each period cell.">
                 : view === 'yoy'
                   ? 'The plotted line’s own period-on-period change. NOT the average of the column above: the chart averages rebased levels, never growth rates.'
                   : undefined}>
-              <span className="block">
-                {view === 'rebased' ? 'Weighted (= the line)' : view === 'yoy' ? 'Line YoY' : 'Total'}
-              </span>
-              {/* Names the second line every period cell in this row now carries. */}
-              <span className="block text-[10px] leading-tight font-normal text-fg-faint">
-                covered
-              </span>
+              {view === 'rebased' ? 'Weighted (= the line)' : view === 'yoy' ? 'Line YoY' : 'Total'}
             </td>
             <td className="px-3 py-1.5" />
             <td className="px-3 py-1.5" />
-            {/* ⚠ THE DENOMINATOR, SPELLED OUT. Without it the Weight column is a set of numbers to
-                take on trust; with it, every row is cap ÷ this. */}
+            {/* Σ of the Mkt cap column — TODAY's caps, matching the column above it. ⚠ It is NOT
+                the denominator of any weight on this table any more: those divide by the `Σ cap`
+                line inside each period, which is that period's own total and a different number
+                in every column. */}
             {hasCap && (
               <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap"
-                title="The sum every weight in this column was divided by.">
+                title="Σ of the Mkt cap column — today's caps. The weights inside the period cells
+divide by that period's own Σ cap instead, on the line directly below this row's figure.">
                 {capBn(rows.reduce((a, r) => a + (r.market_cap_eur ?? 0), 0))}
               </td>
             )}
-            <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
-              {rows.reduce((a, r) => a + r.weight_pct, 0).toFixed(2)}%
-            </td>
             <td className="px-3 py-1.5" />
+            {/* The line-label column, for the total row — same order and the same dim inks as the
+                per-company labels above, so the whole column reads as one list of names.
+
+                ⚠⚠ THE THIRD LINE MEANS SOMETHING DIFFERENT HERE, AND THE LABEL IS WHAT MAKES THAT
+                SAFE. A company's third line is its WEIGHT; this row's is COVERAGE — deliberately
+                not the sum of the weights above, which is 100% by construction and would tell a
+                reader nothing. Scanning down a period column you therefore pass a run of weights
+                and land on a percentage that is not their total. Unlabelled that is a trap; named
+                `weight` on every row and `covered` on this one, they are two quantities that
+                simply share a line.
+
+                The first line carries the metric's own name, exactly as every row above does — it
+                IS that line, weight-averaged. What KIND of average is on the sticky cell at the
+                far left (`Weighted (= the line)`), which stays in view when this column does
+                not. */}
+            {/* ⚠ THE TOTAL ROW CARRIES NO CURRENCY ON ITS FIRST LINE, AND THE ASYMMETRY IS THE
+                POINT. Every row above says e.g. `Revenue (USD)` in Reported view; this one cannot,
+                because there is nothing here to put a currency on — Reported has no total at all
+                (the columns are different currencies, which is exactly why the chart rebases), and
+                Rebased and YoY are an index and a percentage. A reader noticing the missing "(USD)"
+                has noticed the real reason the blend works the way it does. */}
+            <td className="px-3 py-1.5 whitespace-nowrap align-top font-normal">
+              <span className="block text-[11px] text-fg-subtle">{metricLabel}</span>
+              {hasPeriodCap && (
+                <span className="block text-[10px] leading-tight text-fg-dim">Σ cap (EUR)</span>
+              )}
+              <span className="block text-[10px] leading-tight text-fg-faint">covered</span>
+            </td>
             {/* ⚠ THE ROW THAT MAKES THE TABLE CHECKABLE — and it is only a sum in one of the three
                 views. Reported: nothing to total, the columns are different currencies. Rebased:
                 the weighted average IS the plotted line. YoY: the plotted line's own change, NOT
@@ -431,17 +746,27 @@ figure is the small second line inside each period cell.">
                         : '')}>
                   <span className="block">
                     <Cell>
-                      {value == null ? ' ' : view === 'rebased' ? value.toFixed(1)
+                      {value == null ? ' ' : view === 'rebased' ? value.toFixed(1)
                         : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`}
                     </Cell>
                   </span>
-                  {/* ⚠ COVERAGE, PROMOTED OUT OF THE TOOLTIP — it is the footer's second line
-                      because every cell above it now has one, and because it is what the weights
-                      above are shares OF. The column of weights sums to 100% within a period by
+                  {/* ⚠⚠ THE DENOMINATOR, SPELLED OUT — Σ of the caps this period's weights were
+                      each divided by. Every weight in the column above is that row's cap ÷ this
+                      number, so the table is checkable rather than asserted. It also makes the
+                      per-period basis visible at a glance: this figure GROWS down the years
+                      because the index was worth less in 2015, which is exactly the fact that
+                      weighting by today's cap threw away. */}
+                  {hasPeriodCap && (
+                    <span className="block text-[10px] leading-tight text-fg-dim">
+                      <Cell>{blend.denom[y] == null ? ' ' : capBn(blend.denom[y])}</Cell>
+                    </span>
+                  )}
+                  {/* ⚠ COVERAGE, PROMOTED OUT OF THE TOOLTIP — it is what the weights above are
+                      shares OF. The column of weights sums to 100% within a period by
                       construction; this says what share of the index that 100% actually is. A
                       period under the floor is greyed with the rest of the cell. */}
                   <span className="block text-[10px] leading-tight text-fg-faint">
-                    <Cell>{lv == null ? ' ' : `${lv.covered.toFixed(0)}%`}</Cell>
+                    <Cell>{lv == null ? ' ' : `${lv.covered.toFixed(0)}%`}</Cell>
                   </span>
                 </td>
               );
@@ -469,6 +794,11 @@ export default function HoldingsRevenueModal({
   /** Set when a benchmark is active — lets the modal load the INDEX's constituents on demand. */
   benchTarget?: { universe: string; cadence: 'annual' | 'quarterly' } | null;
 }) {
+  /** Is this metric MONEY? ⚠ Declared once, from the unit, and read by both tables — the rule that
+   *  `shares` is a plain count and `percent` is already a ratio is easy to state and easy to get
+   *  backwards, and two copies of it is how one table comes to label a share count "(USD)". Same
+   *  two members as the backend's `_CURRENCY_UNITS`. */
+  const valueIsCurrency = unit === 'millions' || unit === 'per_share';
   // millions/shares → compact B/T/M; per_share → a plain per-share figure; percent → a % ratio.
   const fmtM = (v: number | null | undefined) => {
     if (v == null) return '—';
@@ -628,7 +958,8 @@ export default function HoldingsRevenueModal({
               <p className="text-xs text-fg-subtle">No held company has {noun} ingested.</p>
             )}
             {data && data.rows.length > 0 && (
-              <MatrixTable data={data} fmt={fmtM} noun={noun} view={view} onFetch={fetchRevenue} />
+              <MatrixTable data={data} fmt={fmtM} noun={noun} metricLabel={seriesLabel ?? noun}
+                valueIsCurrency={valueIsCurrency} view={view} onFetch={fetchRevenue} />
             )}
           </div>
 
@@ -674,7 +1005,8 @@ export default function HoldingsRevenueModal({
                       `weight_basis` is still computed and still on the API response — nothing was
                       removed from `_benchmark_index.weight_basis` — so a compact form (a count, with
                       the names in a tooltip) can be put back without touching the backend. */}
-                  <MatrixTable data={bench} fmt={fmtM} noun={noun} view={view} />
+                  <MatrixTable data={bench} fmt={fmtM} noun={noun} metricLabel={seriesLabel ?? noun}
+                valueIsCurrency={valueIsCurrency} view={view} />
                 </>
               )}
             </div>
