@@ -127,7 +127,9 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
       )}
 
       {showInputs && (
-        <MarginInputsModal target={holdingsTarget} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <MarginInputsModal target={holdingsTarget} portfolioName={holdingsName}
+          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          onClose={() => setShowInputs(false)} />
       )}
     </div>
   );

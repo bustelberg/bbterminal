@@ -123,7 +123,9 @@ export default function CapexMarginCard({ holdingsTarget, holdingsName, benchTar
       )}
 
       {showInputs && (
-        <CapexMarginInputsModal target={holdingsTarget} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <CapexMarginInputsModal target={holdingsTarget} portfolioName={holdingsName}
+          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          onClose={() => setShowInputs(false)} />
       )}
     </div>
   );

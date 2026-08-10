@@ -1731,6 +1731,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/portfolios/{portefeuille}/refresh/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Portfolio Refresh Job
+         * @description The same re-scan as above, as a CANCELLABLE JOB that reports progress.
+         *
+         *     ⚠ WHY A JOB FOR A "few seconds" REFRESH. It is not a few seconds any more: with the cascade it
+         *     is five downloads per account over a chain that reaches NINE (TOPS_BEOFF_BEH_DYN). Held open as
+         *     one POST, the caller gets a disabled button and no line moving — indistinguishable from a hung
+         *     one — and navigating away abandons work that carries on invisibly. As a job it reports into the
+         *     shared toast stack, survives the route change, and re-attaches on reload (`attachRunningJobs`).
+         *
+         *     ⚠ THE SAME `refresh_one_portfolio`, WITH A LISTENER — not a streaming copy of it. That function
+         *     is already the one body the fleet scan and the per-row refresh share; a second version for the
+         *     job path is exactly the drift its own docstring exists to prevent. The plain POST above stays
+         *     for scripts and for anything that wants one blocking answer.
+         *
+         *     ⚠ NO `ctx.check()` INSIDE THE SCAN. Cancellation is cooperative and the natural boundary is
+         *     BETWEEN accounts — but a half-cascade leaves a parent fresh against stale children, which is
+         *     the state this endpoint exists to avoid. So the job is not cancellable mid-chain: it reports,
+         *     it does not stop. `_LOCK` already refuses a second one.
+         */
+        post: operations["airs_portfolio_refresh_job_api_airs_portfolios__portefeuille__refresh_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/scan": {
         parameters: {
             query?: never;
@@ -14123,6 +14159,39 @@ export interface operations {
         };
     };
     airs_portfolio_refresh_api_airs_portfolios__portefeuille__refresh_post: {
+        parameters: {
+            query?: {
+                cascade?: boolean;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_refresh_job_api_airs_portfolios__portefeuille__refresh_job_post: {
         parameters: {
             query?: {
                 cascade?: boolean;

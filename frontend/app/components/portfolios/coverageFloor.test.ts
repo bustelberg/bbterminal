@@ -52,6 +52,57 @@ describe('weightedByYear', () => {
   });
 });
 
+/**
+ * PER-PERIOD WEIGHTING — an index is weighted by the cap it HAD in that period, not by today's.
+ *
+ * Weighting 2018's margin by today's cap is look-ahead bias: measured on the S&P, NVIDIA is
+ * carried at 7.46% of a year it was 0.63% of, and the FCF-SBC margin benchmark moves up to 3.00pp.
+ * A portfolio has no cap history — a holding weight is not a market cap — so it keeps one basis
+ * for every period, which is what the absence of `market_cap_by_period` means.
+ */
+describe('weightedByYear with per-period caps', () => {
+  const c = (weight_pct: number, years: Record<string, number | null>,
+    caps: Record<string, number>) => ({ weight_pct, years, market_cap_by_period: caps });
+
+  it('weights by THAT period’s cap, not by the stable weight', () => {
+    // Equal weight_pct, wildly unequal caps in 2024: 900/100, so the answer is 12 and NOT the 20
+    // that today's-cap weighting gives. This is the whole change in one assertion.
+    const out = weightedByYear(
+      [c(50, { 2024: 10 }, { 2024: 900 }), c(50, { 2024: 30 }, { 2024: 100 })], YEARS, VALUE);
+    expect(out.get(2024)).toBeCloseTo(12);
+    expect(out.get(2024)).not.toBeCloseTo(20);
+  });
+
+  it('⚠ drops a row with no cap that period from the average entirely', () => {
+    // C has a figure and no cap: it cannot be weighted on the same basis as the others, so it is
+    // out of both numerator and denominator. Its 999 must not reach the average.
+    const out = weightedByYear([
+      c(45, { 2024: 10 }, { 2024: 100 }),
+      c(45, { 2024: 10 }, { 2024: 100 }),
+      c(10, { 2024: 999 }, {}),
+    ], YEARS, VALUE);
+    expect(out.get(2024)).toBeCloseTo(10);
+  });
+
+  it('⚠⚠ measures COVERAGE on the stable weight — the bug that silently disabled the floor', () => {
+    // The per-period cap comes out of the same GuruFocus blob as the figure, so a company that has
+    // not filed FY2026 has no FY2026 cap either. Measuring coverage with it divides the filers by
+    // the filers and reads 100% — which is how FY2026 came to draw a full-height point built
+    // almost entirely out of NVIDIA. On the stable weight this is 20% covered, and omitted.
+    const out = weightedByYear([
+      c(20, { 2026: 20 }, { 2026: 500 }),
+      c(80, {}, {}),
+    ], YEARS, VALUE);
+    expect([...out.keys()]).toEqual([]);
+  });
+
+  it('a portfolio keeps ONE basis for every period', () => {
+    // No `market_cap_by_period` at all ⇒ the holding weight applies throughout, unchanged.
+    const out = weightedByYear(rows(w(50, { 2024: 10 }), w(50, { 2024: 30 })), YEARS, VALUE);
+    expect(out.get(2024)).toBeCloseTo(20);
+  });
+});
+
 describe('coverageByYear', () => {
   it('reports the share behind each year, including years no point was drawn for', () => {
     const out = coverageByYear(rows(w(40, { 2026: 20 }), w(60, {})), YEARS, VALUE);

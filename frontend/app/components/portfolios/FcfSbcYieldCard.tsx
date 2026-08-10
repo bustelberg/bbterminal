@@ -141,7 +141,9 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
       )}
 
       {showInputs && (
-        <FcfSbcYieldInputsModal target={target} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <FcfSbcYieldInputsModal target={target} portfolioName={holdingsName}
+          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          onClose={() => setShowInputs(false)} />
       )}
     </div>
   );

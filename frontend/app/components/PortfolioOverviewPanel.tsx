@@ -11,6 +11,8 @@ import { runSSE } from '../../lib/stream';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
+import { RefreshIcon } from './portfolios/RefreshIcon';
+import { startJob } from '../../lib/stores/jobs';
 import AllocationBandsModal from './portfolios/AllocationBandsModal';
 import AccountTransactions from './portfolios/AccountTransactions';
 import AccountTotalReturn from './portfolios/AccountTotalReturn';
@@ -50,8 +52,6 @@ const eur = (v: number | null | undefined) =>
 const tone = (v: number | null | undefined) =>
   v == null ? 'text-fg-faint' : v >= 0 ? 'text-pos-400' : 'text-neg-400';
 
-/** A clean reload glyph (inline SVG, not the `↻` character) — the standard two-arrow refresh,
- *  spinning while a refresh is running. */
 /** The four AIRS reports, by the code the scan records, in AIRS's own words — a badge saying
  *  "volk" would send a reader to the wrong screen. Mirrors `airs_vermogen.REPORTS`. */
 /** One CAUSE of failure, with how many accounts hit it — see the backend's `summarise_errors`. */
@@ -150,18 +150,6 @@ const REPORT_LABELS: Record<string, string> = {
   model: 'Model',
 };
 
-function RefreshIcon({ spinning, size = 14 }: { spinning?: boolean; size?: number }) {
-  return (
-    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-      className={spinning ? 'animate-spin' : ''}>
-      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-      <path d="M21 3v5h-5" />
-      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-      <path d="M3 21v-5h5" />
-    </svg>
-  );
-}
 
 export default function PortfolioOverviewPanel() {
   // ⚠ THE TABLE IS FOR EVERYONE; CHANGING IT IS NOT. Scraping AIRS, deleting an account and
@@ -189,7 +177,10 @@ export default function PortfolioOverviewPanel() {
   // nobody asked to see is not worth a request on every page load.
   const [showBands, setShowBands] = useState(false);
   // The Fixed portfolio to analyse. Its id, not the row's — the modal describes the strategy.
-  const [analyse, setAnalyse] = useState<{ id?: number; name: string; basket?: Basket } | null>(null);
+  /** `pf` is the AIRS portefeuille code — what `refreshOne` is keyed on, carried so the modal's
+   *  Refresh fires the identical scan the row's does. */
+  const [analyse, setAnalyse] = useState<
+    { id?: number; name: string; basket?: Basket; pf?: string } | null>(null);
   // Refresh state: the fleet job is running; a status/error line; which single rows are re-scanning.
   const [refreshingAll, setRefreshingAll] = useState(false);
   /**
@@ -209,6 +200,8 @@ export default function PortfolioOverviewPanel() {
   const [refreshMsg, setRefreshMsg] = useState<
     { text: string; kind: 'info' | 'error' | 'warn' | 'ok' } | null>(null);
   const [refreshingRows, setRefreshingRows] = useState<Set<string>>(new Set());
+  /** Bumped when a row refresh finishes, so an open Analyse modal re-reads what it rebuilt. */
+  const [refreshSeq, setRefreshSeq] = useState(0);
   const [deletingRows, setDeletingRows] = useState<Set<string>>(new Set());
   const [scanningModels, setScanningModels] = useState(false);
   const [opening, setOpening] = useState<string | null>(null);
@@ -270,8 +263,11 @@ export default function PortfolioOverviewPanel() {
    */
   const openModal = async (r: AirsPortfolioOverview) => {
     const set = setAnalyse;
+    // ⚠ THE PORTEFEUILLE CODE TRAVELS WITH THE MODAL. `refreshOne` is keyed on it, not on the
+    // fixed portfolio id, so without it the modal's Refresh has nothing to call — the row and the
+    // modal must fire the identical scan.
     if (r.fixed_portfolio_id != null) {
-      set({ id: r.fixed_portfolio_id, name: r.name });
+      set({ id: r.fixed_portfolio_id, name: r.name, pf: r.dynamic_portefeuille });
       return;
     }
     const p = r.dynamic_portefeuille;
@@ -293,7 +289,7 @@ export default function PortfolioOverviewPanel() {
         setRefreshMsg({ text: `${r.name}: no ISIN-bearing holdings to analyse.`, kind: 'warn' });
         return;
       }
-      set({ name: r.name, basket: { holdings, label: r.name } });
+      set({ name: r.name, basket: { holdings, label: r.name }, pf: r.dynamic_portefeuille });
     } catch (e) {
       console.warn(`[AIRS expand] could not build a basket for ${p}`, e);
       setRefreshMsg({ text: `${r.name}: ${e instanceof Error ? e.message : String(e)}`, kind: 'error' });
@@ -465,59 +461,33 @@ export default function PortfolioOverviewPanel() {
 
   useEffect(() => { void loadOverview(); }, [loadOverview]);
 
-  // Re-scan ONE portfolio's AIRS reports (Rendement + Vermogensoverzicht) and reload its figures.
-  // Drops the cached holdings so a re-expand pulls the fresh snapshot too.
+  /**
+   * Re-scan ONE portfolio's AIRS reports (Rendement + Vermogensoverzicht) and reload its figures.
+   *
+   * ⚠ IT RUNS AS A JOB, AND THE PROGRESS GOES TO THE SHARED TOAST STACK (`lib/stores/jobs.ts`,
+   * rendered from the root layout) — the same one the fundamentals ingests report into. Three
+   * things that a plain POST could not give it, and this refresh needs all three:
+   *   * a line that MOVES. With the cascade this is five downloads per account over a chain that
+   *     reaches nine (TOPS_BEOFF_BEH_DYN); a disabled button with nothing happening reads as hung;
+   *   * progress that SURVIVES navigating away — the work carried on regardless, it just had
+   *     nothing on screen to say so;
+   *   * re-attachment on reload (`attachRunningJobs`), so a refresh is never invisible.
+   *
+   * ⚠ THE INLINE `refreshMsg` LINE IS GONE FOR THIS ACTION, deliberately. Two places reporting one
+   * job is two places to keep in step, and the toast already carries the outcome, the failure and
+   * the countdown. `refreshMsg` stays for everything else on this panel that is NOT a job.
+   */
   const refreshOne = async (portefeuille: string) => {
     setRefreshingRows((s) => new Set(s).add(portefeuille));
-    setRefreshMsg(null);
     try {
-      const r = await apiFetch(
-        `${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh`,
-        { method: 'POST' });
-      const b = (await r.json().catch(() => null)) as
-        { status?: string; errors?: string[]; as_of?: string; holdings_rows?: number;
-          complete?: boolean;
-          /** ⚠ The books this one is BUILT FROM — a holding can be a certificate wrapping another
-           *  strategy, and everything shown through it is read from that book's own scan. */
-          cascaded?: { portefeuille: string; status?: string; errors?: string[] }[] } | null;
-      // ⚠ NAMED, NOT SILENT. This refresh can now be nine scans instead of one (measured on
-      // TOPS_BEOFF_BEH_DYN), so the reader is owed what it did — and a parent refreshed against a
-      // child that FAILED is not fresh, which a single "refreshed" would have claimed.
-      const also = b?.cascaded ?? [];
-      const alsoFailed = also.filter((c) => c.status !== 'ok');
-      const alsoText = also.length
-        ? ` Also refreshed ${also.length} book${also.length === 1 ? '' : 's'} it is built from`
-          + (alsoFailed.length ? ` — ${alsoFailed.length} failed.` : '.')
-        : '';
-      if (alsoFailed.length) logDetail(`refresh ${portefeuille}: cascade failures`, alsoFailed);
-      if (!r.ok) {
-        logDetail(`refresh ${portefeuille} failed`, { status: r.status, body: b });
-        setRefreshMsg({ text: `${portefeuille}: refresh failed — HTTP ${r.status}. Is the backend running with AIRS credentials?`, kind: 'error' });
-      } else if (b?.status === 'busy') {
-        setRefreshMsg({ text: 'A full refresh is already running — try again in a moment.', kind: 'info' });
-      } else if (b?.status === 'error') {
-        logDetail(`refresh ${portefeuille}: AIRS scan failed`, b?.errors ?? b);
-        setRefreshMsg({ text: `${portefeuille}: AIRS scan failed — see the console for the reason.`, kind: 'error' });
-      } else if (b?.complete === false) {
-        // ⚠ THE OUTCOME THIS BUTTON EXISTS FOR, so it has to say what it means: some reports
-        // arrived and some did not. "AIRS scan failed" (what this said before) sends you to check
-        // credentials that are fine. WHICH reports, and why, is console detail — the row itself
-        // already carries a ⚠ naming them, so repeating them here said it twice and neither well.
-        logDetail(`refresh ${portefeuille} incomplete`, b?.errors ?? b);
-        setRefreshMsg({
-          text: `${portefeuille}: partly refreshed — some reports did not arrive.${alsoText}`,
-          kind: 'warn',
-        });
-      } else {
-        setRefreshMsg({
-          text: `${portefeuille}: refreshed — ${b?.holdings_rows ?? 0} holdings as of `
-            + `${b?.as_of ?? 'today'}.${alsoText}`,
-          // ⚠ A failed dependency downgrades the whole message. The parent's own scan succeeded,
-          // but its looked-through figures are read from a book that did not — reporting that as
-          // a clean refresh is exactly the stale-shown-as-fresh failure this app keeps refusing.
-          kind: alsoFailed.length ? 'warn' : 'ok',
-        });
-      }
+      const { done } = await startJob(
+        `${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh/job`,
+        portefeuille);
+      const job = await done;
+      // ⚠ RELOAD ON ANYTHING THAT REACHED THE SERVER, not only on `done`. A failed cascade still
+      // wrote every account it got through, so leaving the pre-refresh figures on screen would
+      // hide real work that was really done — the same rule the bulk fundamentals fill follows.
+      if (job.status === 'failed') logDetail(`refresh ${portefeuille} failed`, job.summary);
       setDetail((d) => { const n = { ...d }; delete n[portefeuille]; return n; });
       setIsins((m) => { const n = { ...m }; delete n[portefeuille]; return n; });
       await loadOverview();
@@ -529,6 +499,11 @@ export default function PortfolioOverviewPanel() {
       setRefreshMsg({ text: `${portefeuille}: ${e instanceof Error ? e.message : String(e)}`, kind: 'error' });
     } finally {
       setRefreshingRows((s) => { const n = new Set(s); n.delete(portefeuille); return n; });
+      // ⚠ AND THE ANALYSE MODAL, IF IT IS OPEN ON THIS PORTFOLIO. It is drawn from the composition
+      // and holdings this scan just re-read, and it has already loaded — so without a nudge it
+      // would sit showing pre-scan figures while the row behind it updated, which reads as the
+      // button having done nothing. A counter, not a boolean: two scans in a row must both land.
+      setRefreshSeq((s) => s + 1);
     }
   };
 
@@ -995,8 +970,16 @@ export default function PortfolioOverviewPanel() {
         // paint the PREVIOUS portfolio's composition for the ~4s the next one takes to load —
         // a complete, plausible, wrong answer with no loading state to warn the reader. The key
         // forces a fresh mount, so an unloaded modal can only ever show "Loading composition…".
+        // ⚠ THE ROW'S OWN `refreshOne`, PASSED THROUGH — not a second implementation. Admin-gated
+        // exactly as the row's button is (the scan writes, and the API gate holds it to admins),
+        // and `refreshSeq` bumps when it finishes so the modal re-reads what the scan rebuilt.
         <PortfolioAnalysisModal key={analyse.id ?? analyse.name} id={analyse.id} basket={analyse.basket}
-          name={analyse.name} onClose={() => setAnalyse(null)} />
+          name={analyse.name}
+          onRefresh={isAdmin && analyse.pf ? () => void refreshOne(analyse.pf!) : undefined}
+          refreshing={!!analyse.pf && refreshingRows.has(analyse.pf)}
+          refreshTitle="Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."
+          refreshSeq={refreshSeq}
+          onClose={() => setAnalyse(null)} />
       )}
       {showBands && (
         <AllocationBandsModal canEdit={isAdmin} onClose={() => setShowBands(false)} />

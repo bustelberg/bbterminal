@@ -134,7 +134,9 @@ export default function InterestBurdenCard({ holdingsTarget, holdingsName, bench
       )}
 
       {showInputs && (
-        <InterestBurdenInputsModal target={holdingsTarget} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <InterestBurdenInputsModal target={holdingsTarget} portfolioName={holdingsName}
+          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          onClose={() => setShowInputs(false)} />
       )}
     </div>
   );

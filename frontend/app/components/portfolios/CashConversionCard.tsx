@@ -148,7 +148,9 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
       )}
 
       {showInputs && (
-        <CashConversionInputsModal target={holdingsTarget} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <CashConversionInputsModal target={holdingsTarget} portfolioName={holdingsName}
+          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          onClose={() => setShowInputs(false)} />
       )}
     </div>
   );

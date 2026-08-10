@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from typing import Callable
 import time as _time
 from datetime import date, datetime, timedelta, timezone
 
@@ -1086,7 +1087,8 @@ def dependent_accounts(portefeuille: str) -> list[str]:
     return order
 
 
-def refresh_one_portfolio(portefeuille: str, cascade: bool = True) -> dict:
+def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
+                          on_step: Callable[[int, int, str], None] | None = None) -> dict:
     """Re-scan ONE portfolio's Rendement (ATT) + Vermogensoverzicht (VOLK) and store both — the
     per-row "Refresh" on the overview table.
 
@@ -1104,9 +1106,28 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True) -> dict:
     refresh and the whole-fleet refresh can never diverge. Serialized against the full scan (and
     other single refreshes) via `_LOCK` — they share ONE AirSPMS session, which must not be driven
     by two threads at once. A few seconds: two downloads (plus a login only if the session lapsed).
+
+    ⚠ `on_step(done, total, message)` IS OPTIONAL AND CHANGES NOTHING ELSE. It exists because the
+    cascade makes this unbounded from the reader's side — TOPS_BEOFF_BEH_DYN is NINE accounts at
+    five downloads each — and a button that sits disabled for a minute with no line moving is
+    indistinguishable from a broken one. It is a hook rather than a second, streaming copy of this
+    function: two implementations of "refresh one portfolio" is exactly what the ⚠ above says this
+    body exists to prevent.
     """
     if not _LOCK.acquire(blocking=False):
         return {"status": "busy", "message": "An AIRS refresh is already running", "portefeuille": portefeuille}
+
+    def _step(done: int, total: int, message: str) -> None:
+        # ⚠ A REPORTER MUST NEVER BE THE REASON A SCAN FAILS. The work is the scan; the line on
+        # screen is a courtesy, and a listener that raises would lose a refresh that had already
+        # downloaded everything.
+        if on_step is None:
+            return
+        try:
+            on_step(done, total, message)
+        except Exception:  # noqa: BLE001
+            _log.debug("[airs_vermogen] progress listener raised", exc_info=True)
+
     try:
         today = date.today()
         van, tot = f"{today.year}-01-01", today.isoformat()
@@ -1115,8 +1136,18 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True) -> dict:
         # of the four downloads — and the two had already drifted (only one recorded which reports
         # arrived). One body, so "refresh this row" and "refresh everything" cannot mean different
         # things.
+        # ⚠ THE TOTAL IS KNOWN BEFORE THE FIRST DOWNLOAD, so the bar is a real fraction from the
+        # start rather than a spinner that suddenly acquires a denominator. `dependent_accounts`
+        # is a lookup, not a scan.
+        deps = list(dependent_accounts(portefeuille)) if cascade else []
+        total = 1 + len(deps)
+        _step(0, total, f"{portefeuille} — scanning AIRS reports"
+                        + (f" (+{len(deps)} book{'s' if len(deps) != 1 else ''} it is built from)"
+                           if deps else ""))
         res = scan_one(portefeuille, van, tot)
         ok = res["reports_ok"]
+        _step(1, total, f"{portefeuille} — {res['holdings']} holdings, "
+                        f"{', '.join(sorted(ok)) or 'no reports'}")
 
         # ⚠ THE PER-ROW REFRESH RECORDS ITS VERDICT TOO — it is how an account short a report gets
         # its badge cleared without waiting for the next full scan. `_MIN_ROSTER` does not apply:
@@ -1129,7 +1160,8 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True) -> dict:
         # and releasing per account would let the fleet scan interleave halfway through a cascade
         # and leave the parent fresh against half-stale children.
         cascaded: list[dict] = []
-        for dep in (dependent_accounts(portefeuille) if cascade else []):
+        for i, dep in enumerate(deps, 1):
+            _step(i, total, f"{dep} — book {i} of {len(deps)} behind {portefeuille}")
             try:
                 sub = scan_one(dep, van, tot)
             except Exception as e:  # noqa: BLE001 — one child must not lose the parent's result
@@ -1137,6 +1169,9 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True) -> dict:
                              dep, type(e).__name__, e)
                 cascaded.append({"portefeuille": dep, "status": "error",
                                  "errors": [f"{type(e).__name__}: {e}"]})
+                # ⚠ A FAILED CHILD IS NAMED ON THE BAR, not folded into the count. A parent
+                # refreshed against a book that did not scan is not fresh.
+                _step(i + 1, total, f"{dep} — FAILED ({type(e).__name__})")
                 continue
             _record_reports({dep: sub["reports_ok"]}, datetime.now(timezone.utc).isoformat())
             cascaded.append({

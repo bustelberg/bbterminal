@@ -2068,6 +2068,55 @@ async def airs_portfolio_refresh(portefeuille: str, cascade: bool = True):
     return await asyncio.to_thread(refresh_one_portfolio, portefeuille, cascade)
 
 
+@router.post("/api/airs/portfolios/{portefeuille}/refresh/job")
+async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
+    """The same re-scan as above, as a CANCELLABLE JOB that reports progress.
+
+    ⚠ WHY A JOB FOR A "few seconds" REFRESH. It is not a few seconds any more: with the cascade it
+    is five downloads per account over a chain that reaches NINE (TOPS_BEOFF_BEH_DYN). Held open as
+    one POST, the caller gets a disabled button and no line moving — indistinguishable from a hung
+    one — and navigating away abandons work that carries on invisibly. As a job it reports into the
+    shared toast stack, survives the route change, and re-attaches on reload (`attachRunningJobs`).
+
+    ⚠ THE SAME `refresh_one_portfolio`, WITH A LISTENER — not a streaming copy of it. That function
+    is already the one body the fleet scan and the per-row refresh share; a second version for the
+    job path is exactly the drift its own docstring exists to prevent. The plain POST above stays
+    for scripts and for anything that wants one blocking answer.
+
+    ⚠ NO `ctx.check()` INSIDE THE SCAN. Cancellation is cooperative and the natural boundary is
+    BETWEEN accounts — but a half-cascade leaves a parent fresh against stale children, which is
+    the state this endpoint exists to avoid. So the job is not cancellable mid-chain: it reports,
+    it does not stop. `_LOCK` already refuses a second one.
+    """
+    import jobs as job_registry  # noqa: PLC0415
+
+    from airs_vermogen import refresh_one_portfolio  # noqa: PLC0415
+
+    def _work(ctx) -> str:
+        res = refresh_one_portfolio(
+            portefeuille, cascade,
+            on_step=lambda done, total, msg: ctx.progress(done, total, msg))
+        if res.get("status") == "busy":
+            # ⚠ AN ANSWER, NOT A FAILURE. The fleet scan holds the session; this is a "try again",
+            # and raising would paint it red beside the real errors.
+            return f"{portefeuille} — another AIRS refresh is running; nothing was re-read"
+        also = res.get("cascaded") or []
+        bad = [c for c in also if c.get("status") != "ok"]
+        if res.get("status") != "ok":
+            raise RuntimeError(
+                f"{portefeuille}: AIRS scan failed — {', '.join(res.get('errors') or []) or 'no reports returned'}")
+        # ⚠ A FAILED DEPENDENCY DOWNGRADES THE WHOLE SUMMARY, exactly as the inline message did:
+        # the parent's own scan succeeded, but its looked-through figures are read from a book that
+        # did not, and one word saying "refreshed" would claim a freshness it does not have.
+        return (f"{portefeuille} — {res.get('holdings_rows', 0)} holdings as of "
+                f"{res.get('as_of') or 'today'}"
+                + (f" · also refreshed {len(also)} book(s) it is built from" if also else '')
+                + (f" — {len(bad)} FAILED, see the console" if bad else ''))
+
+    job = job_registry.start("airs.portfolio.refresh", portefeuille, _work)
+    return {"job_id": job.id, "label": portefeuille}
+
+
 @router.get("/api/airs/vermogen/status")
 async def airs_vermogen_status():
     """Status of the Vermogensoverzicht refresh job: in-flight progress, last

@@ -15701,6 +15701,57 @@
         ]
       }
     },
+    "/api/airs/portfolios/{portefeuille}/refresh/job": {
+      "post": {
+        "description": "The same re-scan as above, as a CANCELLABLE JOB that reports progress.\n\n\u26a0 WHY A JOB FOR A \"few seconds\" REFRESH. It is not a few seconds any more: with the cascade it\nis five downloads per account over a chain that reaches NINE (TOPS_BEOFF_BEH_DYN). Held open as\none POST, the caller gets a disabled button and no line moving \u2014 indistinguishable from a hung\none \u2014 and navigating away abandons work that carries on invisibly. As a job it reports into the\nshared toast stack, survives the route change, and re-attaches on reload (`attachRunningJobs`).\n\n\u26a0 THE SAME `refresh_one_portfolio`, WITH A LISTENER \u2014 not a streaming copy of it. That function\nis already the one body the fleet scan and the per-row refresh share; a second version for the\njob path is exactly the drift its own docstring exists to prevent. The plain POST above stays\nfor scripts and for anything that wants one blocking answer.\n\n\u26a0 NO `ctx.check()` INSIDE THE SCAN. Cancellation is cooperative and the natural boundary is\nBETWEEN accounts \u2014 but a half-cascade leaves a parent fresh against stale children, which is\nthe state this endpoint exists to avoid. So the job is not cancellable mid-chain: it reports,\nit does not stop. `_LOCK` already refuses a second one.",
+        "operationId": "airs_portfolio_refresh_job_api_airs_portfolios__portefeuille__refresh_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cascade",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Cascade",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Refresh Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/scan": {
       "get": {
         "operationId": "airs_scan_api_airs_scan_get",

@@ -167,7 +167,9 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
       )}
 
       {showInputs && (
-        <CashReturnInputsModal target={holdingsTarget} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <CashReturnInputsModal target={holdingsTarget} portfolioName={holdingsName}
+          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          onClose={() => setShowInputs(false)} />
       )}
     </div>
   );

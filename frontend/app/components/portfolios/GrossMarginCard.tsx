@@ -133,7 +133,9 @@ export default function GrossMarginCard({ holdingsTarget, holdingsName, benchTar
       )}
 
       {showInputs && (
-        <GrossMarginInputsModal target={holdingsTarget} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <GrossMarginInputsModal target={holdingsTarget} portfolioName={holdingsName}
+          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          onClose={() => setShowInputs(false)} />
       )}
     </div>
   );

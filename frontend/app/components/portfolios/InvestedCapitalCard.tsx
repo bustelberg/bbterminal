@@ -227,7 +227,9 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
       )}
 
       {showInputs && (
-        <InvestedCapitalInputsModal target={holdingsTarget} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <InvestedCapitalInputsModal target={holdingsTarget} portfolioName={holdingsName}
+          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          onClose={() => setShowInputs(false)} />
       )}
     </div>
   );

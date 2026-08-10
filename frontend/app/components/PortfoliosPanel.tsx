@@ -268,6 +268,8 @@ export default function PortfoliosPanel() {
    * Detail goes to the console; the row gets the latest line and then reloads. */
   const [refreshingPf, setRefreshingPf] = useState<number | null>(null);
   const [refreshTick, setRefreshTick] = useState<string | null>(null);
+  /** Bumped when a refresh finishes, so an open Analyse modal re-reads what it rebuilt. */
+  const [refreshSeq, setRefreshSeq] = useState(0);
   const refreshPortfolio = async (id: number) => {
     setRefreshingPf(id);
     setRefreshTick('starting…');
@@ -303,6 +305,11 @@ export default function PortfoliosPanel() {
         setRows((prev) => prev?.map((p) => ({ ...p, perf: byId.get(p.id) ?? p.perf })) ?? prev);
       }
     } catch { /* the row keeps its previous figure; the console has the new one */ }
+    // ⚠ AND THE ANALYSE MODAL, IF IT IS OPEN. It is drawn from the composition, the prices and the
+    // FX this run just rebuilt, and it has already loaded — so without a nudge it would sit there
+    // showing pre-refresh figures while the row behind it updated, which reads as the button
+    // having done nothing. A counter rather than a boolean: two refreshes in a row must both land.
+    setRefreshSeq((s) => s + 1);
   };
 
   const toggle = (id: number) => {
@@ -626,7 +633,15 @@ export default function PortfoliosPanel() {
       {analyse && (
         // ⚠ Keyed by portfolio — see the twin in `PortfolioOverviewPanel`. Without it a surviving
         // instance paints the previous portfolio's composition while the next one loads.
+        // ⚠ THE ROW'S OWN REFRESH HANDLER, PASSED THROUGH — not a second implementation. Pressing
+        // it here runs the identical job the expanded row runs, streams to the same console, and
+        // bumps `refreshSeq` so this modal re-reads the composition it just rebuilt.
         <PortfolioAnalysisModal key={analyse.id} id={analyse.id} name={analyse.name}
+          onRefresh={() => void refreshPortfolio(analyse.id)}
+          refreshTitle="Re-acquire everything behind this model's YTD: its composition from AirSPMS, its instrument mapping, its FX history (both directions — nothing else backfills it), and each holding's price series from Yahoo. Then recompute the YTD and print the per-holding arithmetic to the browser console."
+          refreshing={refreshingPf === analyse.id}
+          refreshTick={refreshingPf === analyse.id ? refreshTick : null}
+          refreshSeq={refreshSeq}
           onClose={() => setAnalyse(null)} />
       )}
     </section>

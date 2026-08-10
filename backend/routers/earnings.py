@@ -1481,6 +1481,37 @@ def period_caps_eur(company_ids: list[int],
     return out
 
 
+def period_caps_by_isin(comp: dict[str, dict], universe: str | None,
+                        cadence: str = "annual") -> dict[str, dict[str, float]]:
+    """`{canonical ISIN: {period: cap in EUR}}` — `period_caps_eur` in the shape the card
+    endpoints index by.
+
+    ⚠ EMPTY FOR A PORTFOLIO, which is not a degenerate case but the correct answer. A holding
+    weight is a share of a book, not a market cap; there is no cap history to weight its periods
+    by, and `_weight_at` reads the absence as "one basis for every period".
+
+    ⚠ THE READ IS SHARED ACROSS THE ELEVEN CARDS. The Long Equity tab fires them concurrently and
+    every one of them wants the same caps for the same constituents — `cached_metric_reads` keyed
+    on (company set, cadence) collapses that to ONE read plus ten waits, exactly as it does for the
+    metric lines. Without it, adding caps here would have put eleven more Postgres connections on
+    the tab and given back most of what batching `_prefetch` won.
+    """
+    if not universe:
+        return {}
+    ids = sorted({c["company_id"] for c in comp.values() if c.get("company_id")})
+    if not ids:
+        return {}
+    # ⚠ A DERIVED SERIES, CACHED THROUGH THE SAME PRIMITIVE AS A RAW ONE. The key is a metric name
+    # the registry does not contain, deliberately — it is `market_cap` plus an FX conversion, and
+    # caching the CONVERTED figure is the point: the conversion is the expensive, per-period-dated
+    # half. `invalidate()` drops it with everything else when an ingest rewrites the caps.
+    key = "__period_caps_eur"
+    by_cid = cached_metric_reads(
+        ids, [key], cadence, lambda _ms: {key: period_caps_eur(ids, cadence)})[key]
+    return {isin: by_cid.get(c["company_id"], {})
+            for isin, c in comp.items() if c.get("company_id")}
+
+
 def rows_by_metric(company_ids: list[int], metrics: list[str],
                    cadence: str = "annual") -> dict[str, dict[int, list[dict]]]:
     """`{metric: {company_id: rows}}` for MANY metrics in **ONE** read.
@@ -1759,6 +1790,10 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ FOR THE WHOLE SET, NOT ONE PER COMPANY — and here it is the difference
         # between a table and a timeout. This loop reads ONE metric per member through
         # `_metric_by_year`, which is ~160 ms each: measured 2026-08-04, the S&P's 489 constituents
@@ -1798,6 +1833,11 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"),
                 "exchange": exch,
@@ -1876,6 +1916,10 @@ async def margin_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -1895,6 +1939,11 @@ async def margin_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status, "revenue": rev, "fcf": fcf, "sbc": sbc,
@@ -1950,6 +1999,10 @@ async def debt_ratio_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -1971,6 +2024,11 @@ async def debt_ratio_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -2028,6 +2086,10 @@ async def cash_return_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -2059,6 +2121,11 @@ async def cash_return_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -2116,6 +2183,10 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -2136,6 +2207,11 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -2192,6 +2268,10 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -2212,6 +2292,11 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -2267,6 +2352,10 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -2287,6 +2376,11 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -2350,6 +2444,10 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -2372,6 +2470,11 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -2436,6 +2539,10 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -2457,6 +2564,11 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -2512,6 +2624,10 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -2552,6 +2668,11 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -2651,6 +2772,10 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -2683,6 +2808,11 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,

@@ -114,7 +114,33 @@ export const xToPeriod = (x: number): string => {
  * portfolio holding 20% cash could never clear an 80% floor and every chart would go blank.
  * Coverage here answers "of the companies this chart aggregates, how many reported this year".
  */
-export function weightedByYear<T extends { weight_pct: number }>(
+export type Weighted = {
+  weight_pct: number;
+  /** INDEX ROWS ONLY — the market cap as at each fiscal period, EUR, converted at that period's
+   *  own end date (`period_caps_eur`). Absent for a portfolio: a holding weight is not a market
+   *  cap and has no history, so the single `weight_pct` applies to every period. */
+  market_cap_by_period?: Record<string, number>;
+};
+
+/**
+ * The weight in force for one row in one period — the frontend twin of the backend's
+ * `_fundamental_blend._weight_at`, and the reason every card on this tab weights the same way.
+ *
+ * ⚠ AN INDEX IS WEIGHTED BY THE CAP IT HAD IN THAT PERIOD. Weighting 2018's margin by today's cap
+ * is look-ahead bias — measured on the S&P, NVIDIA is carried at 7.46% of a year it was 0.63% of.
+ * Null (never 0) when a constituent has no cap that period: it is out of that period's average
+ * entirely rather than weighted on a different basis from its neighbours.
+ */
+export function weightAt(r: Weighted, year: string): number | null {
+  const per = r.market_cap_by_period;
+  if (per) {
+    const v = per[year];
+    return v && v > 0 ? v : null;
+  }
+  return r.weight_pct > 0 ? r.weight_pct : null;
+}
+
+export function weightedByYear<T extends Weighted>(
   rows: T[],
   yearsOf: (r: T) => string[],
   valueOf: (r: T, year: string) => number | null,
@@ -127,13 +153,24 @@ export function weightedByYear<T extends { weight_pct: number }>(
   for (const y of years) {
     let num = 0;
     let den = 0;
+    // ⚠⚠ COVERAGE IS ACCUMULATED ON THE **STABLE** WEIGHT, NOT THE PER-PERIOD CAP, AND CONFUSING
+    // THE TWO DISABLES THE FLOOR COMPLETELY. The per-period cap comes out of the same GuruFocus
+    // blob as the figure, so a company that has not filed FY2026 has no FY2026 cap either —
+    // measure coverage with it and you divide the filers by the filers, which reads ~100% in
+    // exactly the period where almost nobody has reported. Measured on the S&P revenue blend:
+    // FY2026 is 13.4% covered on this basis and read 100.0% on the per-period one, which drew a
+    // full-height point built almost entirely out of NVIDIA.
+    let cov = 0;
     for (const r of rows) {
       const v = valueOf(r, y);
       if (v == null) continue;
-      num += r.weight_pct * v;
-      den += r.weight_pct;
+      const w = weightAt(r, y);
+      if (w == null) continue;
+      num += w * v;
+      den += w;
+      cov += r.weight_pct;
     }
-    if (den > 0 && 100 * den / total >= MIN_YEAR_COVERAGE_PCT) out.set(periodToX(y), num / den);
+    if (den > 0 && 100 * cov / total >= MIN_YEAR_COVERAGE_PCT) out.set(periodToX(y), num / den);
   }
   return out;
 }
@@ -141,7 +178,40 @@ export function weightedByYear<T extends { weight_pct: number }>(
 /** The share of the charted set that reported in each year — the same denominator and the same
  *  per-holding test `weightedByYear` uses, so a card can state the coverage behind a point it
  *  drew (and a year below the floor is visible as a fact rather than as a hole). */
-export function coverageByYear<T extends { weight_pct: number }>(
+/**
+ * The denominator each period's weighted average ACTUALLY divided by — `{period: Σ weight}`.
+ *
+ * ⚠ IT MUST APPLY THE SAME TWO TESTS AS `weightedByYear`, AND THAT IS THE ONLY REASON IT EARNS ITS
+ * PLACE HERE RATHER THAN IN THE MODAL. A drill-down exists to show the arithmetic behind a line; a
+ * denominator derived "the same way" somewhere else is how a table comes to show weights that do
+ * not sum to the line above them. Value present AND a usable weight — a company with a figure but
+ * no cap that period is out of the average, so it is out of this sum too.
+ *
+ * By construction, dividing each contributor's `weightAt` by this gives a column that sums to
+ * exactly 100% in every period — which is what makes the drill-down checkable.
+ */
+export function periodDenoms<T extends Weighted>(
+  rows: T[],
+  yearsOf: (r: T) => string[],
+  valueOf: (r: T, year: string) => number | null,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  const years = new Set<string>();
+  for (const r of rows) for (const y of yearsOf(r)) years.add(y);
+  for (const y of years) {
+    let den = 0;
+    for (const r of rows) {
+      if (valueOf(r, y) == null) continue;
+      const w = weightAt(r, y);
+      if (w == null) continue;
+      den += w;
+    }
+    if (den > 0) out[y] = den;
+  }
+  return out;
+}
+
+export function coverageByYear<T extends Weighted>(
   rows: T[],
   yearsOf: (r: T) => string[],
   valueOf: (r: T, year: string) => number | null,
@@ -153,7 +223,13 @@ export function coverageByYear<T extends { weight_pct: number }>(
   for (const r of rows) for (const y of yearsOf(r)) years.add(y);
   for (const y of years) {
     let den = 0;
-    for (const r of rows) if (valueOf(r, y) != null) den += r.weight_pct;
+    // ⚠ THE SAME TWO TESTS `weightedByYear` APPLIES — a value AND a usable weight. A constituent
+    // with a figure but no cap that period is out of the average, so counting it as covered would
+    // let a period clear the floor on the strength of rows that contributed nothing to it. And the
+    // same STABLE weight, for the reason spelled out there.
+    for (const r of rows) {
+      if (valueOf(r, y) != null && weightAt(r, y) != null) den += r.weight_pct;
+    }
     out.set(periodToX(y), 100 * den / total);
   }
   return out;

@@ -160,7 +160,9 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
       )}
 
       {showInputs && (
-        <DividendYieldInputsModal target={target} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <DividendYieldInputsModal target={target} portfolioName={holdingsName}
+          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          onClose={() => setShowInputs(false)} />
       )}
     </div>
   );

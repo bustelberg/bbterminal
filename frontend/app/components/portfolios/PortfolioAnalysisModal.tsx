@@ -10,6 +10,7 @@ import { classWeightedReturn } from './classReturn';
 import { Provenance } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
+import { RefreshIcon } from './RefreshIcon';
 import AttributionPanel from './AttributionPanel';
 import HoldingTimingModal from './HoldingTimingModal';
 import BucketDetailPanel from './BucketDetailPanel';
@@ -646,14 +647,23 @@ type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution';
  * when one of two groups that both need it is switched off — a question with no good answer, and
  * one this shape never has to ask.
  *
- * ⚠ NOTHING IS ON BY DEFAULT. The table opens at seven columns — Name, Via, Sector, Weight
- * (now), Money-weighted and Instrument return, plus the row number — which fits a screen and answers
- * what most visits are asking: what you hold, and what your money did with it.
+ * ⚠ NO GROUP IS ON BY DEFAULT. The table opens at eight columns — Name, Via, Sector, Weight
+ * (now), Money-weighted, Instrument return and Contribution, plus the row number — which fits a
+ * screen and answers what most visits are asking: what you hold, what your money did with it, and
+ * what that did to the book.
  *
- * ⚠ TWO COLUMNS SIT OUTSIDE THE GROUPS AND ARE ALWAYS ON: `Instrument return` and `Money-weighted`.
- * They are the two ANSWERS; every group here is a DERIVATION, and a derivation with its answer
- * hidden explains nothing. Ticking a group puts the chain on screen beside the figure it
- * produces, which is the only arrangement in which a reader can check one against the other.
+ * ⚠ THREE COLUMNS SIT OUTSIDE THE GROUPS AND ARE ALWAYS ON: `Instrument return`, `Money-weighted`
+ * and `Contribution`. They are the three ANSWERS; every group here is a DERIVATION, and a
+ * derivation with its answer hidden explains nothing. Ticking a group puts the chain on screen
+ * beside the figure it produces, which is the only arrangement in which a reader can check one
+ * against the other.
+ *
+ * ⚠ CONTRIBUTION IS LAST, TO THE RIGHT OF `Instrument return`, AND THE ORDER IS THE ARGUMENT. The
+ * two return columns say what the INSTRUMENT did; Contribution says what that was worth to THIS
+ * book — the same Result over the book's opening capital rather than the position's. Reading left
+ * to right you get the rate, then the rate on your own money, then the effect. Putting it before
+ * them (where it was, gated off) asked the reader to accept an effect before either figure it is
+ * derived from was on screen.
  */
 const COLUMN_GROUPS = [
   {
@@ -677,7 +687,10 @@ const COLUMN_GROUPS = [
     key: 'contribution',
     label: 'How the Contribution is built',
     hint: 'Result ÷ the book’s opening capital',
-    cols: ['result', 'contribution'],
+    // ⚠ `Contribution` ITSELF IS NOT HERE — like `Instrument return` and `Money-weighted` it is
+    // always on, and this group supplies only the chain BEHIND it. Listing it would put a key in
+    // the union that nothing reads: harmless at runtime and a lie in the data.
+    cols: ['result'],
   },
 ] as const;
 
@@ -1236,17 +1249,6 @@ ${eur0n(grand.valuenow)} − ${eur0n(grand.opening)} = ${eur0n(grand.unrealised)
 ${eur0n(grand.unrealised)} + ${eur0n(grand.realised)} + ${eur0n(grand.income)} = ${eur0n(grand.result)}`} />
               </th>
 )}
-{show('contribution') && (
-              <th className={`text-right w-28 ${th}`} onClick={() => click('contribution')}>
-                Contribution{caret('contribution')}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what="What this position added to, or took off, the book’s return for the year."
-                  note="result ÷ the book’s opening capital"
-                  how={`Result ÷ the book’s opening capital
-
-${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contribution)}`} />
-              </th>
-)}
               <th className="text-right w-32 py-2 font-medium">
                 Money-weighted
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
@@ -1278,6 +1280,15 @@ ${eur0n(grand.result)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`} />
 Beginwaarde prices TODAY’s share count at its 1 January price, which is what erases your timing — so this is NOT a chained time-weighted return: a share bought in June is still measured from January. Money-weighted, beside it, is the same Result over the capital actually tied up.
 
 a row marked ƒ is priced off our own EUR series instead; the class rows below divide their own Result by their own Beginwaarde`} />
+              </th>
+              <th className={`text-right w-28 ${th}`} onClick={() => click('contribution')}>
+                Contribution{caret('contribution')}
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what="What this position added to, or took off, the book’s return for the year."
+                  note="result ÷ the book’s opening capital"
+                  how={`Result ÷ the book’s opening capital
+
+${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contribution)}`} />
               </th>
             </tr>
           </thead>
@@ -1337,27 +1348,6 @@ ${num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}
                 {show('realised') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.realised)}`}>{eur0n(g.sum.realised)}</td>}
                 {show('income') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.income)}`}>{eur0n(g.sum.income)}</td>}
                 {show('result') && <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.result)}`}>{eur0n(g.sum.result)}</td>}
-                {show('contribution') && (
-                <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.contribution)}`}>
-                  {ppt(g.sum.contribution)}
-                  {/* ⚠ THE PAIR A READER CANNOT ARBITRATE UNLESS IT IS EXPLAINED, and on a class
-                      that is nearly the whole book the two sit a fraction of a point apart and
-                      look like one of them is wrong. They share a NUMERATOR and differ only in
-                      what they divide by — so the card prints both divisions, side by side. */}
-                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={`What ${bucketLabel(g.bucket)} added to, or took off, the book’s return for the year.`}
-                    note={`${eur0n(g.sum.result)} ÷ the book’s opening capital`}
-                    /* ⚠ THE MULTIPLICATION IS THE WHOLE EXPLANATION, so it goes on screen rather
-                       than in prose. Contribution and Return differ by exactly one term — the
-                       class's share of the book's OPENING capital — and that term is nowhere else
-                       in the table: the Weight column is today's share (85.38% where the opening
-                       share is 82.98%), which is why nobody could reconstruct it. Verified on
-                       every class of both measured books, to the third decimal. */
-                    how={`Return × this class’s share of the book’s opening capital
-
-${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%'} (${eur0n(g.ret.startEur)} of ${eur0n(realised?.basis_eur)}) = ${ppt(g.sum.contribution)}`} />
-                </td>
-                )}
                 <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.mwr)}`}>
                   {fmtRet(g.sum.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -1407,6 +1397,25 @@ ${eur0n(g.sum.mwrResult)} ÷ ${eur0n(g.sum.avgcapital)} = ${fmtRet(g.sum.mwr)}${
                     how={`Result ÷ what this class was worth when the year opened
 
 ${eur0n(g.ret.resultEur)} ÷ ${eur0n(g.ret.startEur)} = ${fmtRet(g.ret.pct)}`} />
+                </td>
+                <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.contribution)}`}>
+                  {ppt(g.sum.contribution)}
+                  {/* ⚠ THE PAIR A READER CANNOT ARBITRATE UNLESS IT IS EXPLAINED, and on a class
+                      that is nearly the whole book the two sit a fraction of a point apart and
+                      look like one of them is wrong. They share a NUMERATOR and differ only in
+                      what they divide by — so the card prints both divisions, side by side. */}
+                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    what={`What ${bucketLabel(g.bucket)} added to, or took off, the book’s return for the year.`}
+                    note={`${eur0n(g.sum.result)} ÷ the book’s opening capital`}
+                    /* ⚠ THE MULTIPLICATION IS THE WHOLE EXPLANATION, so it goes on screen rather
+                       than in prose. Contribution and Return differ by exactly one term — the
+                       class's share of the book's OPENING capital — and that term is nowhere else
+                       in the table: the Weight column is today's share (85.38% where the opening
+                       share is 82.98%), which is why nobody could reconstruct it. Verified on
+                       every class of both measured books, to the third decimal. */
+                    how={`Return × this class’s share of the book’s opening capital
+
+${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%'} (${eur0n(g.ret.startEur)} of ${eur0n(realised?.basis_eur)}) = ${ppt(g.sum.contribution)}`} />
                 </td>
               </tr>
               {[...g.rows].sort(cmp).map((h, i) => (
@@ -1474,23 +1483,6 @@ ${eur0n(g.ret.resultEur)} ÷ ${eur0n(g.ret.startEur)} = ${fmtRet(g.ret.pct)}`} /
                   {show('realised') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.realised_result_eur)}`}>{eur0n(h.realised_result_eur)}</td>}
                   {show('income') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.income_eur)}`}>{eur0n(h.income_eur)}</td>}
                   {show('result') && <td className={`py-1.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(h.result_eur)}`}>{eur0n(h.result_eur)}</td>}
-                  {show('contribution') && (
-                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.contribution_pct)}`}>
-                    {ppt(h.contribution_pct)}
-                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                      what={h.contribution_pct == null
-                        ? `${h.name ?? 'This position'} has no result to contribute — it could not be valued over the window.`
-                        : `What ${h.name ?? 'this position'} added to, or took off, the book’s return for the year.`}
-                      note={h.contribution_pct == null ? undefined : 'result ÷ the book’s opening capital'}
-                      how={h.contribution_pct != null
-                        ? `Result ÷ the book’s opening capital
-
-${eur0n(h.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(h.contribution_pct)}`
-                        : `Result ÷ the book’s opening capital
-
-no result — this position could not be valued at both ends of the window, so there is nothing to divide`} />
-                  </td>
-                  )}
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.money_weighted_return_pct)}`}>
                     {fmtRet(h.money_weighted_return_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -1627,6 +1619,21 @@ ${fmtRet(h.own_return_pct)} since ${h.own_return_from ?? 'the year opened'}`
 
 ${bookMath(h) ?? (h.own_income_eur ? `(Huidige waarde + ${eur0(h.own_income_eur)} net dividend) ÷ Beginwaarde − 1` : 'Huidige waarde ÷ Beginwaarde − 1')} = ${fmtRet(h.own_return_pct)}`} />
                   </td>
+                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.contribution_pct)}`}>
+                    {ppt(h.contribution_pct)}
+                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                      what={h.contribution_pct == null
+                        ? `${h.name ?? 'This position'} has no result to contribute — it could not be valued over the window.`
+                        : `What ${h.name ?? 'this position'} added to, or took off, the book’s return for the year.`}
+                      note={h.contribution_pct == null ? undefined : 'result ÷ the book’s opening capital'}
+                      how={h.contribution_pct != null
+                        ? `Result ÷ the book’s opening capital
+
+${eur0n(h.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(h.contribution_pct)}`
+                        : `Result ÷ the book’s opening capital
+
+no result — this position could not be valued at both ends of the window, so there is nothing to divide`} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1663,17 +1670,6 @@ ${bookMath(h) ?? (h.own_income_eur ? `(Huidige waarde + ${eur0(h.own_income_eur)
                 {show('realised') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.realised)}`}>{eur0n(soldSum.realised)}</td>}
                 {show('income') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.income)}`}>{eur0n(soldSum.income)}</td>}
                 {show('result') && <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.result)}`}>{eur0n(soldSum.result)}</td>}
-                {show('contribution') && (
-                <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.contribution)}`}>
-                  {ppt(soldSum.contribution)}
-                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={'What the positions sold out during the year added to, or took off, the book’s return.'}
-                    note="result ÷ the book’s opening capital"
-                    how={`Result ÷ the book’s opening capital
-
-${eur0n(soldSum.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(soldSum.contribution)}`} />
-                </td>
-                )}
                 <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.mwr)}`}>
                   {fmtRet(soldSum.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -1684,6 +1680,15 @@ ${eur0n(soldSum.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(soldSum.contri
 ${eur0n(soldSum.mwrResult)} ÷ ${eur0n(soldCap)} = ${fmtRet(soldSum.mwr)}`} />
                 </td>
                 <td className="pr-4" />
+                <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.contribution)}`}>
+                  {ppt(soldSum.contribution)}
+                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    what={'What the positions sold out during the year added to, or took off, the book’s return.'}
+                    note="result ÷ the book’s opening capital"
+                    how={`Result ÷ the book’s opening capital
+
+${eur0n(soldSum.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(soldSum.contribution)}`} />
+                </td>
               </tr>
               {sold.map((p, i) => (
                 <tr key={p.name ?? i} className="border-b border-neutral-800/[0.15] last:border-0 hover:bg-overlay/[0.03] transition-colors">
@@ -1711,17 +1716,6 @@ ${eur0n(soldSum.mwrResult)} ÷ ${eur0n(soldCap)} = ${fmtRet(soldSum.mwr)}`} />
                   {show('realised') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.realised_result_eur)}`}>{eur0n(p.realised_result_eur)}</td>}
                   {show('income') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.income_eur)}`}>{eur0n(p.income_eur)}</td>}
                   {show('result') && <td className={`py-1.5 text-right font-mono font-semibold tabular-nums ${retTone(p.result_eur)}`}>{eur0n(p.result_eur)}</td>}
-                  {show('contribution') && (
-                  <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.contribution_pct)}`}>
-                    {ppt(p.contribution_pct)}
-                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                      what={`What ${p.name ?? 'this position'} added to, or took off, the book’s return before it was sold.`}
-                      note="result ÷ the book’s opening capital"
-                      how={`Result ÷ the book’s opening capital
-
-${eur0n(p.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(p.contribution_pct)}`} />
-                  </td>
-                  )}
                   <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.return_pct)}`}>
                     {fmtRet(p.return_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -1732,6 +1726,15 @@ ${eur0n(p.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(p.contribution_p
 ${eur0n(p.result_eur)} ÷ ${eur0n(p.avg_capital_eur)} = ${fmtRet(p.return_pct)}`} />
                   </td>
                   <td className="pr-4" />
+                  <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.contribution_pct)}`}>
+                    {ppt(p.contribution_pct)}
+                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                      what={`What ${p.name ?? 'this position'} added to, or took off, the book’s return before it was sold.`}
+                      note="result ÷ the book’s opening capital"
+                      how={`Result ÷ the book’s opening capital
+
+${eur0n(p.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(p.contribution_pct)}`} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1766,17 +1769,6 @@ ${eur0n(p.result_eur)} ÷ ${eur0n(p.avg_capital_eur)} = ${fmtRet(p.return_pct)}`
                 {show('realised') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.realised)}`}>{eur0n(grand.realised)}</td>}
                 {show('income') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.income)}`}>{eur0n(grand.income)}</td>}
                 {show('result') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.result)}`}>{eur0n(grand.result)}</td>}
-                {show('contribution') && (
-                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.contribution)}`}>
-                  {ppt(grand.contribution)}
-                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={'What every position in this table, held and sold, added up to for the book’s year.'}
-                    note="result ÷ the book’s opening capital"
-                    how={`Result ÷ the book’s opening capital
-
-${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contribution)}`} />
-                </td>
-                )}
                 <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.mwr)}`}>
                   {fmtRet(grand.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -1795,6 +1787,15 @@ ${eur0n(grand.mwrResult)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`}
 
 ${ppt(grand.contribution)} from these rows vs ${fmtRet(realised?.book_ytd_pct)} from AIRS${reconciled ? ' — they agree' : ' — they do NOT agree'}`} />
                 </td>
+                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.contribution)}`}>
+                  {ppt(grand.contribution)}
+                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                    what={'What every position in this table, held and sold, added up to for the book’s year.'}
+                    note="result ÷ the book’s opening capital"
+                    how={`Result ÷ the book’s opening capital
+
+${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contribution)}`} />
+                </td>
               </tr>
             </tfoot>
           )}
@@ -1802,12 +1803,11 @@ ${ppt(grand.contribution)} from these rows vs ${fmtRet(realised?.book_ytd_pct)} 
       </div>
       {/* Said in words under the table, because a reader who has just added a column of euros
           wants to know whether it landed — not to compare two figures themselves. */}
-      {/* ⚠ IT FOLLOWS THE COLUMN IT TALKS ABOUT. This line reads "the Contribution column adds to
-          AIRS's own +5.83% exactly" — a statement with no referent once that column is hidden,
-          which since the picker defaults to all-off would otherwise be its normal state. A caveat
-          pointing at something not on screen is worse than no caveat: it makes a reader hunt for a
-          column that is not there. */}
-      {show('contribution') && grand.contribution != null && realised?.book_ytd_pct != null && (
+      {/* ⚠ IT USED TO FOLLOW THE COLUMN IT TALKS ABOUT, and no longer needs to: Contribution is
+          always on now, so the line can never point at a column that is not there. The gate that
+          remains is the one that always mattered — both figures have to exist for the sentence to
+          claim anything. */}
+      {grand.contribution != null && realised?.book_ytd_pct != null && (
         <div className="px-4 py-2 border-t border-neutral-800/40 text-[10px]">
           {reconciled ? (
             <span className="text-pos-400">
@@ -2024,8 +2024,38 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
  *  `_benchmark_index.INDEX_CAP_PCT` — not here, and not per-caller. */
 const BENCHMARKS = ['SP500', 'ACWI', 'AEX'] as const;
 
-export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
+export default function PortfolioAnalysisModal({
+  id, name, basket, onRefresh, refreshing = false, refreshTitle, refreshTick = null,
+  refreshSeq = 0, onClose,
+}: {
   id?: number; name: string; basket?: Basket; onClose: () => void;
+  /**
+   * The row's own `Refresh (AIRS + prices + FX)`, hoisted onto this modal — the SAME handler, not
+   * a second one.
+   *
+   * ⚠ IT IS PASSED IN RATHER THAN REIMPLEMENTED. That refresh re-acquires four inputs (composition
+   * from AirSPMS, the instrument mapping, FX history in BOTH directions, and each holding's Yahoo
+   * price series) and streams its progress; a second copy here would be a second thing to keep in
+   * step with a job whose whole point is that it is the one way to rebuild the number. Absent for
+   * a basket, which has no AIRS portfolio behind it to refresh.
+   */
+  onRefresh?: () => void;
+  refreshing?: boolean;
+  /** ⚠ THE CALLER'S OWN WORDING, because the two panels run DIFFERENT refreshes behind the same
+   *  glyph: the overview's re-scans this portfolio's AIRS reports, the other re-acquires AIRS +
+   *  prices + FX. A tooltip hardcoded here would describe one of them on both. */
+  refreshTitle?: string;
+  /** The latest line from the running refresh — the same tail the expanded row shows. */
+  refreshTick?: string | null;
+  /**
+   * Bumped by the caller when a refresh finishes.
+   *
+   * ⚠ WITHOUT THIS THE BUTTON APPEARS TO DO NOTHING. The refresh rewrites the composition, the
+   * prices and the FX this modal is drawn from, but the modal has already loaded — so it would sit
+   * there showing pre-refresh figures while the row behind it updated. It is a dependency of the
+   * load effect, which is what makes the modal re-read what the refresh just rebuilt.
+   */
+  refreshSeq?: number;
 }) {
   // A basket (a single stock, a group) is treated as a portfolio-of-N: same view, but yfinance-only
   // (no AIRS book) and no id-based drill-downs (attribution / bucket detail are portfolio-only).
@@ -2097,8 +2127,11 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
       }
     })();
     return () => { cancelled = true; };
+    // ⚠ `refreshSeq` IS A REAL DEPENDENCY, not defensive padding — see its prop doc. The refresh
+    // rebuilds the composition, prices and FX this payload is derived from, so without it the
+    // modal keeps showing the figures it loaded before the button was pressed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reqKey, benchmark, source, assetFilter]);
+  }, [reqKey, benchmark, source, assetFilter, refreshSeq]);
 
   // The selected class (null = nothing selected = the whole portfolio). A basket is never a
   // portfolio-of-classes, so it stays on the whole-basket view.
@@ -2121,7 +2154,25 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
               <p className="text-[11px] text-warn-300 mt-0.5">⚠ {data.weight_note}</p>
             )}
           </div>
+          {/* ⚠ ORDER IS REFRESH · BENCHMARK · CLOSE. Refresh sits leftmost of the three because it
+              acts on the SUBJECT of the modal — it rebuilds this portfolio's inputs — while the
+              benchmark picker only changes what those inputs are compared against. Close stays
+              last, where a dialog's dismiss belongs. */}
           <div className="flex items-center gap-2 shrink-0">
+            {/* ⚠ THE ROW'S REFRESH, NOT A NEW ONE — same handler, same glyph (`RefreshIcon`, shared
+                so the two are visibly one control) and the caller's own wording, so pressing it
+                here and pressing it on the row cannot come to mean different things. Absent when
+                the caller passes no handler: a basket has no AIRS portfolio behind it to re-scan,
+                and the panels gate the row's button on `isAdmin` for the same reason they gate
+                everything that writes. */}
+            {onRefresh && (
+              <button type="button" onClick={onRefresh} disabled={refreshing}
+                title={refreshTitle} aria-label="Refresh this portfolio"
+                className="cursor-pointer inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-neutral-700 text-accent-400 hover:border-accent-500/50 hover:bg-overlay/5 transition-colors disabled:opacity-50 disabled:cursor-wait whitespace-nowrap">
+                <RefreshIcon spinning={refreshing} size={12} />
+                {refreshing ? 'Refreshing…' : 'Refresh'}
+              </button>
+            )}
             <label className="flex items-center gap-1.5 text-[11px] text-fg-muted">
               Benchmark
               <select value={benchmark} aria-label="Benchmark"
@@ -2136,6 +2187,16 @@ export default function PortfolioAnalysisModal({ id, name, basket, onClose }: {
             </button>
           </div>
         </div>
+
+        {/* ⚠ THE LIVE TAIL, as the expanded row has. This refresh re-acquires four sources and
+            takes seconds; without a line moving, a disabled button is indistinguishable from a
+            frozen one and the reader presses it again. A TAIL, not a log — the log is the
+            console, which is where the per-holding arithmetic goes. */}
+        {refreshing && refreshTick && (
+          <p className="text-[11px] text-fg-faint font-mono truncate mb-2" title={refreshTick}>
+            {refreshTick}
+          </p>
+        )}
 
         {error && (
           <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">
