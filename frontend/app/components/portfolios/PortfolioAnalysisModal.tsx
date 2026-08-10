@@ -411,9 +411,13 @@ function Chip({ label, value, valueClass, hint }: {
 }
 
 function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
-  name, onBucket, selected }: {
+  name, onBucket, selected, stale = false }: {
   axis: string;
   rows: Row[];
+  /** True while these bars are the PREVIOUS selection's, waiting on the current one. The bars stay
+   *  (blanking them on every class click is worse), but nothing that makes a CLAIM about them may
+   *  be shown — see the warning below and `stale` on the modal. */
+  stale?: boolean;
   /** The denominator in words, and how many positions it spans — from the server, per axis. */
   basis?: string | null;
   positions?: number | null;
@@ -466,7 +470,11 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
           weight this chart "cannot handle" turned a perfectly ordinary 13% in ETFs into what
           looked like a defect. An unpriced STOCK is the real hole: it is missing from a bucket
           that should contain it, which makes that bucket read low. */}
-      {(unpricedPct ?? 0) > 0.005 && (
+      {/* ⚠ AND NOT WHILE THESE BARS BELONG TO A DIFFERENT SELECTION. See `stale` on the modal: the
+          previous payload stays on screen while the next loads, so without this the reader clicks
+          Stocks and is warned about the whole portfolio's unpriceable weight for the length of a
+          request — a caveat that appears and then vanishes on its own, which is worse than none. */}
+      {!stale && (unpricedPct ?? 0) > 0.005 && (
         <p className="text-[12px] text-warn-300 mt-0.5"
           title="Real holdings, in real buckets, that we have no price series for. They are absent from the bars, so the buckets they belong to read lower than they are. Open Data for the names.">
           ⚠ {unpricedPct!.toFixed(1)}% held but unpriceable — missing from these bars
@@ -477,7 +485,9 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
           that 13% of the STOCKS are unclassified. They were not: they were five ETFs and a cash
           line. A percentage phrased as an absence gets heard as a data-quality problem, so the
           line now says which holdings they are and why they are legitimately absent. */}
-      {excludedWeight > 0.005 && (
+      {/* ⚠ SUPPRESSED WHILE STALE FOR THE SAME REASON AS THE WARNING ABOVE — it is a statement
+          about the bars, and during a class change the bars are the previous selection's. */}
+      {!stale && excludedWeight > 0.005 && (
         <p className="text-[12px] text-fg-faint mt-0.5"
           title="Funds, bonds and cash have no sector of their own — they are their own slices of the allocation chart above. Open Data for the names.">
           Excludes {excludedWeight.toFixed(1)}% in funds, bonds and cash — no{' '}
@@ -519,7 +529,7 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
           return (
             <button type="button" key={r.bucket}
               onClick={() => onBucket(axis, r.bucket)}
-              title={`${r.bucket}  ·  Portfolio ${p.toFixed(1)}%  vs  ${benchmark} ${b.toFixed(1)}%  ·  tilt ${tilt >= 0 ? '+' : ''}${tilt.toFixed(1)}pp`}
+              title={`${r.bucket}  ·  Portfolio ${p.toFixed(2)}%  vs  ${benchmark} ${b.toFixed(2)}%  ·  tilt ${tilt >= 0 ? '+' : ''}${tilt.toFixed(2)}pp`}
               className={`group flex cursor-pointer items-center gap-2.5 rounded-md -mx-1.5 px-1.5 py-1 text-left transition-colors ${
                 active ? 'bg-accent-500/10' : 'hover:bg-overlay/[0.03]'}`}>
               <span className={`w-[6.5rem] shrink-0 truncate text-[12px] ${
@@ -538,8 +548,8 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
               </span>
               {/* Colour-coded to the series they belong to (portfolio blue / benchmark amber), so
                   the value ties to its bar without reading the legend. */}
-              <span className="w-9 shrink-0 text-right font-mono text-[12px]" style={{ color: SERIES.portfolio }}>{pct(p)}</span>
-              <span className="w-9 shrink-0 text-right font-mono text-[11px]" style={{ color: SERIES.benchmark }}>{pct(b)}</span>
+              <span className="w-[3.5rem] shrink-0 text-right font-mono text-[12px]" style={{ color: SERIES.portfolio }}>{pct(p)}</span>
+              <span className="w-[3.5rem] shrink-0 text-right font-mono text-[11px]" style={{ color: SERIES.benchmark }}>{pct(b)}</span>
             </button>
           );
         })}
@@ -1300,9 +1310,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
 ${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).length} of them reached through a certificate`} />
         </h4>
         <span className="flex items-center gap-2">
-          <span className="text-[11px] font-mono text-fg-faint">
-            {shownHoldings.length} positions · {groups.length} classes
-          </span>
           {/* ⚠ HIDDEN WHEN NOTHING WOULD FOLD, rather than offered and inert. A book that holds no
               other book has no certificate legs to collapse, and a checkbox that visibly changes
               nothing teaches the reader to distrust the ones that do.
@@ -2370,6 +2377,27 @@ export default function PortfolioAnalysisModal({
       body: JSON.stringify({ holdings: basket.holdings, label: basket.label }) }
     : undefined;
 
+  /**
+   * WHICH SELECTION THE PAYLOAD ON SCREEN BELONGS TO — and therefore whether it still describes
+   * what is selected now.
+   *
+   * ⚠⚠ THE CHARTS KEEP THE PREVIOUS PAYLOAD WHILE A NEW ONE LOADS, ON PURPOSE (clearing `data`
+   * would blank the modal on every class click), AND THAT IS WHY THIS EXISTS. Measured on
+   * Bustelberg Offensief: clicking Stocks left the whole-portfolio bars on screen for the length
+   * of the request, including their "⚠ 6.4% held but unpriceable" banner — a warning about a
+   * selection the reader had just left, which then vanished when the Stocks payload landed. A
+   * caveat that appears and disappears on its own teaches the reader to distrust the ones that
+   * stay.
+   *
+   * ⚠ DERIVED, NOT A `loading` FLAG SET IN THE EFFECT. Setting state at the top of an effect is
+   * the cascading render the file already refuses to do (see the note above `basketBody`) and what
+   * `react-hooks/set-state-in-effect` objects to. Recording what the arriving payload was FOR
+   * costs one setState in the response handler, where there is already one.
+   */
+  const viewKey = `${reqKey}|${benchmark}|${source}|${assetFilter ?? ''}|${refreshSeq}`;
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const stale = data != null && loadedFor !== viewKey;
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -2391,6 +2419,7 @@ export default function PortfolioAnalysisModal({
           const total = Object.values(t).reduce((s, v) => s + (v ?? 0), 0);
           trace('analyse', `server phases (ms) — ${total} total`, t);
         }
+        setLoadedFor(viewKey);
         setData(b as ModelPortfolioAnalysis);
       } catch (e) {
         traceError('analyse', 'the composition could not be loaded', e);
@@ -2597,7 +2626,7 @@ export default function PortfolioAnalysisModal({
                   {(data.axes ?? []).map((a) => (
                     <Chart key={a.axis} axis={a.axis} rows={a.rows}
                       basis={a.basis} positions={a.positions} name={name}
-                      unpricedPct={a.unpriced_pct} excluded={a.excluded}
+                      unpricedPct={a.unpriced_pct} excluded={a.excluded} stale={stale}
                       benchmark={data.benchmark ?? 'SP500'}
                       onBucket={(axis, b) => { if (isBasket) return; setWhy(null); setBucket(
                         (prev) => prev && prev.axis === axis && prev.bucket === b ? null : { axis, bucket: b }); }}

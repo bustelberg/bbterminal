@@ -24,8 +24,19 @@ export type CompositionRow = {
   benchmark_pct?: number | null;
 };
 
-/** Decimals shown on a composition percentage. THE single source — see the module note. */
-export const DISPLAY_DECIMALS = 0;
+/** Decimals shown on a composition percentage. THE single source — see the module note.
+ *
+ * ⚠ RAISED 0 → 2 (2026-08-10, on request). The bars are read against the drill-down totals beneath
+ * them, and at zero decimals a bar saying "35%" could not be checked against a list summing to
+ * 31.24% — the reader could not tell a rounding from a disagreement. Two decimals makes the two
+ * figures directly comparable, which is the only way the panel's claim that they match is worth
+ * anything.
+ *
+ * ⚠ THE THRESHOLD FOLLOWS AUTOMATICALLY — that is the whole point of deriving `DISPLAY_EPSILON`
+ * from this constant. It moves 0.5 → 0.005, so buckets that used to vanish for printing "0%" now
+ * print "0.01%" and are kept, which is the same rule ("hide it if and only if it would render as
+ * zero") applied at the new precision rather than a second decision. */
+export const DISPLAY_DECIMALS = 2;
 
 /** Below this, a percentage renders as "0%" and the bucket carries no visible information. */
 export const DISPLAY_EPSILON = 0.5 / 10 ** DISPLAY_DECIMALS;

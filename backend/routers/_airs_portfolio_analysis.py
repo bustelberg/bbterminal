@@ -92,6 +92,40 @@ _CATEGORIE_TO_CLASS = {"AAND": "Equity", "OBL": "Bonds", "VAS": "Real estate", "
 _ALLOC_ORDER = ["Equity", "Equity ETF", "Bonds", "Alternatives", "Cash", UNKNOWN_BUCKET]
 
 
+def _bench_start_caps(label: str, start: str | None) -> dict[str, float]:
+    """`{isin: market cap at `start`}` for an index — or `{}` when there is no window to open at.
+
+    ⚠ THE COMPOSITION CHART'S INDEX BAR IS DRAWN AGAINST A PORTFOLIO WEIGHED AT THE WINDOW'S OPEN,
+    so it has to be weighed there too. `_members` carries `market_cap_eur` (today) and that is what
+    the bars used until 2026-08-10 — which made the tilt a subtraction across two bases and put a
+    figure on screen that contradicted both the axis note above it and the drill-down beneath it.
+    Measured on SP500 Technology: 34.90% today against 31.24% at the open.
+
+    ⚠ THE SAME `index_rows` THE ATTRIBUTION USES, not a second reconstruction. That function already
+    backs each constituent's start cap out through its price (`_window_rows`), which is the whole
+    reason the attribution is not look-ahead biased; a private copy here would be a second place for
+    that to rot. Returning a dict rather than rows keeps the caller's classification untouched.
+
+    ⚠ EMPTY ON ANY FAILURE, AND EMPTY MEANS "KEEP TODAY'S CAPS". A benchmark bar drawn from a
+    partial start-cap map would be renormalised over whichever constituents happened to resolve —
+    a quietly different index. Falling back to the basis the chart used for a year is the smaller
+    wrong, and the axis note already tells the reader which one is in force.
+    """
+    if not start:
+        return {}
+    try:
+        from ._asset_benchmark import index_rows  # noqa: PLC0415
+
+        rows, _coverage = index_rows(label, start)
+    except Exception as e:  # noqa: BLE001 — the chart must not fail over a weighting refinement
+        _log.warning("[analysis] start-of-window caps for %s unavailable (%s: %s); "
+                     "the index bar stays on today's caps", label, type(e).__name__, e)
+        return {}
+    out = {r["isin"]: float(r["start_cap_eur"]) for r in rows
+           if r.get("isin") and (r.get("start_cap_eur") or 0) > 0}
+    return out
+
+
 def _weigh_alloc(items: list[tuple[float, str]]) -> list[dict]:
     """Sum the (weight, bucket) pairs into ordered percentage slices (drops empty buckets).
 
@@ -1705,6 +1739,10 @@ def compute_portfolio_analysis(portfolio_id: int,
     bench_isins = sorted({m["isin"] for m in bench if m.get("isin")})
     bgrid = _grid(bench_isins)
     bench_items: list[tuple[float, tuple[str, str, str]]] = []
+    # Same rows, keyed by ISIN, so the start-of-window caps can be swapped in below without
+    # re-classifying anything: the bucket a constituent sits in does not depend on when it
+    # was weighed.
+    bench_rows: list[tuple[float, tuple[str, str, str], str]] = []
     bench_classified = bench_total = 0.0
     bench_foreign = 0
     for m in bench:
@@ -1719,6 +1757,7 @@ def compute_portfolio_analysis(portfolio_id: int,
         if row and _foreign_listing(row):
             bench_foreign += 1
         bench_items.append((cap, b))
+        bench_rows.append((cap, b, m.get("isin") or ""))
 
     # ── Book weighting override ─────────────────────────────────────────────────────────────
     # The model side is always built (it is the fallback). When the reader asks for book weights
@@ -1810,7 +1849,21 @@ def compute_portfolio_analysis(portfolio_id: int,
     sector_items = [pi for pi, _lb in sector_keep]
     sector_labels = [lb for _pi, lb in sector_keep]
     pw_general, pw_sector = _weigh(general_items), _weigh(sector_items)
-    bw = _weigh(bench_items)
+    # ⚠⚠ THE INDEX IS WEIGHED ON THE SAME BASIS AS THE PORTFOLIO IT IS DRAWN AGAINST, AND IT WAS
+    # NOT (fixed 2026-08-10). `bench_items` above carries `market_cap_eur` — the cap TODAY — while
+    # the portfolio bars moved to the attribution basis (Beginwaarde, the window's open) in
+    # 2026-07-31. So every bar pair compared a start-weighted book against a today-weighted index,
+    # and `diff_pct` — the TILT, the entire reason the two are side by side — was a subtraction
+    # across two bases.
+    #
+    # Measured on SP500 Technology: **34.90% on today's caps, 31.24% at the window's open.** The
+    # chart printed 35% under an axis note reading "Start-of-window weights", and the drill-down
+    # (which has always used `index_rows(label, start)`) printed 31.24% — a 3.66pp gap that read as
+    # a broken panel and was really two honest numbers under one label.
+    #
+    # ⚠ ONLY WHEN THERE IS A WINDOW TO OPEN. Without a priced book there is no Beginwaarde and the
+    # portfolio bars fall back to current value — so the index falls back with it, and the axis
+    # note already says the basis is not the attribution one. Two fallbacks, one basis, either way.
     # The rows behind the bars, on each axis's OWN denominator — see `_axis_holdings`.
     dd_general = _axis_holdings(general_items, general_labels)
     dd_sector = _axis_holdings(sector_items, sector_labels)
@@ -1833,6 +1886,16 @@ def compute_portfolio_analysis(portfolio_id: int,
     # which are point-in-time views of what is held and must NOT move to a January basis. Only
     # these three axes changed, and only so a sector bar equals its own Brinson row.
     basis_axes = _basis_axes(portfolio_id, source, p.get("positions_datum"), bucket_filter)
+    # ⚠⚠ A CONSTITUENT WITH NO START CAP IS DROPPED, NOT FALLEN BACK TO TODAY'S. The first version
+    # of this used `bench_start.get(isin, cap)`, which quietly re-created the very thing it was
+    # fixing: a handful of names weighed today inside a bar weighed at the open, and a denominator
+    # that then matched neither basis. Measured on SP500 Technology it read 31.92% against the
+    # drill-down's 31.24% — a 0.68pp gap from about two constituents. Dropping them puts the bar on
+    # exactly the constituent set `index_rows` weighs, so the two agree by construction rather than
+    # to within a rounding.
+    bench_start = _bench_start_caps(benchmark_label, (basis_axes or {}).get("_start"))
+    bw = _weigh([(bench_start[isin], b) for _cap, b, isin in bench_rows if isin in bench_start]
+                if bench_start else bench_items)
     _phase("axes")
 
     # ⚠⚠ THE CLASS RETURN IS RE-DERIVED FROM THE ENRICHED ROWS, AND `_book_port_items`' OWN

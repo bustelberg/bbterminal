@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import type { ModelPortfolioAttribution } from '../../../lib/types/api';
@@ -28,12 +28,18 @@ function Num({ v, pp }: { v?: number | null; pp?: boolean }) {
 function HoldingsCols() {
   return (
     <colgroup>
-      {/* Rank — narrow and fixed, so a 2-digit number never steals width from the name. */}
+      {/* Rank — narrow and fixed, so a 2-digit number never steals width from the name. ⚠ NOT
+          widened with the three below: it holds at most two digits, and the space would come
+          straight out of the name column for nothing. */}
       <col className="w-[1.75rem]" />
       <col />
-      <col className="w-[4rem]" />
-      <col className="w-[4.25rem]" />
-      <col className="w-[4.5rem]" />
+      {/* ⚠ 1.5× THE ORIGINAL 4 / 4.25 / 4.5rem (2026-08-10, on request). The width comes out of
+          the NAME column, which is the only auto one — so these three gain exactly what the
+          truncated name loses. That is the trade being made deliberately: the figures are the
+          reason the panel is open, and a clipped name still has its full text on hover. */}
+      <col className="w-[6rem]" />
+      <col className="w-[6.375rem]" />
+      <col className="w-[6.75rem]" />
     </colgroup>
   );
 }
@@ -53,9 +59,28 @@ const SORT_VAL: Record<SortKey, (h: Name) => number | string | null> = {
  *  holdings: Technology read 36% there and 39.1% here, ASML 7.30% against 5.75%. Both correct,
  *  which is what made it unarbitrable. The composition now adopts this basis, so the two agree —
  *  the label stays because the basis is still not self-evident from a percentage. */
+/**
+ * ⚠⚠ THIS SENTENCE'S CLAIM — "a bucket total here equals its bar" — WAS FALSE FOR THE INDEX FOR A
+ * YEAR, AND NOBODY COULD TELL UNTIL THE TOTAL ROW MADE IT CHECKABLE. The composition chart weighed
+ * the index by `market_cap_eur` (TODAY's cap) while this list has always used
+ * `index_rows(label, start)` (the cap at the window's open), so SP500 Technology read **34.90% on
+ * the bar against 31.24% here** — and the bar sat under an axis note saying "Start-of-window
+ * weights".
+ *
+ * ⚠ IT WAS NOT A LABELLING PROBLEM. `diff_pct`, the TILT the two bars exist to show, subtracted a
+ * today-weighted index from a start-weighted book — a difference computed across two bases. Fixed
+ * in `_airs_portfolio_analysis` (2026-08-10) by weighing the index at the window's open too,
+ * dropping any constituent with no start cap rather than letting it keep today's (which had left a
+ * 0.68pp residue). Both figures are now 31.24% on the same constituent set, by construction.
+ *
+ * ⚠ SO THE CLAIM BELOW IS TRUE AGAIN — for both sides — and it is worth keeping precisely because
+ * it is the thing a reader can check in five seconds. If it ever stops holding, the cause is a
+ * basis drifting apart again, not a rounding.
+ */
 const WEIGHT_HINT = 'Share of the attributable holdings (funds, cash and unpriced names removed, '
   + 'the rest renormalised to 100%), weighted by each position\'s value when the window OPENED. '
-  + 'The composition chart is weighted the same way, so a bucket total here equals its bar.';
+  + 'The composition chart is weighted the same way — your bar and the index\'s — so a bucket '
+  + 'total here equals its bar.';
 
 /** ⚠ EXPORTED, AND THE ATTRIBUTION TABLE'S ROW DRILL-DOWN USES THE SAME ONE. Both answer the
  *  identical question — "which names are behind this bucket, on each side" — off the identical
@@ -66,6 +91,36 @@ export function Holdings({ rows }: { rows: Name[] }) {
   // on its OWN state (your names and the index's are independent lists).
   const [key, setKey] = useState<SortKey>('weight');
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
+  /**
+   * The three figures the total row shows — computed BEFORE the early return so the hook order is
+   * fixed, which is why this sits above `if (!rows.length)`.
+   *
+   * ⚠ THE RETURN IS THE ONLY ONE THAT IS NOT A SUM, and it is weighted by the START weight over
+   * the names that HAVE a return. A plain mean would let a 0.1% holding that doubled pull as hard
+   * as a 9% one that stood still; counting an unpriceable name as a zero would drag the average
+   * toward nothing by exactly the weight we could not measure. Renormalising puts it out of both
+   * sides of the ratio, which is the same discipline every other weighted figure in this app uses.
+   *
+   * ⚠ THE THREE RECONCILE OVER THE **PRICED** NAMES, NOT OVER THE WEIGHT CELL. Contribution is
+   * `w · r / 100` per row, so `Σw(priced) × return ÷ 100 == contrib` exactly — but the Weight cell
+   * sums EVERY name, including the ones with no return. Measured on a five-name bucket: weight
+   * 8.50%, priced weight 7.60%, and it is the 7.60 that ties. Reading the row as
+   * `8.50 × 14.29 ÷ 100` and finding 1.21 against a printed 1.09 is not a bug — it is the
+   * unpriceable 0.90% showing up, which is why the return cell states its own denominator.
+   */
+  const totals = useMemo(() => {
+    const weight = rows.reduce((s, h) => s + (h.weight_pct ?? 0), 0);
+    const priced = rows.filter((h) => h.return_pct != null && (h.weight_pct ?? 0) > 0);
+    const den = priced.reduce((s, h) => s + h.weight_pct!, 0);
+    const contribRows = rows.filter((h) => h.contribution_pct != null);
+    return {
+      weight,
+      ret: den > 0 ? priced.reduce((s, h) => s + h.weight_pct! * h.return_pct!, 0) / den : null,
+      retRows: priced.length,
+      contrib: contribRows.length
+        ? contribRows.reduce((s, h) => s + h.contribution_pct!, 0) : null,
+    };
+  }, [rows]);
   if (!rows.length) return <p className="text-[12px] text-fg-faint py-1">Nothing held here.</p>;
 
   const sorted = [...rows].sort((a, b) => {
@@ -107,6 +162,37 @@ export function Holdings({ rows }: { rows: Name[] }) {
         </tr>
       </thead>
       <tbody>
+        {/* ⚠ THE TOTAL SITS AT THE TOP AND IS NOT NUMBERED. At the top because it is the answer the
+            list is evidence for — on a 40-name index bucket a footer total is below the fold, and
+            the reader is comparing this figure against the one in the other table, not reading to
+            the end. Unnumbered because it is not a holding: a "1" here would push every name's
+            rank up by one against the list it summarises. It also does not move when the headers
+            are clicked — a total has no position in a sort. */}
+        <tr className="border-t border-neutral-800/40 bg-inset font-semibold text-fg-strong">
+          <td />
+          <td className="py-1 pr-2 truncate" title={`All ${rows.length} name${rows.length === 1 ? '' : 's'} in this bucket`}>
+            Total <span className="text-fg-faint font-normal">({rows.length})</span>
+          </td>
+          <td className="py-1 px-1 text-right font-mono tabular-nums" title={WEIGHT_HINT}>
+            {totals.weight.toFixed(2)}%
+          </td>
+          {/* ⚠ WEIGHTED BY THE START WEIGHT, NEVER A PLAIN MEAN — a 0.1% holding that doubled
+              would otherwise pull this as hard as a 9% one that did nothing. Renormalised over the
+              names that HAVE a return, so a row we could not price is out of both sides of the
+              ratio rather than counted as a zero. */}
+          <td className="py-1 px-1 text-right font-mono"
+            title={totals.retRows < rows.length
+              ? `Weighted by start weight, over the ${totals.retRows} of ${rows.length} names with a return`
+              : 'Weighted by start weight'}>
+            <Num v={totals.ret} />
+          </td>
+          {/* ⚠ A PLAIN SUM, AND IT IS ALLOWED TO BE ONE because contribution is percentage POINTS
+              of the basket's return — points add, percentages do not. It ties to the two cells
+              left of it as `priced weight × return ÷ 100`, which is the Weight cell only when
+              every name has a return; see the memo for why that distinction is stated rather than
+              rounded over. */}
+          <td className="py-1 pl-1 text-right font-mono"><Num v={totals.contrib} pp /></td>
+        </tr>
         {sorted.map((h, i) => (
           // THE INTERSECTION IS THE POINT: a name held on both sides is emphasised (tint + bold +
           // a ringed dot); everything else — index names you don't own, your names not in the
@@ -265,6 +351,16 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
                     {shared(row.benchmark_holdings) > 0 && (
                       <span className="text-accent-400"> · {shared(row.benchmark_holdings)} in both</span>
                     )}
+                    {/* ⚠ THIS NOTE EXISTS BECAUSE THE BASIS WAS WRONG HERE ONCE AND NOTHING SAID SO.
+                        The index bar was weighted by today's caps against a list weighted at the
+                        window's open (SP500 Technology: 34.90% vs 31.24%), under an axis label
+                        claiming start-of-window. Both sides are now weighed at the open, so the
+                        total below DOES match the bar — and naming the basis is what lets a reader
+                        notice if that ever stops being true. */}
+                    <span className="text-fg-faint font-normal"
+                      title="Market caps as at the window's open, renormalised over the attributable constituents — the same basis the index bar on the composition chart uses, so this total matches it. A return must be weighted by what was held when it started, not by what the constituents are worth today.">
+                      {' '}· weighted at window open
+                    </span>
                   </p>
                   <Holdings rows={row.benchmark_holdings ?? []} />
                 </div>

@@ -698,7 +698,7 @@ export default function PortfolioOverviewPanel() {
           <button type="button" onClick={() => setShowBands(true)}
             title="Per risk profile (Offensief / Beperkt Offensief / Neutraal / Defensief), the minimum, default and maximum share each asset class may take."
             className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors">
-            Allocation bands
+            Asset allocatie
           </button>
           {/* ⚠ ONE BUTTON. It ran as two for a while — accounts here, model portfolios on a second
               control — which put an implementation rule (keep the two scans' error verdicts apart)
