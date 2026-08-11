@@ -56,7 +56,15 @@ import logging
 
 from asset_pipeline.fx import SUBUNIT
 from common.pg import _db_url, _run_copy
-from deps import IN_CHUNK_SIZE, supabase
+# ⚠ `deps.supabase` IS RESOLVED AT CALL TIME, NOT BOUND AT IMPORT. `from deps import
+# supabase` captures the object once, so a test (or anything else) that swaps
+# `deps.supabase` afterwards cannot reach this module — and because this module is a
+# SHARED loader, the reads it performs used to live in the routers where the tests patch.
+# Moving them here silently took them out of reach of every one of those patches and CI
+# went red with `KeyError: 'SUPABASE_URL'` (the real proxy trying to build a client).
+# Going through the module keeps one patch point for the whole app.
+import deps
+from deps import IN_CHUNK_SIZE
 
 log = logging.getLogger(__name__)
 
@@ -118,7 +126,7 @@ def _paged(major: list[str], start: str, end: str) -> FxRates:
         chunk = major[i:i + IN_CHUNK_SIZE]
         off = 0
         while True:
-            rows = (supabase.table("fx_rate")
+            rows = (deps.supabase.table("fx_rate")
                     .select("currency_code,rate_date,rate")
                     .in_("currency_code", chunk)
                     .gte("rate_date", start).lte("rate_date", end)

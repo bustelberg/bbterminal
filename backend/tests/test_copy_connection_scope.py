@@ -128,20 +128,46 @@ class TestFailureIsolation:
 
 class TestThreadsDoNotShareAConnection:
     def test_each_thread_gets_its_own(self, monkeypatch):
-        """⚠ THE ONE THAT MATTERS. `to_thread` copies the ContextVar, so workers share the scope
+        """⚠ THE ONE THAT MATTERS. `to_thread` copies the context, so workers share the scope
         dict — but a psycopg connection is not thread-safe, and interleaved COPY streams return
-        wrong bytes rather than raising."""
+        wrong bytes rather than raising.
+
+        ⚠⚠ IT MUST BE `copy_context().run`, NOT A BARE `threading.Thread`. A plain thread does NOT
+        inherit ContextVars — it sees the default `None`, `_scoped_connection` returns None, and
+        the test passes or fails for a reason that has nothing to do with the property. My first
+        version did exactly that and asserted `4 == 1` against `{ident: None}`. `asyncio.to_thread`
+        propagates the context via `contextvars.copy_context()`, so that is what this reproduces.
+
+        ⚠ AND THE BARRIER IS LOAD-BEARING: thread IDENTS ARE REUSED after a thread exits, so
+        short sequential threads can share one and the dict silently collapses to fewer entries
+        (the same first version recorded ONE). Holding all four alive at once keeps them distinct.
+        """
+        import contextvars
+
         made = _patch(monkeypatch)
         seen: dict[int, object] = {}
+        barrier = threading.Barrier(4)
         with pg.copy_connection_scope():
             def work():
-                seen[threading.get_ident()] = pg._scoped_connection("postgresql://x")
-            threads = [threading.Thread(target=work) for _ in range(4)]
+                conn = pg._scoped_connection("postgresql://x")
+                seen[threading.get_ident()] = conn
+                barrier.wait(timeout=10)          # all four alive together — no ident reuse
+
+            # ⚠ ONE Context PER THREAD. A `contextvars.Context` cannot be entered twice
+            # concurrently — sharing one across four threads raises "cannot enter context:
+            # already entered" inside the workers, which pytest reports only as an unhandled
+            # THREAD exception while the assertion fails for an unrelated-looking reason.
+            # `asyncio.to_thread` likewise copies the context per call. The copies share the same
+            # ContextVar VALUES (the one scope dict), which is exactly the situation under test.
+            threads = [threading.Thread(target=contextvars.copy_context().run, args=(work,))
+                       for _ in range(4)]
             for t in threads:
                 t.start()
             for t in threads:
-                t.join()
-        assert len(seen) == 4
+                t.join(timeout=10)
+        assert len(seen) == 4, f"expected 4 distinct threads, saw {len(seen)}"
+        assert all(c is not None for c in seen.values()), \
+            "a worker saw no scope — the context was not propagated"
         assert len({id(c) for c in seen.values()}) == 4, "threads shared a connection"
         assert len(made) == 4
         assert all(c.closed for c in made), "every thread's connection is closed on scope exit"

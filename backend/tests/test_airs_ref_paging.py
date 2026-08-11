@@ -41,13 +41,17 @@ def _models(n: int = 102) -> list[dict]:
 
 
 def _install(monkeypatch, *, max_rows: int | None):
+    """⚠ PATCHES `deps.supabase`, NOT `_airs_ref.supabase` — the module has no such attribute.
+    `_airs_ref` resolves `deps.supabase` at CALL time precisely so that one patch point covers
+    every module that ends up doing the read; binding it at import is what broke a dozen existing
+    tests when these loaders moved out of the routers."""
     fake = FakeSupabase(
         {"airs_model_portfolio": _models(),
          "airs_model_portfolio_position": _positions()},
         max_rows=max_rows,
     )
     import routers._airs_ref as ref
-    monkeypatch.setattr(ref, "supabase", fake)
+    monkeypatch.setattr("deps.supabase", fake)
     return ref
 
 

@@ -46,7 +46,14 @@ HOW IT WORKS — NO NEW CACHING SEMANTICS
 """
 from __future__ import annotations
 
-from deps import supabase
+# ⚠ `deps.supabase` IS RESOLVED AT CALL TIME, NOT BOUND AT IMPORT. `from deps import
+# supabase` captures the object once, so a test (or anything else) that swaps
+# `deps.supabase` afterwards cannot reach this module — and because this module is a
+# SHARED loader, the reads it performs used to live in the routers where the tests patch.
+# Moving them here silently took them out of reach of every one of those patches and CI
+# went red with `KeyError: 'SUPABASE_URL'` (the real proxy trying to build a client).
+# Going through the module keeps one patch point for the whole app.
+import deps
 
 # The union of every column any reader asks for. Adding one here is cheap (the row count is tiny);
 # adding a NEW query shape elsewhere is what costs a round trip.
@@ -88,7 +95,7 @@ def _paged(table: str, cols: str, order_by: tuple[str, ...]) -> list[dict]:
     out: list[dict] = []
     off = 0
     while True:
-        q = supabase.table(table).select(cols)
+        q = deps.supabase.table(table).select(cols)
         for col in order_by:
             q = q.order(col)
         rows = q.range(off, off + _PAGE - 1).execute().data or []
