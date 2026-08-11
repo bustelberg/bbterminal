@@ -206,7 +206,7 @@ export default function SavedRunsDropdown({
                   onChange={toggleSelectAll}
                   className="accent-accent-500 w-3.5 h-3.5 shrink-0 cursor-pointer"
                 />
-                <span className="text-[11px] text-fg-soft">
+                <span className="text-[12px] text-fg-soft">
                   {allSelected ? 'Deselect all' : 'Select all'}
                 </span>
               </label>
@@ -216,7 +216,7 @@ export default function SavedRunsDropdown({
                   <button
                     type="button"
                     onClick={() => setSelectedIds(new Set())}
-                    className="text-[11px] text-fg-subtle hover:text-fg-soft px-2 py-1 rounded transition-colors"
+                    className="text-[12px] text-fg-subtle hover:text-fg-soft px-2 py-1 rounded transition-colors"
                   >
                     clear
                   </button>
@@ -224,7 +224,7 @@ export default function SavedRunsDropdown({
                     type="button"
                     onClick={() => void handleBulkDelete()}
                     disabled={bulkDeleting}
-                    className="text-[11px] font-medium px-2 py-1 rounded bg-neg-500/15 text-neg-300 border border-neg-500/30 hover:bg-neg-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
+                    className="text-[12px] font-medium px-2 py-1 rounded bg-neg-500/15 text-neg-300 border border-neg-500/30 hover:bg-neg-500/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
                   >
                     {bulkDeleting && <Spinner size={12} />}
                     Delete {selectedIds.size}
@@ -265,12 +265,12 @@ export default function SavedRunsDropdown({
                     <span>{r.name}</span>
                   </div>
                   {paramsLine && (
-                    <div className="text-[11px] text-fg-muted mt-0.5 whitespace-nowrap">{paramsLine}</div>
+                    <div className="text-[12px] text-fg-muted mt-0.5 whitespace-nowrap">{paramsLine}</div>
                   )}
                   {signalsLine && (
-                    <div className="text-[10px] text-fg-subtle font-mono mt-0.5 whitespace-nowrap">{signalsLine}</div>
+                    <div className="text-[11px] text-fg-subtle font-mono mt-0.5 whitespace-nowrap">{signalsLine}</div>
                   )}
-                  <div className="text-[10px] text-fg-faint font-mono mt-0.5">{new Date(r.created_at).toLocaleDateString()}</div>
+                  <div className="text-[11px] text-fg-faint font-mono mt-0.5">{new Date(r.created_at).toLocaleDateString()}</div>
                 </button>
                 <button
                   type="button"

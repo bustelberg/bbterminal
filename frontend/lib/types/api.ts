@@ -95,6 +95,17 @@ export type ModelPortfolioAnalysis = components['schemas']['ModelPortfolioAnalys
 // effects SUM to the excess; `reconciles` carries the proof.
 export type ModelPortfolioAttribution = components['schemas']['ModelPortfolioAttribution'];
 export type ReconstructedIndex = components['schemas']['ReconstructedIndex'];
+/** Per-constituent Long Equity measures for a benchmark — a second, slower call than the index
+ *  itself, so the price table renders first and these fill in. */
+export type ConstituentFundamentals = components['schemas']['ConstituentFundamentals'];
+/** The VALUES behind `ConstituentFundamentals`' spans: every constituent x every line x every
+ *  period, in EUR, with the period's own market cap so a cross-section can be weighted.
+ *  ⚠ `cadence: 'quarterly'` is TRAILING TWELVE MONTHS, not the raw quarter — both slider axes are
+ *  12-month figures, so moving the quarter changes the as-of date and never the unit. */
+export type FundamentalGrid = components['schemas']['FundamentalGrid'];
+export type FundamentalGridColumn = components['schemas']['FundamentalGridColumn'];
+export type FundamentalGridRow = components['schemas']['FundamentalGridRow'];
+export type FundamentalGridPeriod = components['schemas']['FundamentalGridPeriod'];
 export type IndexMember = components['schemas']['IndexMember'];
 
 /** The four soundness charts — price vs fair value, yield, ROIC vs WACC, safety.
@@ -111,6 +122,17 @@ export type AirsAccount = components['schemas']['AirsAccount'];
 export type AirsAccountDetail = components['schemas']['AirsAccountDetail'];
 export type AirsPortfolioOverview = components['schemas']['AirsPortfolioOverview'];
 export type AirsAccountIsins = components['schemas']['AirsAccountIsins'];
+/** One account's AIRS Transacties, as the SHEET — `columns` are DATA, not a contract. No column of
+ *  the TRANS report has been measured yet, so the backend imposes no schema on it; see
+ *  `backend/airs_transacties.py` for why guessing one is the failure to avoid. */
+export type AirsAccountTransactions = components['schemas']['AirsAccountTransactions'];
+/** A book's year built from its positions — held AND sold — set against AIRS's own figure.
+ *  ⚠ `realised_ytd_eur` of null is NOT zero: it means no Transacties sheet is cached, so the
+ *  realised leg is unknown and there is no total to show. */
+export type AirsAccountReconciliation = components['schemas']['AirsAccountReconciliation'];
+/** One holding's year split into buy-and-hold + the effect of each trade. ⚠ `actual_eur` is the
+ *  ECONOMIC result and is not the table's `Result` column — see `restatement_eur`. */
+export type HoldingTiming = components['schemas']['HoldingTiming'];
 export type AirsHoldingSegment = components['schemas']['AirsHoldingSegment'];
 export type AirsHoldingIsin = components['schemas']['AirsHoldingIsin'];
 export type AirsAccountModelLink = components['schemas']['AirsAccountModelLink'];

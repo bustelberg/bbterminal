@@ -201,13 +201,13 @@ export default function AlphaLab() {
             <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5">
               {(Object.keys(RANGES) as RangeId[]).map((r) => (
                 <button key={r} type="button" onClick={() => setRange(r)}
-                  className={`text-[11px] px-2.5 py-1 rounded-md transition-colors ${
+                  className={`text-[12px] px-2.5 py-1 rounded-md transition-colors ${
                     range === r ? 'bg-accent-600 text-white' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/[0.04]'}`}>
                   {RANGES[r].label} <span className={range === r ? 'opacity-80' : 'opacity-50'}>{RANGES[r].span}</span>
                 </button>
               ))}
             </div>
-            <span className="text-[10px] text-fg-faint">tune the detector on the training set · validate out-of-sample on the test set</span>
+            <span className="text-[11px] text-fg-faint">tune the detector on the training set · validate out-of-sample on the test set</span>
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
@@ -217,8 +217,8 @@ export default function AlphaLab() {
               <option value="">Select a universe…</option>
               {savedUniverses.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.ticker_count.toLocaleString()})</option>)}
             </select>
-            {loading && <span className="text-[11px] text-fg-faint">Computing… {stage ? `${stage} · ` : ''}{elapsed.toFixed(1)}s</span>}
-            <label className="flex items-center gap-1.5 text-[11px] text-fg-muted cursor-pointer ml-auto"
+            {loading && <span className="text-[12px] text-fg-faint">Computing… {stage ? `${stage} · ` : ''}{elapsed.toFixed(1)}s</span>}
+            <label className="flex items-center gap-1.5 text-[12px] text-fg-muted cursor-pointer ml-auto"
               title="Overlay bull/bear × calm/turbulent regime bands behind every chart">
               <input type="checkbox" checked={overlay} onChange={(e) => setOverlay(e.target.checked)}
                 className="accent-accent-500 h-3.5 w-3.5" />
@@ -235,7 +235,7 @@ export default function AlphaLab() {
             <>
               {overlay && regimeBands && <RegimeLegend current={regime.current} />}
               <LwLineChart data={eqLine} scale="log" unit="=100" bands={regimeBands} />
-              <div className="text-[10px] text-fg-faint">
+              <div className="text-[11px] text-fg-faint">
                 {RANGES[range].label} set ({RANGES[range].span}) · equal-weight index of {regime.universe?.name ? `“${regime.universe.name}”` : 'the universe'} ({regime.universe?.size ?? 0} instruments)
                 {excluded.size > 0 && ` · excludes ${excludedList}`}
                 {' · =100 at start · scroll to zoom, drag to pan, double-click to reset'}
@@ -243,12 +243,12 @@ export default function AlphaLab() {
               </div>
             </>
           )}
-          {!regime && !error && !loading && <p className="text-[11px] text-fg-subtle">Pick a universe to chart its equal-weight index.</p>}
+          {!regime && !error && !loading && <p className="text-[12px] text-fg-subtle">Pick a universe to chart its equal-weight index.</p>}
 
           {/* Benchmark sector exclusions — saved to localStorage. */}
           {sectors && sectors.length > 0 && (
             <div className="space-y-1.5 pt-1">
-              <div className="text-[11px] text-fg-muted">
+              <div className="text-[12px] text-fg-muted">
                 Benchmark sectors <span className="text-fg-faint">— click to exclude a sector from the index you’re trying to beat (saved)</span>
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -257,7 +257,7 @@ export default function AlphaLab() {
                   return (
                     <button key={s.sector} type="button" onClick={() => toggleExcluded(s.sector)}
                       title={off ? 'Excluded — click to include' : 'Included — click to exclude'}
-                      className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${
+                      className={`text-[12px] px-2 py-0.5 rounded-full border transition-colors ${
                         off
                           ? 'border-neutral-700 text-fg-faint line-through opacity-60 hover:opacity-90'
                           : 'border-accent-500/40 bg-accent-500/10 text-accent-400 hover:bg-accent-500/15'

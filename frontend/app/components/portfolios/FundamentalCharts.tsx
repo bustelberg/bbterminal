@@ -123,21 +123,21 @@ export default function FundamentalCharts({ isin, name, blend }: {
     // ⚠ A COUNT, NOT A SPINNER, FOR A PORTFOLIO. The blend is a read per holding, so a 40-name
     // book sits here for a minute — and "Loading…" for a minute is indistinguishable from hung.
     return (
-      <p className="text-[11px] text-fg-subtle py-8 text-center">
+      <p className="text-[12px] text-fg-subtle py-8 text-center">
         {blend ? blendLoadingLabel(progress) : 'Loading fundamentals…'}
       </p>
     );
   }
   if (state.kind === 'none') {
     return (
-      <p className="text-[11px] text-fg-faint py-8 text-center max-w-xl mx-auto">
+      <p className="text-[12px] text-fg-faint py-8 text-center max-w-xl mx-auto">
         Full fundamental charts are available for companies in our dataset — this instrument isn’t one of them.
       </p>
     );
   }
   if (state.kind === 'error') {
     return (
-      <p className="text-[11px] text-neg-400 py-8 text-center">Couldn’t load fundamentals — {state.message}</p>
+      <p className="text-[12px] text-neg-400 py-8 text-center">Couldn’t load fundamentals — {state.message}</p>
     );
   }
 

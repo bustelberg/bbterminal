@@ -85,7 +85,7 @@ export default function VariantsPanel({
         <h2 className="text-fg-soft text-xs font-semibold uppercase tracking-wider">
           Variants
         </h2>
-        <span className="text-[10px] text-fg-subtle">
+        <span className="text-[11px] text-fg-subtle">
           Cross-product of the axes below — each permutation runs once and shows up in the variants table
         </span>
       </div>
@@ -103,7 +103,7 @@ export default function VariantsPanel({
         <div>
           <label className="text-fg-subtle text-xs block mb-1">
             Top {Array.from(selectedGroupings)[0] === 'industry' ? 'industries' : 'sectors'}{' '}
-            <span className="text-fg-faint text-[10px]">(comma list, blank = inherit)</span>
+            <span className="text-fg-faint text-[11px]">(comma list, blank = inherit)</span>
           </label>
           <input
             type="text"
@@ -116,7 +116,7 @@ export default function VariantsPanel({
         <div>
           <label className="text-fg-subtle text-xs block mb-1">
             Per {Array.from(selectedGroupings)[0] === 'industry' ? 'industry' : 'sector'}{' '}
-            <span className="text-fg-faint text-[10px]">(comma list, blank = inherit)</span>
+            <span className="text-fg-faint text-[11px]">(comma list, blank = inherit)</span>
           </label>
           <input
             type="text"
@@ -129,7 +129,7 @@ export default function VariantsPanel({
         <div>
           <label className="text-fg-subtle text-xs block mb-1">
             Min price score{' '}
-            <span className="text-fg-faint text-[10px]">(comma list; &quot;none&quot;/&quot;off&quot; = disabled)</span>
+            <span className="text-fg-faint text-[11px]">(comma list; &quot;none&quot;/&quot;off&quot; = disabled)</span>
           </label>
           <input
             type="text"
@@ -142,7 +142,7 @@ export default function VariantsPanel({
         <div>
           <label className="text-fg-subtle text-xs block mb-1">
             Vol target %{' '}
-            <span className="text-fg-faint text-[10px]">(comma list; &quot;off&quot; = plain strategy)</span>
+            <span className="text-fg-faint text-[11px]">(comma list; &quot;off&quot; = plain strategy)</span>
           </label>
           <input
             type="text"
@@ -151,14 +151,14 @@ export default function VariantsPanel({
             placeholder="e.g. off,10,12,15  (blank = off)"
             className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           />
-          <p className="text-[10px] text-fg-faint mt-1.5">
+          <p className="text-[11px] text-fg-faint mt-1.5">
             A vol-targeted variant scales exposure toward the target each rebalance (holds cash when turbulent; never levers). Include <span className="font-mono">off</span>{' '}to compare against the original strategy.
           </p>
         </div>
         <div>
           <label className="text-fg-subtle text-xs block mb-1">
             Regime filter floor{' '}
-            <span className="text-fg-faint text-[10px]">(comma list 0&ndash;1; &quot;off&quot; = no filter)</span>
+            <span className="text-fg-faint text-[11px]">(comma list 0&ndash;1; &quot;off&quot; = no filter)</span>
           </label>
           <input
             type="text"
@@ -167,7 +167,7 @@ export default function VariantsPanel({
             placeholder="e.g. off,0,0.5  (blank = off)"
             className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           />
-          <p className="text-[10px] text-fg-faint mt-1.5">
+          <p className="text-[11px] text-fg-faint mt-1.5">
             Scales exposure with a composite market-health score (trend + 6-mo momentum + drawdown): fully invested when healthy, down to this floor (<span className="font-mono">0</span> = all cash, <span className="font-mono">0.5</span> = half) when broadly weak, proportional in between. <span className="font-mono">off</span> = no filter.
           </p>
         </div>
@@ -182,7 +182,7 @@ export default function VariantsPanel({
             />
             Compare tit-for-tat
           </label>
-          <p className="text-[10px] text-fg-faint mt-1.5">
+          <p className="text-[11px] text-fg-faint mt-1.5">
             Fans each variant into a plain and a <span className="font-mono">tit-for-tat</span>{' '}version: invested today only if yesterday&apos;s daily return was up, else cash. A daily in/out overlay — holdings unchanged.
           </p>
         </div>
@@ -192,7 +192,7 @@ export default function VariantsPanel({
         <div>
           <label className="text-fg-subtle text-xs block mb-1">
             Skip variants smaller than{' '}
-            <span className="text-fg-faint text-[10px]">(blank = 12, 0 disables)</span>
+            <span className="text-fg-faint text-[11px]">(blank = 12, 0 disables)</span>
           </label>
           <input
             type="number"
@@ -203,7 +203,7 @@ export default function VariantsPanel({
             className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           />
           {minPortfolioSize > 0 && belowMinSize.size > 0 && (
-            <p className="text-[10px] text-warn-400/70 mt-1.5">
+            <p className="text-[11px] text-warn-400/70 mt-1.5">
               Skipping {belowMinSize.size} of {allPermutations.length} (portfolio &lt; {minPortfolioSize}).
             </p>
           )}
@@ -211,7 +211,7 @@ export default function VariantsPanel({
         <div>
           <label className="text-fg-subtle text-xs block mb-1">
             Skip variants larger than{' '}
-            <span className="text-fg-faint text-[10px]">(blank = 50, 0 disables)</span>
+            <span className="text-fg-faint text-[11px]">(blank = 50, 0 disables)</span>
           </label>
           <input
             type="number"
@@ -222,7 +222,7 @@ export default function VariantsPanel({
             className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
           />
           {maxPortfolioSize > 0 && aboveMaxSize.size > 0 && (
-            <p className="text-[10px] text-warn-400/70 mt-1.5">
+            <p className="text-[11px] text-warn-400/70 mt-1.5">
               Skipping {aboveMaxSize.size} of {allPermutations.length} (portfolio &gt; {maxPortfolioSize}).
             </p>
           )}
@@ -230,7 +230,7 @@ export default function VariantsPanel({
       </div>
 
       {longShortBlocked && (
-        <div className="mb-3 px-3 py-2 text-[11px] text-warn-300/80 bg-warn-500/5 border border-warn-500/20 rounded-lg">
+        <div className="mb-3 px-3 py-2 text-[12px] text-warn-300/80 bg-warn-500/5 border border-warn-500/20 rounded-lg">
           Long-short is disabled in {selectionMode === 'all' ? 'all-universe' : selectionMode === 'sector_etf' ? 'sector-ETF' : 'random'} mode (no top/bottom split to short on). Long-short rows below are greyed out.
         </div>
       )}
@@ -384,7 +384,7 @@ export default function VariantsPanel({
           <div className="flex items-center gap-2">
             <span className="text-xs text-fg-muted">Permutations</span>
             <span
-              className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+              className={`text-[11px] font-mono px-1.5 py-0.5 rounded ${
                 eligibleCount > LARGE_VARIANTS_THRESHOLD
                   ? 'bg-warn-500/15 text-warn-300 border border-warn-500/30'
                   : 'bg-neutral-700/40 text-fg-soft border border-neutral-700/40'
@@ -402,7 +402,7 @@ export default function VariantsPanel({
             <button
               type="button"
               onClick={() => setDisabledPerms(new Set())}
-              className="text-[11px] text-accent-400 hover:text-accent-300"
+              className="text-[12px] text-accent-400 hover:text-accent-300"
             >
               Enable all
             </button>
@@ -439,12 +439,12 @@ export default function VariantsPanel({
                     <span className="truncate">
                       {variantLabel(p)}
                       {sizeBelowMin && (
-                        <span className="ml-1.5 text-[9px] uppercase tracking-wider text-warn-400/70">
+                        <span className="ml-1.5 text-[10px] uppercase tracking-wider text-warn-400/70">
                           skipped · {variantSize(p)} &lt; {minPortfolioSize}
                         </span>
                       )}
                       {sizeAboveMax && (
-                        <span className="ml-1.5 text-[9px] uppercase tracking-wider text-warn-400/70">
+                        <span className="ml-1.5 text-[10px] uppercase tracking-wider text-warn-400/70">
                           skipped · {variantSize(p)} &gt; {maxPortfolioSize}
                         </span>
                       )}

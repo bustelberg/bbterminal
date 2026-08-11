@@ -253,7 +253,7 @@ export default function AcwiCanonicalView() {
         <div className="min-w-0">
           <h2 className="text-sm font-medium text-fg-strong">
             ACWI Universe
-            <span className="ml-2 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-accent-500/15 text-accent-300 border-accent-500/30">
+            <span className="ml-2 text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-accent-500/15 text-accent-300 border-accent-500/30">
               template-managed
             </span>
           </h2>
@@ -361,7 +361,7 @@ export default function AcwiCanonicalView() {
           </div>
           <div className="max-h-[600px] overflow-auto">
             <table className="w-full text-xs">
-              <thead className="text-fg-subtle text-[10px] uppercase sticky top-0 bg-card">
+              <thead className="text-fg-subtle text-[11px] uppercase sticky top-0 bg-card">
                 <tr className="border-b border-neutral-800/40">
                   <th className="text-left px-3 py-1.5 font-medium">Ticker</th>
                   <th className="text-left px-3 py-1.5 font-medium">Name</th>
@@ -413,7 +413,7 @@ export default function AcwiCanonicalView() {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="bg-page border border-neutral-800/40 rounded-lg px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-fg-subtle">{label}</div>
+      <div className="text-[11px] uppercase tracking-wider text-fg-subtle">{label}</div>
       <div className="font-mono text-sm text-fg mt-0.5">{value}</div>
     </div>
   );

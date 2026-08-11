@@ -3,7 +3,6 @@
 Endpoints:
     GET /api/hello   sanity ping
     GET /api/health  Supabase connectivity probe (used by uptime checks)
-    GET /api/items   demo endpoint kept around for the boilerplate page
     GET /api/usage   GuruFocus API call counter for the current month
 """
 
@@ -48,15 +47,6 @@ def health():
             "has_service_key": "YES" if os.environ.get("SUPABASE_SERVICE_KEY") else "NO",
             "error": str(e),
         }
-
-
-@router.get("/api/items")
-def get_items():
-    try:
-        result = supabase.table("items").select("*").execute()
-        return {"items": result.data}
-    except Exception:
-        return {"items": []}
 
 
 @router.get("/api/usage")

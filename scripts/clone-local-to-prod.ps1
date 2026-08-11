@@ -15,7 +15,12 @@
     2. Stages every small/medium table's local rows into a clone_stg schema on
        prod (one transfer; ~140k rows total -> seconds).
     3. UPSERTs them parent->child (insert + update by PK), then DELETEs prod rows
-       whose PK is gone from local child->parent. True mirror, no schema drop --
+       whose PK is gone from local child->parent -- removing whatever still points
+       at such a row first, because half this schema's FKs are ON DELETE NO ACTION
+       and do NOT clean up after themselves (see Remove-RowsWithDependents; this
+       is what killed the 2026-08-11 run on company/metric_data). A parent an
+       ADDITIVE table still references is kept instead, never cascaded into.
+       True mirror, no schema drop --
        EXCEPT the airs_* tables, which are ADDITIVE (see `$additiveTables`): prod
        scrapes those itself from a live AirSPMS, so local is only ever a subset
        and deleting prod-only rows would destroy scraped history. They are still
@@ -166,23 +171,98 @@ $StorageSyncEnabled = [bool]($LocalServiceKey -and $ProdServiceKey -and $ProdSto
 # ---- psql helpers -----------------------------------------------------------
 # Each returns rows as string[]; fields are pipe-delimited (-F'|'), tuples-only
 # (-tA) so there's no header/footer to strip.
+# ---- retry: the network WILL drop during a run this long -------------------
+# !! A CLONE IS 30-90 MINUTES OF OPEN CONNECTIONS, SO A BLIP IS NOT AN EXCEPTION, IT IS AN EVENT
+# TO PLAN FOR. Observed 2026-08-11, mid `metric_data` batch:
+#
+#   psql:<stdin>:12: SSL SYSCALL error: EOF detected
+#   psql:<stdin>:12: error: connection to server was lost
+#
+# Switching wifi <-> ethernet changes the source IP, which kills every established TCP connection
+# outright -- no keepalive setting can survive that, so the only defence is to reconnect and redo
+# the unit of work. Each `docker exec psql` opens its OWN connection, so a retry is a clean
+# reconnect rather than a resumption of a broken one.
+#
+# !! RETRYING IS ONLY SAFE BECAUSE EVERY RETRIED UNIT IS IDEMPOTENT, and that is a property this
+# script had to be given rather than one it happened to have:
+#   * staging (step 4)   `DROP TABLE IF EXISTS` before the CREATE -- added for exactly this;
+#   * upserts (5, 6)     INSERT ... ON CONFLICT DO UPDATE, by definition;
+#   * delete-missing     an anti-join; deleting nothing twice is deleting nothing;
+#   * doom tables        every one is DROP-IF-EXISTS then CREATE;
+#   * sequence resets    setval to MAX, computed fresh each time.
+# !! THE MIGRATIONS IN STEP [3] ARE THE EXCEPTION AND ARE DELIBERATELY NOT RETRIED. A migration
+# that half-applied must be looked at by a human, not re-run by a loop.
+$MaxDbTries = 4
+
+function Test-TransientDbError([string]$text) {
+    # Named patterns rather than "any failure", so a genuine SQL error is reported on the first
+    # attempt instead of being repeated four times with a 30-second pause between.
+    foreach ($p in @('SSL SYSCALL error', 'connection to server was lost', 'EOF detected',
+                     'server closed the connection unexpectedly', 'could not connect to server',
+                     'Connection refused', 'Connection reset', 'connection timed out',
+                     'no connection to the server', 'terminating connection',
+                     'authentication did not complete', 'server login has been failing')) {
+        if ($text -like "*$p*") { return $true }
+    }
+    # !! AN EMPTY BODY WITH A NON-ZERO EXIT IS ALSO A DROPPED CONNECTION. psql writes its errors to
+    # STDERR, which PowerShell does not fold into the captured stdout -- so on a lost connection
+    # the text we can see here is often empty while the exit code is 2. A real SQL error usually
+    # leaves something on stdout (the rows before it, a NOTICE); nothing at all is the signature of
+    # never having got an answer.
+    return [string]::IsNullOrWhiteSpace($text)
+}
+
 function Invoke-Local([string]$sql) {
-    $out = docker exec $Container psql -U postgres -d postgres -tA -F'|' -c $sql
-    if ($LASTEXITCODE -ne 0) { throw "local psql failed: $sql`n$out" }
-    # TrimEnd CR: docker-exec output can carry a stray trailing \r on Windows,
-    # which would silently break version/PK compares + int parses downstream.
-    # ("$_" coerces a possible $null to '' so TrimEnd never throws.)
-    return @($out | ForEach-Object { "$_".TrimEnd("`r") } | Where-Object { $_ -ne '' })
+    for ($try = 1; $try -le $MaxDbTries; $try++) {
+        $out = docker exec $Container psql -U postgres -d postgres -tA -F'|' -c $sql
+        if ($LASTEXITCODE -eq 0) {
+            # TrimEnd CR: docker-exec output can carry a stray trailing \r on Windows,
+            # which would silently break version/PK compares + int parses downstream.
+            # ("$_" coerces a possible $null to '' so TrimEnd never throws.)
+            return @($out | ForEach-Object { "$_".TrimEnd("`r") } | Where-Object { $_ -ne '' })
+        }
+        $text = ($out -join "`n")
+        if ($try -eq $MaxDbTries -or -not (Test-TransientDbError $text)) {
+            throw "local psql failed: $sql`n$text"
+        }
+        Write-Host ("  local connection lost (attempt {0}/{1}) -- retrying in {2}s..." -f `
+                $try, $MaxDbTries, (5 * $try)) -ForegroundColor Yellow
+        Start-Sleep -Seconds (5 * $try)
+    }
 }
 function Invoke-Prod([string]$sql) {
-    $out = docker exec @prodEnv $Container psql $prodUrlNoPw -tA -F'|' -c $sql
-    if ($LASTEXITCODE -ne 0) { throw "prod psql failed: $sql`n$out" }
-    return @($out | ForEach-Object { "$_".TrimEnd("`r") } | Where-Object { $_ -ne '' })
+    for ($try = 1; $try -le $MaxDbTries; $try++) {
+        $out = docker exec @prodEnv $Container psql $prodUrlNoPw -tA -F'|' -c $sql
+        if ($LASTEXITCODE -eq 0) {
+            return @($out | ForEach-Object { "$_".TrimEnd("`r") } | Where-Object { $_ -ne '' })
+        }
+        $text = ($out -join "`n")
+        if ($try -eq $MaxDbTries -or -not (Test-TransientDbError $text)) {
+            throw "prod psql failed: $sql`n$text"
+        }
+        Write-Host ("  prod connection lost (attempt {0}/{1}) -- retrying in {2}s..." -f `
+                $try, $MaxDbTries, (5 * $try)) -ForegroundColor Yellow
+        Start-Sleep -Seconds (5 * $try)
+    }
 }
 # Run a multi-statement / \copy script against prod via stdin (-f -).
+#
+# !! THIS IS THE ONE THAT ACTUALLY DROPPED. It carries the metric_data batch -- minutes of held
+# connection moving millions of rows -- so it is where a network change lands. The whole batch is
+# re-sent on a retry, which is safe: it opens with `DROP TABLE IF EXISTS clone_stg.md_batch` and
+# wraps its delete+insert in BEGIN/COMMIT, so a half-finished attempt left nothing behind.
 function Invoke-ProdScript([string]$script) {
-    $script | docker exec -i @prodEnv $Container psql $prodUrlNoPw -v ON_ERROR_STOP=1 -f -
-    if ($LASTEXITCODE -ne 0) { throw "prod script failed (see output above)." }
+    for ($try = 1; $try -le $MaxDbTries; $try++) {
+        $script | docker exec -i @prodEnv $Container psql $prodUrlNoPw -v ON_ERROR_STOP=1 -f -
+        if ($LASTEXITCODE -eq 0) { return }
+        # stdin scripts stream their output straight to the console (that is how a long \copy shows
+        # progress), so there is nothing captured to classify -- and a lost connection is by far the
+        # likeliest cause of a non-zero exit here. Retry, and let the final attempt throw.
+        if ($try -eq $MaxDbTries) { throw "prod script failed (see output above)." }
+        Write-Host ("  prod script failed (attempt {0}/{1}) -- reconnecting in {2}s..." -f `
+                $try, $MaxDbTries, (10 * $try)) -ForegroundColor Yellow
+        Start-Sleep -Seconds (10 * $try)
+    }
 }
 
 # ---- storage helpers (backtest-results bucket) ------------------------------
@@ -374,6 +454,37 @@ WHERE tc.constraint_type='FOREIGN KEY' AND tc.table_schema='public' AND tc.table
     if ($parentsByTable.ContainsKey($p[0]) -and $allTables -contains $p[1]) { [void]$parentsByTable[$p[0]].Add($p[1]) }
 }
 
+# FK edges that BLOCK a parent delete: ON DELETE NO ACTION ('a') or RESTRICT ('r').
+# CASCADE and SET NULL clean themselves up; these do not, and the statement that
+# fails does not tell you which kind you have. Read from the catalogue (not
+# information_schema, which does not expose the delete rule) so a new table gets
+# the right treatment on its first clone. See Remove-RowsWithDependents.
+$blockingChildren = @{}
+foreach ($t in $allTables) { $blockingChildren[$t] = New-Object System.Collections.ArrayList }
+foreach ($r in Invoke-Local @"
+SELECT p.relname, c.relname,
+       (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+          FROM unnest(con.conkey) WITH ORDINALITY k(att, ord)
+          JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.att),
+       (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+          FROM unnest(con.confkey) WITH ORDINALITY k(att, ord)
+          JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.att)
+FROM pg_constraint con
+JOIN pg_class c ON c.oid = con.conrelid
+JOIN pg_class p ON p.oid = con.confrelid
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE con.contype = 'f' AND n.nspname = 'public'
+  AND con.confdeltype IN ('a', 'r') AND c.relname <> p.relname
+ORDER BY p.relname, c.relname
+"@) {
+    $f = $r -split '\|'
+    if ($f.Length -lt 4) { continue }
+    if (-not $blockingChildren.ContainsKey($f[0])) { continue }
+    [void]$blockingChildren[$f[0]].Add(@{
+        Child = $f[1]; ChildCols = @($f[2] -split ','); ParentCols = @($f[3] -split ',')
+    })
+}
+
 # Tables whose INSERT must say OVERRIDING SYSTEM VALUE because a PK column is
 # GENERATED ALWAYS AS IDENTITY (an explicit value is otherwise rejected).
 $alwaysIdentity = @{}
@@ -445,7 +556,51 @@ $diffSpecs = @(
     @{ Table = 'asset_price'; Key = 'analysis_id'; Sums = @('close', 'volume'); Exclude = @() }
 )
 $diffTables   = @($diffSpecs | ForEach-Object { $_.Table })
-$stagedTables = @($upsertOrder.ToArray() | Where-Object { $diffTables -notcontains $_ })
+
+# ---- NOT SYNCED AT ALL: prod owns these, and their PK is a SURROGATE id ------
+# !! ADDITIVE IS NOT ENOUGH WHEN THE PRIMARY KEY IS A SERIAL, AND ON 2026-08-11
+# THAT PUT DUPLICATE ROWS IN PROD. "Additive" means: upsert local's rows BY PK,
+# never delete prod-only ones. That is exactly right for a table whose PK is the
+# NATURAL key -- airs_performance (portefeuille, periode), airs_model_weight
+# (portefeuille, fonds), airs_account_roster (portefeuille) -- because the same
+# logical row carries the same key on both sides, so an upsert updates it.
+#
+# These six have a surrogate `id` instead, and BOTH SIDES SCRAPE AIRS
+# INDEPENDENTLY, each assigning its own serial. Local's airs_holding id=5 and
+# prod's id=5 are different holdings. So the upsert did two wrong things at once:
+#
+#   * ON CONFLICT (id) DO UPDATE OVERWROTE prod's row 5 with local's -- silent
+#     corruption of a row prod scraped and local never saw; and
+#   * a local row whose id was free on prod was INSERTED beside the row prod
+#     already held for that same holding -- the duplicates, which nothing then
+#     removes, because additive never deletes.
+#
+# There is no key to match them on, so there is no correct upsert. The honest
+# answer is not to sync them: prod scrapes AIRS on its own schedule and is the
+# AUTHOR of every row here. Local's copies are dev artifacts -- the same reasoning
+# `asset_ingest_queue` is already excluded under.
+#
+# !! ALL SIX GO TOGETHER, FOR FK COHERENCE. airs_model_portfolio_position and
+# airs_account_model_link both point at airs_model_portfolio; syncing one while
+# skipping another would leave a child referencing a parent that was never sent.
+#
+# !! THE LAST TWO DO HAVE A NATURAL KEY -- AND THE SCRIPT CANNOT SEE IT. It is an
+# EXPRESSION unique index (`lower(portefeuille)`, and
+# `COALESCE(NULLIF(isin,''), lower(fonds))`), while `$uniqByTable` is built from
+# information_schema.table_constraints, which lists CONSTRAINTS only. An
+# expression index is invisible there, so step [5]'s pre-clear never de-conflicts
+# them and the INSERT trips the index outright. Skipping is both the fix for the
+# duplicates and the fix for that.
+$skipTables = @(
+    'airs_holding',                    # scraped positions per book per date
+    'airs_mutatie',                    # scraped mutations
+    'airs_model_portfolio',            # the 95 model portfolios, scraped
+    'airs_model_portfolio_position',   # their compositions, scraped
+    'airs_model_portfolio_link',       # manual link, natural key is an expression index
+    'airs_account_model_link'          # manual pairing, same
+)
+$stagedTables = @($upsertOrder.ToArray() |
+    Where-Object { $diffTables -notcontains $_ -and $skipTables -notcontains $_ })
 
 # ---- ADDITIVE tables: upsert local rows, NEVER delete prod-only ones ---------
 # !! PROD IS THE AUTHOR OF THESE TABLES, NOT LOCAL. Everything named airs_* is
@@ -500,6 +655,140 @@ $additiveTables = @($upsertOrder.ToArray() | Where-Object {
     $_ -in @('current_picks_snapshot', 'fx_rate', 'asset_ingest_queue')
 })
 Write-Host "  $($allTables.Count) tables; upsert order resolved." -ForegroundColor Green
+
+# ---- deleting a parent row means deleting what points at it -----------------
+# !! STEP [5]'s COMMENT USED TO CLAIM "FK ON DELETE CASCADE/SET NULL cleans their
+# dependents". For three of company's six children that is FALSE, and the clone
+# died on it on 2026-08-11, 47 tables in:
+#
+#   ERROR: update or delete on table "company" violates foreign key constraint
+#          "metric_data_company_id_fkey" on table "metric_data"
+#   DETAIL: Key (company_id)=(6418) is still referenced from table "metric_data".
+#
+# metric_data, portfolio_weight and earnings_portfolio_member are all NO ACTION,
+# as are five more edges elsewhere (country<-gurufocus_exchange,
+# currency<-fx_rate, currency<-gurufocus_exchange, gurufocus_exchange<-company,
+# portfolio<-portfolio_weight). Nothing in the failing statement says which of a
+# table's children block and which clean up after themselves, so the edges come
+# from the catalogue and the dependents go first, deepest first.
+#
+# !! THIS IS NOT AN EXTRA DELETION -- IT IS THE SAME ONE, EARLIER. Both call
+# sites only ever remove a parent row whose PK IS GONE FROM LOCAL. Local
+# therefore cannot hold a child pointing at it either, so every dependent removed
+# here is a row step [6] (prod-only metric_data / asset_price keys) or step [7]
+# (the mirror) would have deleted minutes later anyway. Nothing is destroyed that
+# the mirror was not already going to destroy.
+#
+# !! EXCEPT IN AN ADDITIVE TABLE, WHERE IT WOULD BE -- SO THE PARENT IS SPARED
+# INSTEAD. fx_rate is a blocking child of currency AND is additive on purpose
+# (prod runs its own ECB sync and had 493 rates local lacked). Cascading into it
+# would destroy precisely the rows $additiveTables exists to protect, to remove a
+# currency row. So a parent still pointed at by an additive child is LEFT ON PROD,
+# counted and named. A stale reference-data row is a much better outcome than
+# deleting prod's own history, and step [8] reports the resulting count.
+function Remove-Dependents {
+    param([string]$Parent, [string]$DoomTable, [int]$Depth)
+    if ($Depth -gt 5) { throw "FK dependency walk exceeded depth 5 at '$Parent' (cycle?)." }
+    if (-not $blockingChildren.ContainsKey($Parent)) { return }
+    $edges = @($blockingChildren[$Parent])
+    if ($edges.Count -eq 0) { return }
+
+    # PASS 1 -- spare the parents an ADDITIVE child still points at, BEFORE anything
+    # is deleted. Doing it inside one loop would delete a mirrored child of a parent
+    # that a later edge then spares, i.e. destroy a dependent of a row we keep.
+    foreach ($e in $edges) {
+        if ($additiveTables -notcontains $e.Child) { continue }
+        $join = Get-JoinClause $e 'ch' 'd'
+        $keep = [int](Invoke-Prod "SELECT count(*) FROM $DoomTable d WHERE EXISTS (SELECT 1 FROM public.$($e.Child) ch WHERE $join);")
+        if ($keep -gt 0) {
+            Invoke-Prod "DELETE FROM $DoomTable d WHERE EXISTS (SELECT 1 FROM public.$($e.Child) ch WHERE $join);" | Out-Null
+            Write-Host ""
+            Write-Host ("    KEPT {0} {1} row(s) on prod: {2} (additive) still references them." -f $keep, $Parent, $e.Child) -ForegroundColor Yellow
+            if (-not $script:sparedByTable.ContainsKey($Parent)) { $script:sparedByTable[$Parent] = 0 }
+            $script:sparedByTable[$Parent] += $keep
+        }
+    }
+
+    # PASS 2 -- remove the dependents that do block, depth-first.
+    foreach ($e in $edges) {
+        if ($additiveTables -contains $e.Child) { continue }
+        $child = $e.Child
+        $join  = Get-JoinClause $e 'ch' 'd'
+        $childPk = $pkByTable[$child]
+        # Only stage the grandchildren's doom set when there ARE grandchildren --
+        # metric_data has none, and it is the one table where an extra scan hurts.
+        if ($childPk -and $blockingChildren.ContainsKey($child) -and $blockingChildren[$child].Count -gt 0) {
+            $childDoom = "clone_stg.doomed_${child}_$Depth"
+            $sel = (($childPk | ForEach-Object { "ch.$_" }) -join ', ')
+            Invoke-Prod "SET statement_timeout = 0; DROP TABLE IF EXISTS $childDoom; CREATE TABLE $childDoom AS SELECT $sel FROM public.$child ch JOIN $DoomTable d ON $join;" | Out-Null
+            Remove-Dependents -Parent $child -DoomTable $childDoom -Depth ($Depth + 1)
+            # !! DELETED VIA ITS OWN (PRUNED) DOOM SET, NOT VIA THE JOIN. The recursion
+            # may have SPARED some of these children -- deleting by the join would take
+            # them anyway, which is the very destruction the sparing exists to prevent.
+            $childMatch = (($childPk | ForEach-Object { "cd.$_ = ch.$_" }) -join ' AND ')
+            Invoke-Prod "SET statement_timeout = 0; DELETE FROM public.$child ch USING $childDoom cd WHERE $childMatch;" | Out-Null
+            Invoke-Prod "DROP TABLE IF EXISTS $childDoom;" | Out-Null
+        } else {
+            Invoke-Prod "SET statement_timeout = 0; DELETE FROM public.$child ch USING $DoomTable d WHERE $join;" | Out-Null
+        }
+        # !! AND THE SPARING PROPAGATES UP, OR IT IS NOT SPARING AT ALL. If anything
+        # of this child SURVIVED (it was kept for an additive descendant), then this
+        # parent is still referenced and deleting it would fail on the very FK this
+        # whole function exists to respect. Asking AFTER the delete is what makes that
+        # self-evident: whatever is still pointing here was deliberately kept. On a
+        # normal run every child is gone and this removes nothing.
+        $left = [int](Invoke-Prod "SELECT count(*) FROM $DoomTable d WHERE EXISTS (SELECT 1 FROM public.$child ch WHERE $join);")
+        if ($left -gt 0) {
+            Invoke-Prod "DELETE FROM $DoomTable d WHERE EXISTS (SELECT 1 FROM public.$child ch WHERE $join);" | Out-Null
+            Write-Host ""
+            Write-Host ("    KEPT {0} {1} row(s) on prod: rows in {2} survived below them." -f $left, $Parent, $child) -ForegroundColor Yellow
+            if (-not $script:sparedByTable.ContainsKey($Parent)) { $script:sparedByTable[$Parent] = 0 }
+            $script:sparedByTable[$Parent] += $left
+        }
+    }
+}
+
+# "ch.col = d.col AND ..." for one FK edge, composite keys included.
+function Get-JoinClause {
+    param($Edge, [string]$ChildAlias, [string]$ParentAlias)
+    $parts = @()
+    for ($i = 0; $i -lt $Edge.ChildCols.Count; $i++) {
+        $parts += "$ChildAlias.$($Edge.ChildCols[$i]) = $ParentAlias.$($Edge.ParentCols[$i])"
+    }
+    return ($parts -join ' AND ')
+}
+
+# Delete the rows of $Table matching $Predicate (a boolean SQL expression over the
+# alias `p`), removing whatever blocks them first.
+#
+# !! THE DOOMED KEYS ARE MATERIALISED, NOT RE-EVALUATED PER CHILD. The predicate
+# reads clone_stg and public.$Table, and every child delete would otherwise re-run
+# it as a correlated subquery -- against metric_data, that is a 30M-row scan per
+# edge. Staged once, each child delete is a join on its own FK index. It also
+# makes "spare this parent" expressible at all: a row is removed from the doom set
+# and the parent delete simply never sees it.
+function Remove-RowsWithDependents {
+    param([string]$Table, [string]$Predicate)
+    $pk = $pkByTable[$Table]
+    # Nothing blocks this table (48 of 55) -- one DELETE, exactly as before.
+    if (-not $pk -or -not $blockingChildren.ContainsKey($Table) -or $blockingChildren[$Table].Count -eq 0) {
+        Invoke-Prod "SET statement_timeout = 0; DELETE FROM public.$Table p WHERE $Predicate;" | Out-Null
+        return
+    }
+    $doom  = "clone_stg.doomed_$Table"
+    $pkSel = (($pk | ForEach-Object { "p.$_" }) -join ', ')
+    Invoke-Prod "SET statement_timeout = 0; DROP TABLE IF EXISTS $doom; CREATE TABLE $doom AS SELECT $pkSel FROM public.$Table p WHERE $Predicate;" | Out-Null
+    $n = [int](Invoke-Prod "SELECT count(*) FROM $doom")
+    if ($n -gt 0) {
+        Remove-Dependents -Parent $Table -DoomTable $doom -Depth 0
+        $match = (($pk | ForEach-Object { "d.$_ = p.$_" }) -join ' AND ')
+        Invoke-Prod "SET statement_timeout = 0; DELETE FROM public.$Table p USING $doom d WHERE $match;" | Out-Null
+    }
+    Invoke-Prod "DROP TABLE IF EXISTS $doom;" | Out-Null
+}
+# parent table -> rows left on prod because an additive child still points at them.
+# Step [8] reads this so a deliberate survivor is not reported as a MISMATCH.
+$sparedByTable = @{}
 
 # Per-company signature for metric_data (price data only; recorded_at excluded).
 # The leading `SET statement_timeout = 0;` disables the per-statement timeout for
@@ -567,6 +856,16 @@ if ($DryRun) {
         # 4,297 scraped ones, which is the difference between a sync and a data
         # loss. Additive tables are marked so their surplus stops looking alarming.
         $flag = ''; $colour = 'Gray'
+        # !! A SKIPPED TABLE MUST NOT BE REPORTED AS "additive", WHICH IS WHAT IT DID ON
+        # 2026-08-11: the dry run showed `airs_holding ... <-- additive: prod keeps +2784`, i.e. it
+        # promised an UPSERT of local's 11,213 rows on a table the run then correctly left alone.
+        # Reporting a stronger action than the one taken is the safe direction to be wrong in and
+        # still the wrong direction to be wrong in -- a dry run exists to be believed.
+        if ($skipTables -contains $t) {
+            Write-Host ("  {0,-28} local={1,-10} prod={2,-10}  <-- NOT TOUCHED (prod owns it)" -f $t, $lc, $pc) `
+                -ForegroundColor DarkGray
+            continue
+        }
         if ($additiveTables -contains $t) {
             if ($pc -gt $lc) { $flag = "  <-- additive: prod keeps +$($pc - $lc)"; $colour = 'DarkGray' }
             elseif ($lc -ne $pc) { $flag = "  <-- $($lc - $pc) to add"; $colour = 'Gray' }
@@ -606,6 +905,8 @@ if (-not $Force) {
     Write-Host "  - apply any missing migrations + align the tracker"
     Write-Host "  - upsert + delete-missing on $($stagedTables.Count - $additiveTables.Count) tables"
     Write-Host "  - upsert ONLY (prod-only rows kept) on $($additiveTables.Count) additive tables: $($additiveTables -join ', ')"
+    Write-Host "  - NOT TOUCHED at all (prod owns them; surrogate ids cannot be matched across sides):"
+    Write-Host "      $($skipTables -join ', ')" -ForegroundColor DarkGray
     Write-Host "  - differentially re-copy only changed rows of $($diffTables -join ', ')"
     Write-Host "  - mirror the backtest-results Storage bucket$(if (-not $StorageSyncEnabled) { ' (SKIPPED -- no prod service key)' })"
     Write-Host "  (auth.users / API keys are NOT touched)"
@@ -642,6 +943,17 @@ foreach ($line in $trackRows) {
 Invoke-ProdScript $trackSql.ToString()
 Write-Host "  schema in sync (applied $($missing.Count) migration(s))." -ForegroundColor Green
 
+# !! EVERYTHING FROM HERE TO STEP [7b] IS INSIDE A try/finally, AND THE finally IS WHAT DROPS
+# clone_stg. A run that dies mid-way used to LEAVE A FULL COPY OF EVERY STAGED TABLE ON PROD --
+# the drop lived on the success path only. On 2026-08-11 the FK failure in step [5] did exactly
+# that, and prod went READ-ONLY: Supabase locks writes at 95% of disk, the staging copy is ~500MB
+# (universe_membership alone is 444MB), and repeated attempts each left another one plus the dead
+# tuples from every table already upserted. Four disk expansions inside 24h hit the modification
+# limit, and there is a ~4h cooldown before the disk can grow again.
+#
+# The braces are deliberately NOT re-indented over the ~200 lines they wrap: PowerShell does not
+# care, and a whitespace-only diff over the whole body would bury the two lines that changed.
+try {
 # ---- [4] stage small/medium tables on prod ----------------------------------
 Write-Host "[4] Staging $($stagedTables.Count) tables into clone_stg on prod..."
 Invoke-Prod "DROP SCHEMA IF EXISTS clone_stg CASCADE; CREATE SCHEMA clone_stg;" | Out-Null
@@ -664,7 +976,11 @@ foreach ($t in $stagedTables) {
     # relied on the PGOPTIONS startup option alone, and the managed session pooler
     # does not forward it (which the PGOPTIONS comment already warned was possible).
     # So a table big enough to outlast the default timeout could never be staged.
-    $loadSql = "SET statement_timeout = 0;`nCREATE TABLE clone_stg.$t (LIKE public.$t INCLUDING DEFAULTS);`n\copy clone_stg.$t ($collist) FROM '$datfile'`n"
+    # !! `DROP TABLE IF EXISTS` MAKES THIS RETRYABLE, which it has to be: a dropped connection
+    # mid-\copy leaves the staging table created and half-loaded, and re-running without the drop
+    # fails on "already exists" -- or worse, succeeds and loads the rows a second time. See the
+    # retry note on Invoke-ProdScript.
+    $loadSql = "SET statement_timeout = 0;`nDROP TABLE IF EXISTS clone_stg.$t;`nCREATE TABLE clone_stg.$t (LIKE public.$t INCLUDING DEFAULTS);`n\copy clone_stg.$t ($collist) FROM '$datfile'`n"
     Invoke-ProdScript $loadSql
 }
 Write-Host "  staged." -ForegroundColor Green
@@ -684,7 +1000,25 @@ foreach ($t in $stagedTables) {
     $nonpk   = @($cols | Where-Object { $pk -notcontains $_ })
     if ($nonpk.Count -gt 0) {
         $setlist = (($nonpk | ForEach-Object { "$_ = EXCLUDED.$_" }) -join ', ')
-        $conflict = "ON CONFLICT ($pklist) DO UPDATE SET $setlist"
+        # !! AN UNCHANGED ROW MUST NOT BE REWRITTEN -- THE SAME RULE STEP [6] ALREADY HAS, ONE
+        # LANE OVER, AND ITS ABSENCE HERE IS WHY A CLONE THAT CHANGES NOTHING STILL COSTS DISK.
+        # Postgres is MVCC: `SET x = x` writes a NEW tuple, marks the old one dead, updates every
+        # index and WAL-logs all of it. Without this guard every clone rewrote EVERY row of EVERY
+        # staged table -- ~8,400 universe_membership rows in a 444MB table, on every run, whether
+        # or not a single value differed. That dead weight is what autovacuum then has to chase,
+        # and on 2026-08-11 it did not chase it fast enough: prod crossed 95% of disk and went
+        # READ-ONLY. The metric_data comment in step [6] calls this "the difference between a sync
+        # and a disk-filling event"; it is the same event here.
+        #
+        # !! NO EXCLUSION LIST, UNLIKE STEP [6]. That one omits `recorded_at` because both sides
+        # stamp it independently, which would defeat the guard. Here EVERY non-PK column is
+        # compared, so a row is skipped only when it is identical in every field -- the guard can
+        # therefore never change what prod ends up holding, only whether we pointlessly wrote it.
+        # (Checked: no staged table has a `json`/geometric column, so every type involved has an
+        # equality operator. A plain `json` column would make this fail outright.)
+        $tgt = (($nonpk | ForEach-Object { "public.$t.$_" }) -join ', ')
+        $inc = (($nonpk | ForEach-Object { "EXCLUDED.$_" }) -join ', ')
+        $conflict = "ON CONFLICT ($pklist) DO UPDATE SET $setlist WHERE ($tgt) IS DISTINCT FROM ($inc)"
     } else {
         $conflict = "ON CONFLICT ($pklist) DO NOTHING"
     }
@@ -693,14 +1027,22 @@ foreach ($t in $stagedTables) {
     # same logical row). Without this the INSERT below trips the unique
     # constraint (e.g. universe.label for a snapshot re-frozen on prod under a
     # different universe_id). The "PK gone from local" guard means we only touch
-    # rows step [7] would delete anyway; FK ON DELETE CASCADE/SET NULL cleans
-    # their dependents. A NULL unique value never matches (p.col = s.col is NULL),
-    # so multi-NULL columns like template_key are correctly left alone.
+    # rows step [7] would delete anyway. A NULL unique value never matches
+    # (p.col = s.col is NULL), so multi-NULL columns like template_key are
+    # correctly left alone.
+    #
+    # !! IT GOES THROUGH Remove-RowsWithDependents BECAUSE CASCADE IS NOT A GIVEN.
+    # This is the statement that killed the 2026-08-11 clone on company/metric_data
+    # -- the comment here asserted the dependents would be cleaned up by the FKs,
+    # and for metric_data, portfolio_weight and earnings_portfolio_member (all NO
+    # ACTION) they are not. See that function.
     if ($uniqByTable.ContainsKey($t)) {
         $pkMatch = (($pk | ForEach-Object { "k.$_ = p.$_" }) -join ' AND ')
         foreach ($ucols in $uniqByTable[$t]) {
             $uMatch = (($ucols | ForEach-Object { "p.$_ = s.$_" }) -join ' AND ')
-            Invoke-Prod "DELETE FROM public.$t p USING clone_stg.$t s WHERE $uMatch AND NOT EXISTS (SELECT 1 FROM clone_stg.$t k WHERE $pkMatch);" | Out-Null
+            Remove-RowsWithDependents -Table $t -Predicate (
+                "EXISTS (SELECT 1 FROM clone_stg.$t s WHERE $uMatch)" +
+                " AND NOT EXISTS (SELECT 1 FROM clone_stg.$t k WHERE $pkMatch)")
         }
     }
     $ov = if ($alwaysIdentity.ContainsKey($t)) { 'OVERRIDING SYSTEM VALUE ' } else { '' }
@@ -831,10 +1173,16 @@ foreach ($t in $deleteOrder) {
     if ($additiveTables -contains $t) { continue }
     $pk = $pkByTable[$t]
     $cond = (($pk | ForEach-Object { "s.$_ = p.$_" }) -join ' AND ')
-    Invoke-Prod "SET statement_timeout = 0; DELETE FROM public.$t p WHERE NOT EXISTS (SELECT 1 FROM clone_stg.$t s WHERE $cond);" | Out-Null
+    # !! THE SAME WALL AS STEP [5], REACHED MINUTES LATER. The mirror delete drops
+    # prod rows whose PK is gone from local -- which for `company` is exactly the
+    # row whose metric_data still points at it. The delete order is child->parent,
+    # so a child TABLE is emptied before its parent, but that says nothing about a
+    # prod-only PARENT row whose children prod also still holds: those children are
+    # deleted by step [6] (metric_data / asset_price are never in clone_stg) or by
+    # an earlier table in this very loop, and neither had run for company 6418.
+    Remove-RowsWithDependents -Table $t -Predicate "NOT EXISTS (SELECT 1 FROM clone_stg.$t s WHERE $cond)"
 }
-Invoke-Prod "DROP SCHEMA IF EXISTS clone_stg CASCADE;" | Out-Null
-docker exec $Container bash -c "rm -f /tmp/clone_*.dat" | Out-Null
+# The staging schema is dropped in the `finally` below, so it goes on a failure too.
 Invoke-Prod "NOTIFY pgrst, 'reload schema';" | Out-Null
 Write-Host "  done." -ForegroundColor Green
 
@@ -850,6 +1198,27 @@ foreach ($s in $seqResets) {
 }
 Write-Host "  done." -ForegroundColor Green
 
+}
+finally {
+    # !! THE STAGING COPY IS DROPPED WHETHER THE RUN SUCCEEDED OR DIED, and that is a DISK rule,
+    # not tidiness. clone_stg holds a full copy of every staged table (~500MB, three quarters of
+    # it universe_membership); left behind on prod it counts against the 95%-of-disk threshold
+    # that puts Supabase into read-only mode, where the next attempt cannot even start.
+    #
+    # !! BEST-EFFORT, AND IT MUST NOT MASK THE REAL FAILURE. If the run is dying because prod is
+    # unreachable then this drop cannot work either, and letting its error escape would replace
+    # "the FK on company blocked the delete" with "connection refused" -- burying the fault that
+    # actually needs fixing. So it warns and rethrows nothing.
+    try {
+        Invoke-Prod "DROP SCHEMA IF EXISTS clone_stg CASCADE;" | Out-Null
+        Write-Host "  clone_stg dropped (staging copy removed from prod)." -ForegroundColor DarkGray
+    } catch {
+        Write-Host "  WARNING: could not drop clone_stg on prod -- it is still using disk there." -ForegroundColor Yellow
+        Write-Host "           Run this by hand once prod is reachable:  DROP SCHEMA IF EXISTS clone_stg CASCADE;" -ForegroundColor Yellow
+    }
+    try { docker exec $Container bash -c "rm -f /tmp/clone_*.dat" | Out-Null } catch { }
+}
+
 # ---- [7c] mirror the backtest-results Storage bucket ------------------------
 # Upload local blobs missing on prod + delete prod-only blobs, so each cloned
 # `backtest_run.result_path` resolves (no out-of-band 404 on read).
@@ -861,6 +1230,16 @@ Write-Host "[8] Verifying..."
 $mismatch = 0
 $surplus  = 0
 foreach ($t in $upsertOrder) {
+    # !! A SKIPPED TABLE HAS NO EXPECTED RELATIONSHIP BETWEEN THE TWO COUNTS. Prod owns it and
+    # local's copy is a dev artifact, so prod holding more (or fewer) is not a finding -- reporting
+    # either as a MISMATCH would fail every clone for doing exactly what it was told.
+    if ($skipTables -contains $t) {
+        $lc = [int](Invoke-Local "SELECT count(*) FROM public.$t")
+        $pc = [int](Invoke-Prod "SELECT count(*) FROM public.$t")
+        Write-Host ("  skipped  {0} : local={1} prod={2} (prod owns this table)" -f $t, $lc, $pc) `
+            -ForegroundColor DarkGray
+        continue
+    }
     $lc = [int](Invoke-Local "SELECT count(*) FROM public.$t")
     $pc = [int](Invoke-Prod "SELECT count(*) FROM public.$t")
     if ($additiveTables -contains $t) {
@@ -876,7 +1255,22 @@ foreach ($t in $upsertOrder) {
         }
         continue
     }
-    if ($lc -ne $pc) { Write-Host "  MISMATCH $t : local=$lc prod=$pc" -ForegroundColor Red; $mismatch++ }
+    if ($lc -ne $pc) {
+        # !! A ROW WE DELIBERATELY KEPT IS NOT A MISMATCH, AND REPORTING IT AS ONE
+        # WOULD FAIL THE RUN FOR DOING THE RIGHT THING. Remove-Dependents spares a
+        # parent that an ADDITIVE child still references rather than cascading into
+        # prod's own scraped/synced history; the survivor is a surplus prod row by
+        # construction. Only the amount it explains is forgiven -- anything beyond
+        # it is still a real mismatch.
+        $sp = 0
+        if ($sparedByTable.ContainsKey($t)) { $sp = $sparedByTable[$t] }
+        if ($sp -gt 0 -and $pc -gt $lc -and ($pc - $lc) -le $sp) {
+            Write-Host ("  KEPT     {0} : local={1} prod={2} (+{3} still referenced by an additive table -- see above)" -f $t, $lc, $pc, ($pc - $lc)) -ForegroundColor Yellow
+        } else {
+            Write-Host "  MISMATCH $t : local=$lc prod=$pc" -ForegroundColor Red
+            $mismatch++
+        }
+    }
 }
 if ($surplus -gt 0) { Write-Host "  $surplus additive table(s) kept prod-only rows (by design)." -ForegroundColor DarkGray }
 if ($mismatch -eq 0) {

@@ -148,7 +148,7 @@ export default function TightenPanel({ base, specs, defaults, onClose, onCreated
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
-          <label className="text-fg-subtle text-[11px] uppercase tracking-wider">New universe label</label>
+          <label className="text-fg-subtle text-[12px] uppercase tracking-wider">New universe label</label>
           <input
             value={label}
             onChange={e => setLabel(e.target.value)}
@@ -156,7 +156,7 @@ export default function TightenPanel({ base, specs, defaults, onClose, onCreated
           />
         </div>
         <div>
-          <label className="text-fg-subtle text-[11px] uppercase tracking-wider">Description (optional)</label>
+          <label className="text-fg-subtle text-[12px] uppercase tracking-wider">Description (optional)</label>
           <input
             value={description}
             onChange={e => setDescription(e.target.value)}

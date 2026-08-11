@@ -5,7 +5,7 @@
  *  ratio. */
 
 import { type CashReturnRow } from './cashReturnData';
-import { weightedByYear } from './marginData';
+import { periodToX, weightedByYear } from './marginData';
 
 /** One company's invested capital per fiscal year (2015+), in its reporting currency. Both legs
  *  must be present for a year — a missing non-current-liabilities line (a bank / Berkshire) means
@@ -14,11 +14,14 @@ export function investedCapitalSeries(row: CashReturnRow): Map<number, number> {
   const out = new Map<number, number>();
   const years = new Set<string>([...Object.keys(row.noncurrent_liabilities), ...Object.keys(row.total_equity)]);
   for (const y of years) {
-    if (Number(y) < 2015) continue;
+    // ⚠ `periodToX`, NOT `Number` — a "2025-Q3" label is NaN to `Number`, and every quarterly
+    // period would land on one NaN key. Compared as a STRING for the 2015 floor, because the
+    // labels sort lexically either way and parsing to compare would reintroduce the same trap.
+    if (y < '2015') continue;
     const ncl = row.noncurrent_liabilities[y];
     const eq = row.total_equity[y];
     if (ncl == null || eq == null) continue;
-    out.set(Number(y), ncl + eq);
+    out.set(periodToX(y), ncl + eq);
   }
   return out;
 }
@@ -41,5 +44,5 @@ export function investedCapitalIndexByYear(rows: CashReturnRow[]): Map<number, n
   // year computed over two of twelve holdings read as 100% covered.
   return weightedByYear(rebased,
     (r) => [...r.idx.keys()].map(String),
-    (r, y) => r.idx.get(Number(y)) ?? null);
+    (r, y) => r.idx.get(periodToX(y)) ?? null);
 }

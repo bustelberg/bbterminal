@@ -37,10 +37,16 @@ WHY REBUILD SOMETHING WE ALREADY HAVE
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
+import logging
 from datetime import date, timedelta
 
 from asset_pipeline.fx import SUBUNIT
+from common.pg import _db_url, _run_copy
 from deps import IN_CHUNK_SIZE, supabase
+
+_log = logging.getLogger(__name__)
 
 # The `universe.label` of the reconstructed membership (Wikipedia + OpenFIGI, the /sp500 page).
 SP500_LABEL = "SP500"
@@ -52,12 +58,26 @@ _CLOSE_METRIC = "close_price"
 _CLOSE_SOURCE = "gurufocus"
 
 
-def _members(label: str) -> list[dict]:
+def _members(label: str, *, require_market_cap: bool = True) -> list[dict]:
     """The index's companies, deduped to ONE ROW PER COMPANY (see the module header).
 
     The price currency comes from the EXCHANGE, not from `market_cap_currency` — they are
     different fields and can disagree, and it is the exchange's currency the close is
     quoted in.
+
+    ⚠ `require_market_cap=False` KEEPS THE CONSTITUENTS THIS OTHERWISE DELETES, and it exists for
+    a caller that LISTS the index rather than weighting it. The default drops any company with no
+    stored `market_cap_eur`, which is right here — the index is cap-weighted, so a member with no
+    cap cannot be given a weight and silently taking a share of the others' would be worse. But
+    "cannot be weighted" is not "is not a constituent": on the AEX the three it removes are
+    **Shell, Unilever and RELX** (LSE listings GuruFocus does not cover), so a table built on the
+    default shows 22 rows and calls it the AEX. `_benchmark_fundamental_grid` passes False to list
+    all 25 and mark the three as unpriceable, which is the honest form for a grid of figures.
+
+    ⚠ THE DEDUPE SURVIVES EITHER WAY. It keeps the highest-cap row per company NAME, and a missing
+    cap reads as 0 there — so an unfiltered call still folds share classes (GOOGL+GOOG are one
+    company) and still prefers the row that has a cap. Removing the filter cannot resurrect a
+    duplicate.
     """
     uni = (supabase.table("universe").select("universe_id")
            .eq("label", label).limit(1).execute().data or [])
@@ -73,12 +93,13 @@ def _members(label: str) -> list[dict]:
 
     rows: list[dict] = []
     for i in range(0, len(ids), IN_CHUNK_SIZE):
-        rows += (supabase.table("company")
-                 .select("company_id,company_name,gurufocus_ticker,isin,market_cap_eur,"
-                         "exchange_id")
-                 .in_("company_id", ids[i:i + IN_CHUNK_SIZE])
-                 .is_("delisted_at", "null").is_("out_of_scope_at", "null")
-                 .not_.is_("market_cap_eur", "null").execute().data or [])
+        q = (supabase.table("company")
+             .select("company_id,company_name,gurufocus_ticker,isin,market_cap_eur,exchange_id")
+             .in_("company_id", ids[i:i + IN_CHUNK_SIZE])
+             .is_("delisted_at", "null").is_("out_of_scope_at", "null"))
+        if require_market_cap:
+            q = q.not_.is_("market_cap_eur", "null")
+        rows += (q.execute().data or [])
     for r in rows:
         r["currency"] = ccy_by_exch.get(r.get("exchange_id"))
 
@@ -91,6 +112,50 @@ def _members(label: str) -> list[dict]:
         if prev is None or (r.get("market_cap_eur") or 0) > (prev.get("market_cap_eur") or 0):
             by_name[k] = r
     return list(by_name.values())
+
+
+def weight_basis(label: str) -> dict:
+    """How this index's constituent weights were arrived at, and who fell out on the way.
+
+    ⚠ THE FUNDAMENTAL BLEND WEIGHTS ON **TODAY's** CAP, NOT THE START-OF-WINDOW CAP THE PRICE
+    INDEX USES. `_window_rows` backs the start weight out through the price precisely because
+    weighting a RETURN by today's cap is look-ahead bias (measured: +9.10% → +21.70%). A growth
+    blend has no single window to back a cap out to — each constituent's series starts in a
+    different year — so it uses `market_cap_eur` as stored. That is a real tilt toward companies
+    that have since grown, and it is stated rather than buried: a constituent whose revenue rose
+    tenfold carries its post-growth weight over its whole history.
+
+    ⚠ AND A CONSTITUENT WITH NO STORED CAP IS NOT IN THE INDEX AT ALL. `_members` requires
+    `market_cap_eur`, and the names that lack one are systematically the ones GuruFocus does not
+    cover — LSE listings above all. Measured 2026-08-04 on the AEX: **Shell, Unilever and RELX**
+    are all missing, so the 22 that remain are renormalised over 100% and **ASML alone reads
+    51.76%**. Against the real AEX — which float-adjusts and caps any constituent at 15% — that
+    is not a small difference, and a reader comparing the two has to be told.
+
+    Returns the counts + the dropped names so the surface that shows the weights can say so.
+    """
+    uni = (supabase.table("universe").select("universe_id")
+           .eq("label", label).limit(1).execute().data or [])
+    if not uni:
+        return {"members": 0, "weighted": 0, "excluded": []}
+    ids = sorted({m["company_id"] for m in
+                  (supabase.table("universe_membership").select("company_id")
+                   .eq("universe_id", uni[0]["universe_id"]).execute().data or [])})
+    rows: list[dict] = []
+    for i in range(0, len(ids), IN_CHUNK_SIZE):
+        rows += (supabase.table("company")
+                 .select("company_name,market_cap_eur,delisted_at,out_of_scope_at")
+                 .in_("company_id", ids[i:i + IN_CHUNK_SIZE]).execute().data or [])
+    excluded = [
+        {"name": r.get("company_name"),
+         "reason": ("delisted" if r.get("delisted_at")
+                    else "out of scope" if r.get("out_of_scope_at")
+                    else "no market cap")}
+        for r in rows
+        if r.get("market_cap_eur") is None or r.get("delisted_at") or r.get("out_of_scope_at")
+    ]
+    return {"members": len(ids), "weighted": len(ids) - len(excluded),
+            "excluded": sorted(excluded, key=lambda e: (e["reason"], e["name"] or ""))}
 
 
 def _closes(company_ids: list[int], start: str, end: str) -> dict[int, list[tuple[str, float]]]:
@@ -122,6 +187,53 @@ def _closes(company_ids: list[int], start: str, end: str) -> dict[int, list[tupl
     return out
 
 
+def _fx_to_eur_via_copy(cur: list[str], start: str,
+                        end: str) -> dict[str, dict[str, float]] | None:
+    """`{currency: {date: units per EUR}}` in ONE COPY, or None to fall back to the pager.
+
+    `cur` is already the MAJOR-currency list `_fx_to_eur` built (`GBp` resolved to `GBP`), so this
+    takes no view on minor units — that would be a second place for the pence rule to live.
+
+    ⚠ A ZERO RATE IS DROPPED, exactly as the paged path drops a falsy one. Not because zero is
+    implausible but because dividing by it raises, and a rate is the DENOMINATOR of every
+    conversion here (`eur = native / rate`).
+
+    ⚠ None ON ANY FAILURE, NEVER A PARTIAL DICT. A currency missing from this map has no EUR
+    series, so its constituents silently leave the index and the weights renormalise over the rest
+    — the failure `_airs_portfolio_perf._fx` measured, where two environments reported different
+    returns off identical code. Falling back to the pager is slow; returning half the currencies
+    would be wrong and would look like a number.
+    """
+    if not _db_url() or not cur:
+        return None
+    sql = ("COPY (SELECT currency_code, rate_date, rate FROM fx_rate "
+           "WHERE currency_code = ANY(%s) AND rate_date BETWEEN %s AND %s) "
+           "TO STDOUT WITH (FORMAT csv)")
+    try:
+        buf = _run_copy(sql, (cur, start, end))
+    except Exception as e:  # noqa: BLE001 — a fast path must never be the reason a page 500s
+        _log.warning("[bench-index] FX COPY failed, falling back to PostgREST: %s: %s",
+                     type(e).__name__, e)
+        return None
+    if buf is None:
+        return None
+    out: dict[str, dict[str, float]] = {}
+    if buf.getbuffer().nbytes == 0:
+        return out
+    for row in csv.reader(io.TextIOWrapper(buf, encoding="utf-8", newline="")):
+        if len(row) != 3:
+            continue
+        code, rate_date, rate = row
+        # COPY writes NULL as an empty field; `float("")` raises, and a missing rate is a real
+        # state in this table (a currency whose feed had a gap that day).
+        if not rate:
+            continue
+        val = float(rate)
+        if val:
+            out.setdefault(code, {})[rate_date] = val
+    return out
+
+
 def _fx_to_eur(currencies: set[str], start: str, end: str) -> dict[str, dict[str, float]]:
     """{currency: {date: units per EUR}} — the same `fx_rate` table the rest of the app uses.
 
@@ -144,6 +256,18 @@ def _fx_to_eur(currencies: set[str], start: str, end: str) -> dict[str, dict[str
     # Keyed by base too: `_rate` resolves the same way, and the divisor is applied there.
     cur = sorted({SUBUNIT.get(c, (c, 1.0))[0]
                   for c in currencies if c and c != "EUR"})
+    # ⚠ ONE COPY FIRST, THE PAGER BELOW AS THE FALLBACK — same contract as every other COPY loader
+    # here: it returns the identical shape or None, so nothing downstream can tell which ran.
+    #
+    # ⚠ THE PAGING IS CORRECT AND ITS COST IS ROUND TRIPS. A daily rate for a global index is
+    # ~260 rows per currency per year, so the fundamentals grid's window (2015 -> today, ~27
+    # currencies) is ~77,000 rows — **77 sequential requests** against PostgREST's 1,000-row cap,
+    # each paying a full network latency. That is not a truncation risk (the loop above is right);
+    # it is simply the largest remaining round-trip cost on that page. A COPY streams the lot over
+    # one connection.
+    fast = _fx_to_eur_via_copy(cur, start, end)
+    if fast is not None:
+        return fast
     for i in range(0, len(cur), IN_CHUNK_SIZE):
         chunk = cur[i:i + IN_CHUNK_SIZE]
         off = 0

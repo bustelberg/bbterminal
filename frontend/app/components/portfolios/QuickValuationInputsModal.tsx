@@ -36,12 +36,12 @@ export default function QuickValuationInputsModal({
         <div className="flex items-baseline gap-3 px-6 py-4 border-b border-neutral-800/40">
           <h2 className="text-fg-strong font-medium">Price vs {b.perShare} — by fiscal year</h2>
           {name && <span className="text-sm text-fg-soft truncate max-w-[28ch]" title={name}>{name}</span>}
-          <span className="text-[11px] font-mono text-fg-faint">{isin}</span>
+          <span className="text-[12px] font-mono text-fg-faint">{isin}</span>
           <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-3">
-          <p className="text-[11px] text-fg-faint">
+          <p className="text-[12px] text-fg-faint">
             Price is the close at each FISCAL year end and {b.perShare} is as reported —
             both {currency ? `in ${currency}, ` : ''}from the same fiscal rows. The indexed rows are
             what the chart draws{index.anchor != null ? `, each 100 at FY${index.anchor}` : ''}.
@@ -51,7 +51,7 @@ export default function QuickValuationInputsModal({
           <div className="overflow-auto rounded-lg border border-neutral-800/40">
             <table className="w-full text-xs">
               <thead className="bg-page">
-                <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                   <th className="px-3 py-1.5 font-medium text-left sticky left-0 bg-page z-10">Line</th>
                   {years.map((y) => <th key={y} className="px-3 py-1.5 font-medium text-right">{y}</th>)}
                 </tr>

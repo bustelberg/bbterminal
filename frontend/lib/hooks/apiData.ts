@@ -211,7 +211,6 @@ function _buildHook<T>(
 
 // ─── Public hooks ───────────────────────────────────────────────────
 
-export const useUniverseTemplates = _buildHook(KEYS.universeTemplates, _fetchUniverseTemplates);
 export const useStaticUniverses = _buildHook(KEYS.staticUniverses, _fetchStaticUniverses);
 
 /** Drop the cached `/api/static-universes` list so the next mount refetches
@@ -226,22 +225,6 @@ export const useMomentumSignals = _buildHook(KEYS.momentumSignals, _fetchMomentu
 export const useExchangeFees = _buildHook(KEYS.exchangeFees, _fetchExchangeFees);
 export const useFxLatest = _buildHook(KEYS.fxLatest, _fetchFxLatest);
 const _useFeeConfigRaw = _buildHook(KEYS.feeConfig, _fetchFeeConfig);
-
-/**
- * Derived hook: `Map<currency, rate>` of the latest stored FX rate per
- * currency (ECB convention — units per 1 EUR; EUR maps to 1). Updates daily as
- * the FX sync rolls new rows in. Used to mark holdings to market in EUR.
- */
-export function useFxRateMap(): Map<string, number> {
-  const { data } = useFxLatest();
-  return useMemo(() => {
-    const m = new Map<string, number>([['EUR', 1]]);
-    for (const r of data ?? []) {
-      if (r.currency && r.rate) m.set(r.currency.toUpperCase(), r.rate);
-    }
-    return m;
-  }, [data]);
-}
 
 /**
  * Derived hook: the sorted list of currencies we hold FX rates for (EUR
@@ -269,26 +252,6 @@ export function useFxCurrencies(): string[] {
 export function useFeeConfig(): FeeConfig {
   const { data } = _useFeeConfigRaw();
   return data ?? DEFAULT_FEE_CONFIG;
-}
-
-/**
- * Derived hook: `Map<exchange_code, fee_bps>` built once from the shared
- * `/api/exchange-fees` fetch and used by every per-trade-fee net-stat
- * calculation in the momentum result rendering (EquityCurveCard,
- * MonthlyHoldingsTable, VariantSummaryTable). Returns null when no
- * non-zero fees are configured so callers can short-circuit
- * `(gross / net)` parentheticals and render the gross stat alone.
- */
-export function useExchangeFeeMap(): Map<string, number> | null {
-  const { data } = useExchangeFees();
-  return useMemo(() => {
-    if (!data) return null;
-    const m = new Map<string, number>();
-    for (const r of data) {
-      if (r.exchange_code && r.fee_bps > 0) m.set(r.exchange_code, r.fee_bps);
-    }
-    return m.size > 0 ? m : null;
-  }, [data]);
 }
 
 /**

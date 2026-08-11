@@ -362,8 +362,12 @@ class TestAbsencesAreNotFailures:
         from routers import _benchmark_refresh as r
 
         src = inspect.getsource(r._prices)
-        assert "already_current" in src
-        assert "already current" in src        # ...and it is SAID, per constituent
+        # ⚠ THE COUNTER WAS RENAMED, THE INVARIANT WAS NOT. `already_current` became `unchanged`
+        # on 2026-08-03, split from `moved` — a better vocabulary for the same fact, and this test
+        # went red naming a string rather than the behaviour it guards. What must stay true is that
+        # a constituent needing no fetch is COUNTED and SAID, not silently skipped.
+        assert '"unchanged"' in src                            # counted…
+        assert "unchanged, Yahoo has no closed bar" in src     # …and said, per constituent
 
     def test_no_start_price_is_its_own_outcome(self):
         """The instrument had not listed when the year opened. It cannot contribute a YTD and the
@@ -375,12 +379,23 @@ class TestAbsencesAreNotFailures:
         assert "no_start" in inspect.getsource(r._prices)
 
     def test_one_dead_symbol_does_not_end_the_run(self):
+        """⚠ THE KEYWORD CHANGED, THE INVARIANT DID NOT — the same correction this class already
+        made once when `already_current` became `unchanged`. The loop became a thread pool on
+        2026-08-11, so the failure path ends in `return` rather than `continue`; asserting the
+        keyword made this red for a rewrite that kept the behaviour exactly.
+
+        What must stay true is that a dead symbol is CAUGHT, COUNTED and the run carries on. That
+        is now proved by running it — `tests/test_benchmark_price_pool.py::
+        TestOneDeadSymbolDoesNotEndTheRun` raises from two of forty constituents and checks the
+        other thirty-eight are still fetched — so this one only guards the shape."""
         import inspect
 
         from routers import _benchmark_refresh as r
 
         src = inspect.getsource(r._prices)
-        assert "except Exception" in src and "continue" in src
+        assert "except Exception" in src          # caught, never allowed to end the run…
+        assert 'out["failed"] += 1' in src        # …counted as its own outcome…
+        assert "FAILED" in src                    # …and named on its own line in the log
 
 
 class TestTheAnchorIsNeverTheCalendar:

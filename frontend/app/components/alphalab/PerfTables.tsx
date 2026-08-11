@@ -10,7 +10,7 @@ function Table({ title, rows }: { title: string; rows: PerfRow[] }) {
       <div className="text-xs font-semibold text-fg-strong uppercase tracking-wide">{title}</div>
       <div className="overflow-auto rounded-lg border border-neutral-800/40 max-h-80">
         <table className="w-full text-xs">
-          <thead className="bg-card sticky top-0 text-fg-faint text-[10px] uppercase tracking-wide">
+          <thead className="bg-card sticky top-0 text-fg-faint text-[11px] uppercase tracking-wide">
             <tr className="border-b border-neutral-800/40">
               <th className="px-3 py-1.5 text-left font-medium">Period</th>
               <th className="px-3 py-1.5 text-right font-medium" title="Annualized geometric return (CAGR)">Return</th>
@@ -52,7 +52,7 @@ export default function PerfTables({ dates, level }: { dates: string[]; level: n
         <Table title="Every 5 years" rows={by5} />
         <Table title="Every 10 years" rows={by10} />
       </div>
-      <p className="text-[10px] text-fg-faint leading-tight">
+      <p className="text-[11px] text-fg-faint leading-tight">
         Return = annualized geometric CAGR · Vol/Sharpe/Sortino annualized (252 trading days, risk-free = 0) ·
         Sharpe & Sortino use the annualized arithmetic-mean return · buckets with &lt; 20 trading days show “—” for the ratios.
       </p>

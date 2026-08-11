@@ -187,22 +187,22 @@ function SectorScores({ rows, held }: { rows: SectorScore[]; held: Set<string | 
     // ⚠ Explained, not blank: a day cached before sector scores existed has none, and an empty
     // area under an expanded row otherwise reads as "this day had no sectors".
     return (
-      <p className="text-[10px] text-fg-faint">
+      <p className="text-[11px] text-fg-faint">
         No sector scores stored for this day — recalculate it to fill them in.
       </p>
     );
   }
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-wide text-fg-faint mb-1">
+      <p className="text-[11px] uppercase tracking-wide text-fg-faint mb-1">
         Sector scores
         <span className="normal-case tracking-normal text-fg-subtle">
           {' '}· every sector ranked that day; the highlighted ones were bought
         </span>
       </p>
-      <table className="w-full text-[11px]">
+      <table className="w-full text-[12px]">
         <thead>
-          <tr className="text-fg-faint text-[10px] uppercase tracking-wide">
+          <tr className="text-fg-faint text-[11px] uppercase tracking-wide">
             <th className="py-1 pr-2 text-left font-medium">#</th>
             <th className="py-1 px-2 text-left font-medium">Sector</th>
             <th className="py-1 px-2 text-right font-medium">Companies</th>
@@ -400,7 +400,7 @@ export default function DailyHoldingsSection({ strategies }: {
           answer from a fresh one. The most recent days are always recomputed (a late close still
           moves them), so a full-reuse run is not possible and the counts show it. */}
       {result?.cache_stats && (
-        <p className="text-[11px] text-fg-faint">
+        <p className="text-[12px] text-fg-faint">
           {result.cache_stats.reused > 0
             ? <>Reused <span className="font-mono text-fg-soft">{result.cache_stats.reused}</span> previously
               calculated day{result.cache_stats.reused === 1 ? '' : 's'} · computed{' '}
@@ -428,7 +428,7 @@ export default function DailyHoldingsSection({ strategies }: {
             value={selected?.id ?? ''}
             onChange={(e) => { setStrategyId(Number(e.target.value)); setResult(null); setStatus('idle'); }}
             disabled={status === 'running' || usable.length === 0}
-            className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[11px] text-fg
+            className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[12px] text-fg
                        focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 max-w-[18rem]"
           >
             {usable.length === 0 && <option value="">No scheduled strategies</option>}
@@ -437,7 +437,7 @@ export default function DailyHoldingsSection({ strategies }: {
             ))}
           </select>
         </label>
-        <span className="flex items-center gap-1 text-[11px]">
+        <span className="flex items-center gap-1 text-[12px]">
           {(Object.keys(WINDOWS) as WindowKey[]).map((k) => (
             <button key={k} type="button"
               onClick={(e) => { e.stopPropagation(); setWin(k); setResult(null); setStatus('idle'); }}
@@ -469,7 +469,7 @@ export default function DailyHoldingsSection({ strategies }: {
           onClick={(e) => { e.stopPropagation(); void calculate(true); }}
           disabled={!selected || status === 'running'}
           title="Ignore every previously calculated day and re-select the whole window from scratch. Slow — use it when prices for the window have been refreshed."
-          className="text-[11px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted
+          className="text-[12px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted
                      hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40
                      disabled:cursor-not-allowed transition-colors"
         >
@@ -496,7 +496,7 @@ export default function DailyHoldingsSection({ strategies }: {
           sector that appears anywhere in the window, in the order it was most often ranked, so a
           colour seen on a row can be named without hovering each one. */}
       {sectorLegend.length > 0 && (
-        <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-[10px]">
+        <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-[11px]">
           <span className="text-fg-faint uppercase tracking-wide">Sectors</span>
           {sectorLegend.map((s) => <SectorChip key={s} sector={s} showName />)}
         </div>
@@ -510,7 +510,7 @@ export default function DailyHoldingsSection({ strategies }: {
       )}
 
       {days.length > 0 && (
-        <div className="flex items-center gap-3 flex-wrap text-[10px] text-fg-faint">
+        <div className="flex items-center gap-3 flex-wrap text-[11px] text-fg-faint">
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-3 h-2 rounded-sm bg-pos-500/25" />entered that day
           </span>
@@ -532,7 +532,7 @@ export default function DailyHoldingsSection({ strategies }: {
           className="overflow-auto rounded-lg border border-neutral-800/40">
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-card z-10">
-              <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+              <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                 <th className="px-3 py-1.5 text-left font-medium">Date</th>
                 <th className="px-3 py-1.5 text-left font-medium"
                   title="The sectors picked that day, best-ranked first. One colour per sector, shared with the /backtest sector timeline.">
@@ -599,9 +599,9 @@ export default function DailyHoldingsSection({ strategies }: {
                       <tr>
                         <td colSpan={7} className="px-3 py-2 bg-inset/50 space-y-2">
                           <SectorScores rows={d.sector_scores ?? []} held={heldSectors(d)} />
-                          <table className="w-full text-[11px]">
+                          <table className="w-full text-[12px]">
                             <thead>
-                              <tr className="text-fg-faint text-[10px] uppercase tracking-wide">
+                              <tr className="text-fg-faint text-[11px] uppercase tracking-wide">
                                 <th className="py-1 pr-2 text-left font-medium">Ticker</th>
                                 <th className="py-1 px-2 text-left font-medium">Company</th>
                                 <th className="py-1 px-2 text-left font-medium">Sector</th>
@@ -651,13 +651,13 @@ export default function DailyHoldingsSection({ strategies }: {
                                       </a>
                                     ) : <span className="text-fg-soft">—</span>}
                                     {isNew && (
-                                      <span className="ml-1.5 text-[9px] uppercase tracking-wide text-pos-400"
+                                      <span className="ml-1.5 text-[10px] uppercase tracking-wide text-pos-400"
                                         title="Not held on the previous trading day — entered on this day.">
                                         new
                                       </span>
                                     )}
                                     {isSold && (
-                                      <span className="ml-1.5 text-[9px] uppercase tracking-wide text-neg-400"
+                                      <span className="ml-1.5 text-[10px] uppercase tracking-wide text-neg-400"
                                         title="Not held on the next trading day — sold out of the basket after this day.">
                                         sold
                                       </span>

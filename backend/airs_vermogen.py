@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from typing import Callable
 import time as _time
 from datetime import date, datetime, timedelta, timezone
 
@@ -132,9 +133,19 @@ def _record_roster(names: list[str]) -> None:
                      type(e).__name__, e)
 
 
-# The four reports an account needs for every figure on the portfolios page to describe the same
+# The reports an account needs for every figure on the portfolios page to describe the same
 # moment. Order is display order, not fetch order.
-REPORTS = ("att", "volk", "mut", "model")
+#
+# ⚠ `trans` JOINED THIS LIST ON 2026-08-05 AND THAT IS A DELIBERATE RE-DEFINITION OF "COMPLETE".
+# Transacties used to be fetched ONLY when someone opened the Transactions panel, so after months
+# of daily fleet scans exactly TWO of 44 books had ever had theirs stored — and every figure that
+# needs flows (invested capital, money-weighted return, the realised leg, the whole look-through
+# into a certificate) was silently unavailable everywhere else. A report nothing routinely fetches
+# is a report that does not exist in practice.
+# Two consequences, both wanted: every account now reads INCOMPLETE until re-scanned (it genuinely
+# is — it is missing a report we now require), and the incremental pass at `needed = set(REPORTS)`
+# stops skipping those books, so the fleet scan backfills transactions on its own.
+REPORTS = ("att", "volk", "mut", "trans", "model")
 
 
 def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
@@ -521,7 +532,7 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     # bare count — and regex-ing that back out of "BUS_X (Vermogensoverzicht: RuntimeError: …)"
     # would be parsing a message we formatted ourselves one line earlier.
     errors: list[dict] = []
-    holdings = mutaties = model_weights = 0
+    holdings = mutaties = transacties = model_weights = 0
     as_of = tot
 
     from airs_scanner import AirsNoData  # noqa: PLC0415
@@ -529,7 +540,8 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     def _step_detail(code: str) -> str:
         """What the successful download actually yielded — the number that makes "ok" verifiable."""
         return {"att": "stored", "volk": f"{holdings} holdings as of {as_of}",
-                "mut": f"{mutaties} mutations", "model": f"{model_weights} model weights",
+                "mut": f"{mutaties} mutations", "trans": f"{transacties} transactions",
+                "model": f"{model_weights} model weights",
                 }.get(code, "")
 
     def _say(report: str, status: str, detail: str = "") -> None:
@@ -588,6 +600,30 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
         nonlocal mutaties
         mutaties = _save_mutaties(name, van, tot)
 
+    def _trans() -> None:
+        nonlocal transacties
+        from airs_scanner import AirsNoData  # noqa: PLC0415
+        from routers._airs_transacties import _fetch_live, _store, ytd_window  # noqa: PLC0415
+
+        # ⚠⚠ `ytd_window()`, NOT THIS SCAN'S `van`/`tot`. The Transactions panel treats a snapshot
+        # of a DIFFERENT window as not-this-answer and re-fetches — so storing under any other
+        # window writes a row the panel will never accept, and every open would go back out to
+        # AIRS as if nothing had been cached. The two happen to be equal today; relying on that is
+        # how they drift apart the first time a caller passes a custom range.
+        tvan, ttot = ytd_window()
+        try:
+            sheet = _fetch_live(name, tvan, ttot)
+        except AirsNoData:
+            # ⚠ STORE THE EMPTY SNAPSHOT, THEN RE-RAISE. `_step` turns `AirsNoData` into `no_data`
+            # and counts the account complete; without the write the book would be marked complete
+            # while holding nothing, so the panel would re-download on every single open. Same
+            # bargain `account_transactions` already strikes — one behaviour, two entry points.
+            from airs_transacties import ParsedSheet  # noqa: PLC0415
+            _store(name, tvan, ttot, ParsedSheet())
+            raise
+        _store(name, tvan, ttot, sheet)
+        transacties = len(sheet.rows)
+
     def _model() -> None:
         nonlocal model_weights
         model_weights = _save_model_weights(name, van, tot)
@@ -595,10 +631,12 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     _step("att", "Rendement", _att)
     _step("volk", "Vermogensoverzicht", _volk)
     _step("mut", "Mutaties", _mut)
+    _step("trans", "Transacties", _trans)
     _step("model", "Model", _model)
 
     return {"reports_ok": ok, "holdings": holdings, "mutaties": mutaties,
-            "model_weights": model_weights, "as_of": as_of, "errors": errors}
+            "transacties": transacties, "model_weights": model_weights,
+            "as_of": as_of, "errors": errors}
 
 
 def _save_holdings(portefeuille: str, as_of: str, holdings) -> int:
@@ -997,17 +1035,99 @@ def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
     raise RuntimeError(f"no valued Vermogensoverzicht in the last 7 days ({last_err})")
 
 
-def refresh_one_portfolio(portefeuille: str) -> dict:
+def dependent_accounts(portefeuille: str) -> list[str]:
+    """The accounts this one's figures are BUILT FROM — transitively, nearest first.
+
+    ⚠ A CERTIFICATE IS ANOTHER BOOK, AND REFRESHING ONLY THE PARENT LEAVES IT HALF FRESH. Some
+    holdings are not instruments: they are Leonteq AMCs wrapping another strategy, and everything
+    the modal shows through one — the looked-through positions, their returns, the attribution —
+    is read from the WRAPPED book's own scan. Measured 2026-08-05: BUS_Offensief_Dyn is built on
+    StarTopSelectie OFF DYN; TOPS_BEOFF_BEH_DYN on NINE other books. Re-scanning the parent alone
+    re-reads AIRS for the 12 lines it stores and leaves the 40 instruments behind them dated to
+    whenever those books were last touched.
+
+    The chain is holding -> linked model portfolio -> the ACCOUNT paired with that model. All three
+    hops already exist; nothing here decides a link, it only follows them.
+
+    ⚠ READ FROM THE DB, NEVER FRESHENED (`freshen=False`). Working out WHAT to refresh must not
+    itself hit AIRS — that would put a scrape in front of every scrape, and it would need the very
+    session the refresh is about to use.
+
+    ⚠ CYCLE-SAFE, AND THE CYCLE IS REAL. `_airs_portfolio_links` records it: TOPS_STS_L holds the
+    certificate of the strategy it IS, so following links walks back to the row you started from.
+    A `seen` set is what stops a refresh recursing until the session dies.
+    """
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+    from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
+
+    try:
+        by_model = {a["model_portfolio_id"]: a["portefeuille"]
+                    for a in list_account_links()["accounts"] if a.get("model_portfolio_id")}
+    except Exception as e:  # noqa: BLE001 — a refresh must not fail because the map is unreadable
+        _log.warning("[airs_vermogen] could not resolve dependencies for %s (%s: %s)",
+                     portefeuille, type(e).__name__, e)
+        return []
+
+    seen, order, queue = {portefeuille}, [], [portefeuille]
+    while queue:
+        cur = queue.pop(0)
+        try:
+            rows = resolve_account_isins(cur, freshen=False).get("rows") or []
+        except Exception as e:  # noqa: BLE001 — one unreadable book must not lose the rest
+            _log.warning("[airs_vermogen] %s: dependency scan failed (%s: %s)",
+                         cur, type(e).__name__, e)
+            continue
+        for name in sorted({by_model[r["linked_portfolio_id"]] for r in rows
+                            if r.get("linked_portfolio_id") in by_model}):
+            if name in seen:
+                continue
+            seen.add(name)
+            order.append(name)
+            queue.append(name)
+    return order
+
+
+def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
+                          on_step: Callable[[int, int, str], None] | None = None) -> dict:
     """Re-scan ONE portfolio's Rendement (ATT) + Vermogensoverzicht (VOLK) and store both — the
     per-row "Refresh" on the overview table.
+
+    ⚠ AND THE BOOKS IT IS BUILT FROM, unless `cascade=False`. A holding that is a certificate is
+    another book, and the parent's own scan says nothing about what is inside it — see
+    `dependent_accounts`. The cost is real and proportional: BUS_Offensief_Dyn pulls in one more
+    account, TOPS_BEOFF_BEH_DYN nine, at four downloads each. It is reported per account rather
+    than hidden in a single "done".
+
+    ⚠ THE TARGET IS SCANNED FIRST. It is the row the user clicked, so its answer should not be
+    held hostage to nine dependencies — and if one of those fails, the primary result is already
+    in hand and the failure is reported beside it rather than replacing it.
 
     Reuses the exact download → parse → save path the full daily scan uses, so a single row's
     refresh and the whole-fleet refresh can never diverge. Serialized against the full scan (and
     other single refreshes) via `_LOCK` — they share ONE AirSPMS session, which must not be driven
     by two threads at once. A few seconds: two downloads (plus a login only if the session lapsed).
+
+    ⚠ `on_step(done, total, message)` IS OPTIONAL AND CHANGES NOTHING ELSE. It exists because the
+    cascade makes this unbounded from the reader's side — TOPS_BEOFF_BEH_DYN is NINE accounts at
+    five downloads each — and a button that sits disabled for a minute with no line moving is
+    indistinguishable from a broken one. It is a hook rather than a second, streaming copy of this
+    function: two implementations of "refresh one portfolio" is exactly what the ⚠ above says this
+    body exists to prevent.
     """
     if not _LOCK.acquire(blocking=False):
         return {"status": "busy", "message": "An AIRS refresh is already running", "portefeuille": portefeuille}
+
+    def _step(done: int, total: int, message: str) -> None:
+        # ⚠ A REPORTER MUST NEVER BE THE REASON A SCAN FAILS. The work is the scan; the line on
+        # screen is a courtesy, and a listener that raises would lose a refresh that had already
+        # downloaded everything.
+        if on_step is None:
+            return
+        try:
+            on_step(done, total, message)
+        except Exception:  # noqa: BLE001
+            _log.debug("[airs_vermogen] progress listener raised", exc_info=True)
+
     try:
         today = date.today()
         van, tot = f"{today.year}-01-01", today.isoformat()
@@ -1016,23 +1136,77 @@ def refresh_one_portfolio(portefeuille: str) -> dict:
         # of the four downloads — and the two had already drifted (only one recorded which reports
         # arrived). One body, so "refresh this row" and "refresh everything" cannot mean different
         # things.
+        # ⚠ THE TOTAL IS KNOWN BEFORE THE FIRST DOWNLOAD, so the bar is a real fraction from the
+        # start rather than a spinner that suddenly acquires a denominator. `dependent_accounts`
+        # is a lookup, not a scan.
+        deps = list(dependent_accounts(portefeuille)) if cascade else []
+        total = 1 + len(deps)
+        _step(0, total, f"{portefeuille} — scanning AIRS reports"
+                        + (f" (+{len(deps)} book{'s' if len(deps) != 1 else ''} it is built from)"
+                           if deps else ""))
         res = scan_one(portefeuille, van, tot)
         ok = res["reports_ok"]
+        _step(1, total, f"{portefeuille} — {res['holdings']} holdings, "
+                        f"{', '.join(sorted(ok)) or 'no reports'}")
 
         # ⚠ THE PER-ROW REFRESH RECORDS ITS VERDICT TOO — it is how an account short a report gets
         # its badge cleared without waiting for the next full scan. `_MIN_ROSTER` does not apply:
         # this is a deliberate request for one named account, not a discovery whose size might mean
         # the scrape failed.
         _record_reports({portefeuille: ok}, datetime.now(timezone.utc).isoformat())
+
+        # ⚠ INSIDE THE SAME LOCK HOLD. `scan_one` deliberately does not take `_LOCK` (both callers
+        # already hold it), so the dependencies run on the session this call already owns. Taking
+        # and releasing per account would let the fleet scan interleave halfway through a cascade
+        # and leave the parent fresh against half-stale children.
+        cascaded: list[dict] = []
+        for i, dep in enumerate(deps, 1):
+            _step(i, total, f"{dep} — book {i} of {len(deps)} behind {portefeuille}")
+            try:
+                sub = scan_one(dep, van, tot)
+            except Exception as e:  # noqa: BLE001 — one child must not lose the parent's result
+                _log.warning("[airs_vermogen] cascade %s failed: %s: %s",
+                             dep, type(e).__name__, e)
+                cascaded.append({"portefeuille": dep, "status": "error",
+                                 "errors": [f"{type(e).__name__}: {e}"]})
+                # ⚠ A FAILED CHILD IS NAMED ON THE BAR, not folded into the count. A parent
+                # refreshed against a book that did not scan is not fresh.
+                _step(i + 1, total, f"{dep} — FAILED ({type(e).__name__})")
+                continue
+            _record_reports({dep: sub["reports_ok"]}, datetime.now(timezone.utc).isoformat())
+            cascaded.append({
+                "portefeuille": dep,
+                "status": "ok" if ("att" in sub["reports_ok"] or "volk" in sub["reports_ok"])
+                else "error",
+                "holdings_rows": sub["holdings"],
+                # The reason the cascade exists at all: this child is the book that actually
+                # trades what the parent holds through a certificate, so its Transacties are what
+                # make the parent's look-through possible.
+                "transacties_rows": sub.get("transacties"),
+                "as_of": sub["as_of"],
+                "errors": [f"{e['report']}: {e['error_type']}: {e['message']}"
+                           for e in sub["errors"]],
+            })
+        if cascaded:
+            _log.warning("[airs_vermogen] %s: also refreshed %d book(s) it is built from — %s",
+                         portefeuille, len(cascaded),
+                         ", ".join(c["portefeuille"] for c in cascaded))
+
         return {
             "status": "ok" if ("att" in ok or "volk" in ok) else "error",
             "portefeuille": portefeuille,
+            # ⚠ The books BEHIND this one, each with its own outcome. A cascade that half-failed
+            # must not read as a clean refresh — the parent's figures are only as fresh as the
+            # child they are computed from.
+            "cascaded": cascaded,
             "as_of": res["as_of"] if "volk" in ok else tot,
             "holdings_rows": res["holdings"],
             "mutatie_rows": res["mutaties"],
             "model_weight_rows": res["model_weights"],
             "rendement_stored": "att" in ok,
             "vermogen_stored": "volk" in ok,
+            "transacties_stored": "trans" in ok,
+            "transacties_rows": res.get("transacties"),
             "reports_ok": ok,
             "complete": len(ok) == len(REPORTS),
             # Formatted for the single-row toast; the structured form rides along beside it.

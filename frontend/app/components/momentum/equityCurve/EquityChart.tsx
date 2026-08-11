@@ -97,12 +97,12 @@ export default function EquityChart({
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
           <XAxis
             dataKey="date"
-            tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
+            tick={{ fill: chartTheme.axisTick, fontSize: 12 }}
             tickLine={false}
             interval={Math.max(0, Math.floor(displayChartData.length / 12) - 1)}
           />
           <YAxis
-            tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
+            tick={{ fill: chartTheme.axisTick, fontSize: 12 }}
             tickLine={false}
             tickFormatter={(v: number) => `${v}%`}
             domain={yDomain}
@@ -118,7 +118,7 @@ export default function EquityChart({
           />
           {alignedSeries.series.length > 1 && (
             <Legend
-              wrapperStyle={{ fontSize: 12, color: chartTheme.axisLabel }}
+              wrapperStyle={{ fontSize: 13, color: chartTheme.axisLabel }}
               formatter={(value) => {
                 const s = alignedSeries.series.find((x) => x.id === value);
                 return s?.label ?? String(value);
@@ -165,7 +165,7 @@ export default function EquityChart({
               strokeDasharray="5 5"
               strokeWidth={1.5}
               ifOverflow="extendDomain"
-              label={{ value: 'Go-live', position: 'insideTopRight', fill: chartTheme.goLiveLabel, fontSize: 10 }}
+              label={{ value: 'Go-live', position: 'insideTopRight', fill: chartTheme.goLiveLabel, fontSize: 11 }}
             />
           )}
           {/* Timeframe slider — drag the handles to zoom into a date range;

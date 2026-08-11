@@ -132,7 +132,7 @@ function FeeStructureCard() {
     <div key={f.key} className="flex items-center justify-between gap-3 py-2">
       <div className="min-w-0">
         <div className="text-sm text-fg">{f.label}</div>
-        <div className="text-[11px] text-fg-faint">{f.hint}</div>
+        <div className="text-[12px] text-fg-faint">{f.hint}</div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <input
@@ -156,11 +156,11 @@ function FeeStructureCard() {
       </div>
       <div className="px-5 py-4 grid gap-x-8 gap-y-2 md:grid-cols-2">
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-1">Leonteq costs</div>
+          <div className="text-[11px] uppercase tracking-wider text-fg-subtle mb-1">Leonteq costs</div>
           <div className="divide-y divide-neutral-800/30">{LEONTEQ_FIELDS.map(field)}</div>
         </div>
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-1">Bustelberg fees</div>
+          <div className="text-[11px] uppercase tracking-wider text-fg-subtle mb-1">Bustelberg fees</div>
           <div className="divide-y divide-neutral-800/30">{BUSTELBERG_FIELDS.map(field)}</div>
         </div>
       </div>
@@ -430,7 +430,7 @@ export default function Fees() {
                           className="accent-pos-500 w-4 h-4 cursor-pointer"
                           title={s.is_supported ? 'Supported by broker — companies on this exchange stay in the universe' : 'NOT supported — companies on this exchange are dropped before backtest'}
                         />
-                        {s.error && <div className="text-[10px] text-neg-400 mt-0.5">{s.error}</div>}
+                        {s.error && <div className="text-[11px] text-neg-400 mt-0.5">{s.error}</div>}
                       </td>
                       <td className={`px-3 py-2 font-mono ${muted ? 'text-fg-subtle' : 'text-fg'}`}>{row.exchange_code}</td>
                       <td className={`px-3 py-2 truncate max-w-[260px] ${muted ? 'text-fg-faint' : 'text-fg-soft'}`}>{row.exchange_name ?? '—'}</td>

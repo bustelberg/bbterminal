@@ -45,7 +45,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
         <div className="flex items-baseline gap-3 px-6 py-4 border-b border-neutral-800/40">
           <h2 className="text-fg-strong font-medium">Assumptions — the data behind the defaults</h2>
           {name && <span className="text-sm text-fg-soft truncate max-w-[28ch]" title={name}>{name}</span>}
-          <span className="text-[11px] font-mono text-fg-faint">{isin}</span>
+          <span className="text-[12px] font-mono text-fg-faint">{isin}</span>
           <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
         </div>
 
@@ -61,7 +61,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                 {cagr.cagr == null ? 'n/a' : `${(cagr.cagr * 100).toFixed(1)}%`}
               </span>
             </div>
-            <p className="text-[11px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
+            <p className="text-[12px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
               The growth the consensus EPS estimates imply, first future period to last.
               ⚠ Not a published long-term rate — GuruFocus files that as a single number with no
               date, so it never reaches our database.
@@ -73,7 +73,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                 <div className="overflow-auto rounded-lg border border-neutral-800/40 max-w-full">
                   <table className="w-full text-xs">
                     <thead className="bg-page">
-                      <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                      <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                         <th className="px-3 py-1.5 font-medium text-left">Fiscal period</th>
                         <th className="px-3 py-1.5 font-medium text-right">EPS estimate{ccy && ` (${currency})`}</th>
                       </tr>
@@ -101,7 +101,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                   </table>
                 </div>
                 {cagr.cagr != null && cagr.years != null && (
-                  <p className="text-[11px] font-mono text-fg-muted break-words whitespace-normal max-w-[80ch]">
+                  <p className="text-[12px] font-mono text-fg-muted break-words whitespace-normal max-w-[80ch]">
                     ({n2(cagr.points[cagr.points.length - 1].eps)} ÷ {n2(cagr.points[0].eps)})
                     ^(1/{cagr.years}) − 1 = {(cagr.cagr * 100).toFixed(1)}%
                   </p>
@@ -109,7 +109,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                 {cagr.cagr == null && (
                   // Two points are needed, and neither may be a loss — the root of a negative
                   // ratio is not a number.
-                  <p className="text-[11px] text-warn-300 break-words whitespace-normal max-w-[80ch]">
+                  <p className="text-[12px] text-warn-300 break-words whitespace-normal max-w-[80ch]">
                     No CAGR: {cagr.points.length < 2
                       ? 'only one future estimate is ingested.'
                       : 'the first or last estimate is not positive, so there is nothing to compound out of.'}
@@ -127,7 +127,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                 {pe.median == null ? 'n/a' : `${pe.median.toFixed(1)}x`}
               </span>
             </div>
-            <p className="text-[11px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
+            <p className="text-[12px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
               Each year’s closing price over that year’s EPS excluding non-recurring items, then the
               median. Derived — GuruFocus’s own P/E line isn’t ingested.
             </p>
@@ -137,7 +137,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
               <div className="overflow-auto rounded-lg border border-neutral-800/40 max-w-full">
                 <table className="w-full text-xs">
                   <thead className="bg-page">
-                    <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                    <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                       <th className="px-3 py-1.5 font-medium text-left">Fiscal year</th>
                       <th className="px-3 py-1.5 font-medium text-right">Year-end price{ccy && ` (${currency})`}</th>
                       <th className="px-3 py-1.5 font-medium text-right">EPS w/o NRI</th>
@@ -185,7 +185,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                 {dy.chosen == null ? 'n/a' : `${dy.chosen.pct.toFixed(2)}%`}
               </span>
             </div>
-            <p className="text-[11px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
+            <p className="text-[12px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
               ⚠ Not an average — the single most recent observation, picked by date across the
               annual and quarterly rows (both carry the same annualised measure). It is trailing
               dividends over the price at that period end, so it ages as the price moves.
@@ -197,7 +197,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                 <div className="overflow-auto rounded-lg border border-neutral-800/40 max-w-full">
                   <table className="w-full text-xs">
                     <thead className="bg-page">
-                      <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                      <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                         <th className="px-3 py-1.5 font-medium text-left">Period end</th>
                         <th className="px-3 py-1.5 font-medium text-left">Cadence</th>
                         <th className="px-3 py-1.5 font-medium text-right">Dividend yield %</th>
@@ -224,7 +224,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                 {dy.rows.length > MAX_YIELD_ROWS && (
                   // ⚠ Said, not silently truncated — a table that stops at eight without saying so
                   // reads as the whole record.
-                  <p className="text-[10px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
+                  <p className="text-[11px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
                     Showing the {MAX_YIELD_ROWS} most recent of {dy.rows.length} observations.
                   </p>
                 )}

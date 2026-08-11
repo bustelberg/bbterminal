@@ -273,7 +273,7 @@ export default function DailyReturnsHistograms({
     <CollapsibleCard
       title="Daily return distribution"
       defaultCollapsed={defaultCollapsed}
-      rightSlot={<span className="text-[11px] font-mono text-fg-faint">{fromDate} → {toDate}</span>}
+      rightSlot={<span className="text-[12px] font-mono text-fg-faint">{fromDate} → {toDate}</span>}
       bodyClassName="px-5 py-4 space-y-4"
     >
       {/* Controls: benchmark picker + From/To range sliders (one window for all). */}
@@ -310,7 +310,7 @@ export default function DailyReturnsHistograms({
 
       {/* Mean-difference readout — the question the dashed lines answer. */}
       {series.strat.n > 0 && series.uni.n > 0 && (
-        <div className="text-[11px] text-fg-subtle">
+        <div className="text-[12px] text-fg-subtle">
           Δμ daily (strategy − universe):{' '}
           <span className={`font-mono font-medium ${series.strat.mean - series.uni.mean >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
             {series.strat.mean - series.uni.mean >= 0 ? '+' : ''}{(series.strat.mean - series.uni.mean).toFixed(3)}%/day
@@ -327,8 +327,8 @@ export default function DailyReturnsHistograms({
       )}
       {/* Strategy tail risk + shape — the moments the μ/σ above don't capture. */}
       {series.stratTail && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-fg-subtle">
-          <span className="text-[10px] uppercase tracking-wide text-fg-faint">Strategy tails</span>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-fg-subtle">
+          <span className="text-[11px] uppercase tracking-wide text-fg-faint">Strategy tails</span>
           <span title="Skewness of daily returns. Negative = a longer/​fatter left (loss) tail — typical of momentum.">
             skew <span className={`font-mono ${series.stratTail.skew >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>{series.stratTail.skew >= 0 ? '+' : ''}{series.stratTail.skew.toFixed(2)}</span>
           </span>
@@ -345,7 +345,7 @@ export default function DailyReturnsHistograms({
           <span>worst <span className="font-mono text-neg-400">{series.stratTail.worst.toFixed(2)}%</span></span>
         </div>
       )}
-      <p className="text-[10px] text-fg-faint">
+      <p className="text-[11px] text-fg-faint">
         Daily % returns over the selected window — overlaid step outlines, density-normalised (% of days), fixed 0.5% bins clamped to ±{X_MAX}%. Solid line = distribution; dashed line = that series&apos; mean (μ). The gap between the dashed lines is the daily-return edge.
         {benchId == null && options.length > 0 ? ' Pick a benchmark to add its line.' : ''}
       </p>
@@ -355,13 +355,13 @@ export default function DailyReturnsHistograms({
           window). The full-window r · β sit underneath as the summary. */}
       <div className="pt-3 border-t border-neutral-800/40">
         <div className="flex items-center justify-between gap-2 mb-2">
-          <span className="text-[11px] uppercase tracking-wide text-fg-faint">Rolling correlation · {rollWindow}-day ({rollLabel(rollWindow)})</span>
-          <label className="flex items-center gap-1.5 text-[11px] text-fg-muted">
+          <span className="text-[12px] uppercase tracking-wide text-fg-faint">Rolling correlation · {rollWindow}-day ({rollLabel(rollWindow)})</span>
+          <label className="flex items-center gap-1.5 text-[12px] text-fg-muted">
             Window
             <select
               value={rollWindow}
               onChange={(e) => setRollWindow(Number(e.target.value))}
-              className="bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-[11px] text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-[12px] text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
             >
               {ROLL_OPTIONS.map((d) => <option key={d} value={d}>{d}d ({rollLabel(d)})</option>)}
             </select>
@@ -381,7 +381,7 @@ function RollingCorr({ uni, bench, hasBench, window }: { uni: RollPoint[]; bench
   const [hover, setHover] = useState<{ leftFrac: number; date: string; uniR: number | null; benchR: number | null } | null>(null);
   const valid = [...uni, ...bench].filter((p) => p.r != null);
   if (valid.length < 2) {
-    return <div className="text-[11px] text-fg-subtle">Not enough overlapping days for a {window}-day rolling correlation in this date range.</div>;
+    return <div className="text-[12px] text-fg-subtle">Not enough overlapping days for a {window}-day rolling correlation in this date range.</div>;
   }
   const W = 200, H = 70, padX = 2, padTop = 4, padBot = 4;
   const innerW = W - 2 * padX, innerH = H - padTop - padBot;
@@ -428,7 +428,7 @@ function RollingCorr({ uni, bench, hasBench, window }: { uni: RollPoint[]; bench
   return (
     <div>
       <div className="flex gap-1.5">
-        <div className="flex flex-col justify-between text-[9px] font-mono text-fg-faint w-5 text-right shrink-0 h-28 py-0.5">
+        <div className="flex flex-col justify-between text-[10px] font-mono text-fg-faint w-5 text-right shrink-0 h-28 py-0.5">
           <span>+1</span><span>0</span><span>−1</span>
         </div>
         <div className="relative flex-1">
@@ -459,7 +459,7 @@ function RollingCorr({ uni, bench, hasBench, window }: { uni: RollPoint[]; bench
                   style={{ left: `${hover.leftFrac * 100}%`, top: `${(yOf(hover.benchR) / H) * 100}%`, background: BENCH_COLOR }} />
               )}
               {/* tooltip */}
-              <div className="absolute top-0 -mt-1 pointer-events-none whitespace-nowrap rounded-md bg-popover border border-neutral-700 px-2 py-1 text-[10px] shadow-xl z-10"
+              <div className="absolute top-0 -mt-1 pointer-events-none whitespace-nowrap rounded-md bg-popover border border-neutral-700 px-2 py-1 text-[11px] shadow-xl z-10"
                 style={{ left: `${hover.leftFrac * 100}%`, transform: `translateX(${tipTx}) translateY(-100%)` }}>
                 <div className="font-mono text-fg-soft mb-0.5">{hover.date}</div>
                 {hover.uniR != null && (
@@ -479,7 +479,7 @@ function RollingCorr({ uni, bench, hasBench, window }: { uni: RollPoint[]; bench
           )}
         </div>
       </div>
-      <div className="flex justify-between text-[9px] font-mono text-fg-faint mt-0.5 pl-[1.625rem]">
+      <div className="flex justify-between text-[10px] font-mono text-fg-faint mt-0.5 pl-[1.625rem]">
         <span>{fmtDate(minMs)}</span><span>{fmtDate(maxMs)}</span>
       </div>
     </div>
@@ -488,7 +488,7 @@ function RollingCorr({ uni, bench, hasBench, window }: { uni: RollPoint[]; bench
 
 function CorrLegend({ color, label, c }: { color: string; label: string; c: Corr }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[11px]">
+    <span className="inline-flex items-center gap-1.5 text-[12px]">
       <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />
       <span className="text-fg-soft">{label}</span>
       <span className="font-mono text-fg-faint">
@@ -502,7 +502,7 @@ function Slider({
   label, value, max, date, onChange,
 }: { label: string; value: number; max: number; date: string; onChange: (v: number) => void }) {
   return (
-    <div className="flex items-center gap-2 text-[11px] text-fg-subtle">
+    <div className="flex items-center gap-2 text-[12px] text-fg-subtle">
       <span className="w-8 shrink-0">{label}</span>
       <input
         type="range" min={0} max={max} value={value}
@@ -576,13 +576,13 @@ function Overlay({ edges, plots }: { edges: number[]; plots: Plot[] }) {
         })}
       </svg>
       {/* x-axis labels (HTML, evenly spaced to match the gridlines) */}
-      <div className="flex justify-between text-[9px] font-mono text-fg-faint mt-0.5">
+      <div className="flex justify-between text-[10px] font-mono text-fg-faint mt-0.5">
         {ticks.map((t, i) => <span key={i}>{t > 0 ? `+${t}` : t}%</span>)}
       </div>
       {/* legend with per-series μ / σ / n */}
       <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2.5">
         {plots.map((p) => (
-          <span key={p.key} className="inline-flex items-center gap-1.5 text-[11px]">
+          <span key={p.key} className="inline-flex items-center gap-1.5 text-[12px]">
             <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ background: p.color }} />
             <span className="text-fg-soft">{p.label}</span>
             <span className="font-mono text-fg-faint">

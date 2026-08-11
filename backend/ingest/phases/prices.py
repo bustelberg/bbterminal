@@ -530,6 +530,38 @@ def _run_prices_phase(
     for ex in error_examples[:5]:
         _step(f"  error: {ex}", level="error")
 
+    _refresh_price_coverage(_step)
+
+
+def _refresh_price_coverage(step=None) -> None:
+    """Re-aggregate `company_price_coverage` — the GuruFocus price/volume summary `asset_grid`
+    reads to show its `gf_price_*` columns.
+
+    Refreshed HERE because this phase is the only thing that writes `metric_data` price/volume
+    rows, so the summary is stale for exactly as long as it takes this call to run and never
+    longer. A scheduled refresh on its own timer would drift from the writer and serve a
+    confident, out-of-date "last close" — the failure that looks like data rather than absence.
+
+    ⚠ BEST-EFFORT ON PURPOSE. The prices themselves are already committed by the time we get
+    here; a failure to refresh a derived summary must not fail the run or mask the price
+    counters above it. Logged at WARNING (uvicorn leaves the root logger at WARNING, so `info`
+    is invisible in production) and reported as a step, so a silently stale grid is impossible.
+
+    `step` is the phase's own reporter, passed in — it is a closure over the run, not a module
+    global, so the alternative would be a second reporting path that could drift from it.
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        supabase.rpc("refresh_company_price_coverage").execute()
+        logger.info("[pipeline.prices] company_price_coverage refreshed")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[pipeline.prices] company_price_coverage refresh FAILED: %s: %s",
+                       type(e).__name__, e)
+        if step is not None:
+            step(f"GuruFocus coverage summary not refreshed ({type(e).__name__}) — "
+                 "the /asset-pipeline gf_price_* columns may lag until the next run.",
+                 level="error")
+
 
 def _checkpoint(run_id: int, snap: dict, total: int | None = None) -> None:
     """Periodic STRUCTURED-counter write, once per company. Best-effort — a

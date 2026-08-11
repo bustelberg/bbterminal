@@ -51,7 +51,7 @@ function Field({ label, value, onChange, suffix, info, width = 'w-32' }: {
 }) {
   return (
     <label className="flex flex-col gap-1 min-w-0">
-      <span className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-fg-muted">
+      <span className="flex items-center gap-1 text-[12px] uppercase tracking-wide text-fg-muted">
         {label}{info}
       </span>
       <span className="flex items-center gap-1">
@@ -151,19 +151,19 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-4 min-w-0">
       <div className="flex items-baseline gap-2 flex-wrap">
         <h4 className="text-base font-semibold text-fg-strong">Reverse DCF</h4>
-        <span className="text-[11px] text-fg-faint">
+        <span className="text-[12px] text-fg-faint">
           what the price implies, not what the company is worth
         </span>
         <span className="ml-auto flex items-center gap-1.5">
           {dirty && (
             <button type="button" onClick={reset}
-              className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
+              className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
               Reset to defaults
             </button>
           )}
           <button type="button" onClick={() => setShowRaw(true)}
             title="Show every company figure this reads, with its source"
-            className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
+            className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
             Raw data ↗
           </button>
         </span>
@@ -255,14 +255,14 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
           off the row instead of taking this one. Click a column to make it the headline. */}
       {fcf != null && fcf > 0 && target != null && (
         <div className="space-y-1">
-          <div className="text-[11px] uppercase tracking-wide text-fg-muted">
+          <div className="text-[12px] uppercase tracking-wide text-fg-muted">
             Implied growth by discount rate
           </div>
           <div className="overflow-x-auto rounded-lg border border-neutral-800/40 max-w-full">
             <table className="text-xs">
               <tbody>
                 <tr className="border-b border-neutral-800/40 bg-page">
-                  <th className="px-2 py-1 text-left font-medium text-fg-faint text-[10px] uppercase tracking-wide sticky left-0 bg-page">
+                  <th className="px-2 py-1 text-left font-medium text-fg-faint text-[11px] uppercase tracking-wide sticky left-0 bg-page">
                     Discount
                   </th>
                   {sweep.map((s) => (
@@ -289,7 +289,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                   ))}
                 </tr>
                 <tr>
-                  <th className="px-2 py-1 text-left font-medium text-fg-faint text-[10px] uppercase tracking-wide sticky left-0 bg-card">
+                  <th className="px-2 py-1 text-left font-medium text-fg-faint text-[11px] uppercase tracking-wide sticky left-0 bg-card">
                     Growth
                   </th>
                   {sweep.map((s) => (

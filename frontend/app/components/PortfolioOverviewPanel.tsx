@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { trace, traceEmpty, traceError, traceRows, traceScope } from '../../lib/debugTrace';
@@ -11,17 +11,18 @@ import { runSSE } from '../../lib/stream';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
-import OwnerEarningsModal from './portfolios/OwnerEarningsModal';
-import { type Basket } from './portfolios/PerformanceModal';
+import { RefreshIcon } from './portfolios/RefreshIcon';
+import { startJob } from '../../lib/stores/jobs';
+import AllocationBandsModal from './portfolios/AllocationBandsModal';
+import AccountTransactions from './portfolios/AccountTransactions';
+import AccountTotalReturn from './portfolios/AccountTotalReturn';
+import { type Basket } from './portfolios/types';
 import { allocColor, bucketLabel, BUCKET_ORDER } from './portfolios/allocationColors';
 import {
   aggregateGroups, combineWeighted, groupStats, holdingTotalReturn, startBasis, weightedReturn,
   WEIGHT_BASES, type GroupStats, type WeightBasis, type WeightedReturn,
 } from './portfolios/startWeights';
 
-/** What an Analyse/Fundamental modal is opened for: one instrument (isin), a group (basket), or a
- *  whole portfolio (portfolioId, resolved to a basket server-side). */
-type ModalTarget = { name: string; isin?: string; basket?: Basket; portfolioId?: number };
 import type {
   AirsAccountDetail, AirsAccountIsins, AirsHoldingSegment, AirsPortfolioOverview,
 } from '../../lib/types/api';
@@ -51,8 +52,6 @@ const eur = (v: number | null | undefined) =>
 const tone = (v: number | null | undefined) =>
   v == null ? 'text-fg-faint' : v >= 0 ? 'text-pos-400' : 'text-neg-400';
 
-/** A clean reload glyph (inline SVG, not the `↻` character) — the standard two-arrow refresh,
- *  spinning while a refresh is running. */
 /** The four AIRS reports, by the code the scan records, in AIRS's own words — a badge saying
  *  "volk" would send a reader to the wrong screen. Mirrors `airs_vermogen.REPORTS`. */
 /** One CAUSE of failure, with how many accounts hit it — see the backend's `summarise_errors`. */
@@ -141,25 +140,16 @@ const MIN_REAL_HOLDINGS = 5;
 const canAnalyse = (r: AirsPortfolioOverview) =>
   r.fixed_portfolio_id != null || (r.holdings ?? 0) >= MIN_REAL_HOLDINGS;
 
+// ⚠ KEEP IN STEP WITH `airs_vermogen.REPORTS` — a code with no label here renders as a bare
+// mnemonic in the "missing reports" gap list, which reads as a bug rather than as a named report.
 const REPORT_LABELS: Record<string, string> = {
   att: 'Rendement',
   volk: 'Vermogensoverzicht',
   mut: 'Mutaties',
+  trans: 'Transacties',
   model: 'Model',
 };
 
-function RefreshIcon({ spinning, size = 14 }: { spinning?: boolean; size?: number }) {
-  return (
-    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-      className={spinning ? 'animate-spin' : ''}>
-      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-      <path d="M21 3v5h-5" />
-      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-      <path d="M3 21v-5h5" />
-    </svg>
-  );
-}
 
 export default function PortfolioOverviewPanel() {
   // ⚠ THE TABLE IS FOR EVERYONE; CHANGING IT IS NOT. Scraping AIRS, deleting an account and
@@ -183,10 +173,14 @@ export default function PortfolioOverviewPanel() {
   const [detail, setDetail] = useState<Record<string, AirsAccountDetail>>({});
   const [isins, setIsins] = useState<Record<string, AirsAccountIsins>>({});
   const [hideSmall, setHideSmall] = useState(true);
+  // The allocation-policy editor. Mounted only while open — it fetches its own grid, and a policy
+  // nobody asked to see is not worth a request on every page load.
+  const [showBands, setShowBands] = useState(false);
   // The Fixed portfolio to analyse. Its id, not the row's — the modal describes the strategy.
-  const [analyse, setAnalyse] = useState<{ id?: number; name: string; basket?: Basket } | null>(null);
-  // The whole portfolio's Fundamental (blended owner earnings + price steadiness), by its id.
-  const [pfFund, setPfFund] = useState<{ id?: number; name: string; basket?: Basket } | null>(null);
+  /** `pf` is the AIRS portefeuille code — what `refreshOne` is keyed on, carried so the modal's
+   *  Refresh fires the identical scan the row's does. */
+  const [analyse, setAnalyse] = useState<
+    { id?: number; name: string; basket?: Basket; pf?: string } | null>(null);
   // Refresh state: the fleet job is running; a status/error line; which single rows are re-scanning.
   const [refreshingAll, setRefreshingAll] = useState(false);
   /**
@@ -206,6 +200,8 @@ export default function PortfolioOverviewPanel() {
   const [refreshMsg, setRefreshMsg] = useState<
     { text: string; kind: 'info' | 'error' | 'warn' | 'ok' } | null>(null);
   const [refreshingRows, setRefreshingRows] = useState<Set<string>>(new Set());
+  /** Bumped when a row refresh finishes, so an open Analyse modal re-reads what it rebuilt. */
+  const [refreshSeq, setRefreshSeq] = useState(0);
   const [deletingRows, setDeletingRows] = useState<Set<string>>(new Set());
   const [scanningModels, setScanningModels] = useState(false);
   const [opening, setOpening] = useState<string | null>(null);
@@ -248,10 +244,11 @@ export default function PortfolioOverviewPanel() {
   };
 
   /**
-   * What Analyse / Fundamental should open for a row — the model portfolio if it has one, else the
-   * book's OWN holdings.
+   * What Analyse should open for a row — the model portfolio if it has one, else the book's OWN
+   * holdings. (Fundamental buttons used to share this — one per row, one per holding and one per
+   * segment. All were removed 2026-08-04; this panel opens Analyse only.)
    *
-   * ⚠ NEITHER MODAL EVER NEEDED A MODEL PORTFOLIO, AND WIRING THEM TO ONE COST DAYS. Both accept a
+   * ⚠ IT NEVER NEEDED A MODEL PORTFOLIO, AND WIRING IT TO ONE COST DAYS. It accepts a
    * plain basket of `{isin, weight}` — `PortfolioAnalysisModal`'s own comment says "a basket is
    * treated as a portfolio-of-N: same view" — and every account already carries exactly that, from
    * the Vermogensoverzicht's `ISIN-code` column. Gating the buttons on `fixed_portfolio_id` instead
@@ -264,10 +261,13 @@ export default function PortfolioOverviewPanel() {
    *
    * The ISINs come from `/isins`, which an expanded row has already loaded; otherwise one fetch.
    */
-  const openModal = async (r: AirsPortfolioOverview, which: 'analyse' | 'fundamental') => {
-    const set = which === 'analyse' ? setAnalyse : setPfFund;
+  const openModal = async (r: AirsPortfolioOverview) => {
+    const set = setAnalyse;
+    // ⚠ THE PORTEFEUILLE CODE TRAVELS WITH THE MODAL. `refreshOne` is keyed on it, not on the
+    // fixed portfolio id, so without it the modal's Refresh has nothing to call — the row and the
+    // modal must fire the identical scan.
     if (r.fixed_portfolio_id != null) {
-      set({ id: r.fixed_portfolio_id, name: r.name });
+      set({ id: r.fixed_portfolio_id, name: r.name, pf: r.dynamic_portefeuille });
       return;
     }
     const p = r.dynamic_portefeuille;
@@ -289,7 +289,7 @@ export default function PortfolioOverviewPanel() {
         setRefreshMsg({ text: `${r.name}: no ISIN-bearing holdings to analyse.`, kind: 'warn' });
         return;
       }
-      set({ name: r.name, basket: { holdings, label: r.name } });
+      set({ name: r.name, basket: { holdings, label: r.name }, pf: r.dynamic_portefeuille });
     } catch (e) {
       console.warn(`[AIRS expand] could not build a basket for ${p}`, e);
       setRefreshMsg({ text: `${r.name}: ${e instanceof Error ? e.message : String(e)}`, kind: 'error' });
@@ -303,7 +303,7 @@ export default function PortfolioOverviewPanel() {
    *
    * ⚠ IT IS A SEPARATE SCAN FROM "Refresh all", AND THAT IS THE WHOLE TRAP. Refresh all scans the
    * ACCOUNTS (returns, holdings, mutations); this one scans the MODEL portfolios that give an
-   * account its name, its ISINs and — the part you notice — its Analyse and Fundamental buttons.
+   * account its name, its ISINs and — the part you notice — its Analyse button.
    * Until 2026-07-30 it had no button anywhere in the app, so a fresh deployment could never get
    * past "0 analysable" from inside the UI.
    *
@@ -461,39 +461,33 @@ export default function PortfolioOverviewPanel() {
 
   useEffect(() => { void loadOverview(); }, [loadOverview]);
 
-  // Re-scan ONE portfolio's AIRS reports (Rendement + Vermogensoverzicht) and reload its figures.
-  // Drops the cached holdings so a re-expand pulls the fresh snapshot too.
+  /**
+   * Re-scan ONE portfolio's AIRS reports (Rendement + Vermogensoverzicht) and reload its figures.
+   *
+   * ⚠ IT RUNS AS A JOB, AND THE PROGRESS GOES TO THE SHARED TOAST STACK (`lib/stores/jobs.ts`,
+   * rendered from the root layout) — the same one the fundamentals ingests report into. Three
+   * things that a plain POST could not give it, and this refresh needs all three:
+   *   * a line that MOVES. With the cascade this is five downloads per account over a chain that
+   *     reaches nine (TOPS_BEOFF_BEH_DYN); a disabled button with nothing happening reads as hung;
+   *   * progress that SURVIVES navigating away — the work carried on regardless, it just had
+   *     nothing on screen to say so;
+   *   * re-attachment on reload (`attachRunningJobs`), so a refresh is never invisible.
+   *
+   * ⚠ THE INLINE `refreshMsg` LINE IS GONE FOR THIS ACTION, deliberately. Two places reporting one
+   * job is two places to keep in step, and the toast already carries the outcome, the failure and
+   * the countdown. `refreshMsg` stays for everything else on this panel that is NOT a job.
+   */
   const refreshOne = async (portefeuille: string) => {
     setRefreshingRows((s) => new Set(s).add(portefeuille));
-    setRefreshMsg(null);
     try {
-      const r = await apiFetch(
-        `${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh`,
-        { method: 'POST' });
-      const b = (await r.json().catch(() => null)) as
-        { status?: string; errors?: string[]; as_of?: string; holdings_rows?: number;
-          complete?: boolean } | null;
-      if (!r.ok) {
-        logDetail(`refresh ${portefeuille} failed`, { status: r.status, body: b });
-        setRefreshMsg({ text: `${portefeuille}: refresh failed — HTTP ${r.status}. Is the backend running with AIRS credentials?`, kind: 'error' });
-      } else if (b?.status === 'busy') {
-        setRefreshMsg({ text: 'A full refresh is already running — try again in a moment.', kind: 'info' });
-      } else if (b?.status === 'error') {
-        logDetail(`refresh ${portefeuille}: AIRS scan failed`, b?.errors ?? b);
-        setRefreshMsg({ text: `${portefeuille}: AIRS scan failed — see the console for the reason.`, kind: 'error' });
-      } else if (b?.complete === false) {
-        // ⚠ THE OUTCOME THIS BUTTON EXISTS FOR, so it has to say what it means: some reports
-        // arrived and some did not. "AIRS scan failed" (what this said before) sends you to check
-        // credentials that are fine. WHICH reports, and why, is console detail — the row itself
-        // already carries a ⚠ naming them, so repeating them here said it twice and neither well.
-        logDetail(`refresh ${portefeuille} incomplete`, b?.errors ?? b);
-        setRefreshMsg({
-          text: `${portefeuille}: partly refreshed — some reports did not arrive.`,
-          kind: 'warn',
-        });
-      } else {
-        setRefreshMsg({ text: `${portefeuille}: refreshed — ${b?.holdings_rows ?? 0} holdings as of ${b?.as_of ?? 'today'}.`, kind: 'ok' });
-      }
+      const { done } = await startJob(
+        `${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh/job`,
+        portefeuille);
+      const job = await done;
+      // ⚠ RELOAD ON ANYTHING THAT REACHED THE SERVER, not only on `done`. A failed cascade still
+      // wrote every account it got through, so leaving the pre-refresh figures on screen would
+      // hide real work that was really done — the same rule the bulk fundamentals fill follows.
+      if (job.status === 'failed') logDetail(`refresh ${portefeuille} failed`, job.summary);
       setDetail((d) => { const n = { ...d }; delete n[portefeuille]; return n; });
       setIsins((m) => { const n = { ...m }; delete n[portefeuille]; return n; });
       await loadOverview();
@@ -505,6 +499,11 @@ export default function PortfolioOverviewPanel() {
       setRefreshMsg({ text: `${portefeuille}: ${e instanceof Error ? e.message : String(e)}`, kind: 'error' });
     } finally {
       setRefreshingRows((s) => { const n = new Set(s); n.delete(portefeuille); return n; });
+      // ⚠ AND THE ANALYSE MODAL, IF IT IS OPEN ON THIS PORTFOLIO. It is drawn from the composition
+      // and holdings this scan just re-read, and it has already loaded — so without a nudge it
+      // would sit showing pre-scan figures while the row behind it updated, which reads as the
+      // button having done nothing. A counter, not a boolean: two scans in a row must both land.
+      setRefreshSeq((s) => s + 1);
     }
   };
 
@@ -592,7 +591,21 @@ export default function PortfolioOverviewPanel() {
     }
   };
 
+  /**
+   * ⚠ ADMIN ONLY (2026-08-06). The expanded row is the ACCOUNT's own book — its positions and
+   * their EUR values, its mutations for the year, and the reconciliation against AIRS. The table
+   * above it is a summary; this is the money.
+   *
+   * ⚠ THE GUARD IS HERE AS WELL AS ON THE ROW, and neither is the access rule. Making the `<tr>`
+   * inert covers the click, but `expand` is a plain function on a component a non-admin renders —
+   * anything that reaches it later (a keyboard handler, a deep link, an "expand all") would walk
+   * straight past a `cursor-default`. The rule that actually holds is on the server: the four
+   * sub-resources this opens are admin-only in `_auth_middleware.py`, so the worst a bypassed UI
+   * can do is render an empty panel. `/isins` is NOT among them — the Analyse button shares it and
+   * non-admins keep Analyse.
+   */
   const expand = async (p: string) => {
+    if (!isAdmin) return;
     setOpen(open === p ? null : p);
     if (detail[p] || open === p) return;
     await loadDetail(p);
@@ -609,12 +622,12 @@ export default function PortfolioOverviewPanel() {
 
   /**
    * ⚠ THE FILTER KEEPS WHAT THE PAGE CAN ACTUALLY DO SOMETHING WITH — `canAnalyse`, the same
-   * predicate the Analyse and Fundamental buttons render on.
+   * predicate the Analyse button renders on.
    *
    * It went through a wrong turn worth recording. It was "Linked only", which hid two books that
    * showed real figures (`BUS_Ris_bepOff_Kl_AFS_Dy`, 24 holdings; `BUS_WTS_StMerken_Dyn`, 22), so
    * it was changed to keep anything with real holdings. That surfaced them — and surfaced that
-   * they are the ONLY two rows with no Analyse/Fundamental buttons, because they pair with no
+   * they are the ONLY two rows with no Analyse button, because they pair with no
    * model portfolio. Both turned out to be bogus books. Holdings measure whether a row has DATA;
    * the buttons measure whether a row is USABLE, and this table exists to open them.
    *
@@ -659,9 +672,11 @@ export default function PortfolioOverviewPanel() {
           <h3 className="text-sm font-semibold text-fg-strong">
             Portfolios{rows ? ` · ${view.length}` : ''}
           </h3>
-          <p className="text-[11px] text-fg-faint mt-0.5 max-w-3xl">
-            Named from the Fixed portfolio; figures from AIRS, year to date. Expand a row for
-            holdings.
+          <p className="text-[12px] text-fg-faint mt-0.5 max-w-3xl">
+            {'Named from the Fixed portfolio; figures from AIRS, year to date.'}
+            {/* Only an admin can open a row, so only an admin is told to — an instruction that
+                does not work is worse than none. */}
+            {isAdmin && ' Expand a row for holdings.'}
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
@@ -676,6 +691,15 @@ export default function PortfolioOverviewPanel() {
               {refreshingAll ? (scanningModels ? 'Scanning models…' : 'Refreshing…') : 'Refresh all'}
             </button>
           )}
+          {/* The POLICY, beside the thing that measures against it. Shown to everyone and editable
+              by admins only — a non-admin reading what the bands are supposed to be is exactly the
+              use this has for them, and hiding it would leave the numbers on this page with no
+              stated target at all. */}
+          <button type="button" onClick={() => setShowBands(true)}
+            title="Per risk profile (Offensief / Beperkt Offensief / Neutraal / Defensief), the minimum, default and maximum share each asset class may take."
+            className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors">
+            Asset allocatie
+          </button>
           {/* ⚠ ONE BUTTON. It ran as two for a while — accounts here, model portfolios on a second
               control — which put an implementation rule (keep the two scans' error verdicts apart)
               in front of the operator as a chore. They are phases of one action now; only the
@@ -685,7 +709,7 @@ export default function PortfolioOverviewPanel() {
               substantial === 0 ? 'text-fg-faint' : 'text-fg-subtle'}`}
               title={substantial === 0
                 ? 'No account is paired with a model portfolio yet, so this filter would hide every row — it is inactive until a model-portfolio scan has run.'
-                : 'Keeps only the books that can actually be opened: Analyse and Fundamental both describe the paired model portfolio, so a book with no model has neither button and nothing this page can do with it. Hides the AIRS benchmarks and the test shells for the same reason.'}>
+                : 'Keeps only the books that can actually be opened: Analyse describes the paired model portfolio, so a book with no model has no button and nothing this page can do with it. Hides the AIRS benchmarks and the test shells for the same reason.'}>
               <input type="checkbox" checked={hideSmall} disabled={substantial === 0}
                 onChange={(e) => setHideSmall(e.target.checked)} />
               {/* ⚠ Disabled at zero — see `effectiveHideSmall`. A checkbox that silently does
@@ -708,7 +732,7 @@ export default function PortfolioOverviewPanel() {
           upgrade (nicknames, Brinson attribution, the bucket drill-downs), and it sits beside
           Refresh all rather than blocking the page. */}
       {refreshMsg && (
-        <div className={`text-[11px] rounded-lg px-3 py-1.5 border ${
+        <div className={`text-[12px] rounded-lg px-3 py-1.5 border ${
           refreshMsg.kind === 'error' ? 'text-neg-300 bg-neg-500/10 border-neg-500/20'
             : refreshMsg.kind === 'warn' ? 'text-warn-300 bg-warn-500/10 border-warn-500/20'
               : refreshMsg.kind === 'ok' ? 'text-pos-300 bg-pos-500/10 border-pos-500/20'
@@ -739,7 +763,7 @@ export default function PortfolioOverviewPanel() {
               own box so the page never scrolls sideways. */}
           <table className="w-full text-xs whitespace-nowrap">
             <thead className="bg-card z-10 [&_th]:bg-card">
-              <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+              <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                 {/* ⚠ A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
                     or re-sorted, which is the point — it is there to say "the 14th row", so two
                     people can talk about the same line. `text-right` so the digits align. */}
@@ -765,8 +789,15 @@ export default function PortfolioOverviewPanel() {
                 const isOpen = open === r.dynamic_portefeuille;
                 return (
                   <Fragment key={r.dynamic_portefeuille}>
-                    <tr onClick={() => void expand(r.dynamic_portefeuille)}
-                      className="group hover:bg-accent-500/10 transition-colors cursor-pointer">
+                    {/* ⚠ THE ROW IS ONLY A CONTROL FOR AN ADMIN. For everyone else it carries no
+                        handler and no pointer — the accent hover is what says "this opens", so
+                        leaving it on a row that cannot open reads as a broken table rather than a
+                        restricted one. `group` stays either way: the action cells inside still
+                        reveal on hover. */}
+                    <tr onClick={isAdmin ? () => void expand(r.dynamic_portefeuille) : undefined}
+                      className={`group transition-colors ${isAdmin
+                        ? 'hover:bg-accent-500/10 cursor-pointer'
+                        : 'hover:bg-overlay/[0.02]'}`}>
                       <td className="px-3 py-1.5 text-right font-mono text-fg-faint tabular-nums">
                         {rowNo + 1}
                       </td>
@@ -777,21 +808,11 @@ export default function PortfolioOverviewPanel() {
                         <div className="flex items-stretch gap-1">
                           {canAnalyse(r) && (
                             <button
-                              onClick={(e) => { e.stopPropagation(); void openModal(r, 'analyse'); }}
+                              onClick={(e) => { e.stopPropagation(); void openModal(r); }}
                               disabled={opening === r.dynamic_portefeuille}
-                              className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg disabled:opacity-50"
+                              className="inline-flex items-center text-[11px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg disabled:opacity-50"
                             >
                               {opening === r.dynamic_portefeuille ? '…' : 'Analyse'}
-                            </button>
-                          )}
-                          {canAnalyse(r) && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); void openModal(r, 'fundamental'); }}
-                              disabled={opening === r.dynamic_portefeuille}
-                              title="Fundamental — the whole portfolio's blended owner earnings & price steadiness"
-                              className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg disabled:opacity-50"
-                            >
-                              Fundamental
                             </button>
                           )}
                           {/* Re-scan just this portfolio (a few seconds). stopPropagation so it does
@@ -832,7 +853,7 @@ export default function PortfolioOverviewPanel() {
                             className="text-left hover:text-accent-300 hover:underline decoration-dotted underline-offset-2">
                             {r.name}
                             {r.name_is_custom && (
-                              <span className="text-accent-400 text-[9px] leading-none ml-1 align-middle">✎</span>
+                              <span className="text-accent-400 text-[10px] leading-none ml-1 align-middle">✎</span>
                             )}
                           </button>
                         ) : (
@@ -847,7 +868,7 @@ export default function PortfolioOverviewPanel() {
                             figures are still real — they just do not all describe the same date,
                             and the badge names exactly which one is stale. */}
                         {(r.missing_reports?.length ?? 0) > 0 && (
-                          <span className="ml-1.5 text-[10px] text-warn-300"
+                          <span className="ml-1.5 text-[11px] text-warn-300"
                             title={`This account's last scan did not retrieve: ${r.missing_reports!
                               .map((c) => REPORT_LABELS[c] ?? c).join(', ')}. Its other figures are from the newer scan, so the row mixes dates — ${
                               // Don't send a reader to a button their role does not render.
@@ -914,10 +935,25 @@ export default function PortfolioOverviewPanel() {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={7} className="px-3 py-3 bg-inset">
+                        <td colSpan={7} className="px-3 py-3 bg-inset space-y-2">
                           <Holdings d={detail[r.dynamic_portefeuille]} i={isins[r.dynamic_portefeuille]}
                             portefeuille={r.dynamic_portefeuille} onOverride={refreshIsins}
                             canEdit={isAdmin} />
+                          {/* ⚠ WHAT THE BOOK DID, beneath what it holds. The positions answer
+                              "where is the money now"; only this answers "how did it get there" —
+                              a name that appeared mid-year, one sold out entirely, and a weight
+                              that drifted purely on price look identical without it.
+                              ⚠ ITS OWN COLLAPSED SECTION, AND ITS OWN LAZY FETCH: the first open
+                              of an account goes out to AIRS behind the shared headless session
+                              and takes seconds, so it must not ride on expanding the row. */}
+                          <AccountTransactions portefeuille={r.dynamic_portefeuille} />
+                          {/* ⚠ THE TWO PANELS ABOVE ARE HALVES OF ONE YEAR, AND THEY DISAGREE
+                              WITH THE ROW'S OWN YTD UNTIL BOTH ARE COUNTED. Measured across 39
+                              accounts, the held positions alone miss the book's own figure by
+                              more than 1pp on 23 of them; adding what was SOLD closes
+                              AITopSelectie to €0.04 on a €387k year. This is where that sum is
+                              done — and checked against AIRS rather than asserted. */}
+                          <AccountTotalReturn portefeuille={r.dynamic_portefeuille} />
                         </td>
                       </tr>
                     )}
@@ -934,12 +970,19 @@ export default function PortfolioOverviewPanel() {
         // paint the PREVIOUS portfolio's composition for the ~4s the next one takes to load —
         // a complete, plausible, wrong answer with no loading state to warn the reader. The key
         // forces a fresh mount, so an unloaded modal can only ever show "Loading composition…".
+        // ⚠ THE ROW'S OWN `refreshOne`, PASSED THROUGH — not a second implementation. Admin-gated
+        // exactly as the row's button is (the scan writes, and the API gate holds it to admins),
+        // and `refreshSeq` bumps when it finishes so the modal re-reads what the scan rebuilt.
         <PortfolioAnalysisModal key={analyse.id ?? analyse.name} id={analyse.id} basket={analyse.basket}
-          name={analyse.name} onClose={() => setAnalyse(null)} />
+          name={analyse.name}
+          onRefresh={isAdmin && analyse.pf ? () => void refreshOne(analyse.pf!) : undefined}
+          refreshing={!!analyse.pf && refreshingRows.has(analyse.pf)}
+          refreshTitle="Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."
+          refreshSeq={refreshSeq}
+          onClose={() => setAnalyse(null)} />
       )}
-      {pfFund && (
-        <OwnerEarningsModal portfolioId={pfFund.id} basket={pfFund.basket} name={pfFund.name}
-          onClose={() => setPfFund(null)} />
+      {showBands && (
+        <AllocationBandsModal canEdit={isAdmin} onClose={() => setShowBands(false)} />
       )}
     </section>
   );
@@ -973,7 +1016,7 @@ function SortTh({ label, k, sortKey, sortDir, onSort, align = 'left', title }: {
         className={'inline-flex items-center gap-1 hover:text-accent-400 transition-colors '
           + (active ? 'text-fg-soft' : '')}>
         {label}
-        <span className={'text-[8px] ' + (active ? 'text-accent-400' : 'text-fg-faint/40')}>
+        <span className={'text-[9px] ' + (active ? 'text-accent-400' : 'text-fg-faint/40')}>
           {active ? (sortDir === 'asc' ? '▲' : '▼') : '▾'}
         </span>
       </button>
@@ -1006,7 +1049,7 @@ function BucketBadge({ bucket, isin, overridden, onOverride }: {
       title={overridden ? 'Class manually set — pick “Auto” to revert to the calculated class.' : 'Auto-classified — click to override the Class.'}>
       {dot}
       <span className="text-fg-soft">{bucketLabel(bucket)}</span>
-      {overridden && <span className="text-accent-400 text-[9px] leading-none">✎</span>}
+      {overridden && <span className="text-accent-400 text-[10px] leading-none">✎</span>}
       {/* The picker overlays the whole cell, invisible, so the badge stays the visible affordance. */}
       <select
         aria-label="Set Class"
@@ -1093,7 +1136,7 @@ function IsinCell({ r, onPin }: {
         <button type="button" disabled={!onPin}
           onClick={(e) => { e.stopPropagation(); void onPin?.(r.holding_name, r.isin); }}
           title="ISIN set by hand — AIRS gives this holding none. Click to change or clear it."
-          className="text-accent-400 text-[9px] leading-none ml-1 align-middle hover:text-accent-300">
+          className="text-accent-400 text-[10px] leading-none ml-1 align-middle hover:text-accent-300">
           ✎
         </button>
       )}
@@ -1125,9 +1168,8 @@ function IsinCell({ r, onPin }: {
  *   AIRS's classification and it is the right one: 10 of the 11 bond ISINs are ETFs, so an "ETF"
  *   bucket would empty Bonds and make a defensive book read as holding almost none.
  */
-function SegmentHeader({ s, asOf, holdings, stats, altReturnPct, basisKey, onFundamental }: {
+function SegmentHeader({ s, asOf, stats, altReturnPct, basisKey }: {
   s: AirsHoldingSegment; asOf?: string | null;
-  holdings: { isin: string; weight: number }[];
   /** ⚠ EVERY FIGURE ON THIS ROW COMES FROM THE HOLDINGS UNDER IT (`groupStats`), not from the
    *  backend's own per-segment numbers — it computes those over a different row set, and a header
    *  that disagrees with the lines beneath it is a second source of truth with no way to tell
@@ -1139,25 +1181,14 @@ function SegmentHeader({ s, asOf, holdings, stats, altReturnPct, basisKey, onFun
    *  the one the Return is computed on — so a header that gated on a different value than its
    *  rows would put this segment's figure under someone else's column heading. */
   basisKey: WeightBasis;
-  onFundamental: (v: ModalTarget) => void;
 }) {
   const { etfPct, partial } = stats;
   // The figure this row actually prints: the chosen weight basis, falling back to the row's own
   // start-weighted return when the basis is "start" (where the two are the same by construction).
   const shown = altReturnPct ?? stats.returnPct;
   const label = bucketLabel(s.asset_class) || 'Group';
-  const target: ModalTarget = { name: label, basket: { holdings, label } };
-  const cls = 'text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap';
   return (
     <tr className="bg-overlay/[0.03] border-t border-neutral-800/40">
-      <td className="px-2 py-1">
-        {holdings.length > 0 && (
-          <div className="flex items-center gap-1">
-            <button type="button" onClick={() => onFundamental(target)} className={cls}
-              title={`Fundamentals of the ${label} holdings — blended owner earnings & price steadiness`}>Fundamental</button>
-          </div>
-        )}
-      </td>
       <td className="px-3 py-1 font-semibold text-fg-strong">
         {label}
         <span className="text-fg-faint font-normal ml-2">
@@ -1175,11 +1206,12 @@ function SegmentHeader({ s, asOf, holdings, stats, altReturnPct, basisKey, onFun
           )}
         </span>
       </td>
-      {/* ⚠ ONE CELL PER COLUMN. The table is [Fundamental] · Fund · ISIN · Class · Link · Sector
-          · Region · Ccy · Beginwaarde · Huidige waarde · Direct result · Div tax · <one weight> ·
-          Return — FOURTEEN (the leading Fundamental cell is emitted above). An extra blank here
-          shifts every figure one column right, which is silent: a weight renders perfectly well
-          under "Ccy".
+      {/* ⚠ ONE CELL PER COLUMN. The table is Fund · ISIN · Class · Link · Sector · Region · Ccy
+          · Beginwaarde · Huidige waarde · Direct result · Div tax · <one weight> · Return —
+          THIRTEEN. (It was fourteen: a leading Fundamental column was removed 2026-08-04, one
+          cell from each of the four row shapes — thead, this header, the holdings and Total. Drop
+          one and not the others and every figure below shifts a column, silently: a weight
+          renders perfectly well under "Ccy".)
           ⚠ EXACTLY ONE WEIGHT COLUMN, and WHICH one is `basisKey`. All four rows — this header,
           the <thead>, the Total row and the holdings — gate on the same value, so a gate added to
           one and forgotten in another does not shift a column here; it puts this segment's figure
@@ -1281,28 +1313,6 @@ function SegmentHeader({ s, asOf, holdings, stats, altReturnPct, basisKey, onFun
   );
 }
 
-/** Leading-cell triggers for the per-instrument fundamentals + risk views. Only an instrument with
- *  an ISIN can be looked up — cash and unresolved lines have none, so they get a blank cell rather
- *  than dead buttons. */
-function FundamentalCell({ isin, name, onFundamental }: {
-  isin?: string | null; name?: string | null;
-  onFundamental: (v: ModalTarget) => void;
-}) {
-  if (!isin) return <td className="px-2 py-1.5" />;
-  const nm = name ?? isin;
-  const cls = 'text-[10px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap';
-  return (
-    <td className="px-2 py-1.5">
-      <div className="flex items-center gap-1">
-        <button type="button" onClick={() => onFundamental({ name: nm, isin })} className={cls}
-          title="Fundamental — is this company fundamentally good? (owner earnings + price steadiness)">
-          Fundamental
-        </button>
-      </div>
-    </td>
-  );
-}
-
 function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
   d?: AirsAccountDetail; i?: AirsAccountIsins;
   portefeuille?: string; onOverride?: (p: string) => void | Promise<void>;
@@ -1310,7 +1320,21 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
    *  non-admin sees each one's ANSWER as plain text and no control to change it. */
   canEdit?: boolean;
 }) {
-  const [fund, setFund] = useState<ModalTarget | null>(null);
+  // ⚠ THE 21-ROW TABLE IS BEHIND A SECOND CLICK (2026-08-05, on request). Expanding an account
+  // used to land the reader straight in the full position list, which is the DETAIL — the thing
+  // you go looking for once you already know which book you are in. Collapsed by default, the
+  // expanded row opens on the book's own summary and the rows are one more click away.
+  //
+  // ⚠ COLLAPSED IS NOT EMPTY. The bar carries the Total row's own three figures (holdings, value
+  // now, return), from the identical variables that row renders — not a second aggregation of the
+  // same data, which is exactly the drift this file warns about two comments below. A disclosure
+  // that says only "Current portfolio" gives the reader nothing to decide on and makes the click
+  // mandatory rather than optional.
+  //
+  // ⚠ RESET ON EVERY EXPAND, and that is free: the parent renders this component inside
+  // `{isOpen && …}`, so collapsing the account unmounts it. There is no stale "still open from
+  // last time" state to reason about.
+  const [showRows, setShowRows] = useState(false);
   // Which column's weights the segment/Total returns are weighted by. "start" is the book’s own
   // return; everything else is a HYPOTHETICAL and the UI says so.
   const [basisKey, setBasisKey] = useState<WeightBasis>('start');
@@ -1318,8 +1342,14 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
   // request per holding. Null until it lands, which the cell renders as "…" rather than an empty
   // select that looks like "no options".
   const [linkCtx, setLinkCtx] = useState<LinkCtx | null>(null);
+  // ⚠ FETCHED WHEN THE TABLE IS OPENED, NOT WHEN THE ACCOUNT IS. It feeds the Link dropdowns and
+  // nothing else, so behind a collapsed table it buys a request whose result no one can see —
+  // and expanding an account already costs two (holdings + isins). A reader scanning down the
+  // list now pays for the rows they actually ask for.
+  const linkFetchedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!portefeuille) return;
+    if (!portefeuille || !showRows || linkFetchedFor.current === portefeuille) return;
+    linkFetchedFor.current = portefeuille;
     let live = true;
     void (async () => {
       // The third request an expand fires. Timed alongside the other two so the console accounts
@@ -1330,10 +1360,14 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
           `${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/linkable`);
         console.warn(`[AIRS expand] ${portefeuille}: linkable in ${Math.round(performance.now() - t0)}ms`);
         if (live && r.ok) setLinkCtx(await r.json());
-      } catch { /* the table is still usable without the dropdown */ }
+      } catch {
+        // The table is still usable without the dropdown — but let a re-open try again rather
+        // than pinning the cells on "…" for the life of the expand.
+        linkFetchedFor.current = null;
+      }
     })();
     return () => { live = false; };
-  }, [portefeuille]);
+  }, [portefeuille, showRows]);
   // Persist a manual Class pin (or clear it → Auto), then re-fetch this account so the row
   // re-groups under its new bucket.
   const setBucket = useCallback(async (isin: string, bucket: string | null) => {
@@ -1362,8 +1396,8 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
     }
     if (portefeuille && onOverride) await onOverride(portefeuille);
   }, [portefeuille, onOverride]);
-  if (!d) return <p className="text-[11px] text-fg-subtle">Loading holdings…</p>;
-  if (!d.rows?.length) return <p className="text-[11px] text-fg-subtle">No holdings snapshot stored.</p>;
+  if (!d) return <p className="text-[12px] text-fg-subtle">Loading holdings…</p>;
+  if (!d.rows?.length) return <p className="text-[12px] text-fg-subtle">No holdings snapshot stored.</p>;
   const byName = new Map((i?.rows ?? []).map((r) => [r.holding_name, r]));
 
   // Grouped by the CALCULATED Class (the `bucket`, incl. manual overrides), in the backend's order
@@ -1440,11 +1474,45 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
   const totalReturn = total.returnPct == null ? null : total.returnPct / 100;
   return (
     <div className="space-y-2">
+      {/* ⚠ THE WHOLE BAR IS THE TOGGLE, not a caret you have to hit. The figures on it are the
+          Total row's, so a reader who only wanted the summary has already been answered and the
+          click is genuinely optional. */}
+      <button type="button" onClick={() => setShowRows((v) => !v)}
+        aria-expanded={showRows}
+        className="w-full flex items-center gap-2 text-left text-[12px] px-2 py-1.5 rounded-lg border border-neutral-800/40 bg-card hover:bg-overlay/5 transition-colors">
+        <span className={`text-[9px] text-fg-faint transition-transform ${showRows ? 'rotate-90' : ''}`}>▶</span>
+        <span className="font-medium text-fg-strong">Current portfolio</span>
+        <span className="text-fg-faint">
+          {all.length} holding{all.length === 1 ? '' : 's'}
+        </span>
+        {/* ⚠ THE SAME VARIABLES THE TOTAL ROW PRINTS, through the same formatters — never a
+            second aggregation of `all`. One that merely HAPPENS to agree starts disagreeing the
+            day either side changes, which is the trap the comment above `basis` records. */}
+        <span className="ml-auto flex items-center gap-3 font-mono">
+          <span className="text-fg-soft">{eur(total.valueEur)}</span>
+          {/* ⚠ THE BOOK'S REAL RETURN, EVEN WHEN A HYPOTHETICAL BASIS IS ARMED INSIDE. The
+              control that marks a basis as hypothetical is itself hidden while this is collapsed,
+              so showing the hypothetical here would be the one number on screen with nothing left
+              to qualify it. The chip says a different basis is waiting rather than quietly
+              printing its answer. */}
+          {isHypothetical && (
+            <span className="text-warn-500 font-sans text-[11px]"
+              title={`Inside, the returns are weighted by ${WEIGHT_BASES.find((x) => x.key === basisKey)!.label} — a hypothetical. The figure here is the book's own start-weighted return.`}>
+              ⚠ {WEIGHT_BASES.find((x) => x.key === basisKey)!.label} inside
+            </span>
+          )}
+          <span className={totalReturn == null ? 'text-fg-faint' : tone(totalReturn)}
+            title="The book's own start-weighted total return — the identical figure the Total row inside shows on Start wt.">
+            {totalReturn == null ? '—' : pct(totalReturn * 100)}
+          </span>
+        </span>
+      </button>
+      {showRows && (<>
       {/* Which weights the segment + Total returns use. Four discrete, named options, so this is
           a segmented control rather than a literal slider — a slider would put "Model wt" at an
           unlabelled 3/4 position and make the default indistinguishable from a nudge.
           ⚠ ONLY "Start wt" is the book's own return; the rest are clearly-marked hypotheticals. */}
-      <div className="flex items-center gap-2 flex-wrap text-[10px]">
+      <div className="flex items-center gap-2 flex-wrap text-[11px]">
         <span className="text-fg-faint">Weight returns by</span>
         <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden">
           {WEIGHT_BASES.map((b) => (
@@ -1479,8 +1547,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
             width the table still grows and the box still scrolls. */}
         <table className="w-full text-xs whitespace-nowrap">
           <thead className="bg-card z-20 [&_th]:bg-card">
-            <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
-              <th className="px-2 py-1.5 font-medium text-left" />{/* Fundamental */}
+            <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
               <th className="px-3 py-1.5 font-medium text-left">Fund</th>
               <th className="px-3 py-1.5 font-medium text-left"
                 title="AIRS's own ISIN-code where the book carries one (exact), else matched by name to a Fixed portfolio position, else pinned by hand. Always price-checked against that instrument's own close. ⚠ = the price disagrees; ? = no series, so nothing cross-checks it.">
@@ -1553,7 +1620,6 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
           <tbody className="divide-y divide-neutral-800/20">
             {/* TOTAL — all weights summed and the value-weighted price return, at the top. */}
             <tr className="bg-overlay/[0.04] font-semibold border-b border-neutral-800/40">
-              <td className="px-2 py-1.5" />{/* Fundamental */}
               <td className="px-3 py-1.5 text-fg-strong" colSpan={7}>
                 Total · {all.length} holding{all.length === 1 ? '' : 's'}
                 <Provenance source="airs_volk" asOf={d.as_of} kind="formula" what="How many positions this account holds in total."
@@ -1651,21 +1717,16 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
               </td>
             </tr>
             {ordered.map(([seg, group]) => {
-              const groupHoldings = group
-                .map((r) => ({ isin: byName.get(r.holding_name)?.isin, weight: r.weight ?? 0, name: r.holding_name }))
-                .filter((h): h is { isin: string; weight: number; name: string } => !!h.isin);
               return (
               <Fragment key={seg?.asset_class ?? 'x'}>
-                {seg && <SegmentHeader s={seg} asOf={d.as_of} holdings={groupHoldings}
+                {seg && <SegmentHeader s={seg} asOf={d.as_of}
                   stats={groupStatsOf.get(seg.asset_class ?? 'rest')!}
                   altReturnPct={isHypothetical ? wrByGroup.get(seg.asset_class ?? 'rest')?.pct : null}
-                  basisKey={basisKey}
-                  onFundamental={setFund} />}
+                  basisKey={basisKey} />}
                 {group.map((r, n) => {
                   const g = byName.get(r.holding_name);
                   return (
               <tr key={`${r.holding_name}-${n}`} className="hover:bg-overlay/[0.02]">
-                <FundamentalCell isin={g?.isin} name={r.holding_name} onFundamental={setFund} />
                 <td className="px-3 py-1.5 text-fg-soft pl-6">
                   <span className="inline-block max-w-[24ch] truncate align-bottom"
                     title={r.holding_name}>{r.holding_name}</span>
@@ -1858,10 +1919,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
           </tbody>
         </table>
       </div>
-      {fund && (
-        <OwnerEarningsModal isin={fund.isin} basket={fund.basket} portfolioId={fund.portfolioId}
-          name={fund.name} onClose={() => setFund(null)} />
-      )}
+      </>)}
     </div>
   );
 }

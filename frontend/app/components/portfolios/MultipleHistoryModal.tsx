@@ -63,13 +63,13 @@ export default function MultipleHistoryModal({
             {b.multiple} — {hasForward ? 'forward & trailing' : 'trailing'}, by date
           </h2>
           {name && <span className="text-sm text-fg-soft truncate max-w-[28ch]" title={name}>{name}</span>}
-          <span className="text-[11px] font-mono text-fg-faint">{isin}</span>
+          <span className="text-[12px] font-mono text-fg-faint">{isin}</span>
           <button type="button" onClick={onClose}
             className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-3">
-          <p className="text-[11px] text-fg-faint">
+          <p className="text-[12px] text-fg-faint">
             Trailing {b.multiple} is the close divided by the {b.perShare} last PUBLISHED at that
             date — the reporting lag is already applied, so no row uses a figure the market did not
             yet have. {hasForward
@@ -81,7 +81,7 @@ export default function MultipleHistoryModal({
           <div className="overflow-auto rounded-lg border border-neutral-800/40">
             <table className="w-full text-xs">
               <thead className="bg-page sticky top-0 z-10">
-                <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                   <th className="px-3 py-1.5 font-medium text-left">Date</th>
                   <th className="px-3 py-1.5 font-medium text-right">
                     Close{currency ? ` (${currency})` : ''}
@@ -123,7 +123,7 @@ export default function MultipleHistoryModal({
           </div>
 
           {hasForward && (
-            <p className="text-[11px] text-fg-faint">
+            <p className="text-[12px] text-fg-faint">
               ⚠ A blank Close and {b.perShare} is not a missing price. That row&apos;s timestamp comes
               from the forward series, which is sampled on its own dates; the trailing line is
               carried across it rather than re-observed, exactly as the chart draws it.

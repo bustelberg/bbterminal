@@ -368,7 +368,7 @@ export default function FrozenUniversesPanel({
                           </span>
                         ) : t.gf_unsubscribed ? (
                           <span
-                            className="px-1.5 py-0.5 text-[10px] font-medium bg-warn-500/15 text-warn-300 border border-warn-500/30 rounded cursor-help"
+                            className="px-1.5 py-0.5 text-[11px] font-medium bg-warn-500/15 text-warn-300 border border-warn-500/30 rounded cursor-help"
                             title={`${t.exchange ?? 'This exchange'} is outside our GuruFocus subscription (India, AU/NZ, Russia, Africa, LatAm) — no market-cap / price / ISIN data is available for this listing.`}
                           >
                             UNSUBSCRIBED

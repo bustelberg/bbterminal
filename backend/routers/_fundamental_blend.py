@@ -154,9 +154,32 @@ def _prepare(members: list[dict], kind: str) -> tuple[list[dict], list[dict]]:
                 dropped.append({"index": i, "weight": w, "reason": "non_positive_base"})
                 continue
             pts = {d: 100.0 * v / base for d, v in pts.items()}
-        ok.append({"index": i, "weight": w, "points": pts, "raw": raw,
+        ok.append({"index": i, "weight": w, "weights": m.get("weights"),
+                   "points": pts, "raw": raw,
                    "by_year": _latest_per_year(pts), "raw_by_year": _latest_per_year(raw)})
     return ok, dropped
+
+
+def _weight_at(m: dict, period: str) -> float | None:
+    """This member's weight IN THIS PERIOD, or None when it has none and is left out of it.
+
+    ⚠ TWO BASES, ONE FUNCTION, AND `None` MEANS SOMETHING DIFFERENT FROM 0. A universe carries
+    `weights` — the market cap as at each fiscal period, so the weighting is the index's own at the
+    time rather than today's applied backwards. A PORTFOLIO does not: a holding weight is not a
+    market cap and has no history here, so the scalar applies to every period. The absence of
+    `weights` is therefore the signal for "single basis", which is why it must be `None` and not an
+    empty dict.
+
+    ⚠ A MEMBER WITH PER-PERIOD WEIGHTS BUT NO CAP THIS PERIOD IS DROPPED FROM THIS PERIOD ONLY, and
+    NOT fallen back to the scalar. Mixing the two bases inside one column would weight some
+    constituents by their 2018 cap and others by today's, with nothing on screen to tell them
+    apart — the failure this whole change exists to remove, reintroduced one row at a time.
+    """
+    ws = m.get("weights")
+    if ws is None:
+        return m.get("weight")
+    w = ws.get(period)
+    return w if w else None
 
 
 def blend_series(members: list[dict], metric_code: str) -> dict:
@@ -176,15 +199,36 @@ def blend_series(members: list[dict], metric_code: str) -> dict:
 
     prepared, _ = _prepare(members, kind)
     by_date: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    # ⚠⚠ COVERAGE IS MEASURED ON THE **STABLE** WEIGHT, NOT THE PER-PERIOD ONE, AND GETTING THIS
+    # WRONG DISABLES THE FLOOR ENTIRELY.
+    #
+    # The per-period market cap is the right basis for the AVERAGE and the wrong one for a
+    # completeness measure, because it comes out of the same GuruFocus blob as the figure itself:
+    # a company that has not filed FY2026 has no FY2026 market cap either. Summing per-period caps
+    # on both sides therefore divides the filers by the filers — coverage reads ~100% in exactly
+    # the period where almost nobody has reported.
+    #
+    # Measured on the S&P: FY2026 read **13.4%** covered on the stable basis (correctly under the
+    # 80% floor, so the chart omitted it) and **100.0%** on the per-period one — which drew a full
+    # -height point built almost entirely out of NVIDIA, in the same ink as a year every
+    # constituent reported. That is the exact failure `MIN_BLEND_COVERAGE_PCT` exists to prevent.
+    #
+    # So: numerator and denominator both use `weight` — one basis, internally consistent, and
+    # present whether or not the company reported. The two quantities answer different questions
+    # and are allowed to use different bases; each has to be consistent with ITSELF.
+    cover_w: dict[str, float] = defaultdict(float)
     for p in prepared:
         for year, (_d, v) in p["by_year"].items():
-            by_date[year].append((p["weight"], v))
+            w = _weight_at(p, year)
+            if w:
+                by_date[year].append((abs(float(w)), v))
+                cover_w[year] += abs(float(p.get("weight") or 0))
 
     combine = _weighted_harmonic if kind == "multiple" else _weighted_arithmetic
     out = []
     for d in sorted(by_date):
         pairs = by_date[d]
-        covered = 100.0 * sum(p[0] for p in pairs) / total_w
+        covered = 100.0 * cover_w[d] / total_w
         value = combine(pairs)
         if value is None or covered < MIN_BLEND_COVERAGE_PCT:
             continue        # ⚠ omitted, never drawn as a dip — see the docstring
@@ -222,14 +266,21 @@ def explain_empty(members: list[dict], metric_code: str) -> dict | None:
     prepared, dropped = _prepare(members, kind)
     combine = _weighted_harmonic if kind == "multiple" else _weighted_arithmetic
     by_year: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    # The same stable basis `blend_series` measures coverage on — see the ⚠⚠ there. A diagnostic
+    # that explained a floor decision using a different denominator from the one that made it
+    # would send the reader after the wrong cause.
+    cover_w: dict[str, float] = defaultdict(float)
     for p in prepared:
         for year, (_d, v) in p["by_year"].items():
-            by_year[year].append((p["weight"], v))
+            w = _weight_at(p, year)
+            if w:
+                by_year[year].append((abs(float(w)), v))
+                cover_w[year] += abs(float(p.get("weight") or 0))
 
     best = 0.0
     below = no_value = 0
-    for pairs in by_year.values():
-        covered = 100.0 * sum(w for w, _ in pairs) / total_w if total_w > 0 else 0.0
+    for year, pairs in by_year.items():
+        covered = 100.0 * cover_w[year] / total_w if total_w > 0 else 0.0
         best = max(best, covered)
         if combine(pairs) is None:
             no_value += 1

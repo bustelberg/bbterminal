@@ -163,7 +163,7 @@ export default function AssetPipeline() {
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) void onLeonteqFile(f); e.target.value = ''; }}
               />
             </label>
-            {scan && <span className="text-[11px] text-fg-faint font-mono">{scan.filename} · {scan.rows.toLocaleString()} rows</span>}
+            {scan && <span className="text-[12px] text-fg-faint font-mono">{scan.filename} · {scan.rows.toLocaleString()} rows</span>}
           </div>
 
           {/* Add a single row by ISIN — the one-off counterpart to the bulk upload. */}
@@ -185,16 +185,16 @@ export default function AssetPipeline() {
             {/* Format-only check, on purpose: it catches a typo without a round-trip, but
                 whether the ISIN actually resolves is the backend's call, not a regex's. */}
             {isin && !isinLooksValid && (
-              <span className="text-[11px] text-warn-300">
+              <span className="text-[12px] text-warn-300">
                 Not an ISIN — 2 letters, 9 alphanumerics, 1 check digit (12 chars).
               </span>
             )}
-            <span className="text-[11px] text-fg-faint">
+            <span className="text-[12px] text-fg-faint">
               Resolves immediately (OpenFIGI-anchored) and stores its price series, so the row
               lands complete rather than queued.
             </span>
           </div>
-          <p className="mt-2 text-[11px] text-fg-faint">
+          <p className="mt-2 text-[12px] text-fg-faint">
             <span className="text-accent-300 font-medium">Leonteq (lynqs) CSV</span> — columns id, ticker, name, productType, ric, isin, currency — replaces the Leonteq-Verified set (name/currency/productType shown in the grid + a badge on each verified row) and queues its ISINs for ingestion.
           </p>
 
@@ -216,12 +216,12 @@ export default function AssetPipeline() {
               >
                 {enqueuing ? 'Adding…' : `Add ${(col?.count ?? 0).toLocaleString()} ISINs to queue`}
               </button>
-              {col && col.count === 0 && <span className="text-[11px] text-warn-300">No valid ISINs in this column — pick another.</span>}
+              {col && col.count === 0 && <span className="text-[12px] text-warn-300">No valid ISINs in this column — pick another.</span>}
             </div>
           )}
 
-          {msg && <div className="mt-3 text-[11px] text-pos-400 bg-pos-500/10 border border-pos-500/20 rounded-lg px-3 py-2">{msg}</div>}
-          {error && <div className="mt-3 text-[11px] text-neg-300 bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2">{error}</div>}
+          {msg && <div className="mt-3 text-[12px] text-pos-400 bg-pos-500/10 border border-pos-500/20 rounded-lg px-3 py-2">{msg}</div>}
+          {error && <div className="mt-3 text-[12px] text-neg-300 bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2">{error}</div>}
         </section>
 
         <AssetPipelineTable reloadSignal={catalogReload} />

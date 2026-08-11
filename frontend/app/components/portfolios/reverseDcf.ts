@@ -40,12 +40,6 @@ export const FORECAST_YEARS = 10;
 /** Used when the company publishes no usable WACC — see `defaultDiscountRate`. */
 export const FALLBACK_DISCOUNT_RATE = 0.10;
 
-export const REVERSE_DCF_DEFAULTS: ReverseDcfAssumptions = {
-  years: FORECAST_YEARS,
-  perpetuityGrowth: PERPETUITY_GROWTH,
-  discountRates: [FALLBACK_DISCOUNT_RATE],
-};
-
 /**
  * The discount rate to start from: the company's OWN cost of capital where GuruFocus publishes one,
  * so a utility and a biotech do not get the same hurdle by default.

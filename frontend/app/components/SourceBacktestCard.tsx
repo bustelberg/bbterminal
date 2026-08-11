@@ -279,14 +279,14 @@ export default function SourceBacktestCard({
                 </span>
               </div>
             )}
-            <span className="text-[11px] text-fg-subtle font-mono ml-auto">{sinceGoLive.from} → {sinceGoLive.to}</span>
+            <span className="text-[12px] text-fg-subtle font-mono ml-auto">{sinceGoLive.from} → {sinceGoLive.to}</span>
           </div>
-          <p className="text-[10px] text-fg-faint mt-1.5">
+          <p className="text-[11px] text-fg-faint mt-1.5">
             Return from the go-live date through the latest priced day ({sinceGoLive.to}) — the held portfolio is marked to market by the price-update job past the backtest horizon{sinceGoLive.benchTo ? `; the universe baseline + alpha run through ${sinceGoLive.benchTo} (no live benchmark)` : ''}. Per-period live performance is in the run history below.
           </p>
         </div>
       )}
-      <div className="text-[10px] uppercase tracking-wider text-fg-subtle">
+      <div className="text-[11px] uppercase tracking-wider text-fg-subtle">
         Source backtest{data.name ? ` · ${data.name}` : ''}
       </div>
       <BacktestResultView

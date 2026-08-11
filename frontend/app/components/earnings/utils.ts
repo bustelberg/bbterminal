@@ -46,17 +46,6 @@ export function latestObservation(metrics: MetricRow[], code: string): { value: 
   return best ? { value: best.numeric_value, date: best.target_date } : null;
 }
 
-/** Pick the earliest estimate after a reference date (for FY1 = next fiscal year). */
-export function earliestFutureValue(metrics: MetricRow[], code: string, afterDate: string): { value: number; date: string } | null {
-  let best: MetricRow | null = null;
-  for (const m of metrics) {
-    if (m.metric_code !== code || m.numeric_value == null) continue;
-    if (m.target_date <= afterDate) continue;
-    if (!best || m.target_date < best.target_date) best = m;
-  }
-  return best ? { value: best.numeric_value!, date: best.target_date } : null;
-}
-
 export function timeSeries(metrics: MetricRow[], code: string): { date: string; value: number }[] {
   return metrics
     .filter((m) => m.metric_code === code && m.numeric_value != null)

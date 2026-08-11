@@ -52,7 +52,7 @@ const GROUP_STYLE: Record<string, string> = {
 function CadenceTag({ cadence }: { cadence?: Cadence }) {
   if (cadence !== 'daily_asof') return null;
   return (
-    <span className="ml-1.5 text-[8px] uppercase tracking-wider px-1 py-0.5 rounded bg-pos-500/15 text-pos-300"
+    <span className="ml-1.5 text-[9px] uppercase tracking-wider px-1 py-0.5 rounded bg-pos-500/15 text-pos-300"
       title="Daily as-of cadence — the signal the live /schedule strategy trades (strict < cutoff, 30-day staleness guard)">
       live
     </span>
@@ -133,13 +133,13 @@ export default function SignalLab() {
             <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5">
               {(Object.keys(RANGES) as RangeId[]).map((r) => (
                 <button key={r} type="button" onClick={() => setRange(r)}
-                  className={`text-[11px] px-2.5 py-1 rounded-md transition-colors ${
+                  className={`text-[12px] px-2.5 py-1 rounded-md transition-colors ${
                     range === r ? 'bg-accent-600 text-white' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/[0.04]'}`}>
                   {RANGES[r].label} <span className={range === r ? 'opacity-80' : 'opacity-50'}>{RANGES[r].span}</span>
                 </button>
               ))}
             </div>
-            <span className="text-[10px] text-fg-faint">develop signals on training · confirm they hold on test</span>
+            <span className="text-[11px] text-fg-faint">develop signals on training · confirm they hold on test</span>
           </div>
 
           <div className="flex items-center gap-3 flex-wrap">
@@ -149,30 +149,30 @@ export default function SignalLab() {
               <option value="">Select a universe…</option>
               {universes.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.ticker_count.toLocaleString()})</option>)}
             </select>
-            <label className="flex items-center gap-1.5 text-[11px] text-fg-muted cursor-pointer select-none"
+            <label className="flex items-center gap-1.5 text-[12px] text-fg-muted cursor-pointer select-none"
               title="Also score the daily as-of signals the live /schedule strategy trades. Much slower — it loops per instrument.">
               <input type="checkbox" checked={includeDaily} onChange={(e) => setIncludeDaily(e.target.checked)}
                 className="accent-accent-600" />
               Live-strategy signals <span className="text-fg-faint">(slower)</span>
             </label>
-            {loading && <span className="text-[11px] text-fg-faint">Computing… {elapsed.toFixed(1)}s</span>}
-            {data && <span className="text-[11px] text-fg-faint">{RANGES[range].label} · {data.months} months · {data.from} → {data.to} · {data.universe?.size ?? 0} instruments</span>}
+            {loading && <span className="text-[12px] text-fg-faint">Computing… {elapsed.toFixed(1)}s</span>}
+            {data && <span className="text-[12px] text-fg-faint">{RANGES[range].label} · {data.months} months · {data.from} → {data.to} · {data.universe?.size ?? 0} instruments</span>}
           </div>
           {loading && <div className="loading-bar h-0.5 w-full rounded-full" aria-hidden />}
           {error && <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">{error}</div>}
-          {!data && !error && !loading && <p className="text-[11px] text-fg-subtle">Pick a universe to score its signals.</p>}
+          {!data && !error && !loading && <p className="text-[12px] text-fg-subtle">Pick a universe to score its signals.</p>}
         </div>
 
         {/* Signal summary — ranked by |t-stat| */}
         {data && (
           <div className="bg-card border border-neutral-800/40 rounded-xl p-4 space-y-2">
             <div className="text-sm font-semibold text-fg-strong">Predictive power</div>
-            <p className="text-[10px] text-fg-faint">
+            <p className="text-[11px] text-fg-faint">
               IC = monthly rank correlation of the signal with next-month return · |t| ≥ 2 = significant · monotonicity = how cleanly deciles line up (1 = perfect) · click a row for its decile profile.
             </p>
             <div className="overflow-auto rounded-lg border border-neutral-800/40">
               <table className="w-full text-xs">
-                <thead className="bg-card text-fg-faint text-[10px] uppercase tracking-wide">
+                <thead className="bg-card text-fg-faint text-[11px] uppercase tracking-wide">
                   <tr className="border-b border-neutral-800/40">
                     <th className="px-3 py-1.5 text-left font-medium">Signal</th>
                     <th className="px-3 py-1.5 text-left font-medium">Type</th>
@@ -189,12 +189,12 @@ export default function SignalLab() {
                       <tr onClick={() => setOpen(open === s.signal ? null : s.signal)}
                         className="hover:bg-overlay/[0.02] cursor-pointer">
                         <td className="px-3 py-1.5 text-fg-soft whitespace-nowrap">
-                          <span className="text-fg-faint text-[9px] mr-1">{open === s.signal ? '▾' : '▸'}</span>{s.label}
+                          <span className="text-fg-faint text-[10px] mr-1">{open === s.signal ? '▾' : '▸'}</span>{s.label}
                           <CadenceTag cadence={s.cadence} />
-                          {s.significant && <span className="ml-1.5 text-[8px] uppercase tracking-wider text-accent-400">sig</span>}
+                          {s.significant && <span className="ml-1.5 text-[9px] uppercase tracking-wider text-accent-400">sig</span>}
                         </td>
                         <td className="px-3 py-1.5">
-                          <span className={`text-[9px] uppercase tracking-wider px-1 py-0.5 rounded ${GROUP_STYLE[s.group] ?? GROUP_STYLE.price}`}>{s.group}</span>
+                          <span className={`text-[10px] uppercase tracking-wider px-1 py-0.5 rounded ${GROUP_STYLE[s.group] ?? GROUP_STYLE.price}`}>{s.group}</span>
                         </td>
                         <td className="px-3 py-1.5 text-right font-mono" style={icStyle(s.mean_ic)}>{num(s.mean_ic, 3)}</td>
                         <td className={`px-3 py-1.5 text-right font-mono ${Math.abs(s.t_stat) >= 2 ? 'text-fg-strong font-semibold' : 'text-fg-muted'}`}>{s.t_stat.toFixed(1)}</td>
@@ -221,9 +221,9 @@ export default function SignalLab() {
         {data && sectors.length > 0 && (
           <div className="bg-card border border-neutral-800/40 rounded-xl p-4 space-y-2">
             <div className="text-sm font-semibold text-fg-strong">IC by sector</div>
-            <p className="text-[10px] text-fg-faint">Mean IC of each signal within each sector · green = predictive, red = inverse · blank = too few names.</p>
+            <p className="text-[11px] text-fg-faint">Mean IC of each signal within each sector · green = predictive, red = inverse · blank = too few names.</p>
             <div className="overflow-auto rounded-lg border border-neutral-800/40">
-              <table className="text-[10px]">
+              <table className="text-[11px]">
                 <thead className="bg-card sticky top-0">
                   <tr>
                     <th className="px-2 py-1.5 text-left font-medium text-fg-faint sticky left-0 bg-card z-10">Signal</th>
@@ -251,7 +251,7 @@ export default function SignalLab() {
                 </tbody>
               </table>
             </div>
-            <p className="text-[9px] text-fg-faint">Values are IC × 100 (e.g. 5 = 0.05).</p>
+            <p className="text-[10px] text-fg-faint">Values are IC × 100 (e.g. 5 = 0.05).</p>
           </div>
         )}
 
@@ -259,12 +259,12 @@ export default function SignalLab() {
         {data && data.regime_months && (
           <div className="bg-card border border-neutral-800/40 rounded-xl p-4 space-y-2">
             <div className="text-sm font-semibold text-fg-strong">IC by regime</div>
-            <p className="text-[10px] text-fg-faint">
+            <p className="text-[11px] text-fg-faint">
               Mean IC in each market regime at decision time (causal). Watch the month count — a thin regime (few months) is noisy, so don’t over-trust it.
             </p>
             <div className="overflow-auto rounded-lg border border-neutral-800/40">
               <table className="w-full text-xs">
-                <thead className="bg-card text-fg-faint text-[10px] uppercase tracking-wide">
+                <thead className="bg-card text-fg-faint text-[11px] uppercase tracking-wide">
                   <tr className="border-b border-neutral-800/40">
                     <th className="px-3 py-1.5 text-left font-medium">Signal</th>
                     {REGIME_ORDER.map((k) => (
@@ -296,7 +296,7 @@ export default function SignalLab() {
                 </tbody>
               </table>
             </div>
-            <p className="text-[9px] text-fg-faint">
+            <p className="text-[10px] text-fg-faint">
               A signal that flips sign (e.g. momentum positive in calm, negative in bear-turbulent) is a candidate for regime-conditioning — validate train/test before trusting it.
             </p>
           </div>
@@ -309,11 +309,11 @@ export default function SignalLab() {
 /** Mean next-month return per signal-decile — a clean upward gradient = a good signal. */
 function DecileBars({ deciles }: { deciles: (number | null)[] }) {
   const vals = deciles.filter((d): d is number => d != null);
-  if (!vals.length) return <div className="text-[10px] text-fg-faint">No decile data.</div>;
+  if (!vals.length) return <div className="text-[11px] text-fg-faint">No decile data.</div>;
   const max = Math.max(...vals.map(Math.abs)) || 1;
   return (
     <div>
-      <div className="text-[10px] text-fg-muted mb-1">Next-month return by signal decile (low → high)</div>
+      <div className="text-[11px] text-fg-muted mb-1">Next-month return by signal decile (low → high)</div>
       <div className="flex items-end gap-1 h-16">
         {deciles.map((d, i) => {
           const h = d == null ? 0 : (Math.abs(d) / max) * 100;
@@ -325,7 +325,7 @@ function DecileBars({ deciles }: { deciles: (number | null)[] }) {
           );
         })}
       </div>
-      <div className="flex justify-between text-[9px] text-fg-faint mt-0.5"><span>D1</span><span>D10</span></div>
+      <div className="flex justify-between text-[10px] text-fg-faint mt-0.5"><span>D1</span><span>D10</span></div>
     </div>
   );
 }

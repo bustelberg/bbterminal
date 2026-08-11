@@ -24,11 +24,11 @@ export function TipCard({ label, labelSuffix, title, subtitle, children }: {
     <div className="space-y-2 min-w-[13rem]">
       <div>
         <div className="flex items-center gap-1.5 mb-0.5">
-          <span className="text-[9px] uppercase tracking-wider text-fg-faint">{label}</span>
+          <span className="text-[10px] uppercase tracking-wider text-fg-faint">{label}</span>
           {labelSuffix}
         </div>
         {title && <div className="text-fg-strong font-semibold leading-tight">{title}</div>}
-        {subtitle && <div className="text-fg-muted text-[11px] mt-0.5">{subtitle}</div>}
+        {subtitle && <div className="text-fg-muted text-[12px] mt-0.5">{subtitle}</div>}
       </div>
       <div className="border-t border-neutral-800/40 pt-2 space-y-1.5">{children}</div>
     </div>
@@ -41,8 +41,8 @@ export function TipCard({ label, labelSuffix, title, subtitle, children }: {
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-baseline gap-2">
-      <span className="text-[9px] uppercase tracking-wider text-fg-faint w-11 shrink-0 pt-px">{label}</span>
-      <span className="min-w-0 text-[11px]">{children}</span>
+      <span className="text-[10px] uppercase tracking-wider text-fg-faint w-11 shrink-0 pt-px">{label}</span>
+      <span className="min-w-0 text-[12px]">{children}</span>
     </div>
   );
 }
@@ -105,7 +105,7 @@ export function AboutCard({ text }: { text: string }) {
     <TipCard label="About" title={title}>
       {/* `whitespace-pre-line` is load-bearing: call sites use \n\n for paragraph breaks and the
           old bare-paragraph rendering honoured them. */}
-      <span className="block text-[11px] text-fg-soft leading-relaxed whitespace-pre-line">
+      <span className="block text-[12px] text-fg-soft leading-relaxed whitespace-pre-line">
         {body}
       </span>
     </TipCard>

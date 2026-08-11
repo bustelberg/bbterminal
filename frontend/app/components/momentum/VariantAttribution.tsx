@@ -338,7 +338,7 @@ function VariantAttributionInner() {
                 <tr className="bg-page border-y border-neutral-800/40">
                   <td
                     colSpan={ALL_METRICS.length + 2}
-                    className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-accent-300 font-medium"
+                    className="px-3 py-1.5 text-[12px] uppercase tracking-wider text-accent-300 font-medium"
                   >
                     {axis.label}
                     <span className="ml-2 text-fg-faint normal-case font-normal">
@@ -367,7 +367,7 @@ function VariantAttributionInner() {
                         >
                           {fmtMetric(m, stat?.mean ?? null)}
                           {stat?.std != null && (
-                            <span className="ml-1 text-fg-subtle text-[11px]">
+                            <span className="ml-1 text-fg-subtle text-[12px]">
                               (±{fmtMetricStd(m, stat.std)})
                             </span>
                           )}

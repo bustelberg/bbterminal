@@ -113,9 +113,9 @@ export default function BreakdownModal({ target, config, onClose }: {
         <div className="flex items-baseline gap-3 px-6 py-4 border-b border-neutral-800/40">
           <h2 className="text-fg-strong font-medium">Why this was picked</h2>
           <span className="text-sm text-fg-soft truncate max-w-[26ch]" title={target.name}>{target.name}</span>
-          {target.ticker && <span className="text-[11px] font-mono text-fg-faint">{target.ticker}</span>}
+          {target.ticker && <span className="text-[12px] font-mono text-fg-faint">{target.ticker}</span>}
           {/* The cutoff, always — the whole breakdown is "as of" this date and means nothing without it. */}
-          <span className="text-[11px] font-mono text-accent-300">as of {target.date}</span>
+          <span className="text-[12px] font-mono text-accent-300">as of {target.date}</span>
           <button type="button" onClick={onClose}
             className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
         </div>

@@ -79,7 +79,7 @@ export default function RowResolveModal({ row, onClose }: {
                 ? `${result.yfinance.symbol} · ${result.yfinance.currency ?? '?'} · ${(result.yfinance.rows ?? 0).toLocaleString()} bars`
                 : 'not found'} />
             {result.openfigi.found && result.yfinance.found && (
-              <div className="text-[11px] text-fg-subtle">
+              <div className="text-[12px] text-fg-subtle">
                 Name match:{' '}
                 <span className={result.identity_status === 'verified' ? 'text-pos-400'
                   : result.identity_status === 'mismatch' ? 'text-warn-400' : 'text-fg-faint'}>
@@ -87,7 +87,7 @@ export default function RowResolveModal({ row, onClose }: {
                 </span>
               </div>
             )}
-            {result.message && <p className="text-[11px] text-fg-faint">{result.message}</p>}
+            {result.message && <p className="text-[12px] text-fg-faint">{result.message}</p>}
           </div>
         )}
 
@@ -105,7 +105,7 @@ export default function RowResolveModal({ row, onClose }: {
 function SourceLine({ label, ok, detail }: { label: string; ok: boolean; detail: string }) {
   return (
     <div className="flex items-center gap-2 text-xs">
-      <span className={`text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${
+      <span className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${
         ok ? 'bg-pos-500/10 text-pos-400 border-pos-500/20' : 'bg-neg-500/10 text-neg-400 border-neg-500/20'}`}>
         {ok ? '✓ found' : '✗ missing'}
       </span>

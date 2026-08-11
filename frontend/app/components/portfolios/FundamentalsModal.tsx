@@ -96,7 +96,7 @@ function QualityStrip({ metrics }: { metrics: QualityMetric[] }) {
   const measured = metrics.filter((m) => m.status === 'ok' || m.status === 'fail');
   if (metrics.length && !measured.length) {
     return (
-      <div className="bg-inset border border-neutral-800/40 rounded-lg px-3 py-2 text-[11px] text-fg-subtle">
+      <div className="bg-inset border border-neutral-800/40 rounded-lg px-3 py-2 text-[12px] text-fg-subtle">
         <strong className="text-fg">These four cannot judge this company.</strong>{' '}Every one of them
         is built on ROIC, gross margin or cash conversion, and a bank has none of the three in a
         comparable sense — lending IS the business, so its capital is its product and its operating
@@ -120,9 +120,9 @@ function QualityStrip({ metrics }: { metrics: QualityMetric[] }) {
       {metrics.map((m) => (
         <div key={m.key} title={m.note ?? ''}
           className={`rounded-lg border px-3 py-2 ${tone(m.status)}`}>
-          <div className="text-[9px] uppercase tracking-wide opacity-70">{m.label}</div>
+          <div className="text-[10px] uppercase tracking-wide opacity-70">{m.label}</div>
           <div className="font-mono text-base font-semibold leading-tight">{fmt(m)}</div>
-          <div className="text-[9px] opacity-60">
+          <div className="text-[10px] opacity-60">
             {m.status === 'n_a' ? 'not applicable'
               : m.status === 'unknown' ? `only ${m.periods} periods`
                 : `${m.periods} periods`}
@@ -139,7 +139,7 @@ function Panel({ title, sub, children }: {
   return (
     <div className="bg-card border border-neutral-800/40 rounded-xl p-4 min-w-0">
       <h4 className="text-xs font-semibold text-fg-strong">{title}</h4>
-      <p className="text-[10px] text-fg-faint mt-0.5 mb-2 leading-relaxed">{sub}</p>
+      <p className="text-[11px] text-fg-faint mt-0.5 mb-2 leading-relaxed">{sub}</p>
       <div className="h-56">
         <ResponsiveContainer width="100%" height="100%">{children as never}</ResponsiveContainer>
       </div>
@@ -147,7 +147,7 @@ function Panel({ title, sub, children }: {
   );
 }
 
-const axis = { stroke: chartTheme.axisTick, fontSize: 9 };
+const axis = { stroke: chartTheme.axisTick, fontSize: 10 };
 const grid = { stroke: chartTheme.grid, strokeDasharray: '3 3' };
 const tip = chartTheme.tooltip;
 
@@ -193,7 +193,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-neutral-800/40">
           <div className="min-w-0">
             <h3 className="text-base font-mono font-semibold text-fg-strong">{fonds}</h3>
-            <p className="text-[11px] text-fg-subtle mt-0.5">
+            <p className="text-[12px] text-fg-subtle mt-0.5">
               Fundamentally sound? · <span className="font-mono">{isin}</span>
               {d && <> · <span className="font-mono">{d.symbol}</span> ·{' '}
                 <span className="font-mono">{d.period_count}</span> periods</>}
@@ -213,7 +213,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
           <div className="p-5 space-y-3">
             {/* ⚠ A non-home listing's history has HOLES — the band would be drawn across them. */}
             {!d.is_home && (
-              <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2 text-[11px] text-warn-300">
+              <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2 text-[12px] text-warn-300">
                 <strong>{d.symbol}</strong>{' '}is not this ISIN&apos;s home listing. GuruFocus&apos;s
                 history on a secondary listing has gaps (Apple: 91 records on Nasdaq, 63 on Zurich
                 with a five-year hole), so treat every line here as indicative.
@@ -266,7 +266,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
                   <Tooltip {...tip}
                     labelFormatter={(t) => new Date(Number(t)).toISOString().slice(0, 10)}
                     formatter={(v) => fmtEur(typeof v === 'number' ? v : null)} />
-                  <Legend wrapperStyle={{ fontSize: 9 }} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
                   {bandLines.map(({ s, data }, i) => (
                     <Line key={s.label} data={data} type="monotone" dataKey="v" name={s.label}
                       dot={false} strokeWidth={1} strokeDasharray="4 3" connectNulls={false}
@@ -291,7 +291,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
                   <XAxis dataKey="date" {...axis} minTickGap={40} />
                   <YAxis {...axis} tickFormatter={(v: number) => `${v}%`} />
                   <Tooltip {...tip} formatter={(v) => fmtPct(typeof v === "number" ? v : null)} />
-                  <Legend wrapperStyle={{ fontSize: 9 }} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
                   <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                   {(d.yields ?? []).map((s, i) => (
                     <Line key={s.label} type="monotone" dataKey={s.label} dot={false}
@@ -317,7 +317,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
                   <XAxis dataKey="date" {...axis} minTickGap={40} />
                   <YAxis {...axis} tickFormatter={(v: number) => `${v}%`} />
                   <Tooltip {...tip} formatter={(v) => fmtPct(typeof v === "number" ? v : null)} />
-                  <Legend wrapperStyle={{ fontSize: 9 }} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
                   <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                   <Area type="monotone" dataKey="ROIC" stroke={chartTheme.pos} strokeWidth={2}
                     fill={chartTheme.pos} fillOpacity={0.12} connectNulls />
@@ -342,7 +342,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
                   <XAxis dataKey="date" {...axis} minTickGap={40} />
                   <YAxis {...axis} />
                   <Tooltip {...tip} />
-                  <Legend wrapperStyle={{ fontSize: 9 }} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
                   {/* Altman's distress zone, in ink rather than prose. */}
                   <ReferenceArea y1={-5} y2={1.8} fill={chartTheme.neg} fillOpacity={0.06} />
                   <ReferenceLine y={-1.78} stroke={chartTheme.warn} strokeDasharray="2 2" />
@@ -355,7 +355,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
               </Panel>
             </div>
 
-            <p className="text-[10px] text-fg-faint leading-relaxed">
+            <p className="text-[11px] text-fg-faint leading-relaxed">
               Price is <strong>yfinance daily close, in EUR</strong> — the same series every model
               portfolio on this page is priced from. The fair values, yields, returns and scores are
               GuruFocus&apos;s, off one already-cached blob ({d.fetched ? 'fetched now' : 'no API call'}

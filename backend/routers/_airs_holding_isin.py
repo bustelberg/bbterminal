@@ -513,7 +513,7 @@ def _segments(rows: list[dict]) -> list[dict]:
     return out
 
 
-def resolve_account_isins(portefeuille: str) -> dict:
+def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
     """One account's holdings, each with its own ISIN and what we know about that instrument.
 
     ⚠ NO PAIRING, NO SCORING, NO ASSIGNMENT — all three were deleted 2026-07-23. Everything they
@@ -567,13 +567,6 @@ def resolve_account_isins(portefeuille: str) -> dict:
                 grid[g["isin"]] = g
 
     # ⚠ AN EXECUTION ROW IS PRICED FROM ITS *ANALYSIS* INSTRUMENT, WHICH CAN BE A DIFFERENT
-    # LISTING. That is the design, not a fault: an ADR's execution row is deliberately served by
-    # the main company's instrument (`asset_isin_alias`), and the two do not trade at the same
-    # number — TSMC is 1 ADR = 5 ordinary shares, plus an ADR premium. The price check below would
-    # call that a `price_mismatch` on every such holding, which is a false alarm on a link we
-    # made on purpose. Those rows get their own verdict instead.
-    served_by = _load_isin_overrides.__self__ if False else None  # (placeholder)
-    # ⚠ AN EXECUTION ROW IS PRICED FROM ITS *ANALYSIS* INSTRUMENT, WHICH CAN BE A DIFFERENT
     # LISTING — that is the design, not a fault. An ADR's execution row is deliberately served by
     # the main company's instrument (`asset_isin_alias`), and the two do not trade at the same
     # number: TSMC is 1 ADR = 5 ordinary shares, plus an ADR premium. The price check below would
@@ -587,8 +580,20 @@ def resolve_account_isins(portefeuille: str) -> dict:
     # ⚠ BEFORE the closes are read, never after: the check below is a comparison, and half of it
     # comes from here. See `_freshen` — a series that merely stopped updating reads as a wrong
     # listing, which is the loudest finding this table can make.
+    # ⚠ SKIPPABLE, AND ONLY THE PRICE CHECK DEPENDS ON IT. `_freshen` exists so the implied-vs-our
+    # price comparison below is not drawn against a series that merely stopped updating — it
+    # protects `verdict` / `price_ratio` / `implied_price_eur`, which the /portfolios expand shows.
+    # The ANALYSIS path reads none of those: it takes the ISIN, the two AIRS valuations, the class
+    # and the certificate link, and prices nothing off our own closes any more. It was paying ~3.3s
+    # per book for a check it does not display — twice, since the wrapped book is resolved too, so
+    # 6.4s of a 9.7s modal open.
+    #
+    # ⚠ THE PRICES STILL GET FRESHENED, JUST NOT HERE: the 06:00 tick covers account holdings
+    # (`price_refresh.held_isins` unions `airs_holding`), and any /portfolios expand runs the full
+    # path. This only declines to do the vendor's work on a read that will not show the result.
     with _phase(t, "freshen_prices"):
-        _freshen(isins)
+        if freshen:
+            _freshen(isins)
     with _phase(t, "closes"):
         closes = _last_closes(isins, as_of)
     with _phase(t, "fx"):

@@ -160,7 +160,7 @@ export default function RelativeGrowthDrilldownModal({
 
           {data && (
             <>
-              <p className="text-[11px] text-fg-faint max-w-3xl">
+              <p className="text-[12px] text-fg-faint max-w-3xl">
                 Each holding indexed to 100 at its start year: Price is month-end share price, OE is
                 Owner Earnings (EPS ex-NRI). Price ÷ OE &gt; 1 means the multiple expanded. The
                 Portfolio row is the weighted blend — the two lines on the chart.
@@ -169,7 +169,7 @@ export default function RelativeGrowthDrilldownModal({
               <div className="overflow-x-auto rounded-lg border border-neutral-800/40">
                 <table className="w-full text-xs">
                   <thead className="bg-page">
-                    <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40 [&>th]:cursor-pointer [&>th]:select-none [&>th:hover]:text-fg-soft [&>th]:transition-colors">
+                    <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40 [&>th]:cursor-pointer [&>th]:select-none [&>th:hover]:text-fg-soft [&>th]:transition-colors">
                       {th('holding', 'Holding', 'left', 'w-full')}
                       {th('weight', 'Weight', 'right')}
                       {th('price', 'Price', 'right')}

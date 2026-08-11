@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { DISPLAY_EPSILON, formatPct, hiddenWeight, visibleBuckets } from './composition';
+import { DISPLAY_EPSILON, formatPct, visibleBuckets } from './composition';
 
 const row = (bucket: string, portfolio_pct: number | null, benchmark_pct: number | null) =>
   ({ bucket, portfolio_pct, benchmark_pct });
@@ -41,12 +41,21 @@ describe('visibleBuckets', () => {
     expect(visibleBuckets(rows).map((r) => r.bucket)).toEqual(['kept']);
   });
 
-  it('⚠ hides a bucket that is small-but-nonzero, because it still PRINTS "0%"', () => {
-    // The bug this file was written for and did not catch: values render at ZERO decimals, so
-    // 0.2% prints "0%". A threshold calibrated to one decimal (0.05) let it through a filter
-    // written to remove it, and the reader still saw "Pacific 0%".
-    expect(visibleBuckets([row('Pacific', 0, 0.2)])).toEqual([]);
-    expect(visibleBuckets([row('Pacific', 0.49, 0)])).toEqual([]);
+  it('⚠ hides a bucket that is small-but-nonzero, because it still PRINTS "0.00%"', () => {
+    // The bug this file was written for and did not catch: a threshold calibrated to a different
+    // precision than the formatter let a bucket through a filter written to remove it, and the
+    // reader still saw "Pacific 0%".
+    //
+    // ⚠ THE LITERALS MOVED WITH `DISPLAY_DECIMALS` 0 -> 2, AND THE RULE DID NOT. They were 0.2 and
+    // 0.49, chosen when values printed at zero decimals so both rendered "0%". At two decimals
+    // they render "0.20%" and "0.49%" — visible information, correctly KEPT — so this test was
+    // asserting the old precision's behaviour, not the invariant. The invariant is "hidden if and
+    // only if it would render as zero", and below 0.005 it still is.
+    expect(visibleBuckets([row('Pacific', 0, 0.002)])).toEqual([]);
+    expect(visibleBuckets([row('Pacific', 0.004, 0)])).toEqual([]);
+    // ...and the pair that used to be hidden is now shown, which is the point of the extra digits.
+    expect(visibleBuckets([row('Pacific', 0, 0.2)]).map((r) => r.bucket)).toEqual(['Pacific']);
+    expect(visibleBuckets([row('Pacific', 0.49, 0)]).map((r) => r.bucket)).toEqual(['Pacific']);
   });
 
   it('the filter and the formatter agree by construction', () => {
@@ -65,31 +74,5 @@ describe('visibleBuckets', () => {
 
   it('an all-empty axis yields no rows rather than a fabricated one', () => {
     expect(visibleBuckets([row('x', 0, 0), row('y', 0, 0)])).toEqual([]);
-  });
-});
-
-describe('hiddenWeight', () => {
-  it('reports what the hidden rows accounted for, per side', () => {
-    // ⚠ Hiding rows makes the visible bars stop summing to 100%. A reader who adds them up has
-    // found a discrepancy we created, so the amount is available to be stated.
-    // ⚠ BOTH sides must be under the threshold for the row to be hidden at all — a first draft of
-    // this fixture gave "dust" a 0.1% benchmark, which correctly KEPT it and reported nothing
-    // hidden. That is the rule working, and it is worth a test of its own (below).
-    const rows = [row('big', 99.96, 99.98), row('dust', 0.04, 0.02)];
-    const h = hiddenWeight(rows);
-    expect(h.portfolio).toBeCloseTo(0.04, 6);
-    expect(h.benchmark).toBeCloseTo(0.02, 6);
-  });
-
-  it('reports nothing hidden when the benchmark side alone keeps a dust row visible', () => {
-    // ⚠ The benchmark side must clear the SAME threshold — 0.6 prints "1%", 0.1 prints "0%".
-    // An earlier version of this test used 0.1 and only passed because the threshold was
-    // mis-set to 0.05; it went green while the feature was visibly broken on screen.
-    expect(hiddenWeight([row('big', 99.4, 99.4), row('dust', 0.04, 0.6)]))
-      .toEqual({ portfolio: 0, benchmark: 0 });
-  });
-
-  it('is zero when nothing is hidden', () => {
-    expect(hiddenWeight([row('a', 50, 50), row('b', 50, 50)])).toEqual({ portfolio: 0, benchmark: 0 });
   });
 });

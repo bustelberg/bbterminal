@@ -106,7 +106,7 @@ export default function TableDownloadButton<T>({
             className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-overlay/[0.04] hover:text-fg-strong transition-colors flex items-center justify-between"
           >
             <span>Download CSV</span>
-            <span className="text-fg-subtle text-[10px] font-mono">.csv</span>
+            <span className="text-fg-subtle text-[11px] font-mono">.csv</span>
           </button>
           <button
             type="button"
@@ -116,7 +116,7 @@ export default function TableDownloadButton<T>({
             className="w-full text-left px-3 py-1.5 text-xs text-fg hover:bg-overlay/[0.04] hover:text-fg-strong transition-colors flex items-center justify-between disabled:opacity-50"
           >
             <span>{busy ? 'Building…' : 'Download XLSX'}</span>
-            <span className="text-fg-subtle text-[10px] font-mono">.xlsx</span>
+            <span className="text-fg-subtle text-[11px] font-mono">.xlsx</span>
           </button>
         </div>
       )}
@@ -131,12 +131,12 @@ export default function TableDownloadButton<T>({
             <button
               type="button"
               onClick={toggleAll}
-              className="text-[11px] font-medium text-accent-400 hover:text-accent-500 transition-colors"
+              className="text-[12px] font-medium text-accent-400 hover:text-accent-500 transition-colors"
             >
               {allSelected ? 'Clear all' : 'Select all'}
             </button>
           </div>
-          <div className="text-[10px] uppercase tracking-wider text-fg-subtle px-3 pt-1.5">
+          <div className="text-[11px] uppercase tracking-wider text-fg-subtle px-3 pt-1.5">
             Columns ({exportCols.length}/{columns.length})
           </div>
           <div className="max-h-56 overflow-auto px-1 py-1">

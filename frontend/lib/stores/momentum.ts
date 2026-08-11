@@ -650,10 +650,3 @@ export function cancelVariantsBacktest(): void {
 export function setActiveVariant(key: VariantKey | null): void {
   momentumStore.set({ activeVariantKey: key });
 }
-
-/** Wipe variant state. Call this from the single-variant "Run Backtest"
- * path so the variants UI doesn't linger as stale rows after the user
- * switches back to single-run mode. */
-export function clearVariants(): void {
-  momentumStore.set({ variants: {}, activeVariantKey: null, variantsRun: null });
-}

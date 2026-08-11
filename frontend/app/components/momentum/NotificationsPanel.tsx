@@ -46,7 +46,7 @@ export default function NotificationsPanel({
             <ul className="max-h-64 overflow-auto border-t border-warn-500/20 divide-y divide-warn-500/10">
               {warnings.map((w, i) => (
                 <li key={i} className="px-4 py-2 text-xs text-warn-200 flex gap-2">
-                  <span className="uppercase text-[10px] tracking-wider font-mono text-warn-400/70 shrink-0 w-16">
+                  <span className="uppercase text-[11px] tracking-wider font-mono text-warn-400/70 shrink-0 w-16">
                     {w.scope}
                   </span>
                   <span className="break-words">{w.message}</span>
@@ -72,7 +72,7 @@ export default function NotificationsPanel({
             <ul className="max-h-64 overflow-auto border-t border-sky-500/20 divide-y divide-sky-500/10">
               {infos.map((n, i) => (
                 <li key={i} className="px-4 py-2 text-xs text-sky-800 flex gap-2">
-                  <span className="uppercase text-[10px] tracking-wider font-mono text-sky-600/80 shrink-0 w-16">
+                  <span className="uppercase text-[11px] tracking-wider font-mono text-sky-600/80 shrink-0 w-16">
                     {n.scope}
                   </span>
                   <span className="break-words">{n.message}</span>

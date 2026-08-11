@@ -42,12 +42,4 @@ export function buildUniverseStyles(labels: Iterable<string>): Map<string, CSSPr
 
 const FALLBACK_STYLE: CSSProperties = hueStyle(210);
 
-/** Stable single-label style (used where the full set isn't known). Falls back
- * to a fixed accent hue. Prefer `buildUniverseStyles` for the chip set. */
-export function universeChipStyle(label: string): CSSProperties {
-  let h = 0;
-  for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) | 0;
-  return hueStyle(Math.abs(h) % 360);
-}
-
 export { FALLBACK_STYLE };

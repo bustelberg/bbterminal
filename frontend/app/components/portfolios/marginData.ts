@@ -49,6 +49,62 @@ export const fmtRatioPct = (v: number | null | undefined) => (v == null ? '—' 
 export const MIN_YEAR_COVERAGE_PCT = 80;
 
 /**
+ * A period LABEL from the server → the numeric x every card plots on.
+ *
+ * ⚠ THIS EXISTS BECAUSE `Number("2025-Q3")` IS **NaN**, AND NaN IS A VALID Map KEY. Every card on
+ * this tab keyed its series with `Number(year)`, which was correct while the server only ever sent
+ * "2025" — and the day it started sending trailing-twelve-month labels, all 42 quarterly periods
+ * collapsed onto ONE NaN key and nine charts went blank. Not one of them errored: the drill-down
+ * modals read the same payload as strings and rendered perfectly, so the data was visibly there
+ * while the chart above it was empty.
+ *
+ * ⚠ FRACTIONAL YEARS, NOT AN INDEX. A quarter is a quarter OF A YEAR, so four points span exactly
+ * 1.0 on the axis — which keeps the spacing honest when a series has gaps and keeps any per-year
+ * arithmetic (the growth cards' CAGR) per year. `2025-Q3` → 2025.5.
+ */
+export const periodToX = (period: string): number => {
+  const q = /^(\d{4})-Q([1-4])$/.exec(period);
+  if (q) return Number(q[1]) + (Number(q[2]) - 1) / 4;
+  // A DAILY label is an ISO date — the two yield cards' cadence. Same trap as the quarter one:
+  // `Number("2026-07-31")` is NaN, so every trading day would land on one key. Placed on the same
+  // fractional-year axis as the others, so a daily series and an annual one are directly
+  // comparable and nothing downstream needs to know which cadence produced the point.
+  const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(period);
+  if (d) {
+    const y = Number(d[1]);
+    const start = Date.UTC(y, 0, 1);
+    const days = (Date.UTC(y, Number(d[2]) - 1, Number(d[3])) - start) / 86_400_000;
+    const inYear = (Date.UTC(y + 1, 0, 1) - start) / 86_400_000;   // 365 or 366
+    return y + days / inYear;
+  }
+  return Number(period);
+};
+
+/** The inverse, for an axis tick or a tooltip: 2025 → "2025", 2025.5 → "2025 Q3". Without it an
+ *  axis tick reads "2025.5", which is a year that does not exist.
+ *
+ *  ⚠ KNOWN AMBIGUITY, AND IT IS THE LEAST-BAD ONE: a Q1 point sits on an integer x (the quarter is
+ *  offset by (q−1)/4 so that four quarters span exactly 1.0 — see `periodToX`), so it renders as
+ *  the bare "2025" rather than "2025 Q1". The alternatives are worse: offsetting by q/4 puts Q4 on
+ *  the NEXT year's integer, and taking a cadence argument means threading one through twelve chart
+ *  components for a tick label. Nothing collides on screen — in quarterly mode there is no annual
+ *  point to confuse it with, and the "2025" tick is visibly the first of that year's four. */
+/** A DAILY axis tick: "Jul 2026". A daily series spans thousands of points, so the tick that helps
+ *  is the month, not the day — and a fractional year like 2026.58 is unreadable either way. */
+export const xToMonth = (x: number): string => {
+  const y = Math.floor(x);
+  const inYear = (Date.UTC(y + 1, 0, 1) - Date.UTC(y, 0, 1)) / 86_400_000;
+  const d = new Date(Date.UTC(y, 0, 1) + Math.round((x - y) * inYear) * 86_400_000);
+  return `${d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })} ${d.getUTCFullYear()}`;
+};
+
+export const xToPeriod = (x: number): string => {
+  const y = Math.floor(x);
+  const q = Math.round((x - y) * 4);
+  return q === 0 && Number.isInteger(x) ? String(y) : `${y} Q${q + 1}`;
+};
+
+/**
  * The one weighted-average-per-year used by every ratio card. Each card supplies the years it
  * could have a value for and a per-holding value; this applies the weights, the renormalisation
  * and the floor in ONE place.
@@ -58,7 +114,33 @@ export const MIN_YEAR_COVERAGE_PCT = 80;
  * portfolio holding 20% cash could never clear an 80% floor and every chart would go blank.
  * Coverage here answers "of the companies this chart aggregates, how many reported this year".
  */
-export function weightedByYear<T extends { weight_pct: number }>(
+export type Weighted = {
+  weight_pct: number;
+  /** INDEX ROWS ONLY — the market cap as at each fiscal period, EUR, converted at that period's
+   *  own end date (`period_caps_eur`). Absent for a portfolio: a holding weight is not a market
+   *  cap and has no history, so the single `weight_pct` applies to every period. */
+  market_cap_by_period?: Record<string, number>;
+};
+
+/**
+ * The weight in force for one row in one period — the frontend twin of the backend's
+ * `_fundamental_blend._weight_at`, and the reason every card on this tab weights the same way.
+ *
+ * ⚠ AN INDEX IS WEIGHTED BY THE CAP IT HAD IN THAT PERIOD. Weighting 2018's margin by today's cap
+ * is look-ahead bias — measured on the S&P, NVIDIA is carried at 7.46% of a year it was 0.63% of.
+ * Null (never 0) when a constituent has no cap that period: it is out of that period's average
+ * entirely rather than weighted on a different basis from its neighbours.
+ */
+export function weightAt(r: Weighted, year: string): number | null {
+  const per = r.market_cap_by_period;
+  if (per) {
+    const v = per[year];
+    return v && v > 0 ? v : null;
+  }
+  return r.weight_pct > 0 ? r.weight_pct : null;
+}
+
+export function weightedByYear<T extends Weighted>(
   rows: T[],
   yearsOf: (r: T) => string[],
   valueOf: (r: T, year: string) => number | null,
@@ -71,13 +153,24 @@ export function weightedByYear<T extends { weight_pct: number }>(
   for (const y of years) {
     let num = 0;
     let den = 0;
+    // ⚠⚠ COVERAGE IS ACCUMULATED ON THE **STABLE** WEIGHT, NOT THE PER-PERIOD CAP, AND CONFUSING
+    // THE TWO DISABLES THE FLOOR COMPLETELY. The per-period cap comes out of the same GuruFocus
+    // blob as the figure, so a company that has not filed FY2026 has no FY2026 cap either —
+    // measure coverage with it and you divide the filers by the filers, which reads ~100% in
+    // exactly the period where almost nobody has reported. Measured on the S&P revenue blend:
+    // FY2026 is 13.4% covered on this basis and read 100.0% on the per-period one, which drew a
+    // full-height point built almost entirely out of NVIDIA.
+    let cov = 0;
     for (const r of rows) {
       const v = valueOf(r, y);
       if (v == null) continue;
-      num += r.weight_pct * v;
-      den += r.weight_pct;
+      const w = weightAt(r, y);
+      if (w == null) continue;
+      num += w * v;
+      den += w;
+      cov += r.weight_pct;
     }
-    if (den > 0 && 100 * den / total >= MIN_YEAR_COVERAGE_PCT) out.set(Number(y), num / den);
+    if (den > 0 && 100 * cov / total >= MIN_YEAR_COVERAGE_PCT) out.set(periodToX(y), num / den);
   }
   return out;
 }
@@ -85,7 +178,40 @@ export function weightedByYear<T extends { weight_pct: number }>(
 /** The share of the charted set that reported in each year — the same denominator and the same
  *  per-holding test `weightedByYear` uses, so a card can state the coverage behind a point it
  *  drew (and a year below the floor is visible as a fact rather than as a hole). */
-export function coverageByYear<T extends { weight_pct: number }>(
+/**
+ * The denominator each period's weighted average ACTUALLY divided by — `{period: Σ weight}`.
+ *
+ * ⚠ IT MUST APPLY THE SAME TWO TESTS AS `weightedByYear`, AND THAT IS THE ONLY REASON IT EARNS ITS
+ * PLACE HERE RATHER THAN IN THE MODAL. A drill-down exists to show the arithmetic behind a line; a
+ * denominator derived "the same way" somewhere else is how a table comes to show weights that do
+ * not sum to the line above them. Value present AND a usable weight — a company with a figure but
+ * no cap that period is out of the average, so it is out of this sum too.
+ *
+ * By construction, dividing each contributor's `weightAt` by this gives a column that sums to
+ * exactly 100% in every period — which is what makes the drill-down checkable.
+ */
+export function periodDenoms<T extends Weighted>(
+  rows: T[],
+  yearsOf: (r: T) => string[],
+  valueOf: (r: T, year: string) => number | null,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  const years = new Set<string>();
+  for (const r of rows) for (const y of yearsOf(r)) years.add(y);
+  for (const y of years) {
+    let den = 0;
+    for (const r of rows) {
+      if (valueOf(r, y) == null) continue;
+      const w = weightAt(r, y);
+      if (w == null) continue;
+      den += w;
+    }
+    if (den > 0) out[y] = den;
+  }
+  return out;
+}
+
+export function coverageByYear<T extends Weighted>(
   rows: T[],
   yearsOf: (r: T) => string[],
   valueOf: (r: T, year: string) => number | null,
@@ -97,8 +223,14 @@ export function coverageByYear<T extends { weight_pct: number }>(
   for (const r of rows) for (const y of yearsOf(r)) years.add(y);
   for (const y of years) {
     let den = 0;
-    for (const r of rows) if (valueOf(r, y) != null) den += r.weight_pct;
-    out.set(Number(y), 100 * den / total);
+    // ⚠ THE SAME TWO TESTS `weightedByYear` APPLIES — a value AND a usable weight. A constituent
+    // with a figure but no cap that period is out of the average, so counting it as covered would
+    // let a period clear the floor on the strength of rows that contributed nothing to it. And the
+    // same STABLE weight, for the reason spelled out there.
+    for (const r of rows) {
+      if (valueOf(r, y) != null && weightAt(r, y) != null) den += r.weight_pct;
+    }
+    out.set(periodToX(y), 100 * den / total);
   }
   return out;
 }

@@ -53,7 +53,7 @@ function FreshnessPill({ tone, label }: { tone: SnapshotTone; label: string }) {
       : tone === 'ok' ? 'bg-neutral-500/10 text-fg-muted border-neutral-700/40'
         : 'bg-pos-500/15 text-pos-600 border-pos-500/40';
   return (
-    <span className={`px-1.5 py-px rounded-full text-[9px] font-medium border whitespace-nowrap ${cls}`}>
+    <span className={`px-1.5 py-px rounded-full text-[10px] font-medium border whitespace-nowrap ${cls}`}>
       {tone === 'fresh' ? 'current' : label}
     </span>
   );
@@ -120,7 +120,13 @@ function ProvenanceCard({ source, asOf, note, how, kind, column, what }: {
               {kind === 'copied'
                 ? <>Copied straight from {s.label}{asOf ? ` (${asOf})` : ''}, as reported — not computed here.</>
                 : kind === 'formula'
-                  ? <>A formula on the data{how ? <>: <span className="text-fg">{trimStop(how)}</span></> : <> we compute here</>}.</>
+                  /* ⚠ `whitespace-pre-wrap` SO A FORMULA CAN BREATHE. The best formula cards state
+                     the rule and then the same rule with this row's own numbers under it — and a
+                     blank line between the two is what makes them read as one thing said twice
+                     rather than as one long sentence. In a plain span every run of whitespace
+                     collapses to one character, so the separation has to be permitted here; it
+                     changes nothing for the single-line cards, which contain no runs to preserve. */
+                  ? <>A formula on the data{how ? <>: <span className="text-fg whitespace-pre-wrap">{trimStop(how)}</span></> : <> we compute here</>}.</>
                   : how}
             </span>
           </Field>

@@ -265,7 +265,7 @@ function RelativeGrowthChartInner({ metrics, metricsB, labelA, labelB, nameA, na
                 key={side}
                 type="button"
                 onClick={() => setActiveCompany(side)}
-                className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition-colors ${active === side ? 'bg-accent-600 text-fg-strong' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}
+                className={`px-2 py-0.5 rounded-md text-[12px] font-medium transition-colors ${active === side ? 'bg-accent-600 text-fg-strong' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}
               >
                 {side === 'a' ? (nameA ?? aLab) : (nameB ?? bLab)}
               </button>
@@ -312,13 +312,13 @@ function RelativeGrowthChartInner({ metrics, metricsB, labelA, labelB, nameA, na
             type="number"
             scale="time"
             domain={['dataMin', 'dataMax']}
-            tick={{ fontSize: 11, fill: chartTheme.axisTick }}
+            tick={{ fontSize: 12, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => new Date(v).getFullYear().toString()}
           />
           <YAxis
             scale="log"
             domain={['auto', 'auto']}
-            tick={{ fontSize: 11, fill: chartTheme.axisTick }}
+            tick={{ fontSize: 12, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => v.toFixed(0)}
           />
           <Tooltip

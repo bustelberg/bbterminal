@@ -12,8 +12,10 @@ import InfoTip from '../InfoTip';
 import { Stat } from './MetricGrowthCard';
 import { type Target } from './HoldingsRevenueModal';
 import DividendYieldInputsModal from './DividendYieldInputsModal';
+import DailyToggle from './DailyToggle';
 import { coverageByYear, dividendYieldByYear, type DividendYieldInputs } from './dividendYieldData';
-import { meanOf, paddedDomain } from './marginData';
+import { meanOf, paddedDomain, xToMonth, xToPeriod } from './marginData';
+import { benchNote, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**
  * Dividend yield card: Dividends per Share ÷ the fiscal year-end share price, per fiscal year, on
@@ -29,12 +31,28 @@ import { meanOf, paddedDomain } from './marginData';
  * dropped. Mirrors {@link ./FcfSbcYieldCard}.
  */
 
-export default function DividendYieldCard({ holdingsTarget, holdingsName }: {
+export default function DividendYieldCard({ holdingsTarget, holdingsName, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
+  /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
+  benchTarget?: BenchTarget | null;
 }) {
   const [data, setData] = useState<DividendYieldInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
+  /**
+   * Daily is a PER-CARD override of the tab's cadence, and only these two yield cards offer it.
+   *
+   * ⚠ IT IS NOT A THIRD SETTING ON THE TAB TOGGLE. A yield is the only shape here with a daily
+   * input: the denominator is a price, which moves every trading day. The other ten cards are pure
+   * accounting — revenue, margins, debt ratios — and a tab-wide "Daily" would blank all of them.
+   */
+  const [daily, setDaily] = useState(false);
+  // ⚠ Memoised, and `daily` is a dep: it is the effect key below AND the modal's target, so a
+  // fresh object each render would refetch forever while a stale one would leave the drill-down
+  // showing a different cadence from the chart it opened from.
+  const target = useMemo(
+    () => (daily ? { ...holdingsTarget, cadence: 'daily' } : holdingsTarget),
+    [holdingsTarget, daily]);
 
   useEffect(() => {
     let alive = true;
@@ -43,7 +61,7 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName }: {
       try {
         const r = await apiFetch(`${API_URL}/api/earnings/dividend-yield-inputs`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(holdingsTarget),
+          body: JSON.stringify(target),
         });
         const b = await r.json().catch(() => null);
         if (!alive) return;
@@ -54,15 +72,19 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName }: {
       }
     })();
     return () => { alive = false; };
-  }, [holdingsTarget]);
+  }, [target]);
 
   const yieldByYr = useMemo(() => dividendYieldByYear(data?.rows ?? []), [data]);
   const covByYr = useMemo(() => coverageByYear(data?.rows ?? []), [data]);
 
-  const chartData = useMemo(() => (
-    [...yieldByYr.keys()].sort((a, b) => a - b)
-      .map((year) => ({ year, yld: yieldByYr.get(year) ?? null }))
-  ), [yieldByYr]);
+  const [benchData, benchErr] = useBenchInputs<DividendYieldInputs>('dividend-yield-inputs', benchTarget);
+  const benchByYr = useMemo(
+    () => (benchData ? dividendYieldByYear(benchData.rows) : null), [benchData]);
+
+  const note = benchNote(benchTarget, benchData, benchErr, benchByYr);
+
+  const chartData = useMemo(
+    () => mergeSeries(yieldByYr, benchByYr, 'yld'), [yieldByYr, benchByYr]);
 
   const avg = meanOf([...yieldByYr.values()]);
   const latestYear = Math.max(-Infinity, ...yieldByYr.keys());
@@ -73,14 +95,19 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName }: {
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      <h4 className="text-base font-semibold text-fg-strong">Dividend yield</h4>
+      <div className="flex items-baseline justify-between gap-2">
+        <h4 className="text-base font-semibold text-fg-strong">Dividend yield</h4>
+        <DailyToggle on={daily} onChange={setDaily}
+          note={'Daily: the dividend per share stays flat between fiscal periods while the PRICE '
+            + 'moves every trading day — a trailing yield. Off, it follows the tab’s cadence.'} />
+      </div>
 
       {data == null && !err ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : yieldByYr.size === 0 ? (
-        <p className="text-[11px] text-fg-faint py-16 text-center">No dividend / price figures ingested to compute a yield.</p>
+        <p className="text-[12px] text-fg-faint py-16 text-center">No dividend / price figures ingested to compute a yield.</p>
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
@@ -107,25 +134,35 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName }: {
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
-                <YAxis domain={paddedDomain([...yieldByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                <XAxis dataKey="year" tickFormatter={daily ? xToMonth : xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+                <YAxis domain={paddedDomain(withBench(yieldByYr.values(), benchByYr))} tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v) => [`${typeof v === 'number' ? v.toFixed(2) : '—'}%`, 'Dividend yield']} />
+                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(2) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : 'Dividend yield']} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
-                <Line dataKey="yld" name="yld" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
+                {/* ⚠ NO DOTS ON A DAILY SERIES — 2,700 markers is a solid band, not a line. */}
+                <Line dataKey="yld" name="yld" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={daily ? false : { r: 2.5 }} connectNulls />
+                {benchByYr && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
               <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />Dividend yield (avg dashed)</span>
+              {benchByYr && <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />{benchTarget?.universe}</span>}
+              {note && (
+                <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">
+                  {note}
+                </span>
+              )}
             </div>
           </div>
         </>
       )}
 
       {showInputs && (
-        <DividendYieldInputsModal target={holdingsTarget} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <DividendYieldInputsModal target={target} portfolioName={holdingsName}
+          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          onClose={() => setShowInputs(false)} />
       )}
     </div>
   );

@@ -31,9 +31,9 @@ function SectorCard({ s, overlay }: { s: SectorIndex; overlay?: boolean }) {
     <div className="rounded-lg border border-neutral-800/40 bg-elevated overflow-hidden">
       <button type="button" onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-overlay/[0.02] transition-colors">
-        <span className="text-fg-faint text-[10px] w-3 shrink-0">{open ? '▾' : '▸'}</span>
+        <span className="text-fg-faint text-[11px] w-3 shrink-0">{open ? '▾' : '▸'}</span>
         <span className="text-sm text-fg-strong font-medium truncate flex-1">{sectorLabel(s.sector)}</span>
-        <span className="text-[10px] text-fg-faint shrink-0">{s.size} name{s.size === 1 ? '' : 's'}</span>
+        <span className="text-[11px] text-fg-faint shrink-0">{s.size} name{s.size === 1 ? '' : 's'}</span>
         {summary && (
           <span className="flex items-center gap-3 shrink-0 font-mono text-xs">
             <span className={retColor(summary.ret)} title="Full-period annualized return (CAGR)">{pct(summary.ret)}</span>
@@ -62,20 +62,20 @@ export default function SectorBreakdown({ sectors, loading, overlay }: { sectors
     <div className="space-y-2">
       <button type="button" onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 w-full text-left group">
-        <span className="text-fg-faint text-[10px] w-3 shrink-0">{open ? '▾' : '▸'}</span>
+        <span className="text-fg-faint text-[11px] w-3 shrink-0">{open ? '▾' : '▸'}</span>
         <span className="text-sm font-semibold text-fg-strong">By sector</span>
-        <span className="text-[11px] text-fg-faint">({sectors.length}{loading ? '…' : ''})</span>
+        <span className="text-[12px] text-fg-faint">({sectors.length}{loading ? '…' : ''})</span>
       </button>
       {open && (
         <>
-          <p className="text-[10px] text-fg-faint leading-tight pl-5">
+          <p className="text-[11px] text-fg-faint leading-tight pl-5">
             Equal-weight index of each sector in the universe · expand a sector for its chart + risk/return by period.
           </p>
           <div className="space-y-1.5">
             {sectors.map((s) => <SectorCard key={s.sector} s={s} overlay={overlay} />)}
           </div>
           {loading && (
-            <div className="flex items-center gap-2 text-[11px] text-fg-faint pt-0.5">
+            <div className="flex items-center gap-2 text-[12px] text-fg-faint pt-0.5">
               <span className="loading-bar h-0.5 w-16 rounded-full" aria-hidden />
               Loading sectors… {sectors.length > 0 && `(${sectors.length} so far)`}
             </div>

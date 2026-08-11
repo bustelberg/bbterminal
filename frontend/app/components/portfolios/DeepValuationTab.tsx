@@ -63,7 +63,7 @@ function PctField({ label, value, onChange, hint, onUseHint, useLabel = 'use', p
 }) {
   return (
     <label className="flex flex-col gap-1 min-w-0">
-      <span className="text-[11px] uppercase tracking-wide text-fg-muted">{label}</span>
+      <span className="text-[12px] uppercase tracking-wide text-fg-muted">{label}</span>
       <span className="flex items-center gap-1">
         <input type="number" step="0.1" value={value} placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
@@ -71,7 +71,7 @@ function PctField({ label, value, onChange, hint, onUseHint, useLabel = 'use', p
         <span className="text-xs text-fg-muted">%</span>
       </span>
       {hint && (
-        <span className="text-[10px] text-fg-faint">
+        <span className="text-[11px] text-fg-faint">
           {hint}
           {onUseHint && (
             <button type="button" onClick={onUseHint} className="ml-1 text-accent-400 hover:underline">{useLabel}</button>
@@ -88,11 +88,11 @@ function NumField({ label, value, onChange, hint, onUseHint }: {
 }) {
   return (
     <label className="flex flex-col gap-1 min-w-0">
-      <span className="text-[11px] uppercase tracking-wide text-fg-muted">{label}</span>
+      <span className="text-[12px] uppercase tracking-wide text-fg-muted">{label}</span>
       <input type="number" step="0.5" value={value} onChange={(e) => onChange(e.target.value)}
         className="w-20 bg-page border border-neutral-700 rounded-lg px-2 py-1 text-sm font-mono text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />
       {hint && (
-        <span className="text-[10px] text-fg-faint">
+        <span className="text-[11px] text-fg-faint">
           {hint}
           {onUseHint && (
             <button type="button" onClick={onUseHint} className="ml-1 text-accent-400 hover:underline">use</button>
@@ -241,7 +241,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-4 min-w-0">
       <div className="flex items-baseline gap-2 flex-wrap">
         <h4 className="text-base font-semibold text-fg-strong">Expected return (EGM)</h4>
-        <span className="text-[11px] text-fg-faint">
+        <span className="text-[12px] text-fg-faint">
           earnings growth + dividend yield + change in the multiple, over {assumptions.years} years
         </span>
       </div>
@@ -249,7 +249,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
       {/* Headline: what it is worth, against what it costs. */}
       <div className="flex items-end gap-4 flex-wrap">
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-fg-muted">Fair value</div>
+          <div className="text-[12px] uppercase tracking-wide text-fg-muted">Fair value</div>
           <div className="font-mono text-3xl font-semibold leading-tight text-fg-strong">
             {money(r.fairValue)}
           </div>
@@ -316,13 +316,13 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
           {/* The header opens the working; the inputs below stay independently clickable. */}
           <button type="button" onClick={() => setShowWorking(true)}
             title="Show the raw data behind these defaults"
-            className="text-[11px] uppercase tracking-wide text-fg-muted hover:text-fg-strong underline decoration-dotted underline-offset-2">
+            className="text-[12px] uppercase tracking-wide text-fg-muted hover:text-fg-strong underline decoration-dotted underline-offset-2">
             Assumptions
           </button>
-          <span className="text-[10px] text-fg-faint">raw data ↗</span>
+          <span className="text-[11px] text-fg-faint">raw data ↗</span>
           {!isDefault && (
             <button type="button" onClick={reset}
-              className="ml-auto text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
+              className="ml-auto text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
               Reset to defaults
             </button>
           )}
@@ -354,7 +354,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
           // never ingested (it has no date to sit on), so this is the CAGR the estimate series
           // implies — the same quantity GuruFocus publishes separately, and a near-twin that
           // diverges for high-growth names. Reference only; nothing computes from it.
-          <p className="text-[10px] text-fg-faint">
+          <p className="text-[11px] text-fg-faint">
             “analysts” is the CAGR implied by the consensus EPS estimates, not a published long-term rate.
           </p>
         )}
@@ -364,7 +364,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
           as tiles beside the numbers they feed, which is where a reader looks for them. */}
 
       {(src.forwardPE == null || src.epsNextFY == null) && (
-        <p className="text-[11px] text-warn-300">
+        <p className="text-[12px] text-warn-300">
           {src.forwardPE == null && 'No forward P/E ingested — the expected return and the P/E ratio can’t be computed. '}
           {src.epsNextFY == null && 'No consensus EPS estimate ingested — there is no fair value to compare with the price. '}
           Everything that doesn’t depend on the missing input is still shown.

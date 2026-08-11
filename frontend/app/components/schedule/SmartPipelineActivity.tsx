@@ -458,7 +458,7 @@ function SortHeader({ label, k, sort, onSort, align = 'left', title }: {
                     ${active ? 'text-fg-soft' : ''} ${align === 'right' ? 'flex-row-reverse' : ''}`}
       >
         <span>{label}</span>
-        <span className="text-[8px] w-2 leading-none">{active ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>
+        <span className="text-[9px] w-2 leading-none">{active ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>
       </button>
     </th>
   );
@@ -560,7 +560,7 @@ function PriceUpdateSection({
           <div className="flex-1 h-1.5 rounded-full bg-inset overflow-hidden">
             <div className="h-full bg-accent-500 transition-all" style={{ width: `${pct}%` }} />
           </div>
-          <span className="text-[11px] font-mono text-fg-faint shrink-0">{done}/{total}</span>
+          <span className="text-[12px] font-mono text-fg-faint shrink-0">{done}/{total}</span>
         </div>
       )}
       {held && (
@@ -569,7 +569,7 @@ function PriceUpdateSection({
             <span className="text-xs text-fg-soft">
               Held companies <span className="text-fg-faint">· {held.total_companies}</span>
             </span>
-            <span className="flex items-center gap-2 text-[11px] font-mono">
+            <span className="flex items-center gap-2 text-[12px] font-mono">
               {fresh?.latest_close_date && <span className="text-fg-faint">through {fresh.latest_close_date}</span>}
               {(fresh?.fresh_count ?? 0) > 0 && <span className="text-pos-400">{fresh!.fresh_count} fresh</span>}
               {(fresh?.stale_count ?? 0) > 0 && <span className="text-warn-300">{fresh!.stale_count} stale</span>}
@@ -583,7 +583,7 @@ function PriceUpdateSection({
             <div className="max-h-80 overflow-auto rounded-lg border border-neutral-800/40">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-card z-10">
-                  <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                  <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                     <SortHeader label="Ticker" k="ticker" sort={sort} onSort={onSort} />
                     <SortHeader label="Exch" k="exchange" sort={sort} onSort={onSort} title="Listing exchange" />
                     <SortHeader label="Company" k="company" sort={sort} onSort={onSort} />
@@ -666,7 +666,7 @@ function RebalanceSection({
         <div className="space-y-1.5 rounded-lg bg-inset/60 px-3 py-2 border border-neutral-800/40">
           <div className="flex items-center gap-2">
             <Spinner className="h-3 w-3 shrink-0 text-accent-300" />
-            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent-500/15 text-accent-300 border border-accent-500/30 shrink-0">
+            <span className="text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent-500/15 text-accent-300 border border-accent-500/30 shrink-0">
               {PHASE_LABEL[running.current_phase ?? ''] ?? (running.current_phase || 'Running')}
             </span>
             <span className="text-fg-subtle truncate">{running.current_message ?? 'Working…'}</span>
@@ -676,7 +676,7 @@ function RebalanceSection({
               <div className="flex-1 h-1.5 rounded-full bg-inset overflow-hidden">
                 <div className="h-full bg-accent-500 transition-all" style={{ width: `${pct}%` }} />
               </div>
-              <span className="text-[11px] font-mono text-fg-faint shrink-0">{done}/{total}</span>
+              <span className="text-[12px] font-mono text-fg-faint shrink-0">{done}/{total}</span>
             </div>
           )}
         </div>
@@ -756,13 +756,13 @@ function CoverageLine({ label, c, tone, marked, onMark }: {
       {c.exchange && <span className="text-fg-faint">·{c.exchange}</span>}
       <span className="text-fg-soft truncate max-w-[200px]">{c.company_name ?? '—'}</span>
       {onMark && (marked ? (
-        <span className="text-[10px] text-warn-300">✓ illiquid · refreshing…</span>
+        <span className="text-[11px] text-warn-300">✓ illiquid · refreshing…</span>
       ) : (
         <button
           type="button"
           onClick={onMark}
           title="Mark as illiquid — trades rarely, so its stale GuruFocus price isn't a valid freshness measure. Excluded from this measure (still priced)."
-          className="text-[10px] px-1.5 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-warn-300 hover:border-warn-500/50 transition-colors"
+          className="text-[11px] px-1.5 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-warn-300 hover:border-warn-500/50 transition-colors"
         >
           Mark illiquid
         </button>
@@ -795,7 +795,7 @@ function HistoryLine({ label, m, members }: { label: string; m: HistoryMetric; m
   const ok = m.no_data === 0 && m.short === 0 && m.gaps === 0;
   const yr = (m.start ?? '') && m.start! <= new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
   return (
-    <div className="flex items-center gap-1.5 flex-wrap pl-1 text-[11px]">
+    <div className="flex items-center gap-1.5 flex-wrap pl-1 text-[12px]">
       <span className={ok ? 'text-pos-400' : 'text-warn-300'}>{ok ? '✓' : '⚠'}</span>
       <span className="text-fg-muted w-9 shrink-0">{label}</span>
       <span className="text-fg-subtle">from</span>
@@ -822,14 +822,14 @@ function FreshnessRow({ c }: { c: StalenessCompany }) {
     );
   };
   return (
-    <div className="flex items-center gap-2 py-0.5 text-[11px]">
+    <div className="flex items-center gap-2 py-0.5 text-[12px]">
       <span className="font-mono text-fg-soft shrink-0 w-28 truncate" title={`${c.ticker ?? '?'}·${c.exchange ?? '?'}`}>
         {c.ticker ?? '?'}<span className="text-fg-faint">·{c.exchange ?? '?'}</span>
       </span>
       <span className="text-fg-muted truncate flex-1 min-w-0" title={c.company_name ?? ''}>{c.company_name ?? '—'}</span>
       <span className="font-mono shrink-0 w-24 text-right">{dateCell(c.latest_close, c.close_days_behind, c.price_stale)}</span>
       <span className="font-mono shrink-0 w-24 text-right">{dateCell(c.latest_volume, c.volume_days_behind, c.volume_stale)}</span>
-      <span className="text-[10px] uppercase text-fg-faint shrink-0 w-16 text-right">{c.marker ? c.marker.replace('_', ' ') : ''}</span>
+      <span className="text-[11px] uppercase text-fg-faint shrink-0 w-16 text-right">{c.marker ? c.marker.replace('_', ' ') : ''}</span>
     </div>
   );
 }
@@ -844,13 +844,13 @@ function FreshnessGroup({ title, color, rows, defaultOpen }: {
   return (
     <div className="pt-1">
       <button type="button" onClick={() => setOpen((o) => !o)}
-        className={`text-[11px] font-medium flex items-center gap-1 ${color}`}>
+        className={`text-[12px] font-medium flex items-center gap-1 ${color}`}>
         <span className="font-mono">{open ? '▾' : '▸'}</span>
         {title} ({rows.length})
       </button>
       {open && (
         <div className="mt-1 max-h-56 overflow-auto border border-neutral-800/30 rounded-lg px-2 py-1">
-          <div className="flex items-center gap-2 py-0.5 text-[10px] uppercase tracking-wide text-fg-faint sticky top-0 bg-card z-10">
+          <div className="flex items-center gap-2 py-0.5 text-[11px] uppercase tracking-wide text-fg-faint sticky top-0 bg-card z-10">
             <span className="w-28 shrink-0">ticker·exch</span>
             <span className="flex-1 min-w-0">company</span>
             <span className="w-24 text-right shrink-0">close</span>
@@ -873,7 +873,7 @@ function StalenessDetail({ detail }: { detail: UniverseStaleness }) {
   const excluded = detail.companies.filter((c) => c.status === 'excluded');
   return (
     <div className="space-y-0.5">
-      <div className="text-[11px] text-fg-muted flex flex-wrap gap-x-2 gap-y-0.5">
+      <div className="text-[12px] text-fg-muted flex flex-wrap gap-x-2 gap-y-0.5">
         <span className="text-pos-300">{detail.counts.fresh} fresh</span>
         <span className={detail.counts.flagged > 0 ? 'text-warn-300' : 'text-fg-faint'}>{detail.counts.flagged} flagged</span>
         {detail.counts.excluded > 0 && <span className="text-fg-faint">{detail.counts.excluded} excluded</span>}
@@ -1042,7 +1042,7 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
             onClick={(e) => { e.stopPropagation(); void check(); }}
             disabled={checking}
             title={`Check that every ${u.label} member has ≥1yr of price/volume history with no >14-day gaps`}
-            className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted
+            className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted
                        hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40
                        disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
           >
@@ -1054,7 +1054,7 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
             onClick={(e) => { e.stopPropagation(); toggleDetail(); }}
             disabled={loadingDetail}
             title={`List every ${u.label} member's latest price/volume date — flagged (stale) vs fresh`}
-            className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted
+            className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted
                        hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40
                        disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
           >
@@ -1066,7 +1066,7 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
             onClick={(e) => { e.stopPropagation(); onTrigger(); void run(); }}
             disabled={pending || busy}
             title={`Re-fetch prices + volumes for every company in ${u.label} (within the monthly GuruFocus budget)`}
-            className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted
+            className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted
                        hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40
                        disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
           >
@@ -1077,11 +1077,11 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
       </div>
 
       {/* Freshness: latest close / volume, most-stale → freshest. */}
-      <div className="flex items-center gap-1.5 flex-wrap pl-1 text-[11px]">
+      <div className="flex items-center gap-1.5 flex-wrap pl-1 text-[12px]">
         <span className="text-fg-muted w-16 shrink-0">latest close</span>
         <CovEnd e={u.price.min} /><span className="text-fg-faint">→</span><CovEnd e={u.price.max} />
       </div>
-      <div className="flex items-center gap-1.5 flex-wrap pl-1 text-[11px]">
+      <div className="flex items-center gap-1.5 flex-wrap pl-1 text-[12px]">
         <span className="text-fg-muted w-16 shrink-0">latest vol</span>
         <CovEnd e={u.volume.min} /><span className="text-fg-faint">→</span><CovEnd e={u.volume.max} />
       </div>
@@ -1089,18 +1089,18 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
       {/* On-demand depth + gap check. */}
       {hist?.price && <HistoryLine label="price" m={hist.price} members={hist.members} />}
       {hist?.volume && <HistoryLine label="vol" m={hist.volume} members={hist.members} />}
-      {hist?.error && <div className="pl-1 text-[11px] text-neg-300">{hist.error}</div>}
+      {hist?.error && <div className="pl-1 text-[12px] text-neg-300">{hist.error}</div>}
 
       {/* On-demand per-company freshness breakdown (flagged vs fresh). */}
       {showDetail && (
         <div className="pl-1 pt-0.5">
           {loadingDetail && !detail ? (
-            <div className="text-[11px] text-fg-faint flex items-center gap-1.5"><Spinner className="h-3 w-3" /> Loading freshness…</div>
+            <div className="text-[12px] text-fg-faint flex items-center gap-1.5"><Spinner className="h-3 w-3" /> Loading freshness…</div>
           ) : detailErr ? (
-            <div className="text-[11px] text-neg-300">Failed to load freshness: {detailErr}</div>
+            <div className="text-[12px] text-neg-300">Failed to load freshness: {detailErr}</div>
           ) : detail ? (
             <div className="space-y-1">
-              <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+              <div className="flex items-center gap-1.5 flex-wrap text-[12px]">
                 <span className="text-fg-faint">Flag if &gt;</span>
                 {[0, 1, 2, 3, 5].map((n) => (
                   <button
@@ -1125,7 +1125,7 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
                     onClick={(e) => { e.stopPropagation(); void refreshStale(); }}
                     disabled={refreshingStale || busy}
                     title={`Re-fetch prices + volumes for ONLY the ${detail.counts.flagged} flagged compan${detail.counts.flagged === 1 ? 'y' : 'ies'} (within budget)`}
-                    className="text-[11px] px-2 py-0.5 rounded-lg border border-warn-500/40 text-warn-300
+                    className="text-[12px] px-2 py-0.5 rounded-lg border border-warn-500/40 text-warn-300
                                hover:bg-warn-500/10 disabled:opacity-40 disabled:cursor-not-allowed
                                transition-colors flex items-center gap-1.5"
                   >
@@ -1135,13 +1135,13 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
                 )}
                 {staleRun && (
                   staleRun.status === 'running' ? (
-                    <span className="text-[11px] text-accent-300 flex items-center gap-1.5">
+                    <span className="text-[12px] text-accent-300 flex items-center gap-1.5">
                       <Spinner className="h-3 w-3" />{staleRun.message ?? 'Refreshing…'}
                     </span>
                   ) : staleRun.status === 'error' ? (
-                    <span className="text-[11px] text-neg-300">✗ Refresh failed: {staleRun.errorSummary ?? staleRun.message ?? 'unknown error'}</span>
+                    <span className="text-[12px] text-neg-300">✗ Refresh failed: {staleRun.errorSummary ?? staleRun.message ?? 'unknown error'}</span>
                   ) : (
-                    <span className={`text-[11px] ${staleRun.errors || staleRun.forbidden ? 'text-warn-300' : 'text-pos-300'}`}>
+                    <span className={`text-[12px] ${staleRun.errors || staleRun.forbidden ? 'text-warn-300' : 'text-pos-300'}`}>
                       ✓ Refreshed {staleRun.prices} price / {staleRun.volumes} volume series
                       {staleRun.forbidden ? `, ${staleRun.forbidden} forbidden` : ''}
                       {staleRun.errors ? `, ${staleRun.errors} errors` : ''}
@@ -1164,9 +1164,9 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
             <div className="flex-1 h-1.5 rounded-full bg-inset overflow-hidden">
               <div className="h-full bg-accent-500 transition-all" style={{ width: `${total > 0 ? pct : 8}%` }} />
             </div>
-            <span className="text-[11px] font-mono text-fg-faint shrink-0">{total > 0 ? `${done}/${total}` : '…'}</span>
+            <span className="text-[12px] font-mono text-fg-faint shrink-0">{total > 0 ? `${done}/${total}` : '…'}</span>
           </div>
-          <div className="text-[11px] text-accent-300">{progress.current_message ?? 'Queued — waiting for the pipeline…'}</div>
+          <div className="text-[12px] text-accent-300">{progress.current_message ?? 'Queued — waiting for the pipeline…'}</div>
         </div>
       )}
     </div>
@@ -1192,7 +1192,7 @@ function UniverseCoverageList({ universes, runningJob }: {
 
   return (
     <div className="space-y-1 pt-1 border-t border-neutral-800/30">
-      <div className="text-[10px] uppercase tracking-wide text-fg-faint">
+      <div className="text-[11px] uppercase tracking-wide text-fg-faint">
         Per static-universe coverage — most-stale (min) &amp; freshest (max) close-price &amp; volume date + the company responsible. Refresh re-fetches one universe within budget.
       </div>
       {universes.map((u) => (
@@ -1392,19 +1392,19 @@ function StalePricesPanel({ busy }: { busy: boolean }) {
   return (
     <div className="space-y-1.5 pt-1 border-t border-neutral-800/30">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[10px] uppercase tracking-wide text-fg-faint">
+        <span className="text-[11px] uppercase tracking-wide text-fg-faint">
           Outdated prices{data ? ` · ${data.total_stale} behind${data.total_stale > (data.companies?.length ?? 0) ? ` (top ${data.companies.length} shown)` : ''}` : ''}
           {data?.reference_date && <> · vs {data.reference_date}</>}
         </span>
         <div className="ml-auto flex items-center gap-1.5">
           <button type="button" onClick={() => void load()} disabled={loading}
-            className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40 transition-colors">
+            className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40 transition-colors">
             {loading ? 'Loading…' : 'Reload'}
           </button>
           {allIds.length > 0 && (
             <button type="button" onClick={() => void refresh(allIds)} disabled={disabled}
               title="Re-fetch prices + volumes for every listed company (within the monthly GuruFocus budget)"
-              className="text-[11px] px-2 py-0.5 rounded-lg border border-warn-500/40 text-warn-300 hover:bg-warn-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5">
+              className="text-[12px] px-2 py-0.5 rounded-lg border border-warn-500/40 text-warn-300 hover:bg-warn-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5">
               {anyRefreshing && <Spinner className="h-3 w-3" />}
               {anyRefreshing ? 'Refreshing…' : `Refresh all ${allIds.length}`}
             </button>
@@ -1413,7 +1413,7 @@ function StalePricesPanel({ busy }: { busy: boolean }) {
       </div>
 
       {runMsg && (
-        <div className={`text-[11px] flex items-center gap-1.5 ${runMsg.startsWith('Refresh failed') || runMsg.startsWith('Failed') ? 'text-neg-300' : anyRefreshing ? 'text-accent-300' : 'text-fg-subtle'}`}>
+        <div className={`text-[12px] flex items-center gap-1.5 ${runMsg.startsWith('Refresh failed') || runMsg.startsWith('Failed') ? 'text-neg-300' : anyRefreshing ? 'text-accent-300' : 'text-fg-subtle'}`}>
           {anyRefreshing && <Spinner className="h-3 w-3" />}{runMsg}
         </div>
       )}
@@ -1424,16 +1424,16 @@ function StalePricesPanel({ busy }: { busy: boolean }) {
         return (
           <div className="rounded-lg border border-neutral-800/40 bg-inset px-2.5 py-2 space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-wide text-fg-faint">Refresh result</span>
-              <button type="button" onClick={() => setLastResults(null)} className="text-[10px] text-fg-muted hover:text-fg">dismiss</button>
+              <span className="text-[11px] uppercase tracking-wide text-fg-faint">Refresh result</span>
+              <button type="button" onClick={() => setLastResults(null)} className="text-[11px] text-fg-muted hover:text-fg">dismiss</button>
             </div>
-            <div className="text-[11px] flex items-center gap-3 flex-wrap">
+            <div className="text-[12px] flex items-center gap-3 flex-wrap">
               <span className={updated.length > 0 ? 'text-pos-300' : 'text-fg-faint'}>✓ {updated.length} updated</span>
               <span className={unchanged.length > 0 ? 'text-warn-300' : 'text-fg-faint'}>— {unchanged.length} no newer data</span>
             </div>
             <div className="max-h-40 overflow-auto space-y-0.5 pt-0.5">
               {lastResults.map((r) => (
-                <div key={r.company_id} className="text-[11px] flex items-center gap-2">
+                <div key={r.company_id} className="text-[12px] flex items-center gap-2">
                   <span className={r.status === 'updated' ? 'text-pos-400' : 'text-warn-300'}>{r.status === 'updated' ? '✓' : '—'}</span>
                   <span className="font-mono whitespace-nowrap">{r.ticker ?? '—'}{r.exchange && <span className="text-fg-faint">·{r.exchange}</span>}</span>
                   {r.status === 'updated' ? (
@@ -1451,16 +1451,16 @@ function StalePricesPanel({ busy }: { busy: boolean }) {
       })()}
 
       {error ? (
-        <div className="text-[11px] text-neg-300">Failed to load: {error}</div>
+        <div className="text-[12px] text-neg-300">Failed to load: {error}</div>
       ) : loading && !data ? (
-        <div className="text-[11px] text-fg-faint flex items-center gap-1.5"><Spinner className="h-3 w-3" /> Loading…</div>
+        <div className="text-[12px] text-fg-faint flex items-center gap-1.5"><Spinner className="h-3 w-3" /> Loading…</div>
       ) : rows.length === 0 ? (
-        <div className="text-[11px] text-pos-300">All active prices are up to date.</div>
+        <div className="text-[12px] text-pos-300">All active prices are up to date.</div>
       ) : (
         <div className="max-h-80 overflow-auto rounded-lg border border-neutral-800/40">
-          <table className="w-full text-[11px]">
+          <table className="w-full text-[12px]">
             <thead className="sticky top-0 bg-card z-10">
-              <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+              <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                 <th className="px-2 py-1 text-left font-medium">Ticker</th>
                 <th className="px-2 py-1 text-left font-medium">Company</th>
                 <th className="px-2 py-1 text-right font-medium">Latest close</th>
@@ -1485,12 +1485,12 @@ function StalePricesPanel({ busy }: { busy: boolean }) {
                       <div className="flex items-center justify-end gap-1">
                         <button type="button" onClick={() => void refresh([c.company_id])} disabled={disabled}
                           title="Re-fetch this company's prices + volumes (within budget)"
-                          className="text-[10px] px-1.5 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1">
+                          className="text-[11px] px-1.5 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1">
                           {one && <Spinner className="h-2.5 w-2.5" />}Refresh
                         </button>
                         <button type="button" onClick={() => void markIlliquid(c.company_id)} disabled={disabled}
                           title="Mark illiquid — trades rarely, so its stale price isn't a valid freshness signal. Excluded from this measure (still priced)."
-                          className="text-[10px] px-1.5 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-warn-300 hover:border-warn-500/50 disabled:opacity-40 transition-colors">
+                          className="text-[11px] px-1.5 py-0.5 rounded border border-neutral-700 text-fg-muted hover:text-warn-300 hover:border-warn-500/50 disabled:opacity-40 transition-colors">
                           Illiquid
                         </button>
                       </div>
@@ -1564,13 +1564,13 @@ function FullPriceRefreshSection({
           <div className="flex-1 h-1.5 rounded-full bg-inset overflow-hidden">
             <div className="h-full bg-accent-500 transition-all" style={{ width: `${pct}%` }} />
           </div>
-          <span className="text-[11px] font-mono text-fg-faint shrink-0">{done}/{total}</span>
+          <span className="text-[12px] font-mono text-fg-faint shrink-0">{done}/{total}</span>
         </div>
       )}
 
       {usage && (
         <div className="space-y-1.5">
-          <div className="text-[10px] uppercase tracking-wide text-fg-faint">
+          <div className="text-[11px] uppercase tracking-wide text-fg-faint">
             Budget left this month ({usage.month})
           </div>
           {regions.map((r) => {
@@ -1594,7 +1594,7 @@ function FullPriceRefreshSection({
 
       {coverage?.newest && (
         <div className="space-y-1.5 pt-1 border-t border-neutral-800/30">
-          <div className="text-[10px] uppercase tracking-wide text-fg-faint">
+          <div className="text-[11px] uppercase tracking-wide text-fg-faint">
             Prices on file · {coverage.priced_companies.toLocaleString()} active companies — freshest close (delisted / out-of-scope excluded)
           </div>
           <CoverageLine label="Newest" c={coverage.newest} tone="text-pos-400" />
@@ -1699,7 +1699,7 @@ function HeldRow({ c, expected, retryAt }: {
             onClick={() => void refresh(c.company_id, strategyId)}
             disabled={busy}
             title="Fetch this stock's price from GuruFocus now (bypasses cache) and show the request + response"
-            className={`text-[11px] px-2 py-0.5 rounded-lg border ${btnTone} disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1`}
+            className={`text-[12px] px-2 py-0.5 rounded-lg border ${btnTone} disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1`}
           >
             {busy && <Spinner className="h-3 w-3" />}
             {busy ? 'Fetching…' : '↻ Refresh'}

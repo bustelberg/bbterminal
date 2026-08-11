@@ -41,7 +41,7 @@ export function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) 
 
       {sortedCategories.length > 0 && (
         <div className="mt-3">
-          <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-1">Category weights</div>
+          <div className="text-[11px] uppercase tracking-wider text-fg-subtle mb-1">Category weights</div>
           <div className="flex flex-wrap gap-2 text-xs">
             {sortedCategories.map(([cat, w]) => (
               <span key={cat} className="bg-page border border-neutral-800/60 rounded px-2 py-0.5">
@@ -56,7 +56,7 @@ export function StrategyConfigDetail({ cfg }: { cfg: Record<string, unknown> }) 
 
       {sortedSignals.length > 0 && (
         <div className="mt-3">
-          <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-1">
+          <div className="text-[11px] uppercase tracking-wider text-fg-subtle mb-1">
             Signal weights ({sortedSignals.filter(([, w]) => w > 0).length} active)
           </div>
           <div className="grid gap-x-4 gap-y-1 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 text-xs">

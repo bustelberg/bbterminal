@@ -163,12 +163,12 @@ export default function RebalanceDayReturnsCard({
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
           <XAxis
             dataKey="date"
-            tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
+            tick={{ fill: chartTheme.axisTick, fontSize: 12 }}
             tickLine={false}
             interval={interval}
           />
           <YAxis
-            tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
+            tick={{ fill: chartTheme.axisTick, fontSize: 12 }}
             tickLine={false}
             tickFormatter={(v: number) => `${v}%`}
             domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
@@ -200,7 +200,7 @@ export default function RebalanceDayReturnsCard({
         <div className="mt-3 space-y-1.5">
           <div className="flex items-baseline gap-2 flex-wrap">
             <span className="text-xs text-fg-muted">Annualized return (CAGR)</span>
-            <span className="text-[11px] text-fg-subtle">with rebalance days</span>
+            <span className="text-[12px] text-fg-subtle">with rebalance days</span>
             <span className={`font-mono font-semibold ${withCAGR >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>{fmtPct(withCAGR)}</span>
             <span className="text-fg-faint">→ without</span>
             <span className={`font-mono font-semibold ${withoutCAGR >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>{fmtPct(withoutCAGR)}</span>
@@ -218,8 +218,8 @@ export default function RebalanceDayReturnsCard({
       )}
 
       {stats && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-fg-subtle mt-2">
-          <span className="text-[10px] uppercase tracking-wide text-fg-faint">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-fg-subtle mt-2">
+          <span className="text-[11px] uppercase tracking-wide text-fg-faint">
             {weekdayLabel ? `${weekdayLabel} rebalance days` : 'Rebalance days'}
           </span>
           <span>
@@ -243,7 +243,7 @@ export default function RebalanceDayReturnsCard({
         </div>
       )}
 
-      <p className="text-[10px] text-fg-faint mt-2">
+      <p className="text-[11px] text-fg-faint mt-2">
         Each step is the strategy&apos;s 1-day return on a month&apos;s rebalance day — the close of that day vs the prior
         trading day&apos;s close — compounded into a random walk. It isolates how much of the strategy&apos;s performance lands
         on rebalance days: the line is what you&apos;d earn (or forgo) by being in the market <em>only</em>{' '}on those days.

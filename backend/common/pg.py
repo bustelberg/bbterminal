@@ -45,7 +45,25 @@ def copy_path_enabled() -> bool:
 def _run_copy(sql: str, params: tuple) -> io.BytesIO | None:
     """Execute one `COPY (...) TO STDOUT` over a fresh direct connection and
     return the raw CSV bytes (or `None` to signal fall-back: unconfigured,
-    psycopg missing, or any connection/query error)."""
+    psycopg missing, or any connection/query error).
+
+    ⚠ INSIDE A `read_cache()` BLOCK AN IDENTICAL COPY IS SERVED FROM THE FIRST ONE. Measured on
+    the Analyse modal: the benchmark's price panel — the single most expensive read on that screen
+    — was loaded THREE times with a byte-identical id list and window, because three collaborating
+    modules each correctly asked for it. Outside such a block this is unchanged: no memo, no TTL,
+    every call hits Postgres. See `common/read_cache.py`.
+    """
+    from common import read_cache  # noqa: PLC0415  (module-level would be a cycle via deps)
+
+    if read_cache.active() is not None:
+        # `repr` on the params, because they are lists of ids and dates — unhashable as-is, and
+        # what identifies the query is exactly their printed form.
+        return read_cache.copy_bytes(("COPY", sql, repr(params)), _run_copy_uncached, sql, params)
+    return _run_copy_uncached(sql, params)
+
+
+def _run_copy_uncached(sql: str, params: tuple) -> io.BytesIO | None:
+    """The COPY itself. Split out so the memo above wraps it without duplicating any of it."""
     url = _db_url()
     if not url:
         global _warned_no_db_url

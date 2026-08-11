@@ -22,6 +22,20 @@ export const allocColor = (bucket?: string | null) => (bucket && ALLOC_COLOR[buc
  *  picker offers these plus an "Auto" (revert to the calculated class). */
 export const BUCKET_ORDER = Object.keys(ALLOC_COLOR);
 
+/** The Cash bucket's label, named once. ⚠ Cash is the one class whose return is KNOWN without
+ *  being computed — zero — so several places have to recognise it; a string literal repeated at
+ *  each of them is a rename away from silently reclassifying cash as an ordinary asset. */
+export const CASH_BUCKET = 'Cash';
+
+/** The one class that is OPERATING COMPANIES, and therefore the only one owner earnings apply to.
+ *
+ *  ⚠ EVERY OTHER CLASS IS SOMETHING ELSE, NOT A WEAKER VERSION OF THIS ONE. An `Equity ETF` holds
+ *  companies but is not one — and this app deliberately does not look through funds, so there is
+ *  nothing to measure. `Alternatives` is crypto and commodities, which have no earnings at all.
+ *  `Bonds` is a claim on a company, not a share of it: earnings per share answers a question a
+ *  bondholder is not asking. `Unclassified` is by definition unknown. */
+export const EQUITY_BUCKET = 'Equity';
+
 // DISPLAY labels only — the stored/computed bucket KEY stays "Equity" / "Equity ETF" everywhere
 // (classify_bucket, overrides, filtering, colours all key off it); we just show "Stocks" to the
 // reader. Change the label here and nowhere else.

@@ -223,7 +223,7 @@ export default function BlendDrilldownModal({
             <span className="font-mono text-fg-strong">{fmt(data.value)}</span>
           )}
           {tab === 'period' && data && (
-            <span className="text-[11px] text-fg-faint">
+            <span className="text-[12px] text-fg-faint">
               blended over {data.covered_pct.toFixed(1)}% of weight
             </span>
           )}
@@ -355,12 +355,12 @@ export default function BlendDrilldownModal({
 
             return (
             <>
-              <p className="text-[11px] text-fg-faint max-w-3xl">{SHARE_NOTE[data.kind]}</p>
+              <p className="text-[12px] text-fg-faint max-w-3xl">{SHARE_NOTE[data.kind]}</p>
 
               <div className="overflow-x-auto rounded-lg border border-neutral-800/40">
                 <table className="w-full text-xs">
                   <thead className="bg-page">
-                    <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40 [&>th]:cursor-pointer [&>th]:select-none [&>th:hover]:text-fg-soft [&>th]:transition-colors">
+                    <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40 [&>th]:cursor-pointer [&>th]:select-none [&>th:hover]:text-fg-soft [&>th]:transition-colors">
                       {cols.map((c) => (
                         <th key={c.key} onClick={() => toggleSort(c.key)}
                           className={`px-3 py-2 font-medium ${c.align === 'left' ? 'text-left' : 'text-right whitespace-nowrap'} ${c.extra ?? ''}`}>
@@ -431,11 +431,11 @@ export default function BlendDrilldownModal({
           )}
           {tab === 'matrix' && matrix && (
             <>
-              <p className="text-[11px] text-fg-faint max-w-3xl">{MATRIX_NOTE[matrix.kind]}</p>
+              <p className="text-[12px] text-fg-faint max-w-3xl">{MATRIX_NOTE[matrix.kind]}</p>
               <div className="overflow-auto rounded-lg border border-neutral-800/40">
                 <table className="text-xs whitespace-nowrap">
                   <thead className="bg-page">
-                    <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                    <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                       {/* Holding stays put while the years scroll. */}
                       <th className="px-3 py-1.5 font-medium text-left sticky left-0 bg-page z-10">Holding</th>
                       <th className="px-3 py-1.5 font-medium text-right">Wt</th>
@@ -488,10 +488,10 @@ export default function BlendDrilldownModal({
                       ))}
                     </tr>
                     <tr className="bg-page">
-                      <td className="px-3 py-1 text-left text-[10px] uppercase tracking-wide text-fg-faint sticky left-0 bg-page z-10">Covered</td>
+                      <td className="px-3 py-1 text-left text-[11px] uppercase tracking-wide text-fg-faint sticky left-0 bg-page z-10">Covered</td>
                       <td className="px-3 py-1" />
                       {matrix.periods.map((p) => (
-                        <td key={p} className={`px-3 py-1 text-right font-mono text-[11px] ${
+                        <td key={p} className={`px-3 py-1 text-right font-mono text-[12px] ${
                           matrix.below_floor[p] ? 'text-warn-300' : 'text-fg-muted'}`}>
                           {matrix.covered[p].toFixed(0)}%
                         </td>
@@ -500,7 +500,7 @@ export default function BlendDrilldownModal({
                   </tfoot>
                 </table>
               </div>
-              <p className="text-[10px] text-fg-faint">
+              <p className="text-[11px] text-fg-faint">
                 * years below the 60% coverage floor — shown here for verification, hidden on the chart.
               </p>
 

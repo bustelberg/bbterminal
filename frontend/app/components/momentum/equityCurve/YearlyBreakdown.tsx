@@ -147,7 +147,7 @@ export default function YearlyBreakdown({
                         {y}
                         {isGoLiveYear && (
                           <span
-                            className="inline-flex items-center gap-1 text-[10px] text-neg-400"
+                            className="inline-flex items-center gap-1 text-[11px] text-neg-400"
                             title={`Strategy went live ${markerDate}`}
                           >
                             <span className="inline-block w-2.5 border-t border-dashed border-neg-400" />
@@ -188,7 +188,7 @@ export default function YearlyBreakdown({
                           {MONTH_NAMES[parseInt(m.slice(5), 10) - 1]}
                           {isGoLiveMonth && (
                             <span
-                              className="inline-flex items-center gap-1 text-[10px] text-neg-400"
+                              className="inline-flex items-center gap-1 text-[11px] text-neg-400"
                               title={`Strategy went live ${markerDate}`}
                             >
                               <span className="inline-block w-2.5 border-t border-dashed border-neg-400" />

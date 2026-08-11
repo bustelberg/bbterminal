@@ -1,11 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import {
-  defaultDiscountRate, FALLBACK_DISCOUNT_RATE, impliedGrowth, marketCapOf, modelValue,
-  REVERSE_DCF_DEFAULTS, solveGrowth,
-  type ReverseDcfInputs,
+  defaultDiscountRate, FALLBACK_DISCOUNT_RATE, FORECAST_YEARS, impliedGrowth, marketCapOf,
+  modelValue, PERPETUITY_GROWTH, solveGrowth,
+  type ReverseDcfAssumptions, type ReverseDcfInputs,
 } from './reverseDcf';
 
-const A = REVERSE_DCF_DEFAULTS;   // 10 years, 3% terminal, discounted at 10%
+// ⚠ THE BASELINE LIVES HERE NOW. It was `REVERSE_DCF_DEFAULTS`, exported from the module — but
+// nothing in production ever read it, so it was a test fixture wearing a module export's clothes
+// and the dead-code sweep (2026-08-03) removed it. Assembled from the module's own constants
+// rather than hard-coded, so a change to the forecast horizon or terminal growth still reaches
+// these tests instead of silently diverging from them.
+const A: ReverseDcfAssumptions = {
+  years: FORECAST_YEARS,
+  perpetuityGrowth: PERPETUITY_GROWTH,
+  discountRates: [FALLBACK_DISCOUNT_RATE],
+};   // 10 years, 3% terminal, discounted at 10%
 
 const INPUTS: ReverseDcfInputs = {
   price: 100, sharesOutstanding: 1000, fcf: 9500,     // 100,000M market cap, ~10.5x FCF

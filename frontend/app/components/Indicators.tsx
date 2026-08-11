@@ -257,12 +257,12 @@ export default function Indicators() {
                   <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
                   <XAxis
                     dataKey="date"
-                    tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
+                    tick={{ fill: chartTheme.axisTick, fontSize: 12 }}
                     tickLine={false}
                     interval={Math.max(0, Math.floor(chartData.length / 6) - 1)}
                   />
                   <YAxis
-                    tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
+                    tick={{ fill: chartTheme.axisTick, fontSize: 12 }}
                     tickLine={false}
                     domain={yDomain}
                     width={70}

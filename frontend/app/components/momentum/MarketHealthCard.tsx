@@ -169,7 +169,7 @@ export default function MarketHealthCard({
       title="Market-health signal"
       defaultCollapsed={defaultCollapsed}
       rightSlot={
-        <span className="text-[11px] font-mono text-fg-faint">
+        <span className="text-[12px] font-mono text-fg-faint">
           {points[0].date} → {points[points.length - 1].date}
         </span>
       }
@@ -187,7 +187,7 @@ export default function MarketHealthCard({
         )}
         <Legend color={EXPOSURE_COLOR} label="Resulting exposure (×book)" />
       </div>
-      <p className="text-[10px] text-fg-faint">
+      <p className="text-[11px] text-fg-faint">
         Health is the average of three absolute breadth measures across the eligible universe, measured strictly before each rebalance.
         Exposure ramps from the floor when health ≤ {RAMP_LO} up to 100% when health ≥ {RAMP_HI} (shaded band), proportional in between.
         Where the orange line sits below 1.0, the filter held cash that period.
@@ -197,13 +197,13 @@ export default function MarketHealthCard({
           the same time axis. */}
       {showComponents && rsiPoints.length >= 2 && (
         <div className="pt-3 border-t border-neutral-800/40 space-y-2">
-          <span className="text-[11px] uppercase tracking-wide text-fg-faint">Universe RSI(14) · average across all names</span>
+          <span className="text-[12px] uppercase tracking-wide text-fg-faint">Universe RSI(14) · average across all names</span>
           <RsiChart points={rsiPoints} xOf={xOf} hoverDate={hoverDate} setHoverDate={setHoverDate} />
           <div className="flex flex-wrap justify-center gap-x-6 gap-y-1">
             <Legend color={RSI_SIMPLE_COLOR} label="Simple (SMA)" />
             <Legend color={RSI_WILDER_COLOR} label="Wilder (smoothed)" />
           </div>
-          <p className="text-[10px] text-fg-faint">
+          <p className="text-[11px] text-fg-faint">
             Mean 14-day RSI over every company in the universe. Classic bands: &gt;70 overbought (broadly extended), &lt;30 oversold (broadly washed out). Wilder&apos;s smoothing reacts slower than the simple average — the gap shows how much lag the smoothing adds.
           </p>
         </div>
@@ -212,13 +212,13 @@ export default function MarketHealthCard({
       {/* Benchmark overlay — same time axis so crises line up vertically. */}
       <div className="pt-3 border-t border-neutral-800/40 space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] uppercase tracking-wide text-fg-faint">Benchmark (aligned · log scale)</span>
-          <label className="flex items-center gap-1.5 text-[11px] text-fg-muted">
+          <span className="text-[12px] uppercase tracking-wide text-fg-faint">Benchmark (aligned · log scale)</span>
+          <label className="flex items-center gap-1.5 text-[12px] text-fg-muted">
             Series
             <select
               value={benchId ?? ''}
               onChange={(e) => setBenchId(e.target.value ? Number(e.target.value) : null)}
-              className="bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-[11px] text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-[12px] text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
             >
               <option value="">(pick one)</option>
               {options.map((o) => (
@@ -228,9 +228,9 @@ export default function MarketHealthCard({
           </label>
         </div>
         {benchId == null ? (
-          <div className="text-[11px] text-fg-subtle">Pick a benchmark (e.g. SP500) to overlay its price on the same dates — dips should line up with health sags.</div>
+          <div className="text-[12px] text-fg-subtle">Pick a benchmark (e.g. SP500) to overlay its price on the same dates — dips should line up with health sags.</div>
         ) : benchPoints.length < 2 ? (
-          <div className="text-[11px] text-fg-subtle">No {benchName} prices in this date range.</div>
+          <div className="text-[12px] text-fg-subtle">No {benchName} prices in this date range.</div>
         ) : (
           <BenchmarkChart
             name={benchName}
@@ -308,7 +308,7 @@ function HealthChart({
   return (
     <div>
       <div className="flex gap-1.5">
-        <div className="flex flex-col justify-between text-[9px] font-mono text-fg-faint w-6 text-right shrink-0 h-40 py-0.5">
+        <div className="flex flex-col justify-between text-[10px] font-mono text-fg-faint w-6 text-right shrink-0 h-40 py-0.5">
           <span>1.0</span><span>{RAMP_HI}</span><span>0.5</span><span>{RAMP_LO}</span><span>0</span>
         </div>
         <div className="relative flex-1">
@@ -351,7 +351,7 @@ function HealthChart({
                 style={{ left: `${guideLeft * 100}%`, top: `${(yOf(hp.health) / H) * 100}%`, background: HEALTH_COLOR }} />
               <div className="absolute w-1.5 h-1.5 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none ring-1 ring-card"
                 style={{ left: `${guideLeft * 100}%`, top: `${(yOf(hp.exposure) / H) * 100}%`, background: EXPOSURE_COLOR }} />
-              <div className="absolute top-1 pointer-events-none whitespace-nowrap rounded-md bg-popover border border-neutral-700 px-2 py-1 text-[10px] shadow-xl z-30"
+              <div className="absolute top-1 pointer-events-none whitespace-nowrap rounded-md bg-popover border border-neutral-700 px-2 py-1 text-[11px] shadow-xl z-30"
                 style={{ left: `${guideLeft * 100}%`, transform: tipTransform(guideLeft) }}>
                 <div className="font-mono text-fg-soft mb-0.5">{hp.date}</div>
                 <div className="font-mono flex items-center gap-1">
@@ -385,7 +385,7 @@ function HealthChart({
           )}
         </div>
       </div>
-      <div className="flex justify-between text-[9px] font-mono text-fg-faint mt-0.5 pl-[1.875rem]">
+      <div className="flex justify-between text-[10px] font-mono text-fg-faint mt-0.5 pl-[1.875rem]">
         <span>{fmtDate(minMs)}</span><span>{fmtDate(maxMs)}</span>
       </div>
     </div>
@@ -457,7 +457,7 @@ function BenchmarkChart({
   return (
     <div>
       <div className="flex gap-1.5">
-        <div className="flex flex-col justify-between text-[9px] font-mono text-fg-faint w-6 text-right shrink-0 h-32 py-0.5">
+        <div className="flex flex-col justify-between text-[10px] font-mono text-fg-faint w-6 text-right shrink-0 h-32 py-0.5">
           <span>{pMax.toFixed(0)}</span><span>{pMin.toFixed(0)}</span>
         </div>
         <div className="relative flex-1">
@@ -475,7 +475,7 @@ function BenchmarkChart({
               <div className="absolute top-0 bottom-0 w-px pointer-events-none" style={{ left: `${guideLeft * 100}%`, background: 'var(--color-neutral-700)' }} />
               <div className="absolute w-1.5 h-1.5 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none ring-1 ring-card"
                 style={{ left: `${guideLeft * 100}%`, top: `${(yOf(hp.price) / H) * 100}%`, background: BENCH_COLOR }} />
-              <div className="absolute top-1 pointer-events-none whitespace-nowrap rounded-md bg-popover border border-neutral-700 px-2 py-1 text-[10px] shadow-xl z-30"
+              <div className="absolute top-1 pointer-events-none whitespace-nowrap rounded-md bg-popover border border-neutral-700 px-2 py-1 text-[11px] shadow-xl z-30"
                 style={{ left: `${guideLeft * 100}%`, transform: tipTransform(guideLeft) }}>
                 <div className="font-mono text-fg-soft mb-0.5">{hp.date}</div>
                 <div className="font-mono flex items-center gap-1">
@@ -550,7 +550,7 @@ function RsiChart({
 
   return (
     <div className="flex gap-1.5">
-      <div className="flex flex-col justify-between text-[9px] font-mono text-fg-faint w-6 text-right shrink-0 h-32 py-0.5">
+      <div className="flex flex-col justify-between text-[10px] font-mono text-fg-faint w-6 text-right shrink-0 h-32 py-0.5">
         <span>100</span><span>70</span><span>30</span><span>0</span>
       </div>
       <div className="relative flex-1">
@@ -586,7 +586,7 @@ function RsiChart({
               <div className="absolute w-1.5 h-1.5 rounded-full -translate-x-1/2 -translate-y-1/2 pointer-events-none ring-1 ring-card"
                 style={{ left: `${guideLeft * 100}%`, top: `${(yOf(hp.wilder) / H) * 100}%`, background: RSI_WILDER_COLOR }} />
             )}
-            <div className="absolute top-1 pointer-events-none whitespace-nowrap rounded-md bg-popover border border-neutral-700 px-2 py-1 text-[10px] shadow-xl z-30"
+            <div className="absolute top-1 pointer-events-none whitespace-nowrap rounded-md bg-popover border border-neutral-700 px-2 py-1 text-[11px] shadow-xl z-30"
               style={{ left: `${guideLeft * 100}%`, transform: tipTransform(guideLeft) }}>
               <div className="font-mono text-fg-soft mb-0.5">{hp.date}</div>
               {hp.simple != null && (
@@ -612,7 +612,7 @@ function RsiChart({
 
 function Legend({ color, label }: { color: string; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[11px]">
+    <span className="inline-flex items-center gap-1.5 text-[12px]">
       <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />
       <span className="text-fg-soft">{label}</span>
     </span>

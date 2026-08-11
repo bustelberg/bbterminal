@@ -303,11 +303,11 @@ function EndpointCard({ ep, token }: { ep: Endpoint; token: string | null }) {
   return (
     <div className="bg-card border border-neutral-800/40 rounded-xl">
       <div className="px-5 py-3 border-b border-neutral-800/40 flex items-center gap-3 flex-wrap">
-        <span className={`inline-flex items-center text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border font-mono ${methodColor}`}>
+        <span className={`inline-flex items-center text-[11px] uppercase tracking-wider px-2 py-0.5 rounded border font-mono ${methodColor}`}>
           {ep.method}
         </span>
         <span className="font-mono text-sm text-fg">{ep.path}</span>
-        {needsAuth && <span className="text-[10px] uppercase tracking-wider text-warn-400">admin</span>}
+        {needsAuth && <span className="text-[11px] uppercase tracking-wider text-warn-400">admin</span>}
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
@@ -350,13 +350,13 @@ function EndpointCard({ ep, token }: { ep: Endpoint; token: string | null }) {
           )}
           {ep.bodyExample && (
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-1">Request body (JSON)</div>
+              <div className="text-[11px] uppercase tracking-wider text-fg-subtle mb-1">Request body (JSON)</div>
               <textarea
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 spellCheck={false}
                 rows={6}
-                className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 font-mono text-[11px] text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 focus:outline-none"
+                className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 font-mono text-[12px] text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 focus:outline-none"
               />
             </div>
           )}
@@ -365,7 +365,7 @@ function EndpointCard({ ep, token }: { ep: Endpoint; token: string | null }) {
 
       {/* Resolved URL — clickable to copy. Helpful when the user wants
           to grab the exact URL the Try button would hit. */}
-      <div className="px-5 pb-3 text-[10px] text-fg-subtle font-mono break-all">
+      <div className="px-5 pb-3 text-[11px] text-fg-subtle font-mono break-all">
         <span className="text-fg-faint">URL: </span>{fullUrl}
       </div>
 
@@ -389,11 +389,11 @@ function ParamGroup({
 }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-1">{label}</div>
+      <div className="text-[11px] uppercase tracking-wider text-fg-subtle mb-1">{label}</div>
       <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
         {params.map((p) => (
           <label key={p.name} className="block">
-            <div className="text-[11px] text-fg-muted mb-0.5">
+            <div className="text-[12px] text-fg-muted mb-0.5">
               {p.name}
               {p.required && <span className="text-neg-400"> *</span>}
               <span className="text-fg-faint ml-1">{p.type}</span>
@@ -405,7 +405,7 @@ function ParamGroup({
               placeholder={p.default != null ? String(p.default) : ''}
               className="w-full bg-page border border-neutral-700 rounded-lg px-2.5 py-1 text-xs text-fg font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 focus:outline-none"
             />
-            {p.hint && <div className="text-[10px] text-fg-faint mt-0.5">{p.hint}</div>}
+            {p.hint && <div className="text-[11px] text-fg-faint mt-0.5">{p.hint}</div>}
           </label>
         ))}
       </div>
@@ -446,7 +446,7 @@ function ResponsePanel({ result }: { result: CallResult }) {
           {result.headers['content-type'] ?? ''}
         </span>
       </div>
-      <pre className="bg-page border border-neutral-800/60 rounded-lg px-3 py-2 text-[11px] font-mono text-fg whitespace-pre-wrap max-h-96 overflow-auto">
+      <pre className="bg-page border border-neutral-800/60 rounded-lg px-3 py-2 text-[12px] font-mono text-fg whitespace-pre-wrap max-h-96 overflow-auto">
         {pretty}
       </pre>
     </div>
@@ -533,8 +533,8 @@ export default function ApiExplorer() {
             <>
               <span className="text-xs text-pos-400">✓ Signed in</span>
               <span className="text-xs text-fg-muted font-mono">{email}</span>
-              <span className="text-[10px] uppercase tracking-wider text-accent-400">{role ?? 'user'}</span>
-              <span className="text-[10px] text-fg-faint font-mono ml-auto">token: {token.slice(0, 12)}…{token.slice(-8)}</span>
+              <span className="text-[11px] uppercase tracking-wider text-accent-400">{role ?? 'user'}</span>
+              <span className="text-[11px] text-fg-faint font-mono ml-auto">token: {token.slice(0, 12)}…{token.slice(-8)}</span>
             </>
           ) : (
             <span className="text-xs text-neg-400">
@@ -560,7 +560,7 @@ export default function ApiExplorer() {
           <section key={group} className="space-y-3">
             <h2 className="text-xs uppercase tracking-wider text-fg-subtle px-1 flex items-baseline gap-2">
               <span>{group}</span>
-              <span className="text-[10px] text-fg-faint font-mono normal-case">{eps.length} endpoint{eps.length === 1 ? '' : 's'}</span>
+              <span className="text-[11px] text-fg-faint font-mono normal-case">{eps.length} endpoint{eps.length === 1 ? '' : 's'}</span>
             </h2>
             <div className="space-y-3">
               {eps.map((ep) => (
@@ -570,7 +570,7 @@ export default function ApiExplorer() {
           </section>
         ))}
 
-        <div className="text-[11px] text-fg-subtle leading-relaxed pt-3 border-t border-neutral-800/40">
+        <div className="text-[12px] text-fg-subtle leading-relaxed pt-3 border-t border-neutral-800/40">
           <p>
             The Try button uses your current Supabase access token directly. Tokens expire ~1h after sign-in;
             if you see 401s after the page has been open for a while, navigate away and back to refresh.

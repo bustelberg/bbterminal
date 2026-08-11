@@ -13,7 +13,8 @@ import { Stat } from './MetricGrowthCard';
 import { type Target } from './HoldingsRevenueModal';
 import CashReturnInputsModal from './CashReturnInputsModal';
 import { MODES, seriesByYear, type CapitalMode, type CashReturnInputs } from './cashReturnData';
-import { meanOf, paddedDomain } from './marginData';
+import { meanOf, paddedDomain , xToPeriod } from './marginData';
+import { benchNote, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**
  * Cash-return-on-capital card: Free Cash Flow ÷ invested capital (non-current liabilities + total
@@ -25,10 +26,12 @@ import { meanOf, paddedDomain } from './marginData';
  * ratios — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./DebtRatioCard}.
  */
 
-export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrection = true }: {
+export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
   /** Tab-level toggle — see `sbcCorrection`. ⚠ Has NO effect in ROIC mode. */
   sbcCorrection?: boolean;
+  /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
+  benchTarget?: BenchTarget | null;
 }) {
   const [data, setData] = useState<CashReturnInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -61,9 +64,14 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
   const ratioByYr = useMemo(
     () => seriesByYear(data?.rows ?? [], mode, sbcCorrection), [data, mode, sbcCorrection]);
 
-  const chartData = useMemo(() => (
-    [...ratioByYr.keys()].sort((a, b) => a - b).map((year) => ({ year, ratio: ratioByYr.get(year) ?? null }))
-  ), [ratioByYr]);
+  const [benchData, benchErr] = useBenchInputs<CashReturnInputs>('cash-return-inputs', benchTarget);
+  const benchByYr = useMemo(
+    () => (benchData ? seriesByYear(benchData.rows, mode, sbcCorrection) : null), [benchData, mode, sbcCorrection]);
+
+  const note = benchNote(benchTarget, benchData, benchErr, benchByYr);
+
+  const chartData = useMemo(
+    () => mergeSeries(ratioByYr, benchByYr, 'ratio'), [ratioByYr, benchByYr]);
 
   const avg = meanOf([...ratioByYr.values()]);
   const latestYear = Math.max(-Infinity, ...ratioByYr.keys());
@@ -88,7 +96,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
           {(Object.keys(MODES) as CapitalMode[]).map((k) => (
             <button key={k} type="button" onClick={() => setMode(k)} aria-pressed={mode === k}
               title={`${MODES[k].title} — ${MODES[k].what}. ${MODES[k].where}`}
-              className={`px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+              className={`px-2.5 py-0.5 text-[12px] font-medium transition-colors ${
                 mode === k ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-overlay/5'}`}>
               {MODES[k].tab}
             </button>
@@ -101,7 +109,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : ratioByYr.size === 0 ? (
-        <p className="text-[11px] text-fg-faint py-16 text-center">
+        <p className="text-[12px] text-fg-faint py-16 text-center">
           {M.derived
             ? 'No FCF / capital figures ingested to compute a ratio.'
             : 'GuruFocus reports no ROIC for these holdings.'}
@@ -124,14 +132,15 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
                 style={{ cursor: M.derived ? 'pointer' : 'default' }}
                 onClick={() => { if (M.derived) setShowInputs(true); }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
-                <YAxis domain={paddedDomain([...ratioByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+                <YAxis domain={paddedDomain(withBench(ratioByYr.values(), benchByYr))} tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, M.title]} />
+                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : M.title]} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 <Line dataKey="ratio" name="ratio" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
+                {benchByYr && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
@@ -146,13 +155,21 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
                 <span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />
                 {M.title} (avg dashed)
               </span>
+              {benchByYr && <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />{benchTarget?.universe}</span>}
+              {note && (
+                <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">
+                  {note}
+                </span>
+              )}
             </div>
           </div>
         </>
       )}
 
       {showInputs && (
-        <CashReturnInputsModal target={holdingsTarget} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <CashReturnInputsModal target={holdingsTarget} portfolioName={holdingsName}
+          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          onClose={() => setShowInputs(false)} />
       )}
     </div>
   );

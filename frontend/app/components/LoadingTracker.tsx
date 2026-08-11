@@ -25,7 +25,7 @@ export default function LoadingTracker() {
           return (
             <li key={item.id} className="px-3 py-2 flex items-center justify-between gap-3">
               <span className="text-xs text-fg truncate">{item.label}</span>
-              <span className="text-[11px] font-mono text-fg-subtle shrink-0">{elapsed}s</span>
+              <span className="text-[12px] font-mono text-fg-subtle shrink-0">{elapsed}s</span>
             </li>
           );
         })}

@@ -98,7 +98,7 @@ export default function LwLineChart({ data, color = chartTheme.accentStrong, sca
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: chartTheme.axisTick, fontSize: 10, attributionLogo: false,
+        textColor: chartTheme.axisTick, fontSize: 11, attributionLogo: false,
       },
       grid: { vertLines: { visible: false }, horzLines: { color: chartTheme.grid } },
       leftPriceScale: {
@@ -154,7 +154,7 @@ export default function LwLineChart({ data, color = chartTheme.accentStrong, sca
     <div className="relative">
       <div ref={wrapRef} className="w-full aspect-[16/9] max-h-[72vh] min-h-[300px]" />
       <div ref={tipRef} style={{ display: 'none' }}
-        className="pointer-events-none absolute z-10 bg-popover border border-neutral-800/40 rounded px-2 py-1 text-[10px] font-mono leading-tight shadow" />
+        className="pointer-events-none absolute z-10 bg-popover border border-neutral-800/40 rounded px-2 py-1 text-[11px] font-mono leading-tight shadow" />
     </div>
   );
 }

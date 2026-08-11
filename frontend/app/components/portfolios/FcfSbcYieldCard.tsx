@@ -14,7 +14,9 @@ import { type Target } from './HoldingsRevenueModal';
 import { fcfLabel } from './sbcCorrection';
 import FcfSbcYieldInputsModal from './FcfSbcYieldInputsModal';
 import { fcfSbcYieldByYear, type FcfSbcYieldInputs } from './fcfSbcYieldData';
-import { meanOf, paddedDomain } from './marginData';
+import DailyToggle from './DailyToggle';
+import { meanOf, paddedDomain, xToMonth, xToPeriod } from './marginData';
+import { benchNote, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**
  * FCF-SBC yield card: (Free Cash Flow − Stock-Based Compensation) ÷ Market Cap per fiscal year, on
@@ -27,14 +29,21 @@ import { meanOf, paddedDomain } from './marginData';
  * yields — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./MarginCard}.
  */
 
-export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorrection = true }: {
+export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
   /** Tab-level toggle. ⚠ This card USED to subtract SBC unconditionally. */
   sbcCorrection?: boolean;
+  /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
+  benchTarget?: BenchTarget | null;
 }) {
   const [data, setData] = useState<FcfSbcYieldInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
+  /** Per-card daily override — see {@link ./DailyToggle} for why it is not on the tab control. */
+  const [daily, setDaily] = useState(false);
+  const target = useMemo(
+    () => (daily ? { ...holdingsTarget, cadence: 'daily' } : holdingsTarget),
+    [holdingsTarget, daily]);
 
   useEffect(() => {
     let alive = true;
@@ -43,7 +52,7 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
       try {
         const r = await apiFetch(`${API_URL}/api/earnings/fcf-sbc-yield-inputs`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(holdingsTarget),
+          body: JSON.stringify(target),
         });
         const b = await r.json().catch(() => null);
         if (!alive) return;
@@ -54,14 +63,19 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
       }
     })();
     return () => { alive = false; };
-  }, [holdingsTarget]);
+  }, [target]);
 
   const yieldByYr = useMemo(
     () => fcfSbcYieldByYear(data?.rows ?? [], sbcCorrection), [data, sbcCorrection]);
 
-  const chartData = useMemo(() => (
-    [...yieldByYr.keys()].sort((a, b) => a - b).map((year) => ({ year, yld: yieldByYr.get(year) ?? null }))
-  ), [yieldByYr]);
+  const [benchData, benchErr] = useBenchInputs<FcfSbcYieldInputs>('fcf-sbc-yield-inputs', benchTarget);
+  const benchByYr = useMemo(
+    () => (benchData ? fcfSbcYieldByYear(benchData.rows, sbcCorrection) : null), [benchData, sbcCorrection]);
+
+  const note = benchNote(benchTarget, benchData, benchErr, benchByYr);
+
+  const chartData = useMemo(
+    () => mergeSeries(yieldByYr, benchByYr, 'yld'), [yieldByYr, benchByYr]);
 
   const avg = meanOf([...yieldByYr.values()]);
   const latestYear = Math.max(-Infinity, ...yieldByYr.keys());
@@ -70,14 +84,20 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      <h4 className="text-base font-semibold text-fg-strong">{fcfLabel(sbcCorrection)} yield</h4>
+      <div className="flex items-baseline justify-between gap-2">
+        <h4 className="text-base font-semibold text-fg-strong">{fcfLabel(sbcCorrection)} yield</h4>
+        <DailyToggle on={daily} onChange={setDaily}
+          note={'Daily: FCF − SBC stays flat between fiscal periods while the market cap moves '
+            + 'every trading day — rebuilt as the day’s close × shares outstanding, since '
+            + 'GuruFocus publishes a market cap only per fiscal period. Off, it follows the tab.'} />
+      </div>
 
       {data == null && !err ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : yieldByYr.size === 0 ? (
-        <p className="text-[11px] text-fg-faint py-16 text-center">No FCF / market-cap figures ingested to compute a yield.</p>
+        <p className="text-[12px] text-fg-faint py-16 text-center">No FCF / market-cap figures ingested to compute a yield.</p>
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
@@ -95,25 +115,35 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
-                <YAxis domain={paddedDomain([...yieldByYr.values()])} tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                <XAxis dataKey="year" tickFormatter={daily ? xToMonth : xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+                <YAxis domain={paddedDomain(withBench(yieldByYr.values(), benchByYr))} tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, `${fcfLabel(sbcCorrection)} yield`]} />
+                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : `${fcfLabel(sbcCorrection)} yield`]} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
-                <Line dataKey="yld" name="yld" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
+                {/* ⚠ NO DOTS ON A DAILY SERIES — 2,700 markers is a solid band, not a line. */}
+                <Line dataKey="yld" name="yld" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={daily ? false : { r: 2.5 }} connectNulls />
+                {benchByYr && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
               <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />{fcfLabel(sbcCorrection)} yield (avg dashed)</span>
+              {benchByYr && <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />{benchTarget?.universe}</span>}
+              {note && (
+                <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">
+                  {note}
+                </span>
+              )}
             </div>
           </div>
         </>
       )}
 
       {showInputs && (
-        <FcfSbcYieldInputsModal target={holdingsTarget} portfolioName={holdingsName} onClose={() => setShowInputs(false)} />
+        <FcfSbcYieldInputsModal target={target} portfolioName={holdingsName}
+          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          onClose={() => setShowInputs(false)} />
       )}
     </div>
   );

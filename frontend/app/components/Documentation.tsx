@@ -52,16 +52,16 @@ function CodeBlock({ code, lang }: { code: string; lang?: string }) {
       <button
         type="button"
         onClick={onCopy}
-        className="absolute top-2 right-2 text-[10px] uppercase tracking-wider px-2 py-1 rounded border border-neutral-700 bg-card text-fg-muted hover:text-fg hover:border-neutral-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+        className="absolute top-2 right-2 text-[11px] uppercase tracking-wider px-2 py-1 rounded border border-neutral-700 bg-card text-fg-muted hover:text-fg hover:border-neutral-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
       >
         {copied ? '✓ Copied' : 'Copy'}
       </button>
       {lang && (
-        <span className="absolute top-2 left-2 text-[9px] uppercase tracking-wider text-fg-faint font-mono pointer-events-none">
+        <span className="absolute top-2 left-2 text-[10px] uppercase tracking-wider text-fg-faint font-mono pointer-events-none">
           {lang}
         </span>
       )}
-      <pre className="bg-page border border-neutral-800/60 rounded-lg px-4 py-3 pt-7 text-[11.5px] font-mono text-fg overflow-auto leading-relaxed">
+      <pre className="bg-page border border-neutral-800/60 rounded-lg px-4 py-3 pt-7 text-[12.5px] font-mono text-fg overflow-auto leading-relaxed">
 {code}
       </pre>
     </div>
@@ -407,7 +407,7 @@ export default function Documentation() {
       <div className="px-8 py-6 grid gap-8 lg:grid-cols-[200px_1fr] max-w-6xl">
         {/* Sticky TOC */}
         <nav className="lg:sticky lg:top-6 self-start text-xs space-y-1">
-          <div className="text-[10px] uppercase tracking-wider text-fg-subtle mb-2">Contents</div>
+          <div className="text-[11px] uppercase tracking-wider text-fg-subtle mb-2">Contents</div>
           {TOC.map((t) => (
             <a
               key={t.id}
@@ -454,7 +454,7 @@ export default function Documentation() {
             </p>
             <div className="overflow-auto border border-neutral-800/40 rounded-lg">
               <table className="w-full text-xs">
-                <thead className="text-fg-subtle text-[10px] uppercase">
+                <thead className="text-fg-subtle text-[11px] uppercase">
                   <tr className="border-b border-neutral-800/40 bg-card">
                     <th className="text-left px-3 py-2 font-medium">Tier</th>
                     <th className="text-left px-3 py-2 font-medium">Token</th>
@@ -607,7 +607,7 @@ export default function Documentation() {
             </p>
             <div className="overflow-auto border border-neutral-800/40 rounded-lg">
               <table className="w-full text-xs">
-                <thead className="text-fg-subtle text-[10px] uppercase">
+                <thead className="text-fg-subtle text-[11px] uppercase">
                   <tr className="border-b border-neutral-800/40 bg-card">
                     <th className="text-left px-3 py-2 font-medium">Method</th>
                     <th className="text-left px-3 py-2 font-medium">Path</th>

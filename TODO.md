@@ -1,7 +1,230 @@
 # Open follow-ups — resume here
 
 Running list of unfinished / offered-but-not-built work, newest context first.
-Last updated **2026-07-13**. Delete items as they're done.
+Last updated **2026-08-11**. Delete items as they're done.
+
+---
+
+## ⚡ Analyse modal — memoized. The remaining cost is REAL work, and one number is unverified.
+
+2026-08-11. Profiled one press of Analyse on BUS_Neutraal_FX: **212 database round trips, 103 of
+them byte-identical repeats** (`airs_performance` x9, `airs_model_portfolio` x5, `asset_grid` x3,
+the SP500 universe id x6). Nobody wrote that loop — a dozen collaborating loaders each correctly
+fetch what they need, and the duplication exists only in their composition. Fixed with a
+**per-request read memo** (`common/read_cache.py`, opened at the request boundary in
+`compute_portfolio_analysis_async`), covering both transports: PostgREST GETs and direct COPY.
+Measured: **212 → 109 round trips, 0 repeats left**, payloads equal to the uncached ones within
+1e-9 across 6 portfolios. Pinned by `tests/test_read_cache.py`.
+
+**⚠ 1. THE PRODUCTION GAIN IS ESTIMATED, NOT MEASURED.** Local wall went 3,436 → 2,949 ms
+(interleaved medians, 14%) — but a local PostgREST call is ~5ms and prod is a network hop at
+~50-80ms, so the 103 removed round trips are worth *seconds* there rather than the ~0.5s here.
+Nobody has timed it against prod. The modal already logs `timings_ms` per phase to the console;
+read that on a real load before quoting a number.
+
+**⚠ 2. THE PAYLOAD IS NOT BYTE-REPRODUCIBLE, AND IT WASN'T BEFORE EITHER.** Two consecutive
+UNCACHED runs of portfolio 1878 differ in the last ULP (`benchmark_pct` 31.472360860646393 vs
+...386) — a float sum over rows Postgres returns in an unspecified order. Harmless at 2 dp, but it
+means any future equality check here needs a tolerance, and an `ORDER BY` on those reads would be
+the real fix.
+
+**What is left, in order:** the phases now sum to the wall clock
+(`composition_and_benchmark` 351ms · `book_holdings` 897 · `axes` 765 · `returns_and_benchmark`
+1,903). The remaining 109 trips are distinct queries doing real work; the biggest single item is
+**8 `asset_price` COPY loads (~1.4s)** over OVERLAPPING id sets and windows — not duplicates, so
+the memo cannot touch them. Merging them into one load sliced per consumer is the next real win,
+and it is a structural change across `_book_port_items` / `_basis_axes` / `_returns` /
+`_benchmark_index`.
+
+**Not done:** the memo is opt-in per endpoint. `/attribution`, the portfolios grid and the
+benchmark endpoints have the same shape and would benefit; each needs its own `read_cache()` at
+its request boundary.
+
+---
+
+## 🧬 clone-local-to-prod — FK cascade fixed 2026-08-11. The DRY RUN still cannot see it.
+
+The clone died 47 tables in on `company` → `metric_data_company_id_fkey`. Step [5]'s comment
+claimed "FK ON DELETE CASCADE/SET NULL cleans their dependents"; **8 edges in this schema are
+`NO ACTION`** and do not (`company` ← metric_data / portfolio_weight / earnings_portfolio_member,
+`currency` ← fx_rate + gurufocus_exchange, `country` ← gurufocus_exchange,
+`gurufocus_exchange` ← company, `portfolio` ← portfolio_weight). Both delete sites now stage the
+doomed PKs and walk the blocking edges depth-first (`Remove-RowsWithDependents`), sparing any
+parent an **additive** table still points at. Verified by planning all 47 generated statements
+against the local catalogue with `EXPLAIN` — nothing executed.
+
+**⚠ 1. NOT YET RUN AGAINST PROD.** Every statement is planned-valid and the walk is proven on the
+real FK graph, but no clone has completed with it. Next run: `./scripts/clone-local-to-prod.ps1`.
+
+**⚠ 2. `-DryRun` DOES NOT REPORT THE CASCADE.** It compares row counts per table, so it says
+"company: prod has 3 more" and nothing about the ~30k `metric_data` rows that go with them. That
+is exactly the number worth seeing before pressing go. It also cannot predict a **spare** (a
+parent kept because an additive child references it), which is the one case where the final
+verify legitimately shows a surplus.
+
+---
+
+## ⏱ Benchmarks Refresh — the speed-up is DERIVED, not measured. And one bounded slice is left.
+
+Built 2026-08-11 (`/management-dashboard` → Benchmarks → **Refresh**). The button now fills an
+index end to end: prices for every constituent, then a **forced** GuruFocus refetch of every
+constituent's fundamentals. Force had to defeat **two** caches — the `metric_data` sentinel (a
+company loaded once was never selected again) and the Storage blob (`is_cache_fresh` keeps it
+fresh for the data's own cadence + 50%, i.e. weeks past the quarter it is missing). Defeating one
+gives a press that spends nothing and changes nothing. Pinned by `tests/test_fundamental_refetch.py`.
+
+The price step then went from a serial loop with a hardcoded `time.sleep(0.4)` onto a pool
+(`_PRICE_WORKERS`, 2× `YAHOO_CONCURRENCY`, capped at 8), the "what did we hold before?" read was
+hoisted into one grouped COPY (`latest_close_by_analysis`), and the cap WRITES were parallelised
+(the quotes were always batched at 100; storing them was ~490 serial round trips for the S&P).
+Pinned by `tests/test_benchmark_price_pool.py`.
+
+**⚠ 1. NOBODY HAS TIMED IT.** The "S&P ~10–15 min → ~3–4" figure is arithmetic off the pacing
+constants (`YAHOO_RPS` 10/s, semaphore 4, the removed 0.4s sleep, ~4 round trips per constituent),
+not a stopwatch. Time one AEX run (25 constituents, ~1 min, cheap) and one SP500 run before
+quoting it to anyone. The interesting question is whether the governor or our database is now the
+limit — if `extend_series`' COPY is, more workers will not help.
+
+**⚠ 2. THE RESOLVE SLICE IS STILL 25 PER PRESS** (`_benchmark_fill._RESOLVE_PER_PRESS`), so a
+fresh or heavily-unresolved index still reports "N still unresolved — press again". Deliberately
+not widened: that path is `resolve()`, where an overloaded Yahoo returns an EMPTY search rather
+than a 429 and the thin foreign listing wins (NVDA-on-Stuttgart, Alphabet-on-Vienna). The price
+pool is safe **only** because `extend_series` asks about a symbol we already identified. If this
+is widened, loop `process_slice` over this benchmark's ISINs — never a second resolver.
+
+**Offered, not built:** the caps step still writes one row per constituent. A PostgREST `upsert`
+of the batch was rejected on purpose — it becomes INSERT … ON CONFLICT, so a constituent with no
+`asset_analysis` row would be CREATED from four cap columns, a junk row that then looks like an
+instrument.
+
+### ⚠⚠ AIRS DUPLICATES HAVE **TWO** CAUSES, AND ONLY ONE IS THE CLONE (2026-08-11)
+
+**1. The SCRAPER writes duplicates inside a single run.** Proven on LOCAL, which has never been
+cloned *to*: 24 pairs in `airs_holding` with consecutive ids, identical `retrieved_at`, identical
+ISIN/quantity/value (Apple 91 @ 27,225.55 twice, ASML 16 @ 22,214.40 twice, all
+`BUS_MTS_NEU_AFS_DYN` 2026-07-28). **Root fix, not yet done:** `airs_holding` has no natural
+unique key, so the writer inserts where it should upsert. Needs a migration adding
+UNIQUE (portefeuille, as_of_date, holding_name, quantity, current_value_eur) — or the
+delete-then-insert-per-(book, date) pattern `airs_model_portfolio_position` already uses.
+
+**2. The clone upserted surrogate-PK tables BY id.** Six AIRS tables key on a serial `id` that each
+side assigns independently, so `ON CONFLICT (id)` overwrote prod rows with unrelated local ones AND
+inserted copies beside rows prod already had. **Fixed:** `$skipTables` — those six are now neither
+staged, upserted nor deleted (prod authors them; local's copies are dev artifacts). Two of them
+(`airs_model_portfolio_link`, `airs_account_model_link`) *do* have a natural key, but as an
+EXPRESSION unique index, which `information_schema.table_constraints` cannot see — so the script's
+unique pre-clear was blind to them anyway.
+
+**⚠ Quantify prod with `scripts/airs-duplicates.sql`** (read-only). ⚠ Its `airs_holding` key
+includes `quantity` + `current_value_eur` on purpose: (portefeuille, as_of_date, holding_name)
+alone over-reports 83 groups on local, because a bond and its accrued-interest line share a display
+name ("6,5% Rabobank Certificaten 14-perp." at EUR 8,347.20 and EUR 112.23, same scrape).
+
+### ⚠ 2026-08-11 INCIDENT: the failed clone filled prod's disk and put it in READ-ONLY mode.
+
+Two defects, both now fixed, both of which only bite on a run that DIES:
+
+1. **`clone_stg` was dropped on the success path only.** The FK failure in step [5] left a full
+   copy of every staged table on prod (~500MB; `universe_membership` alone is 444MB), and each
+   retry left another. Now dropped in a `finally`.
+2. **The staging upsert rewrote EVERY row of EVERY table, every run.** Postgres is MVCC, so
+   `SET x = x` still writes a new tuple, kills the old one and WAL-logs it — the exact
+   "disk-filling event" the metric_data lane has guarded against since it was written. Step [5]
+   now carries the same `IS DISTINCT FROM` guard (type-checked against all 55 staged tables).
+
+Together those crossed 95% of disk → Supabase read-only → four disk expansions inside 24h → the
+disk-modification limit, with a ~4h cooldown.
+
+**⚠ STILL OPEN: `universe_membership` is 8,444 rows in 444MB, and `last_autovacuum` is NULL** (on
+LOCAL — prod is likely worse, it runs the pipeline daily). That is ~55KB per row; the table is
+almost entirely dead tuples from repeated rewrites. `VACUUM FULL public.universe_membership` takes
+seconds on 8k rows and needs only its own size free. Worth doing on both sides, and worth finding
+out why autovacuum never ran on it.
+
+**⚠ NEVER `VACUUM FULL` metric_data on prod** — it rewrites the table and needs that much free
+space. Plain `VACUUM` only.
+
+**Measured on prod 2026-08-11** (via the new `scripts/prod-reclaim-disk.ps1`, which reports by
+default and never picks what to drop):
+
+```
+DB 20 GB, of which metric_data 13 GB (heap 2,729 MB + indexes 10 GB) and asset_price 6,693 MB.
+No replication slots. clone_stg confirmed gone (22 GB -> 20 GB when it was dropped).
+
+metric_data_pkey                            4,088 MB   37,966,199 scans  (99.5%)
+idx_metric_data_metric_source_company_date  5,999 MB      189,364 scans  ( 0.5%)  <- USED, keep
+asset_price_pkey                            2,413 MB      915,799 scans
+idx_metric_data_source_date                   471 MB           30 scans  <- DROPPED 2026-08-11
+```
+
+**Still open:** ~3.3 GB of estimated index bloat on `metric_data` (prod runs 3.33 GB of index per
+GB of heap; local runs 2.54 — scaled by heap, prod's indexes should be ~7.5 GB, not 10). `-Reindex`
+reclaims it but BUILDS THE NEW INDEX FIRST, so the 4 GB pkey needs ~4 GB free — not available at
+95% full. Do it after the disk has headroom, not during an incident.
+
+**Also open:** `last_autovacuum` is NULL on both big tables and prod reported `n_live_tup 25,413`
+for asset_price (off by orders of magnitude). Autovacuum sizes its thresholds off that estimate,
+so a wrong one is self-perpetuating — `-Vacuum -Apply` (VACUUM ANALYZE) once healthy.
+
+---
+
+## 📋 AIRS Transacties — measured on ONE account. Two things still unverified.
+
+Built 2026-08-05: `/portfolios` → expand an account → **Transactions** (the sheet, cached in
+`airs_transactie_snapshot`) and **Total return** (the year, built from held + sold positions and
+checked against AIRS's own `beleggingsresultaat`). `TRANS` is confirmed to be Transacties; the
+columns are documented in `airs_transacties`'s docstring from a real download.
+
+Measured on AITopSelectie OFF DYN: held 380,986.94 + realised 6,306.85 + sold-name income 0.00 =
+**387,293.79** against the book's **387,293.75** — residual **€0.04** — and 38.729379% against
+AIRS's own 38.729375%.
+
+**✅ 1. `Res. YtD` vs `proceeds − Kostprijs` — RESOLVED, on real data (BUS_Offensief_Dyn).** The
+first book measured (AITopSelectie) had `Res. voorg. jr.` = 0.00 on every row, so the two formulas
+agreed exactly and it could not arbitrate. Bustelberg Offensief settles it — 12 of its 13 sold
+names carry prior-year amounts (Novo Nordisk −24,866.94, Wolters Kluwer −20,819.13):
+
+```
+Res. YtD                 -28,656.47   -> total +69,792.94  =  +5.83%   AIRS: +5.83%  ✓
+Res. voorg. jr.          -97,919.73
+proceeds - Kostprijs    -126,576.20   -> total -28,126.79  =  -2.35%              ✗
+identity: proceeds - cost == Res. YtD + Res. voorg. jr., to -0.00
+```
+
+The intuitive formula is **8pp out and the wrong sign**, and looks entirely plausible. Keep
+`Res. YtD`. (The book's own YTD moves as it is re-scanned — these are 2026-08-05 mid-session; the
+identity and the size of the error are what matter, not the exact totals.)
+
+**⚠ 2. `Tt='D'` is uninterpreted.** One row: KLA-Tencor, 2026-06-12, 369 shares, every money column
+`0.0`. KLA split 9:1 in 2026, so a corporate action is the obvious reading — and obvious is not
+measured. It carries no money, so it is excluded from every total and **counted** (surfaced in the
+panel). If a `D` ever arrives carrying a value, that count is what will show it.
+
+**✅ The merged position ledger is built** (`airs_capital.py`, Analyse modal → "Every position this
+year"). One row per instrument the book touched, held or sold, weighted by **average invested
+capital** (Modified Dietz) — the only weight a sold position can carry, and the only one that
+describes a book whose composition changed. Contributions sit on `beginvermogen` and sum to the
+book's own YTD **exactly** (measured: 5.8267 vs 5.8267, 44.4624 vs 44.4624; residual 0.0000pp).
+
+⚠ A 1-January weight was tried first and is WRONG: AITopSelectie's equities were worth EUR 40,319
+on 1 Jan against a EUR 1m opening capital, because it began the year in cash and deployed on
+5 January — a start-weighted table calls it 96% cash.
+
+**Still approximate, and surfaced rather than hidden** (`capital_coverage_ratio`, measured
+0.980 / 1.023):
+- Modified Dietz ignores the price path *within* a position.
+- A sold-out parcel's opening value is split proportionally by quantity between shares held at the
+  open and shares bought during the year — AIRS does not publish its parcel matching.
+- The de-restatement assumes `Beginwaarde ÷ quantity` is the 1-Jan price (linear restatement).
+
+**Not yet done:**
+- `start_gap_eur` in the /portfolios reconciliation is still the NET of two opposite effects. The
+  ledger now separates them; that panel could read the ledger instead.
+- A sold position has no sector, so it is absent from the composition bars and Brinson. Those
+  report `realised_share_of_result_pct` instead. Classifying by name → `asset_execution` would
+  close it, but a name match is exactly what `_airs_holding_isin` warns against.
+- `kosten` is 0 on all 53 accounts, so whether costs sit inside `cumulatief_rendement` but outside
+  `beleggingsresultaat` is untested. If a book ever charges them, the residual is where it shows.
 
 ---
 
@@ -292,3 +515,52 @@ real delisting.
       stock-vs-stock; portfolio mode = the Allocation×Selection matrix only,
       prices-only). Confirm nothing still triggers the heavy member-metrics
       aggregate before building this.
+
+## 11. Long Equity benchmark performance (2026-08-06)
+
+Context: selecting ACWI as the benchmark on the Long Equity tab fires ~11 requests
+(one per card) over 1,514 constituents. All three items below are **shipped and
+ruff/tsc/eslint clean**; what is missing is production measurement, not code.
+
+- [ ] **Confirm `SUPABASE_DB_URL` is set on Railway.** Without it the new COPY path
+      in `routers/_earnings_pg.py` is INERT and everything silently keeps using the
+      PostgREST pager (`common.pg` logs one warning at startup saying so). This is
+      the single highest-value check — the COPY win scales with round-trip latency,
+      which is ~2ms locally and 50–200ms to Supabase cloud.
+- [ ] **Re-benchmark the tab INTERLEAVED, not in blocks.** Local block-measurements
+      contradicted each other (COPY+dedupe 6.04s vs dedupe-only 4.55s), which is the
+      ~15% run-to-run spread CLAUDE.md already warns about. A 4-way interleaved
+      benchmark (PostgREST / +dedupe / COPY / COPY+dedupe, ≥3 rounds) is the only way
+      to get a trustworthy number. **Do this on prod, or at least with a warm DB** —
+      the local figures understate COPY by design.
+
+### What was built (all in place, no follow-up needed unless the above says otherwise)
+
+1. **Response cache** — `routers/_blend_cache.py`, `@cached_blend` on 13 endpoints.
+   Verified: 1.99s → 6.8ms on a repeat; portfolio/holdings requests are NEVER cached;
+   `openapi.json` byte-identical; `invalidate()` wired to both fundamentals ingest jobs
+   and fires only when data was actually written.
+2. **COPY transport** — `routers/_earnings_pg.py::rows_by_company_via_copy`, tried first
+   in `_rows_by_company` with the pager as fallback. Verified **identical output**
+   (`dict == dict`, 1,512 companies / 16,336 rows) and 3.2× on the raw read locally.
+3. **Metric-read dedupe** — `cached_metric_read` with THREAD-based single-flight (the
+   reads run inside `asyncio.to_thread`). The tab issues 27 metric reads of which only
+   18 are distinct (`sbc` ×5, `fcf` ×4, `revenue` ×3). 60s TTL, 32-entry cap: it exists
+   to dedupe a concurrent burst, not to persist — persistence is the response cache's job.
+
+### Measured dead ends — do NOT redo these
+
+- **Collapsing the ~11 card requests into one endpoint is NOT worth it.** The only work
+  all 13 endpoints share is `_load_and_expand_members` = **0.100s** (1.3s of 16.6s = 8%);
+  the rest is each endpoint reading its own metric codes. And the cards already run
+  concurrently (16.6s of work in 11.1s), so serialising them inside one handler would make
+  cold wall-clock *worse* unless it re-implements the same fan-out internally.
+  ⚠ An earlier claim that this was worth ~72% came from subtracting `_blend_inputs` (1.08s)
+  from `*-inputs` endpoints that **never call it** — they call `_load_and_expand_members`.
+- **Truncating a benchmark to the top 90% of cap does NOT work for these charts.** Measured
+  on ACWI 2025: levels and ratios are 7–53% off (revenue sum −11%, net margin +11%,
+  net income/share +53%), because the dropped tail is a systematically different business
+  mix (EM/financials/industrials, lower margin), not "the same companies, smaller".
+  Single-year cap-weighted *growth* IS accurate (−0.11pp ACWI, +0.60pp SP500), and a
+  properly chained per-year version lands at +1.15% (SP500) / −5.42% (ACWI) over a decade —
+  so it is only defensible for growth-based series, and only if labelled on the chart.

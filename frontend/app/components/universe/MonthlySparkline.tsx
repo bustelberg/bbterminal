@@ -37,7 +37,7 @@ export default function MonthlySparkline({ monthly }: { monthly: MonthlyCount[] 
     <div className="p-5">
       <div className="flex items-center justify-between mb-3">
         <div className="text-fg-muted text-xs font-medium">Monthly membership count</div>
-        <div className="text-fg-faint text-[10px] font-mono">
+        <div className="text-fg-faint text-[11px] font-mono">
           min {stats.min} · avg {stats.avg.toFixed(0)} · max {stats.max}
         </div>
       </div>
@@ -52,12 +52,12 @@ export default function MonthlySparkline({ monthly }: { monthly: MonthlyCount[] 
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
           <XAxis
             dataKey="month"
-            tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
+            tick={{ fill: chartTheme.axisTick, fontSize: 12 }}
             tickLine={false}
             interval={Math.max(0, Math.floor(monthly.length / 8) - 1)}
           />
           <YAxis
-            tick={{ fill: chartTheme.axisTick, fontSize: 11 }}
+            tick={{ fill: chartTheme.axisTick, fontSize: 12 }}
             tickLine={false}
             domain={yDomain}
             allowDecimals={false}

@@ -66,25 +66,6 @@ def _excluded_company_ids(supabase: Client) -> set[int]:
         return set()
 
 
-def _company_ids_with_longequity_metrics(supabase: Client) -> set[int]:
-    """Every company_id that has at least one `metric_data` row with
-    `source_code='longequity'`. This is the source-of-truth for "ever
-    appeared in a LongEquity snapshot" — the universe_membership table
-    is derived from this, not the other way around."""
-    out: set[int] = set()
-    for r in paginate(
-        lambda lo, hi: supabase.table('metric_data')
-        .select('company_id')
-        .eq('source_code', 'longequity')
-        .range(lo, hi)
-        .execute()
-    ):
-        cid = r.get('company_id')
-        if cid is not None:
-            out.add(int(cid))
-    return out
-
-
 def _membership_by_month(supabase: Client) -> dict[str, set[int]]:
     """True point-in-time membership: `{YYYY-MM: {company_id, ...}}` from the
     actual monthly LongEquity reports (`metric_data` source `longequity`),
@@ -137,17 +118,6 @@ def _latest_sector_per_company(supabase: Client, cids: set[int]) -> dict[int, st
         if sec and (cid not in latest_month or m > latest_month[cid]):
             latest_month[cid] = m
             out[cid] = sec
-    return out
-
-
-def _months_from(start: date, end: date) -> list[str]:
-    """`YYYY-MM` strings for every month in [start, end], inclusive."""
-    out: list[str] = []
-    cur = date(start.year, start.month, 1)
-    end_m = date(end.year, end.month, 1)
-    while cur <= end_m:
-        out.append(cur.strftime('%Y-%m'))
-        cur = date(cur.year + 1, 1, 1) if cur.month == 12 else date(cur.year, cur.month + 1, 1)
     return out
 
 
@@ -242,10 +212,11 @@ def rebuild_longequity_universe(
     )
     if u_resp.data:
         universe_id = u_resp.data[0]['universe_id']
-        if not u_resp.data[0].get('is_monthly'):
-            supabase.table('universe').update(
-                {'is_monthly': True}
-            ).eq('universe_id', universe_id).execute()
+        # ⚠ THE FLAG IS NO LONGER FORCED TRUE HERE (2026-08-06). It used to be, so a multi-month
+        # write could never hit the single-month trigger — and that is precisely why a data-only
+        # collapse would not have stuck: the next ingest would have flipped it back and rewritten
+        # nine months. The writer now produces one month, so the flag is cleared below instead,
+        # AFTER the rows land (the trigger refuses the other order).
     else:
         ins = supabase.table('universe').insert({
             'label': 'LongEquity',
@@ -279,22 +250,52 @@ def rebuild_longequity_universe(
     # month-to-month; the report doesn't restate it every period).
     sectors = _latest_sector_per_company(supabase, all_cids)
     months = sorted(by_month.keys())
-    emit(f'Writing true per-month membership ({months[0]} → {months[-1]})')
+
+    # ── ⚠⚠ THE UNION, NOT ONE ROW PER MONTH (2026-08-06).
+    #
+    # This wrote true point-in-time membership: 3,219 rows over 9 months for 400 distinct
+    # companies. Every one of those rows was a MATERIALISED COPY of something derivable — the
+    # source of truth is `metric_data` (`source_code='longequity'`), which is exactly what
+    # `_membership_by_month` reads three lines above, and what the
+    # `longequity_membership_by_month` RPC serves to `/longequity-universe`. Verified before the
+    # change: the stored union and the RPC's union agree exactly at 400.
+    #
+    # Collapsing costs no information and removes the LAST time-varying universe, which is the
+    # thing that mattered: LongEquity was the only one of eight with more than one month, and it
+    # is why `monthly_universe_labels()`, the `?month=` query param and `FrozenUniversesPanel`'s
+    # carve-out all exist. Membership is now yes/no everywhere, which is what lets the asset-side
+    # membership table be a plain join with no time dimension.
+    #
+    # ⚠ THE FLAG MUST FOLLOW THE DATA, NEVER LEAD IT. `enforce_universe_monthly_flag` refuses
+    # `is_monthly=false` while >1 distinct month exists — its own message says "Collapse
+    # membership to a single snapshot first" — so the write below has to land before the update.
+    #
+    # ⚠ AND THE SET IS WIDER THAN ANY SINGLE MONTH. 400 companies against 254–498 per month, so
+    # "ever in LongEquity" carries survivorship: a name that appeared once in 2025-08 is a
+    # permanent yes. That is right for a radar flag and wrong for a backtest universe — which is
+    # why `/backtest` selects a FROZEN snapshot (see `freeze_longequity_union`) and never this row.
+    stamp = months[-1]
+    emit(f'Writing static membership: {len(all_cids)} companies '
+         f'(union of {len(by_month)} report months {months[0]} → {months[-1]})')
 
     # Wipe existing rows BEFORE the legacy drop — if the legacy delete
     # somehow grabs the wrong row, we still won't have orphan stale
     # per-month memberships hanging around.
     _delete_universe_memberships(supabase, universe_id)
 
-    payload: list[dict] = []
-    for m in months:
-        for cid in sorted(by_month[m]):
-            payload.append({
-                'universe_id': universe_id,
-                'company_id': cid,
-                'target_month': m,
-                'sector': sectors.get(cid),
-            })
+    payload: list[dict] = [
+        {
+            'universe_id': universe_id,
+            'company_id': cid,
+            # Stamped with the newest report month so the row carries a meaningful "as of",
+            # matching how every other (single-month) universe uses this column. It is no longer
+            # a claim that the company was in THAT month's report — the per-month truth is in
+            # `metric_data`, where it always was.
+            'target_month': stamp,
+            'sector': sectors.get(cid),
+        }
+        for cid in sorted(all_cids)
+    ]
 
     written = 0
     for ci, chunk in enumerate(chunked(payload, 500)):
@@ -318,11 +319,12 @@ def rebuild_longequity_universe(
             except Exception as e2:
                 log.warning('[longequity_universe] upsert fallback also failed: %s', e2)
 
-    # Stamp as_of_date = latest captured report month (the column's meaning
-    # for is_monthly universes) so it tracks the newest report, not a stale
-    # value from an earlier migration.
+    # Stamp as_of_date = latest captured report month so it tracks the newest report, not a stale
+    # value from an earlier migration — and clear `is_monthly` now that the rows are a single
+    # snapshot. ⚠ AFTER THE INSERT, NECESSARILY: `enforce_universe_monthly_flag` counts the
+    # DISTINCT months already present and refuses the flag change while more than one exists.
     supabase.table('universe').update(
-        {'as_of_date': f'{months[-1]}-01'}
+        {'as_of_date': f'{months[-1]}-01', 'is_monthly': False}
     ).eq('universe_id', universe_id).execute()
 
     legacy = _drop_legacy_cumulative(supabase)

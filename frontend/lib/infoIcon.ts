@@ -35,7 +35,7 @@
  *  `uppercase tracking-wide` table header, which is why these are stated, not left open. */
 export const INFO_ICON =
   'inline-flex items-center justify-center w-3.5 h-3.5 rounded-full align-middle '
-  + 'font-mono text-[9px] font-semibold leading-none normal-case tracking-normal '
+  + 'font-mono text-[10px] font-semibold leading-none normal-case tracking-normal '
   + 'cursor-help transition-colors '
   + 'bg-accent-500/10 text-accent-500 hover:bg-accent-500/20';
 
@@ -44,6 +44,6 @@ export const INFO_ICON =
  *  state, not as another control. Only the hue changes. */
 export const INFO_ICON_WARN =
   'inline-flex items-center justify-center w-3.5 h-3.5 rounded-full align-middle '
-  + 'font-mono text-[9px] font-semibold leading-none normal-case tracking-normal '
+  + 'font-mono text-[10px] font-semibold leading-none normal-case tracking-normal '
   + 'cursor-help transition-colors '
   + 'bg-warn-500/20 text-warn-600 hover:bg-warn-500/30';

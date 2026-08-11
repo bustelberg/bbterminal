@@ -13,6 +13,12 @@
 // (Refresh, Delete, the Class/ISIN/Link overrides, the benchmark Fill) stays admin-only in BOTH
 // places — the API gate refuses them, and the components hide the controls via `useIsAdmin` so a
 // user is never shown a button that 403s.
+//
+// ⚠ AND SINCE 2026-08-06, ONE READ IS RESTRICTED TOO: expanding a row in the Overview table. The
+// summary a user sees is the whole page for them; the book behind a row — positions and their EUR
+// values, mutations, reconciliation — is admin's. Same two places (`PortfolioOverviewPanel`'s
+// `expand` + `_ADMIN_ONLY_PATTERNS` in `_auth_middleware.py`), so the page staying in this list is
+// not a statement that everything on it is readable.
 export const USER_ALLOWED_PATHS: readonly string[] = [
   '/', '/earnings', '/schedule', '/management-dashboard', '/forbidden',
 ];

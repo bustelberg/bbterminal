@@ -13,6 +13,7 @@ other three back the broker-scan flow.
 from __future__ import annotations
 
 import asyncio
+import gzip
 import io
 import re
 from routers import _airs_portfolio_store as store
@@ -24,7 +25,7 @@ from datetime import UTC, datetime
 from datetime import date as dt_date
 
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -500,6 +501,78 @@ async def airs_model_portfolio_ytd_explain(portfolio_id: int, year: int | None =
     return await explain_portfolio_ytd_async(portfolio_id, year)
 
 
+class CorrelationInstrument(BaseModel):
+    """One instrument that fed the correlation matrices, and how it was priced.
+
+    ⚠ THREE STATES, AND COLLAPSING ANY TWO WOULD MISREAD THE MATRIX. Measured 2026-08-10 over the
+    44 listed models and their 245 distinct ISINs:
+
+        direct       230   an `asset_execution` with a yfinance series, EUR-converted per date
+        lookthrough    9   a Leonteq certificate that IS another model; priced from that model's
+                           own curve, because the certificate has no price of its own to fetch
+        unpriced       6   no series at all — its weight is what the 60% coverage floor is
+                           measured over, so these rows are the reason a portfolio can be refused
+
+    The look-through nine (Star Selection, and the Europa/AI/Dividend/Familie/Merken/Momentum/
+    Azie/Vastgoed TopSelectie certificates) look unpriceable in the database and are not. A table
+    that showed only "priced / not priced" would report the largest of them — Star Selection, held
+    by 12 models — as missing data.
+    """
+
+    isin: str
+    # AIRS's own name for the line. This table is read against the AIRS model, so its vocabulary
+    # wins; `asset_name` is ours, kept for the rows where the two disagree.
+    name: str | None = None
+    asset_name: str | None = None
+    symbol: str | None = None
+    currency: str | None = None
+    analysis_id: int | None = None
+    state: str                       # direct | lookthrough | unpriced
+    # Which key in `series.values` charts this row. `null` for an unpriced instrument — there is
+    # no series, and pointing at an empty one would draw a flat line where the answer is "none".
+    series_key: str | None = None
+    # The model a certificate wraps. Set even when that model could not be priced either, because
+    # "wraps AI-TopSelectie, which is itself under-covered" is a different fact from "unknown".
+    linked_portfolio_id: int | None = None
+    linked_label: str | None = None
+    # ⚠ EUR for a real listing, an INDEX BASED AT 100 for a look-through — not the same kind of
+    # number, so the chart must label them differently. `null` when there is nothing to plot.
+    unit: str | None = None
+    # ⚠ THE VENUE'S MEDIAN DAILY TRADED VALUE, IN EUR — the column that tells you whether to
+    # believe the row above it. A near-untraded listing still yields 251 bars a year, so nothing
+    # else here would look wrong; its closes are simply stale against the real market, and a
+    # correlation of DAILY RETURNS is the statistic that damages most. See `_median_adv` for the
+    # measured case (Hermès on Hanover, EUR 4,946/day, held by 19 of 44 models).
+    med_adv_eur: float | None = None
+    # ⚠ WHERE THE NUMBERS CAME FROM — TWO VENDORS, NOT ONE. `price_source` is yfinance for every
+    # priced row on this page: GuruFocus (`metric_data`) prices the /benchmarks index and the
+    # momentum engine and NEVER enters this path, because the AIRS books live in the ISIN/asset
+    # world. `fx_source` is the second vendor a "which source?" question usually forgets — a EUR
+    # level for a USD holding is a yfinance close multiplied by an ECB rate. `null` on a EUR
+    # holding (no conversion occurs); "per holding" on a look-through, which is a basket whose
+    # constituents each convert on their own rate.
+    price_source: str | None = None
+    fx_source: str | None = None
+    in_portfolios: int = 0           # DISTINCT models (one model may list an ISIN twice)
+    weight_pct_sum: float = 0.0      # Σ of its weights across those models
+    observations: int = 0
+    first_date: str | None = None
+    last_date: str | None = None
+
+
+class CorrelationSeries(BaseModel):
+    """Every charted series on ONE shared date axis — see `_series_block` for the measurement
+    that chose this encoding over the obvious `[[date, value], …]` (452 KB raw against 1,270 KB).
+
+    `values[key][i]` is the level on `dates[i]`, or `null` for a day that instrument did not
+    trade. ⚠ A null is a foreign holiday, NOT a zero: the axis is the union of every instrument's
+    trading days, so rendering nulls as 0 draws a spike to the floor on every one of them.
+    """
+
+    dates: list[str] = []
+    values: dict[str, list[float | None]] = {}
+
+
 class PortfolioCorrelationMatrix(BaseModel):
     """Pairwise Pearson correlation of the LISTED model portfolios' daily EUR returns, for two
     windows. Same return series the /portfolios YTD column is read off, correlated pairwise-
@@ -530,17 +603,38 @@ class PortfolioCorrelationMatrix(BaseModel):
     ytd_obs: list[int]
     trailing_12m: list[list[float | None]]
     trailing_12m_obs: list[int]
+    # Every instrument behind the numbers above, and its charted series. Shipped WITH the matrix
+    # rather than from a second endpoint: both are built from one price load (the only expensive
+    # part of this request), so a second endpoint would repeat that load AND open the door to the
+    # table describing a slightly different set of inputs than the matrix consumed.
+    instruments: list[CorrelationInstrument] = []
+    series: CorrelationSeries = CorrelationSeries()
 
 
 @router.get("/api/airs/model-portfolios/correlations",
             response_model=PortfolioCorrelationMatrix)
-async def airs_model_portfolio_correlations(year: int | None = None):
-    """YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models."""
+async def airs_model_portfolio_correlations(request: Request, year: int | None = None):
+    """YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models,
+    plus every instrument that fed them and its price series.
+
+    ⚠ GZIPPED HERE RATHER THAN BY A `GZipMiddleware`, for the reason `/api/benchmarks/…/grid`
+    records: this app is SSE-heavy, and compression sits between a stream and its client and
+    buffers. The instrument series are ~450 KB of JSON and compress to ~207 KB; the matrices
+    alone are a few KB. `Accept-Encoding` is honoured, not assumed — `/documentation` publishes
+    curl quick-starts against this API, and curl does not send it by default.
+    """
     from routers._airs_portfolio_correlation import (  # noqa: PLC0415
         compute_portfolio_correlations_async,
     )
 
-    return await compute_portfolio_correlations_async(year)
+    payload = await compute_portfolio_correlations_async(year)
+    # ⚠ THE MODEL STILL VALIDATES. Returning a `Response` skips FastAPI's `response_model` check,
+    # and this schema is what `npm run gen:types` builds the frontend's types from.
+    body = PortfolioCorrelationMatrix.model_validate(payload).model_dump_json().encode()
+    if "gzip" in (request.headers.get("accept-encoding") or "").lower():
+        return Response(content=gzip.compress(body, 1), media_type="application/json",
+                        headers={"Content-Encoding": "gzip"})
+    return Response(content=body, media_type="application/json")
 
 
 class CompositionHolding(BaseModel):
@@ -685,13 +779,52 @@ class PortfolioAllocationSlice(BaseModel):
     """
     bucket: str
     pct: float
-    # The bucket's value-weighted YTD price return (from the paired book); null when no book.
+    # The bucket's own return — its euro Result over what it was worth when the year opened.
+    # Null when no book. ⚠ A RATE ON ITS OWN DENOMINATOR, so these do NOT add across classes.
     return_pct: float | None = None
+    # ⚠ THE SAME EUROS ON THE BOOK'S DENOMINATOR, in POINTS — this one DOES add.
+    # ⚠ BUT NOT TO THE WHOLE BOOK: a position sold out during the year has no asset class, so no
+    # slice can carry it. Measured on BUS_Offensief_Dyn the classes come to +8.211pp against a
+    # book that made +5.827%, the missing -2.384pp being eight names it no longer holds
+    # (`realised.positions`). The UI states that remainder rather than letting the parts quietly
+    # miss the total.
+    contribution_pct: float | None = None
     # ⚠ How many INDIVIDUAL holdings sit in this class, counted AFTER the certificates are looked
     # through. A weight alone cannot tell "66% in one bond ETF" from "66% across sixty names" —
     # they draw the same slice and are not the same portfolio. On ToppenbergBeheer Defensief the
     # Stocks sleeve is nine lines in AIRS and ~160 real companies underneath.
     holdings: int = 0
+
+
+class HoldingSource(BaseModel):
+    """One ROUTE into a holding, and how much of the book arrives that way.
+
+    `label` is null for the book's own shares (held directly); otherwise it is the strategy whose
+    certificate was looked through to reach the instrument.
+    """
+
+    label: str | None = None
+    value_eur: float
+    # A share of the WHOLE BOOK, not of the row — so the routes add up to the holding's
+    # `weight_now_pct` and can be checked against the column next to them.
+    weight_now_pct: float
+    # What this route was worth when the window opened, and what IT returned — valued by the book
+    # that actually holds it, so a wrapped leg carries that book's own figure.
+    start_value_eur: float | None = None
+    return_pct: float | None = None
+    book: str | None = None                # the AIRS account that valued this route
+    as_of: str | None = None               # ...and the snapshot it valued it at
+    # ⚠ THAT BOOK'S OWN VALUATION — the numerator and denominator behind `return_pct`, so the card
+    # can print the division instead of asserting its result. NOT this route's slice of our book:
+    # on a split row the two diverge, and showing the slice beside the direct position's return
+    # would put two numbers on screen whose ratio is not the third.
+    book_start_value_eur: float | None = None
+    book_current_value_eur: float | None = None
+    book_income_eur: float | None = None
+    # This route's share of the OPENING value of the routes that could be valued — the weight it
+    # carried in `own_return_pct`. Null where the route had no return to contribute, which is also
+    # how the card shows a reader which legs actually spoke.
+    blend_weight_pct: float | None = None
 
 
 class BookHoldingDetail(BaseModel):
@@ -735,15 +868,84 @@ class BookHoldingDetail(BaseModel):
     name: str | None = None
     isin: str | None = None
     bucket: str
+    # ⚠ THE SECTOR CHART'S OWN BUCKET, NOT `asset_grid.sector` RAW. It runs through the identical
+    # `_buckets` the bars and the benchmark use — canonicalised ("Financial Services" -> Financials,
+    # the two Yahoo vocabularies), the ETF/asset-class leftovers ("etf", "Equity") stripped back to
+    # Unclassified, a fund folded to Unclassified because its listing says nothing about what it
+    # holds, and cash to Cash. A column that named a sector the bars have never heard of is exactly
+    # the taxonomy split this module exists to prevent, one screen apart instead of one chart apart.
+    sector: str | None = None
     currency: str | None = None
     # Which strategies put us in this instrument — the model portfolios whose certificates were
     # looked through to reach it. Empty when the position is held directly. More than one is
     # normal: NVIDIA arrives through three of ToppenbergBeheer Defensief's certificates.
     via_names: list[str] = []
+    # ⚠ HOW MUCH CAME EACH WAY — `via_names` names the routes but cannot size them, and unsized
+    # they mislead: MasterCard is EUR 50,489 of BUS_Offensief_Dyn's own shares against EUR 1,991
+    # (3.8%) through the Star certificate, and a row chipped only "Star" reads as a position the
+    # book does not hold itself. `label` is null for the book's own shares. The percentages are
+    # shares of the BOOK and SUM to `weight_now_pct` by construction — the column beside them.
+    sources: list[HoldingSource] = []
     weight_pct: float | None = None
     weight_now_pct: float = 0.0
     weight_start_pct: float | None = None
     return_pct: float | None = None
+    # ── WHAT THIS POSITION ACTUALLY MADE, in euros, and its share of the book's year.
+    # ⚠ THESE ADD UP AND THE WEIGHTS DO NOT, which is why they exist. `unrealised + realised +
+    # income = result`, and Σ `contribution_pct` over every row — these plus the sold-out positions
+    # in `realised.positions` — IS the book's own return (measured: 0.0000pp residual).
+    #
+    # ⚠ A EURO AMOUNT MAY BE SPLIT ACROSS A CERTIFICATE'S LEGS; A PERCENTAGE MAY NOT. A
+    # looked-through row's `unrealised_eur` is its share of the certificate's value change — real
+    # money, really this row's share — while its `return_pct` would be the WRAPPER's rate, which is
+    # the documented lie (NVIDIA +0.08% against its own +2.82%). That is why the result columns are
+    # in euros and the Return column stays `own_return_pct`.
+    start_value_eur: float | None = None
+    current_value_eur: float | None = None
+    unrealised_eur: float | None = None
+    # ⚠ Only on a position TRIMMED but still held. A name sold out entirely has no row here at all
+    # — it is in `realised.positions` — and a looked-through leg is never sold on its own, because
+    # AIRS trades the certificate. Null, never 0: "nothing was sold" and "the sale broke even" are
+    # different facts.
+    realised_result_eur: float | None = None
+    income_eur: float | None = None
+    result_eur: float | None = None
+    contribution_pct: float | None = None
+    # ── WHAT THE MONEY MADE, as against what the instrument did.
+    # ⚠ `return_pct` / `own_return_pct` divide by AIRS's RESTATED `Beginwaarde` — today's quantity
+    # priced in January — which erases your timing ON PURPOSE so the figure describes the stock.
+    # This one divides by the capital actually tied up, weighted by when it went in (Modified
+    # Dietz), with dividends net of withholding and anything realised on a mid-year sale already
+    # in the numerator. Measured: KLA-Tencor +55.62% as an instrument, +30.94% on the money.
+    #
+    # ⚠ NULL FOR A LEG INSIDE A CERTIFICATE, and that is not a gap to fill. AIRS trades the
+    # WRAPPER, so a stock reached through one has no buys or sells of its own — there is no "money
+    # you put in" to divide by. 24 of BUS_Offensief_Dyn's 52 rows are in this position.
+    avg_capital_eur: float | None = None
+    money_weighted_return_pct: float | None = None
+    # ⚠ WHICH of the two reasons the two fields above are blank. True = this position carries a
+    # `Tt = D` (Deponering) row, so shares arrived without a purchase and its trade quantities and
+    # its holding quantity are on different bases. False with a blank value = it is a leg inside a
+    # certificate, which has no flows of its own at all. Same `None`, different facts.
+    capital_unknown: bool = False
+    # ── THE CERTIFICATE'S OWN INVESTED-CAPITAL FIGURES, for a leg that can never have its own.
+    # ⚠⚠ THIS IS NOT THE LEG'S RETURN AND MUST NOT BE SHOWN IN THE LEG'S COLUMN. AIRS bought ONE
+    # certificate, so every leg inside it shares a single flow history: put it in the column and
+    # all 22 StarTopSelectie legs read −3.86%, which looks like 22 per-stock measurements and is
+    # one measurement copied 22 times. Shopify did not return −3.86% on the money; the wrapper did.
+    # Separate keys so the UI attributes it instead of asserting it.
+    via_holding_names: list[str] = []
+    via_holding_name: str | None = None
+    # ── "lookthrough" means `money_weighted_return_pct` was measured in `capital_book` — the child
+    # book that ACTUALLY bought this stock — rather than in the book being viewed, which only ever
+    # bought the certificate. ⚠ It is therefore the STRATEGY's return on its money, not this book's:
+    # this book's own experience depends on when IT bought the wrapper. Same compromise the Return
+    # column already makes, so the two agree instead of each being wrong differently. The euro
+    # capital is scaled to this book's slice of the child's position; the rate is not scaled.
+    capital_source: str | None = None
+    capital_book: str | None = None
+    via_money_weighted_return_pct: float | None = None
+    via_avg_capital_eur: float | None = None
     # ⚠ THE INSTRUMENT'S OWN EUR RETURN — NOT `return_pct`, AND THE DIFFERENCE IS THE WHOLE POINT.
     # `return_pct` is the book's value change, and the book does not know what NVIDIA did: it knows
     # what the CERTIFICATE holding NVIDIA did. Splitting that certificate's start and current value
@@ -769,6 +971,15 @@ class BookHoldingDetail(BaseModel):
     own_return_from: str | None = None
     own_return_estimated: bool = False
     own_return_source: str | None = None      # "airs" | "yfinance" | None
+    # ⚠ WHICH AIRS BOOK THE FIGURE CAME FROM, because it is no longer always this one. A leg held
+    # only inside a certificate is valued by the account behind that certificate — the book that
+    # actually holds the shares — and its answer can differ sharply from this book's for the same
+    # instrument, because AIRS's Beginwaarde is the year-open value OR the PURCHASE value for a
+    # position opened during the year. MasterCard: +2.14% in BUS_Offensief_Dyn (held since January)
+    # against +17.62% in StarTopSelectie's book (bought later, cheaper). Both AIRS, both correct,
+    # different questions — so the column names its source rather than leaving it inferable.
+    # None on a yfinance row.
+    own_return_book: str | None = None
     # ⚠ THE DATE THIS ROW'S RETURN IS AS-OF, PER ROW, because the two bases have different
     # clocks: an `airs` row is as-of the BOOK SNAPSHOT, a `yfinance` row as-of that instrument's
     # own last close, which can trail it by weeks. The payload's `as_of` is neither — it is the
@@ -779,6 +990,154 @@ class BookHoldingDetail(BaseModel):
     # None on a look-through row, and None when the journal has no line for the holding — "paid
     # nothing" and "we have not read the journal" are different claims.
     own_income_eur: float | None = None
+
+
+class AllocationBand(BaseModel):
+    """One cell of the allocation policy: what share this class may take in this risk profile.
+
+    ⚠ EVERY PERCENT IS OPTIONAL, AND NULL IS NOT ZERO. "No policy recorded" and "hold none of this"
+    are the same claim for a minimum and OPPOSITE claims for a default and a maximum, so an unset
+    cell comes back null rather than 0 — a zeroed grid would publish a policy nobody wrote.
+
+    ⚠ DECLARED ABOVE `ModelPortfolioAnalysis` BECAUSE THAT MODEL EMBEDS IT (the bands drawn over
+    the allocation bars). Pydantic resolves the annotation when the class is built, so a definition
+    further down the file is a NameError at import, not a forward reference.
+    """
+
+    variant: str            # a `_airs_portfolio_variant.VARIANTS` label
+    bucket: str             # a BUCKET_ORDER key — "Equity", never the "Stocks" display label
+    min_pct: float | None = None
+    default_pct: float | None = None
+    max_pct: float | None = None
+    updated_at: str | None = None
+
+
+class RealisedContributionLeg(BaseModel):
+    """One name the book SOLD this year, and what that sale contributed to the year.
+
+    ⚠ THERE IS NO WEIGHT HERE, AND ITS ABSENCE IS THE HONEST STATEMENT. A sold parcel's opening
+    value is not recoverable from AIRS's data: `proceeds − Res. YtD` yields its COST BASIS, which
+    for a parcel bought in February is real capital that did not exist on 1 January — feeding it
+    in made the opening-capital gap WORSE (EUR 55,427 → EUR 377,776 on BUS_Offensief_Dyn), and
+    partial sells make it unrecoverable in principle since AIRS restates `Beginwaarde` to the
+    CURRENT quantity. A contribution needs no weight; an allocation effect does, which is why
+    these legs may never enter the composition bars or Brinson.
+    """
+
+    fonds: str | None = None
+    realised_ytd_eur: float | None = None
+    # Share of the BOOK's year, in points, on its own opening capital.
+    contribution_pct: float | None = None
+    # ⚠ Decided by ABSENCE from the holdings, not by presence here — a sale is a realisation, not
+    # a closure, and most sold names are still held (trimmed).
+    closed_out: bool | None = None
+    # Non-zero means part of this gain was made in earlier years and is correctly NOT in the year.
+    prior_year_eur: float | None = None
+    first: str | None = None
+    last: str | None = None
+
+
+class LedgerPosition(BaseModel):
+    """One instrument's whole year — whether the book still holds it or not.
+
+    ⚠ `contribution_pct` IS THE COLUMN THAT ADDS UP. Its sum over every position IS the book's own
+    YTD (measured exactly: 5.8267 against AIRS's 5.826704, and 44.4624 against 44.462408).
+    `weight_pct` is DESCRIPTIVE — how much of the year's capital this position occupied — so
+    `contribution ≈ weight × return` holds only approximately, and the identity the table asserts
+    is the contribution one.
+
+    ⚠ `return_pct` IS ON AVERAGE CAPITAL, NOT THE INSTRUMENT'S PRICE RETURN. A name bought in June
+    shows a larger percentage on the same euros than one held all year, because it answers "how
+    hard did this money work" rather than "what did the instrument do". The Holdings table's own
+    Return column is the other question and the two will differ.
+    """
+
+    name: str
+    held: bool = False
+    # ⚠ Decided by ABSENCE from the holdings, not by having sold — most sold names are trims.
+    closed_out: bool = False
+    # Value at the year's open. For a held row, `Beginwaarde` de-restated back to the quantity
+    # actually owned then; for a sold-out row, `proceeds − Res. YtD` scaled to the shares held at
+    # the open (AIRS does not publish its parcel matching, so that split is proportional).
+    # ⚠⚠ NULLABLE, AND THE NULL IS THE POINT — a 0.0 here would be a claim that the position
+    # opened at nothing and tied up nothing, which is exactly the false statement the refusal
+    # exists to avoid. `None` means "its share count moved for a reason we do not interpret
+    # (`Tt = D`, Deponering), so no quantity arithmetic on it is trustworthy". Typed as plain
+    # floats these blanks raised a ResponseValidationError and took the whole modal down with a
+    # 500 — the right failure for a wrong type, and a reminder that a refusal has to be modelled
+    # as far as the wire, not just computed.
+    opening_eur: float | None = None
+    avg_capital_eur: float | None = None
+    weight_pct: float | None = None
+    # Why those three are blank, so the UI can say so rather than showing three unexplained dashes.
+    capital_unknown: bool = False
+    held_result_eur: float = 0.0
+    realised_result_eur: float = 0.0
+    income_eur: float = 0.0
+    result_eur: float = 0.0
+    contribution_pct: float | None = None
+    return_pct: float | None = None
+    sales: int = 0
+    first_sale: str | None = None
+    last_sale: str | None = None
+    prior_year_eur: float = 0.0
+
+
+class RealisedBlock(BaseModel):
+    """What the paired book realised on sales this year — the leg the holdings table cannot show.
+
+    ⚠ EVERY FIGURE SITS ON ONE DENOMINATOR, `basis_eur` (the book's own `beginvermogen`), so
+    `held_pct + realised_pct + sold_income_pct == book_ytd_pct` exactly. The holdings table weights
+    by each position's share of the PRICED HELD book, which is right for a class return and cannot
+    carry a sold position at all — different question, different denominator.
+
+    ⚠ `available: false` IS NOT "SOLD NOTHING". No pairing, no cached Transacties sheet, or a
+    sheet we could not read — each has its own `note`, and an empty list presented as an answer
+    would hide EUR 28,656 of realised loss on the book this was measured against.
+    """
+
+    available: bool = False
+    portefeuille: str | None = None
+    note: str | None = None
+    basis_eur: float | None = None
+    # ⚠⚠ False on a book with deposits or withdrawals: `result ÷ opening capital` is not a return
+    # there, so the percentages are withheld and only the euro amounts stand. Contributions that
+    # do not add to the figure they decompose are worse than none — each looks reasonable alone.
+    comparable: bool | None = None
+    held_pct: float | None = None
+    realised_pct: float | None = None
+    sold_income_pct: float | None = None
+    total_pct: float | None = None
+    held_eur: float | None = None
+    realised_eur: float | None = None
+    sold_income_eur: float | None = None
+    book_ytd_pct: float | None = None
+    residual_eur: float | None = None
+    reconciles: bool | None = None
+    holdings_as_of: str | None = None
+    book_as_of: str | None = None
+    dates_aligned: bool | None = None
+    residual_reason: str | None = None
+    # ⚠ WHAT THE WEIGHT-BASED VIEWS CANNOT SEE, on the ABSOLUTE result — a realised −28,656 against
+    # a held +75,164 is not "negative coverage"; the question is how much of the movement happened
+    # outside the holdings table. Measured 41% on BUS_Offensief_Dyn, which alone can reverse a
+    # sector's verdict in an attribution built only on what is left.
+    realised_share_of_result_pct: float | None = None
+    legs: list[RealisedContributionLeg] = []
+
+    # ── EVERY POSITION THE BOOK TOUCHED, held and sold, in ONE list.
+    # ⚠ `weight_pct` is AVERAGE INVESTED CAPITAL (Modified Dietz), not a 1-January snapshot — the
+    # only weight a sold position can carry, and the only one that describes a book that changed
+    # during the year. AITopSelectie's equities were worth EUR 40,319 on 1 January against a
+    # EUR 1,000,000 opening capital (it began the year in cash and deployed on 5 January), so a
+    # start-weighted table would have called it 96% cash.
+    positions: list[LedgerPosition] = []
+    avg_capital_eur: float | None = None
+    # ⚠ Σ average capital ÷ `beginvermogen`. REPORTED, never assumed to be 1: Modified Dietz
+    # ignores the price path within a position and the de-restatement is its own approximation.
+    # Measured 0.980 (BUS_Offensief) and 1.023 (AITopSelectie).
+    capital_coverage_ratio: float | None = None
+    ledger_result_eur: float | None = None
 
 
 class ModelPortfolioAnalysis(BaseModel):
@@ -807,6 +1166,18 @@ class ModelPortfolioAnalysis(BaseModel):
     # `own_return_source == "airs"` row. Null in model mode, where each row carries its own
     # `own_return_as_of` instead.
     holdings_as_of: str | None = None
+    # ⚠ WHICH BOOK IS "THIS" BOOK. Needed the moment a holding's Return could come from ANOTHER
+    # account: a leg held only inside a certificate is valued by the book behind that certificate,
+    # which reports its own `own_return_book`. Without this to compare against, either every AIRS
+    # row has to be labelled with its source or none of them can be.
+    book_portefeuille: str | None = None
+    # The risk profile AIRS's own name says this model is offered at (Offensief / Beperkt
+    # Offensief / Neutraal / Defensief), and the allocation policy recorded for it — the band each
+    # class is SUPPOSED to sit in, drawn over the bar showing where it actually sits. `variant` is
+    # null for the 8 models not offered at a profile at all, and `bands` is then empty: a product
+    # with no risk profile has no policy, and inventing one would be worse than drawing nothing.
+    variant: str | None = None
+    bands: list[AllocationBand] = []
     benchmark: str
     # Which side the portfolio bars weight by: "model" (nominal strategy weights) or "book" (the
     # paired AIRS book's actual EUR holdings). Only the WEIGHTS change — classification and the
@@ -860,6 +1231,10 @@ class ModelPortfolioAnalysis(BaseModel):
     # scanned, or it was opened as an unpaired basket. Different remedies, and none of them was
     # on screen. Null when there IS a book view.
     book_note: str | None = None
+    # ⚠ THE HALF OF THE YEAR THE HOLDINGS TABLE CANNOT SHOW. Everything above is built from
+    # positions the book STILL HOLDS; a name sold in March has no row and its result is invisible
+    # (BUS_Offensief_Dyn: EUR -28,656, 41% of the year's movement).
+    realised: RealisedBlock | None = None
     # Milliseconds per phase of this request. The modal is seconds long and the browser could
     # only ever see the total — "Loading composition…" with nothing saying which of its eight
     # loads was responsible. Logged to the console on every open.
@@ -892,6 +1267,94 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
     src = source if source in ("model", "book") else "book"
     bucket_filter = bucket if bucket in BUCKET_ORDER else None
     return await compute_portfolio_analysis_async(portfolio_id, benchmark, basis, src, bucket_filter)
+
+
+class HoldingTradeEffect(BaseModel):
+    """One decision, and what it was worth against not having made it.
+
+    ⚠ AGAINST DOING NOTHING, NOT AGAINST A PERFECT DECISION. A buy gains if the price rose after
+    it; a sell gains if the price fell after it. A lucky call and a good one produce the same
+    number — this makes no claim about skill.
+    """
+
+    datum: str | None = None
+    kind: str
+    quantity: float          # in TODAY's share basis
+    price_eur: float         # per share, EUR, today's basis
+    amount_eur: float
+    effect_eur: float
+    # The effect per euro that changed hands — i.e. how far the price moved in your favour since
+    # the decision. Says how GOOD it was, and nothing about whether it mattered.
+    move_pct: float | None = None
+    # The effect over the position's value on 1 January — how MUCH it mattered. Null where nothing
+    # was held at the open, since there is no base to be a share of.
+    effect_pp: float | None = None
+    # The trade was in a pre-split basis and had to be converted before it could be compared.
+    rescaled: bool = False
+
+
+class HoldingTiming(BaseModel):
+    """One held position's year: what doing nothing would have made, and what each trade changed.
+
+    ⚠ THE IDENTITY IS EXACT AND IS ASSERTED: `buy_hold_eur + timing_eur == actual_eur`. Measured
+    2026-08-05, residual 0.00 on every position tried. Three lines that do not add up are not a
+    decomposition, and `reconciles` is how the UI knows not to present them as one.
+
+    ⚠⚠ `actual_eur` IS THE ECONOMIC RESULT AND IS NOT THE TABLE'S `Result` COLUMN. That column is
+    AIRS's restated figure — `Huidige waarde − Beginwaarde`, where Beginwaarde prices TODAY's share
+    count at the 1 January price, valuing shares bought later at January's price rather than what
+    was paid. `restatement_eur` is the difference, named rather than left for a reader to find.
+    """
+
+    available: bool = False
+    name: str
+    portefeuille: str | None = None
+    note: str | None = None
+    qty_open: float = 0.0
+    qty_now: float = 0.0
+    price_open_eur: float = 0.0
+    price_now_eur: float = 0.0
+    buy_hold_eur: float = 0.0
+    timing_eur: float = 0.0
+    actual_eur: float = 0.0
+    # ── The same three lines in percent, over ONE base: what the position held on 1 January was
+    #    worth. Because it is one base the identity survives the division —
+    #    `buy_hold_pct + timing_pp == actual_pct`. Null where nothing was held at the open.
+    #    ⚠ `actual_pct` is NOT the `Money-weighted` column: that is Modified Dietz over the
+    #    TIME-WEIGHTED average capital, a different denominator.
+    open_value_eur: float | None = None
+    buy_hold_pct: float | None = None
+    timing_pp: float | None = None
+    actual_pct: float | None = None
+    residual_eur: float = 0.0
+    reconciles: bool = False
+    airs_result_eur: float | None = None
+    restatement_eur: float | None = None
+    income_eur: float = 0.0
+    # The proven split ratio applied to the pre-event trades, or null if there was none.
+    split_ratio: float | None = None
+    # The window every figure here is measured over — carried so a timeline can place each
+    # decision on a real axis rather than one inferred from the trades themselves.
+    period_start: str | None = None
+    period_end: str | None = None
+    trades: list[HoldingTradeEffect] = []
+
+
+@router.get("/api/airs/model-portfolios/{portfolio_id}/holding-timing",
+            response_model=HoldingTiming)
+async def airs_holding_timing(portfolio_id: int, name: str):
+    """Why one holding's `Money-weighted` return differs from its `Instrument return` — trade by trade.
+
+    `Instrument return` erases your timing on purpose (it divides by AIRS's opening value restated
+    to today's quantity, so a share bought in June is still measured from January); `Money-weighted`
+    is driven by it. This decomposes the gap: what the position you held on 1 January would have
+    made untouched, and what each buy and sell added or cost against that.
+    """
+    import asyncio  # noqa: PLC0415
+
+    from routers._airs_holding_timing import holding_timing  # noqa: PLC0415
+
+    return await asyncio.to_thread(holding_timing, portfolio_id, name)
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/risk-windows",
@@ -1678,14 +2141,74 @@ async def airs_account_set_display_name(portefeuille: str, body: AirsAccountName
 
 
 @router.post("/api/airs/portfolios/{portefeuille}/refresh")
-async def airs_portfolio_refresh(portefeuille: str):
-    """Re-scan ONE portfolio's AIRS Rendement + Vermogensoverzicht and store both — the per-row
-    Refresh on the overview table. Awaited (a few seconds: two downloads), so the client can
-    re-fetch the row on success. Serialized against the full scan via the module lock; returns
-    `{status: busy}` if a fleet refresh is in flight."""
+async def airs_portfolio_refresh(portefeuille: str, cascade: bool = True):
+    """Re-scan ONE portfolio's AIRS reports — and the books it is BUILT FROM.
+
+    ⚠ A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another
+    strategy, and everything shown through one — the looked-through holdings, their returns, the
+    attribution — is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads
+    the twelve lines it stores and leaves the instruments behind them as stale as they were.
+    Measured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.
+
+    ⚠ SO THIS IS NOT ALWAYS "a few seconds" ANY MORE — it is FIVE downloads per account in the
+    chain (Rendement, Vermogensoverzicht, Mutaties, Transacties, Model). Each one's outcome comes back in `cascaded` rather than being folded into a single
+    status, because a parent refreshed against a child that failed is not fresh. `cascade=false`
+    refreshes only the named account.
+
+    Serialized against the full scan via the module lock; returns `{status: busy}` if a fleet
+    refresh is in flight."""
     from airs_vermogen import refresh_one_portfolio  # noqa: PLC0415
 
-    return await asyncio.to_thread(refresh_one_portfolio, portefeuille)
+    return await asyncio.to_thread(refresh_one_portfolio, portefeuille, cascade)
+
+
+@router.post("/api/airs/portfolios/{portefeuille}/refresh/job")
+async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
+    """The same re-scan as above, as a CANCELLABLE JOB that reports progress.
+
+    ⚠ WHY A JOB FOR A "few seconds" REFRESH. It is not a few seconds any more: with the cascade it
+    is five downloads per account over a chain that reaches NINE (TOPS_BEOFF_BEH_DYN). Held open as
+    one POST, the caller gets a disabled button and no line moving — indistinguishable from a hung
+    one — and navigating away abandons work that carries on invisibly. As a job it reports into the
+    shared toast stack, survives the route change, and re-attaches on reload (`attachRunningJobs`).
+
+    ⚠ THE SAME `refresh_one_portfolio`, WITH A LISTENER — not a streaming copy of it. That function
+    is already the one body the fleet scan and the per-row refresh share; a second version for the
+    job path is exactly the drift its own docstring exists to prevent. The plain POST above stays
+    for scripts and for anything that wants one blocking answer.
+
+    ⚠ NO `ctx.check()` INSIDE THE SCAN. Cancellation is cooperative and the natural boundary is
+    BETWEEN accounts — but a half-cascade leaves a parent fresh against stale children, which is
+    the state this endpoint exists to avoid. So the job is not cancellable mid-chain: it reports,
+    it does not stop. `_LOCK` already refuses a second one.
+    """
+    import jobs as job_registry  # noqa: PLC0415
+
+    from airs_vermogen import refresh_one_portfolio  # noqa: PLC0415
+
+    def _work(ctx) -> str:
+        res = refresh_one_portfolio(
+            portefeuille, cascade,
+            on_step=lambda done, total, msg: ctx.progress(done, total, msg))
+        if res.get("status") == "busy":
+            # ⚠ AN ANSWER, NOT A FAILURE. The fleet scan holds the session; this is a "try again",
+            # and raising would paint it red beside the real errors.
+            return f"{portefeuille} — another AIRS refresh is running; nothing was re-read"
+        also = res.get("cascaded") or []
+        bad = [c for c in also if c.get("status") != "ok"]
+        if res.get("status") != "ok":
+            raise RuntimeError(
+                f"{portefeuille}: AIRS scan failed — {', '.join(res.get('errors') or []) or 'no reports returned'}")
+        # ⚠ A FAILED DEPENDENCY DOWNGRADES THE WHOLE SUMMARY, exactly as the inline message did:
+        # the parent's own scan succeeded, but its looked-through figures are read from a book that
+        # did not, and one word saying "refreshed" would claim a freshness it does not have.
+        return (f"{portefeuille} — {res.get('holdings_rows', 0)} holdings as of "
+                f"{res.get('as_of') or 'today'}"
+                + (f" · also refreshed {len(also)} book(s) it is built from" if also else '')
+                + (f" — {len(bad)} FAILED, see the console" if bad else ''))
+
+    job = job_registry.start("airs.portfolio.refresh", portefeuille, _work)
+    return {"job_id": job.id, "label": portefeuille}
 
 
 @router.get("/api/airs/vermogen/status")
@@ -2202,6 +2725,188 @@ async def airs_account_isins(portefeuille: str):
     return await resolve_account_isins_async(portefeuille)
 
 
+class AirsAccountTransactions(BaseModel):
+    """One account's AIRS Transacties, as the SHEET — no schema imposed on it.
+
+    ⚠ THE COLUMNS ARE DATA HERE, NOT A CONTRACT. `rapport_types=TRANS` returns an XLS (probed
+    2026-07-23) and no column of it has ever been measured, so this endpoint reports the report:
+    `columns` in the sheet's own order, `kinds` giving each one's pandas-inferred type, and `rows`
+    keyed by column name. Naming fields against a sheet nobody has read is how `Bedrag` gets
+    charted where `Bedrag eur` belonged — one word apart, and the wrong one is a plausible number
+    rather than an error. See `airs_transacties` for the full reasoning and for what replaces this
+    once the sheet has been seen.
+
+    ⚠ `source` AND `note` ARE THE ANSWER'S OWN PROVENANCE. An empty `rows` means one of three very
+    different things — the book did not trade, AIRS has no such report for it, or we could not ask
+    — and an empty table with nothing beside it asserts the first.
+    """
+
+    portefeuille: str
+    datum_van: str
+    datum_tot: str
+    columns: list[str] = []
+    # column -> 'number' | 'date' | 'text'
+    kinds: dict[str, str] = {}
+    # ⚠ Values are float | str | null and NEVER NaN — a blank Excel cell is float NaN, which is not
+    # JSON and which `str()` renders as the TRUTHY string "nan".
+    rows: list[dict[str, float | str | None]] = []
+    # When the stored snapshot was fetched. Null on a live answer — the UI says "cached" only when
+    # there is a date to show for it.
+    cached_at: str | None = None
+    # 'cache' | 'live' | 'unavailable'
+    source: str
+    note: str | None = None
+
+
+@router.get("/api/airs/accounts/{portefeuille}/transactions",
+            response_model=AirsAccountTransactions)
+async def airs_account_transactions(portefeuille: str, refresh: bool = False):
+    """What this book BOUGHT and SOLD this year — the AIRS Transacties report.
+
+    The three reports already stored say what a book holds (VOLK), what it earned (MUT) and what
+    its strategy asks for (MODEL). None says what it DID, so a position that appeared mid-year, one
+    sold out entirely, and a weight that drifted purely on price all look the same from outside.
+
+    Served from the stored snapshot; `refresh=true` (or a stale window, or nothing stored) goes out
+    to AIRS. A live fetch is seconds behind a headless session, which is why the panel is behind a
+    click and the answer says whether it was cached.
+    """
+    import asyncio  # noqa: PLC0415
+
+    from routers._airs_transacties import account_transactions  # noqa: PLC0415
+
+    return await asyncio.to_thread(account_transactions, portefeuille, refresh)
+
+
+class AirsRealisedLeg(BaseModel):
+    """One instrument's realised result this year, summed over its sales.
+
+    ⚠ `closed_out` IS DECIDED BY ABSENCE FROM THE HOLDINGS, NOT BY PRESENCE HERE. A sale is a
+    REALISATION, not a closure — Synopsys was trimmed on 2026-01-22 and is still held — so a name
+    can legitimately appear both here and in the positions table above.
+    """
+
+    fonds: str
+    sales: int = 0
+    quantity: float = 0.0
+    proceeds_eur: float = 0.0
+    cost_eur: float = 0.0
+    # ⚠ AIRS's own `Res. YtD`, never `proceeds − cost`: the two differ by `prior_year_eur` on any
+    # position carried across a year end, and they coincide on every book bought entirely this
+    # year — so the account this was validated on could not have told them apart.
+    realised_ytd_eur: float = 0.0
+    prior_year_eur: float = 0.0
+    first: str | None = None
+    last: str | None = None
+    closed_out: bool = False
+
+
+class AirsAccountReconciliation(BaseModel):
+    """The book's own YTD, lined up against what its positions — held AND sold — explain.
+
+    ⚠ THE TWO NUMBERS ARE ALREADY ON SCREEN A FEW LINES APART AND THEY DISAGREE. Measured
+    2026-08-05 over 39 accounts, **23 disagree by more than 1pp** (BUS_FTS_BEPOFF_DYN: the book
+    made -4.57%, its open positions +3.27pp more than that). Both are correct answers to different
+    questions, and a reader given both with no arithmetic between them cannot arbitrate.
+
+    ⚠ EVERY COMPONENT IS A EURO AMOUNT. The two percentages are measured on different opening
+    capitals, so they do not subtract into anything meaningful — `gap_pp` is reported for
+    orientation and is deliberately named in POINTS, never divided into.
+    """
+
+    portefeuille: str
+    as_of: str | None = None
+    # The ATT period the book side covers, and how many monthly rows it spans.
+    periode: str | None = None
+    months: int | None = None
+
+    # ── The book's own year, from AIRS. Authoritative; never recomputed here.
+    book_return_pct: float | None = None
+    # ⚠ `beleggingsresultaat`, NOT end − begin: the difference is deposits, and a book that took
+    # EUR 1m mid-year would report the deposit as profit.
+    book_result_eur: float | None = None
+    book_start_eur: float | None = None
+    book_end_eur: float | None = None
+    deposits_eur: float = 0.0
+    withdrawals_eur: float = 0.0
+    costs_eur: float = 0.0
+    book_reconciles: bool | None = None
+
+    # ── What the positions still held explain, on the positions table's own basis.
+    open_return_pct: float | None = None
+    open_result_eur: float | None = None
+    open_start_eur: float | None = None
+    open_end_eur: float | None = None
+    open_priced: int = 0
+    open_unpriced: int = 0
+
+    # ── Measured, so it leaves the residual: income paid by funds no longer held.
+    sold_income_eur: float = 0.0
+    sold_funds: list[str] = []
+
+    # ── What the sales realised this year, from the cached Transacties sheet.
+    # ⚠ None is NOT zero. No sheet cached means the realised result is UNKNOWN; publishing 0 would
+    # hand the open positions' figure to the reader as the year's total.
+    realised_ytd_eur: float | None = None
+    realised_names: int = 0
+    realised_note: str | None = None
+    realised: list[AirsRealisedLeg] = []
+    buys_eur: float | None = None
+    buy_count: int | None = None
+
+    # ⚠ THE NET OF TWO OPPOSITE EFFECTS, and labelled as such rather than as "closed positions":
+    # a position sold outright leaves opening value in the book with no row to carry it, while
+    # AIRS restating `Beginwaarde` to the CURRENT quantity inflates the rows for anything bought
+    # into during the year. On AITopSelectie the net is NEGATIVE.
+    start_gap_eur: float | None = None
+
+    # ── The year, built from the positions: held + realised + income from names no longer held.
+    total_result_eur: float | None = None
+    # ⚠⚠ ONLY ON A FLOW-FREE BOOK. `result ÷ opening capital` reproduces `cumulatief_rendement`
+    # exactly (measured: 38.729379% against AIRS's 38.729375%) when nothing was paid in or out,
+    # and is undefined the moment something was — AzTopSelectie opened at ZERO and took EUR 1m.
+    # `return_basis` says which case the reader is in: 'opening_capital' | 'flows' | 'unavailable'.
+    total_return_pct: float | None = None
+    return_basis: str | None = None
+    # ⚠ ASSERTED, NEVER ASSUMED — a total never set against the book's own is an assertion, not a
+    # reconciliation. Measured residual EUR 0.04 on a EUR 387,293.75 year.
+    residual_vs_book_eur: float | None = None
+    # ⚠ None is UNKNOWN, not False. The held leg is the VOLK holdings snapshot and the result is
+    # the ATT report — two downloads, routinely a day apart — and one day of market movement on a
+    # EUR 1.4m book reads as tens of thousands of "unexplained" residual. See `dates_aligned`.
+    reconciles: bool | None = None
+    holdings_as_of: str | None = None
+    book_as_of: str | None = None
+    dates_aligned: bool | None = None
+    residual_reason: str | None = None
+
+    # The gap BEFORE the sales are counted, kept so the reader can see how much they closed.
+    # ⚠ NOT distributed across the components above.
+    unexplained_eur: float | None = None
+    gap_pp: float | None = None
+    # Cached Transacties rows. None = never fetched.
+    transaction_rows: int | None = None
+    # Transaction types the parser does not interpret, with counts (measured: {'D': 1}, a
+    # quantity-only row carrying no money). Counted rather than assumed harmless.
+    unknown_transaction_types: dict[str, int] = {}
+
+
+@router.get("/api/airs/accounts/{portefeuille}/return-reconciliation",
+            response_model=AirsAccountReconciliation)
+async def airs_account_return_reconciliation(portefeuille: str):
+    """Why this book's own YTD is not the YTD its open positions add up to.
+
+    Reads both sides from the loaders the other panels already use — `_year_perf` for the book,
+    `account_holdings` for the positions — so the reconciliation cannot quietly disagree with
+    either of the figures it is reconciling.
+    """
+    import asyncio  # noqa: PLC0415
+
+    from routers._airs_return_reconciliation import account_return_reconciliation  # noqa: PLC0415
+
+    return await asyncio.to_thread(account_return_reconciliation, portefeuille)
+
+
 @router.get("/api/airs/accounts/{portefeuille}/linkable", response_model=LinkableContext)
 async def airs_account_linkable_portfolios(portefeuille: str):
     """What an ACCOUNT's holdings may be linked to — the same dropdown the model-portfolio
@@ -2352,3 +3057,55 @@ async def clear_airs_account_model_link(portefeuille: str):
     from routers._airs_account_links import clear_account_link_async  # noqa: PLC0415
 
     return await clear_account_link_async(portefeuille)
+
+
+class AllocationBandGrid(BaseModel):
+    """The whole policy, always complete: every profile × every invested class.
+
+    `variants` and `buckets` ship with it so the editor renders the grid the SERVER knows about
+    rather than a copy of it — add a fifth risk profile to `VARIANTS` and the editor grows a column
+    without a frontend change, which is the only way the two cannot drift.
+    """
+
+    variants: list[str]
+    buckets: list[str]
+    cells: list[AllocationBand]
+
+
+@router.get("/api/airs/allocation-bands", response_model=AllocationBandGrid)
+async def airs_allocation_bands():
+    """The allocation policy — all sixteen cells, nulls where nothing is set."""
+    from routers._airs_allocation_bands import POLICY_BUCKETS, load_bands  # noqa: PLC0415
+    from routers._airs_portfolio_variant import VARIANTS  # noqa: PLC0415
+
+    cells = await asyncio.to_thread(load_bands)
+    return {"variants": list(VARIANTS), "buckets": list(POLICY_BUCKETS), "cells": cells}
+
+
+@router.put("/api/airs/allocation-bands", response_model=AllocationBandGrid)
+async def airs_set_allocation_bands(body: list[AllocationBand]):
+    """Apply these cells to the policy. Admin-only (the API gate refuses a non-admin write).
+
+    ⚠ PARTIAL BY DESIGN — send only the cells you changed. A cell that IS sent and is empty means
+    "clear this row"; a cell that is not sent means nothing at all. Sending the full grid from a
+    stale view therefore deletes everything that changed since it loaded, which is not theoretical:
+    it wiped 15 of 16 seeded rows on 2026-08-04, silently.
+
+    ⚠ VALIDATED IN FULL BEFORE ANYTHING IS WRITTEN. A save is ONE intent, so a bad cell rejects the
+    whole submission with a sentence naming it — landing the first eight and refusing the ninth
+    would leave a policy half-updated while the reader believes all of it took.
+
+    Returns the WHOLE grid as stored, so the editor renders what the database now holds — including
+    any cell somebody else changed while it was open — rather than what it hoped it sent.
+    """
+    from routers._airs_allocation_bands import POLICY_BUCKETS, load_bands, save_bands  # noqa: PLC0415
+    from routers._airs_portfolio_variant import VARIANTS  # noqa: PLC0415
+
+    def _run() -> dict:
+        try:
+            save_bands([c.model_dump() for c in body])
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        return {"variants": list(VARIANTS), "buckets": list(POLICY_BUCKETS), "cells": load_bands()}
+
+    return await asyncio.to_thread(_run)

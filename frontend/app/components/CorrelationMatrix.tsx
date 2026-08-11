@@ -6,6 +6,7 @@ import { apiFetch } from '../../lib/apiFetch';
 import { trace, traceEmpty, traceError } from '../../lib/debugTrace';
 import { API_URL } from '../../lib/apiUrl';
 import type { PortfolioCorrelationMatrix } from '../../lib/types/api';
+import CorrelationInstruments from './CorrelationInstruments';
 import { sliceMatrix } from './correlationFilter';
 import { VARIANT_FILTERS } from './portfolioVariants';
 import type { Variant } from './portfolioVariants';
@@ -249,18 +250,22 @@ export default function CorrelationMatrix() {
     // whatever portfolio count crosses the new number next; `isolation: isolate` creates a
     // stacking context so every z-index in here is compared only against its siblings, and the
     // table can rank its own headers however it likes without competing with the page.
+    //
+    // ⚠ THE INSTRUMENTS TABLE IS A SIBLING SECTION, NOT A CHILD OF THIS ONE — it must not inherit
+    // either the z-index band above or the horizontal `overflow-auto` the matrix scrolls in.
+    <div className="space-y-4">
     <section className="isolate bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h3 className="text-sm font-semibold text-fg-strong">Portfolio correlations</h3>
-          <p className="text-[11px] text-fg-faint mt-0.5"
+          <p className="text-[12px] text-fg-faint mt-0.5"
             title="Computed from the same daily EUR return series the portfolios' YTD is read off.">
             Pairwise correlation of daily EUR returns
             {data ? ` · ${labels.length}` : ''}. Blue = diverging, amber = moving together.
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">
-        <div className="flex rounded-lg border border-neutral-800/40 overflow-hidden text-[11px]"
+        <div className="flex rounded-lg border border-neutral-800/40 overflow-hidden text-[12px]"
           title="Filter to ONE risk profile so the rows are comparable — a correlation between an Offensief and a Defensief model mostly measures the risk gap, not the strategies. Read off AIRS's own name, so renaming a model cannot change its profile. The 8 models not offered at a profile (the themed TopSelectie and WTS funds, Risicodragend/Risicomijdend) appear only under All.">
           {VARIANT_FILTERS.map((v) => (
             <button key={v.key} onClick={() => { setVariant(v.key); setHover(null); }}
@@ -271,7 +276,7 @@ export default function CorrelationMatrix() {
             </button>
           ))}
         </div>
-        <div className="flex rounded-lg border border-neutral-800/40 overflow-hidden text-[11px]">
+        <div className="flex rounded-lg border border-neutral-800/40 overflow-hidden text-[12px]">
           {WINDOWS.map((w) => (
             <button key={w.key} onClick={() => { setWin(w.key); setHover(null); }}
               className={`px-3 py-1 transition-colors ${
@@ -304,7 +309,7 @@ export default function CorrelationMatrix() {
       {!loading && !error && data && labels.length > 0 && (
         <>
           {/* Hover readout — one pair at a time, so cells stay color-only at this density. */}
-          <div className="text-[11px] min-h-[1.5rem] flex items-center gap-2">
+          <div className="text-[12px] min-h-[1.5rem] flex items-center gap-2">
             {readout ? (
               readout.self ? (
                 <span className="text-fg-soft"><span className="font-medium text-fg">{readout.a}</span> — self</span>
@@ -329,7 +334,7 @@ export default function CorrelationMatrix() {
           </div>
 
           {/* Legend */}
-          <div className="flex items-center gap-x-4 gap-y-2 text-[10px] text-fg-faint flex-wrap">
+          <div className="flex items-center gap-x-4 gap-y-2 text-[11px] text-fg-faint flex-wrap">
             <div className="inline-flex items-center gap-2">
               <span className="text-accent-400">−1 perfect negative correlation</span>
               <div className="flex flex-col items-stretch gap-0.5">
@@ -362,7 +367,7 @@ export default function CorrelationMatrix() {
                 centred flex child clips its own leading edge once it outgrows the box — auto
                 margins just resolve to 0, so a too-wide matrix falls back to left-aligned and
                 scrollable instead of losing its first column. */}
-            <table className="border-separate text-[10px] mx-auto" style={{ borderSpacing: 0 }}>
+            <table className="border-separate text-[11px] mx-auto" style={{ borderSpacing: 0 }}>
               <thead>
                 <tr>
                   {/* Above every diagonal label: the column headers scroll left UNDER this
@@ -432,7 +437,7 @@ export default function CorrelationMatrix() {
             </table>
           </div>
 
-          <p className="text-[10px] text-fg-faint leading-relaxed">
+          <p className="text-[11px] text-fg-faint leading-relaxed">
             Pearson correlation of daily EUR returns, pairwise-complete: each pair uses only the
             trading days both portfolios have a return, so different inception dates shorten the
             overlap rather than inject zeros. A cell needs at least {data.min_overlap_days} common
@@ -442,5 +447,8 @@ export default function CorrelationMatrix() {
         </>
       )}
     </section>
+
+    {data && <CorrelationInstruments data={data} win={win} />}
+    </div>
   );
 }

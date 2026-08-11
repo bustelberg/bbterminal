@@ -137,11 +137,24 @@ SHIPPED_FIXTURE = "snapshot_829"
 # Only this one has a bar on the signal cutoff (see module docstring).
 TRADING_DAY_FIXTURE = "trading_day"
 
-pytestmark = pytest.mark.skipif(
-    not all(p.exists() for p in FIXTURES.values()),
-    reason=f"golden fixtures missing from {_FIXTURE_DIR} "
-           "(regenerate with scripts/capture_golden_rebalance.py)",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        not all(p.exists() for p in FIXTURES.values()),
+        reason=f"golden fixtures missing from {_FIXTURE_DIR} "
+               "(regenerate with scripts/capture_golden_rebalance.py)",
+    ),
+    # ⚠ TIERED `slow`, WHICH IS A STATEMENT ABOUT COST AND NOTHING ELSE — this module is the
+    # suite's critical path at ~20s, and it is 20s of `run_current_portfolio` genuinely running
+    # over 1,479 companies (profiled 2026-08-03: loading both 6.8MB .npz fixtures is 0.24s of
+    # that; the rest is the engine). There is no I/O to remove and no assertion here has a
+    # tolerance, so the only way to make it cheaper is to test less.
+    #
+    # ⚠ IT IS STILL THE ONLY TEST THAT CATCHES SECTOR-AGGREGATION `mean()` -> `median()` — all
+    # 2,076 others pass under that mutation. `-m fast` therefore runs WITHOUT the one check that
+    # covers the engine end to end, which is exactly why the tier exists to speed the keystroke
+    # loop and CI still runs everything. Never let a green fast tier stand in for this.
+    pytest.mark.slow,
+]
 
 # The engine returns full float precision; `current_picks_snapshot.holdings`
 # persists `weight` rounded to 4dp. Only the shipped-comparison needs this.

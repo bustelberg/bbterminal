@@ -33,6 +33,24 @@ from __future__ import annotations
 import pytest
 
 
+def pytest_collection_modifyitems(items):
+    """Give every unmarked test the `fast` tier.
+
+    ⚠ THE DEFAULT IS `fast`, NOT "UNTIERED", AND THAT DIRECTION IS THE WHOLE POINT. Requiring an
+    explicit `@pytest.mark.fast` on 2,100 tests would mean a new test written without one is
+    silently absent from the loop that is supposed to be everybody's default — a test that never
+    runs, which is worse than no test because it reads as coverage. Inverting it makes the failure
+    mode loud instead: forget to mark a slow test and the fast tier gets slower, which somebody
+    notices the same day.
+
+    A test opts OUT by carrying `slow` (see pyproject's `markers` for what earns it) — so
+    `-m fast` and `-m "not fast"` partition the suite with nothing falling between them.
+    """
+    for item in items:
+        if not any(item.get_closest_marker(m) for m in ("fast", "integration", "slow")):
+            item.add_marker(pytest.mark.fast)
+
+
 @pytest.fixture(autouse=True)
 def _no_live_supabase(monkeypatch, request):
     """Turn "reaches the database" from an environment-dependent pass into a hard failure."""
@@ -49,3 +67,35 @@ def _no_live_supabase(monkeypatch, request):
         )
 
     monkeypatch.setattr(deps, "create_client", _refuse)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_copy(monkeypatch):
+    """⚠⚠ THE COPY TRANSPORT IS A SECOND DOOR TO THE SAME DATABASE, AND THE GUARD ABOVE CANNOT SEE
+    IT. `common.pg._run_copy` opens its own `psycopg.connect(SUPABASE_DB_URL)` — it never goes
+    through `deps.create_client`, so patching that chokepoint fences PostgREST and leaves direct
+    Postgres wide open.
+
+    ⚠ AND IT IS QUIETER THAN THE HOLE IT REOPENED. `_run_copy` catches `Exception` by design (any
+    failure → fall back, never raise), so a test reaching the database this way cannot even fail
+    loudly; it just returns whatever that database happens to hold. Measured 2026-08-10: three
+    readers grew a COPY fast path in front of a PostgREST read the tests fake, and the fast path
+    won — `_bulk_blend_rows` asked the live database for company ids 1 and 2, got nothing, and
+    returned an authoritative empty list while the fake's rows sat unread; `_fx_to_eur` came back
+    with 256 real days of 2024 against the fixture's 200. Same class of bug as the incident in the
+    module docstring, one layer down, and with the pass/fail inverted: these went RED on the
+    developer machine (which has `SUPABASE_DB_URL`) and stayed green in CI (which does not).
+
+    The fix is to give every test CI's environment: no connection string, therefore
+    `copy_path_enabled()` is False and `_run_copy` returns None, therefore each caller takes the
+    PostgREST fallback that the fakes actually serve. Patching `_db_url` rather than `_run_copy`
+    keeps those two answers consistent — code that branches on `copy_path_enabled()` must not be
+    told the path is available and then handed None.
+
+    ⚠ THIS IS NOT "COPY IS UNTESTED". A test that wants the COPY path monkeypatches `_run_copy` (or
+    `_db_url`) with its own fixture bytes; that patch is applied after this autouse one and wins.
+    What is refused is the *unconfigured, accidental* use — reaching a real server.
+    """
+    import common.pg as pg  # noqa: PLC0415
+
+    monkeypatch.setattr(pg, "_db_url", lambda: None)

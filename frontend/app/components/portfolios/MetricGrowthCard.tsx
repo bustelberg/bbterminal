@@ -13,7 +13,8 @@ import InfoTip from '../InfoTip';
 import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
 import HoldingsIngestPanel from './HoldingsIngestPanel';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
-import { paddedLogDomain } from './marginData';
+import { paddedLogDomain , xToPeriod } from './marginData';
+import { benchNote, rebaseSeries } from './benchSeries';
 
 /**
  * One "Long Equity" growth card: a metric per fiscal year on a LOG axis with an exponential-trend
@@ -38,6 +39,40 @@ export type MetricCfg = {
 
 type MetricRow = { metric_code: string; target_date: string; numeric_value: number | null };
 
+/**
+ * One metric's points out of a metrics blob — the company's, or an index's.
+ *
+ * ⚠ THE X UNIT IS ALWAYS A YEAR — WHOLE ON ANNUAL, FRACTIONAL ON QUARTERLY — AND THAT IS WHAT
+ * KEEPS THE CAGR A **C-A-GR**. `logLinearFit` regresses ln(value) on this axis, so its slope is
+ * "per x unit". Bucketing quarterly points 0,1,2,3… would make the slope per QUARTER and the card
+ * would print a quarterly growth rate under a label that says annual — a number ~4x too small,
+ * entirely plausible, and wrong on every one of the three growth cards at once.
+ *
+ * A TTM point dated 2026-03-31 sits at 2026.25, so four of them span exactly 1.0 on the axis and
+ * the fitted slope is per year by construction. R² is unaffected (it is scale-free).
+ *
+ * ⚠ ONE EXTRACTION, BOTH LINES. The benchmark overlay runs through this same function, so the two
+ * series on a chart cannot have been built from different rules about which row wins a period.
+ */
+function extractPoints(rows: MetricRow[], codes: string[], cadence: 'annual' | 'quarterly') {
+  const want = new Set(codes);
+  const byX = new Map<number, { date: string; value: number }>();
+  for (const m of rows) {
+    if (!want.has(m.metric_code) || m.numeric_value == null) continue;
+    const d = String(m.target_date);
+    const y = parseInt(d.slice(0, 4), 10);
+    if (y < 2015) continue;   // charts start from 2015, like the holdings/margin views
+    // Annual rows keep one point per calendar year (the latest); TTM rows are already one per
+    // quarter, so each gets its own x and nothing collapses.
+    const x = cadence === 'quarterly'
+      ? y + (Math.ceil(parseInt(d.slice(5, 7), 10) / 3) - 1) / 4
+      : y;
+    const cur = byX.get(x);
+    if (!cur || d > cur.date) byX.set(x, { date: d, value: m.numeric_value });
+  }
+  return [...byX.entries()].map(([year, v]) => ({ year, value: v.value })).sort((a, b) => a.year - b.year);
+}
+
 export function Stat({ label, value, tone, color, info }: {
   label: string; value: string; tone?: string; color?: string; info?: React.ReactNode;
 }) {
@@ -45,7 +80,7 @@ export function Stat({ label, value, tone, color, info }: {
   return (
     <div className="rounded-lg border border-neutral-800/40 bg-inset px-3 py-2 min-w-[6.5rem]"
       style={color ? { borderLeft: `3px solid ${color}` } : undefined}>
-      <div className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-fg-muted">{label}{info}</div>
+      <div className="flex items-center gap-1 text-[12px] uppercase tracking-wide text-fg-muted">{label}{info}</div>
       <div className={`font-mono text-xl font-semibold leading-tight ${color ? '' : (tone ?? 'text-fg-strong')}`}
         style={color ? { color } : undefined}>{value}</div>
     </div>
@@ -54,9 +89,13 @@ export function Stat({ label, value, tone, color, info }: {
 
 export default function MetricGrowthCard({
   cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin, onIngested,
-  blendNotes, onReloadMetrics,
+  blendNotes, onReloadMetrics, cadence = 'annual', benchMetrics, benchLabel, benchErr,
 }: {
   cfg: MetricCfg;
+  /** 'annual' = one point per fiscal year. 'quarterly' = one TRAILING-TWELVE-MONTH point per
+   *  quarter — quarterly frequency, annual scope, so it is comparable with the annual line and
+   *  free of the seasonality raw quarters would carry. */
+  cadence?: 'annual' | 'quarterly';
   metrics: MetricRow[] | null;   // null = still loading (the tab's company fetch)
   isAgg: boolean;
   currency?: string | null;
@@ -74,6 +113,16 @@ export default function MetricGrowthCard({
   // drill-down instead, so this is left undefined there.
   ingestIsin?: string;
   onIngested?: () => void;
+  /**
+   * The selected index blended the SAME way this card's own series is — one
+   * `fundamental-blend-metrics` call in the tab, every code in it, so all three growth cards read
+   * one fetch exactly as they read the company's own. Null = no benchmark selected.
+   */
+  benchMetrics?: MetricRow[] | null;
+  benchLabel?: string | null;
+  /** Why the blend failed, if it did — so a missing overlay states its reason instead of looking
+   *  like an index that happens to track this book exactly. See `benchNote`. */
+  benchErr?: string | null;
 }) {
   const [showHoldings, setShowHoldings] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -116,19 +165,54 @@ export default function MetricGrowthCard({
     }
   };
 
-  const points = useMemo(() => {
-    const rows = metrics ?? [];
-    const codes = new Set(cfg.codes);
-    const byYear = new Map<number, { date: string; value: number }>();
-    for (const m of rows) {
-      if (!codes.has(m.metric_code) || m.numeric_value == null) continue;
-      const y = parseInt(String(m.target_date).slice(0, 4), 10);
-      if (y < 2015) continue;   // charts start from 2015, like the holdings/margin views
-      const cur = byYear.get(y);
-      if (!cur || m.target_date > cur.date) byYear.set(y, { date: m.target_date, value: m.numeric_value });
-    }
-    return [...byYear.entries()].map(([year, v]) => ({ year, value: v.value })).sort((a, b) => a.year - b.year);
-  }, [metrics, cfg]);
+  /** See `extractPoints` — the x unit, and why it has to be a year. */
+  const points = useMemo(
+    () => extractPoints(metrics ?? [], cfg.codes, cadence), [metrics, cfg, cadence]);
+
+  /** The index's own series, through the IDENTICAL extraction, and left RAW.
+   *
+   *  ⚠ NO LONGER SCALED ONTO OURS. It used to go through `rebaseOnto`, which stretched the index
+   *  to meet this company's absolute level; now `rebaseSeries` indexes BOTH lines to 100 on their
+   *  shared anchor, so pre-scaling here would transform the benchmark twice and the second scale
+   *  would silently cancel the first. `rebaseOnto` still exists for callers that plot an absolute
+   *  axis. A ratio card needs neither: both lines are already the same unit (%). */
+  const benchByX = useMemo(() => {
+    if (!benchMetrics) return null;
+    const raw = new Map<number, number | null>(
+      extractPoints(benchMetrics, cfg.codes, cadence).map((p) => [p.year, p.value]));
+    return raw.size ? raw : null;
+  }, [benchMetrics, cfg, cadence]);
+
+  /**
+   * ⚠⚠ THE AXIS IS INDEXED, THE HOVER IS ACTUAL. A level card plots BOTH lines rebased to 100 at
+   * the first year they share, so a company and an index are compared on their growth — the only
+   * thing they have in common — while the tooltip still reads out the real number, so the level is
+   * never lost. That is what lets `Shares outstanding` be both "is this company diluting?" and
+   * "15,004.7M shares", which the absolute-only axis could not do against a benchmark.
+   *
+   * ⚠ A RATIO IS NEVER REBASED. Margins and ROIC are already the same unit on both lines; indexing
+   * a percentage to 100 would destroy the one axis that is directly readable.
+   *
+   * ⚠ AND IT FALLS BACK TO ABSOLUTE RATHER THAN GUESSING. `rebaseSeries` refuses when there is no
+   * shared year with both values positive; the raw series is still true, just not comparable, so
+   * that is what gets drawn (and `indexed` says so, for the axis label and the tooltip).
+   */
+  const { indexed, ownByX, benchRawByX } = useMemo(() => {
+    const own = new Map(points.map((p) => [p.year, p.value as number | null]));
+    if (isRatio) return { indexed: null, ownByX: own, benchRawByX: benchByX };
+    return { indexed: rebaseSeries(own, benchByX), ownByX: own, benchRawByX: benchByX };
+  }, [points, isRatio, benchByX]);
+
+  /** ⚠ THE FOURTH ABSENCE, WHICH ONLY THE LEVEL CARDS HAVE: the two series may share no year where
+   *  both values are positive, and `rebaseSeries` then refuses rather than inventing a base. The
+   *  card still draws — in absolute units, which is the honest fallback — so this says which basis
+   *  is on screen instead of reporting an empty series. */
+  const note = benchLabel
+    ? benchNote({ universe: benchLabel, cadence }, benchMetrics, benchErr ?? null, benchByX)
+      ?? (benchByX && !isRatio && !indexed
+        ? `${benchLabel}: no year in common with a positive value — showing absolute, not indexed`
+        : null)
+    : null;
 
   // Present only when the blend saw this metric and still drew nothing — the one case where
   // "not ingested" would be false.
@@ -140,18 +224,53 @@ export default function MetricGrowthCard({
 
   const chartData = useMemo(() => {
     const trendByYear = new Map(fit.trend.map((t) => [t.year, t.value]));
-    return points.map((p) => ({
-      year: p.year,
-      // A log axis can't plot ≤ 0; a linear ratio can (ROIC can be negative), so keep it.
-      value: isRatio ? p.value : (p.value > 0 ? p.value : null),
-      trend: isRatio ? null : (trendByYear.get(p.year) ?? null),
-    }));
-  }, [points, fit, isRatio]);
+    // What the LINES use: the indexed maps when we could anchor, the raw ones when we could not.
+    const plotOwn = indexed?.own ?? ownByX;
+    const plotBench = indexed ? indexed.bench : benchRawByX;
+    // The trend is fitted on the RAW series, so it has to ride the same multiplier as the line it
+    // belongs to — otherwise the dashed fit floats off its own data.
+    const trendScale = indexed ? 100 / ((ownByX.get(indexed.anchor) as number)) : 1;
+    // ⚠ The x UNION, not our own periods: an index reaches back further than most books, and
+    // clipping it to ours would redraw the benchmark's history whenever a holding changed.
+    const xs = new Set<number>(points.map((p) => p.year));
+    if (plotBench) for (const x of plotBench.keys()) xs.add(x);
+    return [...xs].sort((a, b) => a - b).map((year) => {
+      const v = plotOwn.get(year) ?? null;
+      const b = plotBench ? plotBench.get(year) ?? null : null;
+      const t = trendByYear.get(year);
+      return {
+        year,
+        // A log axis can't plot ≤ 0; a linear ratio can (ROIC can be negative), so keep it.
+        value: isRatio ? v : (v != null && v > 0 ? v : null),
+        trend: isRatio ? null : (t != null ? t * trendScale : null),
+        bench: isRatio ? b : (b != null && b > 0 ? b : null),
+        // Carried for the tooltip only — never plotted.
+        //
+        // ⚠ ONLY A SINGLE COMPANY HAS ONE. A portfolio's series is ALREADY a blended index from
+        // the backend (`currency: null` — there is no portfolio revenue), so its "raw" is just a
+        // differently-anchored index; printing it beside ours would show two index numbers and
+        // call one of them actual. Null here means the tooltip shows the index alone, which is
+        // the whole truth available. The benchmark is always a blend, so it never has one.
+        rawValue: isAgg ? null : (ownByX.get(year) ?? null),
+      };
+    });
+  }, [points, fit, isRatio, indexed, ownByX, benchRawByX, isAgg]);
 
   // Log axis: pad the domain (multiplicatively) so the min/max points + trend endpoints don't clip.
   const logDomain = useMemo(() =>
-    paddedLogDomain(chartData.flatMap((d) => [d.value, d.trend]).filter((v): v is number => v != null)),
+    paddedLogDomain(chartData.flatMap((d) => [d.value, d.trend, d.bench]).filter((v): v is number => v != null)),
   [chartData]);
+
+  /**
+   * ⚠⚠ AN INDEX IS A BARE NUMBER — 100, NEVER "100M" AND NEVER "EUR 100". `fmt` below is
+   * UNIT-AWARE, and once the axis became an index it started dressing index values as the
+   * quantity they were derived from: revenue and shares (unit `millions`/`shares`) fell through
+   * to the B/T/M scaler and rendered an index of 100 as "100M", while `per_share` escaped only by
+   * accident of having its own branch. A reader has no way to tell that apart from a real amount.
+   * So anything ON the indexed axis goes through here instead, and the currency prefix is dropped
+   * with it — the actual amounts live in the hover, which is the point of the split.
+   */
+  const fmtIndex = (v: number | null | undefined, dp = 0) => (v == null ? '—' : v.toFixed(dp));
 
   const fmt = (v: number | null | undefined) => {
     if (v == null) return '—';
@@ -179,8 +298,8 @@ export default function MetricGrowthCard({
         // would send the reader to spend GuruFocus quota on data that is already in the database.
         // State the fact and the reason, and open the per-holding table instead.
         <div className="py-16 flex flex-col items-center gap-2 text-center px-2">
-          <p className="text-[11px] text-fg-soft">{reportingLine(blendNote, cfg.noun)}.</p>
-          <p className="text-[11px] text-fg-faint">No portfolio line: {whyNoLine(blendNote)}</p>
+          <p className="text-[12px] text-fg-soft">{reportingLine(blendNote, cfg.noun)}.</p>
+          <p className="text-[12px] text-fg-faint">No portfolio line: {whyNoLine(blendNote)}</p>
           <button type="button" onClick={() => setShowHoldings(true)}
             className="text-xs px-3 py-1 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
             See per holding
@@ -195,14 +314,14 @@ export default function MetricGrowthCard({
           noun={cfg.noun} onIngested={onReloadMetrics ?? onIngested} />
       ) : points.length === 0 ? (
         <div className="py-16 flex flex-col items-center gap-3 text-center px-4">
-          <p className="text-[11px] text-fg-faint">No {cfg.noun} ingested for this company.</p>
+          <p className="text-[12px] text-fg-faint">No {cfg.noun} ingested for this company.</p>
           {ingestIsin && (busy ? (
             <span className="text-xs text-fg-subtle">Fetching from GuruFocus…</span>
           ) : outcome ? (
             <>
               <p className="text-xs text-warn-300 max-w-[28ch]">{outcome}</p>
               <button type="button" onClick={ingest}
-                className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
+                className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
                 Try again
               </button>
             </>
@@ -248,27 +367,74 @@ export default function MetricGrowthCard({
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowHoldings(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
+                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
                 {isRatio ? (
-                  <YAxis tick={{ fontSize: 11, fill: chartTheme.axisTick }} width={48}
+                  <YAxis tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                     tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 ) : (
                   // Log scale: an exponential (constant-%) growth trend draws as a straight line.
                   <YAxis scale="log" domain={logDomain ?? ['dataMin', 'dataMax']} allowDataOverflow
-                    tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: number) => fmt(v)} width={60} />
+                    tick={{ fontSize: 12, fill: chartTheme.axisTick }}
+                    tickFormatter={(v: number) => (indexed ? fmtIndex(v) : fmt(v))} width={60} />
                 )}
+                {/* ⚠ THE HOVER READS THE ACTUAL NUMBER, NOT THE AXIS. With the lines indexed, the
+                    plotted value is "112.4" — true but not a fact about the company. The raw value
+                    rides along on the row (`rawValue`/`rawBench`) and is what gets shown, with the
+                    index in parentheses so the point on screen is still identifiable. When the
+                    rebase refused, plotted IS raw and the parenthetical is dropped rather than
+                    printed twice. A blended index has no raw value at all — `currency: null`,
+                    there is no portfolio share count — so it correctly shows the index alone. */}
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v, name) => [`${ccy}${fmt(typeof v === 'number' ? v : null)}`, name === 'trend' ? 'Trend' : cfg.title]} />
+                  formatter={(v, name, item) => {
+                    const row = item?.payload as { rawValue?: number | null } | undefined;
+                    const plotted = typeof v === 'number' ? v : null;
+                    const label = name === 'trend' ? 'Trend'
+                      : name === 'bench' ? (benchLabel ?? 'Benchmark')
+                        : cfg.title;
+                    // A ratio is already in real units; so is the absolute fallback when the
+                    // rebase refused. Both print exactly as they did before indexing existed.
+                    if (isRatio || !indexed) return [`${ccy}${fmt(plotted)}`, label];
+                    // Everything else on this chart is an INDEX. Only our own line, and only for a
+                    // single company, has an actual value behind it — the trend, the benchmark and
+                    // a blended portfolio do not, and inventing one for them is how an index comes
+                    // to be read as an amount.
+                    const raw = name === 'value' ? row?.rawValue ?? null : null;
+                    if (raw == null) return [fmtIndex(plotted, 1), label];
+                    return [`${ccy}${fmt(raw)}  (index ${fmtIndex(plotted, 1)})`, label];
+                  }} />
                 {isRatio && <ReferenceLine y={0} stroke={chartTheme.zeroLine} />}
                 {isRatio && avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 <Line dataKey="value" name="value" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
                 {!isRatio && <Line dataKey="trend" name="trend" type="monotone" stroke={chartTheme.warn} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />}
+                {/* ⚠ ONE COLOUR FOR THE BENCHMARK ON ALL FOURTEEN CHARTS — green (`chartTheme.pos`).
+                    It has to be the same everywhere or the eye re-learns which line is the index on
+                    every card. Validated, not eyeballed (`dataviz/scripts/validate_palette.js`):
+                    green↔the accent blue is ΔE 19.1 deutan / 20.7 normal.
+                    ⚠ ON THIS CARD IT ALSO SITS BESIDE THE AMBER TREND, and green↔amber is ΔE 7.9
+                    under protanopia — the 6–8 floor band, legal only with a second encoding. It has
+                    two: the trend is DASHED where the benchmark is solid, and both are named. */}
+                {benchByX && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
               <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />{cfg.title}{isRatio ? ' (avg dashed)' : ''}</span>
               {!isRatio && (
                 <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.warn }} />Trend (R² {fit.r2 == null ? '—' : fit.r2.toFixed(2)})</span>
+              )}
+              {benchByX && (
+                <span className="flex items-center gap-1.5"
+                  title={isRatio ? undefined
+                    : indexed
+                      ? `Both lines are indexed to 100 at ${indexed.anchor}, the first year they share. Only the growth is being compared — hover any point for the actual value.`
+                      : 'Absolute values: the two series share no year with a positive value, so there is no honest base to index them on.'}>
+                  <span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />
+                  {benchLabel}
+                </span>
+              )}
+              {note && (
+                <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">
+                  {note}
+                </span>
               )}
             </div>
           </div>
@@ -277,7 +443,10 @@ export default function MetricGrowthCard({
 
       {showHoldings && (
         <HoldingsRevenueModal target={holdingsTarget} metric={cfg.benchmarkMetric} unit={cfg.unit}
-          noun={cfg.noun} portfolioName={holdingsName} onClose={() => setShowHoldings(false)} />
+          noun={cfg.noun} portfolioName={holdingsName} onClose={() => setShowHoldings(false)}
+          seriesLabel={cfg.title}
+          benchLabel={benchByX ? benchLabel : null}
+          benchTarget={benchLabel ? { universe: benchLabel, cadence } : null} />
       )}
     </div>
   );

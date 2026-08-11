@@ -17,6 +17,9 @@ Tiers (matched as `path.startswith(prefix)` unless stated):
                        lets the request reach it untouched.
   _ADMIN_ONLY_PREFIXES admin even though they sit inside a user-readable
                        prefix — checked FIRST, before any allow.
+  _ADMIN_ONLY_PATTERNS the same deny, by REGEX, for the ones whose id sits in
+                       the MIDDLE of the path so no prefix can name them
+                       without swallowing a sibling. Checked alongside it.
   _USER_READ_PREFIXES  GET/HEAD allowed for any authenticated user.
   _USER_WRITE_PREFIXES writes allowed for any authenticated user.
   _USER_POST_READ_PATHS  EXACT paths that compute-and-return over a POSTed
@@ -98,6 +101,34 @@ _ADMIN_ONLY_PREFIXES: tuple[str, ...] = (
     "/api/airs/model-portfolios/scan",
     "/api/airs/crm-relaties",
 )
+
+# ⚠ THE SAME DENY, BY PATTERN, BECAUSE THE ID SITS IN THE MIDDLE OF THE PATH. A prefix here can
+# only be `/api/airs/accounts/`, which is every sub-resource of every account at once.
+#
+# These four ARE the /management-dashboard Overview EXPANDED ROW (admin-only from 2026-08-06): an
+# account's own positions and their EUR values, its mutations for the year, the reconciliation
+# against AIRS's figure, and the link picker. The summary table above them stays user-readable —
+# what is restricted is opening a book, not seeing that it exists.
+#
+# ⚠ HIDING THE ROW IS NOT THE RULE, THIS IS. The frontend makes the `<tr>` inert for a non-admin,
+# which stops the click and nothing else: the URLs are three lines of a component every user
+# downloads. Without this tier the restriction would last exactly as long as nobody opened the
+# network tab.
+#
+# ⚠ `/isins` IS DELIBERATELY ABSENT AND MUST STAY ABSENT. It is the one account sub-resource the
+# expand SHARES with the Analyse button, which non-admins keep — it is how an unpaired book gets a
+# basket to analyse (`openModal`). Folding these into the `/api/airs/accounts/` prefix would take
+# Analyse away as collateral, silently, for the rows that need it most.
+_ADMIN_ONLY_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^/api/airs/accounts/[^/]+/holdings$"),
+    re.compile(r"^/api/airs/accounts/[^/]+/transactions$"),
+    re.compile(r"^/api/airs/accounts/[^/]+/return-reconciliation$"),
+    re.compile(r"^/api/airs/accounts/[^/]+/linkable$"),
+)
+
+
+def _is_admin_only_pattern(path: str) -> bool:
+    return any(p.match(path) for p in _ADMIN_ONLY_PATTERNS)
 
 # Writes any AUTHENTICATED user may make — the mutations those pages need.
 # (Earnings refresh is handled separately by `_is_earnings_refresh`.)
@@ -211,7 +242,7 @@ async def enforce_api_auth(
     # ⚠ THE DENY IS FIRST. It covers endpoints that sit inside a user-readable prefix but are not
     # reads (the SSE scrapes) or not this page's subject (CRM), so it must not be reachable by
     # widening a prefix above.
-    if _starts_with_any(path, _ADMIN_ONLY_PREFIXES):
+    if _starts_with_any(path, _ADMIN_ONLY_PREFIXES) or _is_admin_only_pattern(path):
         allowed = False
     elif request.method in _WRITE_METHODS:
         allowed = (

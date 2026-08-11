@@ -55,9 +55,3 @@ export async function startIngest(onFinish?: () => void): Promise<void> {
     onFinish?.();
   }
 }
-
-export function cancelIngest(): void {
-  abortController?.abort();
-  abortController = null;
-  ingestStore.set({ running: false });
-}

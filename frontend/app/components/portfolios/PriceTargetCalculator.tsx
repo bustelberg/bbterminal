@@ -59,7 +59,7 @@ function Row({ label, info, children }: {
 }) {
   return (
     <div className="flex items-baseline gap-2">
-      <span className="flex items-center gap-1 text-[11px] text-fg-muted shrink-0">
+      <span className="flex items-center gap-1 text-[12px] text-fg-muted shrink-0">
         {label}{info}
       </span>
       <Leader />
@@ -75,7 +75,7 @@ function Input({ value, onChange, suffix }: {
     <span className="flex items-center gap-1 justify-end">
       <input type="number" value={value} onChange={(e) => onChange(e.target.value)}
         className="w-20 bg-page border border-neutral-700 rounded px-1.5 py-0.5 text-xs font-mono text-fg-strong text-right focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />
-      {suffix && <span className="text-[10px] text-fg-muted">{suffix}</span>}
+      {suffix && <span className="text-[11px] text-fg-muted">{suffix}</span>}
     </span>
   );
 }
@@ -157,7 +157,7 @@ export default function PriceTargetCalculator({
         <h4 className="text-base font-semibold text-fg-strong">Price target</h4>
         {dirty && (
           <button type="button" onClick={onReset}
-            className="ml-auto text-[10px] text-accent-400 hover:underline">reset</button>
+            className="ml-auto text-[11px] text-accent-400 hover:underline">reset</button>
         )}
       </div>
 
@@ -223,11 +223,11 @@ export default function PriceTargetCalculator({
             failure this row exists to fix, and nobody opens a tooltip to check a number that
             looks fine. */}
         {price.pending ? (
-          <span className="ml-1 text-[10px] text-fg-faint">…</span>
+          <span className="ml-1 text-[11px] text-fg-faint">…</span>
         ) : !price.live ? (
-          <span className="ml-1 text-[10px] text-warn-300" title="No live close available — this is the fiscal year-end price.">⚠ fiscal</span>
+          <span className="ml-1 text-[11px] text-warn-300" title="No live close available — this is the fiscal year-end price.">⚠ fiscal</span>
         ) : price.staleDays != null && price.staleDays > STALE_WARN_DAYS ? (
-          <span className="ml-1 text-[10px] text-warn-300" title={`Last close ${fmtDate(price.date)} — ${price.staleDays} days ago.`}>⚠ {price.staleDays}d old</span>
+          <span className="ml-1 text-[11px] text-warn-300" title={`Last close ${fmtDate(price.date)} — ${price.staleDays} days ago.`}>⚠ {price.staleDays}d old</span>
         ) : null}
       </Row>
       <Row label="Forecast share price"
@@ -240,7 +240,7 @@ export default function PriceTargetCalculator({
       </Row>
 
       <div className="flex items-baseline gap-2 pt-1.5 mt-auto border-t border-neutral-800/40">
-        <span className="flex items-center gap-1 text-[11px] text-fg-muted shrink-0">
+        <span className="flex items-center gap-1 text-[12px] text-fg-muted shrink-0">
           {/* Named by its ENDPOINT, not its length: off a live price the horizon is a fraction
               ("Est. 1.4-year CAGR" reads like a typo), and the fiscal year is the thing the chart
               beside it actually plots the target at. */}

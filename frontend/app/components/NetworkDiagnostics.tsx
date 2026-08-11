@@ -179,7 +179,7 @@ function GeoTag({ geo }: { geo?: Geo | null }) {
 function VerdictChip({ verdict }: { verdict: Verdict }) {
   const m = VERDICT_META[verdict];
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${m.chip}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[12px] font-medium border ${m.chip}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${m.dot}`} />
       {m.label}
     </span>
@@ -312,7 +312,7 @@ export default function NetworkDiagnostics() {
                       ? 'Probe via the curl_cffi browser-impersonation ladder — exactly what the ingest pipeline uses.'
                       : 'Probe with a plain requests.get — no impersonation, no proxy, bypasses the circuit breaker. Succeeds only if GuruFocus has stopped bot-challenging this IP.'
                   }
-                  className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors disabled:opacity-50 ${guruMethod === m ? 'bg-accent-600 text-white' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}
+                  className={`px-2 py-1 rounded-md text-[12px] font-medium transition-colors disabled:opacity-50 ${guruMethod === m ? 'bg-accent-600 text-white' : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}
                 >
                   {m === 'curl' ? 'Browser (curl_cffi)' : 'Plain requests'}
                 </button>
@@ -431,7 +431,7 @@ export default function NetworkDiagnostics() {
             {grouped.map(({ cat, rows }) =>
               rows.length === 0 ? null : (
                 <tr key={`hdr-${cat}`}>
-                  <td colSpan={5} className="bg-inset px-5 py-1.5 text-[11px] uppercase tracking-wider text-fg-subtle border-b border-neutral-800/40">
+                  <td colSpan={5} className="bg-inset px-5 py-1.5 text-[12px] uppercase tracking-wider text-fg-subtle border-b border-neutral-800/40">
                     {CATEGORY_LABEL[cat]}
                   </td>
                 </tr>
@@ -459,7 +459,7 @@ export default function NetworkDiagnostics() {
                   <td className="px-3 py-3">
                     <VerdictChip verdict={s.verdict} />
                     {Object.keys(s.cdn_headers).length > 0 && (
-                      <div className="text-[10px] text-fg-faint font-mono mt-1">
+                      <div className="text-[11px] text-fg-faint font-mono mt-1">
                         {Object.entries(s.cdn_headers)
                           .map(([k, v]) => `${k}=${v}`)
                           .join(' · ')}

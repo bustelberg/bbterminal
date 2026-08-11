@@ -171,10 +171,10 @@ function byYear(metrics: MetricRow[], codes: string[]): Map<number, number> {
  * point belongs to, not just its year.
  *
  * ⚠ THE DAY MATTERS, BECAUSE THE PRICE IS NOW LIVE. The forecast sits a fixed number of years
- * past this date, so the horizon a live price is annualised over is the distance from TODAY to
- * it — anywhere from one to two years, depending how long ago the company last reported. Rounding
- * that to "2 years" understates the CAGR by however stale the accounts are, which is exactly the
- * staleness this change exists to stop hiding.
+ * past this date (`PROJECT_YEARS`), so the horizon a live price is annualised over is the
+ * distance from TODAY to it — up to a year shorter, depending how long ago the company last
+ * reported. Rounding that back to the full horizon understates the CAGR by however stale the
+ * accounts are, which is exactly the staleness this exists to stop hiding.
  */
 export function latestDateOf(metrics: MetricRow[], codes: string[]): string | null {
   const want = new Set(codes);
@@ -201,8 +201,8 @@ export function addYears(iso: string | null, n: number): string | null {
  * Years from `from` to `to`, as a decimal.
  *
  * Null when either date is missing or the window has closed — a CAGR needs a positive horizon,
- * and a target date already in the past is not one. (It happens: a company that has not filed in
- * over two years has a forecast year that is already here.)
+ * and a target date already in the past is not one. (It happens: a company that has not filed
+ * for longer than the projection horizon has a forecast year that is already here.)
  */
 export function yearsBetween(from: string | null, to: string | null): number | null {
   if (!from || !to) return null;
@@ -245,23 +245,6 @@ export function yieldOf(value: number | null, price: number | null): number | nu
 }
 
 /**
- * Price ÷ a per-share amount — the multiple. `100 / yieldOf(value, price)`, and the reciprocal is
- * the point: nobody quotes a stock at "a 4.5% earnings yield" in a meeting.
- *
- * ⚠ A NON-POSITIVE DENOMINATOR RETURNS NULL, AND THIS IS THE OPPOSITE RULE TO `yieldOf`. That is
- * not an inconsistency, it is exactly why both exist. A loss year is a real, plottable −5% yield;
- * as a multiple it is −20×, which on any axis sorts BELOW every cheap year and reads as the
- * bargain of the decade. The ratio inverts as it crosses zero and there is no arrangement of a
- * multiple chart that survives it — so the year has no multiple, and the caller counts what it
- * dropped rather than drawing a line straight through the gap.
- */
-export function multipleOf(price: number | null, value: number | null): number | null {
-  if (price == null || value == null) return null;
-  if (!(value > 0) || !(price > 0)) return null;
-  return price / value;
-}
-
-/**
  * The consensus for the fiscal years still AHEAD of `after`, oldest first.
  *
  * ⚠ FIRST CODE THAT ANSWERS WINS — it is a priority list, never a union (see `EPS_EST_CODES`).
@@ -281,24 +264,6 @@ export function forwardEstimates(
     if (rows.length) return rows;
   }
   return [];
-}
-
-/**
- * The forecast per-share figures the forward multiple divides today's price by — for a basis that
- * HAS a published consensus, and an empty list for one that does not.
- *
- * ⚠ THE WHOLE POINT OF THIS FUNCTION IS THE `[]`. It would be one line inline; it is here so that
- * "the forward half of the chart is observed data or it does not exist" is a rule with a test on
- * it rather than a habit. Every plausible way to fill that gap — the fitted trend, the operating
- * cash-flow consensus — produces a line indistinguishable from a real forecast, and the reader has
- * no way to tell which one they are looking at.
- */
-export function forwardFigures(
-  metrics: MetricRow[], basis: (typeof BASIS)[keyof typeof BASIS], lastValueYear: number | null,
-): { year: number; value: number }[] {
-  return basis.estimateCodes
-    ? forwardEstimates(metrics, basis.estimateCodes, lastValueYear)
-    : [];
 }
 
 /**

@@ -475,7 +475,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                     )}
                     {r.is_open && (
                       <span
-                        className="ml-2 inline-flex items-center text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-warn-500/15 text-warn-300 border border-warn-500/30"
+                        className="ml-2 inline-flex items-center text-[11px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-warn-500/15 text-warn-300 border border-warn-500/30"
                         title={
                           r.as_of_date
                             ? `Open period — valued through ${r.as_of_date}. Each held name uses its own latest available close; names with no newer trade keep their last price, so some end dates may be earlier.`
@@ -495,7 +495,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                       if (nNew === 0 && nSold === 0) return null;
                       return (
                         <span
-                          className="ml-1.5 text-[10px]"
+                          className="ml-1.5 text-[11px]"
                           title={`${nNew} new this period, ${nSold} sold vs the previous period`}
                         >
                           {nNew > 0 && <span className="text-pos-400">+{nNew}</span>}
@@ -663,7 +663,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                                 <tr key={`${h.side ?? 'long'}-${h.company_id}`} className={`border-t border-neutral-800/20 ${isShort ? 'bg-neg-500/[0.04]' : ''}`}>
                                   <td className="py-1.5 pr-2 whitespace-nowrap">
                                     <span
-                                      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium ${
                                         isShort
                                           ? 'bg-neg-500/15 text-neg-300 border border-neg-500/30'
                                           : 'bg-pos-500/10 text-pos-300 border border-pos-500/25'
@@ -694,7 +694,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                                     </a>
                                     {exch && (
                                       <span
-                                        className="ml-1 text-[10px] text-fg-subtle"
+                                        className="ml-1 text-[11px] text-fg-subtle"
                                         title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}
                                       >
                                         ({exch})
@@ -702,7 +702,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                                     )}
                                     {isNew && (
                                       <span
-                                        className="ml-1.5 inline-flex items-center px-1 py-0.5 rounded text-[9px] uppercase tracking-wide font-semibold bg-pos-500/15 text-pos-300 border border-pos-500/30 align-middle"
+                                        className="ml-1.5 inline-flex items-center px-1 py-0.5 rounded text-[10px] uppercase tracking-wide font-semibold bg-pos-500/15 text-pos-300 border border-pos-500/30 align-middle"
                                         title="New this period — not held in the previous portfolio"
                                       >
                                         New
@@ -733,14 +733,14 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                                     {h.sector_rank != null ? (
                                       <span className="text-accent-300">{h.sector_rank}</span>
                                     ) : (
-                                      <span className="text-fg-faint text-[10px]">—</span>
+                                      <span className="text-fg-faint text-[11px]">—</span>
                                     )}
                                   </td>
                                   <td className="text-right py-1.5 font-mono">
                                     {h.company_rank != null ? (
                                       <span className="text-fg">{h.company_rank}</span>
                                     ) : (
-                                      <span className="text-fg-faint text-[10px]">—</span>
+                                      <span className="text-fg-faint text-[11px]">—</span>
                                     )}
                                   </td>
                                   {categories.map((cat) => (
@@ -760,7 +760,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                                   </td>
                                   <td className="text-right py-1.5 text-fg-muted font-mono pl-4">
                                     {fmtPrice(h.entry_price_local)}
-                                    {h.currency && <span className="text-fg-faint text-[10px] ml-1">{h.currency}</span>}
+                                    {h.currency && <span className="text-fg-faint text-[11px] ml-1">{h.currency}</span>}
                                     {h.entry_date && (
                                       <CellInfoTip>
                                         <div className="text-fg-muted">Trading date</div>
@@ -836,7 +836,7 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                         if (dropped.length === 0) return null;
                         return (
                           <div className="mt-3 pt-3 border-t border-neutral-800/30">
-                            <div className="text-[11px] uppercase tracking-wider text-neg-300/80 mb-1.5 font-medium">
+                            <div className="text-[12px] uppercase tracking-wider text-neg-300/80 mb-1.5 font-medium">
                               Sold — held last period, not this one ({dropped.length})
                             </div>
                             <div className="flex flex-wrap gap-1.5">
@@ -854,9 +854,9 @@ function MonthlyHoldingsTableInner({ result, categories, exchangeByCompany, isin
                                       title={`${h.company_name}${h.sector ? ` · ${h.sector}` : ''} — sold this period`}
                                       className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-neg-500/10 border border-neg-500/25 hover:bg-neg-500/15 transition-colors"
                                     >
-                                      <span className="font-mono text-[11px] text-neg-300">{h.ticker || '—'}</span>
-                                      {exch && <span className="text-[9px] text-fg-subtle">({exch})</span>}
-                                      <span className="text-[11px] text-fg-subtle truncate max-w-[150px]">{h.company_name}</span>
+                                      <span className="font-mono text-[12px] text-neg-300">{h.ticker || '—'}</span>
+                                      {exch && <span className="text-[10px] text-fg-subtle">({exch})</span>}
+                                      <span className="text-[12px] text-fg-subtle truncate max-w-[150px]">{h.company_name}</span>
                                     </a>
                                   );
                                 })}
@@ -1022,7 +1022,7 @@ function CompanySearch({
                 }`}
               >
                 <div className="font-mono text-xs text-fg">{c.ticker || '—'}</div>
-                <div className="text-[10px] text-fg-subtle truncate">{c.company_name || '—'}</div>
+                <div className="text-[11px] text-fg-subtle truncate">{c.company_name || '—'}</div>
               </button>
             ))
           )}

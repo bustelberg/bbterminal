@@ -268,6 +268,8 @@ export default function PortfoliosPanel() {
    * Detail goes to the console; the row gets the latest line and then reloads. */
   const [refreshingPf, setRefreshingPf] = useState<number | null>(null);
   const [refreshTick, setRefreshTick] = useState<string | null>(null);
+  /** Bumped when a refresh finishes, so an open Analyse modal re-reads what it rebuilt. */
+  const [refreshSeq, setRefreshSeq] = useState(0);
   const refreshPortfolio = async (id: number) => {
     setRefreshingPf(id);
     setRefreshTick('starting…');
@@ -303,6 +305,11 @@ export default function PortfoliosPanel() {
         setRows((prev) => prev?.map((p) => ({ ...p, perf: byId.get(p.id) ?? p.perf })) ?? prev);
       }
     } catch { /* the row keeps its previous figure; the console has the new one */ }
+    // ⚠ AND THE ANALYSE MODAL, IF IT IS OPEN. It is drawn from the composition, the prices and the
+    // FX this run just rebuilt, and it has already loaded — so without a nudge it would sit there
+    // showing pre-refresh figures while the row behind it updated, which reads as the button
+    // having done nothing. A counter rather than a boolean: two refreshes in a row must both land.
+    setRefreshSeq((s) => s + 1);
   };
 
   const toggle = (id: number) => {
@@ -425,7 +432,7 @@ export default function PortfoliosPanel() {
                 Their counterpart is the Dynamic table below. */}
             AIRS Fixed Portfolio&apos;s{rows ? ` · ${view.length}/${rows.length}` : ''}
           </h3>
-          <p className="text-[11px] text-fg-faint mt-0.5">
+          <p className="text-[12px] text-fg-faint mt-0.5">
             Stamgegevens › Onderhoud portefeuilles › Model portefeuilles
             {counted.length > 0 && (
               <> · <span className="font-mono text-fg-subtle">{totalHoldings}</span>{' '}positions
@@ -443,7 +450,7 @@ export default function PortfoliosPanel() {
         </div>
         <div className="flex items-center gap-2">
           {rows && (
-            <div className="flex rounded-lg border border-neutral-800/40 overflow-hidden text-[11px]"
+            <div className="flex rounded-lg border border-neutral-800/40 overflow-hidden text-[12px]"
               title="Filter to one risk profile. Read off AIRS's own name, so renaming a model in the Name column cannot change its profile. The models not offered at a profile — the themed TopSelectie and WereldTopSelectie funds, and Risicodragend/Risicomijdend (a different axis entirely) — appear only under All. Same classifier the correlation matrix uses, so the two panels always agree.">
               {VARIANT_FILTERS.map((v) => (
                 <button key={v.key} type="button" onClick={() => setVariant(v.key)}
@@ -478,7 +485,7 @@ export default function PortfoliosPanel() {
       </div>
 
       {scanning && <div className="loading-bar h-0.5 w-full rounded-full" aria-hidden />}
-      {progress && <p className="text-[11px] text-fg-subtle font-mono">{progress}</p>}
+      {progress && <p className="text-[12px] text-fg-subtle font-mono">{progress}</p>}
       {error && (
         <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">{error}</div>
       )}
@@ -497,7 +504,7 @@ export default function PortfoliosPanel() {
         <div className="overflow-auto rounded-lg border border-neutral-800/40 max-h-[70vh]">
           <table className="w-full text-xs">
             <thead className="bg-card sticky top-0 z-10">
-              <tr className="group text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+              <tr className="group text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                 <th className="px-3 py-1.5 font-medium text-left w-[5.5rem]"
                   title="Composition of this model — sector, region and currency — beside the SP500 benchmark, on one set of groups.">
                   Analyse
@@ -544,7 +551,7 @@ export default function PortfoliosPanel() {
                       title={noComposition(r)
                         ? 'This portfolio has no fixed model — AIRS stores no composition for it, so there is nothing to analyse.'
                         : 'Sector / region / currency split vs the SP500 benchmark'}
-                      className="text-[11px] px-2 py-1 rounded-lg border border-neutral-700 text-accent-400 hover:border-accent-500/50 hover:bg-overlay/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                      className="text-[12px] px-2 py-1 rounded-lg border border-neutral-700 text-accent-400 hover:border-accent-500/50 hover:bg-overlay/5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
                       Analyse
                     </button>
                   </td>
@@ -556,7 +563,7 @@ export default function PortfoliosPanel() {
                         rather than presenting a half-name as if it were the real one. */}
                     {r.truncated && (
                       <span title="The list page truncates this name and its edit page could not be read — this value is CLIPPED, not the real portfolio name."
-                        className="ml-2 text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-warn-500/15 text-warn-300 border-warn-500/25">
+                        className="ml-2 text-[10px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-warn-500/15 text-warn-300 border-warn-500/25">
                         clipped
                       </span>
                     )}
@@ -626,7 +633,15 @@ export default function PortfoliosPanel() {
       {analyse && (
         // ⚠ Keyed by portfolio — see the twin in `PortfolioOverviewPanel`. Without it a surviving
         // instance paints the previous portfolio's composition while the next one loads.
+        // ⚠ THE ROW'S OWN REFRESH HANDLER, PASSED THROUGH — not a second implementation. Pressing
+        // it here runs the identical job the expanded row runs, streams to the same console, and
+        // bumps `refreshSeq` so this modal re-reads the composition it just rebuilt.
         <PortfolioAnalysisModal key={analyse.id} id={analyse.id} name={analyse.name}
+          onRefresh={() => void refreshPortfolio(analyse.id)}
+          refreshTitle="Re-acquire everything behind this model's YTD: its composition from AirSPMS, its instrument mapping, its FX history (both directions — nothing else backfills it), and each holding's price series from Yahoo. Then recompute the YTD and print the per-holding arithmetic to the browser console."
+          refreshing={refreshingPf === analyse.id}
+          refreshTick={refreshingPf === analyse.id ? refreshTick : null}
+          refreshSeq={refreshSeq}
           onClose={() => setAnalyse(null)} />
       )}
     </section>
@@ -729,7 +744,7 @@ function ResolvedCell({ p }: { p: Portfolio }) {
 function NotAvailable({ title }: { title: string }) {
   return (
     <span title={title}
-      className="text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-neutral-500/10 text-fg-faint border-neutral-600/30">
+      className="text-[10px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-neutral-500/10 text-fg-faint border-neutral-600/30">
       n/a
     </span>
   );
@@ -928,7 +943,7 @@ function FixedDateCell({ p }: { p: Portfolio }) {
       : undefined}>
       {p.fixed_datum || '—'}
       {differs && (
-        <span className="block text-[10px] text-fg-faint">model {eff}</span>
+        <span className="block text-[11px] text-fg-faint">model {eff}</span>
       )}
     </span>
   );
@@ -948,7 +963,7 @@ function HoldingsCell({ p }: { p: Portfolio }) {
   if (p.holdings_error) {
     return (
       <span title={p.holdings_error}
-        className="text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-neg-500/15 text-neg-300 border-neg-500/25">
+        className="text-[10px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-neg-500/15 text-neg-300 border-neg-500/25">
         failed
       </span>
     );
@@ -956,7 +971,7 @@ function HoldingsCell({ p }: { p: Portfolio }) {
   if (p.holdings === null) {
     return (
       <span title="This portfolio is not of type fixed (…), so AIRS stores no composition for it at all. That is not zero holdings — there is no model to hold anything."
-        className="text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-neutral-500/10 text-fg-faint border-neutral-600/30">
+        className="text-[10px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-neutral-500/10 text-fg-faint border-neutral-600/30">
         no model
       </span>
     );
@@ -964,7 +979,7 @@ function HoldingsCell({ p }: { p: Portfolio }) {
   if (p.no_snapshot) {
     return (
       <span title="AIRS has no dated composition for this portfolio — its snapshot dropdown held nothing but the empty 'today' placeholder. So we do not know what it holds; that is NOT the same as holding nothing."
-        className="text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-warn-500/15 text-warn-300 border-warn-500/25">
+        className="text-[10px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-warn-500/15 text-warn-300 border-warn-500/25">
         no snapshot
       </span>
     );
@@ -1168,7 +1183,7 @@ function DisplayNameCell({ p, onSaved }: { p: Portfolio; onSaved: (v: string) =>
       className={`text-left rounded px-1 -mx-1 hover:bg-overlay/5 transition-colors ${
         p.display_name ? 'text-fg' : 'text-fg-faint'}`}>
       {p.display_name || '—'}
-      {err && <span className="ml-1.5 text-[10px] text-neg-400" title="Save failed — not stored.">failed</span>}
+      {err && <span className="ml-1.5 text-[11px] text-neg-400" title="Save failed — not stored.">failed</span>}
     </button>
   );
 }
@@ -1206,7 +1221,7 @@ function SoundnessCell({ p, onOpen }: {
   return (
     <button type="button" onClick={() => onOpen({ isin: p.isin!, fonds: p.fonds ?? p.isin! })}
       title={`Is ${p.fonds ?? p.isin} fundamentally sound? Price vs fair value, yield, ROIC vs WACC, safety.`}
-      className="text-[10px] px-1.5 py-0.5 rounded border border-neutral-700 text-accent-400 hover:bg-overlay/5 transition-colors whitespace-nowrap">
+      className="text-[11px] px-1.5 py-0.5 rounded border border-neutral-700 text-accent-400 hover:bg-overlay/5 transition-colors whitespace-nowrap">
       Sound?
     </button>
   );
@@ -1333,11 +1348,11 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
       <td className="px-3 py-1.5 whitespace-nowrap">
         <span className="inline-flex items-center gap-1.5">
           {linkedLabel
-            ? <span className="text-[11px] text-accent-400" title={linkedLabel}>{linkedLabel}</span>
-            : <span className="text-[11px] text-fg-faint">— not a portfolio —</span>}
+            ? <span className="text-[12px] text-accent-400" title={linkedLabel}>{linkedLabel}</span>
+            : <span className="text-[12px] text-fg-faint">— not a portfolio —</span>}
           {isGuess && (
             <span title={`Automatic guess — ${(conf * 100).toFixed(0)}% confidence.${p.link_reason ? ` ${p.link_reason}` : ''}`}
-              className={`text-[9px] font-mono px-1 py-0.5 rounded border ${
+              className={`text-[10px] font-mono px-1 py-0.5 rounded border ${
                 conf >= 0.9
                   ? 'bg-pos-500/15 text-pos-400 border-pos-500/25'
                   : conf >= 0.7
@@ -1359,7 +1374,7 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
           disabled={busy}
           onChange={(e) => void save(e.target.value)}
           title={linkedLabel}
-          className={`bg-page border rounded-lg px-1.5 py-0.5 text-[11px] w-[15rem] focus:border-accent-500 disabled:opacity-50 ${
+          className={`bg-page border rounded-lg px-1.5 py-0.5 text-[12px] w-[15rem] focus:border-accent-500 disabled:opacity-50 ${
             p.linked_portfolio_id != null
               ? 'border-accent-600/40 text-accent-400'
               : 'border-neutral-800/40 text-fg-faint'
@@ -1379,7 +1394,7 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
         {isGuess && (
           <span
             title={`Automatic guess — ${(conf * 100).toFixed(0)}% confidence.${p.link_reason ? ` ${p.link_reason}` : ''} Pick from the dropdown to overrule it.`}
-            className={`text-[9px] font-mono px-1 py-0.5 rounded border ${
+            className={`text-[10px] font-mono px-1 py-0.5 rounded border ${
               conf >= 0.9
                 ? 'bg-pos-500/15 text-pos-400 border-pos-500/25'
                 : conf >= 0.7
@@ -1396,7 +1411,7 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
             onClick={() => void reset()}
             disabled={busy}
             title="Forget this manual choice and fall back to the automatic guess."
-            className="text-[10px] text-fg-faint hover:text-accent-400 transition-colors"
+            className="text-[11px] text-fg-faint hover:text-accent-400 transition-colors"
           >
             ↺
           </button>
@@ -1447,11 +1462,11 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
   }, [pid]);
 
   if (!state || state.loading) {
-    return <p className="text-[11px] text-fg-subtle">Loading positions…</p>;
+    return <p className="text-[12px] text-fg-subtle">Loading positions…</p>;
   }
   if (state.error) {
     return (
-      <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-[11px] text-neg-300">
+      <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-[12px] text-neg-300">
         {state.error}
       </div>
     );
@@ -1462,12 +1477,12 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
   // Model composition (yfinance) vs the paired AIRS book's own holdings. Rendered in both the
   // empty and populated states, so a book with no rows can always be switched back to Model.
   const sourceToggle = (
-    <label className="flex items-center gap-1.5 text-[11px] text-fg-muted"
+    <label className="flex items-center gap-1.5 text-[12px] text-fg-muted"
       title="Source: Model = this portfolio's composition, priced from yfinance (per-share closes). Book (AIRS) = the paired AIRS book's ACTUAL holdings, valued by AIRS itself (Beginwaarde / Huidige waarde in EUR, over the calendar year). Different rows — a book holds a different set than the composition it tracks.">
       Source
       <select value={source} aria-label="Positions source"
         onChange={(e) => onSource(e.target.value as 'model' | 'book')}
-        className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[11px] text-fg focus:border-accent-500">
+        className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[12px] text-fg focus:border-accent-500">
         <option value="model">Model</option>
         <option value="book">Book (AIRS)</option>
       </select>
@@ -1477,8 +1492,8 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
   if (d.rows.length === 0) {
     return (
       <div className="space-y-2">
-        <div className="flex items-center gap-3 text-[11px]">{sourceToggle}</div>
-        <p className="text-[11px] text-fg-faint">
+        <div className="flex items-center gap-3 text-[12px]">{sourceToggle}</div>
+        <p className="text-[12px] text-fg-faint">
           {isBook ? (
             <>No AIRS book is paired with this model, so there are no book holdings to value.
             Pair one on this page, or switch Source back to <span className="font-mono">Model</span>.</>
@@ -1497,7 +1512,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-3 flex-wrap text-[11px]">
+      <div className="flex items-center gap-3 flex-wrap text-[12px]">
         {sourceToggle}
         <span className="text-fg-soft">
           <span className="font-mono text-fg">{d.rows.length}</span>{' '}
@@ -1527,7 +1542,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
           <label className="flex items-center gap-1.5 text-fg-muted">
             Snapshot
             <select value={d.datum ?? ''} onChange={(e) => onPickDate(e.target.value)}
-              className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[11px] font-mono text-fg focus:border-accent-500">
+              className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[12px] font-mono text-fg focus:border-accent-500">
               {d.dates.map((x) => <option key={x} value={x}>{x}</option>)}
             </select>
           </label>
@@ -1556,7 +1571,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
                 all four fetchable inputs and rebuilds the number. */}
             <button type="button" onClick={onRefresh} disabled={refreshing}
               title="Re-acquire everything behind this model's YTD: its composition from AirSPMS, its instrument mapping, its FX history (both directions — nothing else backfills it), and each holding's price series from Yahoo. Then recompute the YTD and print the per-holding arithmetic to the browser console."
-              className="text-[11px] px-2 py-1 rounded-lg hover:bg-overlay/5 text-accent-400 transition-colors disabled:opacity-50">
+              className="text-[12px] px-2 py-1 rounded-lg hover:bg-overlay/5 text-accent-400 transition-colors disabled:opacity-50">
               {refreshing ? 'Refreshing…' : 'Refresh (AIRS + prices + FX)'}
             </button>
             {/* The YTD's own arithmetic, printed to the console — for diffing this deployment
@@ -1565,7 +1580,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
                 something an expand triggers. */}
             <button type="button" onClick={onExplainYtd} disabled={explaining}
               title="Print the full YTD derivation (load fingerprint, window, per-holding marks and contributions) to the browser console, then diff it against the other environment."
-              className="text-[11px] px-2 py-1 rounded-lg hover:bg-overlay/5 text-fg-muted transition-colors disabled:opacity-50">
+              className="text-[12px] px-2 py-1 rounded-lg hover:bg-overlay/5 text-fg-muted transition-colors disabled:opacity-50">
               {explaining ? 'Explaining…' : 'Explain YTD → console'}
             </button>
           </span>
@@ -1576,7 +1591,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
           exists only so a run of tens of seconds visibly moves. Truncated so a 20-holding
           price sweep cannot reflow the panel on every frame. */}
       {refreshing && (
-        <div className="text-[11px] rounded-lg px-3 py-1.5 border border-neutral-800/40 bg-overlay/[0.03]">
+        <div className="text-[12px] rounded-lg px-3 py-1.5 border border-neutral-800/40 bg-overlay/[0.03]">
           <div className="loading-bar h-0.5 w-full rounded-full mb-1" aria-hidden />
           <div className="font-mono text-fg-faint truncate" title={refreshTick ?? ''}>
             {refreshTick ?? 'starting…'}
@@ -1587,7 +1602,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
       <div className="overflow-auto rounded-lg border border-neutral-800/40 max-h-[50vh]">
         <table className="w-full text-xs">
           <thead className="bg-card sticky top-0">
-            <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+            <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
               {/* Position in the model as AIRS lists it — these rows are not re-sorted here, so
                   the number is stable and can be read back against the XLS export. */}
               <th className="px-3 py-1.5 font-medium text-right w-8">#</th>
@@ -1645,7 +1660,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
                       {p.isin}
                       {!p.known_instrument && (
                         <span title="This ISIN is not an instrument in our grid — usually an in-house fund (e.g. High Income Quality fund), which has no listing to resolve."
-                          className="ml-2 text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-warn-500/15 text-warn-300 border-warn-500/25">
+                          className="ml-2 text-[10px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-warn-500/15 text-warn-300 border-warn-500/25">
                           not in grid
                         </span>
                       )}

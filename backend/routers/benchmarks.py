@@ -17,17 +17,32 @@ carry each sector at a time.
 from __future__ import annotations
 
 import asyncio
+import gzip
+import itertools
+import logging
+import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from deps import supabase
+from routers import _blend_cache
 from ingest.api_usage import track_api_call
 from ingest.constants import DATA_CUTOFF
 from ingest.prices import _fetch_price_from_api, _parse_price_series
 
 router = APIRouter(tags=["benchmarks"])
+
+# How many constituents the bulk fundamentals fill fetches at once.
+#
+# ⚠ CHOSEN FROM MEASUREMENT, NOT FROM A FEELING. Against the live GuruFocus API: 6 calls serially
+# 15.42s, the same 6 on six threads 4.56s (3.4x), and twelve threads doubled throughput again to
+# 2.64 calls/s with no 403 anywhere — the ceiling was never found. What WAS seen at twelve was one
+# empty response in twelve, which is not a quota refusal and not proof of a limit either; eight
+# keeps nearly all of the gain without probing for the edge, and `_one` retries an empty answer.
+_FILL_WORKERS = 8
 
 
 class CreateBenchmarkRequest(BaseModel):
@@ -433,3 +448,816 @@ async def benchmark_reset(label: str):
         return await asyncio.to_thread(reset_benchmark, label)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+class ConstituentFundamentalColumn(BaseModel):
+    """One RAW GuruFocus line the Long Equity charts consume. Shipped with the data so the table
+    renders the set the SERVER knows about — add a line backend-side and its columns appear
+    without a frontend change, which is the only way the two cannot drift."""
+
+    key: str
+    label: str
+    # Why the line matters, and its trap where it has one (a bank has no gross profit; interest
+    # expense is reported negative). Shown on the column head rather than kept in the source.
+    note: str | None = None
+
+
+class ConstituentFundamentals(BaseModel):
+    """The RAW GuruFocus lines per constituent, and the period span we hold for each.
+
+    ⚠ `covered` IS NOT DECORATION. Only the members whose fundamentals have been ingested appear in
+    `rows`; measured 2026-08-04, that was 92 of SP500's 503. A table that simply renders blanks for
+    the rest reads as "these companies have no margins", which is a claim about the companies
+    rather than about our ingest. The count says which it is.
+    """
+
+    label: str
+    # ⚠ ECHOED BACK, so a row of spans can never be read under the wrong basis. The two cadences
+    # give DIFFERENT periods for the same company ("2025" vs "2025-Q3") and different counts, and a
+    # table that shows one while its toggle says the other is a silent lie about the data.
+    cadence: str
+    columns: list[ConstituentFundamentalColumn]
+    members: int
+    covered: int
+    # ⚠ KEYED BY **ISIN**, NOT BY company_id — AND THAT IS A CORRECTNESS FIX, NOT A PREFERENCE.
+    # The constituent table is served by `_asset_benchmark`, which puts the `analysis_id` (an
+    # `asset_execution` row) into a field NAMED `company_id`, because it reuses
+    # `_benchmark_index._window_rows` and that keys prices by that name. Fundamentals live in the
+    # `company` world. The two id spaces are disjoint, so keying this by company_id matched nothing
+    # the table could look up and EVERY cell rendered a dash — including the 92 companies that do
+    # have data. ISIN is the one identifier both worlds carry, and it is the bridge the rest of the
+    # app uses between them.
+    rows: dict[str, dict]     # ISIN -> {line key: {from, to, n}}
+
+
+@router.get("/api/benchmarks/index/{label}/fundamentals", response_model=ConstituentFundamentals)
+async def benchmark_constituent_fundamentals(label: str, cadence: str = "annual"):
+    """The twelve Long Equity measures for each of an index's constituents.
+
+    ⚠ A SEPARATE CALL FROM `/index/{label}`, DELIBERATELY. That endpoint prices 500 constituents and
+    is what the table needs to render at all; this one reads fourteen metric series. Folding them
+    together would hold the whole table behind the slower half, so the prices land first and the
+    fundamentals fill in — the same progressive shape the /schedule and holdings-count surfaces use.
+
+    `cadence` is `annual` (fiscal years) or `quarterly` (TRAILING TWELVE MONTHS, the basis the tab
+    plots) — see `constituent_fundamentals`, which owns what each one means and why the quarterly
+    span starts three quarters late. It is a VIEW over data one GuruFocus call already brought;
+    switching it never spends quota.
+    """
+    from routers._benchmark_fundamentals import (  # noqa: PLC0415
+        COLUMNS, constituent_fundamentals, normalise_cadence,
+    )
+    from routers._benchmark_index import _members  # noqa: PLC0415
+
+    # ⚠ NORMALISED, NEVER PASSED THROUGH — see `normalise_cadence` for the failure it prevents.
+    cad = normalise_cadence(cadence)
+
+    def _run() -> dict:
+        # `_members` is the COMPANY-world list: it carries the real `company_id` the metrics are
+        # stored against AND the ISIN the table can be joined on. A member with no ISIN cannot be
+        # bridged and is simply absent — honest, since nothing could look it up either.
+        members = _members(label)
+        by_cid = {m["company_id"]: (m.get("isin") or "").strip().upper()
+                  for m in members if m.get("company_id")}
+        rows = constituent_fundamentals(sorted(by_cid), cad)
+        out: dict[str, dict] = {}
+        for cid, spans in rows.items():
+            isin = by_cid.get(cid)
+            if isin:
+                out[isin] = spans
+        return {
+            "label": label,
+            "cadence": cad,
+            "columns": [{"key": c["key"], "label": c["label"], "note": c.get("note")}
+                        for c in COLUMNS],
+            "members": len(by_cid),
+            "covered": len(out),
+            "rows": out,
+        }
+
+    return await asyncio.to_thread(_run)
+
+
+class FundamentalGridColumn(BaseModel):
+    """One line, and what an INDEX-LEVEL total may do with it. `agg` is `sum` for a flow or a
+    snapshot (revenue, market cap) and `weighted_mean` for a rate (ROIC %) — summing percentages
+    across 500 companies produces a number in the thousands that still renders as a percent.
+
+    `unit` says whether the figure is currency at all: `millions` / `per_share` are EUR-converted,
+    `shares` (a count) and `percent` (already a rate) are NOT — see the ⚠⚠ in
+    `_benchmark_fundamental_grid`, where converting them produced a plausible wrong share count.
+    """
+
+    key: str
+    label: str
+    note: str | None = None
+    unit: str
+    agg: str
+
+
+class FundamentalGridPeriod(BaseModel):
+    """What the index looked like in ONE period. `weights_usable` is the gate the table reads
+    before showing any weight or total — see `_benchmark_fundamental_grid.MIN_COVERAGE_PCT`."""
+
+    covered: int
+    members: int
+    covered_pct: float
+    with_market_cap: int
+    cap_covered_pct: float
+    total_market_cap_eur: float | None = None
+    weights_usable: bool
+
+
+class FundamentalGridRow(BaseModel):
+    """One constituent. `v` is EUR (what the grid shows), `n` the figure as REPORTED, `fx` the rate
+    applied — shipped together so the conversion can be checked rather than trusted."""
+
+    company_id: int
+    isin: str | None = None
+    name: str | None = None
+    ticker: str | None = None
+    # The other half of the GuruFocus identifier — a bare ticker is ambiguous across venues.
+    exchange: str | None = None
+    currency: str | None = None
+    # Built server-side by `_tickers`, because `_build_symbol` drops the prefix for US venues and
+    # normalizes the ticker (HKSE zero-pad, `BRK/B` -> `BRK.B`). None when the row has no ticker
+    # or no exchange, in which case the UI shows plain text rather than a dead link.
+    gf_url: str | None = None
+    # Why this row can NEVER be filled, or None when it can. From the same `eligible()` the fill
+    # job calls — an unsubscribed exchange, no GuruFocus ticker, or no exchange at all. It is the
+    # difference between "nobody has fetched this yet" and "this cannot be fetched", which without
+    # it render identically as dashes.
+    unavailable: str | None = None
+    # The badge text for `unavailable` — `UNSUB` (the venue is outside the subscription, so it is
+    # true of every constituent on that exchange) or `NO GF` (this row has no GuruFocus ticker or
+    # exchange). Classified server-side so the UI never has to pattern-match a prose message.
+    unavailable_label: str | None = None
+    v: dict[str, dict[str, float]]
+    n: dict[str, dict[str, float]]
+    fx: dict[str, float]
+
+
+class FundamentalGrid(BaseModel):
+    """Every constituent x every line x every period, in EUR.
+
+    ⚠ `membership_as_of` IS `today` AND THAT IS A REAL LIMIT, NOT A FORMALITY: scrubbing to 2016
+    shows 2016's figures for the companies in the index NOW. Surfaced so the grid can say so.
+    """
+
+    label: str
+    cadence: str
+    periods: list[str]
+    columns: list[FundamentalGridColumn]
+    members: int
+    # ⚠ THE RAW MEMBERSHIP, AND IT IS USUALLY LARGER THAN `members`. A constituent with no stored
+    # market cap is dropped by `_members` — on the AEX that is Shell, Unilever and RELX — so it is
+    # absent from `members` entirely rather than counted as uncovered. Reported so the total row can
+    # state the gap. Not deduped (share classes count twice), so it is context, never a denominator.
+    enrolled_members: int = 0
+    # How many constituents "Fetch all" would fetch — counted by the FILL's own `needs`/`eligible`,
+    # not derived from `covered`. The two disagree (234 vs 206 on SP500) because they use different
+    # denominators and different definitions of "has data"; a button must promise what it does.
+    fillable: int = 0
+    covered: int
+    rows: list[FundamentalGridRow]
+    by_period: dict[str, FundamentalGridPeriod]
+    membership_as_of: str
+    min_coverage_pct: float
+    # ⚠ SET => THIS INDEX CAPS, AND EVERY WEIGHT IN THIS PAYLOAD WOULD BE WRONG. The AEX caps a
+    # constituent at 15%; uncapped, ASML is 37.53% of it. The grid therefore shows no weights and
+    # no index row for such an index rather than shipping a second, uncapped weighting — see
+    # `INDEX_CAP_PCT`, which is the single declaration this is read from.
+    weight_cap_pct: float | None = None
+
+
+@router.get("/api/benchmarks/index/{label}/fundamentals/grid", response_model=FundamentalGrid)
+async def benchmark_fundamental_grid(request: Request, label: str, cadence: str = "annual"):
+    """Every constituent's fundamentals for every period, with the cap that weights each one.
+
+    The VALUES behind `/fundamentals`, which reports only which periods we hold. Rows are
+    companies, columns are lines, and the period is the slider — because weighting is
+    cross-sectional: FY2021's weights need every constituent's FY2021 cap at once.
+
+    `cadence` is `annual` (fiscal years) or `quarterly`, which — as everywhere else in this app —
+    means **trailing twelve months**, not the raw quarter. That keeps both slider axes on one
+    12-month basis, so moving the quarter changes the as-of date and never the unit.
+
+    Returned whole, not per period: it is ONE bulk read for every line over data one GuruFocus call
+    already brought, and the reader's whole interaction is dragging a slider.
+
+    ⚠ CACHED IN-PROCESS, AND DROPPED BY THE INGEST JOBS. Both Fetch buttons call
+    `_blend_cache.invalidate()` when they have written something, so a filled row shows up on the
+    reload the pane does anyway. See `cached_grid` for why this must not be a `Cache-Control`
+    header: a copy in the browser is one no invalidation of ours can reach.
+
+    ⚠⚠ GZIPPED HERE RATHER THAN APP-WIDE, AND THAT IS DELIBERATE. ACWI's payload is **16.5 MB** of
+    JSON — 1,949 constituents x 12 periods x 19 lines, each carrying its EUR value, its native
+    figure and the rate between them — and it compresses to **5.3 MB** in 0.21s (level 1; level 6
+    reaches 4.5 MB for three times the CPU, which is the wrong trade for a number this size). By
+    the time the server work below is measured in hundreds of milliseconds, the transfer IS the
+    load time, and no amount of query tuning touches it.
+
+    A `GZipMiddleware` on the app would have covered this endpoint and every other one — and this
+    app is SSE-heavy (ingest, scanner, backtest, every live dashboard). Compression sits between a
+    stream and its client and buffers; the whole point of those endpoints is that a frame arrives
+    when it is produced. One endpoint that ships megabytes is not a reason to put a buffer in front
+    of the ones that ship bytes.
+
+    ⚠ THE `Accept-Encoding` HEADER IS HONOURED, NOT ASSUMED. Every browser sends it and `requests`
+    sends it by default, but a plain `curl` does NOT — and `/documentation` publishes curl
+    quick-starts against this API. Shipping gzip to a client that did not ask for it hands it
+    binary it will render as mojibake.
+
+    ⚠ THE MODEL STILL VALIDATES. Returning a `Response` skips FastAPI's `response_model` check, so
+    it is run explicitly below — the schema is what `npm run gen:types` generates the frontend's
+    types from, and an endpoint that silently stops conforming to its own contract is worse than a
+    slow one. It costs 0.06s on the largest payload here, and only on a cache miss.
+    """
+    from routers._benchmark_fundamental_grid import fundamental_grid  # noqa: PLC0415
+    from routers._benchmark_fundamentals import normalise_cadence  # noqa: PLC0415
+
+    # ⚠ THE KEY IS THE NORMALISED CADENCE, NOT THE RAW QUERY STRING. `normalise_cadence` maps
+    # anything that is not "quarterly" onto "annual", so `?cadence=annual`, `?cadence=` and a typo
+    # all produce the SAME payload — keying on the raw string would store it three times and
+    # compute it three times to prove it.
+    cad = normalise_cadence(cadence)
+
+    def _encoded() -> bytes:
+        """The gzipped JSON — this is what the cache holds, and it is smaller than the dict.
+
+        ⚠ THE COMPRESSED BYTES, NOT THE PAYLOAD OBJECT. Caching the dict would hold ~250,000
+        Python floats across ~60,000 dicts for ACWI, which costs far more resident memory than the
+        5.3 MB this is — and it would still pay validation and serialisation on every hit. Caching
+        the finished bytes makes a cache hit a memcpy. `_MAX_ENTRIES` is 24 and the entries are
+        big; this is the version that fits.
+        """
+        payload = fundamental_grid(label, cad)
+        body = FundamentalGrid.model_validate(payload).model_dump_json().encode()
+        return gzip.compress(body, 1)
+
+    blob = await asyncio.to_thread(_blend_cache.cached_grid, label, cad, _encoded)
+    accepts = "gzip" in (request.headers.get("accept-encoding") or "").lower()
+    if accepts:
+        return Response(content=blob, media_type="application/json",
+                        headers={"Content-Encoding": "gzip"})
+    # ⚠ DECOMPRESSED ON THE WAY OUT, never stored twice. This branch is a curl session, not the
+    # app, so it may pay for the round trip through gzip rather than double the cache's footprint.
+    return Response(content=gzip.decompress(blob), media_type="application/json")
+
+
+class CompanyIngestResult(BaseModel):
+    """What one company's backfill did. `feeds` names the calls actually spent."""
+
+    company_id: int
+    name: str | None = None
+    feeds: list[str] = []
+    rows: int = 0
+    skipped: str | None = None      # why nothing was fetched (unsubscribed, no ticker)
+    error: str | None = None
+
+
+@router.post("/api/benchmarks/isin/{isin}/fundamentals/ingest",
+             response_model=CompanyIngestResult)
+async def ingest_company_fundamentals(isin: str, force: bool = False):
+    """Fetch the GuruFocus feeds ONE constituent is missing — the per-row button.
+
+    ⚠ BY ISIN, NOT BY THE TABLE'S `company_id`. That field is an `analysis_id` in the constituent
+    payload (see `ConstituentFundamentals.rows`), so an id taken straight off the row 404s against
+    the `company` table — measured, on analysis_id 1457, which is a real asset row and not a
+    company at all. ISIN is the identifier both worlds carry.
+
+    ⚠ ALL THREE FEEDS, unlike `/api/earnings/fundamental-coverage/ingest`, which fetches only the
+    statements. A company with financials and no estimates renders a Long Equity tab that fills in
+    around two empty panels, which reads as a charting bug. See `_fundamental_backfill`.
+
+    Admin-only: it spends GuruFocus quota, and the auth gate holds any non-`/refresh` write here to
+    admins.
+    """
+    from routers._fundamental_backfill import (  # noqa: PLC0415
+        company_rows, eligible, ingest_company, needs,
+    )
+
+    def _run() -> dict:
+        key = (isin or "").strip().upper()
+        hit = (supabase.table("company").select("company_id")
+               .eq("isin", key).limit(1).execute().data or [])
+        if not hit:
+            # ⚠ AN ANSWER, NOT A FAULT. Plenty of constituents are priced from `asset_execution`
+            # with no `company` row behind them — there is nothing to fetch fundamentals INTO, and
+            # saying so beats a 404 the reader reads as a broken button.
+            return {"company_id": 0, "name": None,
+                    "skipped": f"no company row for {key} — nothing to ingest into"}
+        cid = hit[0]["company_id"]
+        comps = company_rows([cid])
+        c = comps[cid]
+        why = eligible(c)
+        if why:
+            return {"company_id": cid, "name": c.get("company_name"), "skipped": why}
+        # `needs` tells us which feeds are missing; with `force` we re-fetch regardless.
+        # ⚠ AND `force` REACHES THE STORAGE BLOB TOO. Selecting a company again while still
+        # replaying the bytes we already hold is not a re-fetch — see `ingest_company`'s ⚠⚠.
+        todo = {**c, **({} if force else next(
+            (n for n in needs(comps) if n["company_id"] == cid),
+            {"need_fin": False, "need_est": False, "need_ind": False}))}
+        r = ingest_company(todo, force=force, refresh_cache=force)
+        return {"company_id": cid, "name": c.get("company_name"),
+                "feeds": r["done"], "rows": r["rows"], "error": r["error"]}
+
+    return await asyncio.to_thread(_run)
+
+
+# The "[n/total]" prefix `_benchmark_refresh._prices` writes on every constituent line. Compiled
+# once because it is matched against every line of a 1,684-constituent run.
+_STEP_RE = re.compile(r"^\[(\d+)/(\d+)\]")
+
+
+class JobStarted(BaseModel):
+    """Just the handle. Everything else arrives on `/api/jobs/{id}/stream`."""
+
+    job_id: str
+    label: str
+
+
+@router.post("/api/benchmarks/company/{company_id}/fundamentals/ingest/job",
+             response_model=JobStarted)
+async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
+                                          feeds: str = "all"):
+    """The per-row Fetch button — same work as the by-ISIN endpoint above, as a cancellable JOB.
+
+    ⚠⚠ KEYED ON `company_id`, AND IT USED TO BE KEYED ON ISIN — WHICH SILENTLY DISABLED THE BUTTON
+    FOR 12 OF THE S&P's 501 CONSTITUENTS. The by-ISIN form exists because in the OLD constituent
+    table `company_id` was secretly an `analysis_id` (the price machinery keys on that name), so an
+    id off the row 404'd against `company`. That warning is real and still on the endpoint above —
+    it just does not apply here: the fundamentals grid is built from `_members()`, which IS the
+    company world, so its `company_id` is genuine.
+
+    Keeping the ISIN detour cost reachability for no safety. Assurant (`company_id` 6414, NYSE,
+    `AIZ`) has every field an ingest needs and no ISIN, so its Fetch button was greyed out with a
+    tooltip about an identifier the fetch does not actually require. `company.isin` is nullable and
+    populated opportunistically; `company_id` is the primary key.
+
+    ⚠⚠ `feeds="statements"` IS ONE API CALL AND FILLS THE WHOLE GRID. Every one of the nineteen
+    columns the fundamentals grid draws — market cap included, as
+    `annuals__Valuation and Quality__Market Cap` — comes out of `fetch_financials`. The other two
+    feeds (analyst estimates, indicators) contribute NOTHING to that table; they supply the Long
+    Equity modal's forward EPS and indicator series.
+
+    So the default `all` spends three calls of which two change nothing on the grid. That is the
+    right default for "load this company properly", and the wrong one for the triage pass this
+    parameter exists for: read the caps cheaply, then spend the other two calls only on the
+    constituents whose weight makes them worth it.
+
+    ⚠ THERE IS NO "MARKET CAP ONLY" AND THERE CANNOT BE. GuruFocus returns one financials blob;
+    the cap arrives inside it along with revenue, equity and ROIC. `statements` is the smallest
+    unit that exists — asking for less would mean discarding data we have already paid for.
+
+    ⚠ WHY A JOB FOR THREE API CALLS. Not for the progress bar: for the CANCEL, and for the fact
+    that several rows can now be fetched at once. The plain endpoint holds one HTTP request open
+    for as long as GuruFocus takes and gives the caller no way to stop it — abort the fetch and the
+    server keeps going, having already decided to spend the quota. Here the three feeds are
+    separated by a `should_stop` check, so Cancel takes effect at the next feed boundary and
+    whatever was already written stays written (`needs()` will pick the rest up next time).
+
+    ⚠ THE OLD ENDPOINT STAYS. It is what `scripts/` and any external caller use, and it is the
+    honest shape for a caller that wants one blocking answer. This is the same `ingest_company`
+    underneath — "ingest" must not come to mean two different things depending on which button
+    you pressed.
+    """
+    import jobs as job_registry  # noqa: PLC0415
+
+    from routers._benchmark_fundamentals import constituent_fundamentals  # noqa: PLC0415
+    from routers._fundamental_backfill import (  # noqa: PLC0415
+        company_rows, eligible, ingest_company, needs,
+    )
+
+    # ⚠ THE FEED TAGS ARE INTERNAL AND MUST NOT REACH A READER. `fin`/`est`/`ind` are what the
+    # backfill calls the three GuruFocus endpoints; on screen they said nothing except that
+    # something technical happened. They stay in the detail line an operator can hover, because
+    # WHICH feed was spent is exactly what you want when one of them comes back empty.
+    feed_label = {"fin": "statements", "est": "estimates", "ind": "indicators"}
+
+    def _span(cid: int) -> str | None:
+        """What the grid will now show for this company — the answer the button was pressed for.
+
+        ⚠ A ROW COUNT IS NOT AN ANSWER. "37,076 rows" is a count of `metric_data` writes: it is
+        large, it is true, and it tells the reader nothing about whether the row they were looking
+        at will fill in. The PERIOD SPAN does, in the same units the table's own slider uses.
+
+        Read back from the same `constituent_fundamentals` the coverage figures come from, so the
+        message cannot claim a span the grid would not draw.
+        """
+        try:
+            spans = (constituent_fundamentals([cid], "annual") or {}).get(cid) or {}
+            froms = [s["from"] for s in spans.values() if s.get("from")]
+            tos = [s["to"] for s in spans.values() if s.get("to")]
+            if not froms or not tos:
+                return None
+            lo, hi = min(froms), max(tos)
+            return f"FY{lo}" if lo == hi else f"FY{lo}–FY{hi}"
+        except Exception as e:  # noqa: BLE001
+            # A summary is not worth failing a successful ingest over — the data landed either
+            # way, and the caller falls back to the row count.
+            logging.getLogger(__name__).warning(
+                "[job] could not read the span for company %s: %s", cid, e)
+            return None
+
+    def _work(ctx) -> str:
+        ctx.emit("start", "Looking this company up…", done=0, total=3)
+        cid = company_id
+        comps = company_rows([cid])
+        c = comps.get(cid)
+        if not c:
+            # An answer, not a fault — the row may have been pruned since the grid was drawn.
+            return f"company {cid} — no company record to load fundamentals into"
+        name = c.get("company_name") or str(cid)
+        why = eligible(c)
+        if why:
+            return f"{name} — {why}"
+        todo = {**c, **({} if force else next(
+            (n for n in needs(comps) if n["company_id"] == cid),
+            {"need_fin": False, "need_est": False, "need_ind": False}))}
+        # ⚠ APPLIED AFTER `needs`/`force`, SO IT CAN ONLY EVER NARROW. Whichever feeds the company
+        # is missing, `statements` runs at most the one this grid reads — the cap and the eighteen
+        # lines beside it. Folding it into the dict above would let `force=true` widen it back.
+        if feeds == "statements":
+            todo = {**todo, "need_est": False, "need_ind": False}
+
+        def _step(tag: str, i: int, total: int) -> None:
+            ctx.progress(i - 1, total, f"Fetching {feed_label.get(tag, tag)} ({i} of {total})")
+
+        # ⚠ `refresh_cache=force`, SO THE FLAG MEANS ONE THING ON EVERY INGEST ENDPOINT: go and
+        # look. The grid's per-row Fetch does not pass `force`, so its cheap cache-friendly
+        # behaviour is unchanged — only a caller that explicitly asked for a re-fetch pays.
+        r = ingest_company(todo, force=force, refresh_cache=force,
+                           on_step=_step, should_stop=lambda: ctx.cancelled)
+        # ⚠ RECORDED BEFORE ANY OF THE EXITS BELOW. A cancelled or failed run has still spent
+        # whatever it spent, and those are the two cases where knowing the bill matters most —
+        # putting this after the `raise` would report a cost of zero for the runs that cost you
+        # something and taught you nothing.
+        ctx.spent(r.get("calls", 0))
+        # ⚠ THE STOP IS RAISED HERE, NOT RETURNED. `ingest_company` reports it as data because it
+        # must never raise mid-run; the JOB wants it as `JobCancelled` so the registry marks the
+        # run cancelled rather than done. Two layers, two right answers.
+        if r.get("stopped"):
+            got = [feed_label.get(d.split()[0], d) for d in r["done"]]
+            ctx.emit("info", f"Stopped after {', '.join(got) or 'no feeds'}")
+            ctx.check()
+        if r["error"]:
+            raise RuntimeError(r["error"])
+
+        # The technical breakdown, kept as the last progress line: the toast shows the human
+        # summary and carries this on hover, and the console has both. `fin 36378` becomes
+        # `statements 36,378`, which is the same fact in words a reader can act on.
+        detail = " · ".join(
+            f"{feed_label.get(d.split()[0], d.split()[0])} {int(d.split()[1]):,}"
+            for d in r["done"] if len(d.split()) == 2)
+        ctx.progress(3, 3, detail or "no new data")
+
+        if not r["done"]:
+            # ⚠ AN ANSWER, NOT A NON-EVENT. "nothing to do" read as though the button had failed to
+            # do anything; what it means is that every feed was already loaded.
+            #
+            # It is also why the cache is NOT dropped here: nothing was written, so every cached
+            # benchmark blend is still correct and throwing them away would cost ~25s of rebuild
+            # to reach the identical answer.
+            return f"{name} — already up to date"
+        # ⚠ WE JUST CHANGED WHAT EVERY BENCHMARK BLEND WOULD COMPUTE. This company may be a
+        # constituent of any index, so the cached lines are stale from this moment; the writer
+        # clearing them is what makes the cache safe to keep for 30 minutes at a time.
+        _blend_cache.invalidate()
+        span = _span(cid)
+        return (f"{name} — loaded {span}" if span
+                else f"{name} — loaded {r['rows']:,} data points")
+
+    # ⚠ THE LABEL IS RESOLVED BEFORE THE JOB STARTS, so the toast says a company NAME from its very
+    # first frame rather than an id the reader would have to look up.
+    row = (supabase.table("company").select("company_name")
+           .eq("company_id", company_id).limit(1).execute().data or [])
+    label = (row[0].get("company_name") if row else None) or f"company {company_id}"
+    job = job_registry.start("fundamentals.company", label, _work)
+    return {"job_id": job.id, "label": label}
+
+
+@router.post("/api/benchmarks/index/{label}/refresh/job", response_model=JobStarted)
+async def benchmark_refresh_job(label: str):
+    """The same refresh as `GET …/refresh`, as a cancellable JOB.
+
+    ⚠ WHY IT EXISTS: THE SSE FORM CANNOT BE STOPPED. It streams to whoever opened it, so the client
+    is attached to the work — navigate away and the progress box vanishes while the thread carries
+    on making paced Yahoo calls for another eleven minutes, with no handle to stop it. That is the
+    identical defect the fundamentals ingest had before it became a job.
+
+    ⚠ THE SSE ENDPOINT IS LEFT IN PLACE, unlike the fundamentals conversion which replaced its own.
+    That one had a single consumer; this one is also how a refresh is watched from `/api` and from
+    curl, where a job handle is the inconvenient form. Both call `refresh_benchmark` — ONE
+    implementation, two transports, never two refreshes.
+
+    ⚠ CANCEL LANDS BETWEEN CONSTITUENTS — `should_stop` is checked in `_prices`' loop, which is
+    where the minutes are. It is deliberately NOT `ctx.check()`: raising would discard the counts
+    for work that really happened, and those counts are this job's entire output. A stopped run
+    keeps everything it fetched and its summary says how far it got.
+    """
+    import jobs as job_registry  # noqa: PLC0415
+
+    from routers._benchmark_refresh import refresh_benchmark  # noqa: PLC0415
+
+    def _work(ctx) -> str:
+        # ⚠ THE BAR NEEDS A DENOMINATOR AND `emit` HAS NONE. `refresh_benchmark` reports prose, not
+        # counts, so the "[n/total]" the price step ALREADY writes into its own line is read back
+        # out here rather than changing that module's contract for one consumer. A line that does
+        # not match leaves the bar where it was — which is right, because the constituents and caps
+        # steps have no meaningful denominator and a bar that resets to 0/0 between phases reads as
+        # the run having restarted.
+        state = {"done": 0, "total": 0}
+
+        def _emit(_msg_type: str, **kw) -> None:
+            msg = (kw.get("message") or "").strip()
+            if not msg:
+                return
+            m = _STEP_RE.match(msg)
+            if m:
+                state["done"], state["total"] = int(m.group(1)), int(m.group(2))
+            ctx.progress(state["done"], state["total"], msg)
+
+        s = refresh_benchmark(label, _emit, should_stop=lambda: ctx.cancelled)
+        if s.get("note") and not s.get("priceable"):
+            return f"{label} — {s['note']}"
+
+        # ⚠⚠ THIS SENTENCE MOVED HERE FROM THE FRONTEND'S `refreshSummary`, WHICH THE JOB TRANSPORT
+        # RETIRED — and it is reproduced rather than shortened because two of its clauses are there
+        # under an explicit "never silent" rule that a transport change must not quietly repeal:
+        #   * a constituent with NO CAP weighs nothing, so it is absent from a cap-weighted index
+        #     while looking perfectly healthy in the grid;
+        #   * "already at the vendor's latest" is the ANSWER on a run where nothing moved. Omitting
+        #     it reads as a broken button, which is exactly how ING's untouched 30.22 was first
+        #     reported.
+        bits = [f"{s.get('priceable', 0)} of {s.get('universe_members', 0)} constituents priceable"]
+        if s.get("capped"):
+            bits.append(f"{s['capped']} market caps")
+        if s.get("no_cap"):
+            bits.append(f"⚠ {s['no_cap']} with no market cap (they weigh nothing)")
+        if s.get("prices_fetched"):
+            bits.append(f"{s['prices_fetched']} price series fetched")
+        if s.get("prices_moved"):
+            bits.append(f"{s['prices_moved']} gained a new close")
+        if s.get("prices_unchanged"):
+            bits.append(f"{s['prices_unchanged']} already at the vendor's latest")
+        if s.get("no_start_price"):
+            bits.append(f"{s['no_start_price']} have no start-of-year price (listed later)")
+        if s.get("prices_failed"):
+            bits.append(f"{s['prices_failed']} failed (see the console)")
+        if s.get("needs_resolve"):
+            bits.append(f"{s['needs_resolve']} still unresolved — press again")
+        if s.get("no_isin"):
+            bits.append(f"⚠ {s['no_isin']} members have no ISIN and can never be reached from here")
+        if s.get("stopped"):
+            bits.append(f"⚠ CANCELLED after {s.get('stopped_at', 0)} — the rest were not fetched")
+        out = ", ".join(bits) + "."
+        if s.get("market_anchor"):
+            out += f" Priced to {s['market_anchor']}."
+        return out
+
+    job = job_registry.start("benchmark.refresh", label, _work)
+    return {"job_id": job.id, "label": label}
+
+
+@router.post("/api/benchmarks/index/{label}/fundamentals/ingest/job",
+             response_model=JobStarted)
+async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str = "statements",
+                                        force: bool = False):
+    """Backfill every constituent missing the data this page shows, as a cancellable JOB.
+
+    ⚠ IT REPLACED AN SSE ENDPOINT RATHER THAN JOINING ONE. The old
+    `GET …/fundamentals/ingest` streamed the same work to a bespoke progress box in the panel, and
+    had the defect every such endpoint here had: the client was not attached to the work. Navigate
+    away and the box vanished while the thread carried on spending quota — on this run, hundreds of
+    calls with no way to stop them. Keeping both would have left two transports for one fill and
+    two places for "ingest" to come to mean different things.
+
+    ⚠ CANCEL LANDS BETWEEN COMPANIES, NOT MID-COMPANY. `_one` checks first thing, so a press stops
+    everything still queued at once while the eight already in flight finish the company they are
+    on. That is the boundary where the database is consistent — and on a 206-company run it is the
+    difference between stopping now and spending the rest of the index.
+
+    ⚠ IT REPORTS THE QUOTA BEFORE IT STARTS AND THE SKIPS AS IT GOES. A region at zero means every
+    further call is wasted, and a company on an unsubscribed exchange is a refusal with a reason —
+    never a failure.
+
+    ⚠⚠ `feeds="statements"` (THE DEFAULT) NARROWS **TWO** THINGS, AND NARROWING ONLY ONE IS A BUG.
+    A fill makes two independent decisions: WHO is in the work list (`needs`, which returns anyone
+    missing any of three sentinels) and WHICH feeds run for each. Narrowing only the second leaves
+    companies selected because they lack estimates or indicators — for whom the narrowed action
+    runs nothing at all. Measured on SP500: 216 companies need a feed, 206 need statements, so 10
+    would have been iterated, spent zero calls, and reported "nothing to do", which reads as a
+    broken button rather than as a deliberate scope.
+
+    So the selection narrows too, to `need_fin`. Measured cost: **637 feed-calls over 216
+    companies → 206 over 206**, a 68% saving for an identical result on this page, because all
+    nineteen columns of the fundamentals grid come from the statements feed alone.
+
+    What is given up: nothing bulk-loads analyst estimates or indicators any more. They are still
+    reachable per company where they are actually drawn — `/api/earnings/{cid}/refresh` takes a
+    `source` — and `feeds=all` here restores the old behaviour for a deliberate full load.
+
+    ⚠⚠ `force=true` MEANS "EVERY CONSTITUENT", AND THE SENTINEL PROBE IS NOT MERELY BYPASSED — IT
+    IS NOT RUN. `needs()` answers *who is missing the feed*, which is the wrong question for a
+    forced run: the answer changes nothing, and it is the expensive part of the setup (one read of
+    `metric_data` per sentinel across every constituent — on ACWI, ~1,900 of them).
+
+    ⚠ IT EXISTS BECAUSE PRESENT IS NOT CURRENT. The sentinel is a row that EXISTS
+    (`annuals__Cashflow Statement__Free Cash Flow`), so a constituent whose statements were loaded
+    a year ago is "not missing" for ever and no press of the un-forced fill will ever update it —
+    the grid keeps showing last year's figures and looks filled. That is the same reasoning the
+    price half already settled (see `_benchmark_refresh`: *a press always fetches, every
+    constituent, no staleness tolerance*), and this is what makes the panel's Refresh mean the same
+    thing on both halves.
+
+    ⚠ FORCE IS EXPRESSED AS THE `need_*` FLAGS, NEVER AS `ingest_company(force=True)`. That
+    argument runs ALL THREE feeds regardless of the flags, so under `feeds="statements"` it would
+    quietly triple the spend on data this page cannot draw. Setting the flags keeps *which feeds
+    run* decided in exactly one place, and `force` then means only *ignore what we already hold*.
+
+    ⚠⚠ AND IT CARRIES `refresh_cache` TOO, BECAUSE THERE ARE TWO CACHES. Selecting a company is not
+    the same as re-asking the vendor: the GuruFocus blob also sits in Storage, and `is_cache_fresh`
+    calls it fresh for weeks past the quarter it is missing. Forced selection without the cache
+    bypass would rewrite identical rows from the same bytes, spend zero calls and leave the grid
+    exactly as it was — a press that looks like a no-op is how a button loses trust. See
+    `ingest_company`'s own ⚠⚠ for the two layers side by side.
+
+    Cost, measured shape: one GuruFocus call per eligible constituent per press — ~490 for SP500,
+    and on ACWI the unsubscribed exchanges are still refused before a call is spent. The remaining
+    quota is read out before the run starts.
+
+    `limit` spends the budget in tranches; 0 is everything that needs it.
+    """
+    import threading  # noqa: PLC0415
+
+    import jobs as job_registry  # noqa: PLC0415
+    from ingest.api_usage import remaining_budget  # noqa: PLC0415
+    from routers._benchmark_index import _members  # noqa: PLC0415
+    from routers._fundamental_backfill import (  # noqa: PLC0415
+        company_rows, eligible, ingest_company, needs,
+    )
+
+    def _work(ctx) -> str:
+        # ⚠⚠ `require_market_cap=False` IS LOAD-BEARING, AND THE DEFAULT MAKES THIS JOB
+        #   SELF-DEFEATING. `_members` drops any constituent with no stored `market_cap_eur` —
+        #   correct for a cap-weighted index, catastrophic here, because the market cap comes out
+        #   of the SAME statements blob this job fetches. So "has no cap" and "needs fetching" are
+        #   very nearly the same set, and filtering on the former removes exactly the companies
+        #   the job exists to load. Measured on the S&P: the grid offered 10 fillable, the work
+        #   list came back 0, and the button reported "0 loaded" while each of those 10 fetched
+        #   fine from its own per-row Fetch (which is keyed by company_id and never consults this
+        #   list). The grid computes `fillable` with the same flag; the two MUST agree, or the
+        #   button promises work it then refuses to do.
+        ids = sorted({m["company_id"] for m in _members(label, require_market_cap=False)
+                      if m.get("company_id")})
+        comps = company_rows(ids)
+        if force:
+            # ⚠ EVERY CONSTITUENT IS WORK, SO NOTHING IS PROBED. `needs` answers "who is missing
+            # this feed", and under force that answer changes nothing — it would just be the
+            # expensive part of the setup thrown away (see the ⚠⚠ in the docstring). The flags are
+            # set to what a forced run means: fetch it, whatever we hold.
+            todo = [{**c, "need_fin": True, "need_est": True, "need_ind": True}
+                    for c in comps.values()]
+        else:
+            # ⚠ THE PROBE NARROWS TOO, NOT ONLY THE SELECTION. Each sentinel is its own read of
+            # `metric_data`; under `statements` the est/ind flags are cleared two lines below
+            # without ever being read, so probing them was two thirds of this read thrown away —
+            # and they are the expensive two (`indicator_q_forward_pe_ratio` is ~526 rows per
+            # company against Free Cash Flow's ~28). The result is identical: `needs` drops a
+            # company only when every PROBED feed is present, and the filter below keeps only
+            # `need_fin` anyway.
+            todo = needs(comps, feeds=("fin",) if feeds == "statements" else None)
+        # ⚠ SELECTION AND ACTION NARROW TOGETHER — see the ⚠⚠ in the docstring. Dropping the
+        # companies that need only estimates/indicators is what stops the run iterating rows
+        # it has nothing to do for; clearing the two flags is what stops it fetching feeds this
+        # page cannot render. Either alone is incoherent.
+        #
+        # ⚠ THE TWO FLAGS ARE STILL SET EXPLICITLY, AND THAT IS NOT REDUNDANT NOW THAT THEY ARE
+        # UNPROBED. `ingest_company` reads `c.get(flag, True)` — an ABSENT flag means "fetch it",
+        # so without this line a narrowed run would spend all three calls per company.
+        #
+        # ⚠ AND IT IS WHERE `force` IS APPLIED, WHICH IS WHY FORCE CANNOT WIDEN THE FEEDS. A forced
+        # run arrives here with all three flags true; this clears two of them under `statements`,
+        # exactly as it does for an un-forced one. The `need_fin` filter is a no-op under force
+        # (every row has it) rather than a second selection rule.
+        if feeds == "statements":
+            todo = [{**c, "need_est": False, "need_ind": False}
+                    for c in todo if c.get("need_fin")]
+        skipped = [(c, eligible(c)) for c in todo]
+        work = [c for c, why in skipped if why is None]
+        refused = [(c, why) for c, why in skipped if why]
+        if limit:
+            work = work[:limit]
+        # ⚠ A FORCED RUN SAYS SO IN ITS FIRST LINE. "206 missing statements" and "206 refetching
+        # every one" are the same number for very different reasons, and the second is the one that
+        # is about to spend a call on every constituent.
+        scope = ("refetching every one" if force
+                 else "missing statements" if feeds == "statements"
+                 else "missing a feed")
+        # ⚠ THE QUOTA WAS A PYTHON dict REPR — `quota {'usa': 16952, 'europe': 19222}`. True, and
+        # written for whoever wrote it. It is the one number here that decides whether the run can
+        # even finish, so it gets read out.
+        budget = remaining_budget(supabase)
+        left = " · ".join(f"{k.upper() if k == 'usa' else k.title()} {v:,}"
+                          for k, v in sorted(budget.items()))
+        ctx.emit(
+            "start",
+            f"{len(ids)} constituents · {len(todo)} {scope} · {len(work)} to fetch"
+            + (f" · {len(refused)} can’t be fetched" if refused else "")
+            + f" · quota left: {left}",
+            done=0, total=len(work))
+        # ⚠ REFUSALS ARE EVENTS, NOT FAILURES — an unsubscribed exchange is an answer. They go
+        # into the log the toast carries rather than onto the bar, which counts work done.
+        for w, why in refused:
+            ctx.emit("skip", f"{w.get('company_name') or w['company_id']}: {why}")
+
+        # ── The fill itself, on a bounded pool.
+        #
+        # ⚠⚠ THIS WAS A SERIAL `for` AND THE SERIAL PART WAS ALL WAITING. Measured against the
+        # live API: 6 calls take 15.42s one at a time and 4.56s on six threads — 3.4x, with
+        # zero refusals; at twelve threads throughput doubled again (2.64 calls/s), so we never
+        # found GuruFocus's ceiling. A 489-constituent fill goes from ~21 minutes to ~4.
+        #
+        # ⚠ EIGHT, NOT TWELVE, DELIBERATELY. The 12-thread run returned one empty response in
+        # twelve — not a 403, so not a quota refusal, and one sample is not proof of a limit.
+        # But the marginal gain past eight is small and the downside of probing for the edge is
+        # a fill that silently does less than it says. Eight keeps most of the win.
+        #
+        # ⚠ AND MY MEASUREMENT WAS API-ONLY. Each company also uploads to Storage and upserts
+        # tens of thousands of `metric_data` rows, which lands on OUR database — expect the real
+        # speed-up to be smaller than the API numbers alone suggest.
+        counter = itertools.count(1)
+        tally_lock = threading.Lock()
+        ok = failed = rows = calls = 0
+
+        def _one(c: dict) -> None:
+            nonlocal ok, failed, rows, calls
+            # ⚠ THE CANCEL BOUNDARY, AND IT IS FIRST. Everything still queued raises here the
+            # moment Cancel is pressed; the eight already inside `ingest_company` finish the
+            # company they are on, because that is where the database is left consistent.
+            ctx.check()
+            # ⚠ `refresh_cache=force` — THE SECOND CACHE. `force` alone only ignores what
+            # `metric_data` holds; the GuruFocus blob in Storage would still be replayed, so a
+            # forced press over an already-loaded index would rewrite identical rows, spend zero
+            # calls and change nothing on screen. See `ingest_company`'s ⚠⚠.
+            r = ingest_company(c, refresh_cache=force)
+            # ⚠ RETRY ONCE ON AN EMPTY ANSWER. This company was selected because it is missing the
+            # feed (or because the run is forced), so zero rows with no error means the fetch came
+            # back with nothing — the failure the 12-thread run produced. It costs one call to
+            # correct and, left alone, would look identical to a company that genuinely has no data.
+            if not r["error"] and r["rows"] == 0:
+                r = ingest_company(c, refresh_cache=force)
+            n = next(counter)
+            with tally_lock:
+                rows += r["rows"]
+                calls += r.get("calls", 0)
+                if r["error"]:
+                    failed += 1
+                else:
+                    ok += 1
+            ctx.spent(r.get("calls", 0))
+            # ⚠ THE COUNTER, NOT THE ARRIVAL ORDER, IS THE POSITION. Eight threads report
+            # concurrently, so `[7/206]` can reach the toast before `[6/206]`; `n` is taken
+            # from an atomic counter so the bar only ever moves forward.
+            # ⚠ THE NAME AND A PLAIN OUTCOME — NOT THE TICKER AND THE FEED TAGS. This line read
+            # `[124/206] PKG fin 35604`: a GuruFocus symbol, the internal tag for the statements
+            # feed, and a count of `metric_data` writes. Three pieces of our own plumbing, and
+            # none of them what a reader watching a ten-minute run wants to know — which is
+            # whether the index is filling in, and which company is the one that failed. The row
+            # counts are not lost; they are summed into the closing line.
+            who = c.get("company_name") or c.get("gurufocus_ticker") or c["company_id"]
+            outcome = ("failed — " + r["error"] if r["error"]
+                       # ⚠ AN ANSWER, NOT A NON-EVENT: every feed was already loaded.
+                       else "already up to date" if not r["done"]
+                       else "loaded")
+            ctx.progress(
+                n, len(work), f"[{n}/{len(work)}] {who} — {outcome}",
+                company_id=c["company_id"], failed=bool(r["error"]))
+
+        if work:
+            with ThreadPoolExecutor(max_workers=_FILL_WORKERS,
+                                    thread_name_prefix="fill") as pool:
+                # `list(...)` so exceptions surface here rather than being swallowed by the
+                # executor's lazy iterator.
+                list(pool.map(_one, work))
+        # ⚠ THE CALL COUNT IS ON THE JOB, NOT ONLY IN THIS SENTENCE. `ctx.spent` has been
+        # accumulating it per company, so the toast's chip is right even mid-run and even if
+        # the run is cancelled — this line just restates it where the outcome is read.
+        # ⚠ "data points", NOT "rows" — the same wording the per-company button settled on. A row
+        # is a `metric_data` write; a reader is being told how much arrived, not how our storage
+        # counts it. `failed` is only mentioned when there were failures: a trailing "0 failed" on
+        # every clean run is noise that teaches the eye to skip the part that matters.
+        # Same rule as the per-company job: drop the cached blends only if something was actually
+        # written. A fill with no work (the AEX case, which spends zero API calls) leaves every
+        # cached line correct, and clearing them would buy nothing but a rebuild.
+        if ok:
+            _blend_cache.invalidate()
+        return (f"{label} — {ok} companies {'refetched' if force else 'loaded'}"
+                + (f", {failed} failed" if failed else "")
+                + f", {rows:,} data points"
+                + (f", {calls:,} API calls" if calls else ""))
+
+    job = job_registry.start("fundamentals.index", label, _work)
+    return {"job_id": job.id, "label": label}

@@ -1002,6 +1002,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/return-reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Return Reconciliation
+         * @description Why this book's own YTD is not the YTD its open positions add up to.
+         *
+         *     Reads both sides from the loaders the other panels already use — `_year_perf` for the book,
+         *     `account_holdings` for the positions — so the reconciliation cannot quietly disagree with
+         *     either of the figures it is reconciling.
+         */
+        get: operations["airs_account_return_reconciliation_api_airs_accounts__portefeuille__return_reconciliation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Transactions
+         * @description What this book BOUGHT and SOLD this year — the AIRS Transacties report.
+         *
+         *     The three reports already stored say what a book holds (VOLK), what it earned (MUT) and what
+         *     its strategy asks for (MODEL). None says what it DID, so a position that appeared mid-year, one
+         *     sold out entirely, and a weight that drifted purely on price all look the same from outside.
+         *
+         *     Served from the stored snapshot; `refresh=true` (or a stale window, or nothing stored) goes out
+         *     to AIRS. A live fetch is seconds behind a headless session, which is why the panel is behind a
+         *     click and the answer says whether it was cached.
+         */
+        get: operations["airs_account_transactions_api_airs_accounts__portefeuille__transactions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/allocation-bands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Allocation Bands
+         * @description The allocation policy — all sixteen cells, nulls where nothing is set.
+         */
+        get: operations["airs_allocation_bands_api_airs_allocation_bands_get"];
+        /**
+         * Airs Set Allocation Bands
+         * @description Apply these cells to the policy. Admin-only (the API gate refuses a non-admin write).
+         *
+         *     ⚠ PARTIAL BY DESIGN — send only the cells you changed. A cell that IS sent and is empty means
+         *     "clear this row"; a cell that is not sent means nothing at all. Sending the full grid from a
+         *     stale view therefore deletes everything that changed since it loaded, which is not theoretical:
+         *     it wiped 15 of 16 seeded rows on 2026-08-04, silently.
+         *
+         *     ⚠ VALIDATED IN FULL BEFORE ANYTHING IS WRITTEN. A save is ONE intent, so a bad cell rejects the
+         *     whole submission with a sentence naming it — landing the first eight and refusing the ninth
+         *     would leave a policy half-updated while the reader believes all of it took.
+         *
+         *     Returns the WHOLE grid as stored, so the editor renders what the database now holds — including
+         *     any cell somebody else changed while it was open — rather than what it hoped it sent.
+         */
+        put: operations["airs_set_allocation_bands_api_airs_allocation_bands_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/asset-bucket-override": {
         parameters: {
             query?: never;
@@ -1122,7 +1210,14 @@ export interface paths {
         };
         /**
          * Airs Model Portfolio Correlations
-         * @description YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models.
+         * @description YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models,
+         *     plus every instrument that fed them and its price series.
+         *
+         *     ⚠ GZIPPED HERE RATHER THAN BY A `GZipMiddleware`, for the reason `/api/benchmarks/…/grid`
+         *     records: this app is SSE-heavy, and compression sits between a stream and its client and
+         *     buffers. The instrument series are ~450 KB of JSON and compress to ~207 KB; the matrices
+         *     alone are a few KB. `Accept-Encoding` is honoured, not assumed — `/documentation` publishes
+         *     curl quick-starts against this API, and curl does not send it by default.
          */
         get: operations["airs_model_portfolio_correlations_api_airs_model_portfolios_correlations_get"];
         put?: never;
@@ -1251,6 +1346,31 @@ export interface paths {
          *     write to any /api/airs path without this needing its own check.
          */
         put: operations["airs_set_portfolio_display_name_api_airs_model_portfolios__portfolio_id__display_name_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/holding-timing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Holding Timing
+         * @description Why one holding's `Money-weighted` return differs from its `Instrument return` — trade by trade.
+         *
+         *     `Instrument return` erases your timing on purpose (it divides by AIRS's opening value restated
+         *     to today's quantity, so a share bought in June is still measured from January); `Money-weighted`
+         *     is driven by it. This decomposes the gap: what the position you held on 1 January would have
+         *     made untouched, and what each buy and sell added or cost against that.
+         */
+        get: operations["airs_holding_timing_api_airs_model_portfolios__portfolio_id__holding_timing_get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1595,12 +1715,59 @@ export interface paths {
         put?: never;
         /**
          * Airs Portfolio Refresh
-         * @description Re-scan ONE portfolio's AIRS Rendement + Vermogensoverzicht and store both — the per-row
-         *     Refresh on the overview table. Awaited (a few seconds: two downloads), so the client can
-         *     re-fetch the row on success. Serialized against the full scan via the module lock; returns
-         *     `{status: busy}` if a fleet refresh is in flight.
+         * @description Re-scan ONE portfolio's AIRS reports — and the books it is BUILT FROM.
+         *
+         *     ⚠ A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another
+         *     strategy, and everything shown through one — the looked-through holdings, their returns, the
+         *     attribution — is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads
+         *     the twelve lines it stores and leaves the instruments behind them as stale as they were.
+         *     Measured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.
+         *
+         *     ⚠ SO THIS IS NOT ALWAYS "a few seconds" ANY MORE — it is FIVE downloads per account in the
+         *     chain (Rendement, Vermogensoverzicht, Mutaties, Transacties, Model). Each one's outcome comes back in `cascaded` rather than being folded into a single
+         *     status, because a parent refreshed against a child that failed is not fresh. `cascade=false`
+         *     refreshes only the named account.
+         *
+         *     Serialized against the full scan via the module lock; returns `{status: busy}` if a fleet
+         *     refresh is in flight.
          */
         post: operations["airs_portfolio_refresh_api_airs_portfolios__portefeuille__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/portfolios/{portefeuille}/refresh/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Portfolio Refresh Job
+         * @description The same re-scan as above, as a CANCELLABLE JOB that reports progress.
+         *
+         *     ⚠ WHY A JOB FOR A "few seconds" REFRESH. It is not a few seconds any more: with the cascade it
+         *     is five downloads per account over a chain that reaches NINE (TOPS_BEOFF_BEH_DYN). Held open as
+         *     one POST, the caller gets a disabled button and no line moving — indistinguishable from a hung
+         *     one — and navigating away abandons work that carries on invisibly. As a job it reports into the
+         *     shared toast stack, survives the route change, and re-attaches on reload (`attachRunningJobs`).
+         *
+         *     ⚠ THE SAME `refresh_one_portfolio`, WITH A LISTENER — not a streaming copy of it. That function
+         *     is already the one body the fleet scan and the per-row refresh share; a second version for the
+         *     job path is exactly the drift its own docstring exists to prevent. The plain POST above stays
+         *     for scripts and for anything that wants one blocking answer.
+         *
+         *     ⚠ NO `ctx.check()` INSIDE THE SCAN. Cancellation is cooperative and the natural boundary is
+         *     BETWEEN accounts — but a half-cascade leaves a parent fresh against stale children, which is
+         *     the state this endpoint exists to avoid. So the job is not cancellable mid-chain: it reports,
+         *     it does not stop. `_LOCK` already refuses a second one.
+         */
+        post: operations["airs_portfolio_refresh_job_api_airs_portfolios__portefeuille__refresh_job_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3011,6 +3178,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/benchmarks/company/{company_id}/fundamentals/ingest/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Company Fundamentals Job
+         * @description The per-row Fetch button — same work as the by-ISIN endpoint above, as a cancellable JOB.
+         *
+         *     ⚠⚠ KEYED ON `company_id`, AND IT USED TO BE KEYED ON ISIN — WHICH SILENTLY DISABLED THE BUTTON
+         *     FOR 12 OF THE S&P's 501 CONSTITUENTS. The by-ISIN form exists because in the OLD constituent
+         *     table `company_id` was secretly an `analysis_id` (the price machinery keys on that name), so an
+         *     id off the row 404'd against `company`. That warning is real and still on the endpoint above —
+         *     it just does not apply here: the fundamentals grid is built from `_members()`, which IS the
+         *     company world, so its `company_id` is genuine.
+         *
+         *     Keeping the ISIN detour cost reachability for no safety. Assurant (`company_id` 6414, NYSE,
+         *     `AIZ`) has every field an ingest needs and no ISIN, so its Fetch button was greyed out with a
+         *     tooltip about an identifier the fetch does not actually require. `company.isin` is nullable and
+         *     populated opportunistically; `company_id` is the primary key.
+         *
+         *     ⚠⚠ `feeds="statements"` IS ONE API CALL AND FILLS THE WHOLE GRID. Every one of the nineteen
+         *     columns the fundamentals grid draws — market cap included, as
+         *     `annuals__Valuation and Quality__Market Cap` — comes out of `fetch_financials`. The other two
+         *     feeds (analyst estimates, indicators) contribute NOTHING to that table; they supply the Long
+         *     Equity modal's forward EPS and indicator series.
+         *
+         *     So the default `all` spends three calls of which two change nothing on the grid. That is the
+         *     right default for "load this company properly", and the wrong one for the triage pass this
+         *     parameter exists for: read the caps cheaply, then spend the other two calls only on the
+         *     constituents whose weight makes them worth it.
+         *
+         *     ⚠ THERE IS NO "MARKET CAP ONLY" AND THERE CANNOT BE. GuruFocus returns one financials blob;
+         *     the cap arrives inside it along with revenue, equity and ROIC. `statements` is the smallest
+         *     unit that exists — asking for less would mean discarding data we have already paid for.
+         *
+         *     ⚠ WHY A JOB FOR THREE API CALLS. Not for the progress bar: for the CANCEL, and for the fact
+         *     that several rows can now be fetched at once. The plain endpoint holds one HTTP request open
+         *     for as long as GuruFocus takes and gives the caller no way to stop it — abort the fetch and the
+         *     server keeps going, having already decided to spend the quota. Here the three feeds are
+         *     separated by a `should_stop` check, so Cancel takes effect at the next feed boundary and
+         *     whatever was already written stays written (`needs()` will pick the rest up next time).
+         *
+         *     ⚠ THE OLD ENDPOINT STAYS. It is what `scripts/` and any external caller use, and it is the
+         *     honest shape for a caller that wants one blocking answer. This is the same `ingest_company`
+         *     underneath — "ingest" must not come to mean two different things depending on which button
+         *     you pressed.
+         */
+        post: operations["ingest_company_fundamentals_job_api_benchmarks_company__company_id__fundamentals_ingest_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/benchmarks/index/{label}": {
         parameters: {
             query?: never;
@@ -3058,6 +3284,178 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/benchmarks/index/{label}/fundamentals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Constituent Fundamentals
+         * @description The twelve Long Equity measures for each of an index's constituents.
+         *
+         *     ⚠ A SEPARATE CALL FROM `/index/{label}`, DELIBERATELY. That endpoint prices 500 constituents and
+         *     is what the table needs to render at all; this one reads fourteen metric series. Folding them
+         *     together would hold the whole table behind the slower half, so the prices land first and the
+         *     fundamentals fill in — the same progressive shape the /schedule and holdings-count surfaces use.
+         *
+         *     `cadence` is `annual` (fiscal years) or `quarterly` (TRAILING TWELVE MONTHS, the basis the tab
+         *     plots) — see `constituent_fundamentals`, which owns what each one means and why the quarterly
+         *     span starts three quarters late. It is a VIEW over data one GuruFocus call already brought;
+         *     switching it never spends quota.
+         */
+        get: operations["benchmark_constituent_fundamentals_api_benchmarks_index__label__fundamentals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/index/{label}/fundamentals/grid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Benchmark Fundamental Grid
+         * @description Every constituent's fundamentals for every period, with the cap that weights each one.
+         *
+         *     The VALUES behind `/fundamentals`, which reports only which periods we hold. Rows are
+         *     companies, columns are lines, and the period is the slider — because weighting is
+         *     cross-sectional: FY2021's weights need every constituent's FY2021 cap at once.
+         *
+         *     `cadence` is `annual` (fiscal years) or `quarterly`, which — as everywhere else in this app —
+         *     means **trailing twelve months**, not the raw quarter. That keeps both slider axes on one
+         *     12-month basis, so moving the quarter changes the as-of date and never the unit.
+         *
+         *     Returned whole, not per period: it is ONE bulk read for every line over data one GuruFocus call
+         *     already brought, and the reader's whole interaction is dragging a slider.
+         *
+         *     ⚠ CACHED IN-PROCESS, AND DROPPED BY THE INGEST JOBS. Both Fetch buttons call
+         *     `_blend_cache.invalidate()` when they have written something, so a filled row shows up on the
+         *     reload the pane does anyway. See `cached_grid` for why this must not be a `Cache-Control`
+         *     header: a copy in the browser is one no invalidation of ours can reach.
+         *
+         *     ⚠⚠ GZIPPED HERE RATHER THAN APP-WIDE, AND THAT IS DELIBERATE. ACWI's payload is **16.5 MB** of
+         *     JSON — 1,949 constituents x 12 periods x 19 lines, each carrying its EUR value, its native
+         *     figure and the rate between them — and it compresses to **5.3 MB** in 0.21s (level 1; level 6
+         *     reaches 4.5 MB for three times the CPU, which is the wrong trade for a number this size). By
+         *     the time the server work below is measured in hundreds of milliseconds, the transfer IS the
+         *     load time, and no amount of query tuning touches it.
+         *
+         *     A `GZipMiddleware` on the app would have covered this endpoint and every other one — and this
+         *     app is SSE-heavy (ingest, scanner, backtest, every live dashboard). Compression sits between a
+         *     stream and its client and buffers; the whole point of those endpoints is that a frame arrives
+         *     when it is produced. One endpoint that ships megabytes is not a reason to put a buffer in front
+         *     of the ones that ship bytes.
+         *
+         *     ⚠ THE `Accept-Encoding` HEADER IS HONOURED, NOT ASSUMED. Every browser sends it and `requests`
+         *     sends it by default, but a plain `curl` does NOT — and `/documentation` publishes curl
+         *     quick-starts against this API. Shipping gzip to a client that did not ask for it hands it
+         *     binary it will render as mojibake.
+         *
+         *     ⚠ THE MODEL STILL VALIDATES. Returning a `Response` skips FastAPI's `response_model` check, so
+         *     it is run explicitly below — the schema is what `npm run gen:types` generates the frontend's
+         *     types from, and an endpoint that silently stops conforming to its own contract is worse than a
+         *     slow one. It costs 0.06s on the largest payload here, and only on a cache miss.
+         */
+        get: operations["benchmark_fundamental_grid_api_benchmarks_index__label__fundamentals_grid_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/index/{label}/fundamentals/ingest/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Index Fundamentals Job
+         * @description Backfill every constituent missing the data this page shows, as a cancellable JOB.
+         *
+         *     ⚠ IT REPLACED AN SSE ENDPOINT RATHER THAN JOINING ONE. The old
+         *     `GET …/fundamentals/ingest` streamed the same work to a bespoke progress box in the panel, and
+         *     had the defect every such endpoint here had: the client was not attached to the work. Navigate
+         *     away and the box vanished while the thread carried on spending quota — on this run, hundreds of
+         *     calls with no way to stop them. Keeping both would have left two transports for one fill and
+         *     two places for "ingest" to come to mean different things.
+         *
+         *     ⚠ CANCEL LANDS BETWEEN COMPANIES, NOT MID-COMPANY. `_one` checks first thing, so a press stops
+         *     everything still queued at once while the eight already in flight finish the company they are
+         *     on. That is the boundary where the database is consistent — and on a 206-company run it is the
+         *     difference between stopping now and spending the rest of the index.
+         *
+         *     ⚠ IT REPORTS THE QUOTA BEFORE IT STARTS AND THE SKIPS AS IT GOES. A region at zero means every
+         *     further call is wasted, and a company on an unsubscribed exchange is a refusal with a reason —
+         *     never a failure.
+         *
+         *     ⚠⚠ `feeds="statements"` (THE DEFAULT) NARROWS **TWO** THINGS, AND NARROWING ONLY ONE IS A BUG.
+         *     A fill makes two independent decisions: WHO is in the work list (`needs`, which returns anyone
+         *     missing any of three sentinels) and WHICH feeds run for each. Narrowing only the second leaves
+         *     companies selected because they lack estimates or indicators — for whom the narrowed action
+         *     runs nothing at all. Measured on SP500: 216 companies need a feed, 206 need statements, so 10
+         *     would have been iterated, spent zero calls, and reported "nothing to do", which reads as a
+         *     broken button rather than as a deliberate scope.
+         *
+         *     So the selection narrows too, to `need_fin`. Measured cost: **637 feed-calls over 216
+         *     companies → 206 over 206**, a 68% saving for an identical result on this page, because all
+         *     nineteen columns of the fundamentals grid come from the statements feed alone.
+         *
+         *     What is given up: nothing bulk-loads analyst estimates or indicators any more. They are still
+         *     reachable per company where they are actually drawn — `/api/earnings/{cid}/refresh` takes a
+         *     `source` — and `feeds=all` here restores the old behaviour for a deliberate full load.
+         *
+         *     ⚠⚠ `force=true` MEANS "EVERY CONSTITUENT", AND THE SENTINEL PROBE IS NOT MERELY BYPASSED — IT
+         *     IS NOT RUN. `needs()` answers *who is missing the feed*, which is the wrong question for a
+         *     forced run: the answer changes nothing, and it is the expensive part of the setup (one read of
+         *     `metric_data` per sentinel across every constituent — on ACWI, ~1,900 of them).
+         *
+         *     ⚠ IT EXISTS BECAUSE PRESENT IS NOT CURRENT. The sentinel is a row that EXISTS
+         *     (`annuals__Cashflow Statement__Free Cash Flow`), so a constituent whose statements were loaded
+         *     a year ago is "not missing" for ever and no press of the un-forced fill will ever update it —
+         *     the grid keeps showing last year's figures and looks filled. That is the same reasoning the
+         *     price half already settled (see `_benchmark_refresh`: *a press always fetches, every
+         *     constituent, no staleness tolerance*), and this is what makes the panel's Refresh mean the same
+         *     thing on both halves.
+         *
+         *     ⚠ FORCE IS EXPRESSED AS THE `need_*` FLAGS, NEVER AS `ingest_company(force=True)`. That
+         *     argument runs ALL THREE feeds regardless of the flags, so under `feeds="statements"` it would
+         *     quietly triple the spend on data this page cannot draw. Setting the flags keeps *which feeds
+         *     run* decided in exactly one place, and `force` then means only *ignore what we already hold*.
+         *
+         *     ⚠⚠ AND IT CARRIES `refresh_cache` TOO, BECAUSE THERE ARE TWO CACHES. Selecting a company is not
+         *     the same as re-asking the vendor: the GuruFocus blob also sits in Storage, and `is_cache_fresh`
+         *     calls it fresh for weeks past the quarter it is missing. Forced selection without the cache
+         *     bypass would rewrite identical rows from the same bytes, spend zero calls and leave the grid
+         *     exactly as it was — a press that looks like a no-op is how a button loses trust. See
+         *     `ingest_company`'s own ⚠⚠ for the two layers side by side.
+         *
+         *     Cost, measured shape: one GuruFocus call per eligible constituent per press — ~490 for SP500,
+         *     and on ACWI the unsubscribed exchanges are still refused before a call is spent. The remaining
+         *     quota is read out before the run starts.
+         *
+         *     `limit` spends the budget in tranches; 0 is everything that needs it.
+         */
+        post: operations["ingest_index_fundamentals_job_api_benchmarks_index__label__fundamentals_ingest_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/benchmarks/index/{label}/refresh": {
         parameters: {
             query?: never;
@@ -3090,6 +3488,73 @@ export interface paths {
         get: operations["benchmark_refresh_api_benchmarks_index__label__refresh_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/index/{label}/refresh/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Benchmark Refresh Job
+         * @description The same refresh as `GET …/refresh`, as a cancellable JOB.
+         *
+         *     ⚠ WHY IT EXISTS: THE SSE FORM CANNOT BE STOPPED. It streams to whoever opened it, so the client
+         *     is attached to the work — navigate away and the progress box vanishes while the thread carries
+         *     on making paced Yahoo calls for another eleven minutes, with no handle to stop it. That is the
+         *     identical defect the fundamentals ingest had before it became a job.
+         *
+         *     ⚠ THE SSE ENDPOINT IS LEFT IN PLACE, unlike the fundamentals conversion which replaced its own.
+         *     That one had a single consumer; this one is also how a refresh is watched from `/api` and from
+         *     curl, where a job handle is the inconvenient form. Both call `refresh_benchmark` — ONE
+         *     implementation, two transports, never two refreshes.
+         *
+         *     ⚠ CANCEL LANDS BETWEEN CONSTITUENTS — `should_stop` is checked in `_prices`' loop, which is
+         *     where the minutes are. It is deliberately NOT `ctx.check()`: raising would discard the counts
+         *     for work that really happened, and those counts are this job's entire output. A stopped run
+         *     keeps everything it fetched and its summary says how far it got.
+         */
+        post: operations["benchmark_refresh_job_api_benchmarks_index__label__refresh_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/isin/{isin}/fundamentals/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Company Fundamentals
+         * @description Fetch the GuruFocus feeds ONE constituent is missing — the per-row button.
+         *
+         *     ⚠ BY ISIN, NOT BY THE TABLE'S `company_id`. That field is an `analysis_id` in the constituent
+         *     payload (see `ConstituentFundamentals.rows`), so an id taken straight off the row 404s against
+         *     the `company` table — measured, on analysis_id 1457, which is a real asset row and not a
+         *     company at all. ISIN is the identifier both worlds carry.
+         *
+         *     ⚠ ALL THREE FEEDS, unlike `/api/earnings/fundamental-coverage/ingest`, which fetches only the
+         *     statements. A company with financials and no estimates renders a Long Equity tab that fills in
+         *     around two empty panels, which reads as a charting bug. See `_fundamental_backfill`.
+         *
+         *     Admin-only: it spends GuruFocus quota, and the auth gate holds any non-`/refresh` write here to
+         *     admins.
+         */
+        post: operations["ingest_company_fundamentals_api_benchmarks_isin__isin__fundamentals_ingest_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5446,15 +5911,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/items": {
+    "/api/jobs": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Items */
-        get: operations["get_items_api_items_get"];
+        /**
+         * List Jobs
+         * @description Running jobs plus recently finished ones (15 minutes).
+         *
+         *     This is what a page reload re-attaches to: without it, a job started before a refresh keeps
+         *     running with nothing on screen to say so.
+         */
+        get: operations["list_jobs_api_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Job
+         * @description Ask a job to stop at its next safe point.
+         *
+         *     ⚠ 200 WITH `cancel_requested`, NOT A PROMISE THAT IT STOPPED. The worker halts between units of
+         *     work — between two GuruFocus feeds — so a job mid-feed keeps going for a few seconds. Reporting
+         *     it as already cancelled would make the row disappear while its API calls were still in flight.
+         */
+        post: operations["cancel_job_api_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/{job_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Job
+         * @description SSE: every event after `after`, then the live tail, then close.
+         *
+         *     ⚠ `after` IS WHAT MAKES THIS RE-ATTACHABLE. A reconnecting client passes the last sequence it
+         *     saw and gets the gap, so a reload — or a second tab — shows the run's history rather than
+         *     joining mid-sentence with no idea what came before.
+         *
+         *     ⚠ A DISCONNECT DOES NOT CANCEL. Closing this stream stops the reporting and nothing else; see
+         *     the module docstring in `jobs.py`. Cancel is an explicit POST.
+         */
+        get: operations["stream_job_api_jobs__job_id__stream_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -7406,6 +7928,182 @@ export interface components {
             display_name?: string | null;
         };
         /**
+         * AirsAccountReconciliation
+         * @description The book's own YTD, lined up against what its positions — held AND sold — explain.
+         *
+         *     ⚠ THE TWO NUMBERS ARE ALREADY ON SCREEN A FEW LINES APART AND THEY DISAGREE. Measured
+         *     2026-08-05 over 39 accounts, **23 disagree by more than 1pp** (BUS_FTS_BEPOFF_DYN: the book
+         *     made -4.57%, its open positions +3.27pp more than that). Both are correct answers to different
+         *     questions, and a reader given both with no arithmetic between them cannot arbitrate.
+         *
+         *     ⚠ EVERY COMPONENT IS A EURO AMOUNT. The two percentages are measured on different opening
+         *     capitals, so they do not subtract into anything meaningful — `gap_pp` is reported for
+         *     orientation and is deliberately named in POINTS, never divided into.
+         */
+        AirsAccountReconciliation: {
+            /** As Of */
+            as_of?: string | null;
+            /** Book As Of */
+            book_as_of?: string | null;
+            /** Book End Eur */
+            book_end_eur?: number | null;
+            /** Book Reconciles */
+            book_reconciles?: boolean | null;
+            /** Book Result Eur */
+            book_result_eur?: number | null;
+            /** Book Return Pct */
+            book_return_pct?: number | null;
+            /** Book Start Eur */
+            book_start_eur?: number | null;
+            /** Buy Count */
+            buy_count?: number | null;
+            /** Buys Eur */
+            buys_eur?: number | null;
+            /**
+             * Costs Eur
+             * @default 0
+             */
+            costs_eur?: number;
+            /** Dates Aligned */
+            dates_aligned?: boolean | null;
+            /**
+             * Deposits Eur
+             * @default 0
+             */
+            deposits_eur?: number;
+            /** Gap Pp */
+            gap_pp?: number | null;
+            /** Holdings As Of */
+            holdings_as_of?: string | null;
+            /** Months */
+            months?: number | null;
+            /** Open End Eur */
+            open_end_eur?: number | null;
+            /**
+             * Open Priced
+             * @default 0
+             */
+            open_priced?: number;
+            /** Open Result Eur */
+            open_result_eur?: number | null;
+            /** Open Return Pct */
+            open_return_pct?: number | null;
+            /** Open Start Eur */
+            open_start_eur?: number | null;
+            /**
+             * Open Unpriced
+             * @default 0
+             */
+            open_unpriced?: number;
+            /** Periode */
+            periode?: string | null;
+            /** Portefeuille */
+            portefeuille: string;
+            /**
+             * Realised
+             * @default []
+             */
+            realised?: components["schemas"]["AirsRealisedLeg"][];
+            /**
+             * Realised Names
+             * @default 0
+             */
+            realised_names?: number;
+            /** Realised Note */
+            realised_note?: string | null;
+            /** Realised Ytd Eur */
+            realised_ytd_eur?: number | null;
+            /** Reconciles */
+            reconciles?: boolean | null;
+            /** Residual Reason */
+            residual_reason?: string | null;
+            /** Residual Vs Book Eur */
+            residual_vs_book_eur?: number | null;
+            /** Return Basis */
+            return_basis?: string | null;
+            /**
+             * Sold Funds
+             * @default []
+             */
+            sold_funds?: string[];
+            /**
+             * Sold Income Eur
+             * @default 0
+             */
+            sold_income_eur?: number;
+            /** Start Gap Eur */
+            start_gap_eur?: number | null;
+            /** Total Result Eur */
+            total_result_eur?: number | null;
+            /** Total Return Pct */
+            total_return_pct?: number | null;
+            /** Transaction Rows */
+            transaction_rows?: number | null;
+            /** Unexplained Eur */
+            unexplained_eur?: number | null;
+            /**
+             * Unknown Transaction Types
+             * @default {}
+             */
+            unknown_transaction_types?: {
+                [key: string]: number;
+            };
+            /**
+             * Withdrawals Eur
+             * @default 0
+             */
+            withdrawals_eur?: number;
+        };
+        /**
+         * AirsAccountTransactions
+         * @description One account's AIRS Transacties, as the SHEET — no schema imposed on it.
+         *
+         *     ⚠ THE COLUMNS ARE DATA HERE, NOT A CONTRACT. `rapport_types=TRANS` returns an XLS (probed
+         *     2026-07-23) and no column of it has ever been measured, so this endpoint reports the report:
+         *     `columns` in the sheet's own order, `kinds` giving each one's pandas-inferred type, and `rows`
+         *     keyed by column name. Naming fields against a sheet nobody has read is how `Bedrag` gets
+         *     charted where `Bedrag eur` belonged — one word apart, and the wrong one is a plausible number
+         *     rather than an error. See `airs_transacties` for the full reasoning and for what replaces this
+         *     once the sheet has been seen.
+         *
+         *     ⚠ `source` AND `note` ARE THE ANSWER'S OWN PROVENANCE. An empty `rows` means one of three very
+         *     different things — the book did not trade, AIRS has no such report for it, or we could not ask
+         *     — and an empty table with nothing beside it asserts the first.
+         */
+        AirsAccountTransactions: {
+            /** Cached At */
+            cached_at?: string | null;
+            /**
+             * Columns
+             * @default []
+             */
+            columns?: string[];
+            /** Datum Tot */
+            datum_tot: string;
+            /** Datum Van */
+            datum_van: string;
+            /**
+             * Kinds
+             * @default {}
+             */
+            kinds?: {
+                [key: string]: string;
+            };
+            /** Note */
+            note?: string | null;
+            /** Portefeuille */
+            portefeuille: string;
+            /**
+             * Rows
+             * @default []
+             */
+            rows?: {
+                [key: string]: number | string | null;
+            }[];
+            /** Source */
+            source: string;
+        };
+        /**
          * AirsHoldingIsin
          * @description One account holding, with the ISIN we believe it is — and how much to believe it.
          *
@@ -7620,6 +8318,99 @@ export interface components {
             /** Ytd Pct */
             ytd_pct?: number | null;
         };
+        /**
+         * AirsRealisedLeg
+         * @description One instrument's realised result this year, summed over its sales.
+         *
+         *     ⚠ `closed_out` IS DECIDED BY ABSENCE FROM THE HOLDINGS, NOT BY PRESENCE HERE. A sale is a
+         *     REALISATION, not a closure — Synopsys was trimmed on 2026-01-22 and is still held — so a name
+         *     can legitimately appear both here and in the positions table above.
+         */
+        AirsRealisedLeg: {
+            /**
+             * Closed Out
+             * @default false
+             */
+            closed_out?: boolean;
+            /**
+             * Cost Eur
+             * @default 0
+             */
+            cost_eur?: number;
+            /** First */
+            first?: string | null;
+            /** Fonds */
+            fonds: string;
+            /** Last */
+            last?: string | null;
+            /**
+             * Prior Year Eur
+             * @default 0
+             */
+            prior_year_eur?: number;
+            /**
+             * Proceeds Eur
+             * @default 0
+             */
+            proceeds_eur?: number;
+            /**
+             * Quantity
+             * @default 0
+             */
+            quantity?: number;
+            /**
+             * Realised Ytd Eur
+             * @default 0
+             */
+            realised_ytd_eur?: number;
+            /**
+             * Sales
+             * @default 0
+             */
+            sales?: number;
+        };
+        /**
+         * AllocationBand
+         * @description One cell of the allocation policy: what share this class may take in this risk profile.
+         *
+         *     ⚠ EVERY PERCENT IS OPTIONAL, AND NULL IS NOT ZERO. "No policy recorded" and "hold none of this"
+         *     are the same claim for a minimum and OPPOSITE claims for a default and a maximum, so an unset
+         *     cell comes back null rather than 0 — a zeroed grid would publish a policy nobody wrote.
+         *
+         *     ⚠ DECLARED ABOVE `ModelPortfolioAnalysis` BECAUSE THAT MODEL EMBEDS IT (the bands drawn over
+         *     the allocation bars). Pydantic resolves the annotation when the class is built, so a definition
+         *     further down the file is a NameError at import, not a forward reference.
+         */
+        AllocationBand: {
+            /** Bucket */
+            bucket: string;
+            /** Default Pct */
+            default_pct?: number | null;
+            /** Max Pct */
+            max_pct?: number | null;
+            /** Min Pct */
+            min_pct?: number | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Variant */
+            variant: string;
+        };
+        /**
+         * AllocationBandGrid
+         * @description The whole policy, always complete: every profile × every invested class.
+         *
+         *     `variants` and `buckets` ship with it so the editor renders the grid the SERVER knows about
+         *     rather than a copy of it — add a fifth risk profile to `VARIANTS` and the editor grows a column
+         *     without a frontend change, which is the only way the two cannot drift.
+         */
+        AllocationBandGrid: {
+            /** Buckets */
+            buckets: string[];
+            /** Cells */
+            cells: components["schemas"]["AllocationBand"][];
+            /** Variants */
+            variants: string[];
+        };
         /** AssetBucketOverride */
         AssetBucketOverride: {
             /** Bucket */
@@ -7648,12 +8439,16 @@ export interface components {
             asset_class?: string | null;
             /** Bars */
             bars?: number | null;
+            /** Company Id */
+            company_id?: number | null;
             /** Continent */
             continent?: string | null;
             /** Country */
             country?: string | null;
             /** Currency */
             currency?: string | null;
+            /** Delisted At */
+            delisted_at?: string | null;
             /** Domicile Country */
             domicile_country?: string | null;
             /** Exchange */
@@ -7662,8 +8457,30 @@ export interface components {
             execution_id: number;
             /** First Date */
             first_date?: string | null;
+            /** Gf Company Name */
+            gf_company_name?: string | null;
+            /** Gf Exchange */
+            gf_exchange?: string | null;
+            /** Gf Has Dividends */
+            gf_has_dividends?: boolean | null;
+            /** Gf Has Financials */
+            gf_has_financials?: boolean | null;
+            /** Gf Price Bars */
+            gf_price_bars?: number | null;
+            /** Gf Price From */
+            gf_price_from?: string | null;
+            /** Gf Price To */
+            gf_price_to?: string | null;
+            /** Gf Ticker */
+            gf_ticker?: string | null;
+            /** Gf Volume Bars */
+            gf_volume_bars?: number | null;
+            /** Gf Volume To */
+            gf_volume_to?: string | null;
             /** Identity Status */
             identity_status?: string | null;
+            /** Illiquid At */
+            illiquid_at?: string | null;
             /** Is Default */
             is_default?: boolean | null;
             /** Is Leveraged */
@@ -7703,6 +8520,10 @@ export interface components {
             openfigi_ticker?: string | null;
             /** Openfigi Type */
             openfigi_type?: string | null;
+            /** Orphaned At */
+            orphaned_at?: string | null;
+            /** Out Of Scope At */
+            out_of_scope_at?: string | null;
             /** Parquet Path */
             parquet_path?: string | null;
             /** Parquet Rows */
@@ -7719,6 +8540,11 @@ export interface components {
             short_multiplier?: number | null;
             /** Status */
             status: string;
+            /**
+             * Universes
+             * @default []
+             */
+            universes?: string[];
             /** Volume From */
             volume_from?: string | null;
             /** Volume To */
@@ -8168,18 +8994,39 @@ export interface components {
          *     NOT folded to Unclassified like the fund axes).
          */
         BookHoldingDetail: {
+            /** Avg Capital Eur */
+            avg_capital_eur?: number | null;
             /** Bucket */
             bucket: string;
+            /** Capital Book */
+            capital_book?: string | null;
+            /** Capital Source */
+            capital_source?: string | null;
+            /**
+             * Capital Unknown
+             * @default false
+             */
+            capital_unknown?: boolean;
+            /** Contribution Pct */
+            contribution_pct?: number | null;
             /** Currency */
             currency?: string | null;
+            /** Current Value Eur */
+            current_value_eur?: number | null;
+            /** Income Eur */
+            income_eur?: number | null;
             /** Isin */
             isin?: string | null;
+            /** Money Weighted Return Pct */
+            money_weighted_return_pct?: number | null;
             /** Name */
             name?: string | null;
             /** Own Income Eur */
             own_income_eur?: number | null;
             /** Own Return As Of */
             own_return_as_of?: string | null;
+            /** Own Return Book */
+            own_return_book?: string | null;
             /**
              * Own Return Estimated
              * @default false
@@ -8191,8 +9038,34 @@ export interface components {
             own_return_pct?: number | null;
             /** Own Return Source */
             own_return_source?: string | null;
+            /** Realised Result Eur */
+            realised_result_eur?: number | null;
+            /** Result Eur */
+            result_eur?: number | null;
             /** Return Pct */
             return_pct?: number | null;
+            /** Sector */
+            sector?: string | null;
+            /**
+             * Sources
+             * @default []
+             */
+            sources?: components["schemas"]["HoldingSource"][];
+            /** Start Value Eur */
+            start_value_eur?: number | null;
+            /** Unrealised Eur */
+            unrealised_eur?: number | null;
+            /** Via Avg Capital Eur */
+            via_avg_capital_eur?: number | null;
+            /** Via Holding Name */
+            via_holding_name?: string | null;
+            /**
+             * Via Holding Names
+             * @default []
+             */
+            via_holding_names?: string[];
+            /** Via Money Weighted Return Pct */
+            via_money_weighted_return_pct?: number | null;
             /**
              * Via Names
              * @default []
@@ -8224,6 +9097,30 @@ export interface components {
             max_companies?: number;
             /** Start Month */
             start_month: string;
+        };
+        /**
+         * CompanyIngestResult
+         * @description What one company's backfill did. `feeds` names the calls actually spent.
+         */
+        CompanyIngestResult: {
+            /** Company Id */
+            company_id: number;
+            /** Error */
+            error?: string | null;
+            /**
+             * Feeds
+             * @default []
+             */
+            feeds?: string[];
+            /** Name */
+            name?: string | null;
+            /**
+             * Rows
+             * @default 0
+             */
+            rows?: number;
+            /** Skipped */
+            skipped?: string | null;
         };
         /**
          * CompositionExcluded
@@ -8285,6 +9182,114 @@ export interface components {
              */
             weight_pct?: number;
         };
+        /**
+         * ConstituentFundamentalColumn
+         * @description One RAW GuruFocus line the Long Equity charts consume. Shipped with the data so the table
+         *     renders the set the SERVER knows about — add a line backend-side and its columns appear
+         *     without a frontend change, which is the only way the two cannot drift.
+         */
+        ConstituentFundamentalColumn: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Note */
+            note?: string | null;
+        };
+        /**
+         * ConstituentFundamentals
+         * @description The RAW GuruFocus lines per constituent, and the period span we hold for each.
+         *
+         *     ⚠ `covered` IS NOT DECORATION. Only the members whose fundamentals have been ingested appear in
+         *     `rows`; measured 2026-08-04, that was 92 of SP500's 503. A table that simply renders blanks for
+         *     the rest reads as "these companies have no margins", which is a claim about the companies
+         *     rather than about our ingest. The count says which it is.
+         */
+        ConstituentFundamentals: {
+            /** Cadence */
+            cadence: string;
+            /** Columns */
+            columns: components["schemas"]["ConstituentFundamentalColumn"][];
+            /** Covered */
+            covered: number;
+            /** Label */
+            label: string;
+            /** Members */
+            members: number;
+            /** Rows */
+            rows: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        /**
+         * CorrelationInstrument
+         * @description One instrument that fed the correlation matrices, and how it was priced.
+         *
+         *     ⚠ THREE STATES, AND COLLAPSING ANY TWO WOULD MISREAD THE MATRIX. Measured 2026-08-10 over the
+         *     44 listed models and their 245 distinct ISINs:
+         *
+         *         direct       230   an `asset_execution` with a yfinance series, EUR-converted per date
+         *         lookthrough    9   a Leonteq certificate that IS another model; priced from that model's
+         *                            own curve, because the certificate has no price of its own to fetch
+         *         unpriced       6   no series at all — its weight is what the 60% coverage floor is
+         *                            measured over, so these rows are the reason a portfolio can be refused
+         *
+         *     The look-through nine (Star Selection, and the Europa/AI/Dividend/Familie/Merken/Momentum/
+         *     Azie/Vastgoed TopSelectie certificates) look unpriceable in the database and are not. A table
+         *     that showed only "priced / not priced" would report the largest of them — Star Selection, held
+         *     by 12 models — as missing data.
+         */
+        CorrelationInstrument: {
+            /** Analysis Id */
+            analysis_id?: number | null;
+            /** Asset Name */
+            asset_name?: string | null;
+            /** Currency */
+            currency?: string | null;
+            /** First Date */
+            first_date?: string | null;
+            /** Fx Source */
+            fx_source?: string | null;
+            /**
+             * In Portfolios
+             * @default 0
+             */
+            in_portfolios?: number;
+            /** Isin */
+            isin: string;
+            /** Last Date */
+            last_date?: string | null;
+            /** Linked Label */
+            linked_label?: string | null;
+            /** Linked Portfolio Id */
+            linked_portfolio_id?: number | null;
+            /** Med Adv Eur */
+            med_adv_eur?: number | null;
+            /** Name */
+            name?: string | null;
+            /**
+             * Observations
+             * @default 0
+             */
+            observations?: number;
+            /** Price Source */
+            price_source?: string | null;
+            /** Series Key */
+            series_key?: string | null;
+            /** State */
+            state: string;
+            /** Symbol */
+            symbol?: string | null;
+            /** Unit */
+            unit?: string | null;
+            /**
+             * Weight Pct Sum
+             * @default 0
+             */
+            weight_pct_sum?: number;
+        };
         /** CorrelationRequest */
         CorrelationRequest: {
             /** Backtest Run Id */
@@ -8314,6 +9319,29 @@ export interface components {
             /** Results */
             results: components["schemas"]["DiversifierResult"][];
             strategy: components["schemas"]["StrategyStats"];
+        };
+        /**
+         * CorrelationSeries
+         * @description Every charted series on ONE shared date axis — see `_series_block` for the measurement
+         *     that chose this encoding over the obvious `[[date, value], …]` (452 KB raw against 1,270 KB).
+         *
+         *     `values[key][i]` is the level on `dates[i]`, or `null` for a day that instrument did not
+         *     trade. ⚠ A null is a foreign holiday, NOT a zero: the axis is the union of every instrument's
+         *     trading days, so rendering nulls as 0 draws a spike to the floor on every one of them.
+         */
+        CorrelationSeries: {
+            /**
+             * Dates
+             * @default []
+             */
+            dates?: string[];
+            /**
+             * Values
+             * @default {}
+             */
+            values?: {
+                [key: string]: (number | null)[];
+            };
         };
         /** CreateBenchmarkRequest */
         CreateBenchmarkRequest: {
@@ -8695,28 +9723,173 @@ export interface components {
          * @description One blended point to take apart: which metric, which fiscal year.
          */
         FundamentalBreakdownRequest: {
+            /**
+             * Cadence
+             * @default annual
+             */
+            cadence?: string;
             /** Holdings */
             holdings?: {
                 [key: string]: unknown;
             }[] | null;
             /** Metric Code */
             metric_code: string;
+            /** Metrics */
+            metrics?: string[] | null;
             /** Period */
             period: string;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            /** Universe */
+            universe?: string | null;
         };
         /**
          * FundamentalCoverageRequest
          * @description Either a model portfolio's id, or an explicit basket of (isin, weight).
          */
         FundamentalCoverageRequest: {
+            /**
+             * Cadence
+             * @default annual
+             */
+            cadence?: string;
             /** Holdings */
             holdings?: {
                 [key: string]: unknown;
             }[] | null;
+            /** Metrics */
+            metrics?: string[] | null;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            /** Universe */
+            universe?: string | null;
+        };
+        /**
+         * FundamentalGrid
+         * @description Every constituent x every line x every period, in EUR.
+         *
+         *     ⚠ `membership_as_of` IS `today` AND THAT IS A REAL LIMIT, NOT A FORMALITY: scrubbing to 2016
+         *     shows 2016's figures for the companies in the index NOW. Surfaced so the grid can say so.
+         */
+        FundamentalGrid: {
+            /** By Period */
+            by_period: {
+                [key: string]: components["schemas"]["FundamentalGridPeriod"];
+            };
+            /** Cadence */
+            cadence: string;
+            /** Columns */
+            columns: components["schemas"]["FundamentalGridColumn"][];
+            /** Covered */
+            covered: number;
+            /**
+             * Enrolled Members
+             * @default 0
+             */
+            enrolled_members?: number;
+            /**
+             * Fillable
+             * @default 0
+             */
+            fillable?: number;
+            /** Label */
+            label: string;
+            /** Members */
+            members: number;
+            /** Membership As Of */
+            membership_as_of: string;
+            /** Min Coverage Pct */
+            min_coverage_pct: number;
+            /** Periods */
+            periods: string[];
+            /** Rows */
+            rows: components["schemas"]["FundamentalGridRow"][];
+            /** Weight Cap Pct */
+            weight_cap_pct?: number | null;
+        };
+        /**
+         * FundamentalGridColumn
+         * @description One line, and what an INDEX-LEVEL total may do with it. `agg` is `sum` for a flow or a
+         *     snapshot (revenue, market cap) and `weighted_mean` for a rate (ROIC %) — summing percentages
+         *     across 500 companies produces a number in the thousands that still renders as a percent.
+         *
+         *     `unit` says whether the figure is currency at all: `millions` / `per_share` are EUR-converted,
+         *     `shares` (a count) and `percent` (already a rate) are NOT — see the ⚠⚠ in
+         *     `_benchmark_fundamental_grid`, where converting them produced a plausible wrong share count.
+         */
+        FundamentalGridColumn: {
+            /** Agg */
+            agg: string;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Note */
+            note?: string | null;
+            /** Unit */
+            unit: string;
+        };
+        /**
+         * FundamentalGridPeriod
+         * @description What the index looked like in ONE period. `weights_usable` is the gate the table reads
+         *     before showing any weight or total — see `_benchmark_fundamental_grid.MIN_COVERAGE_PCT`.
+         */
+        FundamentalGridPeriod: {
+            /** Cap Covered Pct */
+            cap_covered_pct: number;
+            /** Covered */
+            covered: number;
+            /** Covered Pct */
+            covered_pct: number;
+            /** Members */
+            members: number;
+            /** Total Market Cap Eur */
+            total_market_cap_eur?: number | null;
+            /** Weights Usable */
+            weights_usable: boolean;
+            /** With Market Cap */
+            with_market_cap: number;
+        };
+        /**
+         * FundamentalGridRow
+         * @description One constituent. `v` is EUR (what the grid shows), `n` the figure as REPORTED, `fx` the rate
+         *     applied — shipped together so the conversion can be checked rather than trusted.
+         */
+        FundamentalGridRow: {
+            /** Company Id */
+            company_id: number;
+            /** Currency */
+            currency?: string | null;
+            /** Exchange */
+            exchange?: string | null;
+            /** Fx */
+            fx: {
+                [key: string]: number;
+            };
+            /** Gf Url */
+            gf_url?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /** N */
+            n: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+            /** Name */
+            name?: string | null;
+            /** Ticker */
+            ticker?: string | null;
+            /** Unavailable */
+            unavailable?: string | null;
+            /** Unavailable Label */
+            unavailable_label?: string | null;
+            /** V */
+            v: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
         };
         /**
          * FundamentalIngestRequest
@@ -8739,14 +9912,23 @@ export interface components {
          * @description The whole blended line taken apart: which metric (every period, every holding).
          */
         FundamentalMatrixRequest: {
+            /**
+             * Cadence
+             * @default annual
+             */
+            cadence?: string;
             /** Holdings */
             holdings?: {
                 [key: string]: unknown;
             }[] | null;
             /** Metric Code */
             metric_code: string;
+            /** Metrics */
+            metrics?: string[] | null;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            /** Universe */
+            universe?: string | null;
         };
         /** FundamentalPoint */
         FundamentalPoint: {
@@ -8881,6 +10063,37 @@ export interface components {
             /** Note */
             note?: string | null;
         };
+        /**
+         * HoldingSource
+         * @description One ROUTE into a holding, and how much of the book arrives that way.
+         *
+         *     `label` is null for the book's own shares (held directly); otherwise it is the strategy whose
+         *     certificate was looked through to reach the instrument.
+         */
+        HoldingSource: {
+            /** As Of */
+            as_of?: string | null;
+            /** Blend Weight Pct */
+            blend_weight_pct?: number | null;
+            /** Book */
+            book?: string | null;
+            /** Book Current Value Eur */
+            book_current_value_eur?: number | null;
+            /** Book Income Eur */
+            book_income_eur?: number | null;
+            /** Book Start Value Eur */
+            book_start_value_eur?: number | null;
+            /** Label */
+            label?: string | null;
+            /** Return Pct */
+            return_pct?: number | null;
+            /** Start Value Eur */
+            start_value_eur?: number | null;
+            /** Value Eur */
+            value_eur: number;
+            /** Weight Now Pct */
+            weight_now_pct: number;
+        };
         /** HoldingStateInfo */
         HoldingStateInfo: {
             /** Band Pct */
@@ -8899,6 +10112,136 @@ export interface components {
             return_since_inception_pct?: number | null;
             /** Target Pct */
             target_pct: number;
+        };
+        /**
+         * HoldingTiming
+         * @description One held position's year: what doing nothing would have made, and what each trade changed.
+         *
+         *     ⚠ THE IDENTITY IS EXACT AND IS ASSERTED: `buy_hold_eur + timing_eur == actual_eur`. Measured
+         *     2026-08-05, residual 0.00 on every position tried. Three lines that do not add up are not a
+         *     decomposition, and `reconciles` is how the UI knows not to present them as one.
+         *
+         *     ⚠⚠ `actual_eur` IS THE ECONOMIC RESULT AND IS NOT THE TABLE'S `Result` COLUMN. That column is
+         *     AIRS's restated figure — `Huidige waarde − Beginwaarde`, where Beginwaarde prices TODAY's share
+         *     count at the 1 January price, valuing shares bought later at January's price rather than what
+         *     was paid. `restatement_eur` is the difference, named rather than left for a reader to find.
+         */
+        HoldingTiming: {
+            /**
+             * Actual Eur
+             * @default 0
+             */
+            actual_eur?: number;
+            /** Actual Pct */
+            actual_pct?: number | null;
+            /** Airs Result Eur */
+            airs_result_eur?: number | null;
+            /**
+             * Available
+             * @default false
+             */
+            available?: boolean;
+            /**
+             * Buy Hold Eur
+             * @default 0
+             */
+            buy_hold_eur?: number;
+            /** Buy Hold Pct */
+            buy_hold_pct?: number | null;
+            /**
+             * Income Eur
+             * @default 0
+             */
+            income_eur?: number;
+            /** Name */
+            name: string;
+            /** Note */
+            note?: string | null;
+            /** Open Value Eur */
+            open_value_eur?: number | null;
+            /** Period End */
+            period_end?: string | null;
+            /** Period Start */
+            period_start?: string | null;
+            /** Portefeuille */
+            portefeuille?: string | null;
+            /**
+             * Price Now Eur
+             * @default 0
+             */
+            price_now_eur?: number;
+            /**
+             * Price Open Eur
+             * @default 0
+             */
+            price_open_eur?: number;
+            /**
+             * Qty Now
+             * @default 0
+             */
+            qty_now?: number;
+            /**
+             * Qty Open
+             * @default 0
+             */
+            qty_open?: number;
+            /**
+             * Reconciles
+             * @default false
+             */
+            reconciles?: boolean;
+            /**
+             * Residual Eur
+             * @default 0
+             */
+            residual_eur?: number;
+            /** Restatement Eur */
+            restatement_eur?: number | null;
+            /** Split Ratio */
+            split_ratio?: number | null;
+            /**
+             * Timing Eur
+             * @default 0
+             */
+            timing_eur?: number;
+            /** Timing Pp */
+            timing_pp?: number | null;
+            /**
+             * Trades
+             * @default []
+             */
+            trades?: components["schemas"]["HoldingTradeEffect"][];
+        };
+        /**
+         * HoldingTradeEffect
+         * @description One decision, and what it was worth against not having made it.
+         *
+         *     ⚠ AGAINST DOING NOTHING, NOT AGAINST A PERFECT DECISION. A buy gains if the price rose after
+         *     it; a sell gains if the price fell after it. A lucky call and a good one produce the same
+         *     number — this makes no claim about skill.
+         */
+        HoldingTradeEffect: {
+            /** Amount Eur */
+            amount_eur: number;
+            /** Datum */
+            datum?: string | null;
+            /** Effect Eur */
+            effect_eur: number;
+            /** Effect Pp */
+            effect_pp?: number | null;
+            /** Kind */
+            kind: string;
+            /** Move Pct */
+            move_pct?: number | null;
+            /** Price Eur */
+            price_eur: number;
+            /** Quantity */
+            quantity: number;
+            /**
+             * Rescaled
+             * @default false
+             */
+            rescaled?: boolean;
         };
         /** ImpersonateRequest */
         ImpersonateRequest: {
@@ -8989,6 +10332,53 @@ export interface components {
             /** Unmatched Count */
             unmatched_count: number;
         };
+        /**
+         * JobStarted
+         * @description Just the handle. Everything else arrives on `/api/jobs/{id}/stream`.
+         */
+        JobStarted: {
+            /** Job Id */
+            job_id: string;
+            /** Label */
+            label: string;
+        };
+        /** JobView */
+        JobView: {
+            /**
+             * Api Calls
+             * @default 0
+             */
+            api_calls?: number;
+            /**
+             * Cancel Requested
+             * @default false
+             */
+            cancel_requested?: boolean;
+            /** Created At */
+            created_at: number;
+            /**
+             * Done
+             * @default 0
+             */
+            done?: number;
+            /** Ended At */
+            ended_at?: number | null;
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Status */
+            status: string;
+            /** Summary */
+            summary?: string | null;
+            /**
+             * Total
+             * @default 0
+             */
+            total?: number;
+        };
         /** LatestCloseResponse */
         LatestCloseResponse: {
             /** Close */
@@ -9012,6 +10402,84 @@ export interface components {
             stale_days?: number;
             /** Symbol */
             symbol?: string | null;
+        };
+        /**
+         * LedgerPosition
+         * @description One instrument's whole year — whether the book still holds it or not.
+         *
+         *     ⚠ `contribution_pct` IS THE COLUMN THAT ADDS UP. Its sum over every position IS the book's own
+         *     YTD (measured exactly: 5.8267 against AIRS's 5.826704, and 44.4624 against 44.462408).
+         *     `weight_pct` is DESCRIPTIVE — how much of the year's capital this position occupied — so
+         *     `contribution ≈ weight × return` holds only approximately, and the identity the table asserts
+         *     is the contribution one.
+         *
+         *     ⚠ `return_pct` IS ON AVERAGE CAPITAL, NOT THE INSTRUMENT'S PRICE RETURN. A name bought in June
+         *     shows a larger percentage on the same euros than one held all year, because it answers "how
+         *     hard did this money work" rather than "what did the instrument do". The Holdings table's own
+         *     Return column is the other question and the two will differ.
+         */
+        LedgerPosition: {
+            /** Avg Capital Eur */
+            avg_capital_eur?: number | null;
+            /**
+             * Capital Unknown
+             * @default false
+             */
+            capital_unknown?: boolean;
+            /**
+             * Closed Out
+             * @default false
+             */
+            closed_out?: boolean;
+            /** Contribution Pct */
+            contribution_pct?: number | null;
+            /** First Sale */
+            first_sale?: string | null;
+            /**
+             * Held
+             * @default false
+             */
+            held?: boolean;
+            /**
+             * Held Result Eur
+             * @default 0
+             */
+            held_result_eur?: number;
+            /**
+             * Income Eur
+             * @default 0
+             */
+            income_eur?: number;
+            /** Last Sale */
+            last_sale?: string | null;
+            /** Name */
+            name: string;
+            /** Opening Eur */
+            opening_eur?: number | null;
+            /**
+             * Prior Year Eur
+             * @default 0
+             */
+            prior_year_eur?: number;
+            /**
+             * Realised Result Eur
+             * @default 0
+             */
+            realised_result_eur?: number;
+            /**
+             * Result Eur
+             * @default 0
+             */
+            result_eur?: number;
+            /** Return Pct */
+            return_pct?: number | null;
+            /**
+             * Sales
+             * @default 0
+             */
+            sales?: number;
+            /** Weight Pct */
+            weight_pct?: number | null;
         };
         /** LinkableContext */
         LinkableContext: {
@@ -9088,6 +10556,11 @@ export interface components {
              * @default []
              */
             axes?: components["schemas"]["PortfolioAnalysisAxis"][];
+            /**
+             * Bands
+             * @default []
+             */
+            bands?: components["schemas"]["AllocationBand"][];
             /** Benchmark */
             benchmark: string;
             /** Benchmark Coverage Pct */
@@ -9124,6 +10597,8 @@ export interface components {
             book_holdings?: components["schemas"]["BookHoldingDetail"][];
             /** Book Note */
             book_note?: string | null;
+            /** Book Portefeuille */
+            book_portefeuille?: string | null;
             /**
              * Covered Pct
              * @default 0
@@ -9162,6 +10637,7 @@ export interface components {
             opaque_pct?: number;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            realised?: components["schemas"]["RealisedBlock"] | null;
             returns?: components["schemas"]["PortfolioAnalysisReturns"] | null;
             /**
              * Timings Ms
@@ -9170,6 +10646,8 @@ export interface components {
             timings_ms?: {
                 [key: string]: number;
             };
+            /** Variant */
+            variant?: string | null;
             /**
              * Weight Basis
              * @default model
@@ -9687,6 +11165,8 @@ export interface components {
         PortfolioAllocationSlice: {
             /** Bucket */
             bucket: string;
+            /** Contribution Pct */
+            contribution_pct?: number | null;
             /**
              * Holdings
              * @default 0
@@ -9823,12 +11303,24 @@ export interface components {
              * @default []
              */
             codes?: string[];
+            /**
+             * Instruments
+             * @default []
+             */
+            instruments?: components["schemas"]["CorrelationInstrument"][];
             /** Labels */
             labels: string[];
             /** Min Overlap Days */
             min_overlap_days: number;
             /** Portfolio Ids */
             portfolio_ids: number[];
+            /**
+             * @default {
+             *       "dates": [],
+             *       "values": {}
+             *     }
+             */
+            series?: components["schemas"]["CorrelationSeries"];
             /** Trailing 12M */
             trailing_12m: (number | null)[][];
             /** Trailing 12M Obs */
@@ -10020,6 +11512,108 @@ export interface components {
             /** Value */
             value?: number | null;
         };
+        /**
+         * RealisedBlock
+         * @description What the paired book realised on sales this year — the leg the holdings table cannot show.
+         *
+         *     ⚠ EVERY FIGURE SITS ON ONE DENOMINATOR, `basis_eur` (the book's own `beginvermogen`), so
+         *     `held_pct + realised_pct + sold_income_pct == book_ytd_pct` exactly. The holdings table weights
+         *     by each position's share of the PRICED HELD book, which is right for a class return and cannot
+         *     carry a sold position at all — different question, different denominator.
+         *
+         *     ⚠ `available: false` IS NOT "SOLD NOTHING". No pairing, no cached Transacties sheet, or a
+         *     sheet we could not read — each has its own `note`, and an empty list presented as an answer
+         *     would hide EUR 28,656 of realised loss on the book this was measured against.
+         */
+        RealisedBlock: {
+            /**
+             * Available
+             * @default false
+             */
+            available?: boolean;
+            /** Avg Capital Eur */
+            avg_capital_eur?: number | null;
+            /** Basis Eur */
+            basis_eur?: number | null;
+            /** Book As Of */
+            book_as_of?: string | null;
+            /** Book Ytd Pct */
+            book_ytd_pct?: number | null;
+            /** Capital Coverage Ratio */
+            capital_coverage_ratio?: number | null;
+            /** Comparable */
+            comparable?: boolean | null;
+            /** Dates Aligned */
+            dates_aligned?: boolean | null;
+            /** Held Eur */
+            held_eur?: number | null;
+            /** Held Pct */
+            held_pct?: number | null;
+            /** Holdings As Of */
+            holdings_as_of?: string | null;
+            /** Ledger Result Eur */
+            ledger_result_eur?: number | null;
+            /**
+             * Legs
+             * @default []
+             */
+            legs?: components["schemas"]["RealisedContributionLeg"][];
+            /** Note */
+            note?: string | null;
+            /** Portefeuille */
+            portefeuille?: string | null;
+            /**
+             * Positions
+             * @default []
+             */
+            positions?: components["schemas"]["LedgerPosition"][];
+            /** Realised Eur */
+            realised_eur?: number | null;
+            /** Realised Pct */
+            realised_pct?: number | null;
+            /** Realised Share Of Result Pct */
+            realised_share_of_result_pct?: number | null;
+            /** Reconciles */
+            reconciles?: boolean | null;
+            /** Residual Eur */
+            residual_eur?: number | null;
+            /** Residual Reason */
+            residual_reason?: string | null;
+            /** Sold Income Eur */
+            sold_income_eur?: number | null;
+            /** Sold Income Pct */
+            sold_income_pct?: number | null;
+            /** Total Pct */
+            total_pct?: number | null;
+        };
+        /**
+         * RealisedContributionLeg
+         * @description One name the book SOLD this year, and what that sale contributed to the year.
+         *
+         *     ⚠ THERE IS NO WEIGHT HERE, AND ITS ABSENCE IS THE HONEST STATEMENT. A sold parcel's opening
+         *     value is not recoverable from AIRS's data: `proceeds − Res. YtD` yields its COST BASIS, which
+         *     for a parcel bought in February is real capital that did not exist on 1 January — feeding it
+         *     in made the opening-capital gap WORSE (EUR 55,427 → EUR 377,776 on BUS_Offensief_Dyn), and
+         *     partial sells make it unrecoverable in principle since AIRS restates `Beginwaarde` to the
+         *     CURRENT quantity. A contribution needs no weight; an allocation effect does, which is why
+         *     these legs may never enter the composition bars or Brinson.
+         */
+        RealisedContributionLeg: {
+            /** Closed Out */
+            closed_out?: boolean | null;
+            /** Contribution Pct */
+            contribution_pct?: number | null;
+            /** First */
+            first?: string | null;
+            /** Fonds */
+            fonds?: string | null;
+            /** Last */
+            last?: string | null;
+            /** Prior Year Eur */
+            prior_year_eur?: number | null;
+            /** Realised Ytd Eur */
+            realised_ytd_eur?: number | null;
+        };
         /** RecomputeRequest */
         RecomputeRequest: {
             /** Universe Ids */
@@ -10068,14 +11662,23 @@ export interface components {
          * @description One year of the Share-Price-vs-Owner-Earnings chart, decomposed per holding.
          */
         RelativeGrowthRequest: {
+            /**
+             * Cadence
+             * @default annual
+             */
+            cadence?: string;
             /** Holdings */
             holdings?: {
                 [key: string]: unknown;
             }[] | null;
+            /** Metrics */
+            metrics?: string[] | null;
             /** Period */
             period: string;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            /** Universe */
+            universe?: string | null;
         };
         /** RenameBacktestRequest */
         RenameBacktestRequest: {
@@ -11850,6 +13453,123 @@ export interface operations {
             };
         };
     };
+    airs_account_return_reconciliation_api_airs_accounts__portefeuille__return_reconciliation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccountReconciliation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_account_transactions_api_airs_accounts__portefeuille__transactions_get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsAccountTransactions"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_allocation_bands_api_airs_allocation_bands_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllocationBandGrid"];
+                };
+            };
+        };
+    };
+    airs_set_allocation_bands_api_airs_allocation_bands_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AllocationBand"][];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AllocationBandGrid"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     set_asset_bucket_override_api_airs_asset_bucket_override_post: {
         parameters: {
             query?: never;
@@ -12167,6 +13887,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_holding_timing_api_airs_model_portfolios__portfolio_id__holding_timing_get: {
+        parameters: {
+            query: {
+                name: string;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HoldingTiming"];
                 };
             };
             /** @description Validation Error */
@@ -12580,7 +14333,42 @@ export interface operations {
     };
     airs_portfolio_refresh_api_airs_portfolios__portefeuille__refresh_post: {
         parameters: {
-            query?: never;
+            query?: {
+                cascade?: boolean;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_refresh_job_api_airs_portfolios__portefeuille__refresh_job_post: {
+        parameters: {
+            query?: {
+                cascade?: boolean;
+            };
             header?: never;
             path: {
                 portefeuille: string;
@@ -14490,6 +16278,40 @@ export interface operations {
             };
         };
     };
+    ingest_company_fundamentals_job_api_benchmarks_company__company_id__fundamentals_ingest_job_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+                feeds?: string;
+            };
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     benchmark_reconstructed_index_api_benchmarks_index__label__get: {
         parameters: {
             query?: {
@@ -14554,6 +16376,107 @@ export interface operations {
             };
         };
     };
+    benchmark_constituent_fundamentals_api_benchmarks_index__label__fundamentals_get: {
+        parameters: {
+            query?: {
+                cadence?: string;
+            };
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConstituentFundamentals"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_fundamental_grid_api_benchmarks_index__label__fundamentals_grid_get: {
+        parameters: {
+            query?: {
+                cadence?: string;
+            };
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundamentalGrid"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_index_fundamentals_job_api_benchmarks_index__label__fundamentals_ingest_job_post: {
+        parameters: {
+            query?: {
+                limit?: number;
+                feeds?: string;
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     benchmark_refresh_api_benchmarks_index__label__refresh_get: {
         parameters: {
             query?: never;
@@ -14572,6 +16495,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_refresh_job_api_benchmarks_index__label__refresh_job_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_company_fundamentals_api_benchmarks_isin__isin__fundamentals_ingest_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompanyIngestResult"];
                 };
             };
             /** @description Validation Error */
@@ -15341,6 +17328,7 @@ export interface operations {
         parameters: {
             query?: {
                 label?: string;
+                cadence?: string;
             };
             header?: never;
             path?: never;
@@ -15466,7 +17454,9 @@ export interface operations {
     };
     get_earnings_metrics_by_isin_api_earnings_by_isin__isin__metrics_get: {
         parameters: {
-            query?: never;
+            query?: {
+                cadence?: string;
+            };
             header?: never;
             path: {
                 isin: string;
@@ -17569,7 +19559,7 @@ export interface operations {
             };
         };
     };
-    get_items_api_items_get: {
+    list_jobs_api_jobs_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -17584,7 +19574,71 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/json": components["schemas"]["JobView"][];
+                };
+            };
+        };
+    };
+    cancel_job_api_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_job_api_jobs__job_id__stream_get: {
+        parameters: {
+            query?: {
+                after?: number;
+            };
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

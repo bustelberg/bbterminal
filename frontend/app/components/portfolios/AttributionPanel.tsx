@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import type { ModelPortfolioAttribution } from '../../../lib/types/api';
 import { Provenance, type SourceKey } from '../../../lib/provenance';
+import { Holdings } from './BucketDetailPanel';
 
 /**
  * WHY the model beat or lagged the index — Brinson-Fachler.
@@ -130,12 +131,12 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
   if (!rows?.length) return null;
   return (
     <div>
-      <h5 className="text-[11px] font-semibold text-fg-strong">{title}</h5>
-      <p className="text-[10px] text-fg-faint mb-1">{hint}</p>
+      <h5 className="text-[12px] font-semibold text-fg-strong">{title}</h5>
+      <p className="text-[11px] text-fg-faint mb-1">{hint}</p>
       {/* `table-fixed` + this colgroup pin the numeric columns to a fixed width and let the Name
           column take the rest and TRUNCATE — without it the table sizes to its content and, in the
           narrower dock, spills past its grid cell and overlaps the neighbouring list. */}
-      <table className="w-full text-[11px] table-fixed">
+      <table className="w-full text-[12px] table-fixed">
         {/* ⚠ Widened for the per-cell ⓘ. Every numeric column now carries a 14px chip plus its
             gap OUTSIDE the digits, and at the old `w-9` the weight column could not fit "4.7%"
             and an icon — under `table-fixed` that does not wrap, it spills over the neighbour. */}
@@ -148,7 +149,7 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
         {/* Three bare percentages in a row (10.0% · +59.2% · +5.92%) are unreadable without
             labels — worse than an unexplained header, because there is nothing to hover. */}
         <thead>
-          <tr className="text-fg-faint text-[9px] uppercase tracking-wide">
+          <tr className="text-fg-faint text-[10px] uppercase tracking-wide">
             <th className="py-0.5 pr-2 text-left font-medium">Name</th>
             <th className="py-0.5 px-1 text-right font-medium whitespace-nowrap">
               Weight
@@ -211,6 +212,82 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
   );
 }
 
+/**
+ * The names behind ONE row of the attribution table: what you hold in that bucket beside what the
+ * index holds, with each side's weights and returns.
+ *
+ * ⚠ THE SAME TABLE THE SECTOR-BAR DRILL-DOWN USES, imported rather than rebuilt — same columns,
+ * same rank, same sort, same overlap treatment (a shared name tinted and dotted, the rest faded),
+ * off the same payload. Two tables for one question is two things to learn.
+ *
+ * ⚠ BOTH LISTS ARE ON THE SAME BASE AS THE ROW ABOVE THEM. The backend renormalises each side's
+ * per-holding weights over what that side can attribute, so the weights in each list ADD UP to the
+ * "Your wt" / "Index wt" figures in the row that opened it — the check a reader will actually try.
+ * They were raw shares of the whole portfolio once: Technology read 34.38% while its own holdings
+ * summed to 9.11%, out by exactly 100/attributable_pct, and neither number was wrong on its own.
+ *
+ * ⚠ AN EMPTY SIDE IS A FINDING, NOT A BLANK. A bucket the index holds and you do not is an
+ * allocation bet with no picks to judge — exactly what the row's Selection column says by being
+ * 0.00pp. Saying so beats an empty box.
+ */
+function BucketNames({ row, bucket, benchmark }: {
+  row: NonNullable<ModelPortfolioAttribution['rows']>[number];
+  bucket: string;
+  benchmark: string;
+}) {
+  const mine = row.portfolio_holdings ?? [];
+  const theirs = row.benchmark_holdings ?? [];
+  const shared = (rows: typeof mine) => rows.filter((h) => h.in_both).length;
+  const sum = (rows: typeof mine) => rows.reduce((s, h) => s + n(h.weight_pct), 0);
+  return (
+    <div className="space-y-2">
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+        <div>
+          <p className="text-[12px] font-medium text-fg-muted mb-1">
+            Your holdings <span className="text-fg-faint">({mine.length})</span>
+            {shared(mine) > 0 && <span className="text-accent-400"> · {shared(mine)} in both</span>}
+            {mine.length > 0 && (
+              <span className="text-fg-faint"> · {sum(mine).toFixed(1)}% of the attributable model</span>
+            )}
+          </p>
+          {mine.length
+            ? <Holdings rows={mine} />
+            : (
+              <p className="text-[12px] text-fg-subtle py-1">
+                {`You hold nothing in ${bucket} — the whole effect is the decision not to own it, `}
+                {'which is why Selection and Interaction are zero on this row.'}
+              </p>
+            )}
+        </div>
+        <div>
+          <p className="text-[12px] font-medium text-fg-muted mb-1">
+            {benchmark} constituents <span className="text-fg-faint">({theirs.length})</span>
+            {shared(theirs) > 0 && <span className="text-accent-400"> · {shared(theirs)} in both</span>}
+            {theirs.length > 0 && (
+              <span className="text-fg-faint"> · {sum(theirs).toFixed(1)}% of the index</span>
+            )}
+          </p>
+          {theirs.length
+            ? <Holdings rows={theirs} />
+            : (
+              <p className="text-[12px] text-fg-subtle py-1">
+                {`${benchmark} holds nothing in ${bucket}, so there is no index return to judge `}
+                {'your picks against — the whole effect is allocation.'}
+              </p>
+            )}
+        </div>
+      </div>
+      {mine.some((h) => h.in_both) && (
+        <p className="text-[11px] text-fg-faint flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-accent-500 inline-block shrink-0" />
+          marked rows are held in both your portfolio and {benchmark} (a share class counts as the
+          same company)
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function AttributionPanel({ id, benchmark, window, source = 'model',
   portfolioAsOf, benchmarkAsOf, onClose }: {
   id: number; benchmark: string; window: 'ytd' | 'since';
@@ -221,6 +298,15 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   const [axis, setAxis] = useState<Axis>('sector');
   const [data, setData] = useState<ModelPortfolioAttribution | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * The bucket whose names are open, or null.
+   *
+   * ⚠ ONE AT A TIME, AND CLEARED WHEN THE AXIS CHANGES. Bucket names are not unique across axes
+   * — "Technology" is a sector and "United States" a region — so a key left over from the previous
+   * axis would either open nothing or, worse, open a same-named bucket on a table it does not
+   * belong to.
+   */
+  const [openBucket, setOpenBucket] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -268,14 +354,15 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
           </h4>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <select value={axis} onChange={(e) => { setData(null); setAxis(e.target.value as Axis); }}
-            className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[11px] text-fg focus:border-accent-500">
+          <select value={axis}
+            onChange={(e) => { setData(null); setOpenBucket(null); setAxis(e.target.value as Axis); }}
+            className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[12px] text-fg focus:border-accent-500">
             <option value="sector">by Sector</option>
             <option value="region">by Region</option>
             <option value="currency">by Currency</option>
           </select>
           <button type="button" onClick={onClose}
-            className="text-[11px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 transition-colors">
+            className="cursor-pointer text-[12px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 transition-colors">
             Hide
           </button>
         </div>
@@ -291,75 +378,39 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       {data && (
         <>
           {data.note && (
-            <p className="text-[11px] text-warn-300 mb-2">⚠ {data.note}</p>
+            <p className="text-[12px] text-warn-300 mb-2">⚠ {data.note}</p>
           )}
           {/* ⚠ The identity IS the decomposition. If it fails, these are just three columns. */}
           {!data.reconciles && (
-            <p className="text-[11px] text-neg-300 mb-2">
+            <p className="text-[12px] text-neg-300 mb-2">
               {'⚠ The effects do not sum to the excess (residual '}
               {pct(data.residual_pct, 4)}
               {'). This is NOT a valid decomposition — do not read the rows below as one.'}
             </p>
           )}
 
-          {/* ⚠ THE TWO "EXCESS" FIGURES ON THIS SCREEN ARE DIFFERENT QUANTITIES, AND SAYING SO IS
-              THE ONLY THING THAT MAKES EITHER READABLE. The tile one click away shows the
-              ACCOUNT's excess — AIRS's own flow-aware return, cash included, carrying dividends
-              from positions closed during the year. This table decomposes the ATTRIBUTABLE
-              SLEEVE: the holdings that have a sector at all, renormalised once cash and funds
-              come out (cash has no sector; leaving it in would score holding cash as a sector
-              bet). Measured on AITopSelectie OFF DYN against the same benchmark: +24.26pp on the
-              tile, +23.39pp here. Neither is wrong; presenting them as one number, in one word,
-              one click apart, was. */}
-          {data.unattributed_excess_pct != null
-            && Math.abs(data.unattributed_excess_pct) > 0.005 && (
-            <p className="text-[11px] text-fg-faint mb-2">
-              {'This table explains '}
-              <span className="font-mono text-fg-muted">{pp(data.excess_pct)}</span>
-              {' of the account’s '}
-              <span className="font-mono text-fg-muted">{pp(data.account_excess_pct)}</span>
-              {' excess. The remaining '}
-              <span className="font-mono text-fg-muted">{pp(data.unattributed_excess_pct)}</span>
-              {' is cash, income on positions closed during the year, and the account’s own '
-                + 'flows — real return with no '}
-              {AXIS_WORD[axis] ?? 'bucket'}
-              {' to attribute it to.'}
-            </p>
-          )}
-
-          {/* ⚠ An UNPRICED holding makes its sector read as UNOWNED, so the allocation effect on
-              that row is a FALSE finding — not a missing one. Name the rows to discount. */}
-          {(data.unpriced_pct ?? 0) > 0.05 && (
-            <p className="text-[11px] text-warn-300 mb-2">
-              {'⚠ '}
-              <span className="font-mono">{(data.unpriced_pct ?? 0).toFixed(0)}%</span>
-              {' of this model is a holding we cannot price ('}
-              {(data.unpriced_buckets ?? []).join(', ')}
-              {`). Those sectors read as unowned below, so their allocation effect there is a false `}
-              {'finding — discount those rows.'}
-            </p>
-          )}
-
-          {/* ⚠ Shown only when something IS excluded. At full coverage the old line read
-              "Explains 100% of the model. 0% is excluded", spending three clauses to say
-              nothing was left out — a caveat that fires when it does not apply trains a
-              reader to skip it, which is exactly when it needs to be read. */}
-          {(data.excluded_pct ?? 0) >= 0.5 && (
-            <p className="text-xs text-fg-faint mb-3">
-              {'Excludes '}
-              <span className="font-mono">{(data.excluded_pct ?? 0).toFixed(0)}%</span>
-              {' of the model (funds and cash).'}
-            </p>
-          )}
+          {/* ⚠ NO COVERAGE NOTES HERE — ALL FOUR REMOVED ON REQUEST 2026-08-05, not overlooked.
+              What they said is still true and the fields are still in the payload:
+                • `unattributed_excess_pct` — this table decomposes the ATTRIBUTABLE SLEEVE, not
+                  the account: cash, income on positions closed during the year and the account’s
+                  own flows are real return with no bucket to attribute them to.
+                • the SOLD share — a position sold out has no opening weight, so a sector traded
+                  out of entirely reads here as one that was never owned. A FALSE finding, not a
+                  missing one.
+                • `unpriced_pct` — the same false finding from a different cause.
+                • `excluded_pct` — funds and cash, correctly out (a fund has no sector).
+              Every one of those is still computed and still on the wire; none of them is on
+              screen. Read a row here as a statement about the sleeve that COULD be attributed,
+              never about the account. */}
 
           {/* ⚠ NO FORMULA STRIP HERE. Each effect's arithmetic lives in its OWN column header's
               info icon (`Th prov` → `Provenance how`), stated in the SAME WORDS the headers use
               so the two cannot drift — a strip above the table restated all three permanently,
               so the panel carried every formula twice. */}
           <div className="overflow-auto rounded-lg border border-neutral-800/40 mb-3">
-            <table className="w-full text-[11px]">
+            <table className="w-full text-[12px]">
               <thead className="bg-card">
-                <tr className="text-fg-faint text-[10px] uppercase tracking-wide border-b border-neutral-800/40">
+                <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                   <Th align="left" label={w}
                     prov={<Provenance source="derived" column kind="formula" note={`the ${w}s`}
                       what={`The ${w}s the excess is split across — including the ones ${benchmark} holds and you do NOT, because choosing not to own something is a decision the numbers can price.`}
@@ -421,9 +472,23 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                   const rP = pct(r.portfolio_return_pct, 1);
                   const rB = pct(r.benchmark_return_pct, 1);
                   const rBt = pct(data.benchmark_return_pct, 1);
+                  const open = openBucket === r.bucket;
                   return (
-                    <tr key={r.bucket} className="hover:bg-overlay/[0.02]">
-                      <td className="px-2 py-1.5 text-fg whitespace-nowrap">{r.bucket}</td>
+                    <Fragment key={r.bucket}>
+                    {/* ⚠ THE WHOLE ROW IS THE HIT TARGET, not a chevron in the first cell. Every
+                        figure on it belongs to the bucket the drill-down explains, so any of them
+                        is a reasonable place to click and ask "which names is this?". */}
+                    <tr onClick={() => setOpenBucket(open ? null : r.bucket)}
+                      title={open ? `Hide the names behind ${r.bucket}`
+                        : `Show the names behind ${r.bucket} — what you hold and what ${benchmark} holds`}
+                      className={`cursor-pointer transition-colors ${
+                        open ? 'bg-accent-500/[0.07]' : 'hover:bg-overlay/[0.02]'}`}>
+                      <td className="px-2 py-1.5 text-fg whitespace-nowrap">
+                        <span className={`inline-block w-3 text-[10px] ${open ? 'text-accent-400' : 'text-fg-faint'}`}>
+                          {open ? '▾' : '▸'}
+                        </span>
+                        {r.bucket}
+                      </td>
                       <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
                         <Num prov={<Provenance source={pSrc} asOf={portfolioAsOf} kind="formula"
                           what={`Your share of the attributable model held in ${r.bucket}.`}
@@ -481,6 +546,14 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                             how={`${pp(r.allocation_pct)} + ${pp(r.selection_pct)} + ${pp(r.interaction_pct)} = ${pp(r.total_pct)}.`} />} />
                       </td>
                     </tr>
+                    {open && (
+                      <tr className="bg-inset/60">
+                        <td colSpan={9} className="px-3 py-3">
+                          <BucketNames row={r} bucket={r.bucket} benchmark={benchmark} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>

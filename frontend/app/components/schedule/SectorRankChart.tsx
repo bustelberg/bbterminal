@@ -36,7 +36,7 @@ export default function SectorRankChart({ days, topN, windowLabel }: {
   const series = sectorRankSeries(days);
   if (!series.length) {
     return (
-      <p className="text-[11px] text-fg-faint">
+      <p className="text-[12px] text-fg-faint">
         No sector ranks in this window — the days here were calculated before sector scores were
         stored. Recalculate them to fill the chart in.
       </p>
@@ -50,18 +50,18 @@ export default function SectorRankChart({ days, topN, windowLabel }: {
     <div className="space-y-2">
       <div className="flex items-baseline gap-2 flex-wrap">
         <h4 className="text-xs font-medium text-fg-strong">Sector rank · {windowLabel}</h4>
-        <span className="text-[10px] text-fg-faint">
+        <span className="text-[11px] text-fg-faint">
           rank 1 at the top · same scale on every panel
         </span>
         {cutoff && (
-          <span className="text-[10px] text-fg-muted flex items-center gap-1.5">
+          <span className="text-[11px] text-fg-muted flex items-center gap-1.5">
             <span className="inline-block w-4 border-t border-dashed shrink-0"
               style={{ borderColor: chartTheme.axisTick }} />
             ceiling — a sector is bought while it sits on or above rank {cutoff}
           </span>
         )}
         {anyDropped && (
-          <span className="text-[10px] text-fg-muted flex items-center gap-1.5"
+          <span className="text-[11px] text-fg-muted flex items-center gap-1.5"
             title="The day was ranked, but no company in this sector cleared the strategy's minimum price score, so the whole sector fell out of the pool. Not missing data — a fact about the sector that day.">
             <span className="inline-block w-4 h-2.5 rounded-sm shrink-0"
               style={{ backgroundColor: chartTheme.axisTick, opacity: 0.16 }} />
@@ -82,22 +82,22 @@ export default function SectorRankChart({ days, topN, windowLabel }: {
                   }}>
                   {sectorCode(s.sector)}
                 </span>
-                <span className="text-[11px] text-fg-soft truncate" title={s.sector}>{s.sector}</span>
+                <span className="text-[12px] text-fg-soft truncate" title={s.sector}>{s.sector}</span>
                 {/* The current rank, in ink — a value never wears the series colour. */}
-                <span className="ml-auto text-[11px] font-mono text-fg-muted shrink-0"
+                <span className="ml-auto text-[12px] font-mono text-fg-muted shrink-0"
                   title={`Ranked on ${s.ranked} of ${s.points.length} days in this window`}>
                   {s.latest == null ? '—' : `#${s.latest}`}
                 </span>
               </div>
               <ResponsiveContainer width="100%" height={92}>
                 <LineChart data={s.points} margin={{ top: 2, right: 6, bottom: 0, left: -22 }}>
-                  <XAxis dataKey="date" tick={{ fontSize: 9, fill: chartTheme.axisTick }}
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: chartTheme.axisTick }}
                     interval="preserveStartEnd" minTickGap={40}
                     tickFormatter={(d: string) => d.slice(5)} />
                   {/* Reversed so 1 sits at the top; `allowDecimals={false}` because there is no
                       rank 2.5. */}
                   <YAxis reversed domain={[1, worst]} allowDecimals={false} width={28}
-                    tick={{ fontSize: 9, fill: chartTheme.axisTick }} />
+                    tick={{ fontSize: 10, fill: chartTheme.axisTick }} />
                   <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle}
                     labelStyle={{ color: chartTheme.axisLabel }}
                     formatter={(v) => [typeof v === 'number' ? `#${v}` : '—', 'Rank']} />
@@ -118,7 +118,7 @@ export default function SectorRankChart({ days, topN, windowLabel }: {
                         strokeDasharray="3 2"
                         label={{
                           value: `top ${cutoff}`, position: 'insideTopRight',
-                          fontSize: 8, fill: chartTheme.axisTick,
+                          fontSize: 9, fill: chartTheme.axisTick,
                         }} />
                     </>
                   )}

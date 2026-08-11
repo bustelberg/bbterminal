@@ -309,7 +309,7 @@ export default function MonthlyReturnsHeatmap({
                 >
                   <span className="font-mono text-warn-300">{b.ticker}</span>
                   <span className="text-fg-subtle truncate">{b.name}</span>
-                  {b.benchmark_id === benchId && <span className="ml-auto text-[10px] text-accent-300">selected</span>}
+                  {b.benchmark_id === benchId && <span className="ml-auto text-[11px] text-accent-300">selected</span>}
                 </button>
               ))}
             </div>
@@ -332,7 +332,7 @@ export default function MonthlyReturnsHeatmap({
             <button
               type="button"
               onClick={clearBenchmark}
-              className="text-[11px] text-fg-faint hover:text-fg-soft underline"
+              className="text-[12px] text-fg-faint hover:text-fg-soft underline"
             >
               clear
             </button>
@@ -340,7 +340,7 @@ export default function MonthlyReturnsHeatmap({
         )}
       </div>
       {benchStatus && (
-        <div className={`mb-3 px-1 text-[11px] flex items-center gap-1.5 ${
+        <div className={`mb-3 px-1 text-[12px] flex items-center gap-1.5 ${
           benchStatus.tone === 'ok' ? 'text-pos-400' : benchStatus.tone === 'warn' ? 'text-warn-400' : 'text-accent-300'
         }`}>
           {loadingBench ? (
@@ -355,12 +355,12 @@ export default function MonthlyReturnsHeatmap({
         </div>
       )}
       {view === 'excess' && (
-        <div className="mb-2 px-1 text-[11px] text-fg-subtle">
+        <div className="mb-2 px-1 text-[12px] text-fg-subtle">
           Showing <span className="text-fg-soft">strategy − {benchLabel}</span>{' '}per month/day — green = strategy outperformed, red = underperformed.
         </div>
       )}
       <div className="overflow-x-auto">
-        <table className="w-full text-[11px]" style={{ borderCollapse: 'collapse' }}>
+        <table className="w-full text-[12px]" style={{ borderCollapse: 'collapse' }}>
           <thead>
             <tr className="text-fg-faint">
               <th className="px-2 py-1 text-left font-medium" />
@@ -405,7 +405,7 @@ export default function MonthlyReturnsHeatmap({
                       >
                         <span className="inline-flex items-center justify-center gap-0.5">
                           {v != null && <span>{fmt(v)}</span>}
-                          <CellInfoTip trigger={<span aria-hidden className="text-warn-400 text-[11px] leading-none">⚠</span>}>
+                          <CellInfoTip trigger={<span aria-hidden className="text-warn-400 text-[12px] leading-none">⚠</span>}>
                             {staleTip}
                           </CellInfoTip>
                         </span>
@@ -445,14 +445,14 @@ export default function MonthlyReturnsHeatmap({
           <div className="mt-3 pt-3 border-t border-neutral-800/40 px-2">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-medium text-fg-soft">{monthLabel(selected)} · daily returns</span>
-              <button type="button" onClick={() => setSelected(null)} className="text-[11px] text-fg-faint hover:text-fg-soft">✕ close</button>
+              <button type="button" onClick={() => setSelected(null)} className="text-[12px] text-fg-faint hover:text-fg-soft">✕ close</button>
             </div>
             <div className="flex flex-wrap gap-1">
               {days.map((d) => (
                 <div
                   key={d.date}
                   title={`${d.date}: ${fmt(d.ret)}%`}
-                  className="flex flex-col items-center justify-center rounded w-9 h-9 text-[9px] font-mono leading-tight"
+                  className="flex flex-col items-center justify-center rounded w-9 h-9 text-[10px] font-mono leading-tight"
                   style={tint(d.ret, maxAbsDaily)}
                 >
                   <span className="text-fg-faint">{Number(d.date.slice(8, 10))}</span>
@@ -460,7 +460,7 @@ export default function MonthlyReturnsHeatmap({
                 </div>
               ))}
             </div>
-            <div className="text-[11px] text-fg-subtle mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            <div className="text-[12px] text-fg-subtle mt-2 flex flex-wrap gap-x-4 gap-y-1">
               <span>month <span className={`font-mono ${total >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>{fmt(total)}%</span></span>
               <span>up days <span className="font-mono text-fg-soft">{up}/{days.length}</span></span>
               <span>best <span className="font-mono text-pos-400">{fmt(best)}%</span></span>
@@ -470,7 +470,7 @@ export default function MonthlyReturnsHeatmap({
         );
       })()}
       {markerDate && (
-        <p className="text-[10px] text-fg-faint mt-2 px-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <p className="text-[11px] text-fg-faint mt-2 px-2 flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="inline-flex items-center gap-1.5">
             <span className="inline-block w-3 h-3 rounded-sm" style={{ boxShadow: 'inset 0 0 0 2px var(--color-neg-400)' }} />
             Go-live <span className="font-mono text-fg-subtle">{markerDate}</span>
@@ -484,7 +484,7 @@ export default function MonthlyReturnsHeatmap({
           )}
         </p>
       )}
-      <p className="text-[10px] text-fg-faint mt-2 px-2">
+      <p className="text-[11px] text-fg-faint mt-2 px-2">
         Calendar-month % returns from the daily equity curve (resampled to month-end). Green = up, red = down; intensity scales with magnitude. The first month is measured from inception; &ldquo;Year&rdquo; compounds that year&apos;s months. <span className="text-fg-subtle">Click a month to drill into its daily returns.</span>
       </p>
     </CollapsibleCard>

@@ -41,11 +41,11 @@ export default function AxisColumn<T>({
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-fg-subtle text-xs">
           {label}{' '}
-          <span className="text-fg-faint text-[10px]">
+          <span className="text-fg-faint text-[11px]">
             ({selected.size}/{options.length})
           </span>
         </span>
-        <div className="flex items-center gap-2 text-[11px]">
+        <div className="flex items-center gap-2 text-[12px]">
           <button type="button" onClick={onAll} className="text-accent-400 hover:text-accent-300">
             All
           </button>

@@ -14,6 +14,11 @@ set the frontend renders — additions need a matching ingest fetcher in
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import logging
+from collections import defaultdict
+from routers._blend_cache import cached_blend, cached_metric_reads
+from routers._earnings_pg import rows_by_company_via_copy
 from routers._sse import sse_message as event
 import queue as _queue
 
@@ -320,7 +325,7 @@ async def get_earnings_metrics(company_id: int):
 
 
 @router.get("/api/earnings/by-isin/{isin}/metrics")
-async def get_earnings_metrics_by_isin(isin: str):
+async def get_earnings_metrics_by_isin(isin: str, cadence: str = "annual"):
     """Dashboard metrics for a company resolved BY ISIN — the /portfolios
     Fundamental modal bridge (ISIN → `company.isin` → company_id, "Bridge A").
 
@@ -358,7 +363,11 @@ async def get_earnings_metrics_by_isin(isin: str):
         info = await asyncio.to_thread(_resolve)
         if info is None:
             raise HTTPException(status_code=404, detail="No company record for this ISIN")
-        rows = await asyncio.to_thread(load_company_metric_rows, info["company_id"])
+        # `cadence="quarterly"` returns TRAILING-TWELVE-MONTH points under the same metric codes —
+        # see `_ttm_metric_rows`. The dashboard and the Long Equity tab share this endpoint, so the
+        # default stays annual and only a caller that asks gets the rolled-up view.
+        loader = _ttm_metric_rows if cadence == "quarterly" else load_company_metric_rows
+        rows = await asyncio.to_thread(loader, info["company_id"])
         return {**info, "metrics": rows}
     except HTTPException:
         raise
@@ -396,6 +405,24 @@ class FundamentalCoverageRequest(BaseModel):
 
     portfolio_id: int | None = None
     holdings: list[dict] | None = None
+    # ⚠ ON THE SHARED REQUEST, SO EVERY CARD ON THE TAB MOVES TOGETHER. All eleven `*-inputs`
+    # endpoints take this model and read their lines through `_metric_by_year`, so one field here
+    # is the whole cadence switch — and it is impossible for one card to be showing fiscal years
+    # while the card beside it shows trailing twelve months. "quarterly" means TTM, not raw
+    # quarters: see `_ttm_by_period` for what each metric's roll-up is and why.
+    cadence: str = "annual"
+    # ⚠ A BENCHMARK LABEL ("SP500", "ACWI", "AEX") INSTEAD OF a book. Set it and every `*-inputs`
+    # endpoint returns that index's cap-weighted constituents in the identical shape, so the client
+    # draws the benchmark line with the same helper it uses for the portfolio. Takes precedence
+    # over `holdings`/`portfolio_id` — a request is one or the other, never a blend of both.
+    universe: str | None = None
+    # ⚠ NARROWS THE BLEND TO THESE METRICS, AND IT IS WHAT MAKES A BENCHMARK BLEND POSSIBLE AT ALL.
+    # `/fundamental-blend-metrics` normally reads EVERY charted code per company — three paged
+    # requests each, which is fine for a 40-name book and is ~1,500 round trips for the S&P 500.
+    # Named here (`_METRIC_CODES` keys: "revenue", "fcf_ps", "shares"), the read becomes one
+    # chunked, paged query per metric across all constituents — the same 400x that
+    # `_metrics_by_company` documents. Omitted = every code, i.e. the behaviour a book still gets.
+    metrics: list[str] | None = None
 
 
 async def _load_and_expand_members(body: FundamentalCoverageRequest) -> list[dict]:
@@ -409,6 +436,30 @@ async def _load_and_expand_members(body: FundamentalCoverageRequest) -> list[dic
     table never admitted. Raises 422 when neither field is set; returns [] for an empty portfolio.
     """
     from routers._airs_portfolio_links import expand_members_through_links  # noqa: PLC0415
+
+    # ⚠ A BENCHMARK IS JUST ANOTHER MEMBER LIST, AND THAT IS THE WHOLE DESIGN. Asking for a
+    # universe here makes every `*-inputs` endpoint return the index's constituents instead of a
+    # book's holdings — same shape, same columns, same coverage floor — so the CLIENT computes the
+    # benchmark line with the identical helper it already runs over the portfolio. There is no
+    # second implementation of "FCF-SBC margin" to drift, which is the only way a benchmark line
+    # and the line it is drawn beside can be guaranteed to mean the same thing.
+    #
+    # ⚠ CAP-WEIGHTED, because that is what the index IS. `_members` is the same deduped one-row-
+    # per-company list the /benchmarks panel uses (GOOGL+GOOG would otherwise count Alphabet's cap
+    # twice, 11.3% of the S&P, fictional).
+    #
+    # ⚠ NO LOOK-THROUGH. An index constituent is a company, never a Leonteq certificate wrapping a
+    # model — running the expansion over 500 names would be work with nothing to find.
+    if body.universe:
+        from routers._benchmark_index import _members  # noqa: PLC0415
+
+        def _load_universe() -> list[dict]:
+            return [{"isin": m["isin"], "name": m.get("company_name"),
+                     "weight": float(m.get("market_cap_eur") or 0)}
+                    for m in _members(body.universe or "")
+                    if m.get("isin") and (m.get("market_cap_eur") or 0) > 0]
+
+        return await asyncio.to_thread(_load_universe)
 
     members = body.holdings
     owner_id = 0
@@ -465,6 +516,7 @@ async def ingest_fundamental_coverage(body: FundamentalIngestRequest):
 
 
 @router.post("/api/earnings/fundamental-coverage")
+@cached_blend("fundamental-coverage")
 async def fundamental_coverage(body: FundamentalCoverageRequest):
     """Which of a portfolio's holdings a fundamentals view can reach, BY WEIGHT, and why not.
 
@@ -506,6 +558,7 @@ BLEND_LABELS = {
 
 
 @router.post("/api/earnings/fundamental-blend")
+@cached_blend("fundamental-blend")
 async def fundamental_blend(body: FundamentalCoverageRequest):
     """A portfolio's fundamentals, blended — with the rule that each metric actually requires.
 
@@ -634,9 +687,47 @@ def _company_metric_rows(cid: int) -> list[dict]:
     return rows
 
 
-def _blend_rows(rows: list[dict], covered: list[dict]) -> dict:
+def _bulk_blend_rows(cids: list[int], metrics: list[str], cadence: str) -> list[dict]:
+    """The named metrics' rows for MANY companies, in `_blend_rows`' shape.
+
+    The bulk twin of `_company_metric_rows` / `_ttm_metric_rows`, and it exists for one reason:
+    those read per company, which is three paged requests each — fine for a 40-name book, ~1,500
+    round trips for the S&P 500, which is what a benchmark overlay asks for. Here it is one
+    chunked, paged query per metric.
+
+    ⚠ TTM ROWS ARE EMITTED UNDER THE **ANNUAL** CODE, exactly as `_ttm_metric_rows` does — the
+    charts select their line by `annuals__…` and the cadence is a property of the request, not of
+    the row. Emit the `quarterly__` spelling here and every card would go blank on the benchmark
+    while its own line kept drawing, which reads as "the index has no data".
+    """
+    out: list[dict] = []
+    for m in metrics:
+        codes, rule = _codes_and_rule(m, cadence)
+        if codes is None:
+            continue
+        raw = _rows_by_company(cids, codes)
+        if rule is None:
+            for rows in raw.values():
+                out += rows
+            continue
+        annual_code = _metric_codes(m)[0]
+        for cid, rows in raw.items():
+            for date, val in _ttm_by_period(rows, rule, key="date").items():
+                out.append({"company_id": cid, "metric_code": annual_code,
+                            "target_date": date, "numeric_value": val})
+    return out
+
+
+def _blend_rows(rows: list[dict], covered: list[dict],
+                caps: dict[int, dict[str, float]] | None = None) -> dict:
     """The blend itself, over rows already fetched. Pure of I/O, so the plain endpoint and the
-    streaming one cannot drift: they differ only in HOW the rows arrive."""
+    streaming one cannot drift: they differ only in HOW the rows arrive.
+
+    `caps` is `period_caps_eur` for an INDEX — the market cap as at each fiscal period, so each
+    period is weighted by what the constituents were worth THEN. `None` for a portfolio, where a
+    holding weight is not a market cap and does not vary by period; `_weight_at` reads the absence
+    as "one basis for every period". See `_fundamental_blend._weight_at`.
+    """
     from routers._fundamental_blend import blend_series, explain_empty  # noqa: PLC0415
 
     by_metric: dict[str, dict[int, dict[str, float]]] = {}
@@ -657,6 +748,8 @@ def _blend_rows(rows: list[dict], covered: list[dict]) -> dict:
         base_code = _FORECAST_BASE.get(code)
         base_by_company = by_metric.get(base_code, {}) if base_code else {}
         blend_members = [{"weight": r["weight_pct"],
+                          # Absent for a portfolio — see the `caps` note on this function.
+                          **({"weights": caps.get(r["company_id"], {})} if caps else {}),
                           "points": per_company.get(r["company_id"], {}),
                           "base_points": base_by_company.get(r["company_id"], {})}
                          for r in covered]
@@ -708,6 +801,7 @@ async def _blend_inputs(body: FundamentalCoverageRequest) -> tuple[list[dict], d
 
 
 @router.post("/api/earnings/fundamental-blend-metrics")
+@cached_blend("fundamental-blend-metrics")
 async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
     """The portfolio as ONE pseudo-company, in the exact shape `/by-isin/{isin}/metrics` returns.
 
@@ -727,10 +821,24 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
     covered, cov = await _blend_inputs(body)
 
     def _build() -> dict:
-        rows: list[dict] = []
+        # ⚠ AN INDEX IS WEIGHTED BY THE CAP IT HAD IN EACH PERIOD; A BOOK BY ITS HOLDING WEIGHT.
+        # Only a universe has a market cap history to weight by — and only for a universe is
+        # `weight_pct` a cap share in the first place (see `_load_and_expand_members`), so this is
+        # the same branch that decides what the weight MEANS, not a new one.
+        caps = (period_caps_eur([r["company_id"] for r in covered], body.cadence)
+                if body.universe else None)
+        if body.metrics:
+            # ⚠ SAME BLEND, DIFFERENT READ. Only the fetch changes — `_blend_rows` is untouched, so
+            # a narrowed request cannot blend by a different rule than a full one.
+            rows = _bulk_blend_rows([r["company_id"] for r in covered], body.metrics, body.cadence)
+            return _blend_rows(rows, covered, caps)
+        # The PORTFOLIO path takes the same cadence as the single-company one, through the same
+        # roll-up — otherwise a book's Long Equity tab would ignore a toggle its holdings honour.
+        load = (_ttm_metric_rows if body.cadence == "quarterly" else _company_metric_rows)
+        rows = []
         for r in covered:
-            rows += _company_metric_rows(r["company_id"])
-        return _blend_rows(rows, covered)
+            rows += load(r["company_id"])
+        return _blend_rows(rows, covered, caps)
 
     return _blend_envelope(await asyncio.to_thread(_build), covered, cov)
 
@@ -970,10 +1078,253 @@ def _revenue_rows(company_id: int) -> list[dict]:
     return _metric_rows(company_id, "revenue")
 
 
-def _metric_by_year(company_id: int, metric: str) -> dict[str, float]:
-    """{year: value} for a metric, the LATEST observation in each fiscal year (both spellings)."""
+# ⚠ HOW EACH METRIC ROLLS UP TO TRAILING TWELVE MONTHS — DECLARED, NEVER INFERRED, BECAUSE THE
+# WRONG RULE PRODUCES A PLAUSIBLE NUMBER RATHER THAN AN ERROR.
+#
+#   sum   a FLOW measured over the period. Four quarters of revenue ARE a year of revenue.
+#   last  a STOCK measured at an instant. Total assets is a balance, not a flow — summing four
+#         quarter-end balance sheets reports a company with 4x its assets, and nothing about the
+#         resulting chart looks wrong.
+#   mean  a figure that is ALREADY a per-period rate or average, where the trailing-twelve-month
+#         view is the average of the four. Two kinds land here:
+#           * `shares` is "Shares Outstanding (Diluted Average)" — already an average OVER the
+#             quarter, so the TTM figure is the mean of the four, not their sum (which would
+#             quadruple the share count and quarter every per-share metric built on it).
+#           * `roic` is a RATIO, and GuruFocus publishes its quarterly one ALREADY ANNUALISED.
+#             Measured on ASML: quarterly 30.88 / 26.91 / 27.76 / 20.93 against annual 24.67 and
+#             26.95 — the same magnitude. A quarterly RATE would read ~6-7%. So four of them
+#             summed is ~4x, and the honest trailing figure is their mean.
+#
+# A metric absent from this map is refused rather than guessed — see `_ttm_by_period`.
+_log = logging.getLogger(__name__)
+
+_TTM_RULE: dict[str, str] = {
+    # Flows — income statement and cash flow.
+    "revenue": "sum", "gross_profit": "sum", "operating_income": "sum", "net_income": "sum",
+    "fcf": "sum", "ocf": "sum", "sbc": "sum", "capex": "sum", "interest_expense": "sum",
+    "fcf_ps": "sum", "div_ps": "sum",
+    # Balances and market values — a point in time.
+    "total_assets": "last", "total_equity": "last", "goodwill": "last",
+    "long_term_debt": "last", "noncurrent_liabilities": "last",
+    "market_cap": "last", "price_ps": "last",
+    # Already an average / an annualised rate.
+    "shares": "mean", "roic": "mean",
+}
+
+
+def _daily_closes(company_id: int, since: str = "2015-01-01") -> dict[str, float]:
+    """{date: close} — GuruFocus's own daily close for one company.
+
+    ⚠ THIS SERIES, NOT yfinance's `asset_price`, AND THE REASON IS CURRENCY. The Long Equity tab
+    lives in the `company` world and its per-share lines are in the company's REPORTING currency;
+    `asset_price` lives in the `asset_execution` world, reachable only by ISIN, and that bridge
+    carries every wrong-listing hazard this repo documents — a US megacap priced on a thin German
+    line, or `GBp` pence against fundamentals in `GBP`, which is a 100x error that still looks like
+    a number. This series needs no bridge and no conversion: measured on ASML, GuruFocus's annual
+    `Month End Stock Price` IS a sample of it (681.7 / 678.7 / 921.4 at the last three year-ends,
+    ratio 1.0000), so swapping the annual point for the daily one changes the frequency and
+    nothing else.
+    """
+    return {str(r["target_date"])[:10]: float(r["numeric_value"])
+            for r in _page_metrics(company_id, "close_price", exact=True)
+            if r.get("numeric_value") is not None and str(r["target_date"])[:10] >= since}
+
+
+def _step_onto_dates(ttm: dict[str, float], dates: list[str]) -> dict[str, float]:
+    """A quarterly TTM series carried across daily dates — the value stays flat until the next
+    fiscal period end, which is what makes a daily yield a yield rather than an interpolation.
+
+    ⚠ NOTHING BEFORE THE FIRST FISCAL PERIOD. A date earlier than any reported period gets NO
+    value rather than the first one carried backwards: back-filling would draw a company's current
+    profitability across years it had not reported, and the line would look like history.
+
+    ⚠ KNOWN LIMITATION, STATED RATHER THAN HIDDEN: the step moves on the fiscal period END, not on
+    the PUBLICATION date, because GuruFocus gives us no publication date. A Q1 figure therefore
+    appears on the chart some weeks before the market could have known it. That is the ordinary
+    construction for a trailing-yield chart and it is fine for reading history; it is NOT safe as a
+    backtest signal, where it would be look-ahead.
+    """
+    ends = sorted(ttm)
+    out: dict[str, float] = {}
+    i = -1
+    for d in dates:                       # both sides sorted → one pass, no bisect per date
+        while i + 1 < len(ends) and ends[i + 1] <= d:
+            i += 1
+        if i >= 0:
+            out[d] = ttm[ends[i]]
+    return out
+
+
+def _daily_metric(company_id: int, metric: str, dates: list[str]) -> dict[str, float]:
+    """A metric's TTM value carried onto `dates` — the numerator of a daily yield."""
+    rule = _TTM_RULE.get(metric)
+    if rule is None:
+        return {}
+    rows: list[dict] = []
+    for code in (c.replace("annuals__", "quarterly__") for c in _metric_codes(metric)):
+        rows += _page_metrics(company_id, code, exact=True)
+    return _step_onto_dates(_ttm_by_period(rows, rule, key="date"), dates)
+
+
+def _ttm_metric_rows(company_id: int) -> list[dict]:
+    """The metric ROWS a growth card reads, rolled to trailing twelve months.
+
+    ⚠ EMITTED UNDER THE ANNUAL CODE NAME, ON PURPOSE. The three growth cards select their line by
+    `metric_code` (`annuals__Income Statement__Revenue`), and the /earnings dashboard reads the
+    same payload — so returning `quarterly__…` codes would mean every consumer learning a second
+    set of names and choosing between them. The cadence is a property of the REQUEST, not of the
+    row: ask for quarterly and the same code carries TTM values at quarter-end dates.
+    """
+    out: list[dict] = []
+    for metric, rule in _TTM_RULE.items():
+        # ⚠ EVERY METRIC WITH A DECLARED ROLL-UP, not a filtered subset. An earlier version gated
+        # on `_LONGEQUITY_METRIC_CODES` — which is NINE share-price CAGR codes, not the financial
+        # lines — and returned an empty series for every card while looking perfectly reasonable.
+        # The consumer picks the code it wants; there is nothing to gain by guessing here.
+        code = _metric_codes(metric)[0]
+        qcodes = tuple(c.replace("annuals__", "quarterly__") for c in _metric_codes(metric))
+        rows: list[dict] = []
+        for qc in qcodes:
+            rows += _page_metrics(company_id, qc, exact=True)
+        for date, val in _ttm_by_period(rows, rule, key="date").items():
+            # ⚠ `company_id` IS NOT DECORATION HERE. These rows also feed `_blend_rows`, which keys
+            # every point by the company that reported it — without it a PORTFOLIO's growth cards
+            # raised KeyError on `quarterly` (a 500 the moment a book switched cadence) while the
+            # single-company path, which never blends, was fine. The synthesised rows have to
+            # carry what the read they replace carried.
+            out.append({"company_id": company_id, "metric_code": code, "target_date": date,
+                        "numeric_value": val, "is_prediction": False})
+    return out
+
+
+def _ttm_by_period(rows: list[dict], rule: str, key: str = "label") -> dict[str, float]:
+    """Quarterly rows → {period label: trailing-twelve-month value}, per `rule`.
+
+    ⚠ A POINT NEEDS FOUR QUARTERS OR IT IS NOT A TRAILING YEAR. The first three quarters of a
+    company's history produce no TTM point at all — emitting a partial one would draw a line that
+    starts at a quarter of the level and "grows" 4x over its first year, which reads as the
+    business quadrupling. `last` is the one rule that could tolerate a short window (a balance is
+    a balance), but it is held to the same bar so every series on the tab starts at the same
+    place; a debt ratio whose numerator begins three quarters before its denominator is worse
+    than one that starts late.
+    """
+    by_date: dict[str, float] = {}
+    for m in rows:
+        v = m.get("numeric_value")
+        if v is None:
+            continue
+        # Latest observation wins for a given quarter-end — same rule as the annual path.
+        by_date[str(m["target_date"])[:10]] = float(v)
+    dates = sorted(by_date)
+    out: dict[str, float] = {}
+    for i in range(3, len(dates)):
+        window = [by_date[d] for d in dates[i - 3:i + 1]]
+        if rule == "sum":
+            val = sum(window)
+        elif rule == "mean":
+            val = sum(window) / 4.0
+        else:                                    # "last"
+            val = window[-1]
+        # Labelled by the quarter the window ENDS in — the period the figure is as-of. `key="date"`
+        # keeps the REAL quarter-end instead, because a fiscal quarter need not end on a calendar
+        # one and synthesising 03-31/06-30/09-30/12-31 would move every point of an off-calendar
+        # filer.
+        d = dates[i]
+        out[d if key == "date" else f"{d[:4]}-Q{(int(d[5:7]) - 1) // 3 + 1}"] = val
+    return out
+
+
+# ⚠ A REQUEST-SCOPED PREFETCH, AND IT EXISTS BECAUSE THE SAME LOOP COSTS 50x AT INDEX SCALE.
+# `_metric_by_year` is one paged read per company per metric. Over a book's ~50 holdings that is
+# fine; over an index's 489 constituents — which is exactly what a benchmark line asks for — it is
+# 72 SECONDS for one card, measured, against 0.1 s for the same rows fetched in bulk.
+#
+# Rather than rewrite eleven endpoint loops, they call `_prefetch(ids, metrics, cadence)` once and
+# `_metric_by_year` reads the cache. A ContextVar, not a module global: two requests can be in
+# flight in the same process and must never see each other's companies.
+_PREFETCH: contextvars.ContextVar[dict[tuple[str, str], dict[int, dict[str, float]]] | None] = (
+    contextvars.ContextVar("_earnings_prefetch", default=None))
+
+
+def _prefetch(company_ids: list[int], metrics: tuple[str, ...], cadence: str = "annual") -> None:
+    """Load these metrics for these companies in one bulk read each, for the rest of the request.
+
+    ⚠ SILENTLY OPTIONAL. Anything not prefetched still resolves through the per-company path, so a
+    caller that forgets is slow rather than wrong — and a metric fetched here that nobody asks for
+    costs one query, not a wrong answer.
+    """
+    if not company_ids:
+        return
+    cache = _PREFETCH.get() or {}
+    want = [m for m in dict.fromkeys(metrics) if (m, cadence) not in cache]
+    if not want:
+        return
+    # ⚠ DEDUPED ACROSS CONCURRENT REQUESTS, NOT JUST WITHIN THIS ONE. `_PREFETCH` is a contextvar,
+    # so it only stops a single request re-reading a line it already has — but the Long Equity tab
+    # fires ~13 requests AT ONCE and they overlap heavily: 30 metric reads of which only 18 are
+    # distinct, with `sbc` wanted by five cards and `fcf` by four. `cached_metric_reads` collapses
+    # those to one read plus four waits.
+    #
+    # ⚠⚠ AND IT READS THE ONES THIS CALLER CLAIMS IN **ONE** QUERY. Per metric, each read is its
+    # own COPY — its own connect + TLS + auth against Supabase — so the tab paid 18 handshakes for
+    # rows that sit side by side in `metric_data`. Measured on ACWI (1,949 constituents, the 18
+    # distinct lines): 18 Postgres connections -> 1, values identical. Locally that is 1.68s ->
+    # 1.56s because a Docker connection is ~2ms; the saving is the handshakes, so it lands in
+    # production and barely shows here — the same shape as the fundamentals grid's own read.
+    #
+    # ⚠ THE BATCH IS NOT SIMPLY `want`. See `cached_metric_reads`: batching everything this
+    # endpoint wants would re-fetch the lines the other twelve cards are already fetching, turning
+    # 18 shared reads into 30 unshared ones. It batches what this caller MISSES and OWNS.
+    for m, series in cached_metric_reads(
+            company_ids, want, cadence,
+            lambda ms: metrics_by_company_bulk(company_ids, ms, cadence)).items():
+        cache[(m, cadence)] = series
+    _PREFETCH.set(cache)
+
+
+def _metric_by_year(company_id: int, metric: str, cadence: str = "annual") -> dict[str, float]:
+    """{period: value} for a metric — fiscal YEARS, or trailing-twelve-month points per quarter.
+
+    ⚠ ONE SEAM FOR TWELVE CARDS. Every `*-inputs` endpoint on the Long Equity tab reads its lines
+    through this function, so the cadence is honoured in one place and no card can end up plotting
+    a different basis from the one beside it.
+
+    ⚠ THE KEYS CHANGE SHAPE ("2025" → "2025-Q3") AND CALLERS MUST NOT PARSE THEM. They are period
+    LABELS, ordered lexically (which is why the quarter suffix works), and every consumer treats
+    them as opaque categories on an x-axis. A caller that slices `[:4]` for a year would silently
+    collapse four TTM points onto one.
+    """
+    # The request-scoped bulk cache, when the caller filled it — see `_prefetch`.
+    cached = (_PREFETCH.get() or {}).get((metric, cadence))
+    if cached is not None:
+        return cached.get(company_id, {})
+    if cadence == "quarterly":
+        rule = _TTM_RULE.get(metric)
+        if rule is None:
+            # Refused, not guessed. A new metric gets a declared roll-up or no quarterly view.
+            _log.warning("[earnings] no TTM rule for %r — quarterly view omits it", metric)
+            return {}
+        codes = tuple(c.replace("annuals__", "quarterly__") for c in _metric_codes(metric))
+        rows: list[dict] = []
+        for code in codes:
+            rows += _page_metrics(company_id, code, exact=True)
+        return _ttm_by_period(rows, rule)
+
+    return _latest_per_year(_metric_rows(company_id, metric))
+
+
+def _latest_per_year_dated(rows: list[dict]) -> dict[str, tuple[str, float]]:
+    """{fiscal year: (period-END date, value)} — the annual bucketing rule, stated once.
+
+    ⚠ THE DATE IS KEPT BECAUSE A YEAR LABEL CANNOT BE CONVERTED. Anything that has to price a
+    fiscal year in another currency needs the date the period actually ENDED — a September filer's
+    "2025" is not 31 December 2025, and converting it at the calendar year-end applies an FX rate
+    from three months after the figure was struck. `_latest_per_year` is this with the date
+    dropped, so the two can never bucket a year differently (see
+    `_benchmark_fundamental_grid`, which is the caller that needs the date).
+    """
     by: dict[str, tuple[str, float]] = {}
-    for m in _metric_rows(company_id, metric):
+    for m in rows:
         v = m.get("numeric_value")
         if v is None:
             continue
@@ -981,7 +1332,265 @@ def _metric_by_year(company_id: int, metric: str) -> dict[str, float]:
         y = d[:4]
         if y not in by or d > by[y][0]:
             by[y] = (d, float(v))
-    return {y: v for y, (_d, v) in by.items()}
+    return by
+
+
+def _latest_per_year(rows: list[dict]) -> dict[str, float]:
+    """{fiscal year: the LATEST observation in it} — the annual bucketing rule, stated once.
+
+    Shared by the per-company reader and the bulk one below, so a benchmark's series and a
+    holding's cannot come to disagree about which observation a year is.
+    """
+    return {y: v for y, (_d, v) in _latest_per_year_dated(rows).items()}
+
+
+def _metrics_by_company(company_ids: list[int], metric: str,
+                        cadence: str = "annual") -> dict[int, dict[str, float]]:
+    """{company_id: {period: value}} for ONE metric across MANY companies.
+
+    ⚠ THE POINT IS THE ROUND TRIPS, NOT THE ROWS. The benchmark endpoints used to call
+    `_metric_by_year` in a loop — one paged read per company per metric — and the data was never
+    the problem: measured on SP500 (503 members), one metric costs **44.5 s** as a loop and
+    **0.1 s** as this, for 2,328 rows. That is 421x, against a LOCAL database; over the network the
+    loop degrades further while this stays one request per chunk. A three-metric card was 133 s and
+    the twelve-card tab would have been ~19 minutes.
+
+    ⚠ CHUNKED **AND** PAGED, because the two limits are different and both bite. `.in_()` is capped
+    at `IN_CHUNK_SIZE` ids (the Cloudflare 502 guard), while PostgREST silently truncates any single
+    response at 1,000 rows on cloud — the failure that produces a plausible number rather than an
+    error, exactly as the FX reader documents. Advance by what came back and stop on an EMPTY page:
+    `len(page) < _PAGE` is only correct while the server's cap is >= the page size, which is the
+    assumption that failed there.
+
+    ⚠ ORDERED ON A UNIQUE KEY. Postgres promises nothing about tied rows across separate
+    LIMIT/OFFSET queries, so a page boundary inside a tie serves a row twice or never;
+    (company_id, target_date, metric_code) is unique here.
+    """
+    codes, rule = _codes_and_rule(metric, cadence)
+    if codes is None:
+        return {}
+    raw = _rows_by_company(company_ids, codes)
+    return {cid: (_ttm_by_period(rows, rule) if rule else _latest_per_year(rows))
+            for cid, rows in raw.items()}
+
+
+def _codes_and_rule(metric: str, cadence: str) -> tuple[list[str] | None, str | None]:
+    """A metric's codes for the requested cadence, plus its TTM roll-up rule (None on annual).
+
+    `(None, None)` means the metric has no declared roll-up, so quarterly cannot be answered for
+    it — the caller omits it rather than inventing one. Shared so the bulk readers and the blend
+    cannot come to disagree about which spelling a cadence uses.
+    """
+    codes = list(_metric_codes(metric))
+    if cadence != "quarterly":
+        return codes, None
+    rule = _TTM_RULE.get(metric)
+    if rule is None:
+        _log.warning("[earnings] no TTM rule for %r — omitted", metric)
+        return None, None
+    return [c.replace("annuals__", "quarterly__") for c in codes], rule
+
+
+def metrics_by_company_bulk(company_ids: list[int], metrics: list[str],
+                            cadence: str = "annual") -> dict[str, dict[int, dict[str, float]]]:
+    """`{metric: {company_id: {period: value}}}` — the BULK twin of `_metrics_by_company`.
+
+    Same answer as calling that function once per metric, in one read instead of one per metric.
+    The bucketing is the same expression, reached through the same `_codes_and_rule`, so the two
+    cannot come to disagree about which observation a period is.
+
+    ⚠ A REFUSED METRIC COMES BACK AS `{}`, NOT ABSENT — deliberately UNLIKE `rows_by_metric`, which
+    omits it. That is the shape `_metrics_by_company` already returns for a quarterly line with no
+    declared TTM roll-up, and matching it is what lets this drop into the caching layer without a
+    third meaning for "nothing here": every requested metric gets a key, so a caller cannot tell a
+    refusal from an empty read and neither can be mistaken for "not yet fetched".
+    """
+    raw_by_metric = rows_by_metric(company_ids, metrics, cadence)
+    out: dict[str, dict[int, dict[str, float]]] = {}
+    for metric in metrics:
+        raw = raw_by_metric.get(metric)
+        if raw is None:
+            out[metric] = {}
+            continue
+        _codes, rule = _codes_and_rule(metric, cadence)
+        out[metric] = {cid: (_ttm_by_period(rows, rule) if rule else _latest_per_year(rows))
+                       for cid, rows in raw.items()}
+    return out
+
+
+def period_caps_eur(company_ids: list[int],
+                    cadence: str = "annual") -> dict[int, dict[str, float]]:
+    """`{company_id: {period: market cap in EUR}}` — the cap AS AT each fiscal period.
+
+    The weighting basis for anything that aggregates a cross-section of history. `market_cap_eur`
+    on `company` is TODAY's cap, and weighting 2018's revenue by it is look-ahead bias: measured on
+    the S&P, 30.6% of index weight sits in the wrong place in FY2018, with NVIDIA carried at 7.35%
+    of a year it was 0.68% of. GuruFocus publishes `Market Cap` per fiscal period, so the period's
+    cap is READ rather than reconstructed from a price ratio.
+
+    ⚠⚠ THE FX RATE IS THE PERIOD'S OWN END, WHICH IS THE ONLY REASON THIS CAN BE DONE AT ALL.
+    GuruFocus reports financials in the LISTING's trading currency, per fiscal period — so an ACWI
+    cross-section is 19 currencies and summing them raw over-weights Japan by ~150x. Apple's FY2025
+    ends in September; converting it at 31 December's rate applies a rate struck three months after
+    the figure. `_values_with_dates` keeps the real period-end date for exactly this, and this
+    function is the reason it takes a list of metrics rather than one.
+
+    ⚠⚠ THE RESULT IS ABSOLUTE EUR, NOT MILLIONS, AND THE CONVERSION IS THE WHOLE POINT OF THIS
+    LINE. GuruFocus financials are in MILLIONS; `company.market_cap_eur` is a plain EUR amount, and
+    every consumer of that field divides by 1e9 to print billions. Returning millions here would
+    render a EUR 2.9tn company as "EUR 2,890" — a number small enough to look like a rounding
+    convention rather than a factor of a million.
+
+    ⚠ A NON-POSITIVE OR UNCONVERTIBLE CAP IS ABSENT, NEVER 0. Absent means "this company has no
+    weight in this period and is left out of it"; a 0 would put it in the denominator as a company
+    worth nothing. Same rule the grid follows for a missing rate.
+
+    ⚠ THE CURRENCY IS LOOKED UP HERE, NOT PASSED IN, AND THAT IS DELIBERATE. A caller handing over
+    the wrong map does not fail — it converts a JPY cap at the USD rate and returns a plausible
+    number roughly 150x out, which then becomes a weight. The lookup is one chunked read against
+    the same `gurufocus_exchange` join every other consumer uses, and it makes the function
+    impossible to misuse.
+    """
+    from routers._benchmark_fundamental_grid import _values_with_dates  # noqa: PLC0415
+    from routers._benchmark_index import _fx_to_eur, _rate  # noqa: PLC0415
+
+    if not company_ids:
+        return {}
+    currency_by_cid: dict[int, str | None] = {}
+    for i in range(0, len(company_ids), IN_CHUNK_SIZE):
+        for c in (supabase.table("company")
+                  .select("company_id,gurufocus_exchange:gurufocus_exchange(currency_code)")
+                  .in_("company_id", company_ids[i:i + IN_CHUNK_SIZE]).execute().data or []):
+            currency_by_cid[c["company_id"]] = (
+                ((c.get("gurufocus_exchange") or {}) or {}).get("currency_code"))
+    dated = _values_with_dates(company_ids, ["market_cap"], cadence).get("market_cap", {})
+    dates = [d for per in dated.values() for d, _v in per.values()]
+    if not dates:
+        return {}
+    fx = _fx_to_eur({c for c in currency_by_cid.values() if c}, min(dates), max(dates))
+    out: dict[int, dict[str, float]] = {}
+    for cid, per in dated.items():
+        ccy = currency_by_cid.get(cid)
+        for period, (date, native) in per.items():
+            if not native or native <= 0:
+                continue
+            rate = _rate(fx, ccy, date)
+            if rate is None:
+                continue
+            out.setdefault(cid, {})[period] = (native / rate) * 1e6
+    return out
+
+
+def period_caps_by_isin(comp: dict[str, dict], universe: str | None,
+                        cadence: str = "annual") -> dict[str, dict[str, float]]:
+    """`{canonical ISIN: {period: cap in EUR}}` — `period_caps_eur` in the shape the card
+    endpoints index by.
+
+    ⚠ EMPTY FOR A PORTFOLIO, which is not a degenerate case but the correct answer. A holding
+    weight is a share of a book, not a market cap; there is no cap history to weight its periods
+    by, and `_weight_at` reads the absence as "one basis for every period".
+
+    ⚠ THE READ IS SHARED ACROSS THE ELEVEN CARDS. The Long Equity tab fires them concurrently and
+    every one of them wants the same caps for the same constituents — `cached_metric_reads` keyed
+    on (company set, cadence) collapses that to ONE read plus ten waits, exactly as it does for the
+    metric lines. Without it, adding caps here would have put eleven more Postgres connections on
+    the tab and given back most of what batching `_prefetch` won.
+    """
+    if not universe:
+        return {}
+    ids = sorted({c["company_id"] for c in comp.values() if c.get("company_id")})
+    if not ids:
+        return {}
+    # ⚠ A DERIVED SERIES, CACHED THROUGH THE SAME PRIMITIVE AS A RAW ONE. The key is a metric name
+    # the registry does not contain, deliberately — it is `market_cap` plus an FX conversion, and
+    # caching the CONVERTED figure is the point: the conversion is the expensive, per-period-dated
+    # half. `invalidate()` drops it with everything else when an ingest rewrites the caps.
+    key = "__period_caps_eur"
+    by_cid = cached_metric_reads(
+        ids, [key], cadence, lambda _ms: {key: period_caps_eur(ids, cadence)})[key]
+    return {isin: by_cid.get(c["company_id"], {})
+            for isin, c in comp.items() if c.get("company_id")}
+
+
+def rows_by_metric(company_ids: list[int], metrics: list[str],
+                   cadence: str = "annual") -> dict[str, dict[int, list[dict]]]:
+    """`{metric: {company_id: rows}}` for MANY metrics in **ONE** read.
+
+    ⚠⚠ THE UNIT OF COST IS THE READ, NOT THE METRIC. `_rows_by_company` is already one bulk read
+    per line, which is what made the benchmark tabs viable at all — but a caller wanting all
+    nineteen fundamentals lines still paid nineteen of them, and on the COPY transport each one
+    opens its OWN Postgres connection (`common.pg._run_copy` connects, sets `statement_timeout`,
+    streams, disconnects). Nineteen TCP+TLS+auth handshakes to Supabase is most of a second before
+    a single row moves, and the nineteen scans hit the same `(company_id, metric_code)` index over
+    the same ~1,900 constituents. One `metric_code = ANY(...)` over the union does all of it once.
+
+    ⚠ THE CODES ARE DISJOINT ACROSS METRICS, which is what makes the split back out unambiguous —
+    `_METRIC_CODES` maps each line to its own GuruFocus spellings (there are two or three per line,
+    for the capitalized and lowercase section cohorts) and no code appears under two keys. A code
+    that ever did would land in both buckets here; it would also mean two lines are the same line.
+
+    ⚠ ORDER IS PRESERVED, AND IT MATTERS. `_rows_by_company` sorts on
+    `(company_id, target_date, metric_code)`; filtering a list keeps relative order, so each
+    metric's per-company rows arrive exactly as its own query would have returned them. That is
+    load-bearing rather than tidy: `_latest_per_year_dated` keeps the LAST row it sees for a
+    period, so a different order can pick a different value.
+
+    ⚠ A METRIC WITH NO TTM RULE IS ABSENT FROM THE RESULT on the quarterly basis, never present as
+    an empty dict — `_codes_and_rule` refuses it rather than guessing a roll-up, and the caller
+    must be able to tell "refused" from "we hold nothing".
+    """
+    codes_by_metric: dict[str, list[str]] = {}
+    for metric in metrics:
+        codes, _rule = _codes_and_rule(metric, cadence)
+        if codes:
+            codes_by_metric[metric] = codes
+    if not codes_by_metric:
+        return {}
+    metric_by_code = {code: metric
+                      for metric, codes in codes_by_metric.items() for code in codes}
+    raw = _rows_by_company(company_ids, sorted(metric_by_code))
+    out: dict[str, dict[int, list[dict]]] = {m: defaultdict(list) for m in codes_by_metric}
+    for cid, rows in raw.items():
+        for r in rows:
+            metric = metric_by_code.get(r["metric_code"])
+            if metric is not None:
+                out[metric][cid].append(r)
+    return out
+
+
+def _rows_by_company(company_ids: list[int], codes: list[str]) -> dict[int, list[dict]]:
+    """{company_id: rows} for the named codes across MANY companies — the read the benchmark work
+    is bounded by. See `_metrics_by_company` for the measurement and for why this is chunked AND
+    paged, ordered on a unique key, and advances by what came back.
+
+    ⚠ ONE COPY FIRST, THIS PAGER AS THE FALLBACK. The paged path below is correct but its cost is
+    ROUND TRIPS: PostgREST caps a response at 1,000 rows (a server setting, 1,000 on cloud), and
+    one metric across ACWI is ~16,300 rows — ~20 requests, times 27 metric reads across the tab's
+    cards. `rows_by_company_via_copy` streams the same rows over one connection and returns the
+    identical shape, or None when it cannot run (no `SUPABASE_DB_URL`, no psycopg, any error) —
+    so this is a pure speed-up with no second behaviour to keep in step.
+    """
+    fast = rows_by_company_via_copy(company_ids, codes, _BLEND_START)
+    if fast is not None:
+        return fast
+
+    raw: dict[int, list[dict]] = defaultdict(list)
+    for i in range(0, len(company_ids), IN_CHUNK_SIZE):
+        chunk = company_ids[i:i + IN_CHUNK_SIZE]
+        off = 0
+        while True:
+            page = (supabase.table("metric_data")
+                    .select("company_id,metric_code,target_date,numeric_value")
+                    .in_("company_id", chunk).in_("metric_code", codes)
+                    .gte("target_date", _BLEND_START)
+                    .order("company_id").order("target_date").order("metric_code")
+                    .range(off, off + _PAGE - 1).execute().data or [])
+            if not page:
+                break
+            for r in page:
+                raw[r["company_id"]].append(r)
+            off += len(page)
+    return raw
 
 
 @router.get("/api/earnings/benchmark-revenue")
@@ -1020,9 +1629,31 @@ async def benchmark_revenue(label: str = "AEX", metric: str = "revenue"):
                     caps[c["company_id"]] = float(c["market_cap_eur"])
 
         members = []
+        # ⚠ ONE READ FOR THE WHOLE INDEX — see `_metrics_by_company`. As a per-company loop this
+        # was 44.5 s for SP500's 503 members; the data it moves is 2,328 rows.
+        #
+        # ⚠ `blend_series` WANTS RAW DATED POINTS, NOT A YEAR-BUCKETED SERIES, so this one keeps the
+        # dates: it rebases each member to an index and does its own period alignment. Handing it
+        # `{year: value}` would silently change what it is blending.
+        raw_by_cid: dict[int, list[dict]] = defaultdict(list)
+        for i in range(0, len(ids), IN_CHUNK_SIZE):
+            chunk = ids[i:i + IN_CHUNK_SIZE]
+            off = 0
+            while True:
+                page = (supabase.table("metric_data")
+                        .select("company_id,metric_code,target_date,numeric_value")
+                        .in_("company_id", chunk).in_("metric_code", list(_metric_codes(metric)))
+                        .gte("target_date", _BLEND_START)
+                        .order("company_id").order("target_date").order("metric_code")
+                        .range(off, off + _PAGE - 1).execute().data or [])
+                if not page:
+                    break
+                for r in page:
+                    raw_by_cid[r["company_id"]].append(r)
+                off += len(page)
         for cid in ids:
             pts = {str(m["target_date"])[:10]: float(m["numeric_value"])
-                   for m in _metric_rows(cid, metric)
+                   for m in raw_by_cid.get(cid, ())
                    if m.get("numeric_value") is not None}
             if pts:
                 members.append({"weight": caps.get(cid, 1.0), "points": pts})
@@ -1159,22 +1790,39 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
+        # ⚠ ONE BULK READ FOR THE WHOLE SET, NOT ONE PER COMPANY — and here it is the difference
+        # between a table and a timeout. This loop reads ONE metric per member through
+        # `_metric_by_year`, which is ~160 ms each: measured 2026-08-04, the S&P's 489 constituents
+        # took **64.5 s**; prefetched they are one chunked, paged query. The endpoint was fine while
+        # only a 20-name book could reach it and became the slowest thing on the tab the day the
+        # benchmark overlay let it be pointed at an index.
+        _prefetch([c["company_id"] for c in comp.values() if c.get("company_id")],
+                  (metric,), body.cadence)
+        # ⚠ INDEX ONLY — the per-period cap is a weighting basis, and for a portfolio the weight is
+        # a holding percentage with no market cap behind it (same branch as `market_cap_eur`
+        # below). This is what lets the table show the cap the weight beside it was divided out of,
+        # per period, instead of one of today's figures repeated across twelve columns.
+        caps = (period_caps_eur([c["company_id"] for c in comp.values() if c.get("company_id")],
+                                body.cadence)
+                if body.universe else {})
         for ci in canon:
             c = comp.get(ci)
             if not c:
                 continue
             gx = (c.get("gurufocus_exchange") or {}) or {}
-            by_year: dict[str, tuple[str, float]] = {}
-            for m in _metric_rows(c["company_id"], metric):
-                if m.get("numeric_value") is None:
-                    continue
-                d = str(m["target_date"])[:10]
-                y = d[:4]
-                if y < "2015":
-                    continue
-                if y not in by_year or d > by_year[y][0]:     # latest observation in the year
-                    by_year[y] = (d, float(m["numeric_value"]))
-            rev = {y: v for y, (_d, v) in by_year.items()}
+            # ⚠ THROUGH THE SHARED SEAM, NOT A SECOND COPY OF IT. This block used to hand-roll the
+            # same "latest observation per fiscal year" bucketing that `_metric_by_year` does — so
+            # when cadence arrived, the chart switched to trailing twelve months and the drill-down
+            # BEHIND that chart quietly kept showing fiscal years. A table that disagrees with the
+            # chart it is supposed to explain is worse than no table, and the duplication is what
+            # made it possible.
+            rev = {p: v for p, v in
+                   _metric_by_year(c["company_id"], metric, body.cadence).items()
+                   if p >= "2015"}
             years |= set(rev)
             # WHY revenue is missing, when it is: a company on an exchange outside the GuruFocus
             # subscription (Brookfield on TSX) can't be fetched at all → `unsubscribed`; one on a
@@ -1185,19 +1833,49 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"),
                 "exchange": exch,
                 "status": status,
                 "revenue": rev,
+                # ⚠ THE NUMERATOR OF THE WEIGHT, AND ONLY ON THE INDEX PATH. For a universe,
+                # `weight_by[ci]` IS `company.market_cap_eur` (see `_load_and_expand_members`), so
+                # this is the figure the percentage beside it was divided out of — cap ÷ Σcap — and
+                # a reader can check the division. For a PORTFOLIO the same variable holds the
+                # holding's weight, which is not a market cap at all, so the field is omitted
+                # rather than filled with a number that would be read as one.
+                **({"market_cap_eur": weight_by[ci]} if body.universe else {}),
+                # ⚠ THE CAP AS AT EACH PERIOD — what the per-period weight is actually computed
+                # from, so the division shown in the cell can be checked rather than trusted.
+                # Sparse on purpose: a period with no filed cap is ABSENT, and the reader sees a
+                # dash for both cap and weight because that company is left out of that period's
+                # average entirely. Padding it with today's figure would mix two bases inside one
+                # column with nothing on screen to tell them apart.
+                **({"market_cap_by_period": caps.get(c["company_id"], {})}
+                   if body.universe else {}),
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(years), "rows": rows, "holdings": len(members)}
+        out = {"years": sorted(years), "rows": rows, "holdings": len(members)}
+        if body.universe:
+            # ⚠ WHO IS **NOT** IN THE INDEX, ON THE ONE SCREEN BUILT FOR CHECKING IT BY HAND. A
+            # constituent with no stored market cap is dropped before weighting, and the names
+            # that lack one are systematically the ones GuruFocus does not cover — on the AEX that
+            # is Shell, Unilever and RELX, which is why ASML renormalises to 51.76%. Absent from
+            # the table AND absent from a footnote, that reads as a weight the index really has.
+            from routers._benchmark_index import weight_basis  # noqa: PLC0415
+            out["weight_basis"] = weight_basis(body.universe)
+        return out
 
     return await asyncio.to_thread(_run)
 
 
 @router.post("/api/earnings/margin-inputs")
+@cached_blend("margin-inputs")
 async def margin_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the FCF-SBC margin, per holding: Revenue, Free Cash Flow and Stock
     Based Compensation per fiscal year, in the company's own reporting currency (millions).
@@ -1238,14 +1916,22 @@ async def margin_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('revenue', 'fcf', 'sbc',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
                 continue
             gx = (c.get("gurufocus_exchange") or {}) or {}
-            rev = _metric_by_year(c["company_id"], "revenue")
-            fcf = _metric_by_year(c["company_id"], "fcf")
-            sbc = _metric_by_year(c["company_id"], "sbc")
+            rev = _metric_by_year(c["company_id"], "revenue", body.cadence)
+            fcf = _metric_by_year(c["company_id"], "fcf", body.cadence)
+            sbc = _metric_by_year(c["company_id"], "sbc", body.cadence)
             years |= set(rev) | set(fcf) | set(sbc)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -1253,6 +1939,11 @@ async def margin_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status, "revenue": rev, "fcf": fcf, "sbc": sbc,
@@ -1264,6 +1955,7 @@ async def margin_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/debt-ratio-inputs")
+@cached_blend("debt-ratio-inputs")
 async def debt_ratio_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the LTD / (Total Assets − Goodwill) ratio, per holding: Long-Term
     Debt, Total Assets and Goodwill per fiscal year, in the company's own reporting currency
@@ -1307,14 +1999,22 @@ async def debt_ratio_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('long_term_debt', 'total_assets', 'goodwill',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
                 continue
             gx = (c.get("gurufocus_exchange") or {}) or {}
-            ltd = _metric_by_year(c["company_id"], "long_term_debt")
-            ta = _metric_by_year(c["company_id"], "total_assets")
-            gw = _metric_by_year(c["company_id"], "goodwill")
+            ltd = _metric_by_year(c["company_id"], "long_term_debt", body.cadence)
+            ta = _metric_by_year(c["company_id"], "total_assets", body.cadence)
+            gw = _metric_by_year(c["company_id"], "goodwill", body.cadence)
             years |= set(ltd) | set(ta) | set(gw)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -1324,6 +2024,11 @@ async def debt_ratio_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -1336,6 +2041,7 @@ async def debt_ratio_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/cash-return-inputs")
+@cached_blend("cash-return-inputs")
 async def cash_return_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind Cash return on capital, per holding: Free Cash Flow, non-current
     (long-term) liabilities and total equity per fiscal year, in the company's own reporting
@@ -1380,23 +2086,31 @@ async def cash_return_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('fcf', 'sbc', 'noncurrent_liabilities', 'total_equity', 'roic',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
                 continue
             gx = (c.get("gurufocus_exchange") or {}) or {}
-            fcf = _metric_by_year(c["company_id"], "fcf")
+            fcf = _metric_by_year(c["company_id"], "fcf", body.cadence)
             # Carried so the tab-level "SBC correction" toggle can subtract it from FCF without a
             # second request. ⚠ MISSING SBC IS TREATED AS ZERO by the client, not as "unknown":
             # most companies genuinely report none, and blanking the ratio for them would empty
             # the chart for the majority to be pedantic about the minority.
-            sbc = _metric_by_year(c["company_id"], "sbc")
-            ncl = _metric_by_year(c["company_id"], "noncurrent_liabilities")
-            eq = _metric_by_year(c["company_id"], "total_equity")
+            sbc = _metric_by_year(c["company_id"], "sbc", body.cadence)
+            ncl = _metric_by_year(c["company_id"], "noncurrent_liabilities", body.cadence)
+            eq = _metric_by_year(c["company_id"], "total_equity", body.cadence)
             # ⚠ A RATIO, NOT A RAW LINE — the one field in this payload that is already the answer.
             # The other three are amounts the client divides; this one is GuruFocus's own
             # percentage and is passed through untouched (see `_METRIC_CODES["roic"]`).
-            roic = _metric_by_year(c["company_id"], "roic")
+            roic = _metric_by_year(c["company_id"], "roic", body.cadence)
             years |= set(fcf) | set(ncl) | set(eq) | set(roic)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -1407,6 +2121,11 @@ async def cash_return_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -1420,6 +2139,7 @@ async def cash_return_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/interest-burden-inputs")
+@cached_blend("interest-burden-inputs")
 async def interest_burden_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the interest-burden ratio, per holding: Interest expense and
     Operating income per fiscal year, in the company's own reporting currency (millions).
@@ -1463,13 +2183,21 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('interest_expense', 'operating_income',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
                 continue
             gx = (c.get("gurufocus_exchange") or {}) or {}
-            ie = _metric_by_year(c["company_id"], "interest_expense")
-            oi = _metric_by_year(c["company_id"], "operating_income")
+            ie = _metric_by_year(c["company_id"], "interest_expense", body.cadence)
+            oi = _metric_by_year(c["company_id"], "operating_income", body.cadence)
             years |= set(ie) | set(oi)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -1479,6 +2207,11 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -1491,6 +2224,7 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/sbc-ocf-inputs")
+@cached_blend("sbc-ocf-inputs")
 async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the SBC/OCF ratio, per holding: Stock-Based Compensation and
     Operating Cash Flow per fiscal year, in the company's own reporting currency (millions).
@@ -1534,13 +2268,21 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('sbc', 'ocf',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
                 continue
             gx = (c.get("gurufocus_exchange") or {}) or {}
-            sbc = _metric_by_year(c["company_id"], "sbc")
-            ocf = _metric_by_year(c["company_id"], "ocf")
+            sbc = _metric_by_year(c["company_id"], "sbc", body.cadence)
+            ocf = _metric_by_year(c["company_id"], "ocf", body.cadence)
             years |= set(sbc) | set(ocf)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -1550,6 +2292,11 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -1562,6 +2309,7 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/capex-margin-inputs")
+@cached_blend("capex-margin-inputs")
 async def capex_margin_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the Capex margin, per holding: Capex and Revenue per fiscal year, in
     the company's own reporting currency (millions).
@@ -1604,13 +2352,21 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('capex', 'revenue',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
                 continue
             gx = (c.get("gurufocus_exchange") or {}) or {}
-            capex = _metric_by_year(c["company_id"], "capex")
-            rev = _metric_by_year(c["company_id"], "revenue")
+            capex = _metric_by_year(c["company_id"], "capex", body.cadence)
+            rev = _metric_by_year(c["company_id"], "revenue", body.cadence)
             years |= set(capex) | set(rev)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -1620,6 +2376,11 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -1632,6 +2393,7 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/gross-margin-inputs")
+@cached_blend("gross-margin-inputs")
 async def gross_margin_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the Gross margin, per holding: Gross Profit and Revenue per fiscal
     year, in the company's own reporting currency (millions).
@@ -1682,13 +2444,21 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('gross_profit', 'revenue',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
                 continue
             gx = (c.get("gurufocus_exchange") or {}) or {}
-            gp = _metric_by_year(c["company_id"], "gross_profit")
-            rev = _metric_by_year(c["company_id"], "revenue")
+            gp = _metric_by_year(c["company_id"], "gross_profit", body.cadence)
+            rev = _metric_by_year(c["company_id"], "revenue", body.cadence)
             years |= set(gp) | set(rev)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -1700,6 +2470,11 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -1712,6 +2487,7 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/cash-conversion-inputs")
+@cached_blend("cash-conversion-inputs")
 async def cash_conversion_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind Cash conversion, per holding: Free Cash Flow and Net Income per
     fiscal year, in the company's own reporting currency (millions).
@@ -1763,14 +2539,22 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('fcf', 'sbc', 'net_income',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
                 continue
             gx = (c.get("gurufocus_exchange") or {}) or {}
-            fcf = _metric_by_year(c["company_id"], "fcf")
-            sbc = _metric_by_year(c["company_id"], "sbc")
-            ni = _metric_by_year(c["company_id"], "net_income")
+            fcf = _metric_by_year(c["company_id"], "fcf", body.cadence)
+            sbc = _metric_by_year(c["company_id"], "sbc", body.cadence)
+            ni = _metric_by_year(c["company_id"], "net_income", body.cadence)
             years |= set(fcf) | set(ni)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -1780,6 +2564,11 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -1792,6 +2581,7 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest):
 
 
 @router.post("/api/earnings/fcf-sbc-yield-inputs")
+@cached_blend("fcf-sbc-yield-inputs")
 async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
     """The base inputs behind the FCF-SBC yield, per holding: Free Cash Flow, Stock-Based
     Compensation and Market Cap per fiscal year, in the company's own reporting currency (millions).
@@ -1834,14 +2624,41 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('fcf', 'sbc', 'market_cap',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
                 continue
             gx = (c.get("gurufocus_exchange") or {}) or {}
-            fcf = _metric_by_year(c["company_id"], "fcf")
-            sbc = _metric_by_year(c["company_id"], "sbc")
-            mc = _metric_by_year(c["company_id"], "market_cap")
+            if body.cadence == "daily":
+                # ⚠ MARKET CAP IS RECONSTRUCTED HERE, NOT READ. GuruFocus publishes `Market Cap`
+                # only per fiscal period, so a daily denominator has to be
+                # `daily close x shares outstanding`. Both legs are already in this company's own
+                # reporting currency and both are in MILLIONS (shares is the diluted average, in
+                # millions), so the product is a market cap in millions — the same unit the annual
+                # line carries, which is what keeps the two cadences on one axis.
+                #
+                # ⚠ IT WILL NOT EQUAL GURUFOCUS'S OWN FIGURE TO THE DECIMAL. Theirs uses the shares
+                # in issue at their own moment; ours uses the TTM diluted average, which is the
+                # basis every other per-share number on this tab is on. Consistency with the tab
+                # beats agreement with a line we do not otherwise use.
+                close = _daily_closes(c["company_id"])
+                dates = sorted(close)
+                fcf = _daily_metric(c["company_id"], "fcf", dates)
+                sbc = _daily_metric(c["company_id"], "sbc", dates)
+                sh = _daily_metric(c["company_id"], "shares", dates)
+                mc = {d: close[d] * sh[d] for d in sh if d in close and sh[d]}
+            else:
+                fcf = _metric_by_year(c["company_id"], "fcf", body.cadence)
+                sbc = _metric_by_year(c["company_id"], "sbc", body.cadence)
+                mc = _metric_by_year(c["company_id"], "market_cap", body.cadence)
             years |= set(fcf) | set(sbc) | set(mc)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -1851,6 +2668,11 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -1898,6 +2720,7 @@ async def growth_estimates_by_isin(isin: str, force: bool = False):
 
 
 @router.post("/api/earnings/dividend-yield-inputs")
+@cached_blend("dividend-yield-inputs")
 async def dividend_yield_inputs(body: FundamentalCoverageRequest):
     """The two base lines behind the dividend yield, per holding: Dividends per Share and the
     fiscal year-end share price, per fiscal year, in the company's own reporting currency.
@@ -1949,13 +2772,32 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
+        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
+        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
+        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
+        caps = period_caps_by_isin(comp, body.universe, body.cadence)
+        # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
+        # request carries an index's 489 constituents, where the per-company path is 72s.
+        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
+                  ('div_ps', 'price_ps',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
                 continue
             gx = (c.get("gurufocus_exchange") or {}) or {}
-            div = _metric_by_year(c["company_id"], "div_ps")
-            price = _metric_by_year(c["company_id"], "price_ps")
+            if body.cadence == "daily":
+                # The denominator moves every trading day; the numerator steps at each fiscal
+                # period end and is flat between them. That IS a trailing yield — the same shape a
+                # terminal draws — and it is why only the two YIELD cards offer this cadence: the
+                # other ten have no daily input at all.
+                price = _daily_closes(c["company_id"])
+                div = _daily_metric(c["company_id"], "div_ps", sorted(price))
+                # ⚠ Only days the numerator reaches. `_step_onto_dates` drops anything before the
+                # first reported period, so `price` alone would put bare denominators on the chart.
+                price = {d: v for d, v in price.items() if d in div}
+            else:
+                div = _metric_by_year(c["company_id"], "div_ps", body.cadence)
+                price = _metric_by_year(c["company_id"], "price_ps", body.cadence)
             years |= set(div) | set(price)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -1966,6 +2808,11 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
+                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
+                # actually computed from. Sparse: a period with no filed cap is ABSENT,
+                # and that company is left out of that period's average entirely rather
+                # than weighted on a different basis from its neighbours.
+                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -1978,7 +2825,7 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest):
 
 
 @router.get("/api/earnings/benchmark-margin")
-async def benchmark_margin(label: str = "AEX"):
+async def benchmark_margin(label: str = "AEX", cadence: str = "annual"):
     """A benchmark index's FCF-SBC margin per fiscal year: `(FCF − SBC) / Revenue` per constituent,
     then a CAP-WEIGHTED AVERAGE across them.
 
@@ -2007,24 +2854,59 @@ async def benchmark_margin(label: str = "AEX"):
                 if c.get("market_cap_eur"):
                     caps[c["company_id"]] = float(c["market_cap_eur"])
 
+        # ⚠ THREE READS FOR THE WHOLE INDEX, NOT THREE PER MEMBER. This was 503 x 3 paged round
+        # trips — ~133 s on SP500 — for data that arrives in a fraction of a second when asked for
+        # once per metric. See `_metrics_by_company`.
+        rev_all = _metrics_by_company(ids, "revenue", cadence)
+        fcf_all = _metrics_by_company(ids, "fcf", cadence)
+        sbc_all = _metrics_by_company(ids, "sbc", cadence)
         per_member: list[tuple[float, dict[str, float]]] = []
         for cid in ids:
-            rev = _metric_by_year(cid, "revenue")
-            fcf = _metric_by_year(cid, "fcf")
-            sbc = _metric_by_year(cid, "sbc")
+            rev = rev_all.get(cid, {})
+            fcf = fcf_all.get(cid, {})
+            sbc = sbc_all.get(cid, {})
             marg = {y: (fcf[y] - sbc.get(y, 0.0)) / rev[y] * 100.0
                     for y in rev if rev[y] and rev[y] > 0 and y in fcf}
             if marg:
                 per_member.append((caps.get(cid, 1.0), marg))
 
+        # ⚠ THE COVERAGE FLOOR — THE SAME ONE THE REST OF THE SUITE USES, AND THIS ENDPOINT WAS THE
+        # ONLY THING ON THE TAB WITHOUT IT. `benchmark_revenue` gets it free from `blend_series`;
+        # this function hand-rolls its own weighted average and tested nothing but `den > 0`.
+        #
+        # Measured on SP500 before the fix: 2022-2025 were each backed by 98-100% of the charted
+        # members, and 2026 by SIX of ninety-two — 7% — because only a handful have filed. That
+        # point read 33.62% against 2025's 19.77%, in the same ink, at the right-hand edge where a
+        # reader looks first. It is not a move in the index, it is a move in the sample.
+        #
+        # ⚠ COVERAGE IS BY CAP WEIGHT, NOT HEADCOUNT, because the figure it gates is cap-weighted:
+        # six megacaps and six minnows are the same count and nothing like the same coverage.
+        #
+        # ⚠ AND THE DENOMINATOR IS THE CHARTED SET, NOT THE INDEX — same rule as the portfolio
+        # cards. Only 92 of SP500's 503 members have fundamentals ingested at all, so measuring
+        # against 503 would put every year under the floor and blank the chart. That 18% is a real
+        # and separate caveat, so it is REPORTED (`index_coverage_pct`) rather than folded into a
+        # per-year test it would silently dominate.
+        from routers._fundamental_blend import MIN_BLEND_COVERAGE_PCT  # noqa: PLC0415
+
+        total_w = sum(w for w, _m in per_member) or 1.0
         years = sorted({y for _w, m in per_member for y in m if y >= "2015"})
         series = []
         for y in years:
             num = sum(w * m[y] for w, m in per_member if y in m)
             den = sum(w for w, m in per_member if y in m)
-            if den > 0:
-                series.append({"year": int(y), "margin_pct": round(num / den, 4)})
-        return {"label": label, "members": len(per_member), "series": series}
+            cov = 100.0 * den / total_w
+            if den <= 0 or cov < MIN_BLEND_COVERAGE_PCT:
+                continue
+            series.append({"year": int(y), "margin_pct": round(num / den, 4),
+                           "coverage_pct": round(cov, 1),
+                           "members": sum(1 for _w, m in per_member if y in m)})
+        return {"label": label, "members": len(per_member), "series": series,
+                # What the per-year test is, so a hidden year reads as withheld rather than absent.
+                "floor_pct": MIN_BLEND_COVERAGE_PCT,
+                # ...and how much of the INDEX the whole line describes — the standing caveat.
+                "index_members": len(ids),
+                "index_coverage_pct": round(100.0 * len(per_member) / (len(ids) or 1), 1)}
 
     return await asyncio.to_thread(_run)
 

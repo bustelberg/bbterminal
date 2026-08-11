@@ -23,6 +23,11 @@ export type BlendHolding = { isin: string; weight: number; name?: string };
 export type BlendTarget = {
   basket?: { holdings: BlendHolding[] };
   portfolioId?: number;
+  /** 'quarterly' rolls every metric to TRAILING TWELVE MONTHS server-side. Omitted = annual.
+   *  ⚠ The PORTFOLIO path needs this explicitly: the derived cards carry the cadence in the body
+   *  they already POST, but the blend has its own builder — leave it out and a book's growth cards
+   *  quietly stay on fiscal years while the nine cards beside them switch. */
+  cadence?: 'annual' | 'quarterly';
 };
 
 /** How far the blend has got. `total` is the number of COVERED holdings — the ones with
@@ -40,9 +45,11 @@ const BASE = `${API_URL}/api/earnings/fundamental-blend-metrics`;
 /** The request body both endpoints take. A basket sends its holdings; a saved model portfolio
  *  sends its id and is expanded server-side (the frontend never holds its membership). */
 export function blendBody(t: BlendTarget): string {
+  const cadence = t.cadence ?? 'annual';
   return JSON.stringify(t.basket
-    ? { holdings: t.basket.holdings.map((h) => ({ isin: h.isin, name: h.name, weight: h.weight })) }
-    : { portfolio_id: t.portfolioId });
+    ? { holdings: t.basket.holdings.map((h) => ({ isin: h.isin, name: h.name, weight: h.weight })),
+      cadence }
+    : { portfolio_id: t.portfolioId, cadence });
 }
 
 async function viaPost<T>(body: string, signal?: AbortSignal): Promise<BlendResult<T>> {

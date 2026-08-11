@@ -116,10 +116,10 @@ function ReloadPrices({ strategyId, canEdit, onDone }: {
     <span className="flex items-baseline gap-1.5">
       <button type="button" onClick={() => void run()} disabled={busy}
         title="Reload this portfolio's prices — start and end, local and converted — from their sources. Does NOT re-pick the holdings; that is Force re-rebalance. Runs the same function the nightly tick does, so the correction lands now instead of at 05:00 UTC."
-        className="text-[11px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
+        className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
         {busy ? 'Reloading…' : 'Reload prices'}
       </button>
-      {msg && <span className="text-[10px] text-fg-faint">{msg}</span>}
+      {msg && <span className="text-[11px] text-fg-faint">{msg}</span>}
     </span>
   );
 }
@@ -213,7 +213,7 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
       <button
         type="button" onClick={() => (open ? setOpen(false) : openEditor())}
         title="Set the cash % and ETF sleeves by hand — the stock picks take the rest, re-weighted from the strategy's own selection"
-        className="text-[11px] px-2 py-0.5 rounded border border-neutral-700 text-fg-soft hover:bg-overlay/5 transition-colors"
+        className="text-[12px] px-2 py-0.5 rounded border border-neutral-700 text-fg-soft hover:bg-overlay/5 transition-colors"
       >
         {open ? 'Close' : summary ? 'Edit sleeves' : 'Add cash / ETFs'}
       </button>
@@ -270,7 +270,7 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
           <button
             type="button" disabled={saving}
             onClick={() => setEtfs([...etfs, { benchmarkId: null, weightPct: '0' }])}
-            className="text-[11px] text-accent-400 hover:underline mb-2"
+            className="text-[12px] text-accent-400 hover:underline mb-2"
           >
             + Add ETF
           </button>
@@ -293,13 +293,13 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
             <span className="flex gap-2">
               <button
                 type="button" onClick={() => setOpen(false)} disabled={saving}
-                className="text-[11px] px-2 py-0.5 rounded border border-neutral-700 text-fg-soft hover:bg-overlay/5"
+                className="text-[12px] px-2 py-0.5 rounded border border-neutral-700 text-fg-soft hover:bg-overlay/5"
               >
                 Cancel
               </button>
               <button
                 type="button" onClick={() => void save()} disabled={saving || !!invalid}
-                className="text-[11px] px-2 py-0.5 rounded bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="text-[12px] px-2 py-0.5 rounded bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {saving ? 'Saving…' : 'Save'}
               </button>
@@ -546,7 +546,7 @@ export default function CurrentPortfolioCard({
                   <tr key="cash" className="border-b border-neutral-800/30 bg-overlay/[0.02]">
                     <td className="py-2 pr-2 font-mono whitespace-nowrap text-fg-soft">
                       Cash
-                      <span className="ml-1.5 text-[9px] uppercase tracking-wide px-1 py-0.5 rounded bg-neutral-500/15 text-fg-muted border border-neutral-500/30">CASH</span>
+                      <span className="ml-1.5 text-[10px] uppercase tracking-wide px-1 py-0.5 rounded bg-neutral-500/15 text-fg-muted border border-neutral-500/30">CASH</span>
                     </td>
                     <td className="py-2 px-2 text-fg-faint">—</td>
                     <td className="py-2 px-2 text-fg-soft">Cash</td>
@@ -602,8 +602,8 @@ export default function CurrentPortfolioCard({
                 <tr className="group border-b border-neutral-800/30 hover:bg-overlay/[0.02]">
                   <td className="py-2 pr-2 font-mono whitespace-nowrap">
                     <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-400 hover:text-accent-300 hover:underline">{h.ticker}</a>
-                    {exch && <span className="ml-1 text-[10px] text-fg-subtle" title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}>({exch})</span>}
-                    {isEtf && <span className="ml-1.5 text-[9px] uppercase tracking-wide px-1 py-0.5 rounded bg-accent-500/15 text-accent-300 border border-accent-500/30">ETF</span>}
+                    {exch && <span className="ml-1 text-[11px] text-fg-subtle" title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}>({exch})</span>}
+                    {isEtf && <span className="ml-1.5 text-[10px] uppercase tracking-wide px-1 py-0.5 rounded bg-accent-500/15 text-accent-300 border border-accent-500/30">ETF</span>}
                     {canRefresh && (
                       <button
                         type="button"
@@ -612,7 +612,7 @@ export default function CurrentPortfolioCard({
                         title={isStale
                           ? "Stale price — refresh this stock from GuruFocus now (shows the request + response)"
                           : "Refresh this stock's price from GuruFocus now (shows the request + response)"}
-                        className={`ml-1.5 text-[11px] disabled:opacity-40 transition-opacity ${
+                        className={`ml-1.5 text-[12px] disabled:opacity-40 transition-opacity ${
                           isStale
                             ? 'text-warn-400 hover:text-warn-300'
                             : 'text-fg-faint hover:text-accent-300 opacity-0 group-hover:opacity-100 focus:opacity-100'
@@ -652,7 +652,7 @@ export default function CurrentPortfolioCard({
                   <td className="py-2 px-2 text-right font-mono text-fg-muted">{target.toFixed(1)}%</td>
                   <td className="py-2 px-2 text-right font-mono text-fg-strong">{current.toFixed(1)}%</td>
                   <td className="py-2 px-2 text-right font-mono text-fg-muted whitespace-nowrap border-l border-neutral-800/40">
-                    {fmtPrice(h.entry_price_local)}{ccy && <span className="text-fg-faint text-[10px] ml-1">{ccy}</span>}
+                    {fmtPrice(h.entry_price_local)}{ccy && <span className="text-fg-faint text-[11px] ml-1">{ccy}</span>}
                   </td>
                   {entryAsOfCell()}
                   <td className="py-2 px-2 text-right font-mono text-fg-muted whitespace-nowrap">{fmtPrice(h.exit_price_local)}</td>
