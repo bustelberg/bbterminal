@@ -3418,6 +3418,35 @@ export interface paths {
          *     reachable per company where they are actually drawn — `/api/earnings/{cid}/refresh` takes a
          *     `source` — and `feeds=all` here restores the old behaviour for a deliberate full load.
          *
+         *     ⚠⚠ `force=true` MEANS "EVERY CONSTITUENT", AND THE SENTINEL PROBE IS NOT MERELY BYPASSED — IT
+         *     IS NOT RUN. `needs()` answers *who is missing the feed*, which is the wrong question for a
+         *     forced run: the answer changes nothing, and it is the expensive part of the setup (one read of
+         *     `metric_data` per sentinel across every constituent — on ACWI, ~1,900 of them).
+         *
+         *     ⚠ IT EXISTS BECAUSE PRESENT IS NOT CURRENT. The sentinel is a row that EXISTS
+         *     (`annuals__Cashflow Statement__Free Cash Flow`), so a constituent whose statements were loaded
+         *     a year ago is "not missing" for ever and no press of the un-forced fill will ever update it —
+         *     the grid keeps showing last year's figures and looks filled. That is the same reasoning the
+         *     price half already settled (see `_benchmark_refresh`: *a press always fetches, every
+         *     constituent, no staleness tolerance*), and this is what makes the panel's Refresh mean the same
+         *     thing on both halves.
+         *
+         *     ⚠ FORCE IS EXPRESSED AS THE `need_*` FLAGS, NEVER AS `ingest_company(force=True)`. That
+         *     argument runs ALL THREE feeds regardless of the flags, so under `feeds="statements"` it would
+         *     quietly triple the spend on data this page cannot draw. Setting the flags keeps *which feeds
+         *     run* decided in exactly one place, and `force` then means only *ignore what we already hold*.
+         *
+         *     ⚠⚠ AND IT CARRIES `refresh_cache` TOO, BECAUSE THERE ARE TWO CACHES. Selecting a company is not
+         *     the same as re-asking the vendor: the GuruFocus blob also sits in Storage, and `is_cache_fresh`
+         *     calls it fresh for weeks past the quarter it is missing. Forced selection without the cache
+         *     bypass would rewrite identical rows from the same bytes, spend zero calls and leave the grid
+         *     exactly as it was — a press that looks like a no-op is how a button loses trust. See
+         *     `ingest_company`'s own ⚠⚠ for the two layers side by side.
+         *
+         *     Cost, measured shape: one GuruFocus call per eligible constituent per press — ~490 for SP500,
+         *     and on ACWI the unsubscribed exchanges are still refused before a call is spent. The remaining
+         *     quota is read out before the run starts.
+         *
          *     `limit` spends the budget in tranches; 0 is everything that needs it.
          */
         post: operations["ingest_index_fundamentals_job_api_benchmarks_index__label__fundamentals_ingest_job_post"];
@@ -3459,6 +3488,41 @@ export interface paths {
         get: operations["benchmark_refresh_api_benchmarks_index__label__refresh_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmarks/index/{label}/refresh/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Benchmark Refresh Job
+         * @description The same refresh as `GET …/refresh`, as a cancellable JOB.
+         *
+         *     ⚠ WHY IT EXISTS: THE SSE FORM CANNOT BE STOPPED. It streams to whoever opened it, so the client
+         *     is attached to the work — navigate away and the progress box vanishes while the thread carries
+         *     on making paced Yahoo calls for another eleven minutes, with no handle to stop it. That is the
+         *     identical defect the fundamentals ingest had before it became a job.
+         *
+         *     ⚠ THE SSE ENDPOINT IS LEFT IN PLACE, unlike the fundamentals conversion which replaced its own.
+         *     That one had a single consumer; this one is also how a refresh is watched from `/api` and from
+         *     curl, where a job handle is the inconvenient form. Both call `refresh_benchmark` — ONE
+         *     implementation, two transports, never two refreshes.
+         *
+         *     ⚠ CANCEL LANDS BETWEEN CONSTITUENTS — `should_stop` is checked in `_prices`' loop, which is
+         *     where the minutes are. It is deliberately NOT `ctx.check()`: raising would discard the counts
+         *     for work that really happened, and those counts are this job's entire output. A stopped run
+         *     keeps everything it fetched and its summary says how far it got.
+         */
+        post: operations["benchmark_refresh_job_api_benchmarks_index__label__refresh_job_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -16383,6 +16447,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 feeds?: string;
+                force?: boolean;
             };
             header?: never;
             path: {
@@ -16430,6 +16495,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    benchmark_refresh_job_api_benchmarks_index__label__refresh_job_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobStarted"];
                 };
             };
             /** @description Validation Error */

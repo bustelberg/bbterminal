@@ -20,6 +20,7 @@ import asyncio
 import gzip
 import itertools
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
@@ -753,14 +754,21 @@ async def ingest_company_fundamentals(isin: str, force: bool = False):
         if why:
             return {"company_id": cid, "name": c.get("company_name"), "skipped": why}
         # `needs` tells us which feeds are missing; with `force` we re-fetch regardless.
+        # ⚠ AND `force` REACHES THE STORAGE BLOB TOO. Selecting a company again while still
+        # replaying the bytes we already hold is not a re-fetch — see `ingest_company`'s ⚠⚠.
         todo = {**c, **({} if force else next(
             (n for n in needs(comps) if n["company_id"] == cid),
             {"need_fin": False, "need_est": False, "need_ind": False}))}
-        r = ingest_company(todo, force=force)
+        r = ingest_company(todo, force=force, refresh_cache=force)
         return {"company_id": cid, "name": c.get("company_name"),
                 "feeds": r["done"], "rows": r["rows"], "error": r["error"]}
 
     return await asyncio.to_thread(_run)
+
+
+# The "[n/total]" prefix `_benchmark_refresh._prices` writes on every constituent line. Compiled
+# once because it is matched against every line of a 1,684-constituent run.
+_STEP_RE = re.compile(r"^\[(\d+)/(\d+)\]")
 
 
 class JobStarted(BaseModel):
@@ -877,7 +885,11 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
         def _step(tag: str, i: int, total: int) -> None:
             ctx.progress(i - 1, total, f"Fetching {feed_label.get(tag, tag)} ({i} of {total})")
 
-        r = ingest_company(todo, force=force, on_step=_step, should_stop=lambda: ctx.cancelled)
+        # ⚠ `refresh_cache=force`, SO THE FLAG MEANS ONE THING ON EVERY INGEST ENDPOINT: go and
+        # look. The grid's per-row Fetch does not pass `force`, so its cheap cache-friendly
+        # behaviour is unchanged — only a caller that explicitly asked for a re-fetch pays.
+        r = ingest_company(todo, force=force, refresh_cache=force,
+                           on_step=_step, should_stop=lambda: ctx.cancelled)
         # ⚠ RECORDED BEFORE ANY OF THE EXITS BELOW. A cancelled or failed run has still spent
         # whatever it spent, and those are the two cases where knowing the bill matters most —
         # putting this after the `raise` would report a cost of zero for the runs that cost you
@@ -926,9 +938,93 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
     return {"job_id": job.id, "label": label}
 
 
+@router.post("/api/benchmarks/index/{label}/refresh/job", response_model=JobStarted)
+async def benchmark_refresh_job(label: str):
+    """The same refresh as `GET …/refresh`, as a cancellable JOB.
+
+    ⚠ WHY IT EXISTS: THE SSE FORM CANNOT BE STOPPED. It streams to whoever opened it, so the client
+    is attached to the work — navigate away and the progress box vanishes while the thread carries
+    on making paced Yahoo calls for another eleven minutes, with no handle to stop it. That is the
+    identical defect the fundamentals ingest had before it became a job.
+
+    ⚠ THE SSE ENDPOINT IS LEFT IN PLACE, unlike the fundamentals conversion which replaced its own.
+    That one had a single consumer; this one is also how a refresh is watched from `/api` and from
+    curl, where a job handle is the inconvenient form. Both call `refresh_benchmark` — ONE
+    implementation, two transports, never two refreshes.
+
+    ⚠ CANCEL LANDS BETWEEN CONSTITUENTS — `should_stop` is checked in `_prices`' loop, which is
+    where the minutes are. It is deliberately NOT `ctx.check()`: raising would discard the counts
+    for work that really happened, and those counts are this job's entire output. A stopped run
+    keeps everything it fetched and its summary says how far it got.
+    """
+    import jobs as job_registry  # noqa: PLC0415
+
+    from routers._benchmark_refresh import refresh_benchmark  # noqa: PLC0415
+
+    def _work(ctx) -> str:
+        # ⚠ THE BAR NEEDS A DENOMINATOR AND `emit` HAS NONE. `refresh_benchmark` reports prose, not
+        # counts, so the "[n/total]" the price step ALREADY writes into its own line is read back
+        # out here rather than changing that module's contract for one consumer. A line that does
+        # not match leaves the bar where it was — which is right, because the constituents and caps
+        # steps have no meaningful denominator and a bar that resets to 0/0 between phases reads as
+        # the run having restarted.
+        state = {"done": 0, "total": 0}
+
+        def _emit(_msg_type: str, **kw) -> None:
+            msg = (kw.get("message") or "").strip()
+            if not msg:
+                return
+            m = _STEP_RE.match(msg)
+            if m:
+                state["done"], state["total"] = int(m.group(1)), int(m.group(2))
+            ctx.progress(state["done"], state["total"], msg)
+
+        s = refresh_benchmark(label, _emit, should_stop=lambda: ctx.cancelled)
+        if s.get("note") and not s.get("priceable"):
+            return f"{label} — {s['note']}"
+
+        # ⚠⚠ THIS SENTENCE MOVED HERE FROM THE FRONTEND'S `refreshSummary`, WHICH THE JOB TRANSPORT
+        # RETIRED — and it is reproduced rather than shortened because two of its clauses are there
+        # under an explicit "never silent" rule that a transport change must not quietly repeal:
+        #   * a constituent with NO CAP weighs nothing, so it is absent from a cap-weighted index
+        #     while looking perfectly healthy in the grid;
+        #   * "already at the vendor's latest" is the ANSWER on a run where nothing moved. Omitting
+        #     it reads as a broken button, which is exactly how ING's untouched 30.22 was first
+        #     reported.
+        bits = [f"{s.get('priceable', 0)} of {s.get('universe_members', 0)} constituents priceable"]
+        if s.get("capped"):
+            bits.append(f"{s['capped']} market caps")
+        if s.get("no_cap"):
+            bits.append(f"⚠ {s['no_cap']} with no market cap (they weigh nothing)")
+        if s.get("prices_fetched"):
+            bits.append(f"{s['prices_fetched']} price series fetched")
+        if s.get("prices_moved"):
+            bits.append(f"{s['prices_moved']} gained a new close")
+        if s.get("prices_unchanged"):
+            bits.append(f"{s['prices_unchanged']} already at the vendor's latest")
+        if s.get("no_start_price"):
+            bits.append(f"{s['no_start_price']} have no start-of-year price (listed later)")
+        if s.get("prices_failed"):
+            bits.append(f"{s['prices_failed']} failed (see the console)")
+        if s.get("needs_resolve"):
+            bits.append(f"{s['needs_resolve']} still unresolved — press again")
+        if s.get("no_isin"):
+            bits.append(f"⚠ {s['no_isin']} members have no ISIN and can never be reached from here")
+        if s.get("stopped"):
+            bits.append(f"⚠ CANCELLED after {s.get('stopped_at', 0)} — the rest were not fetched")
+        out = ", ".join(bits) + "."
+        if s.get("market_anchor"):
+            out += f" Priced to {s['market_anchor']}."
+        return out
+
+    job = job_registry.start("benchmark.refresh", label, _work)
+    return {"job_id": job.id, "label": label}
+
+
 @router.post("/api/benchmarks/index/{label}/fundamentals/ingest/job",
              response_model=JobStarted)
-async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str = "statements"):
+async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str = "statements",
+                                        force: bool = False):
     """Backfill every constituent missing the data this page shows, as a cancellable JOB.
 
     ⚠ IT REPLACED AN SSE ENDPOINT RATHER THAN JOINING ONE. The old
@@ -963,6 +1059,35 @@ async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str =
     reachable per company where they are actually drawn — `/api/earnings/{cid}/refresh` takes a
     `source` — and `feeds=all` here restores the old behaviour for a deliberate full load.
 
+    ⚠⚠ `force=true` MEANS "EVERY CONSTITUENT", AND THE SENTINEL PROBE IS NOT MERELY BYPASSED — IT
+    IS NOT RUN. `needs()` answers *who is missing the feed*, which is the wrong question for a
+    forced run: the answer changes nothing, and it is the expensive part of the setup (one read of
+    `metric_data` per sentinel across every constituent — on ACWI, ~1,900 of them).
+
+    ⚠ IT EXISTS BECAUSE PRESENT IS NOT CURRENT. The sentinel is a row that EXISTS
+    (`annuals__Cashflow Statement__Free Cash Flow`), so a constituent whose statements were loaded
+    a year ago is "not missing" for ever and no press of the un-forced fill will ever update it —
+    the grid keeps showing last year's figures and looks filled. That is the same reasoning the
+    price half already settled (see `_benchmark_refresh`: *a press always fetches, every
+    constituent, no staleness tolerance*), and this is what makes the panel's Refresh mean the same
+    thing on both halves.
+
+    ⚠ FORCE IS EXPRESSED AS THE `need_*` FLAGS, NEVER AS `ingest_company(force=True)`. That
+    argument runs ALL THREE feeds regardless of the flags, so under `feeds="statements"` it would
+    quietly triple the spend on data this page cannot draw. Setting the flags keeps *which feeds
+    run* decided in exactly one place, and `force` then means only *ignore what we already hold*.
+
+    ⚠⚠ AND IT CARRIES `refresh_cache` TOO, BECAUSE THERE ARE TWO CACHES. Selecting a company is not
+    the same as re-asking the vendor: the GuruFocus blob also sits in Storage, and `is_cache_fresh`
+    calls it fresh for weeks past the quarter it is missing. Forced selection without the cache
+    bypass would rewrite identical rows from the same bytes, spend zero calls and leave the grid
+    exactly as it was — a press that looks like a no-op is how a button loses trust. See
+    `ingest_company`'s own ⚠⚠ for the two layers side by side.
+
+    Cost, measured shape: one GuruFocus call per eligible constituent per press — ~490 for SP500,
+    and on ACWI the unsubscribed exchanges are still refused before a call is spent. The remaining
+    quota is read out before the run starts.
+
     `limit` spends the budget in tranches; 0 is everything that needs it.
     """
     import threading  # noqa: PLC0415
@@ -988,13 +1113,22 @@ async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str =
         ids = sorted({m["company_id"] for m in _members(label, require_market_cap=False)
                       if m.get("company_id")})
         comps = company_rows(ids)
-        # ⚠ THE PROBE NARROWS TOO, NOT ONLY THE SELECTION. Each sentinel is its own read of
-        # `metric_data`; under `statements` the est/ind flags are cleared two lines below without
-        # ever being read, so probing them was two thirds of this read thrown away — and they are
-        # the expensive two (`indicator_q_forward_pe_ratio` is ~526 rows per company against Free
-        # Cash Flow's ~28). The result is identical: `needs` drops a company only when every
-        # PROBED feed is present, and the filter below keeps only `need_fin` anyway.
-        todo = needs(comps, feeds=("fin",) if feeds == "statements" else None)
+        if force:
+            # ⚠ EVERY CONSTITUENT IS WORK, SO NOTHING IS PROBED. `needs` answers "who is missing
+            # this feed", and under force that answer changes nothing — it would just be the
+            # expensive part of the setup thrown away (see the ⚠⚠ in the docstring). The flags are
+            # set to what a forced run means: fetch it, whatever we hold.
+            todo = [{**c, "need_fin": True, "need_est": True, "need_ind": True}
+                    for c in comps.values()]
+        else:
+            # ⚠ THE PROBE NARROWS TOO, NOT ONLY THE SELECTION. Each sentinel is its own read of
+            # `metric_data`; under `statements` the est/ind flags are cleared two lines below
+            # without ever being read, so probing them was two thirds of this read thrown away —
+            # and they are the expensive two (`indicator_q_forward_pe_ratio` is ~526 rows per
+            # company against Free Cash Flow's ~28). The result is identical: `needs` drops a
+            # company only when every PROBED feed is present, and the filter below keeps only
+            # `need_fin` anyway.
+            todo = needs(comps, feeds=("fin",) if feeds == "statements" else None)
         # ⚠ SELECTION AND ACTION NARROW TOGETHER — see the ⚠⚠ in the docstring. Dropping the
         # companies that need only estimates/indicators is what stops the run iterating rows
         # it has nothing to do for; clearing the two flags is what stops it fetching feeds this
@@ -1003,6 +1137,11 @@ async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str =
         # ⚠ THE TWO FLAGS ARE STILL SET EXPLICITLY, AND THAT IS NOT REDUNDANT NOW THAT THEY ARE
         # UNPROBED. `ingest_company` reads `c.get(flag, True)` — an ABSENT flag means "fetch it",
         # so without this line a narrowed run would spend all three calls per company.
+        #
+        # ⚠ AND IT IS WHERE `force` IS APPLIED, WHICH IS WHY FORCE CANNOT WIDEN THE FEEDS. A forced
+        # run arrives here with all three flags true; this clears two of them under `statements`,
+        # exactly as it does for an un-forced one. The `need_fin` filter is a no-op under force
+        # (every row has it) rather than a second selection rule.
         if feeds == "statements":
             todo = [{**c, "need_est": False, "need_ind": False}
                     for c in todo if c.get("need_fin")]
@@ -1011,7 +1150,12 @@ async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str =
         refused = [(c, why) for c, why in skipped if why]
         if limit:
             work = work[:limit]
-        scope = "missing statements" if feeds == "statements" else "missing a feed"
+        # ⚠ A FORCED RUN SAYS SO IN ITS FIRST LINE. "206 missing statements" and "206 refetching
+        # every one" are the same number for very different reasons, and the second is the one that
+        # is about to spend a call on every constituent.
+        scope = ("refetching every one" if force
+                 else "missing statements" if feeds == "statements"
+                 else "missing a feed")
         # ⚠ THE QUOTA WAS A PYTHON dict REPR — `quota {'usa': 16952, 'europe': 19222}`. True, and
         # written for whoever wrote it. It is the one number here that decides whether the run can
         # even finish, so it gets read out.
@@ -1054,13 +1198,17 @@ async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str =
             # moment Cancel is pressed; the eight already inside `ingest_company` finish the
             # company they are on, because that is where the database is left consistent.
             ctx.check()
-            r = ingest_company(c)
-            # ⚠ RETRY ONCE ON AN EMPTY ANSWER. `needs()` only selected this company because it
-            # is missing the feed, so zero rows with no error means the fetch came back with
-            # nothing — the failure the 12-thread run produced. It costs one call to correct
-            # and, left alone, would look identical to a company that genuinely has no data.
+            # ⚠ `refresh_cache=force` — THE SECOND CACHE. `force` alone only ignores what
+            # `metric_data` holds; the GuruFocus blob in Storage would still be replayed, so a
+            # forced press over an already-loaded index would rewrite identical rows, spend zero
+            # calls and change nothing on screen. See `ingest_company`'s ⚠⚠.
+            r = ingest_company(c, refresh_cache=force)
+            # ⚠ RETRY ONCE ON AN EMPTY ANSWER. This company was selected because it is missing the
+            # feed (or because the run is forced), so zero rows with no error means the fetch came
+            # back with nothing — the failure the 12-thread run produced. It costs one call to
+            # correct and, left alone, would look identical to a company that genuinely has no data.
             if not r["error"] and r["rows"] == 0:
-                r = ingest_company(c)
+                r = ingest_company(c, refresh_cache=force)
             n = next(counter)
             with tally_lock:
                 rows += r["rows"]
@@ -1106,7 +1254,7 @@ async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str =
         # cached line correct, and clearing them would buy nothing but a rebuild.
         if ok:
             _blend_cache.invalidate()
-        return (f"{label} — {ok} companies loaded"
+        return (f"{label} — {ok} companies {'refetched' if force else 'loaded'}"
                 + (f", {failed} failed" if failed else "")
                 + f", {rows:,} data points"
                 + (f", {calls:,} API calls" if calls else ""))

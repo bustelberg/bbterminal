@@ -1675,6 +1675,21 @@ def compute_portfolio_analysis(portfolio_id: int,
                           the weights change; the classification and the benchmark are identical.
                           Falls back to "model" (with `weight_note`) when there is no book.
     """
+    # ⚠ THE CLOCK STARTS ON THE FIRST LINE, NOT AT THE BOOK LOAD. It used to be initialised 100
+    # lines down, so the composition read, the certificate look-through, the asset-grid join and
+    # the whole BENCHMARK side — its members, its grid and its classification — were outside every
+    # phase this endpoint reports. Measured on BUS_Neutraal_FX that was ~400ms of a ~3.4s load
+    # attributed to nothing, which is also why the old note here concluded "the split is flat":
+    # the unmeasured part cannot show up as a peak. The phases now sum to the wall clock.
+    _t: dict[str, int] = {}
+    _t0 = time.perf_counter()
+
+    def _phase(name: str) -> None:
+        nonlocal _t0
+        now = time.perf_counter()
+        _t[name] = int((now - _t0) * 1000)
+        _t0 = now
+
     p = (supabase.table("airs_model_portfolio")
          .select("id,name,omschrijving,positions_datum")
          .eq("id", portfolio_id).limit(1).execute().data or [])
@@ -1768,17 +1783,10 @@ def compute_portfolio_analysis(portfolio_id: int,
     # ⚠ PHASE TIMING, RETURNED TO THE CLIENT. This endpoint is seconds long and the browser could
     # only see the total — "Loading composition…" for 5s with nothing saying which of its eight
     # loads was responsible. The AIRS expand has carried per-phase timings for exactly this reason;
-    # this had none. Measured, the split is flat (no single hotspot), which is itself the finding —
-    # and only visible once it is reported.
-    _t: dict[str, int] = {}
-    _t0 = time.perf_counter()
-
-    def _phase(name: str) -> None:
-        nonlocal _t0
-        now = time.perf_counter()
-        _t[name] = int((now - _t0) * 1000)
-        _t0 = now
-
+    # this had none. The split is fairly flat, which is itself the finding — there is no one hot
+    # query to fix, which is what sent the 2026-08-11 profile after the round-trip COUNT instead
+    # (212 of them, 103 byte-identical repeats — see `compute_portfolio_analysis_async`).
+    _phase("composition_and_benchmark")
     book = _book_port_items(portfolio_id, codes)
     _phase("book_holdings")
     # ⚠ SAY WHY THERE IS NO BOOK, HERE, EVERY TIME — not only when book WEIGHTS were asked for.
@@ -2212,8 +2220,34 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
                                            weight_by: str = "model",
                                            source: str = "model",
                                            bucket_filter: str | None = None) -> dict:
-    return await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label,
-                                   weight_by, source, bucket_filter)
+    """The Analyse modal's one request.
+
+    ⚠⚠ THE READ MEMO IS OPENED **HERE**, AT THE REQUEST BOUNDARY, NOT INSIDE THE COMPUTATION.
+    Measured on BUS_Neutraal_FX, one press issued **212 database round trips of which 103 were
+    byte-identical repeats** — `airs_performance` nine times, `airs_model_portfolio` five,
+    `asset_grid` three, the SP500 universe id six, and the benchmark's whole price panel THREE
+    times through COPY. No module is at fault: this endpoint is a dozen collaborating loaders
+    (look-through, book ledger, benchmark, attribution basis, axes) each correctly fetching what
+    it needs, and the duplication only exists in their composition.
+
+    A request is exactly the scope over which "the database did not change under us" is a safe
+    assumption, so that is the scope of the memo — not a TTL, not a process-wide cache. See
+    `common/read_cache.py`.
+
+    ⚠ THE CONTEXT REACHES THE WORKER THREAD BECAUSE `to_thread` COPIES IT. That is the whole
+    reason this can be a ContextVar rather than something threaded through fifteen signatures;
+    it is also why the memo must be opened OUTSIDE the `to_thread` call rather than within the
+    sync function.
+
+    ⚠ AND THE SYNC FUNCTION KEEPS ITS OWN BEHAVIOUR UNCHANGED. `compute_portfolio_analysis` is
+    still callable from a script or a test with no memo at all, which is what an offline caller
+    should get: no shared state, no question about how old an answer is.
+    """
+    from common.read_cache import read_cache  # noqa: PLC0415
+
+    with read_cache(f"analysis:{portfolio_id}"):
+        return await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label,
+                                       weight_by, source, bucket_filter)
 
 
 def portfolio_basket_request(portfolio_id: int):
@@ -2397,4 +2431,10 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
 
 async def compute_basket_analysis_async(holdings, benchmark_label: str = SP500_LABEL,
                                         name: str | None = None) -> dict:
-    return await asyncio.to_thread(compute_basket_analysis, holdings, benchmark_label, name)
+    """The same modal over an ad-hoc basket — same memo, same reason (see the portfolio twin).
+    It loads the identical benchmark side, which is where the repeated COPY of the whole price
+    panel lives."""
+    from common.read_cache import read_cache  # noqa: PLC0415
+
+    with read_cache(f"basket:{name or len(holdings or [])}"):
+        return await asyncio.to_thread(compute_basket_analysis, holdings, benchmark_label, name)

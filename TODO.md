@@ -1,7 +1,101 @@
 # Open follow-ups — resume here
 
 Running list of unfinished / offered-but-not-built work, newest context first.
-Last updated **2026-08-05**. Delete items as they're done.
+Last updated **2026-08-11**. Delete items as they're done.
+
+---
+
+## ⚡ Analyse modal — memoized. The remaining cost is REAL work, and one number is unverified.
+
+2026-08-11. Profiled one press of Analyse on BUS_Neutraal_FX: **212 database round trips, 103 of
+them byte-identical repeats** (`airs_performance` x9, `airs_model_portfolio` x5, `asset_grid` x3,
+the SP500 universe id x6). Nobody wrote that loop — a dozen collaborating loaders each correctly
+fetch what they need, and the duplication exists only in their composition. Fixed with a
+**per-request read memo** (`common/read_cache.py`, opened at the request boundary in
+`compute_portfolio_analysis_async`), covering both transports: PostgREST GETs and direct COPY.
+Measured: **212 → 109 round trips, 0 repeats left**, payloads equal to the uncached ones within
+1e-9 across 6 portfolios. Pinned by `tests/test_read_cache.py`.
+
+**⚠ 1. THE PRODUCTION GAIN IS ESTIMATED, NOT MEASURED.** Local wall went 3,436 → 2,949 ms
+(interleaved medians, 14%) — but a local PostgREST call is ~5ms and prod is a network hop at
+~50-80ms, so the 103 removed round trips are worth *seconds* there rather than the ~0.5s here.
+Nobody has timed it against prod. The modal already logs `timings_ms` per phase to the console;
+read that on a real load before quoting a number.
+
+**⚠ 2. THE PAYLOAD IS NOT BYTE-REPRODUCIBLE, AND IT WASN'T BEFORE EITHER.** Two consecutive
+UNCACHED runs of portfolio 1878 differ in the last ULP (`benchmark_pct` 31.472360860646393 vs
+...386) — a float sum over rows Postgres returns in an unspecified order. Harmless at 2 dp, but it
+means any future equality check here needs a tolerance, and an `ORDER BY` on those reads would be
+the real fix.
+
+**What is left, in order:** the phases now sum to the wall clock
+(`composition_and_benchmark` 351ms · `book_holdings` 897 · `axes` 765 · `returns_and_benchmark`
+1,903). The remaining 109 trips are distinct queries doing real work; the biggest single item is
+**8 `asset_price` COPY loads (~1.4s)** over OVERLAPPING id sets and windows — not duplicates, so
+the memo cannot touch them. Merging them into one load sliced per consumer is the next real win,
+and it is a structural change across `_book_port_items` / `_basis_axes` / `_returns` /
+`_benchmark_index`.
+
+**Not done:** the memo is opt-in per endpoint. `/attribution`, the portfolios grid and the
+benchmark endpoints have the same shape and would benefit; each needs its own `read_cache()` at
+its request boundary.
+
+---
+
+## 🧬 clone-local-to-prod — FK cascade fixed 2026-08-11. The DRY RUN still cannot see it.
+
+The clone died 47 tables in on `company` → `metric_data_company_id_fkey`. Step [5]'s comment
+claimed "FK ON DELETE CASCADE/SET NULL cleans their dependents"; **8 edges in this schema are
+`NO ACTION`** and do not (`company` ← metric_data / portfolio_weight / earnings_portfolio_member,
+`currency` ← fx_rate + gurufocus_exchange, `country` ← gurufocus_exchange,
+`gurufocus_exchange` ← company, `portfolio` ← portfolio_weight). Both delete sites now stage the
+doomed PKs and walk the blocking edges depth-first (`Remove-RowsWithDependents`), sparing any
+parent an **additive** table still points at. Verified by planning all 47 generated statements
+against the local catalogue with `EXPLAIN` — nothing executed.
+
+**⚠ 1. NOT YET RUN AGAINST PROD.** Every statement is planned-valid and the walk is proven on the
+real FK graph, but no clone has completed with it. Next run: `./scripts/clone-local-to-prod.ps1`.
+
+**⚠ 2. `-DryRun` DOES NOT REPORT THE CASCADE.** It compares row counts per table, so it says
+"company: prod has 3 more" and nothing about the ~30k `metric_data` rows that go with them. That
+is exactly the number worth seeing before pressing go. It also cannot predict a **spare** (a
+parent kept because an additive child references it), which is the one case where the final
+verify legitimately shows a surplus.
+
+---
+
+## ⏱ Benchmarks Refresh — the speed-up is DERIVED, not measured. And one bounded slice is left.
+
+Built 2026-08-11 (`/management-dashboard` → Benchmarks → **Refresh**). The button now fills an
+index end to end: prices for every constituent, then a **forced** GuruFocus refetch of every
+constituent's fundamentals. Force had to defeat **two** caches — the `metric_data` sentinel (a
+company loaded once was never selected again) and the Storage blob (`is_cache_fresh` keeps it
+fresh for the data's own cadence + 50%, i.e. weeks past the quarter it is missing). Defeating one
+gives a press that spends nothing and changes nothing. Pinned by `tests/test_fundamental_refetch.py`.
+
+The price step then went from a serial loop with a hardcoded `time.sleep(0.4)` onto a pool
+(`_PRICE_WORKERS`, 2× `YAHOO_CONCURRENCY`, capped at 8), the "what did we hold before?" read was
+hoisted into one grouped COPY (`latest_close_by_analysis`), and the cap WRITES were parallelised
+(the quotes were always batched at 100; storing them was ~490 serial round trips for the S&P).
+Pinned by `tests/test_benchmark_price_pool.py`.
+
+**⚠ 1. NOBODY HAS TIMED IT.** The "S&P ~10–15 min → ~3–4" figure is arithmetic off the pacing
+constants (`YAHOO_RPS` 10/s, semaphore 4, the removed 0.4s sleep, ~4 round trips per constituent),
+not a stopwatch. Time one AEX run (25 constituents, ~1 min, cheap) and one SP500 run before
+quoting it to anyone. The interesting question is whether the governor or our database is now the
+limit — if `extend_series`' COPY is, more workers will not help.
+
+**⚠ 2. THE RESOLVE SLICE IS STILL 25 PER PRESS** (`_benchmark_fill._RESOLVE_PER_PRESS`), so a
+fresh or heavily-unresolved index still reports "N still unresolved — press again". Deliberately
+not widened: that path is `resolve()`, where an overloaded Yahoo returns an EMPTY search rather
+than a 429 and the thin foreign listing wins (NVDA-on-Stuttgart, Alphabet-on-Vienna). The price
+pool is safe **only** because `extend_series` asks about a symbol we already identified. If this
+is widened, loop `process_slice` over this benchmark's ISINs — never a second resolver.
+
+**Offered, not built:** the caps step still writes one row per constituent. A PostgREST `upsert`
+of the batch was rejected on purpose — it becomes INSERT … ON CONFLICT, so a constituent with no
+`asset_analysis` row would be CREATED from four cap columns, a junk row that then looks like an
+instrument.
 
 ---
 

@@ -159,7 +159,7 @@ def eligible(c: dict) -> str | None:
     return None
 
 
-def ingest_company(c: dict, *, force: bool = False,
+def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
                    on_step: Callable[[str, int, int], None] | None = None,
                    should_stop: Callable[[], bool] | None = None) -> dict:
     """Run the feeds this company is missing. Returns {done: [...], rows: n, error: str|None}.
@@ -178,6 +178,26 @@ def ingest_company(c: dict, *, force: bool = False,
     `needs()` will pick it up next time). Interrupting mid-write would not be. The stop is
     reported as `stopped` on the result rather than as an error — it is an outcome the caller
     asked for.
+
+    ⚠⚠ `force` AND `refresh_cache` ARE TWO DIFFERENT CACHES, ONE LAYER APART, AND ONLY DOING ONE OF
+    THEM IS A REFRESH THAT REFRESHES NOTHING.
+
+        force          ignore what `metric_data` already holds — run the feed even though the
+                       sentinel row says it has run before. WITHOUT this a company loaded a year
+                       ago is never selected again.
+        refresh_cache  ignore the GuruFocus blob in Storage — re-ask the API. WITHOUT this the
+                       selected company is re-loaded from the SAME bytes we already had, so the
+                       run writes identical rows, spends zero calls, and changes nothing on screen.
+
+    `is_cache_fresh` derives its window from the data's own cadence, which for a quarterly filer is
+    ~91 days plus a 50% buffer — so a blob keeps counting as fresh for weeks after the next quarter
+    has actually been published. That is the right economy for a background backfill and the wrong
+    one for a human pressing Refresh: pressing it is a request to LOOK, and the price half of that
+    same button settled this identically (`_benchmark_refresh`: *a press always fetches, every
+    constituent, no staleness tolerance*).
+
+    They are separate parameters because the callers genuinely differ — a triage pass wants `force`
+    without the calls, and nothing wants the calls without `force`.
     """
     from ingest.earnings import (  # noqa: PLC0415
         fetch_analyst_estimates, fetch_financials, fetch_indicators,
@@ -203,7 +223,7 @@ def ingest_company(c: dict, *, force: bool = False,
                 return {"done": done, "rows": rows, "calls": calls, "error": None, "stopped": True}
             if on_step is not None:
                 on_step(tag, i, len(feeds))
-            r = fn(supabase, cid, tic, exch)
+            r = fn(supabase, cid, tic, exch, force_refresh=refresh_cache)
             n = getattr(r, "rows_loaded", 0) or 0
             rows += n
             calls += getattr(r, "api_calls", 0) or 0

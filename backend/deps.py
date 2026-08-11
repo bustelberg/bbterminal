@@ -41,6 +41,81 @@ load_dotenv(_BACKEND_DIR / ".env.local", override=True)
 print(f"[deps] SUPABASE_URL = {os.environ.get('SUPABASE_URL', '<UNSET>')}", flush=True)
 
 
+class _CachingSession:
+    """The PostgREST session, with a per-request memo on identical GETs.
+
+    ⚠ IT IS INERT UNLESS SOMETHING OPTED IN. Outside a `common.read_cache.read_cache()` block —
+    which is everything except the endpoints that asked for it — `send` is the base client's,
+    byte for byte. There is no global cache here and no TTL to reason about.
+
+    ⚠ IT SUBCLASSES THE SESSION RATHER THAN PATCHING `httpx.Client`. Yahoo, GuruFocus, OpenFIGI,
+    iShares and Supabase Storage all use their own `httpx.Client`s; a patch on the class would
+    quietly memoize a vendor call whose repetition may be the entire point (a paced price loop
+    asking about a symbol twice is not a duplicate).
+
+    See `common/read_cache.py` for what was measured and why the count of round trips, rather
+    than a local stopwatch, is the number that matters.
+    """
+
+    def __init__(self, **kw: Any) -> None:
+        import httpx  # noqa: PLC0415
+
+        # Composition, not inheritance of httpx.Client — wrapping keeps us clear of httpx's own
+        # constructor and attribute surface changing under us.
+        #
+        # ⚠ THE FORWARDING IS READ-ONLY, WHICH IS SAFE ONLY BECAUSE NOTHING WRITES TO THE SESSION.
+        # `__getattr__` forwards attribute READS to the real client, but an assignment
+        # (`session.headers = ...`) would land on this wrapper and be silently ignored by the
+        # client underneath. Checked against the installed postgrest 2.28.3: the entire surface it
+        # uses is `self.session.request(...)` (intercepted below) and `self.session.close()`
+        # (forwarded) — there is no assignment anywhere in postgrest or supabase-py. If that ever
+        # changes, this needs a `__setattr__` too.
+        self._c = httpx.Client(**kw)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._c, name)
+
+    def request(self, method: str, url: Any, **kw: Any) -> Any:
+        """⚠ `request`, NOT `send` — postgrest builds no `Request` object.
+
+        `RequestConfig.send()` calls `session.request(method, path, json=, params=, headers=,
+        auth=)`, so an override of `send` is never reached: the memo silently did nothing, the
+        round-trip count stayed at 212, and the only symptom was that it did not get faster. If
+        postgrest ever moves to `send`, this stops caching rather than starting to serve wrong
+        answers — the failure mode is a lost optimisation, which is the right way round.
+        """
+        from common import read_cache  # noqa: PLC0415  (avoid an import cycle at module load)
+
+        if read_cache.active() is None:
+            return self._c.request(method, url, **kw)
+        if method.upper() not in ("GET", "HEAD"):
+            # A write invalidates the snapshot — see `note_write`.
+            read_cache.note_write()
+            return self._c.request(method, url, **kw)
+        # ⚠ THE KEY INCLUDES `prefer` AND `range`. The same URL asked with `Prefer: count=exact`,
+        # or over a different `Range`, is a DIFFERENT question — pagination and the count variant
+        # both ride on HEADERS rather than on the query string, so a URL-only key would serve
+        # page 1 for every page of a paged read. That is the one mistake here that would produce
+        # wrong data rather than merely slow data.
+        headers = kw.get("headers") or {}
+        key = (method.upper(), str(url), str(kw.get("params") or ""),
+               headers.get("prefer"), headers.get("range"))
+        hit = read_cache.lookup(key)
+        if hit is not None:
+            return hit
+        import time  # noqa: PLC0415
+
+        t0 = time.perf_counter()
+        r = self._c.request(method, url, **kw)
+        if r.is_success:
+            # Reading `.content` forces the body so the cached response can be handed out again;
+            # postgrest re-parses those bytes into FRESH rows per caller, which is what makes
+            # sharing one response object safe.
+            _ = r.content
+            read_cache.store(key, r, (time.perf_counter() - t0) * 1000)
+        return r
+
+
 class _LazySupabase:
     """Proxy that defers `create_client(...)` until the first method call.
 
@@ -95,10 +170,8 @@ class _LazySupabase:
             # postgrest already set. Best-effort: if supabase-py internals move we
             # keep the default (http2) client rather than crash the app.
             try:
-                import httpx  # noqa: PLC0415
-
                 _pg = real.postgrest.session
-                real.postgrest.session = httpx.Client(
+                real.postgrest.session = _CachingSession(
                     base_url=_pg.base_url,
                     headers=_pg.headers,
                     timeout=_pg.timeout,

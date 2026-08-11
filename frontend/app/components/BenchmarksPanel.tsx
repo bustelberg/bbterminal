@@ -1,14 +1,19 @@
 'use client';
 
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { trace, traceEmpty, traceError } from '../../lib/debugTrace';
 import { dialog } from '../../lib/dialog';
 import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
-import { runSSE } from '../../lib/stream';
+import { cancelJob, startJob } from '../../lib/stores/jobs';
 import type { ReconstructedIndex } from '../../lib/types/api';
 import FundamentalGridPane from './benchmarks/FundamentalGridPane';
+
+/** `runOwner` when the HEADER button started the run. A sentinel rather than a label because no
+ *  index can be called this, and the alternative — a separate boolean — would let "a row owns it"
+ *  and "the header owns it" both be true. */
+const ALL = '*';
 
 /** The indices we rebuild from our own constituents.
  *
@@ -51,38 +56,16 @@ const tone = (v: number | null | undefined) =>
  * three constituents' price series had to be un-split (our stored closes are not
  * split-adjusted and cannot self-heal).
  */
-/** `GET /api/benchmarks/index/{label}/refresh` (SSE) — the run's own frames.
+/**
+ * ⚠ THE SSE FRAME TYPES AND `refreshSummary` ARE GONE — the job transport retired them, and the
+ * receipt sentence they built now lives in `benchmark_refresh_job` on the server (reproduced there
+ * clause for clause, including the two "never silent" ones about an uncapped constituent and about
+ * "already at the vendor's latest"). Keeping a second copy here would be a second place for the
+ * wording of a run's outcome to drift; the panel now shows `job.summary` verbatim.
  *
- *  `progress` is one human line per step; `done` carries the totals. Nothing is parsed out of
- *  the prose — the summary is a separate object — so the log can be made more detailed without
- *  anything in the UI depending on its wording. */
-type RefreshEvent = {
-  type?: 'progress' | 'phase' | 'done' | 'error';
-  phase?: string;
-  message?: string;
-  summary?: RefreshSummary;
-};
-
-type RefreshSummary = {
-  label: string;
-  universe_members?: number;
-  priceable?: number;
-  needs_resolve?: number;
-  no_isin?: number;
-  capped?: number;
-  no_cap?: number;
-  prices_total?: number;
-  prices_fetched?: number;
-  /** Of those fetched: gained a new closed bar vs the vendor having nothing newer. The second
-   *  is an ANSWER (a venue with no close that day, a session still open), not a miss. */
-  prices_moved?: number;
-  prices_unchanged?: number;
-  prices_failed?: number;
-  no_start_price?: number;
-  market_anchor?: string | null;
-  seconds?: number;
-  note?: string | null;
-};
+ * `GET …/refresh` (SSE) is still live on the backend for `/api` and curl — this panel simply is
+ * not one of its consumers any more.
+ */
 
 /**
  * ⚠ THE FUNDAMENTALS-FILL PROGRESS BOX IS GONE (2026-08-06) — it is a JOB now, and the toast
@@ -100,47 +83,44 @@ type RefreshSummary = {
  * reflow the stack under the reader's cursor.
  */
 
-/** One sentence for the panel. The DETAIL is in the console — this is the receipt. */
-function refreshSummary(s: RefreshSummary): string {
-  if (s.note) return s.note;
-  const bits: string[] = [];
-  bits.push(`${s.priceable ?? 0} of ${s.universe_members ?? 0} constituents priceable`);
-  if (s.capped) bits.push(`${s.capped} market caps`);
-  // A constituent with no cap weighs nothing, so it is absent from a cap-weighted index while
-  // looking healthy in the grid. Never silent.
-  if (s.no_cap) bits.push(`⚠ ${s.no_cap} with no market cap (they weigh nothing)`);
-  if (s.prices_fetched) bits.push(`${s.prices_fetched} price series fetched`);
-  if (s.prices_moved) bits.push(`${s.prices_moved} gained a new close`);
-  // ⚠ SAID, NOT OMITTED. A press now always fetches, so a run where nothing moved still did the
-  // work — and 'the vendor has nothing newer' is the finding. Silence here reads as a broken
-  // button, which is exactly how ING's untouched 30.22 was first reported.
-  if (s.prices_unchanged) bits.push(`${s.prices_unchanged} already at the vendor's latest`);
-  if (s.no_start_price) bits.push(`${s.no_start_price} have no start-of-year price (listed later)`);
-  if (s.prices_failed) bits.push(`${s.prices_failed} failed (see the console)`);
-  if (s.needs_resolve) bits.push(`${s.needs_resolve} still unresolved — press again`);
-  if (s.no_isin) bits.push(`⚠ ${s.no_isin} members have no ISIN and can never be reached from here`);
-  let out = `${bits.join(', ')}.`;
-  if (s.market_anchor) out += ` Priced to ${s.market_anchor}.`;
-  if (s.seconds != null) out += ` (${s.seconds}s)`;
-  return out;
-}
-
 export default function BenchmarksPanel() {
   const isAdmin = useIsAdmin();
   const [data, setData] = useState<Record<string, ReconstructedIndex>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState<Set<string>>(new Set());
+  /**
+   * WHICH BUTTON OWNS THE RUN — a row's label, or `ALL` for the header button. `null` when idle.
+   *
+   * ⚠⚠ IT IS THE OWNER, NOT A SET OF WHAT IS RUNNING, AND THAT IS THE WHOLE POINT. Only the button
+   * that was PRESSED turns into Cancel; every other Refresh merely disables. A set of in-flight
+   * labels cannot express that — during "Refresh all" all three labels are in it, so all three row
+   * buttons would offer to cancel, and pressing one would raise the question of what exactly it
+   * cancels. One owner, one Cancel, one run.
+   */
+  const [runOwner, setRunOwner] = useState<string | null>(null);
+  /** The job in flight RIGHT NOW, so Cancel has something to cancel. A run is a SEQUENCE of jobs
+   *  (prices then fundamentals, per index), so this changes several times within one press. */
+  const [activeJob, setActiveJob] = useState<string | null>(null);
+  /**
+   * ⚠ A REF, NOT STATE, AND IT MUST BE. The loop in `refresh` closes over its variables once; a
+   * `cancelled` state read inside it would be the value from the render that started the run and
+   * would still be false after Cancel, so the sequence would carry on to the next index having
+   * duly cancelled the current job. The ref is read through, so the loop sees the press.
+   */
+  const abort = useRef(false);
   const [runMsg, setRunMsg] = useState<{ text: string; kind: 'info' | 'warn' } | null>(null);
-  // The newest line off the stream, so the panel shows motion while the console shows the run.
-  const [tick, setTick] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   // ⚠ THE TABLE HAS TO RE-READ, OR THE WHOLE POINT IS LOST. Reset → Refresh is a loop you watch:
   // without a reload the row keeps showing the members it had before you deleted them, which reads
   // as the button having done nothing.
   const [reloadKey, setReloadKey] = useState(0);
   const reload = () => setReloadKey((k) => k + 1);
+  /** ⚠ A SECOND SIGNAL, NOT `reloadKey`. That one re-reads the INDEX payloads (prices, caps, YTD)
+   *  and re-renders the whole table; the fundamentals grid holds its own two cadences and is
+   *  expensive to refetch, so it is told separately and only when a fill actually wrote something.
+   *  Reusing one key would refetch both halves on every press of either. */
+  const [fundKey, setFundKey] = useState(0);
   /**
    * ⚠ NEITHER BACKFILL IS OWNED HERE ANY MORE (2026-08-06). Both are jobs.
    *
@@ -155,7 +135,62 @@ export default function BenchmarksPanel() {
    * paths run the same `ingest_company`, so "ingest" continues to mean exactly one thing.
    */
 
-  /** Refresh one index, or every index in sequence: constituents → market caps → the two prices.
+  /**
+   * The fundamentals half of a Refresh: the GuruFocus fill for one index.
+   *
+   * ⚠⚠ THIS IS A SECOND VENDOR WITH A SEPARATE, MONTHLY QUOTA — which is exactly why it was split
+   * OUT of this button on 2026-08-06, and why chaining it back on is a deliberate choice rather
+   * than a tidy-up. What made the old arrangement wrong was not the pairing, it was that the count
+   * beside it came from a third endpoint with a third denominator, so it offered to fetch
+   * constituents the fill would then refuse. The fill now counts its own work (`needs`/`eligible`),
+   * so the pairing is safe in a way it was not then.
+   *
+   * ⚠ AWAITED, SO THE THREE INDICES FILL ONE AT A TIME. `startJob` returns as soon as the job is
+   * running, so firing all three would put three concurrent fills on GuruFocus — eight companies
+   * in flight each. The prices half is already sequential for the same reason on the Yahoo side;
+   * this keeps the whole button to one external consumer at a time.
+   *
+   * ⚠ IT RUNS EVEN WHEN THE PRICE HALF FAILED. Different vendor, different data: a Yahoo outage
+   * says nothing about whether GuruFocus can fill the grid, and skipping it would make a partial
+   * failure quietly halve the button.
+   *
+   * ⚠⚠ `force=true` — EVERY CONSTITUENT, NOT THE ONES WITH NOTHING. Without it the fill selects on
+   * a sentinel row's EXISTENCE, so a constituent whose statements were loaded a year ago is never
+   * missing and never refetched: the grid goes on showing last year's figures and looks full. That
+   * is the same conclusion the price half reached (`_benchmark_refresh`: a press always fetches,
+   * every constituent, no staleness tolerance), and it is what makes one Refresh mean the same
+   * thing on both halves. One GuruFocus call per constituent — `fetch_financials` is a single blob
+   * carrying every column this grid draws, market cap included, so "all fundamentals" costs one
+   * call, not nineteen.
+   *
+   * ⚠ THE GRID'S OWN "All {n}" BUTTON IS DELIBERATELY *NOT* FORCED. It counts what is missing and
+   * fetches exactly that — the cheap, targeted press. This one is the rebuild.
+   *
+   * Returns the sentence for the receipt, or '' when there was nothing to say.
+   */
+  const fill = async (label: string): Promise<string> => {
+    try {
+      const { id, done } = await startJob(
+        `${API_URL}/api/benchmarks/index/${encodeURIComponent(label)}/fundamentals/ingest/job`
+        + '?feeds=statements&force=true',
+        `${label} fundamentals`);
+      setActiveJob(id);
+      const job = await done;
+      // ⚠ RE-READ ON ANYTHING BUT A FAILURE, including a cancel: a cancelled bulk run has still
+      // loaded every company it got through, and leaving the pre-fill grid on screen would hide
+      // real work that was really done. Mirrors `fillAll` in the grid pane.
+      if (job.status !== 'failed') setFundKey((k) => k + 1);
+      return job.summary || `fundamentals ${job.status}`;
+    } catch (e) {
+      // The toast already carries the failure; this line keeps the panel's receipt honest about
+      // which half of the button did not run.
+      traceError('benchmarks', `could not start the fundamentals fill for ${label}`, e);
+      return 'fundamentals could not start';
+    }
+  };
+
+  /** Refresh one index, or every index in sequence: constituents → market caps → the two prices,
+   *  then that index's GuruFocus fundamentals fill (see `fill`).
    *
    * ⚠ SEQUENTIALLY, NEVER `Promise.all`. Every step calls Yahoo; three indices at once is three
    * concurrent consumers on the throttle, which is the failure this whole pipeline is arranged
@@ -165,45 +200,64 @@ export default function BenchmarksPanel() {
    * constituent — 491 for the S&P — which is exactly what you want when checking a price and
    * exactly what you do not want in a status bar. The panel gets the latest line while it runs
    * and one sentence at the end. */
-  const refresh = async (labels: string[]) => {
-    setRefreshing(new Set(labels));
+  const refresh = async (labels: string[], owner: string) => {
+    setRunOwner(owner);
+    abort.current = false;
     setRunMsg({ text: `Refreshing ${labels.join(', ')}…`, kind: 'info' });
-    setTick(null);
     const lines: string[] = [];
     try {
       for (const label of labels) {
-        console.groupCollapsed(`[benchmark refresh] ${label}`);
-        let summary: RefreshSummary | null = null;
-        let failed: string | null = null;
+        // ⚠ CHECKED BEFORE EACH LEG, NOT ONLY AT THE TOP. Cancel is asked for mid-run, and the
+        // legs are minutes long — a press during ACWI's prices must not be followed by ACWI's
+        // fundamentals and then two more indices. See `cancelRun`.
+        if (abort.current) { lines.push(`${label}: not started — cancelled`); continue; }
+        let priced: string;
         try {
-          await runSSE(`${API_URL}/api/benchmarks/index/${label}/refresh`, { method: 'GET' },
-            (evt) => {
-              const e = evt as RefreshEvent;
-              if (e.type === 'error') { failed = e.message ?? 'refresh failed'; console.error(failed); return; }
-              if (e.type === 'done') { summary = e.summary ?? null; return; }
-              if (!e.message) return;
-              // A phase header is the one line worth making findable in a 500-line log.
-              if (e.type === 'phase') console.log(`%c${e.message}`, 'font-weight:bold');
-              else console.log(e.message);
-              setTick(e.message.trim());
-            });
-        } finally {
-          console.groupEnd();
+          const { id, done } = await startJob(
+            `${API_URL}/api/benchmarks/index/${encodeURIComponent(label)}/refresh/job`,
+            `${label} prices`);
+          setActiveJob(id);
+          const job = await done;
+          priced = `${label}: ${job.summary || job.status}`;
+        } catch (e) {
+          traceError('benchmarks', `could not start the refresh for ${label}`, e);
+          priced = `${label}: refresh could not start`;
         }
-        if (failed) { lines.push(`${label}: ${failed}`); continue; }
-        lines.push(summary ? `${label}: ${refreshSummary(summary)}` : `${label}: no summary returned`);
-        if (summary) console.log(`[benchmark refresh] ${label} summary`, summary);
+        if (abort.current) { lines.push(`${priced}  ·  fundamentals skipped — cancelled`); continue; }
+        lines.push([priced, await fill(label)].filter(Boolean).join('  ·  '));
       }
-      setRunMsg({ text: lines.join('  ·  '), kind: 'warn' });
+      // ⚠ A DIFFERENT SEPARATOR BETWEEN INDICES THAN WITHIN ONE. Each line is two halves joined by
+      // '·' (prices · fundamentals); joining the three lines with '·' as well produced one
+      // undifferentiated run in which you could not see where SP500 ended and ACWI began.
+      setRunMsg({ text: lines.join('   |   '), kind: 'warn' });
       // Caps and prices are written as the run goes, so the table's numbers change now.
       reload();
     } catch (e) {
       console.warn('[benchmark refresh] failed', e);
       setRunMsg({ text: e instanceof Error ? e.message : String(e), kind: 'warn' });
     } finally {
-      setRefreshing(new Set());
-      setTick(null);
+      setRunOwner(null);
+      setActiveJob(null);
+      abort.current = false;
     }
+  };
+
+  /**
+   * Stop the whole run this button started — not just the leg currently executing.
+   *
+   * ⚠⚠ TWO ACTIONS, AND EITHER ALONE IS A CANCEL THAT DOES NOT CANCEL. `cancelJob` stops the job
+   * in flight; the `abort` ref stops the SEQUENCE. Without the ref, cancelling ACWI's prices would
+   * be followed immediately by ACWI's fundamentals and then SP500 — five more legs, after the
+   * reader asked it to stop. Without `cancelJob`, the current leg would run to completion first,
+   * which on ACWI is eleven more minutes of Yahoo calls.
+   *
+   * ⚠ THE TOAST'S OWN CANCEL IS A DIFFERENT SCOPE AND BOTH ARE CORRECT: it cancels THAT LEG and
+   * the sequence moves on to the next; this cancels the RUN. The tooltips say which is which.
+   */
+  const cancelRun = async () => {
+    abort.current = true;
+    setRunMsg({ text: 'Cancelling — the current step stops at its next safe point…', kind: 'warn' });
+    if (activeJob) await cancelJob(activeJob);
   };
 
   /**
@@ -320,14 +374,20 @@ export default function BenchmarksPanel() {
         </div>
         {/* Ingesting constituents is admin work — hidden rather than left to 403. The index itself
             reads the same for everyone. */}
-        {isAdmin && (
-          <button type="button" onClick={() => void refresh(INDICES.map((i) => i.label))}
-            disabled={refreshing.size > 0}
-            title="For each index, in order: gather its constituents, get every one's market cap from Yahoo, then each one's start-of-year price and current price. Minutes per index — every step is logged to the browser console as it happens. Runs one index at a time; concurrent Yahoo callers are how a constituent lands on the wrong listing."
-            className="ml-auto text-[12px] px-2.5 py-1 rounded-lg bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-50">
-            {refreshing.size > 1 ? 'Refreshing…' : 'Refresh all'}
-          </button>
-        )}
+        {isAdmin && (runOwner === ALL ? (
+            <button type="button" onClick={() => void cancelRun()}
+              title="Stop the whole run — the step in flight stops at its next safe point (between constituents, or between companies in a fill) and nothing further is started. Everything already fetched is kept."
+              className="ml-auto text-[12px] px-2.5 py-1 rounded-lg border border-warn-500/40 bg-warn-500/10 text-warn-500 hover:bg-warn-500/20">
+              Cancel
+            </button>
+          ) : (
+            <button type="button" onClick={() => void refresh(INDICES.map((i) => i.label), ALL)}
+              disabled={runOwner !== null}
+              title="For each index, in order: gather its constituents, get every one's market cap from Yahoo, then each one's start-of-year price and current price — then refetch every constituent's fundamentals from GuruFocus, which is what the expanded row's grid reads. Both halves fetch EVERY constituent, holes or not, so figures that are present but stale are replaced. One GuruFocus call each (~490 for the S&P) against a monthly quota, read out before the run starts. Minutes per index; progress and Cancel are in the pop-ups bottom-right. Runs one index at a time — concurrent callers are how a constituent lands on the wrong listing."
+              className="ml-auto text-[12px] px-2.5 py-1 rounded-lg bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-50">
+              Refresh all
+            </button>
+          ))}
       </div>
 
 
@@ -336,16 +396,16 @@ export default function BenchmarksPanel() {
           runMsg.kind === 'warn'
             ? 'text-warn-300 bg-warn-500/10 border-warn-500/20'
             : 'text-fg-subtle bg-overlay/[0.03] border-neutral-800/40'}`}>
+          {/* ⚠ THE LIVE `tick` LINE IS GONE, DELIBERATELY. It existed because the SSE run had
+              nowhere else to show motion; the run is a job now and the toast bottom-right carries
+              the line, a progress bar, the quota spent and Cancel. Keeping both would give a
+              minutes-long run two progress readouts that update at different moments and can
+              disagree about which step it is on. What stays here is the RECEIPT — one sentence per
+              index, after the fact, which the toast deliberately does not keep. */}
           {runMsg.text}
-          {/* The live line, while it runs. It is a TAIL, not a log — the log is the console, and
-              this exists only so a run that will take minutes visibly moves. Monospace and
-              truncated so a 491-constituent run cannot reflow the panel on every frame. */}
-          {tick && (
-            <div className="mt-1 font-mono text-fg-faint truncate" title={tick}>{tick}</div>
-          )}
         </div>
       )}
-      {refreshing.size > 0 && <div className="loading-bar h-0.5 w-full rounded-full" aria-hidden />}
+      {runOwner !== null && <div className="loading-bar h-0.5 w-full rounded-full" aria-hidden />}
 
       {loading && <p className="text-xs text-fg-subtle">Computing…</p>}
       {error && (
@@ -391,15 +451,29 @@ export default function BenchmarksPanel() {
                             that also opened the detail would look like it had rendered a result. */}
                         {isAdmin && (
                           <div className="inline-flex items-center gap-1">
-                            <button type="button" disabled={refreshing.size > 0 || deleting != null}
-                              onClick={(e) => { e.stopPropagation(); void refresh([ix.label]); }}
-                              title={`Refresh ${ix.name}: gather its constituents, get every one's market cap from Yahoo, then each one's start-of-year price and current price. Takes minutes — every step is logged to the browser console as it happens.`}
-                              className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
-                              {refreshing.has(ix.label) && refreshing.size === 1 ? 'Refreshing…' : 'Refresh'}
-                            </button>
+                            {/* ⚠ ONLY THE PRESSED BUTTON BECOMES CANCEL. During "Refresh all" all
+                                three rows are being worked on, but none of them owns the run, so
+                                all three stay disabled — a Cancel on a row would otherwise have to
+                                answer "cancel what, this index or the run?" and either answer is
+                                a surprise. */}
+                            {runOwner === ix.label ? (
+                              <button type="button"
+                                onClick={(e) => { e.stopPropagation(); void cancelRun(); }}
+                                title={`Stop refreshing ${ix.name}. The step in flight stops at its next safe point and the fundamentals fill is not started; everything already fetched is kept.`}
+                                className="text-[12px] px-2 py-0.5 rounded-lg border border-warn-500/40 bg-warn-500/10 text-warn-500 hover:bg-warn-500/20">
+                                Cancel
+                              </button>
+                            ) : (
+                              <button type="button" disabled={runOwner !== null || deleting != null}
+                                onClick={(e) => { e.stopPropagation(); void refresh([ix.label], ix.label); }}
+                                title={`Refresh ${ix.name}: everything this row and its expanded grid read, for every constituent — not only the ones with gaps. Constituents, market caps and the two prices from Yahoo, then a refetch of every constituent's fundamentals from GuruFocus (one call each, against a monthly quota). Present-but-stale figures are replaced. Takes minutes — progress and Cancel are in the pop-ups bottom-right.`}
+                                className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
+                                Refresh
+                              </button>
+                            )}
                             {/* Only where Refresh can put it back — see `rebuildable`. */}
                             {ix.rebuildable && (
-                              <button type="button" disabled={refreshing.size > 0 || deleting != null}
+                              <button type="button" disabled={runOwner !== null || deleting != null}
                                 onClick={(e) => { e.stopPropagation(); void del(ix.label, d?.member_count); }}
                                 title={`Delete the ${ix.name} universe so Refresh can be watched rebuilding it. Membership only — prices and market caps are untouched.`}
                                 aria-label={`Delete the ${ix.name} universe`}
@@ -414,7 +488,7 @@ export default function BenchmarksPanel() {
                     {isOpen && (
                       <tr>
                         <td colSpan={6} className="px-3 py-3 bg-inset">
-                          <IndexDetail d={d} />
+                          <IndexDetail d={d} fundKey={fundKey} />
                         </td>
                       </tr>
                     )}
@@ -432,10 +506,13 @@ export default function BenchmarksPanel() {
 /** ⚠ NO `fill` / `onFillAll` PROPS ANY MORE. They existed so the PANEL could own the stream and
  *  keep a progress box alive while this collapsible pane unmounted. A job needs neither: the run
  *  has a handle, the toast lives in the root layout, and this pane can simply start it. */
-function IndexDetail({ d }: { d: ReconstructedIndex }) {
+function IndexDetail({ d, fundKey = 0 }: { d: ReconstructedIndex; fundKey?: number }) {
   return (
     <div className="space-y-2">
-      <FundamentalGridPane label={d.label} />
+      {/* ⚠ THE PANE CANNOT NOTICE A FILL ON ITS OWN — it caches both cadences precisely so that
+          scrubbing the slider never refetches, which also means nothing tells it the data
+          underneath changed. `refreshKey` is that telling, bumped by Refresh's fundamentals half. */}
+      <FundamentalGridPane label={d.label} refreshKey={fundKey} />
       {/* ⚠ THE FILL BUTTON MOVED INTO THE GRID'S TOTAL ROW (2026-08-06). It sat here beside the
           price/constituent Refresh, which is a different vendor with a different quota — and its
           count came from a THIRD endpoint with a third denominator, so it could offer to fetch
