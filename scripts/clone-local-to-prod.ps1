@@ -481,7 +481,51 @@ $diffSpecs = @(
     @{ Table = 'asset_price'; Key = 'analysis_id'; Sums = @('close', 'volume'); Exclude = @() }
 )
 $diffTables   = @($diffSpecs | ForEach-Object { $_.Table })
-$stagedTables = @($upsertOrder.ToArray() | Where-Object { $diffTables -notcontains $_ })
+
+# ---- NOT SYNCED AT ALL: prod owns these, and their PK is a SURROGATE id ------
+# !! ADDITIVE IS NOT ENOUGH WHEN THE PRIMARY KEY IS A SERIAL, AND ON 2026-08-11
+# THAT PUT DUPLICATE ROWS IN PROD. "Additive" means: upsert local's rows BY PK,
+# never delete prod-only ones. That is exactly right for a table whose PK is the
+# NATURAL key -- airs_performance (portefeuille, periode), airs_model_weight
+# (portefeuille, fonds), airs_account_roster (portefeuille) -- because the same
+# logical row carries the same key on both sides, so an upsert updates it.
+#
+# These six have a surrogate `id` instead, and BOTH SIDES SCRAPE AIRS
+# INDEPENDENTLY, each assigning its own serial. Local's airs_holding id=5 and
+# prod's id=5 are different holdings. So the upsert did two wrong things at once:
+#
+#   * ON CONFLICT (id) DO UPDATE OVERWROTE prod's row 5 with local's -- silent
+#     corruption of a row prod scraped and local never saw; and
+#   * a local row whose id was free on prod was INSERTED beside the row prod
+#     already held for that same holding -- the duplicates, which nothing then
+#     removes, because additive never deletes.
+#
+# There is no key to match them on, so there is no correct upsert. The honest
+# answer is not to sync them: prod scrapes AIRS on its own schedule and is the
+# AUTHOR of every row here. Local's copies are dev artifacts -- the same reasoning
+# `asset_ingest_queue` is already excluded under.
+#
+# !! ALL SIX GO TOGETHER, FOR FK COHERENCE. airs_model_portfolio_position and
+# airs_account_model_link both point at airs_model_portfolio; syncing one while
+# skipping another would leave a child referencing a parent that was never sent.
+#
+# !! THE LAST TWO DO HAVE A NATURAL KEY -- AND THE SCRIPT CANNOT SEE IT. It is an
+# EXPRESSION unique index (`lower(portefeuille)`, and
+# `COALESCE(NULLIF(isin,''), lower(fonds))`), while `$uniqByTable` is built from
+# information_schema.table_constraints, which lists CONSTRAINTS only. An
+# expression index is invisible there, so step [5]'s pre-clear never de-conflicts
+# them and the INSERT trips the index outright. Skipping is both the fix for the
+# duplicates and the fix for that.
+$skipTables = @(
+    'airs_holding',                    # scraped positions per book per date
+    'airs_mutatie',                    # scraped mutations
+    'airs_model_portfolio',            # the 95 model portfolios, scraped
+    'airs_model_portfolio_position',   # their compositions, scraped
+    'airs_model_portfolio_link',       # manual link, natural key is an expression index
+    'airs_account_model_link'          # manual pairing, same
+)
+$stagedTables = @($upsertOrder.ToArray() |
+    Where-Object { $diffTables -notcontains $_ -and $skipTables -notcontains $_ })
 
 # ---- ADDITIVE tables: upsert local rows, NEVER delete prod-only ones ---------
 # !! PROD IS THE AUTHOR OF THESE TABLES, NOT LOCAL. Everything named airs_* is
@@ -776,6 +820,8 @@ if (-not $Force) {
     Write-Host "  - apply any missing migrations + align the tracker"
     Write-Host "  - upsert + delete-missing on $($stagedTables.Count - $additiveTables.Count) tables"
     Write-Host "  - upsert ONLY (prod-only rows kept) on $($additiveTables.Count) additive tables: $($additiveTables -join ', ')"
+    Write-Host "  - NOT TOUCHED at all (prod owns them; surrogate ids cannot be matched across sides):"
+    Write-Host "      $($skipTables -join ', ')" -ForegroundColor DarkGray
     Write-Host "  - differentially re-copy only changed rows of $($diffTables -join ', ')"
     Write-Host "  - mirror the backtest-results Storage bucket$(if (-not $StorageSyncEnabled) { ' (SKIPPED -- no prod service key)' })"
     Write-Host "  (auth.users / API keys are NOT touched)"
@@ -812,6 +858,17 @@ foreach ($line in $trackRows) {
 Invoke-ProdScript $trackSql.ToString()
 Write-Host "  schema in sync (applied $($missing.Count) migration(s))." -ForegroundColor Green
 
+# !! EVERYTHING FROM HERE TO STEP [7b] IS INSIDE A try/finally, AND THE finally IS WHAT DROPS
+# clone_stg. A run that dies mid-way used to LEAVE A FULL COPY OF EVERY STAGED TABLE ON PROD --
+# the drop lived on the success path only. On 2026-08-11 the FK failure in step [5] did exactly
+# that, and prod went READ-ONLY: Supabase locks writes at 95% of disk, the staging copy is ~500MB
+# (universe_membership alone is 444MB), and repeated attempts each left another one plus the dead
+# tuples from every table already upserted. Four disk expansions inside 24h hit the modification
+# limit, and there is a ~4h cooldown before the disk can grow again.
+#
+# The braces are deliberately NOT re-indented over the ~200 lines they wrap: PowerShell does not
+# care, and a whitespace-only diff over the whole body would bury the two lines that changed.
+try {
 # ---- [4] stage small/medium tables on prod ----------------------------------
 Write-Host "[4] Staging $($stagedTables.Count) tables into clone_stg on prod..."
 Invoke-Prod "DROP SCHEMA IF EXISTS clone_stg CASCADE; CREATE SCHEMA clone_stg;" | Out-Null
@@ -854,7 +911,25 @@ foreach ($t in $stagedTables) {
     $nonpk   = @($cols | Where-Object { $pk -notcontains $_ })
     if ($nonpk.Count -gt 0) {
         $setlist = (($nonpk | ForEach-Object { "$_ = EXCLUDED.$_" }) -join ', ')
-        $conflict = "ON CONFLICT ($pklist) DO UPDATE SET $setlist"
+        # !! AN UNCHANGED ROW MUST NOT BE REWRITTEN -- THE SAME RULE STEP [6] ALREADY HAS, ONE
+        # LANE OVER, AND ITS ABSENCE HERE IS WHY A CLONE THAT CHANGES NOTHING STILL COSTS DISK.
+        # Postgres is MVCC: `SET x = x` writes a NEW tuple, marks the old one dead, updates every
+        # index and WAL-logs all of it. Without this guard every clone rewrote EVERY row of EVERY
+        # staged table -- ~8,400 universe_membership rows in a 444MB table, on every run, whether
+        # or not a single value differed. That dead weight is what autovacuum then has to chase,
+        # and on 2026-08-11 it did not chase it fast enough: prod crossed 95% of disk and went
+        # READ-ONLY. The metric_data comment in step [6] calls this "the difference between a sync
+        # and a disk-filling event"; it is the same event here.
+        #
+        # !! NO EXCLUSION LIST, UNLIKE STEP [6]. That one omits `recorded_at` because both sides
+        # stamp it independently, which would defeat the guard. Here EVERY non-PK column is
+        # compared, so a row is skipped only when it is identical in every field -- the guard can
+        # therefore never change what prod ends up holding, only whether we pointlessly wrote it.
+        # (Checked: no staged table has a `json`/geometric column, so every type involved has an
+        # equality operator. A plain `json` column would make this fail outright.)
+        $tgt = (($nonpk | ForEach-Object { "public.$t.$_" }) -join ', ')
+        $inc = (($nonpk | ForEach-Object { "EXCLUDED.$_" }) -join ', ')
+        $conflict = "ON CONFLICT ($pklist) DO UPDATE SET $setlist WHERE ($tgt) IS DISTINCT FROM ($inc)"
     } else {
         $conflict = "ON CONFLICT ($pklist) DO NOTHING"
     }
@@ -1018,8 +1093,7 @@ foreach ($t in $deleteOrder) {
     # an earlier table in this very loop, and neither had run for company 6418.
     Remove-RowsWithDependents -Table $t -Predicate "NOT EXISTS (SELECT 1 FROM clone_stg.$t s WHERE $cond)"
 }
-Invoke-Prod "DROP SCHEMA IF EXISTS clone_stg CASCADE;" | Out-Null
-docker exec $Container bash -c "rm -f /tmp/clone_*.dat" | Out-Null
+# The staging schema is dropped in the `finally` below, so it goes on a failure too.
 Invoke-Prod "NOTIFY pgrst, 'reload schema';" | Out-Null
 Write-Host "  done." -ForegroundColor Green
 
@@ -1035,6 +1109,27 @@ foreach ($s in $seqResets) {
 }
 Write-Host "  done." -ForegroundColor Green
 
+}
+finally {
+    # !! THE STAGING COPY IS DROPPED WHETHER THE RUN SUCCEEDED OR DIED, and that is a DISK rule,
+    # not tidiness. clone_stg holds a full copy of every staged table (~500MB, three quarters of
+    # it universe_membership); left behind on prod it counts against the 95%-of-disk threshold
+    # that puts Supabase into read-only mode, where the next attempt cannot even start.
+    #
+    # !! BEST-EFFORT, AND IT MUST NOT MASK THE REAL FAILURE. If the run is dying because prod is
+    # unreachable then this drop cannot work either, and letting its error escape would replace
+    # "the FK on company blocked the delete" with "connection refused" -- burying the fault that
+    # actually needs fixing. So it warns and rethrows nothing.
+    try {
+        Invoke-Prod "DROP SCHEMA IF EXISTS clone_stg CASCADE;" | Out-Null
+        Write-Host "  clone_stg dropped (staging copy removed from prod)." -ForegroundColor DarkGray
+    } catch {
+        Write-Host "  WARNING: could not drop clone_stg on prod -- it is still using disk there." -ForegroundColor Yellow
+        Write-Host "           Run this by hand once prod is reachable:  DROP SCHEMA IF EXISTS clone_stg CASCADE;" -ForegroundColor Yellow
+    }
+    try { docker exec $Container bash -c "rm -f /tmp/clone_*.dat" | Out-Null } catch { }
+}
+
 # ---- [7c] mirror the backtest-results Storage bucket ------------------------
 # Upload local blobs missing on prod + delete prod-only blobs, so each cloned
 # `backtest_run.result_path` resolves (no out-of-band 404 on read).
@@ -1046,6 +1141,16 @@ Write-Host "[8] Verifying..."
 $mismatch = 0
 $surplus  = 0
 foreach ($t in $upsertOrder) {
+    # !! A SKIPPED TABLE HAS NO EXPECTED RELATIONSHIP BETWEEN THE TWO COUNTS. Prod owns it and
+    # local's copy is a dev artifact, so prod holding more (or fewer) is not a finding -- reporting
+    # either as a MISMATCH would fail every clone for doing exactly what it was told.
+    if ($skipTables -contains $t) {
+        $lc = [int](Invoke-Local "SELECT count(*) FROM public.$t")
+        $pc = [int](Invoke-Prod "SELECT count(*) FROM public.$t")
+        Write-Host ("  skipped  {0} : local={1} prod={2} (prod owns this table)" -f $t, $lc, $pc) `
+            -ForegroundColor DarkGray
+        continue
+    }
     $lc = [int](Invoke-Local "SELECT count(*) FROM public.$t")
     $pc = [int](Invoke-Prod "SELECT count(*) FROM public.$t")
     if ($additiveTables -contains $t) {

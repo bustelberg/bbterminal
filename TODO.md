@@ -97,6 +97,75 @@ of the batch was rejected on purpose — it becomes INSERT … ON CONFLICT, so a
 `asset_analysis` row would be CREATED from four cap columns, a junk row that then looks like an
 instrument.
 
+### ⚠⚠ AIRS DUPLICATES HAVE **TWO** CAUSES, AND ONLY ONE IS THE CLONE (2026-08-11)
+
+**1. The SCRAPER writes duplicates inside a single run.** Proven on LOCAL, which has never been
+cloned *to*: 24 pairs in `airs_holding` with consecutive ids, identical `retrieved_at`, identical
+ISIN/quantity/value (Apple 91 @ 27,225.55 twice, ASML 16 @ 22,214.40 twice, all
+`BUS_MTS_NEU_AFS_DYN` 2026-07-28). **Root fix, not yet done:** `airs_holding` has no natural
+unique key, so the writer inserts where it should upsert. Needs a migration adding
+UNIQUE (portefeuille, as_of_date, holding_name, quantity, current_value_eur) — or the
+delete-then-insert-per-(book, date) pattern `airs_model_portfolio_position` already uses.
+
+**2. The clone upserted surrogate-PK tables BY id.** Six AIRS tables key on a serial `id` that each
+side assigns independently, so `ON CONFLICT (id)` overwrote prod rows with unrelated local ones AND
+inserted copies beside rows prod already had. **Fixed:** `$skipTables` — those six are now neither
+staged, upserted nor deleted (prod authors them; local's copies are dev artifacts). Two of them
+(`airs_model_portfolio_link`, `airs_account_model_link`) *do* have a natural key, but as an
+EXPRESSION unique index, which `information_schema.table_constraints` cannot see — so the script's
+unique pre-clear was blind to them anyway.
+
+**⚠ Quantify prod with `scripts/airs-duplicates.sql`** (read-only). ⚠ Its `airs_holding` key
+includes `quantity` + `current_value_eur` on purpose: (portefeuille, as_of_date, holding_name)
+alone over-reports 83 groups on local, because a bond and its accrued-interest line share a display
+name ("6,5% Rabobank Certificaten 14-perp." at EUR 8,347.20 and EUR 112.23, same scrape).
+
+### ⚠ 2026-08-11 INCIDENT: the failed clone filled prod's disk and put it in READ-ONLY mode.
+
+Two defects, both now fixed, both of which only bite on a run that DIES:
+
+1. **`clone_stg` was dropped on the success path only.** The FK failure in step [5] left a full
+   copy of every staged table on prod (~500MB; `universe_membership` alone is 444MB), and each
+   retry left another. Now dropped in a `finally`.
+2. **The staging upsert rewrote EVERY row of EVERY table, every run.** Postgres is MVCC, so
+   `SET x = x` still writes a new tuple, kills the old one and WAL-logs it — the exact
+   "disk-filling event" the metric_data lane has guarded against since it was written. Step [5]
+   now carries the same `IS DISTINCT FROM` guard (type-checked against all 55 staged tables).
+
+Together those crossed 95% of disk → Supabase read-only → four disk expansions inside 24h → the
+disk-modification limit, with a ~4h cooldown.
+
+**⚠ STILL OPEN: `universe_membership` is 8,444 rows in 444MB, and `last_autovacuum` is NULL** (on
+LOCAL — prod is likely worse, it runs the pipeline daily). That is ~55KB per row; the table is
+almost entirely dead tuples from repeated rewrites. `VACUUM FULL public.universe_membership` takes
+seconds on 8k rows and needs only its own size free. Worth doing on both sides, and worth finding
+out why autovacuum never ran on it.
+
+**⚠ NEVER `VACUUM FULL` metric_data on prod** — it rewrites the table and needs that much free
+space. Plain `VACUUM` only.
+
+**Measured on prod 2026-08-11** (via the new `scripts/prod-reclaim-disk.ps1`, which reports by
+default and never picks what to drop):
+
+```
+DB 20 GB, of which metric_data 13 GB (heap 2,729 MB + indexes 10 GB) and asset_price 6,693 MB.
+No replication slots. clone_stg confirmed gone (22 GB -> 20 GB when it was dropped).
+
+metric_data_pkey                            4,088 MB   37,966,199 scans  (99.5%)
+idx_metric_data_metric_source_company_date  5,999 MB      189,364 scans  ( 0.5%)  <- USED, keep
+asset_price_pkey                            2,413 MB      915,799 scans
+idx_metric_data_source_date                   471 MB           30 scans  <- DROPPED 2026-08-11
+```
+
+**Still open:** ~3.3 GB of estimated index bloat on `metric_data` (prod runs 3.33 GB of index per
+GB of heap; local runs 2.54 — scaled by heap, prod's indexes should be ~7.5 GB, not 10). `-Reindex`
+reclaims it but BUILDS THE NEW INDEX FIRST, so the 4 GB pkey needs ~4 GB free — not available at
+95% full. Do it after the disk has headroom, not during an incident.
+
+**Also open:** `last_autovacuum` is NULL on both big tables and prod reported `n_live_tup 25,413`
+for asset_price (off by orders of magnitude). Autovacuum sizes its thresholds off that estimate,
+so a wrong one is self-perpetuating — `-Vacuum -Apply` (VACUUM ANALYZE) once healthy.
+
 ---
 
 ## 📋 AIRS Transacties — measured on ONE account. Two things still unverified.
