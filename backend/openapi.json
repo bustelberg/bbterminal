@@ -16255,6 +16255,48 @@
         ]
       }
     },
+    "/api/airs/vermogen/refresh/job": {
+      "post": {
+        "description": "The fleet re-scan as a CANCELLABLE JOB \u2014 the \"Refresh all\" button.\n\n\u26a0 WHY THIS EXISTS BESIDE THE PLAIN POST ABOVE. That one fires a daemon thread and returns\nimmediately; the caller then polls `/api/airs/vermogen/status` every 2.5s and paints its own\nbanner. Three things follow from that and all three are why this page kept feeling broken:\nthe work is INVISIBLE after a route change or a reload, there is NO WAY TO STOP IT once\nstarted, and the panel grows a second progress vocabulary that has to be kept in step with the\ntoast every other button on the page already uses.\n\nAs a job it reports into the shared toast stack, survives navigation, re-attaches via\n`attachRunningJobs`, and the toast's Cancel actually reaches the scan.\n\n\u26a0 THE SCAN ITSELF IS UNCHANGED \u2014 `run_airs_vermogen_refresh_sync` with two optional hooks, not\na streaming copy of it. A second implementation for the job path is exactly the drift its own\ndocstring warns about, and this is the function the 05:00 scheduler tick also calls.\n\n\u26a0 CANCEL STOPS BETWEEN ACCOUNTS, NOT INSIDE ONE, and the result is a real outcome rather than\na failure: everything already downloaded is stored and the summary says where it stopped. An\naccount's four reports are a unit \u2014 stopping midway would leave a book with two fresh reports\nand two stale ones and nothing on the row to say which.\n\n\u26a0 `busy` IS AN ANSWER, NOT AN ERROR. `_LOCK` already serialises the scan (the scheduler holds\nit too), so a second press returns a sentence instead of painting a red toast beside real\nfailures \u2014 the same rule the per-row refresh follows.",
+        "operationId": "airs_vermogen_refresh_job_api_airs_vermogen_refresh_job_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Force",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Vermogen Refresh Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/vermogen/status": {
       "get": {
         "description": "Status of the Vermogensoverzicht refresh job: in-flight progress, last\nresult, the freshest stored snapshot date, and the next scheduled run.",

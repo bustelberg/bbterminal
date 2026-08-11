@@ -2079,6 +2079,63 @@ async def airs_vermogen_refresh(force: bool = False):
     return {"status": "started", "force": force}
 
 
+@router.post("/api/airs/vermogen/refresh/job")
+async def airs_vermogen_refresh_job(force: bool = False):
+    """The fleet re-scan as a CANCELLABLE JOB — the "Refresh all" button.
+
+    ⚠ WHY THIS EXISTS BESIDE THE PLAIN POST ABOVE. That one fires a daemon thread and returns
+    immediately; the caller then polls `/api/airs/vermogen/status` every 2.5s and paints its own
+    banner. Three things follow from that and all three are why this page kept feeling broken:
+    the work is INVISIBLE after a route change or a reload, there is NO WAY TO STOP IT once
+    started, and the panel grows a second progress vocabulary that has to be kept in step with the
+    toast every other button on the page already uses.
+
+    As a job it reports into the shared toast stack, survives navigation, re-attaches via
+    `attachRunningJobs`, and the toast's Cancel actually reaches the scan.
+
+    ⚠ THE SCAN ITSELF IS UNCHANGED — `run_airs_vermogen_refresh_sync` with two optional hooks, not
+    a streaming copy of it. A second implementation for the job path is exactly the drift its own
+    docstring warns about, and this is the function the 05:00 scheduler tick also calls.
+
+    ⚠ CANCEL STOPS BETWEEN ACCOUNTS, NOT INSIDE ONE, and the result is a real outcome rather than
+    a failure: everything already downloaded is stored and the summary says where it stopped. An
+    account's four reports are a unit — stopping midway would leave a book with two fresh reports
+    and two stale ones and nothing on the row to say which.
+
+    ⚠ `busy` IS AN ANSWER, NOT AN ERROR. `_LOCK` already serialises the scan (the scheduler holds
+    it too), so a second press returns a sentence instead of painting a red toast beside real
+    failures — the same rule the per-row refresh follows.
+    """
+    import jobs as job_registry  # noqa: PLC0415
+
+    from airs_vermogen import run_airs_vermogen_refresh_sync  # noqa: PLC0415
+
+    def _work(ctx) -> str:
+        res = run_airs_vermogen_refresh_sync(
+            triggered_by="manual-force" if force else "manual",
+            force=force,
+            on_step=lambda done, total, msg: ctx.progress(done, total, msg),
+            # ⚠ `ctx.check()` RAISES to unwind a job; here we only need the FLAG, because the scan
+            # has to run its own finalisation (write the status, release `_LOCK`) before returning.
+            # `cancelled` is the registry's own view of whether Cancel was pressed.
+            should_stop=lambda: ctx.cancelled,
+        )
+        if res.get("status") == "busy":
+            return "Another AIRS refresh is already running — nothing was re-read"
+        stopped = res.get("cancelled_at")
+        errs = res.get("errors") or []
+        summary = (f"{res.get('complete_accounts', 0)}/{res.get('portfolios_found', 0)} accounts, "
+                   f"{res.get('holdings_rows', 0)} holdings")
+        if stopped:
+            return f"Cancelled before {stopped} — {summary} stored before stopping"
+        if res.get("status") == "error":
+            raise RuntimeError(res.get("message") or "AIRS scan stored nothing")
+        return summary + (f" — {len(errs)} report(s) failed, see the console" if errs else "")
+
+    job = job_registry.start("airs.vermogen.refresh", "Refresh all portfolios", _work)
+    return {"job_id": job.id, "label": "Refresh all portfolios", "force": force}
+
+
 class AirsAccountDeleted(BaseModel):
     portefeuille: str
     deleted: dict[str, int] = {}     # per table; -1 = that table's delete errored

@@ -1892,6 +1892,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/vermogen/refresh/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Vermogen Refresh Job
+         * @description The fleet re-scan as a CANCELLABLE JOB — the "Refresh all" button.
+         *
+         *     ⚠ WHY THIS EXISTS BESIDE THE PLAIN POST ABOVE. That one fires a daemon thread and returns
+         *     immediately; the caller then polls `/api/airs/vermogen/status` every 2.5s and paints its own
+         *     banner. Three things follow from that and all three are why this page kept feeling broken:
+         *     the work is INVISIBLE after a route change or a reload, there is NO WAY TO STOP IT once
+         *     started, and the panel grows a second progress vocabulary that has to be kept in step with the
+         *     toast every other button on the page already uses.
+         *
+         *     As a job it reports into the shared toast stack, survives navigation, re-attaches via
+         *     `attachRunningJobs`, and the toast's Cancel actually reaches the scan.
+         *
+         *     ⚠ THE SCAN ITSELF IS UNCHANGED — `run_airs_vermogen_refresh_sync` with two optional hooks, not
+         *     a streaming copy of it. A second implementation for the job path is exactly the drift its own
+         *     docstring warns about, and this is the function the 05:00 scheduler tick also calls.
+         *
+         *     ⚠ CANCEL STOPS BETWEEN ACCOUNTS, NOT INSIDE ONE, and the result is a real outcome rather than
+         *     a failure: everything already downloaded is stored and the summary says where it stopped. An
+         *     account's four reports are a unit — stopping midway would leave a book with two fresh reports
+         *     and two stale ones and nothing on the row to say which.
+         *
+         *     ⚠ `busy` IS AN ANSWER, NOT AN ERROR. `_LOCK` already serialises the scan (the scheduler holds
+         *     it too), so a second press returns a sentence instead of painting a red toast beside real
+         *     failures — the same rule the per-row refresh follows.
+         */
+        post: operations["airs_vermogen_refresh_job_api_airs_vermogen_refresh_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/vermogen/status": {
         parameters: {
             query?: never;
@@ -14589,6 +14632,37 @@ export interface operations {
         };
     };
     airs_vermogen_refresh_api_airs_vermogen_refresh_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_vermogen_refresh_job_api_airs_vermogen_refresh_job_post: {
         parameters: {
             query?: {
                 force?: boolean;

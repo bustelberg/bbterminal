@@ -751,7 +751,8 @@ def _save_model_weights(portefeuille: str, van: str, tot: str) -> int:
     return len(rows)
 
 
-def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = False) -> dict:
+def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = False,
+                                   on_step=None, should_stop=None) -> dict:
     """Discover → download → parse → store, for every live portfolio that NEEDS it. Serialized
     via `_LOCK` (a second trigger while one runs returns busy). Returns the final
     status dict. Call from a thread — it does blocking Playwright + DB work.
@@ -760,6 +761,17 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
     it is what refills an account somebody deleted — but an account whose last pass got all four
     reports within `AIRS_FRESH_HOURS` is skipped rather than re-downloaded (`accounts_to_scan`).
     `force=True` scans every discovered account regardless.
+
+    `on_step(done, total, message)` and `should_stop()` are the JOB hooks — see
+    `/api/airs/vermogen/refresh/job`. Both optional and both no-ops when absent, so the scheduler
+    and the plain POST keep exactly today's behaviour.
+
+    ⚠ CANCELLATION IS CHECKED BETWEEN ACCOUNTS, NEVER INSIDE ONE. An account's four reports are
+    downloaded and stored as a unit; stopping midway would leave it holding two fresh reports and
+    two stale ones, with nothing on the row to say which. Between accounts the state is always
+    consistent — every book is either fully re-read or untouched — so that is the only safe
+    boundary. The cost is that Cancel waits out the account in flight (seconds), which is stated
+    in the UI rather than hidden.
     """
     if not _LOCK.acquire(blocking=False):
         return {"status": "busy", "message": "An AIRS refresh is already running"}
@@ -880,7 +892,20 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         # book removed from `todo` would otherwise be scanned here anyway.
         skipped_set = set(current)
         todo_set = set(todo)
+        cancelled_at: str | None = None
         for i, name in enumerate(names, 1):
+            # ⚠ BEFORE THE ACCOUNT, NOT INSIDE IT — see the docstring. `break`, not `return`, so the
+            # run still falls through to `_finish` below and records what it DID store; abandoning
+            # here would leave `_STATUS["running"]` true for ever and the next press would read
+            # "busy" against a job nobody is running.
+            if should_stop is not None and should_stop():
+                cancelled_at = name
+                _emit("cancelled", i=i, n=len(names), account=name,
+                      message=f"[{i}/{len(names)}] cancelled before {name} — "
+                              f"{i - 1} account(s) already stored")
+                break
+            if on_step is not None:
+                on_step(i, len(names), f"{i}/{len(names)}: {name}")
             if name in skipped_set:
                 _emit("account_skipped", i=i, n=len(names), account=name,
                       message=f"[{i}/{len(names)}] {name}: skipped — all reports current")
@@ -970,10 +995,16 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
                f"Vermogensoverzicht {vermogen_ok}/{total} ({holdings_total} holdings), "
                f"Mutaties {mutaties_total} rows, Model {model_total} rows" if total else "")
             + (f"; {len(_STATUS['errors'])} report(s) failed" if _STATUS["errors"] else "")
+            # ⚠ A CANCELLED RUN MUST NOT READ AS A COMPLETE ONE. It stored real rows, so it is not
+            # an error — but "38/44 accounts complete" with no other word implies the other six
+            # failed, when in fact nobody ever asked for them.
+            + (f"; CANCELLED before {cancelled_at} — the accounts after it were not read"
+               if cancelled_at else "")
         )
         _STATUS.update({
             "finished_at": datetime.now(timezone.utc).isoformat(),
-            "status": "ok" if any_stored else "error",
+            "cancelled_at": cancelled_at,
+            "status": "cancelled" if cancelled_at else ("ok" if any_stored else "error"),
             "rendement_stored": rendement_ok,
             "vermogen_stored": vermogen_ok,
             "holdings_rows": holdings_total,

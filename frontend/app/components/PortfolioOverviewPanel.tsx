@@ -12,7 +12,7 @@ import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 import { RefreshIcon } from './portfolios/RefreshIcon';
-import { startJob } from '../../lib/stores/jobs';
+import { cancelJob, startJob } from '../../lib/stores/jobs';
 import AllocationBandsModal from './portfolios/AllocationBandsModal';
 import AccountTransactions from './portfolios/AccountTransactions';
 import AccountTotalReturn from './portfolios/AccountTotalReturn';
@@ -200,6 +200,20 @@ export default function PortfolioOverviewPanel() {
   const [refreshMsg, setRefreshMsg] = useState<
     { text: string; kind: 'info' | 'error' | 'warn' | 'ok' } | null>(null);
   const [refreshingRows, setRefreshingRows] = useState<Set<string>>(new Set());
+  /**
+   * The job id behind each in-flight action, so its button can become a CANCEL.
+   *
+   * ⚠ THE ID, NOT A BOOLEAN. `refreshingAll` / `refreshingRows` already say "this is busy" and
+   * that is all a spinner needs — but Cancel needs something to cancel, and it must be the job
+   * THIS button started. A shared "is anything running" flag would offer a Cancel on every row
+   * while only one of them could act, which is worse than not offering it at all.
+   *
+   * ⚠ THE TOAST'S OWN CANCEL IS THE SAME SCOPE HERE, deliberately: one press, one job. (In the
+   * Benchmarks panel the two differ — there a run is a SEQUENCE of jobs, so the toast cancels a
+   * leg and the panel's button cancels the run. Nothing on this panel is a sequence.)
+   */
+  const [fleetJob, setFleetJob] = useState<string | null>(null);
+  const [rowJobs, setRowJobs] = useState<Record<string, string>>({});
   /** Bumped when a row refresh finishes, so an open Analyse modal re-reads what it rebuilt. */
   const [refreshSeq, setRefreshSeq] = useState(0);
   const [deletingRows, setDeletingRows] = useState<Set<string>>(new Set());
@@ -480,9 +494,10 @@ export default function PortfolioOverviewPanel() {
   const refreshOne = async (portefeuille: string) => {
     setRefreshingRows((s) => new Set(s).add(portefeuille));
     try {
-      const { done } = await startJob(
+      const { id, done } = await startJob(
         `${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh/job`,
         portefeuille);
+      setRowJobs((m) => ({ ...m, [portefeuille]: id }));
       const job = await done;
       // ⚠ RELOAD ON ANYTHING THAT REACHED THE SERVER, not only on `done`. A failed cascade still
       // wrote every account it got through, so leaving the pre-refresh figures on screen would
@@ -499,6 +514,7 @@ export default function PortfolioOverviewPanel() {
       setRefreshMsg({ text: `${portefeuille}: ${e instanceof Error ? e.message : String(e)}`, kind: 'error' });
     } finally {
       setRefreshingRows((s) => { const n = new Set(s); n.delete(portefeuille); return n; });
+      setRowJobs((m) => { const n = { ...m }; delete n[portefeuille]; return n; });
       // ⚠ AND THE ANALYSE MODAL, IF IT IS OPEN ON THIS PORTFOLIO. It is drawn from the composition
       // and holdings this scan just re-read, and it has already loaded — so without a nudge it
       // would sit showing pre-scan figures while the row behind it updated, which reads as the
@@ -507,88 +523,125 @@ export default function PortfolioOverviewPanel() {
     }
   };
 
-  // Scan every live portfolio that NEEDS scanning (the background fleet job), polling its status
-  // until it finishes, then reloading.
-  //
-  // ⚠ INCREMENTAL, AND THE BACKEND DECIDES. Discovery always runs against AIRS, so an account that
-  // is new or was deleted is always fetched; one whose last pass got all four reports recently is
-  // skipped. A full pass is minutes, a no-op pass is seconds — hence `force` for when you actually
-  // want the four downloads again.
+  /**
+   * Scan every live portfolio that NEEDS scanning — as a CANCELLABLE JOB.
+   *
+   * ⚠ INCREMENTAL, AND THE BACKEND DECIDES. Discovery always runs against AIRS, so an account that
+   * is new or was deleted is always fetched; one whose last pass got all four reports recently is
+   * skipped. A full pass is minutes, a no-op pass is seconds — hence `force` for when you actually
+   * want the four downloads again.
+   *
+   * ⚠⚠ THIS WAS A POLL LOOP AND THAT IS WHY THE BUTTON KEPT READING AS BROKEN (2026-08-11). It
+   * POSTed `/vermogen/refresh`, then re-read `/vermogen/status` every 2.5s and painted its own
+   * banner. Three consequences, all of them the reader's problem rather than the code's:
+   *   * the work was INVISIBLE the moment you navigated away or reloaded — it carried on, with
+   *     nothing on screen to say so;
+   *   * there was NO WAY TO STOP IT, so a full re-scan started by accident ran its minutes out;
+   *   * the panel carried a second progress vocabulary that had to be kept in step with the toast
+   *     every other button on this page already used.
+   * As a job it reports into the shared toast stack, survives the route change, re-attaches on
+   * reload (`attachRunningJobs`), and Cancel reaches the scan.
+   *
+   * ⚠ THE INLINE `refreshMsg` LINE IS GONE FOR THIS ACTION, deliberately — the same rule
+   * `refreshOne` follows. Two places reporting one job is two places to keep in step, and the
+   * toast already carries the outcome, the failure and the countdown. `refreshMsg` stays for
+   * everything on this panel that is NOT a job.
+   *
+   * ⚠ THE STEP-BY-STEP CONSOLE NARRATION IS KEPT, BUT PRINTED ONCE AT THE END. It used to come
+   * from the polled `log` array via a high-water mark on `seq`; there is no poll any more, so it
+   * is read from `/vermogen/status` in a single request after the job resolves. That log is the
+   * only place the ROSTER appears in full (44 names to compare against AIRS's own "44 Items in
+   * selectie") and the only per-report ✓/—/✗ breakdown — the comments on `logSteps` record that
+   * this is where the bugs kept being found, so dropping it to save one request would have been a
+   * real loss of diagnosability disguised as cleanup. The toast carries `i/n: name` live, which is
+   * what answers "is it moving"; this answers "what did it actually do".
+   */
   const refreshAll = async (force = false) => {
     if (refreshingAll) return;
     setRefreshingAll(true);
-    setRefreshMsg({ text: force ? 'Starting full re-scan…' : 'Checking what needs refreshing…',
-      kind: 'info' });
     try {
-      const started = await apiFetch(
-        `${API_URL}/api/airs/vermogen/refresh${force ? '?force=true' : ''}`, { method: 'POST' });
-      if (!started.ok) {
-        logDetail('fleet refresh could not start', { status: started.status });
-        setRefreshMsg({ text: `Refresh failed — HTTP ${started.status}. Is the backend running with AIRS credentials?`, kind: 'error' });
-        return;
-      }
-      console.warn(`[AIRS scan] started${force ? ' (forced full re-scan)' : ''} — step-by-step progress follows`);
-      let printed = 0;             // high-water mark over the log's append-only `seq`
-      for (;;) {
-        await new Promise((res) => setTimeout(res, 2500));
-        const s = await apiFetch(`${API_URL}/api/airs/vermogen/status`);
-        const st = (await s.json().catch(() => null)) as
-          { running?: boolean; status?: string; message?: string; detail?: string;
-            errors?: string[]; error_summary?: FailureGroup[]; log?: ScanStep[] } | null;
-        // ⚠ EACH STEP PRINTED ONCE, IN ORDER, WHILE IT IS STILL RELEVANT. The status is POLLED, so
-        // the log arrives whole every 2.5s and the same entries would be reprinted on every tick;
-        // `seq` is the append-only index the backend stamps, so anything above the high-water mark
-        // is new. Printed as it arrives rather than collected for the end — a minutes-long scrape
-        // with no narration cannot be told apart from a hung one.
-        printed = logSteps(st?.log ?? [], printed);
-        if (!st?.running) {
-          // ⚠ THE REASON, NOT THE COUNT — but in the CONSOLE. "27 report(s) failed" gives no
-          // handle on what; 27 individual lines are no better, because nobody reads 27 of them
-          // looking for the pattern. Grouped by cause, thirteen unvalued books and fourteen
-          // expired-session failures are visibly two different problems with two different fixes —
-          // and that is a developer's question, asked with devtools open, not a paragraph the
-          // panel prints at everyone who presses Refresh.
-          // The per-report breakdown the banner used to print — "Rendement 44/44,
-          // Vermogensoverzicht 44/44 (710 holdings), Mutaties 972 rows…". It answers "what did the
-          // scraper fetch", which is a developer's question; `message` answers "did it work".
-          if (st?.detail) logDetail('scan detail', st.detail);
-          const groups: FailureGroup[] = st?.error_summary ?? [];
-          if (groups.length) logDetail('reports that failed, grouped by cause', groups);
-          if (st?.errors?.length) logDetail('raw scan errors', st.errors);
-          // ⚠ THE BACKEND'S OWN VERDICT DECIDES RED, NOT THE ERROR COUNT. `status` is "error" only
-          // when NOTHING was stored — a genuinely failed scan. Anything else stored a snapshot,
-          // so individual report failures are amber: real, worth reading, not a dead job.
-          setRefreshMsg({
-            text: st?.message ?? 'Refresh complete.',
-            kind: st?.status === 'error' ? 'error' : st?.errors?.length ? 'warn' : 'ok',
-          });
-          break;
+      const { id, done } = await startJob(
+        `${API_URL}/api/airs/vermogen/refresh/job${force ? '?force=true' : ''}`,
+        force ? 'Refresh all (full re-scan)' : 'Refresh all portfolios');
+      setFleetJob(id);
+      const job = await done;
+      // ⚠ RELOAD ON ANYTHING THAT REACHED THE SERVER — done, failed OR cancelled. The scan stores
+      // each account as it goes, so a run stopped after 30 of 44 wrote 30 books; leaving the
+      // pre-refresh figures on screen would hide real work that was really done.
+      if (job.status === 'failed') logDetail('fleet refresh failed', job.summary);
+      // ⚠ BEST-EFFORT, AND NEVER A REASON TO FAIL THE REFRESH. The scan is already finished and
+      // its rows are already stored; a console diagnostic that could not be fetched must not turn
+      // a completed run into an error on screen.
+      try {
+        const st = await (await apiFetch(`${API_URL}/api/airs/vermogen/status`)).json() as
+          { detail?: string; errors?: string[]; error_summary?: FailureGroup[];
+            log?: ScanStep[] } | null;
+        logSteps(st?.log ?? [], 0);
+        if (st?.detail) logDetail('scan detail', st.detail);
+        // The REASON grouped by cause, not 27 individual lines nobody reads looking for a pattern.
+        if (st?.error_summary?.length) {
+          logDetail('reports that failed, grouped by cause', st.error_summary);
         }
-        if (st?.message) setRefreshMsg({ text: st.message, kind: 'info' });
-        // ⚠ RELOAD WHILE IT RUNS, NOT ONLY AT THE END. The scan writes each portfolio as it goes,
-        // so the rows already exist — waiting for all 44 meant staring at a stale table for
-        // minutes and then getting everything at once. The list read is a cheap DB query against
-        // rows the scraper has already committed; it costs nothing and turns the wait into
-        // progress you can watch.
-        await loadOverview();
+        if (st?.errors?.length) logDetail('raw scan errors', st.errors);
+      } catch (e) {
+        logDetail('could not read the scan log (the scan itself finished)', e);
       }
-      // ⚠ PHASE TWO OF THE SAME BUTTON. Front-Office → the four reports per book is the whole
-      // workflow and it is done by here; this adds the model portfolios, which supply the readable
-      // nickname and the id-only views (attribution, bucket drill-downs). Kept as a separate PHASE
-      // rather than a separate BUTTON: two scans of different objects must keep their verdicts
-      // apart (the CRM lesson), but that is an implementation rule and was never a reason to make
-      // the operator press twice.
-      await scanModels(force);
       setDetail({});
       setIsins({});
       await loadOverview();
+      // ⚠ PHASE TWO OF THE SAME BUTTON, AND IT IS SKIPPED ON CANCEL. Front-Office → the four
+      // reports per book is the whole workflow; this adds the model portfolios, which supply the
+      // readable nickname and the id-only views. Running it after the reader pressed Cancel would
+      // be minutes more of exactly what they asked to stop.
+      if (job.status === 'done') {
+        await scanModels(force);
+        setDetail({});
+        setIsins({});
+        await loadOverview();
+      }
       if (open) await loadDetail(open);   // same trap as refreshOne — an open row must re-fetch
     } catch (e) {
       logDetail('fleet refresh threw', e);
       setRefreshMsg({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
     } finally {
       setRefreshingAll(false);
+      setFleetJob(null);
     }
+  };
+
+  /**
+   * Stop the fleet scan the reader started.
+   *
+   * ⚠ IT STOPS BETWEEN ACCOUNTS, NOT INSIDE ONE, and the button says so. An account's four reports
+   * are downloaded and stored as a unit — stopping midway would leave a book holding two fresh
+   * reports and two stale ones with nothing on the row to say which. So Cancel waits out the
+   * account in flight (seconds), and everything already stored is kept.
+   */
+  /**
+   * Stop ONE row's re-scan.
+   *
+   * ⚠ THE CASCADE IS WHY THIS IS WORTH HAVING. A single row is not one download: with the
+   * look-through chain it is five per account over a chain reaching NINE books, so a press on the
+   * wrong row is minutes, not seconds.
+   *
+   * ⚠ IT REPORTS RATHER THAN STOPS MID-CHAIN, and that is the backend's rule, not an oversight:
+   * `/refresh/job` deliberately has no `ctx.check()` inside the scan, because a half-finished
+   * cascade leaves a parent fresh against stale children — the exact state that endpoint exists to
+   * avoid. So Cancel is honoured at the job boundary; the button says the chain finishes first.
+   */
+  const cancelRefreshRow = async (portefeuille: string) => {
+    const id = rowJobs[portefeuille];
+    if (!id) return;
+    setRefreshMsg({ text: `${portefeuille}: cancelling — the chain in flight finishes first.`,
+      kind: 'warn' });
+    await cancelJob(id);
+  };
+
+  const cancelRefreshAll = async () => {
+    if (!fleetJob) return;
+    setRefreshMsg({ text: 'Cancelling — the account being read finishes first, then it stops.',
+      kind: 'warn' });
+    await cancelJob(fleetJob);
   };
 
   /**
@@ -684,11 +737,25 @@ export default function PortfolioOverviewPanel() {
               all four reports within the last few hours, so a press after a full run is seconds
               rather than minutes. Shift-click forces a full re-scan. */}
           {isAdmin && (
-            <button type="button" onClick={(e) => void refreshAll(e.shiftKey)} disabled={refreshingAll}
-              title="Everything AIRS has: Rapportage → Front-Office (Actieve · Interne · zonder consolidatie), then Rendement, Vermogensoverzicht, Mutaties and Model for each book — plus the model portfolios if they have never been scanned. An account fully scanned in the last few hours is skipped. Shift-click forces a full re-scan of everything (minutes)."
-              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors disabled:opacity-50 disabled:cursor-wait">
-              <RefreshIcon spinning={refreshingAll} size={12} />
-              {refreshingAll ? (scanningModels ? 'Scanning models…' : 'Refreshing…') : 'Refresh all'}
+            <button type="button"
+              onClick={(e) => { if (fleetJob) { void cancelRefreshAll(); } else { void refreshAll(e.shiftKey); } }}
+              // Inert only in the gap between the press and the job id arriving — see the row button.
+              disabled={refreshingAll && !fleetJob}
+              title={fleetJob
+                ? 'Stop the scan. The account being read finishes first (seconds), then it stops — everything already downloaded is kept.'
+                : 'Everything AIRS has: Rapportage → Front-Office (Actieve · Interne · zonder consolidatie), then Rendement, Vermogensoverzicht, Mutaties and Model for each book — plus the model portfolios if they have never been scanned. An account fully scanned in the last few hours is skipped. Shift-click forces a full re-scan of everything (minutes).'}
+              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-wait ${
+                fleetJob
+                  ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
+                  : 'border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50'}`}>
+              {fleetJob ? <span className="text-[11px] leading-none">✕</span>
+                        : <RefreshIcon spinning={refreshingAll} size={12} />}
+              {/* ⚠ THE MODEL-SCAN PHASE STILL SPEAKS FOR ITSELF. It runs AFTER the job resolves,
+                  so `fleetJob` is already null and there is no Cancel to offer for it — the label
+                  is the only thing left saying the button is still busy. */}
+              {fleetJob ? 'Cancel scan'
+                : refreshingAll ? (scanningModels ? 'Scanning models…' : 'Refreshing…')
+                : 'Refresh all'}
             </button>
           )}
           {/* The POLICY, beside the thing that measures against it. Shown to everyone and editable
@@ -820,13 +887,37 @@ export default function PortfolioOverviewPanel() {
                               this exactly the height of the Analyse button beside it. */}
                           {isAdmin && (
                             <button
-                              onClick={(e) => { e.stopPropagation(); void refreshOne(r.dynamic_portefeuille); }}
-                              disabled={refreshingRows.has(r.dynamic_portefeuille)}
-                              title="Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."
-                              aria-label="Refresh this portfolio"
-                              className="inline-flex items-center justify-center px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 disabled:opacity-50 disabled:cursor-wait"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // ⚠ ONE BUTTON, TWO ACTIONS — chosen by whether a job of OURS is
+                                // in flight, not by `refreshingRows`. A row can be busy for a
+                                // moment before `startJob` returns an id, and offering a Cancel
+                                // that has nothing to cancel is worse than showing none.
+                                if (rowJobs[r.dynamic_portefeuille]) {
+                                  void cancelRefreshRow(r.dynamic_portefeuille);
+                                } else {
+                                  void refreshOne(r.dynamic_portefeuille);
+                                }
+                              }}
+                              // ⚠ NOT DISABLED WHILE RUNNING ANY MORE — that is the whole change.
+                              // A disabled spinner is the state this panel kept being reported as
+                              // "stuck": nothing to press, nothing moving, no way out. It is only
+                              // inert in the gap before the job id arrives, which is milliseconds.
+                              disabled={refreshingRows.has(r.dynamic_portefeuille)
+                                        && !rowJobs[r.dynamic_portefeuille]}
+                              title={rowJobs[r.dynamic_portefeuille]
+                                ? 'Cancel this re-scan. The look-through chain in flight finishes first, and everything already downloaded is kept.'
+                                : "Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."}
+                              aria-label={rowJobs[r.dynamic_portefeuille]
+                                ? 'Cancel this refresh' : 'Refresh this portfolio'}
+                              className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded border transition-colors disabled:opacity-50 disabled:cursor-wait ${
+                                rowJobs[r.dynamic_portefeuille]
+                                  ? 'border-warn-500/40 text-warn-400 hover:bg-warn-500/10'
+                                  : 'border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300'}`}
                             >
-                              <RefreshIcon spinning={refreshingRows.has(r.dynamic_portefeuille)} size={12} />
+                              {rowJobs[r.dynamic_portefeuille]
+                                ? <span className="text-[10px] leading-none px-0.5">✕</span>
+                                : <RefreshIcon spinning={refreshingRows.has(r.dynamic_portefeuille)} size={12} />}
                             </button>
                           )}
                         </div>
