@@ -243,6 +243,101 @@ cache would key on the `fx` dict's identity and `id()` is reused after GC, so a 
 a price at ANOTHER currency's rate. The structural fix is to stop calling `_rate` per date:
 `_eur_series` and the FX table are both date-ordered and could merge-walk once, O(n+m).
 
+### ✅ 2026-08-11 — one Postgres connection per REQUEST, not per COPY. **~3.3 s off production.**
+
+⚠⚠ **THE COST A LOCAL PROFILE STRUCTURALLY CANNOT SEE, WHICH IS WHY IT SURVIVED FOUR ROUNDS OF
+PROFILING.** `common/pg._run_copy_uncached` opened a fresh `psycopg.connect()` for every COPY.
+Measured (connect + `SET statement_timeout` + `SELECT 1`):
+
+    local (127.0.0.1)         24.0 ms          production (eu-west-3, via Supavisor)   220.7 ms
+
+The Analyse modal issues 17 COPYs ⇒ **~3.75 s in production spent purely opening connections**,
+against 0.41 s locally. Every profile I took reported it as ~4% of the time.
+
+Now scoped to the request: `copy_connection_scope()` in `common/pg.py`, entered by `read_cache`
+(already exactly "one request"), so **every existing caller gets it with no call-site change**.
+Measured: **16 connections → 1**, local cold 5,801 → 2,711 ms, payload identical (largest numeric
+difference **0**).
+
+⚠ **KEYED PER THREAD, AND THAT IS CORRECTNESS, NOT TIDINESS.** A ContextVar is COPIED into a
+worker by `asyncio.to_thread`, so several workers share one scope — and **a psycopg connection is
+not thread-safe**. Two COPY streams interleaved on one socket do not raise, they return the wrong
+bytes. Pinned by `tests/test_copy_connection_scope.py`.
+⚠ **Any COPY failure drops the connection** so the next one reconnects: a poisoned session would
+otherwise fail every remaining COPY in the request instead of just that one.
+⚠ **Nesting must not close the outer connection**, and `SET statement_timeout` runs once per
+connection rather than once per COPY.
+
+### ✅ `asset_grid` via COPY (2026-08-11) — 11 HTTP round trips → **0**
+
+⚠ **THIS REVERSES THE EARLIER "NOT WORTH IT" VERDICT, AND THE REASON IS THAT THE ECONOMICS
+CHANGED.** Rejecting it was right at the time: the proposal then was *select-list unification*,
+which the measurement showed wins nothing (11 distinct filters, only 23% id overlap, and the three
+`analysis_id` calls are one logical read chunked at 200 for URL length — zero redundancy). The
+lever was always COPY, and COPY only became cheap once the connection stopped being re-opened per
+call.
+
+`common/pg.load_rows_via_copy(table, columns, key_col, values)` — no URL, so the whole id list
+goes in one `= ANY()`. Wired into `_grid`, `_asset_benchmark` and `_airs_holding_isin`, each with
+the chunked PostgREST loop kept as the fallback. Verified against PostgREST **field for field,
+types included, on all three column sets** (after deduping ids — `asset_grid` is one row per
+EXECUTION, so a duplicated id in two chunks makes PostgREST return the row twice; the real callers
+use `sorted(set(...))`). End-to-end payload unchanged (largest numeric difference 3.55e-15, the
+pre-existing float-ordering noise).
+
+⚠⚠ **THE ROWS ARE SHIPPED AS JSON, NOT CSV COLUMNS — AND THAT IS NOT A STYLE CHOICE.** Every other
+COPY loader here parses with `line.split(",")`, which is safe only because those queries select
+numbers and dates. These select `name` / `gf_company_name` / `openfigi_name` / `leonteq_name`, and
+**1,948 rows in `asset_grid` have a comma in `name`** ("Alphabet, Inc."). A comma-split would shift
+every field after the name by one — a sector, currency and market cap attributed to the WRONG
+instrument, parsing cleanly, raising nothing. `row_to_json` also keeps types and distinguishes NULL
+from `""`, which bare CSV cannot. Pinned by `tests/test_load_rows_via_copy.py`.
+
+**Net: 65 → 54 HTTP, 17 → 23 COPY (all on the one pooled connection), local cold 2,711 → 2,361 ms.**
+⚠ Honest accounting: that is ~5 fewer round trips overall, not 11 — the 11 HTTP calls became 6
+COPYs. The win is real but smaller than "11 → 0" suggests, and it is worth more in production
+(~50 ms per HTTP hop) than the local clock shows.
+
+### ✅ `asset_execution` + `airs_holding` + the last `_airs_ref` stragglers (2026-08-11)
+
+**`_executions` → COPY.** 6 chunked round trips → 1. ⚠ The `r["isin"] not in out` guard reads like
+a transport-order-dependent "first listing wins" — it is not: **`asset_execution.isin` carries a
+UNIQUE constraint** (16,613 rows / 16,613 distinct). Checked rather than assumed, because if a
+duplicate were possible the two transports could pick different winners and only under COPY.
+
+**`airs_holding` snapshot → COPY.** Removes the paging *and* its empty probe page (a 24-row
+snapshot issued a second request at `offset=24` purely to come back empty). 10 → 6.
+⚠⚠ **THE FIRST ATTEMPT WAS A SILENT 18.8x OVER-FETCH.** `load_rows_via_copy` took one key, so I
+filtered on `portefeuille` and re-applied `as_of_date` in Python — **788 rows instead of 42**,
+because the table keeps 28 historical snapshots per book. Right answer, far more bytes, and
+nothing would have reported it. The loader now takes a `where=` for extra equality predicates.
+
+**Three readers of `airs_model_portfolio_position` were still bypassing `_airs_ref`** — visible
+only by dumping the actual query params: `order=id.asc` (correct), `order=portfolio_id.asc,isin.asc`
+(`_airs_account_links`), and two unpaged reads (`_airs_portfolio_links`). ⚠ The second was **paging
+on a NON-UNIQUE key** — the CapitaLand duplicate — so it also had a latent
+serve-twice-or-skip bug at a page boundary. All migrated: 6 → 3, and `airs_model_portfolio` 5 → 3.
+
+⚠⚠ **AND THAT MIGRATION NEARLY CHANGED 30 PORTFOLIOS' NUMBERS.** `_airs_account_links` counted
+EVERY position row; `_airs_ref.position_counts()` counts only ISIN-bearing ones (the grid counts
+*instruments*, and a cash line is not one). **31 position rows have no ISIN, across 30 portfolios**,
+so swapping in the shared helper would have quietly altered more than half the list's `positions`.
+The count is now computed inline from the shared read, preserving the original semantics exactly.
+Verified: overview + account-links payload **IDENTICAL**.
+
+### Where /management-dashboard stands now (local, cold vs re-open)
+
+| | round trips | pg connections | time |
+|---|---|---|---|
+| Analyse — first open | 65 HTTP | **1** | **2,711 ms** (was ~7,200) |
+| Analyse — re-open | **0** | 1 | **25 ms** |
+
+⚠ **Production is still dominated by the 65 HTTP round trips (~50 ms each ⇒ ~3.3 s).** That is now
+the single biggest remaining item and the local clock will keep under-reporting it. The tables are
+`asset_grid` 11 · `airs_holding` 10 · `asset_execution` 6 · `airs_mutatie`/`airs_model_weight` — and
+the lever is **COPY** (no URI chunking limit ⇒ 502 ids in one round trip), not the
+select-list unification measured and rejected above.
+
 ### Next, in value order
 
 **A. CACHE THE ANALYSE PAYLOAD — by far the biggest win, and the only one that changes the feel.**

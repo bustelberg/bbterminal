@@ -25,6 +25,7 @@ WHY THE OBVIOUS MATCHER PICKS THE WRONG PORTFOLIO
     name score usable at all. Rank first, and the wrapper wins every time.
 """
 from __future__ import annotations
+from routers._airs_ref import models as ref_models, positions as ref_positions
 
 import re
 import unicodedata
@@ -242,11 +243,9 @@ class ResolvedLink:
 
 
 def _load_context(supabase) -> tuple[list[dict], dict[int, list[dict]], dict[str, dict]]:
-    portfolios = (supabase.table("airs_model_portfolio")
-                  .select("id,name,display_name,omschrijving").execute().data or [])
+    portfolios = ref_models()          # one shared read — see `_airs_ref`
     comp: dict[int, list[dict]] = {}
-    for r in (supabase.table("airs_model_portfolio_position")
-              .select("portfolio_id,isin,fonds").execute().data or []):
+    for r in ref_positions():
         comp.setdefault(r["portfolio_id"], []).append(r)
     stored = {
         link_key(r.get("isin"), r.get("fonds")): r
@@ -400,11 +399,9 @@ def expand_members_through_links(supabase, members: list[dict], *,
     Link column shows, so what a reader sees linked is exactly what gets looked through."""
     if not members:
         return members
-    portfolios = (supabase.table("airs_model_portfolio")
-                  .select("id,name,display_name,omschrijving").execute().data or [])
+    portfolios = ref_models()          # one shared read — see `_airs_ref`
     positions_by_pid: dict[int, list[dict]] = {}
-    for r in (supabase.table("airs_model_portfolio_position")
-              .select("portfolio_id,fonds,isin,percentage").execute().data or []):
+    for r in ref_positions():
         positions_by_pid.setdefault(r["portfolio_id"], []).append(r)
     # The guesser only needs isin/fonds per portfolio (its gates), not the percentages.
     comp = {pid: [{"isin": r.get("isin"), "fonds": r.get("fonds")} for r in rows]

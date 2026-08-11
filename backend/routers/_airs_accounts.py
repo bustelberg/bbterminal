@@ -61,8 +61,14 @@ from datetime import date
 # two copies would drift the moment a fifth report is added, and the drift would show up as
 # accounts silently missing from the page.
 from airs_vermogen import REPORTS
+from common.pg import load_rows_via_copy
 from deps import supabase
 from routers._airs_ref import model_weights_for as ref_model_weights_for, mutaties_for as ref_mutaties_for
+
+_SNAP_COLS = ("as_of_date,holding_name,quantity,currency,weight,start_value_eur,"
+              "current_value_eur,ytd_return_eur,ytd_return_pct,ytd_return_local_pct,"
+              "cost_basis_local,current_price_local,airs_weight,fund_result_eur,"
+              "fx_result_eur,airs_result_pct")
 
 # AIRS reports a portfolio's own return; we never recompute it. These are the columns it uses.
 _PERF_COLS = ("portefeuille,periode,beginvermogen,stortingen,onttrekkingen,koersresultaat,"
@@ -557,13 +563,19 @@ def account_holdings(portefeuille: str) -> dict:
     if not newest:
         return {"portefeuille": portefeuille, "as_of": None, "rows": []}
     as_of = str(newest[0]["as_of_date"])
-    snap = _paged(lambda: supabase.table("airs_holding")
-                  .select("as_of_date,holding_name,quantity,currency,weight,start_value_eur,"
-                          "current_value_eur,ytd_return_eur,ytd_return_pct,ytd_return_local_pct,"
-                          "cost_basis_local,current_price_local,airs_weight,fund_result_eur,"
-                          "fx_result_eur,airs_result_pct")
-                  .eq("portefeuille", portefeuille).eq("as_of_date", as_of)
-                  .order("holding_name"))
+    # ⚠ COPY REMOVES THE PAGING *AND* ITS EMPTY PROBE PAGE. The pager below is correct and must
+    # stay as the fallback, but it costs `ceil(rows/1000) + 1` round trips — the +1 being the
+    # empty page that proves the previous one was the last (measured: a 24-row snapshot issued a
+    # second request at `offset=24` purely to come back empty). A COPY has no row cap, so one
+    # query returns the snapshot and there is nothing to prove.
+    # ⚠ `as_of_date` STAYS A SERVER-SIDE FILTER. `airs_holding` keeps 28 historical snapshots per
+    # book, so fetching the book and picking the date in Python reads **788 rows instead of 42**.
+    snap = load_rows_via_copy("airs_holding", _SNAP_COLS, "portefeuille", [portefeuille],
+                              where={"as_of_date": as_of})
+    if snap is None:
+        snap = _paged(lambda: supabase.table("airs_holding").select(_SNAP_COLS)
+                      .eq("portefeuille", portefeuille).eq("as_of_date", as_of)
+                      .order("holding_name"))
     if not snap:
         return {"portefeuille": portefeuille, "as_of": None, "rows": []}
     snap.sort(key=lambda r: -(r.get("current_value_eur") or 0))

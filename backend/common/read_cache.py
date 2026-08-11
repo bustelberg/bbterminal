@@ -83,8 +83,17 @@ def read_cache(label: str = ""):
     state: dict[str, Any] = {"store": {}, "hits": 0, "misses": 0, "writes": 0,
                              "saved_ms": 0.0, "label": label}
     token = _ACTIVE.set(state)
+    # ⚠ THE DIRECT-POSTGRES CONNECTION IS SCOPED HERE TOO, and it is the larger of the two savings
+    # in production. `common/pg.py` opened a fresh connection per COPY: 24ms locally, **220ms
+    # against eu-west-3 through Supavisor** — so the Analyse modal's 17 COPYs spent ~3.75s just
+    # connecting, invisibly, because a laptop profile puts it at 0.4s. This block is already
+    # exactly "one request", which is the right lifetime for that connection, so entering the
+    # scope here gives every existing caller the reuse without touching a single call site.
+    from common.pg import copy_connection_scope  # noqa: PLC0415 — avoids an import cycle
+
     try:
-        yield state
+        with copy_connection_scope():
+            yield state
     finally:
         _ACTIVE.reset(token)
         if state["hits"]:

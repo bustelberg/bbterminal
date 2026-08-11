@@ -45,6 +45,7 @@ from collections import defaultdict
 from datetime import date
 
 from asset_pipeline.geo import msci_region_of
+from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase
 from routers._airs_ref import model as ref_model, mutaties_for as ref_mutaties_for, positions_for as ref_positions_for
 from routers._asset_benchmark import index_returns
@@ -154,16 +155,24 @@ def _sector(raw: str | None) -> str:
     return _SECTOR_ALIASES.get(raw, raw)
 
 
+_GRID_COLS = ("isin,name,sector,country,msci_region,domicile_country,currency,"
+              "market_cap_currency,asset_class,status")
+
+
 def _grid(isins: list[str]) -> dict[str, dict]:
+    # ONE COPY instead of ceil(len/200) round trips — see `load_rows_via_copy`. The chunked
+    # PostgREST loop below is the fallback and is what runs when the direct connection is
+    # unavailable; both return the same rows (verified field for field, types included).
+    rows = load_rows_via_copy("asset_grid", _GRID_COLS, "isin", isins)
+    if rows is None:
+        rows = []
+        for i in range(0, len(isins), IN_CHUNK_SIZE):
+            rows += (supabase.table("asset_grid").select(_GRID_COLS)
+                     .in_("isin", isins[i:i + IN_CHUNK_SIZE]).execute().data or [])
     out: dict[str, dict] = {}
-    for i in range(0, len(isins), IN_CHUNK_SIZE):
-        rows = (supabase.table("asset_grid")
-                .select("isin,name,sector,country,msci_region,domicile_country,currency,"
-                        "market_cap_currency,asset_class,status")
-                .in_("isin", isins[i:i + IN_CHUNK_SIZE]).execute().data or [])
-        for r in rows:
-            if r.get("status") == "ok":
-                out[r["isin"]] = r
+    for r in rows:
+        if r.get("status") == "ok":
+            out[r["isin"]] = r
     return out
 
 

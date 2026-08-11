@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 
+from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase
 from routers._airs_portfolio_perf import _closes as _asset_closes
 from routers._benchmark_index import (
@@ -50,6 +51,11 @@ from routers._benchmark_index import (
     _window_rows,
     index_weights,
 )
+
+
+_BENCH_GRID_COLS = ("isin,analysis_id,yahoo_symbol,name,gf_company_name,currency,"
+                    "market_cap_eur,market_cap_currency,status,bars,is_default,"
+                    "delisted_at,out_of_scope_at")
 
 
 def window_marks_multi(analysis_ids: list[int], lookback: str, start_anchors: list[str],
@@ -309,13 +315,14 @@ def members(label: str) -> tuple[list[dict], dict]:
     if not ids:
         return [], {"universe_members": 0, "priced": 0, "covered_pct": None}
 
-    grid_rows: list[dict] = []
-    for i in range(0, len(aids := _universe_analysis_ids(label)), IN_CHUNK_SIZE):
-        grid_rows += (supabase.table("asset_grid")
-                      .select("isin,analysis_id,yahoo_symbol,name,gf_company_name,currency,"
-                              "market_cap_eur,market_cap_currency,status,bars,is_default,"
-                              "delisted_at,out_of_scope_at")
-                      .in_("analysis_id", aids[i:i + IN_CHUNK_SIZE]).execute().data or [])
+    aids = _universe_analysis_ids(label)
+    # ONE COPY for the whole universe (502 ids) instead of three chunked round trips.
+    grid_rows = load_rows_via_copy("asset_grid", _BENCH_GRID_COLS, "analysis_id", aids)
+    if grid_rows is None:
+        grid_rows = []
+        for i in range(0, len(aids), IN_CHUNK_SIZE):
+            grid_rows += (supabase.table("asset_grid").select(_BENCH_GRID_COLS)
+                          .in_("analysis_id", aids[i:i + IN_CHUNK_SIZE]).execute().data or [])
 
     # ⚠ ONE ROW PER ANALYSIS ASSET, NOT PER LISTING. `asset_grid` is one row per EXECUTION, so a
     #   company traded on several venues appears several times — measured on the S&P, 501 assets
