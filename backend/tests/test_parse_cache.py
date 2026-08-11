@@ -13,7 +13,21 @@ from __future__ import annotations
 
 import copy
 
+import httpx
+
 from common.parse_cache import _copy_rows, _is_flat
+
+
+def _response(body: bytes) -> httpx.Response:
+    """An `httpx.Response` postgrest can actually parse.
+
+    ⚠ THE `request=` IS REQUIRED AND ITS ABSENCE FAILS LATE. `httpx.Response(200, content=...)`
+    constructs fine, but postgrest reads `response.request` to find the Content-Range header for
+    the row count, and httpx raises `RuntimeError: The request instance has not been set on this
+    response` only at that point — so the omission looks like a bug in the code under test rather
+    than in the fixture.
+    """
+    return httpx.Response(200, content=body, request=httpx.Request("GET", "http://test/x"))
 
 
 class TestFlatnessDetection:
@@ -82,18 +96,15 @@ class TestInstallIsSafe:
 
     def test_a_response_without_the_marker_parses_normally(self):
         """Degrades to exactly today's behaviour — the whole fallback story."""
-        import httpx
         from postgrest.base_request_builder import APIResponse
-        r = httpx.Response(200, content=b'[{"id": 1, "name": "x"}]')
-        out = APIResponse.from_http_request_response(r)
+        out = APIResponse.from_http_request_response(_response(b'[{"id": 1, "name": "x"}]'))
         assert out.data == [{"id": 1, "name": "x"}]
 
     def test_the_second_parse_of_the_same_response_is_equal_but_not_shared(self):
         """The marker is attached to the response object, so a repeated parse of the SAME
         object is served from the memo — and must still hand back an independent copy."""
-        import httpx
         from postgrest.base_request_builder import APIResponse
-        r = httpx.Response(200, content=b'[{"id": 1, "name": "x"}]')
+        r = _response(b'[{"id": 1, "name": "x"}]')
         first = APIResponse.from_http_request_response(r).data
         first[0]["name"] = "MUTATED"
         second = APIResponse.from_http_request_response(r).data

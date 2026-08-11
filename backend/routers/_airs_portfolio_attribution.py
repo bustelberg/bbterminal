@@ -42,7 +42,6 @@ import asyncio
 import logging
 from datetime import date
 
-from deps import supabase
 from routers._airs_ref import model as ref_model
 from routers._airs_portfolio_analysis import (
     CASH_BUCKET,

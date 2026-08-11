@@ -18,20 +18,13 @@ from __future__ import annotations
 
 import pytest
 
-from tests._fake_supabase import FakeSupabase
-
-
-# One instrument with a clean series, one with a 10:1 split partway through, one that has no bar
-# at all before the earlier anchor (so its `start` is None there but not at the later anchor).
-_PRICES = (
-    [{"analysis_id": 1, "target_date": d, "close": c} for d, c in
-     [("2025-01-02", 100.0), ("2025-03-03", 110.0), ("2025-06-02", 120.0), ("2025-09-01", 130.0)]]
-    + [{"analysis_id": 2, "target_date": d, "close": c} for d, c in
-       # 10:1 split between 2025-03-03 and 2025-06-02
-       [("2025-01-02", 1000.0), ("2025-03-03", 1050.0), ("2025-06-02", 105.0), ("2025-09-01", 111.0)]]
-    + [{"analysis_id": 3, "target_date": d, "close": c} for d, c in
-       [("2025-06-02", 50.0), ("2025-09-01", 55.0)]]        # nothing before 2025-04-01
-)
+# ⚠ NO FAKE DATABASE HERE, DELIBERATELY. The SQL-level equivalence of `window_marks_multi` and
+# `window_marks` cannot be shown against a fake — the whole claim is about what POSTGRES does with
+# `DISTINCT ON (analysis_id, anchor)` and the per-anchor jump join, and a Python stand-in would
+# only re-assert my own reading of it. That equivalence was verified against the real database
+# (502 SP500 ids, two anchors, field for field including the asymmetric jump sets: 3 at one anchor,
+# 0 at the other). What IS testable without a database is everything around the query — the
+# fallback shapes and the "one call for N anchors" contract — and that is what these cover.
 
 
 @pytest.fixture

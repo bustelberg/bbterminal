@@ -58,16 +58,15 @@ from datetime import date, timedelta
 from common.pg import load_rows_via_copy
 from deps import supabase
 from routers._airs_ref import model_weights_for as ref_model_weights_for, models as ref_models
-
-_HOLDING_GRID_COLS = ("isin,name,openfigi_name,leonteq_name,leonteq_product_type,"
-                      "country,continent,msci_region,asset_class,sector")
-
 from timeseries import load_series
 
 from ._airs_portfolio_links import link_key, resolve_links
 from ._benchmark_index import _fx_to_eur, _rate
 
 _log = logging.getLogger(__name__)
+
+_HOLDING_GRID_COLS = ("isin,name,openfigi_name,leonteq_name,leonteq_product_type,"
+                      "country,continent,msci_region,asset_class,sector")
 
 
 @contextmanager

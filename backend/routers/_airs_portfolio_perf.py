@@ -47,7 +47,6 @@ from __future__ import annotations
 import asyncio
 from datetime import date, timedelta
 
-from asset_pipeline.fx import SUBUNIT
 from common.fx_load import load_fx_to_eur
 from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase

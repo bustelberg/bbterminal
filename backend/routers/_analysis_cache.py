@@ -65,7 +65,6 @@ import threading
 import time
 from typing import Any, Callable
 
-from deps import supabase
 from index_universe.templates._cache import _LruTtlCache  # noqa: PLC2701
 
 _log = logging.getLogger(__name__)

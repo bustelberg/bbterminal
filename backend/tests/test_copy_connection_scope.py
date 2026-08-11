@@ -137,8 +137,10 @@ class TestThreadsDoNotShareAConnection:
             def work():
                 seen[threading.get_ident()] = pg._scoped_connection("postgresql://x")
             threads = [threading.Thread(target=work) for _ in range(4)]
-            for t in threads: t.start()
-            for t in threads: t.join()
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
         assert len(seen) == 4
         assert len({id(c) for c in seen.values()}) == 4, "threads shared a connection"
         assert len(made) == 4

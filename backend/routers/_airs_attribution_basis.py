@@ -34,7 +34,6 @@ from __future__ import annotations
 
 from datetime import date
 
-from deps import supabase
 from routers._airs_ref import positions_for as ref_positions_for
 
 # Bucket sentinels + the classifier live in the analysis module; importing them here is safe
