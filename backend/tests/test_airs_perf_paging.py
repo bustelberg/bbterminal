@@ -119,10 +119,13 @@ class TestTheHoldingsSnapshotIsAskedForByDate:
                 "airs_weight": 1, "fund_result_eur": 0, "fx_result_eur": 0, "airs_result_pct": 0}
                for i in range(1500)]
         new = [{**old[0], "as_of_date": "2026-08-01", "holding_name": "NEW A"}]
-        monkeypatch.setattr(acc, "supabase",
-                            FakeSupabase({"airs_holding": old + new,
-                                          "airs_mutatie": [], "airs_model_weight": [],
-                                          "airs_performance": []}, max_rows=CLOUD_CAP))
+        fake = FakeSupabase({"airs_holding": old + new,
+                             "airs_mutatie": [], "airs_model_weight": [],
+                             "airs_performance": []}, max_rows=CLOUD_CAP)
+        monkeypatch.setattr(acc, "supabase", fake)
+        # ⚠ AND `deps.supabase` — the mutatie/model-weight reads moved into the shared
+        # `routers._airs_ref`, which resolves through `deps` at call time.
+        monkeypatch.setattr("deps.supabase", fake)
 
         got = acc.account_holdings("P")
 

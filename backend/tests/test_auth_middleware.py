@@ -39,11 +39,32 @@ def _request(method: str, path: str, auth: str | None = "Bearer t") -> Request:
     return Request(scope)
 
 
-def _run(monkeypatch, method: str, path: str, role: str | None, auth: str | None = "Bearer t"):
+class _FakeAuthBackendUnavailable(RuntimeError):
+    """Stands in for `routers.auth.AuthBackendUnavailable`.
+
+    The middleware does `from routers.auth import AuthBackendUnavailable`, so it
+    binds whatever the injected fake module exposes — meaning raising *this*
+    class is caught by the middleware's `except` for real. Defining it here
+    instead of importing the genuine one keeps this suite free of the Supabase
+    client, which is the whole reason routers.auth is faked (see module docstring).
+    """
+
+
+def _run(monkeypatch, method: str, path: str, role: str | None, auth: str | None = "Bearer t",
+         raises: BaseException | None = None):
     """Returns (status_code, reached_handler). `role=None` simulates an
-    invalid/absent token (verify_token returns None)."""
+    invalid/absent token (verify_token returns None); `raises` simulates
+    verify_token blowing up instead of returning a verdict."""
+    def _verify(_authz):
+        if raises is not None:
+            raise raises
+        return None if role is None else {"role": role}
+
     fake_auth = types.SimpleNamespace(
-        verify_token=lambda _authz: (None if role is None else {"role": role})
+        verify_token=_verify,
+        # !! MUST BE PRESENT OR EVERY TEST IN THIS FILE ImportErrors -- the
+        # middleware imports this name alongside verify_token.
+        AuthBackendUnavailable=_FakeAuthBackendUnavailable,
     )
     monkeypatch.setitem(sys.modules, "routers.auth", fake_auth)
 
@@ -279,3 +300,60 @@ class TestWriteTiers:
 
     def test_admin_may_read_anything(self, monkeypatch):
         assert _run(monkeypatch, "GET", "/api/admin/health", "admin") == (200, True)
+
+
+class TestUnreachableIdentityProviderIsNot401:
+    """An outage must not be reported as a credentials problem.
+
+    2026-08-11: a REINDEX saturated prod's disk I/O, GoTrue's own DB lookup
+    timed out, `verify_token` swallowed the exception into None, and the whole
+    app answered **401 Authentication required**. Every session was valid. The
+    401 pointed the investigation at expired logins and auth config for hours
+    while the actual cause was one maintenance command eating the disk.
+
+    401 is also actively harmful here: it invites the frontend to discard a
+    good session in response to a transient fault.
+    """
+
+    def test_transport_failure_is_503_not_401(self, monkeypatch):
+        status, reached = _run(
+            monkeypatch, "GET", "/api/airs/portfolios/overview", "user",
+            raises=_FakeAuthBackendUnavailable("ReadTimeout"),
+        )
+        assert status == 503, "an unreachable identity provider must not read as bad credentials"
+        assert reached is False, "the request must still not reach the handler"
+
+    def test_503_carries_retry_after(self, monkeypatch):
+        """Transient means retryable, and the response should say so."""
+        fake_auth = types.SimpleNamespace(
+            verify_token=_raise_unavailable,
+            AuthBackendUnavailable=_FakeAuthBackendUnavailable,
+        )
+        monkeypatch.setitem(sys.modules, "routers.auth", fake_auth)
+
+        async def call_next(_req):
+            return JSONResponse({"ok": True})
+
+        resp = asyncio.run(
+            mw.enforce_api_auth(_request("GET", "/api/airs/portfolios/overview"), call_next)
+        )
+        assert resp.status_code == 503
+        assert resp.headers.get("Retry-After") == "5"
+
+    def test_a_genuinely_invalid_token_is_still_401(self, monkeypatch):
+        """The fix must not turn real rejections into 503s — that would make
+        every unauthenticated probe look like an outage."""
+        assert _run(monkeypatch, "GET", "/api/airs/portfolios/overview", None) == (401, False)
+
+    def test_an_unexpected_error_is_still_500(self, monkeypatch):
+        """Only transport faults become 503. A programming error must stay a
+        500, or a real bug hides behind 'try again later' forever."""
+        status, reached = _run(
+            monkeypatch, "GET", "/api/airs/portfolios/overview", "user",
+            raises=ValueError("boom"),
+        )
+        assert (status, reached) == (500, False)
+
+
+def _raise_unavailable(_authz):
+    raise _FakeAuthBackendUnavailable("ReadTimeout")

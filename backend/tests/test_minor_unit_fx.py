@@ -25,6 +25,7 @@ from __future__ import annotations
 import pytest
 
 from asset_pipeline.fx import SUBUNIT
+from tests._fake_supabase import FakeSupabase
 from routers._benchmark_index import _rate
 
 
@@ -63,21 +64,55 @@ class TestPenceIsNotACurrency:
 class TestTheLoadersAskForTheBaseCurrency:
     """`_rate` cannot resolve GBp -> GBP if the FX dict never had GBP in it. Both loaders build
     that dict from `asset_execution.currency`, so both must normalise before querying — a fix in
-    `_rate` alone leaves the table empty and the holding just as unpriced."""
+    `_rate` alone leaves the table empty and the holding just as unpriced.
 
-    def test_the_portfolio_loader_normalises(self):
-        import inspect
+    ⚠ THESE WERE `assert "SUBUNIT" in inspect.getsource(...)` AND THAT WAS ALWAYS A PROXY, NOT THE
+    PROPERTY. It broke the moment both loaders were merged into `common/fx_load.py` (2026-08-11) —
+    the behaviour was unchanged and identical for both, and the tests still went red, because they
+    were asserting about the TEXT of a function rather than what it does. Rewritten to ask the
+    loader for `GBp` and check what comes back, which is the thing that actually matters and
+    survives the body moving again.
+    """
 
+    @staticmethod
+    def _fake_gbp(monkeypatch):
+        """A `fx_rate` table holding GBP and, deliberately, nothing called GBp."""
+        fake = FakeSupabase({"fx_rate": [
+            {"currency_code": "GBP", "rate_date": "2026-01-02", "rate": 0.85}]})
+        monkeypatch.setattr("deps.supabase", fake)
+        # ⚠ Patch the name AS BOUND IN `fx_load`, not `common.pg._db_url` — `fx_load` did
+        # `from common.pg import _db_url`, so patching the origin would not reach it. Forces the
+        # PostgREST pager, which is the path a FakeSupabase can serve.
+        monkeypatch.setattr("common.fx_load._db_url", lambda: None)
+        return fake
+
+    def test_the_portfolio_loader_normalises(self, monkeypatch):
         from routers._airs_portfolio_perf import _fx
 
-        assert "SUBUNIT" in inspect.getsource(_fx)
+        self._fake_gbp(monkeypatch)
+        got = _fx({"GBp"}, "2026-01-01", "2026-12-31")
 
-    def test_the_benchmark_loader_normalises(self):
-        import inspect
+        assert "GBP" in got, "asked for the literal 'GBp' — fx_rate has no such row, so the "\
+                             "holding reads as unpriceable with every bar present"
+        assert got["GBP"]["2026-01-02"] == 0.85
+        assert "GBp" not in got
 
+    def test_the_benchmark_loader_normalises(self, monkeypatch):
         from routers._benchmark_index import _fx_to_eur
 
-        assert "SUBUNIT" in inspect.getsource(_fx_to_eur)
+        self._fake_gbp(monkeypatch)
+        got = _fx_to_eur({"GBp"}, "2026-01-01", "2026-12-31")
+
+        assert "GBP" in got
+        assert got["GBP"]["2026-01-02"] == 0.85
+        assert "GBp" not in got
+
+    def test_eur_is_never_requested(self, monkeypatch):
+        """EUR has no row in `fx_rate` — it is the base. Asking for it would be a wasted
+        predicate and a key that is never populated."""
+        from common.fx_load import major_currencies
+
+        assert major_currencies({"EUR", "GBp", "USD"}) == ["GBP", "USD"]
 
 
 class TestAMarketCapIsNotAPrice:

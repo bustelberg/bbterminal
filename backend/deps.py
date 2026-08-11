@@ -75,6 +75,70 @@ class _CachingSession:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._c, name)
 
+    def _send(self, method: str, url: Any, **kw: Any) -> Any:
+        """One PostgREST call, retried once when the failure is a TRANSPORT fault.
+
+        ⚠⚠ ONLY FOR IDEMPOTENT METHODS, AND THE ASYMMETRY IS THE WHOLE POINT. A read that times
+        out can be repeated; a POST or PATCH that times out MAY ALREADY HAVE BEEN APPLIED —
+        the timeout is about the response, not the write — so retrying one risks a double write
+        with no way to tell afterwards. GET and HEAD retry; everything else raises.
+
+        ⚠ WHY THIS EXISTS: a transient stall was 500-ing whole pages. Production, 2026-08-11:
+        `httpcore.ReadTimeout` on `GET /api/airs/portfolios/overview`, thrown out of `_year_perf`.
+        That read is `airs_performance` — **1,815 rows, 608 kB, two pages** — so it is not a slow
+        query and no amount of optimising it would have helped. One stall against a 30s timeout on
+        a client with no retry took the page down, and `deps`' own comment already described the
+        intent that was never implemented: "read endpoints catch + return empty, so a slow
+        dependency degrades gracefully rather than wedging the UI".
+
+        ⚠ ONE EXTRA ATTEMPT, NOT FIVE. The timeout is 30s, so a retry is expensive; two attempts
+        cover the stall-and-recover case that actually happens while capping the worst case at
+        ~60s rather than minutes. A dependency that is genuinely down should surface as an error,
+        not as a page that hangs for five minutes first.
+        """
+        import time  # noqa: PLC0415
+
+        import httpx  # noqa: PLC0415
+
+        transient = (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError,
+                     httpx.RemoteProtocolError, httpx.ReadError)
+        idempotent = method.upper() in ("GET", "HEAD")
+        for attempt in (1, 2):
+            try:
+                r = self._c.request(method, url, **kw)
+            except transient:
+                if attempt == 2 or not idempotent:
+                    raise
+                logging.getLogger(__name__).warning(
+                    "[deps] transient PostgREST fault on %s %s — retrying once",
+                    method, str(url).split("?")[0])
+                time.sleep(0.5)
+                continue
+            # ⚠⚠ A STATEMENT TIMEOUT ARRIVES AS A SUCCESSFUL HTTP RESPONSE CARRYING AN ERROR BODY,
+            # which is why the `except` above cannot see it. Postgres cancels the query, PostgREST
+            # reports `{"code": "57014"}`, and postgrest-py raises `APIError` only later, when the
+            # caller parses. Production 2026-08-11: this 500'd
+            # `GET /api/airs/model-portfolios/2015/analysis` from a plain `asset_grid` read while a
+            # bulk clone saturated the disk — a query that takes milliseconds when nothing else is
+            # running.
+            #
+            # ⚠ 57014 ONLY, AND ONLY FOR A READ. It is a RESOURCE verdict ("this took too long
+            # right now"), which the next attempt may well not hit — unlike a syntax error or a
+            # constraint violation, which are facts about the query and must surface immediately.
+            # Retrying those would waste the whole timeout again and delay the report.
+            #
+            # ⚠ AND IT IS LOGGED AT WARNING, because uvicorn leaves the root logger there. A query
+            # that is slow for a REAL reason (a missing index) must not be silently papered over by
+            # a retry that usually succeeds — the line is what makes the difference visible.
+            if attempt == 1 and idempotent and not r.is_success and b'"57014"' in r.content:
+                logging.getLogger(__name__).warning(
+                    "[deps] statement timeout (57014) on %s %s — retrying once",
+                    method, str(url).split("?")[0])
+                time.sleep(0.5)
+                continue
+            return r
+        raise AssertionError("unreachable")   # the loop either returns or raises
+
     def request(self, method: str, url: Any, **kw: Any) -> Any:
         """⚠ `request`, NOT `send` — postgrest builds no `Request` object.
 
@@ -87,11 +151,11 @@ class _CachingSession:
         from common import read_cache  # noqa: PLC0415  (avoid an import cycle at module load)
 
         if read_cache.active() is None:
-            return self._c.request(method, url, **kw)
+            return self._send(method, url, **kw)
         if method.upper() not in ("GET", "HEAD"):
             # A write invalidates the snapshot — see `note_write`.
             read_cache.note_write()
-            return self._c.request(method, url, **kw)
+            return self._send(method, url, **kw)
         # ⚠ THE KEY INCLUDES `prefer` AND `range`. The same URL asked with `Prefer: count=exact`,
         # or over a different `Range`, is a DIFFERENT question — pagination and the count variant
         # both ride on HEADERS rather than on the query string, so a URL-only key would serve
@@ -106,7 +170,11 @@ class _CachingSession:
         import time  # noqa: PLC0415
 
         t0 = time.perf_counter()
-        r = self._c.request(method, url, **kw)
+        # ⚠ THROUGH `_send`, LIKE EVERY OTHER PATH. A memo MISS is an ordinary read and needs the
+        # same transport resilience; routing it around the retry would mean the first caller of a
+        # query is the only one exposed to a transient stall — the hardest kind of flake to
+        # reproduce, because a second attempt would have been served from the memo anyway.
+        r = self._send(method, url, **kw)
         if r.is_success:
             # Reading `.content` forces the body so the cached response can be handed out again;
             # postgrest re-parses those bytes into FRESH rows per caller, which is what makes
@@ -194,6 +262,15 @@ class _LazySupabase:
 
 
 supabase = _LazySupabase()
+
+# Reuse the PARSE of a response that `read_cache` served from its memo. The memo already removes
+# the round trip; without this, postgrest still re-runs the full pydantic parse on every hit —
+# profiled at 1.16s (~21%) of one Analyse computation. Installed here, beside the session swap,
+# because both are the same kind of thing: a postgrest internal this codebase deliberately
+# reaches into. Best-effort: a failure logs and leaves behaviour exactly as it was.
+from common.parse_cache import install as _install_parse_cache  # noqa: E402, PLC0415
+
+_install_parse_cache()
 
 
 # Default chunk size for `.in_()` queries.

@@ -63,11 +63,18 @@ def _parent(pct=50.0):
 
 
 def _patch(monkeypatch, **kw):
-    # ⚠ Only this module holds a handle. `_airs_portfolio_links` takes `supabase` as an argument,
-    # so patching it there would fail — and passing the fake through is what proves the two share
-    # one connection rather than each reaching for their own.
+    # `_airs_portfolio_links` takes `supabase` as an argument, so patching it there would fail —
+    # and passing the fake through is what proves the two share one connection rather than each
+    # reaching for their own.
+    #
+    # ⚠ BOTH HANDLES, because the position/model reads moved into the SHARED `routers._airs_ref`
+    # (2026-08-11) and that module resolves `deps.supabase` at call time. Patching only this
+    # module left those reads pointing at the real proxy, which tried to build a client and failed
+    # with `KeyError: 'SUPABASE_URL'` — i.e. a refactor elsewhere silently took this test's
+    # database away. Patching `deps.supabase` too covers wherever a read ends up living.
     fake = FakeSupabase(_tables(**kw))
     monkeypatch.setattr(LT, "supabase", fake)
+    monkeypatch.setattr("deps.supabase", fake)
     return fake
 
 

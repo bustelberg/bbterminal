@@ -18,10 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import gzip
-import itertools
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -35,14 +33,9 @@ from ingest.prices import _fetch_price_from_api, _parse_price_series
 
 router = APIRouter(tags=["benchmarks"])
 
-# How many constituents the bulk fundamentals fill fetches at once.
-#
-# ⚠ CHOSEN FROM MEASUREMENT, NOT FROM A FEELING. Against the live GuruFocus API: 6 calls serially
-# 15.42s, the same 6 on six threads 4.56s (3.4x), and twelve threads doubled throughput again to
-# 2.64 calls/s with no 403 anywhere — the ceiling was never found. What WAS seen at twelve was one
-# empty response in twelve, which is not a quota refusal and not proof of a limit either; eight
-# keeps nearly all of the gain without probing for the edge, and `_one` retries an empty answer.
-_FILL_WORKERS = 8
+# ⚠ THE FILL'S WORKER COUNT MOVED WITH THE FILL — `routers/_fundamental_fill.FILL_WORKERS`, where
+# the measurement behind the number lives beside the loop it governs. Two copies of a concurrency
+# limit is two places for one of them to be raised.
 
 
 class CreateBenchmarkRequest(BaseModel):
@@ -343,9 +336,15 @@ async def benchmark_reconstructed_index(label: str, year: int | None = None):
     and looked entirely plausible doing it. `_benchmark_index.compute_index` remains as the SPY
     cross-check (+9.05% vs SPY's +9.02%), which validates the METHOD; it is not the basis.
     """
+    from common.read_cache import read_cache  # noqa: PLC0415
+
     from routers._asset_benchmark import compute_index_async  # noqa: PLC0415
 
-    return await compute_index_async(label, year)
+    # ⚠ SAME SHAPE AS THE OVERVIEW'S MEMO, AND THE SAME REASON. It removes one round trip of
+    # fourteen and takes the endpoint from 1,704ms to 433ms locally: the repeat is a whole-universe
+    # read, and the Benchmarks tab fires three of these at once (SP500, ACWI, AEX).
+    with read_cache(f"index:{label}"):
+        return await compute_index_async(label, year)
 
 
 async def _benchmark_refresh_stream(label: str):
@@ -1090,174 +1089,28 @@ async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str =
 
     `limit` spends the budget in tranches; 0 is everything that needs it.
     """
-    import threading  # noqa: PLC0415
-
     import jobs as job_registry  # noqa: PLC0415
-    from ingest.api_usage import remaining_budget  # noqa: PLC0415
+
     from routers._benchmark_index import _members  # noqa: PLC0415
-    from routers._fundamental_backfill import (  # noqa: PLC0415
-        company_rows, eligible, ingest_company, needs,
-    )
+    from routers._fundamental_fill import fill_company_ids  # noqa: PLC0415
 
     def _work(ctx) -> str:
         # ⚠⚠ `require_market_cap=False` IS LOAD-BEARING, AND THE DEFAULT MAKES THIS JOB
-        #   SELF-DEFEATING. `_members` drops any constituent with no stored `market_cap_eur` —
+        #   SELF-DEFEATING. `_members` drops any constituent with no stored `market_cap_eur` --
         #   correct for a cap-weighted index, catastrophic here, because the market cap comes out
         #   of the SAME statements blob this job fetches. So "has no cap" and "needs fetching" are
         #   very nearly the same set, and filtering on the former removes exactly the companies
         #   the job exists to load. Measured on the S&P: the grid offered 10 fillable, the work
         #   list came back 0, and the button reported "0 loaded" while each of those 10 fetched
-        #   fine from its own per-row Fetch (which is keyed by company_id and never consults this
-        #   list). The grid computes `fillable` with the same flag; the two MUST agree, or the
-        #   button promises work it then refuses to do.
+        #   fine from its own per-row Fetch. The grid computes `fillable` with the same flag; the
+        #   two MUST agree, or the button promises work it then refuses to do.
+        #
+        # ⚠ SELECTION IS ALL THAT IS LEFT HERE. The fill itself moved to
+        #   `routers/_fundamental_fill.py` when the portfolio button needed the identical work over
+        #   a different id list -- see the ⚠⚠ at the top of that module for why it is not copied.
         ids = sorted({m["company_id"] for m in _members(label, require_market_cap=False)
                       if m.get("company_id")})
-        comps = company_rows(ids)
-        if force:
-            # ⚠ EVERY CONSTITUENT IS WORK, SO NOTHING IS PROBED. `needs` answers "who is missing
-            # this feed", and under force that answer changes nothing — it would just be the
-            # expensive part of the setup thrown away (see the ⚠⚠ in the docstring). The flags are
-            # set to what a forced run means: fetch it, whatever we hold.
-            todo = [{**c, "need_fin": True, "need_est": True, "need_ind": True}
-                    for c in comps.values()]
-        else:
-            # ⚠ THE PROBE NARROWS TOO, NOT ONLY THE SELECTION. Each sentinel is its own read of
-            # `metric_data`; under `statements` the est/ind flags are cleared two lines below
-            # without ever being read, so probing them was two thirds of this read thrown away —
-            # and they are the expensive two (`indicator_q_forward_pe_ratio` is ~526 rows per
-            # company against Free Cash Flow's ~28). The result is identical: `needs` drops a
-            # company only when every PROBED feed is present, and the filter below keeps only
-            # `need_fin` anyway.
-            todo = needs(comps, feeds=("fin",) if feeds == "statements" else None)
-        # ⚠ SELECTION AND ACTION NARROW TOGETHER — see the ⚠⚠ in the docstring. Dropping the
-        # companies that need only estimates/indicators is what stops the run iterating rows
-        # it has nothing to do for; clearing the two flags is what stops it fetching feeds this
-        # page cannot render. Either alone is incoherent.
-        #
-        # ⚠ THE TWO FLAGS ARE STILL SET EXPLICITLY, AND THAT IS NOT REDUNDANT NOW THAT THEY ARE
-        # UNPROBED. `ingest_company` reads `c.get(flag, True)` — an ABSENT flag means "fetch it",
-        # so without this line a narrowed run would spend all three calls per company.
-        #
-        # ⚠ AND IT IS WHERE `force` IS APPLIED, WHICH IS WHY FORCE CANNOT WIDEN THE FEEDS. A forced
-        # run arrives here with all three flags true; this clears two of them under `statements`,
-        # exactly as it does for an un-forced one. The `need_fin` filter is a no-op under force
-        # (every row has it) rather than a second selection rule.
-        if feeds == "statements":
-            todo = [{**c, "need_est": False, "need_ind": False}
-                    for c in todo if c.get("need_fin")]
-        skipped = [(c, eligible(c)) for c in todo]
-        work = [c for c, why in skipped if why is None]
-        refused = [(c, why) for c, why in skipped if why]
-        if limit:
-            work = work[:limit]
-        # ⚠ A FORCED RUN SAYS SO IN ITS FIRST LINE. "206 missing statements" and "206 refetching
-        # every one" are the same number for very different reasons, and the second is the one that
-        # is about to spend a call on every constituent.
-        scope = ("refetching every one" if force
-                 else "missing statements" if feeds == "statements"
-                 else "missing a feed")
-        # ⚠ THE QUOTA WAS A PYTHON dict REPR — `quota {'usa': 16952, 'europe': 19222}`. True, and
-        # written for whoever wrote it. It is the one number here that decides whether the run can
-        # even finish, so it gets read out.
-        budget = remaining_budget(supabase)
-        left = " · ".join(f"{k.upper() if k == 'usa' else k.title()} {v:,}"
-                          for k, v in sorted(budget.items()))
-        ctx.emit(
-            "start",
-            f"{len(ids)} constituents · {len(todo)} {scope} · {len(work)} to fetch"
-            + (f" · {len(refused)} can’t be fetched" if refused else "")
-            + f" · quota left: {left}",
-            done=0, total=len(work))
-        # ⚠ REFUSALS ARE EVENTS, NOT FAILURES — an unsubscribed exchange is an answer. They go
-        # into the log the toast carries rather than onto the bar, which counts work done.
-        for w, why in refused:
-            ctx.emit("skip", f"{w.get('company_name') or w['company_id']}: {why}")
-
-        # ── The fill itself, on a bounded pool.
-        #
-        # ⚠⚠ THIS WAS A SERIAL `for` AND THE SERIAL PART WAS ALL WAITING. Measured against the
-        # live API: 6 calls take 15.42s one at a time and 4.56s on six threads — 3.4x, with
-        # zero refusals; at twelve threads throughput doubled again (2.64 calls/s), so we never
-        # found GuruFocus's ceiling. A 489-constituent fill goes from ~21 minutes to ~4.
-        #
-        # ⚠ EIGHT, NOT TWELVE, DELIBERATELY. The 12-thread run returned one empty response in
-        # twelve — not a 403, so not a quota refusal, and one sample is not proof of a limit.
-        # But the marginal gain past eight is small and the downside of probing for the edge is
-        # a fill that silently does less than it says. Eight keeps most of the win.
-        #
-        # ⚠ AND MY MEASUREMENT WAS API-ONLY. Each company also uploads to Storage and upserts
-        # tens of thousands of `metric_data` rows, which lands on OUR database — expect the real
-        # speed-up to be smaller than the API numbers alone suggest.
-        counter = itertools.count(1)
-        tally_lock = threading.Lock()
-        ok = failed = rows = calls = 0
-
-        def _one(c: dict) -> None:
-            nonlocal ok, failed, rows, calls
-            # ⚠ THE CANCEL BOUNDARY, AND IT IS FIRST. Everything still queued raises here the
-            # moment Cancel is pressed; the eight already inside `ingest_company` finish the
-            # company they are on, because that is where the database is left consistent.
-            ctx.check()
-            # ⚠ `refresh_cache=force` — THE SECOND CACHE. `force` alone only ignores what
-            # `metric_data` holds; the GuruFocus blob in Storage would still be replayed, so a
-            # forced press over an already-loaded index would rewrite identical rows, spend zero
-            # calls and change nothing on screen. See `ingest_company`'s ⚠⚠.
-            r = ingest_company(c, refresh_cache=force)
-            # ⚠ RETRY ONCE ON AN EMPTY ANSWER. This company was selected because it is missing the
-            # feed (or because the run is forced), so zero rows with no error means the fetch came
-            # back with nothing — the failure the 12-thread run produced. It costs one call to
-            # correct and, left alone, would look identical to a company that genuinely has no data.
-            if not r["error"] and r["rows"] == 0:
-                r = ingest_company(c, refresh_cache=force)
-            n = next(counter)
-            with tally_lock:
-                rows += r["rows"]
-                calls += r.get("calls", 0)
-                if r["error"]:
-                    failed += 1
-                else:
-                    ok += 1
-            ctx.spent(r.get("calls", 0))
-            # ⚠ THE COUNTER, NOT THE ARRIVAL ORDER, IS THE POSITION. Eight threads report
-            # concurrently, so `[7/206]` can reach the toast before `[6/206]`; `n` is taken
-            # from an atomic counter so the bar only ever moves forward.
-            # ⚠ THE NAME AND A PLAIN OUTCOME — NOT THE TICKER AND THE FEED TAGS. This line read
-            # `[124/206] PKG fin 35604`: a GuruFocus symbol, the internal tag for the statements
-            # feed, and a count of `metric_data` writes. Three pieces of our own plumbing, and
-            # none of them what a reader watching a ten-minute run wants to know — which is
-            # whether the index is filling in, and which company is the one that failed. The row
-            # counts are not lost; they are summed into the closing line.
-            who = c.get("company_name") or c.get("gurufocus_ticker") or c["company_id"]
-            outcome = ("failed — " + r["error"] if r["error"]
-                       # ⚠ AN ANSWER, NOT A NON-EVENT: every feed was already loaded.
-                       else "already up to date" if not r["done"]
-                       else "loaded")
-            ctx.progress(
-                n, len(work), f"[{n}/{len(work)}] {who} — {outcome}",
-                company_id=c["company_id"], failed=bool(r["error"]))
-
-        if work:
-            with ThreadPoolExecutor(max_workers=_FILL_WORKERS,
-                                    thread_name_prefix="fill") as pool:
-                # `list(...)` so exceptions surface here rather than being swallowed by the
-                # executor's lazy iterator.
-                list(pool.map(_one, work))
-        # ⚠ THE CALL COUNT IS ON THE JOB, NOT ONLY IN THIS SENTENCE. `ctx.spent` has been
-        # accumulating it per company, so the toast's chip is right even mid-run and even if
-        # the run is cancelled — this line just restates it where the outcome is read.
-        # ⚠ "data points", NOT "rows" — the same wording the per-company button settled on. A row
-        # is a `metric_data` write; a reader is being told how much arrived, not how our storage
-        # counts it. `failed` is only mentioned when there were failures: a trailing "0 failed" on
-        # every clean run is noise that teaches the eye to skip the part that matters.
-        # Same rule as the per-company job: drop the cached blends only if something was actually
-        # written. A fill with no work (the AEX case, which spends zero API calls) leaves every
-        # cached line correct, and clearing them would buy nothing but a rebuild.
-        if ok:
-            _blend_cache.invalidate()
-        return (f"{label} — {ok} companies {'refetched' if force else 'loaded'}"
-                + (f", {failed} failed" if failed else "")
-                + f", {rows:,} data points"
-                + (f", {calls:,} API calls" if calls else ""))
+        return fill_company_ids(ctx, label, ids, feeds=feeds, force=force, limit=limit)
 
     job = job_registry.start("fundamentals.index", label, _work)
     return {"job_id": job.id, "label": label}

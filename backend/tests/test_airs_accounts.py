@@ -135,10 +135,15 @@ class TestTheSnapshotIsTheFreshestOnly:
                     "current_price_local": 1, "airs_weight": 1, "fund_result_eur": 0,
                     "fx_result_eur": 0, "airs_result_pct": 0}
 
-        monkeypatch.setattr(acc, "supabase", FakeSupabase({
+        fake = FakeSupabase({
             "airs_holding": [_h("2026-06-30", "STALE"), _h("2026-08-01", "FRESH")],
             "airs_mutatie": [], "airs_model_weight": [], "airs_performance": [],
-        }))
+        })
+        monkeypatch.setattr(acc, "supabase", fake)
+        # ⚠ AND `deps.supabase`: the mutatie/model-weight reads moved into the shared
+        # `routers._airs_ref`, which resolves through `deps` at call time. Patching only the
+        # router leaves those pointing at the real client.
+        monkeypatch.setattr("deps.supabase", fake)
 
         got = acc.account_holdings("P")
 

@@ -35,6 +35,7 @@ from __future__ import annotations
 import logging
 
 from deps import supabase
+from routers._airs_ref import model as ref_model, models as ref_models, positions_for as ref_positions_for
 
 from ._airs_portfolio_links import link_key, resolve_links
 
@@ -43,18 +44,15 @@ _log = logging.getLogger(__name__)
 
 def _positions_of(portfolio_id: int, datum: str | None) -> list[dict]:
     """One model's stored composition, at its own effective date."""
-    rows = (supabase.table("airs_model_portfolio_position")
-            .select("isin,fonds,percentage,datum,categorie")
-            .eq("portfolio_id", portfolio_id).execute().data or [])
+    rows = ref_positions_for(portfolio_id)      # one shared read — see `_airs_ref`
     if datum:
         rows = [r for r in rows if r.get("datum") == datum]
     return rows
 
 
 def _datum_of(portfolio_id: int) -> str | None:
-    r = (supabase.table("airs_model_portfolio").select("positions_datum")
-         .eq("id", portfolio_id).limit(1).execute().data or [])
-    return (r[0].get("positions_datum") if r else None)
+    r = ref_model(portfolio_id)
+    return (r.get("positions_datum") if r else None)
 
 
 def expand_positions(portfolio_id: int, datum: str | None,
@@ -75,8 +73,7 @@ def expand_positions(portfolio_id: int, datum: str | None,
     links = resolve_links(supabase, portfolio_id,
                           [{"isin": r.get("isin"), "fonds": r.get("fonds")} for r in pos])
     names = {p["id"]: (p.get("display_name") or p["name"]) for p in (
-        supabase.table("airs_model_portfolio").select("id,name,display_name")
-        .limit(500).execute().data or [])}
+        ref_models())}
 
     legs: list[dict] = []
     expanded: list[dict] = []

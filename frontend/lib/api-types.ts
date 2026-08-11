@@ -1134,6 +1134,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/basket/fundamentals/ingest/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Basket Fundamentals Job
+         * @description The same fill, for a basket of holdings rather than a stored model portfolio.
+         *
+         *     ⚠⚠ IT EXISTS BECAUSE MOST BOOKS ON /management-dashboard HAVE NO FIXED MODEL. `openModal` in
+         *     `PortfolioOverviewPanel` only carries a `fixed_portfolio_id` when the account is PAIRED with
+         *     one; otherwise it resolves the account's own ISINs into a basket and opens the same Analyse
+         *     view. Scoping the refresh to a model portfolio id therefore hid the button on exactly the rows
+         *     a user is most likely to be looking at — an account is the unit of work, the model is the
+         *     optional extra.
+         *
+         *     Mirrors `POST /api/airs/basket/analysis`, which exists for the identical reason: one view
+         *     serving a stored portfolio and an ad-hoc set alike.
+         */
+        post: operations["ingest_basket_fundamentals_job_api_airs_basket_fundamentals_ingest_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/crm-relaties": {
         parameters: {
             query?: never;
@@ -1347,6 +1377,50 @@ export interface paths {
          */
         put: operations["airs_set_portfolio_display_name_api_airs_model_portfolios__portfolio_id__display_name_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolios/{portfolio_id}/fundamentals/ingest/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Portfolio Fundamentals Job
+         * @description Refresh GuruFocus fundamentals for every company this model portfolio holds.
+         *
+         *     The portfolio-scoped twin of the benchmark fill. ⚠ IT IS THE SAME FILL, not a copy — see
+         *     `routers/_fundamental_fill.py`. Only the selector differs: an index names its constituents,
+         *     a portfolio names its holdings.
+         *
+         *     ⚠⚠ THE ISIN -> company BRIDGE IS PARTIAL, AND THE COUNT MUST SAY SO. A model holds instruments
+         *     by ISIN; GuruFocus fundamentals hang off `company`, joined on `company.isin`. Measured on
+         *     AITopSelectie OFF FX: 19 of 20 holdings resolve, and the missing one is Taiwan Semiconductor,
+         *     held via its US ADR ISIN (US8740391003) while the company world carries the Taiwan line
+         *     (TW0002330008). "Refreshed 19 holdings" is true; implying the portfolio is covered is not, so
+         *     `holdings` and `reachable` are both returned and the caller shows `n of m`.
+         *
+         *     ⚠ CERTIFICATES ARE NOT LOOKED THROUGH. A Leonteq AMC that IS another model contributes no
+         *     company of its own; refresh that model from its own row. Expanding here would make one press
+         *     fan out across portfolios without saying so.
+         *
+         *     ⚠ `force=True` BY DEFAULT, AND IT HAS TO BE. Without it `needs()` sees the sentinel row and
+         *     runs nothing, and even selected, `is_cache_fresh` replays the Storage blob for months — the
+         *     two caches that make the fundamentals grid's per-row Fetch a no-op for a company that already
+         *     has data. This button exists precisely to get data we do not yet have.
+         *
+         *     ⚠ `only_due=True` IS WHAT MAKES IT CHEAP. The detector (`ingest.earnings.due`) drops the
+         *     holdings whose next fiscal period cannot plausibly have been filed yet, so a press costs one
+         *     API call per company that might actually have something — and zero when none do.
+         */
+        post: operations["ingest_portfolio_fundamentals_job_api_airs_model_portfolios__portfolio_id__fundamentals_ingest_job_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11345,6 +11419,29 @@ export interface components {
             /** Name */
             name: string;
         };
+        /**
+         * PortfolioFundamentalsJob
+         * @description The job handle, plus the two counts that keep the button honest.
+         *
+         *     ⚠ `holdings` AND `reachable` ARE BOTH RETURNED BECAUSE THEY DIFFER. The gap is holdings whose
+         *     ISIN has no `company` row — an ADR held under a different ISIN from the one we ingested, a
+         *     structured product, an in-house fund. Returning only the number fetched would let the UI imply
+         *     it covered the portfolio.
+         */
+        PortfolioFundamentalsJob: {
+            /** Holdings */
+            holdings: number;
+            /** Job Id */
+            job_id: string;
+            /** Label */
+            label: string;
+            /** No Company */
+            no_company: number;
+            /** No Fundamentals */
+            no_fundamentals: number;
+            /** Reachable */
+            reachable: number;
+        };
         /** PortfolioMemberIn */
         PortfolioMemberIn: {
             /** Company Id */
@@ -13638,6 +13735,44 @@ export interface operations {
             };
         };
     };
+    ingest_basket_fundamentals_job_api_airs_basket_fundamentals_ingest_job_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+                only_due?: boolean;
+                feeds?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BasketRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioFundamentalsJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_crm_relaties_api_airs_crm_relaties_get: {
         parameters: {
             query?: never;
@@ -13887,6 +14022,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_portfolio_fundamentals_job_api_airs_model_portfolios__portfolio_id__fundamentals_ingest_job_post: {
+        parameters: {
+            query?: {
+                force?: boolean;
+                only_due?: boolean;
+                feeds?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioFundamentalsJob"];
                 };
             };
             /** @description Validation Error */

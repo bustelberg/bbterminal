@@ -47,9 +47,8 @@ from __future__ import annotations
 import asyncio
 from datetime import date, timedelta
 
-import pandas as pd
-
-from asset_pipeline.fx import SUBUNIT
+from common.fx_load import load_fx_to_eur
+from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase
 from momentum.diversification import annualized_stats
 from routers._benchmark_index import _at_or_before, _rate, _split_adjust
@@ -123,16 +122,32 @@ _MAX_INTERP_SPAN_DAYS = 400
 _PAGE = 1000
 
 
+_EXEC_COLS = "isin,analysis_id,currency,yahoo_symbol,name"
+
+
 def _executions(isins: list[str]) -> dict[str, dict]:
-    """ISIN -> its priceable execution row. The bridge between the AIRS world and ours."""
+    """ISIN -> its priceable execution row. The bridge between the AIRS world and ours.
+
+    ONE COPY for the whole ISIN list instead of `ceil(len/200)` PostgREST round trips (the
+    IN-clause goes in the URL, hence the chunking); the chunked loop stays as the fallback.
+
+    The `r["isin"] not in out` guard reads like a "first listing wins" tie-break that would make
+    this transport-order-dependent — it is not. ⚠ **`asset_execution.isin` carries a UNIQUE
+    constraint** (`asset_execution_isin_key`; measured 16,613 rows / 16,613 distinct ISINs), so
+    there is never a second row to lose a tie. Checked rather than assumed, because if a duplicate
+    were possible the two transports could disagree about the winner and only under COPY.
+    (Verified anyway on 300 ISINs: identical rows and identical winners from both paths.)
+    """
+    rows = load_rows_via_copy("asset_execution", _EXEC_COLS, "isin", isins)
+    if rows is None:
+        rows = []
+        for i in range(0, len(isins), IN_CHUNK_SIZE):
+            rows += (supabase.table("asset_execution").select(_EXEC_COLS)
+                     .in_("isin", isins[i:i + IN_CHUNK_SIZE]).execute().data or [])
     out: dict[str, dict] = {}
-    for i in range(0, len(isins), IN_CHUNK_SIZE):
-        rows = (supabase.table("asset_execution")
-                .select("isin,analysis_id,currency,yahoo_symbol,name")
-                .in_("isin", isins[i:i + IN_CHUNK_SIZE]).execute().data or [])
-        for r in rows:
-            if r.get("analysis_id") and r["isin"] not in out:
-                out[r["isin"]] = r
+    for r in rows:
+        if r.get("analysis_id") and r["isin"] not in out:
+            out[r["isin"]] = r
     return out
 
 
@@ -199,9 +214,22 @@ def _closes(analysis_ids: list[int], start: str, end: str) -> dict[int, list[tup
     out: dict[int, list[tuple[str, float]]] = {}
     if df.empty:
         return out
-    dates = df[DATE_COL].dt.strftime("%Y-%m-%d")
-    for aid, d, c in zip(df[ENTITY_COL], dates, df["close"], strict=True):
-        if pd.notna(c):
+    # ⚠ `.tolist()` FIRST — DO NOT ZIP THE SERIES DIRECTLY. Iterating a pandas Series yields one
+    # boxed scalar per element, and these columns are ARROW-backed, so every element costs an
+    # ArrowExtensionArray.__iter__ step. Profiled 2026-08-11 on one Analyse call: **102,348 calls
+    # to that iterator, 0.26s of self time** — the largest pure-Python cost in the endpoint, spent
+    # entirely on boxing. `.tolist()` does the whole column in one C-level pass and hands back
+    # native Python objects, after which this is an ordinary zip over lists.
+    #
+    # ⚠ NULLS ARRIVE AS `None` FROM AN ARROW COLUMN AND AS `nan` FROM A NUMPY ONE, and `pd.notna`
+    # is gone now, so BOTH have to be handled here: `c is not None` catches Arrow, `c == c`
+    # catches NaN. Dropping either check silently turns a missing close into a real price of
+    # `nan`, which then propagates through every return computed off this series.
+    dates = df[DATE_COL].dt.strftime("%Y-%m-%d").tolist()
+    aids = df[ENTITY_COL].tolist()
+    closes = df["close"].tolist()
+    for aid, d, c in zip(aids, dates, closes, strict=True):
+        if c is not None and c == c:
             out.setdefault(int(aid), []).append((d, float(c)))
     for s in out.values():
         s.sort()      # `load_series` already sorts by (entity, date); belt and braces
@@ -241,26 +269,18 @@ def _fx(currencies: set[str], start: str, end: str) -> dict[str, dict[str, float
         page" is only true while the server's cap is at least the page size, which is the very
         assumption that just failed. Advancing by `len(rows)` and stopping on empty is correct
         under any cap, at the cost of one extra empty request per chunk.
+
+    ⚠ THE BODY MOVED TO `common/fx_load.py` (2026-08-11) AND SO DID ITS TWIN'S. Every rule in the
+    docstring above is a correctness rule with an incident behind it, and it had to be right in
+    TWO places at once — here and in `_benchmark_index._fx_to_eur`, which each docstring already
+    called the other's twin. They had drifted in exactly the way that arrangement invites: the
+    benchmark side gained a one-request COPY fast path and this one did not, so the Analyse modal
+    paid **17 sequential PostgREST requests for `fx_rate` (13,617 rows), 14 of them the same query
+    differing only by `offset`**, while the benchmark did the same job in 4 COPYs. One definition
+    now; the shared loader keeps the paging as its fallback, so behaviour is unchanged when the
+    direct-Postgres path is unavailable.
     """
-    out: dict[str, dict[str, float]] = {}
-    cur = sorted({SUBUNIT.get(c, (c, 1.0))[0] for c in currencies if c and c != "EUR"})
-    for i in range(0, len(cur), IN_CHUNK_SIZE):
-        chunk = cur[i:i + IN_CHUNK_SIZE]
-        off = 0
-        while True:
-            rows = (supabase.table("fx_rate")
-                    .select("currency_code,rate_date,rate")
-                    .in_("currency_code", chunk)
-                    .gte("rate_date", start).lte("rate_date", end)
-                    .order("rate_date").order("currency_code")
-                    .range(off, off + _PAGE - 1).execute().data or [])
-            if not rows:
-                break
-            for r in rows:
-                if r["rate"]:
-                    out.setdefault(r["currency_code"], {})[r["rate_date"]] = float(r["rate"])
-            off += len(rows)
-    return out
+    return load_fx_to_eur(currencies, start, end)
 
 
 def _eur_series(series: list[tuple[str, float]], ccy: str | None,
@@ -292,12 +312,43 @@ def _prepend_opening_bars(closes: dict[int, list[tuple[str, float]]],
     are indistinguishable downstream, which is how one caller showed a blank while another
     priced 23.6% of the same portfolio.
 
-    So the missing bar is fetched directly, per series, and only for the series that lack it —
-    normally none. Mutates `closes` in place; the bar is real history, so a series it is added
-    to is simply more complete for every other anchor too.
+    So the missing bar is fetched directly, and only for the series that lack it. Mutates `closes`
+    in place; the bar is real history, so a series it is added to is simply more complete for every
+    other anchor too.
+
+    ⚠⚠ "NORMALLY NONE" WAS WRONG, AND IT WAS THE SLOWEST THING ON /management-dashboard. Measured
+    2026-08-11 on the portfolios grid: **71 series lacked their opening bar**, each fetched by its
+    own `analysis_id=eq.N … limit 1` round trip. Locally that is 483ms of a 6.4s endpoint; in
+    production, where a PostgREST call is a ~60ms network hop rather than ~5ms, it is **~4.3
+    seconds of latency spent one row at a time**. The models' inception dates reach back before the
+    loaded window, so the "sparse listing" this was written for turns out to be the common case.
+    A comment's guess about frequency is not a measurement, and this one was hiding an N+1.
     """
     missing = [aid for aid in analysis_ids
                if not closes.get(aid) or closes[aid][0][0] > anchor]
+    if not missing:
+        return
+
+    # ⚠ ONE ANCHOR PER CALL IS WHAT MAKES THIS COLLAPSIBLE. Every row wants "the last close on or
+    # before the SAME date", so `DISTINCT ON (analysis_id) … ORDER BY analysis_id, target_date DESC`
+    # answers all of them in one pass — the identical result the loop produced, in one round trip.
+    from common.pg import _run_copy  # noqa: PLC0415
+
+    buf = _run_copy(
+        "COPY (SELECT DISTINCT ON (analysis_id) analysis_id, target_date::text, close "
+        "FROM asset_price WHERE analysis_id = ANY(%s::int[]) AND target_date <= %s "
+        "AND close IS NOT NULL ORDER BY analysis_id, target_date DESC) TO STDOUT WITH CSV",
+        (list(missing), anchor))
+    if buf is not None:
+        for line in buf.getvalue().decode().splitlines():
+            aid_s, d, c = line.split(",")
+            if c:
+                closes.setdefault(int(aid_s), []).insert(0, (d, float(c)))
+        return
+
+    # ⚠ THE PER-SERIES FALLBACK STAYS, because COPY is optional (`SUPABASE_DB_URL` absent, psycopg
+    # missing, a connection fault) and this bar is a CORRECTNESS input, not an optimisation: a
+    # holding without it reads as unpriceable and silently leaves the basket.
     for aid in missing:
         got = (supabase.table("asset_price").select("target_date,close")
                .eq("analysis_id", aid).lte("target_date", anchor)

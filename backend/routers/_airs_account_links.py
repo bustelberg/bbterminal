@@ -32,6 +32,7 @@ import re
 from datetime import datetime, timezone
 
 from deps import supabase
+from routers._airs_ref import models as ref_models, positions as ref_positions
 
 # Suffixes that name the VENUE/variant of a portfolio rather than the strategy. Stripped from
 # both sides before comparing.
@@ -137,21 +138,21 @@ def _models() -> list[dict]:
         that made `_year_perf` serve June's return in production while local served July's, one
         table over, waiting for the next scan to trip it.
     """
-    rows = (supabase.table("airs_model_portfolio").select("id,name,portfolio_type")
-            .limit(500).execute().data or [])
+    # ⚠ WAS ITS OWN PAGED READ, ORDERED ON `(portfolio_id, isin)` — WHICH IS NOT UNIQUE. Measured:
+    # this table holds one genuine duplicate pair (a model listing the same instrument at two
+    # weights), and Postgres promises nothing about tied rows across separate LIMIT/OFFSET
+    # queries, so a page boundary landing inside that tie could serve the row twice or never.
+    # `_airs_ref` pages on the PRIMARY KEY and is shared with every other reader, so this is both
+    # a correctness fix and two round trips removed.
+    rows = ref_models()
+    # ⚠ COUNTS EVERY POSITION ROW, NOT ONLY ISIN-BEARING ONES — deliberately NOT
+    # `_airs_ref.position_counts()`, which excludes rows without an ISIN because the /portfolios
+    # grid counts *instruments* and a cash line is not one. The two are genuinely different
+    # numbers here: 31 position rows have no ISIN, spread over 30 portfolios, so swapping in the
+    # grid's definition would quietly change this list's `positions` for more than half of them.
     counts: dict[int, int] = {}
-    off = 0
-    while True:
-        # Advance by what came back and stop on an empty page — correct under any cap. Ordered
-        # on the primary key so a page boundary cannot serve a row twice or skip it.
-        page = (supabase.table("airs_model_portfolio_position").select("portfolio_id,isin")
-                .order("portfolio_id").order("isin")
-                .range(off, off + 999).execute().data or [])
-        if not page:
-            break
-        for p in page:
-            counts[p["portfolio_id"]] = counts.get(p["portfolio_id"], 0) + 1
-        off += len(page)
+    for p in ref_positions():
+        counts[p["portfolio_id"]] = counts.get(p["portfolio_id"], 0) + 1
     return [{**m, "positions": counts.get(m["id"], 0)} for m in rows if counts.get(m["id"], 0)]
 
 

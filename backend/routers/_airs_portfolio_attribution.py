@@ -42,7 +42,7 @@ import asyncio
 import logging
 from datetime import date
 
-from deps import supabase
+from routers._airs_ref import model as ref_model
 from routers._airs_portfolio_analysis import (
     CASH_BUCKET,
     FUND_BUCKET,
@@ -139,11 +139,9 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     """
     idx = _AXIS_IDX.get(axis, 0)
 
-    p = (supabase.table("airs_model_portfolio")
-         .select("id,name,positions_datum").eq("id", portfolio_id).limit(1).execute().data or [])
+    p = ref_model(portfolio_id)          # one shared read — see `_airs_ref`
     if not p:
         return {}
-    p = p[0]
     eff = p.get("positions_datum")
     if source == "book":
         # AIRS reports the book over the calendar year; 'since' has no book equivalent.

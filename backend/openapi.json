@@ -9862,6 +9862,45 @@
         "title": "PortfolioCreate",
         "type": "object"
       },
+      "PortfolioFundamentalsJob": {
+        "description": "The job handle, plus the two counts that keep the button honest.\n\n\u26a0 `holdings` AND `reachable` ARE BOTH RETURNED BECAUSE THEY DIFFER. The gap is holdings whose\nISIN has no `company` row \u2014 an ADR held under a different ISIN from the one we ingested, a\nstructured product, an in-house fund. Returning only the number fetched would let the UI imply\nit covered the portfolio.",
+        "properties": {
+          "holdings": {
+            "title": "Holdings",
+            "type": "integer"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "no_company": {
+            "title": "No Company",
+            "type": "integer"
+          },
+          "no_fundamentals": {
+            "title": "No Fundamentals",
+            "type": "integer"
+          },
+          "reachable": {
+            "title": "Reachable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id",
+          "label",
+          "holdings",
+          "reachable",
+          "no_fundamentals",
+          "no_company"
+        ],
+        "title": "PortfolioFundamentalsJob",
+        "type": "object"
+      },
       "PortfolioMemberIn": {
         "properties": {
           "company_id": {
@@ -14766,6 +14805,90 @@
         ]
       }
     },
+    "/api/airs/basket/fundamentals/ingest/job": {
+      "post": {
+        "description": "The same fill, for a basket of holdings rather than a stored model portfolio.\n\n\u26a0\u26a0 IT EXISTS BECAUSE MOST BOOKS ON /management-dashboard HAVE NO FIXED MODEL. `openModal` in\n`PortfolioOverviewPanel` only carries a `fixed_portfolio_id` when the account is PAIRED with\none; otherwise it resolves the account's own ISINs into a basket and opens the same Analyse\nview. Scoping the refresh to a model portfolio id therefore hid the button on exactly the rows\na user is most likely to be looking at \u2014 an account is the unit of work, the model is the\noptional extra.\n\nMirrors `POST /api/airs/basket/analysis`, which exists for the identical reason: one view\nserving a stored portfolio and an ad-hoc set alike.",
+        "operationId": "ingest_basket_fundamentals_job_api_airs_basket_fundamentals_ingest_job_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Force",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "only_due",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Only Due",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feeds",
+            "required": false,
+            "schema": {
+              "default": "statements",
+              "title": "Feeds",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BasketRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioFundamentalsJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Basket Fundamentals Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/crm-relaties": {
       "get": {
         "description": "The latest stored CRM 'Alle relaties' export, parsed on the fly from the\nraw .xls in `airs_crm_relaties_raw` into a generic `{columns, rows}` table\n(whatever columns the export has). Empty until the daily job has run it.",
@@ -15194,6 +15317,89 @@
           }
         },
         "summary": "Airs Set Portfolio Display Name",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/{portfolio_id}/fundamentals/ingest/job": {
+      "post": {
+        "description": "Refresh GuruFocus fundamentals for every company this model portfolio holds.\n\nThe portfolio-scoped twin of the benchmark fill. \u26a0 IT IS THE SAME FILL, not a copy \u2014 see\n`routers/_fundamental_fill.py`. Only the selector differs: an index names its constituents,\na portfolio names its holdings.\n\n\u26a0\u26a0 THE ISIN -> company BRIDGE IS PARTIAL, AND THE COUNT MUST SAY SO. A model holds instruments\nby ISIN; GuruFocus fundamentals hang off `company`, joined on `company.isin`. Measured on\nAITopSelectie OFF FX: 19 of 20 holdings resolve, and the missing one is Taiwan Semiconductor,\nheld via its US ADR ISIN (US8740391003) while the company world carries the Taiwan line\n(TW0002330008). \"Refreshed 19 holdings\" is true; implying the portfolio is covered is not, so\n`holdings` and `reachable` are both returned and the caller shows `n of m`.\n\n\u26a0 CERTIFICATES ARE NOT LOOKED THROUGH. A Leonteq AMC that IS another model contributes no\ncompany of its own; refresh that model from its own row. Expanding here would make one press\nfan out across portfolios without saying so.\n\n\u26a0 `force=True` BY DEFAULT, AND IT HAS TO BE. Without it `needs()` sees the sentinel row and\nruns nothing, and even selected, `is_cache_fresh` replays the Storage blob for months \u2014 the\ntwo caches that make the fundamentals grid's per-row Fetch a no-op for a company that already\nhas data. This button exists precisely to get data we do not yet have.\n\n\u26a0 `only_due=True` IS WHAT MAKES IT CHEAP. The detector (`ingest.earnings.due`) drops the\nholdings whose next fiscal period cannot plausibly have been filed yet, so a press costs one\nAPI call per company that might actually have something \u2014 and zero when none do.",
+        "operationId": "ingest_portfolio_fundamentals_job_api_airs_model_portfolios__portfolio_id__fundamentals_ingest_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "force",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Force",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "only_due",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Only Due",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feeds",
+            "required": false,
+            "schema": {
+              "default": "statements",
+              "title": "Feeds",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioFundamentalsJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ingest Portfolio Fundamentals Job",
         "tags": [
           "airs"
         ]

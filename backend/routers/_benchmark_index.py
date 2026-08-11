@@ -37,13 +37,11 @@ WHY REBUILD SOMETHING WE ALREADY HAVE
 from __future__ import annotations
 
 import asyncio
-import csv
-import io
 import logging
 from datetime import date, timedelta
 
 from asset_pipeline.fx import SUBUNIT
-from common.pg import _db_url, _run_copy
+from common.fx_load import load_fx_to_eur
 from deps import IN_CHUNK_SIZE, supabase
 
 _log = logging.getLogger(__name__)
@@ -187,53 +185,6 @@ def _closes(company_ids: list[int], start: str, end: str) -> dict[int, list[tupl
     return out
 
 
-def _fx_to_eur_via_copy(cur: list[str], start: str,
-                        end: str) -> dict[str, dict[str, float]] | None:
-    """`{currency: {date: units per EUR}}` in ONE COPY, or None to fall back to the pager.
-
-    `cur` is already the MAJOR-currency list `_fx_to_eur` built (`GBp` resolved to `GBP`), so this
-    takes no view on minor units — that would be a second place for the pence rule to live.
-
-    ⚠ A ZERO RATE IS DROPPED, exactly as the paged path drops a falsy one. Not because zero is
-    implausible but because dividing by it raises, and a rate is the DENOMINATOR of every
-    conversion here (`eur = native / rate`).
-
-    ⚠ None ON ANY FAILURE, NEVER A PARTIAL DICT. A currency missing from this map has no EUR
-    series, so its constituents silently leave the index and the weights renormalise over the rest
-    — the failure `_airs_portfolio_perf._fx` measured, where two environments reported different
-    returns off identical code. Falling back to the pager is slow; returning half the currencies
-    would be wrong and would look like a number.
-    """
-    if not _db_url() or not cur:
-        return None
-    sql = ("COPY (SELECT currency_code, rate_date, rate FROM fx_rate "
-           "WHERE currency_code = ANY(%s) AND rate_date BETWEEN %s AND %s) "
-           "TO STDOUT WITH (FORMAT csv)")
-    try:
-        buf = _run_copy(sql, (cur, start, end))
-    except Exception as e:  # noqa: BLE001 — a fast path must never be the reason a page 500s
-        _log.warning("[bench-index] FX COPY failed, falling back to PostgREST: %s: %s",
-                     type(e).__name__, e)
-        return None
-    if buf is None:
-        return None
-    out: dict[str, dict[str, float]] = {}
-    if buf.getbuffer().nbytes == 0:
-        return out
-    for row in csv.reader(io.TextIOWrapper(buf, encoding="utf-8", newline="")):
-        if len(row) != 3:
-            continue
-        code, rate_date, rate = row
-        # COPY writes NULL as an empty field; `float("")` raises, and a missing rate is a real
-        # state in this table (a currency whose feed had a gap that day).
-        if not rate:
-            continue
-        val = float(rate)
-        if val:
-            out.setdefault(code, {})[rate_date] = val
-    return out
-
-
 def _fx_to_eur(currencies: set[str], start: str, end: str) -> dict[str, dict[str, float]]:
     """{currency: {date: units per EUR}} — the same `fx_rate` table the rest of the app uses.
 
@@ -241,54 +192,16 @@ def _fx_to_eur(currencies: set[str], start: str, end: str) -> dict[str, dict[str
     mirrors `momentum/data/fx.py`, which divides). Getting it upside down would invert every
     FX move.
 
-    ⚠ IT MUST PAGE — see `_airs_portfolio_perf._fx`, which is this function's twin and where
-    the failure was measured. A benchmark spans dozens of currencies over years, which is tens
-    of thousands of `fx_rate` rows; PostgREST caps a response at 1,000 (cloud) / 10,000 (local)
-    and truncates SILENTLY. A currency whose rows are cut has no EUR series before the cut, so
-    its constituents drop out of the index and the weights renormalise over the rest — no
-    error, a different index, and a DIFFERENT ONE IN EACH ENVIRONMENT because the two caps
-    differ tenfold.
+    ⚠ THE IMPLEMENTATION — INCLUDING THE PAGING RULES AND THE COPY FAST PATH — NOW LIVES IN
+    `common/fx_load.py`, TOGETHER WITH ITS TWIN'S. This function and `_airs_portfolio_perf._fx`
+    each documented the other as its twin and then drifted: only this side had the one-request
+    COPY, so the Analyse modal paid **17 sequential PostgREST requests for `fx_rate` (13,617
+    rows)** on the AIRS side while doing the same job here in 4 COPYs. Every rule involved is a
+    correctness rule with an incident behind it (silent 1,000/10,000-row truncation dropping a
+    currency, and with it a fully-priced holding, out of its own basket) — and it had to be right
+    in two files at once. That arrangement is what produced the bug. One definition now.
     """
-    out: dict[str, dict[str, float]] = {}
-    # Ask for the MAJOR currency. `fx_rate` has GBP; it has never had `GBp`, because pence is a
-    # quoting convention and not a currency — so requesting the literal code returns zero rows,
-    # `_rate` finds no table, and the holding reads as unpriceable with all its bars present.
-    # Keyed by base too: `_rate` resolves the same way, and the divisor is applied there.
-    cur = sorted({SUBUNIT.get(c, (c, 1.0))[0]
-                  for c in currencies if c and c != "EUR"})
-    # ⚠ ONE COPY FIRST, THE PAGER BELOW AS THE FALLBACK — same contract as every other COPY loader
-    # here: it returns the identical shape or None, so nothing downstream can tell which ran.
-    #
-    # ⚠ THE PAGING IS CORRECT AND ITS COST IS ROUND TRIPS. A daily rate for a global index is
-    # ~260 rows per currency per year, so the fundamentals grid's window (2015 -> today, ~27
-    # currencies) is ~77,000 rows — **77 sequential requests** against PostgREST's 1,000-row cap,
-    # each paying a full network latency. That is not a truncation risk (the loop above is right);
-    # it is simply the largest remaining round-trip cost on that page. A COPY streams the lot over
-    # one connection.
-    fast = _fx_to_eur_via_copy(cur, start, end)
-    if fast is not None:
-        return fast
-    for i in range(0, len(cur), IN_CHUNK_SIZE):
-        chunk = cur[i:i + IN_CHUNK_SIZE]
-        off = 0
-        while True:
-            # `(rate_date, currency_code)` — a unique key, so a page boundary landing inside a
-            # tie cannot serve a row twice or skip it. The loop advances by what came back
-            # rather than by the page size: "a short page is the last page" only holds while
-            # the server's cap is at least the page size, and that assumption is the bug.
-            rows = (supabase.table("fx_rate")
-                    .select("currency_code,rate_date,rate")
-                    .in_("currency_code", chunk)
-                    .gte("rate_date", start).lte("rate_date", end)
-                    .order("rate_date").order("currency_code")
-                    .range(off, off + 999).execute().data or [])
-            if not rows:
-                break
-            for r in rows:
-                if r["rate"]:
-                    out.setdefault(r["currency_code"], {})[r["rate_date"]] = float(r["rate"])
-            off += len(rows)
-    return out
+    return load_fx_to_eur(currencies, start, end)
 
 
 # A split shows up as a single-day price ratio nothing like a real market move. Outside this
@@ -421,6 +334,20 @@ def _rate(fx: dict[str, dict[str, float]], ccy: str | None, when: str) -> float 
         return None
     if when in tbl:
         return tbl[when] * divisor
+    # ⚠⚠ KEEP THE LIST COMPREHENSION. A GENERATOR HERE IS ~2.3x SLOWER — MEASURED, NOT ASSUMED.
+    # `_rate` runs 103,835 times per Analyse computation (once per close per holding) and this
+    # branch is taken 8,569 of them. Swapping the comprehension for `max(d for d in tbl ...)`
+    # looked like a free win — same O(n) scan, no list allocated — and profiling said otherwise:
+    # the genexpr showed up as **2,038,758 calls costing 0.295s**, with `max` rising 0.048s ->
+    # 0.283s. Since PEP 709 (Python 3.12) a list comprehension is INLINED into its enclosing
+    # frame, while a generator expression still builds a frame and resumes it per item — so the
+    # "allocation-free" version pays 2M frame resumptions to avoid one list.
+    #
+    # ⚠ The real fix is NOT here: it is to stop calling `_rate` per date at all. The series and
+    # the FX table are both date-ordered, so `_eur_series` could merge-walk them once (O(n+m))
+    # instead of scanning the table per close (O(n·m)). A bisect over cached sorted keys was
+    # rejected — the cache would key on the `fx` dict's identity, and `id()` is reused after GC,
+    # so a stale hit would convert a price at ANOTHER CURRENCY's rate. Silent, and wrong.
     earlier = [d for d in tbl if d <= when]
     return tbl[max(earlier)] * divisor if earlier else None
 

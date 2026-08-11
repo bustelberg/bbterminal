@@ -36,7 +36,7 @@ from airs_scanner import (
     fetch_portfolio_positions_sync,
     scan_portfolios_sync,
 )
-from deps import supabase
+from deps import IN_CHUNK_SIZE, supabase
 from portfolio import parse_airs_excel
 
 router = APIRouter(tags=["airs"])
@@ -2559,9 +2559,16 @@ async def airs_portfolios_overview():
     The Fixed side has the ISINs and your nickname and AIRS values none of it; the Dynamic side
     has the money and no ISIN. Overlap between the two: zero. This is the pair, composed.
     """
+    from common.read_cache import read_cache  # noqa: PLC0415
+
     from routers._airs_overview import list_overview_async  # noqa: PLC0415
 
-    return await list_overview_async()
+    # ⚠ THE MEMO IS WORTH FAR MORE THAN THE CALL COUNT SUGGESTS. It removes only 3 of 17 round
+    # trips here — but those three are repeats of the whole `airs_performance` history (912KB), so
+    # measured locally the endpoint goes 1,109ms -> 277ms. A request is exactly the scope over
+    # which "the database did not change under us" is safe; see `common/read_cache.py`.
+    with read_cache("overview"):
+        return await list_overview_async()
 
 
 class AirsHoldingIsin(BaseModel):
@@ -3109,3 +3116,159 @@ async def airs_set_allocation_bands(body: list[AllocationBand]):
         return {"variants": list(VARIANTS), "buckets": list(POLICY_BUCKETS), "cells": load_bands()}
 
     return await asyncio.to_thread(_run)
+
+
+def _fundamentals_scope(isins: list[str]) -> tuple[list[int], int, int, int]:
+    """`(company_ids, holdings, no_fundamentals, no_company)` for a set of held ISINs.
+
+    Shared by the two entry points — a model portfolio names its positions, an account-derived
+    basket names its holdings, and from here they are the same question.
+
+    ⚠ RESOLVE THE ALIAS BEFORE THE LOOKUP. `company` is keyed on the RAW ISIN, so an issuer we hold
+    under one ISIN and ingested under another is invisible to a direct match — the ADR-vs-home-line
+    split (`company_override` kind `alias`). Measured: without this, AITopSelectie reads 19 of 20
+    and the "missing" one is Taiwan Semiconductor, whose alias we already had.
+
+    ⚠⚠ THE REMAINDER IS TWO DIFFERENT ABSENCES AND THE CALLER MUST BE ABLE TO TELL THEM APART. An
+    ETF, a bond or a cash line HAS no company fundamentals by definition; a missing `company` row
+    for an operating company is a real gap worth fixing. Measured on BUS_Neutraal_FX: 24 of 40
+    reachable, of which eleven are funds/bonds and only five are gaps. One number for both makes a
+    correct answer look broken.
+    """
+    from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+
+    from routers._fundamental_coverage import classify_holding  # noqa: PLC0415
+
+    canon = canonical_map(isins)
+    wanted = sorted({canon.get(i, i) for i in isins})
+
+    by_isin: dict[str, int] = {}
+    for i in range(0, len(wanted), IN_CHUNK_SIZE):
+        for c in (supabase.table("company").select("company_id,isin")
+                  .in_("isin", wanted[i:i + IN_CHUNK_SIZE]).execute().data or []):
+            by_isin[(c.get("isin") or "").strip().upper()] = c["company_id"]
+
+    missing = [i for i in wanted if i not in by_isin]
+    grid: dict[str, dict] = {}
+    for i in range(0, len(missing), IN_CHUNK_SIZE):
+        for g in (supabase.table("asset_grid").select("isin,asset_class,leonteq_product_type")
+                  .in_("isin", missing[i:i + IN_CHUNK_SIZE]).execute().data or []):
+            grid[(g.get("isin") or "").strip().upper()] = g
+    verdicts = [classify_holding(i, grid.get(i), has_company=False, subscribed=None)
+                for i in missing]
+    no_fundamentals = sum(1 for v in verdicts if v in ("not_equity", "fund", "cash"))
+    return (sorted(set(by_isin.values())), len(wanted),
+            no_fundamentals, len(missing) - no_fundamentals)
+
+
+class PortfolioFundamentalsJob(BaseModel):
+    """The job handle, plus the two counts that keep the button honest.
+
+    ⚠ `holdings` AND `reachable` ARE BOTH RETURNED BECAUSE THEY DIFFER. The gap is holdings whose
+    ISIN has no `company` row — an ADR held under a different ISIN from the one we ingested, a
+    structured product, an in-house fund. Returning only the number fetched would let the UI imply
+    it covered the portfolio.
+    """
+
+    job_id: str
+    label: str
+    holdings: int
+    reachable: int
+    # ⚠ THE UNREACHABLE REMAINDER IS TWO DIFFERENT THINGS AND THE UI MUST NOT MERGE THEM.
+    # Measured: AITopSelectie is 19 of 20 (Taiwan Semiconductor, held under its US ADR ISIN — a
+    # real GAP, fixable), while BUS_Neutraal_FX is 24 of 40 and every one of the missing 16 is an
+    # ETF, fund, bond or certificate — instruments that HAVE no company fundamentals by definition.
+    # "24 of 40" with one explanation reads as broken when it is correct.
+    no_fundamentals: int
+    no_company: int
+
+
+@router.post("/api/airs/model-portfolios/{portfolio_id}/fundamentals/ingest/job",
+             response_model=PortfolioFundamentalsJob)
+async def ingest_portfolio_fundamentals_job(portfolio_id: int, force: bool = True,
+                                            only_due: bool = True, feeds: str = "statements",
+                                            limit: int = 0):
+    """Refresh GuruFocus fundamentals for every company this model portfolio holds.
+
+    The portfolio-scoped twin of the benchmark fill. ⚠ IT IS THE SAME FILL, not a copy — see
+    `routers/_fundamental_fill.py`. Only the selector differs: an index names its constituents,
+    a portfolio names its holdings.
+
+    ⚠⚠ THE ISIN -> company BRIDGE IS PARTIAL, AND THE COUNT MUST SAY SO. A model holds instruments
+    by ISIN; GuruFocus fundamentals hang off `company`, joined on `company.isin`. Measured on
+    AITopSelectie OFF FX: 19 of 20 holdings resolve, and the missing one is Taiwan Semiconductor,
+    held via its US ADR ISIN (US8740391003) while the company world carries the Taiwan line
+    (TW0002330008). "Refreshed 19 holdings" is true; implying the portfolio is covered is not, so
+    `holdings` and `reachable` are both returned and the caller shows `n of m`.
+
+    ⚠ CERTIFICATES ARE NOT LOOKED THROUGH. A Leonteq AMC that IS another model contributes no
+    company of its own; refresh that model from its own row. Expanding here would make one press
+    fan out across portfolios without saying so.
+
+    ⚠ `force=True` BY DEFAULT, AND IT HAS TO BE. Without it `needs()` sees the sentinel row and
+    runs nothing, and even selected, `is_cache_fresh` replays the Storage blob for months — the
+    two caches that make the fundamentals grid's per-row Fetch a no-op for a company that already
+    has data. This button exists precisely to get data we do not yet have.
+
+    ⚠ `only_due=True` IS WHAT MAKES IT CHEAP. The detector (`ingest.earnings.due`) drops the
+    holdings whose next fiscal period cannot plausibly have been filed yet, so a press costs one
+    API call per company that might actually have something — and zero when none do.
+    """
+    import jobs as job_registry  # noqa: PLC0415
+
+    from routers._fundamental_fill import fill_company_ids  # noqa: PLC0415
+
+    p = (supabase.table("airs_model_portfolio").select("id,name,positions_datum")
+         .eq("id", portfolio_id).limit(1).execute().data or [])
+    if not p:
+        raise HTTPException(status_code=404, detail=f"No model portfolio {portfolio_id}.")
+    name = p[0].get("name") or f"portfolio {portfolio_id}"
+
+    pos = (supabase.table("airs_model_portfolio_position").select("isin,datum")
+           .eq("portfolio_id", portfolio_id).execute().data or [])
+    if p[0].get("positions_datum"):
+        pos = [r for r in pos if r.get("datum") == p[0]["positions_datum"]]
+    isins = sorted({(r.get("isin") or "").strip().upper() for r in pos if r.get("isin")})
+    ids, holdings, no_fundamentals, no_company = _fundamentals_scope(isins)
+
+    def _work(ctx) -> str:
+        return fill_company_ids(ctx, name, ids, feeds=feeds, force=force, limit=limit,
+                                only_due=only_due)
+
+    job = job_registry.start("fundamentals.portfolio", name, _work)
+    return {"job_id": job.id, "label": name, "holdings": holdings, "reachable": len(ids),
+            "no_fundamentals": no_fundamentals, "no_company": no_company}
+
+
+@router.post("/api/airs/basket/fundamentals/ingest/job",
+             response_model=PortfolioFundamentalsJob)
+async def ingest_basket_fundamentals_job(req: BasketRequest, force: bool = True,
+                                         only_due: bool = True, feeds: str = "statements",
+                                         limit: int = 0):
+    """The same fill, for a basket of holdings rather than a stored model portfolio.
+
+    ⚠⚠ IT EXISTS BECAUSE MOST BOOKS ON /management-dashboard HAVE NO FIXED MODEL. `openModal` in
+    `PortfolioOverviewPanel` only carries a `fixed_portfolio_id` when the account is PAIRED with
+    one; otherwise it resolves the account's own ISINs into a basket and opens the same Analyse
+    view. Scoping the refresh to a model portfolio id therefore hid the button on exactly the rows
+    a user is most likely to be looking at — an account is the unit of work, the model is the
+    optional extra.
+
+    Mirrors `POST /api/airs/basket/analysis`, which exists for the identical reason: one view
+    serving a stored portfolio and an ad-hoc set alike.
+    """
+    import jobs as job_registry  # noqa: PLC0415
+
+    from routers._fundamental_fill import fill_company_ids  # noqa: PLC0415
+
+    name = req.label or "basket"
+    isins = sorted({(h.isin or "").strip().upper() for h in (req.holdings or []) if h.isin})
+    ids, holdings, no_fundamentals, no_company = _fundamentals_scope(isins)
+
+    def _work(ctx) -> str:
+        return fill_company_ids(ctx, name, ids, feeds=feeds, force=force, limit=limit,
+                                only_due=only_due)
+
+    job = job_registry.start("fundamentals.basket", name, _work)
+    return {"job_id": job.id, "label": name, "holdings": holdings, "reachable": len(ids),
+            "no_fundamentals": no_fundamentals, "no_company": no_company}

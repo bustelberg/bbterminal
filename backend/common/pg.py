@@ -20,11 +20,165 @@ re-exports these three names for its existing callers.
 """
 from __future__ import annotations
 
+import csv
 import io
+import json
 import logging
 import os
+import re
+import threading
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 log = logging.getLogger(__name__)
+
+# Only ever matched against module-level literals — see `load_rows_via_copy`.
+_SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# ---------------------------------------------------------------------------
+# Per-request connection reuse
+#
+# ⚠⚠ A FRESH CONNECTION PER COPY COSTS 220ms IN PRODUCTION AND 24ms LOCALLY — SO A LOCAL PROFILE
+# CANNOT SEE THIS AT ALL. `_run_copy_uncached` used to `psycopg.connect()` every time. Measured
+# 2026-08-11 from this machine:
+#
+#     connect + SET statement_timeout + SELECT 1     local 24.0ms     production 220.7ms
+#
+# The Analyse modal issues 17 COPYs, so it spent **~3.75s in production purely opening
+# connections** — TCP, then TLS, then Supavisor's auth — against 0.41s locally. That is not a
+# tuning detail, it was the single largest remaining cost on the page, and every profile taken on
+# a laptop reported it as 4% of the time.
+#
+# So a connection is opened once per REQUEST and reused. Scope comes from `read_cache`, which is
+# already exactly "one request" and is already entered by every endpoint that does bulk reads.
+#
+# ⚠ KEYED PER THREAD, NOT PER CONTEXT. A ContextVar is COPIED into a worker thread by
+# `asyncio.to_thread`, so several workers can share one context — and a psycopg connection is NOT
+# thread-safe. Sharing one across threads would interleave two COPY streams on a single socket,
+# which does not raise, it returns the wrong bytes. The scope holds a dict keyed by thread id, so
+# concurrent workers get their own connection and still avoid reconnecting per COPY.
+#
+# ⚠ A BROKEN CONNECTION MUST NOT POISON THE REST OF THE REQUEST. Anything that fails on a reused
+# connection drops it from the scope so the next COPY opens a fresh one; the caller still gets the
+# normal PostgREST fallback for that one query.
+_CONN_SCOPE: ContextVar[dict | None] = ContextVar("pg_conn_scope", default=None)
+
+
+@contextmanager
+def copy_connection_scope():
+    """Reuse one direct-Postgres connection per thread for the duration of this block.
+
+    Entered by `read_cache`, so callers get it for free. Nests by doing nothing (an inner block
+    keeps the outer scope) — closing on the inner exit would shut the connection the outer block
+    is still using.
+    """
+    if _CONN_SCOPE.get() is not None:
+        yield
+        return
+    scope: dict = {}
+    token = _CONN_SCOPE.set(scope)
+    try:
+        yield
+    finally:
+        _CONN_SCOPE.reset(token)
+        for conn in list(scope.values()):
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 — closing must never raise into the caller
+                pass
+        scope.clear()
+
+
+def _scoped_connection(url: str):
+    """The live connection for this thread, or None when no scope is open."""
+    scope = _CONN_SCOPE.get()
+    if scope is None:
+        return None
+    key = threading.get_ident()
+    conn = scope.get(key)
+    if conn is not None and getattr(conn, "closed", False):
+        conn = None
+        scope.pop(key, None)
+    if conn is None:
+        import psycopg  # noqa: PLC0415 — optional dependency, same as below
+
+        conn = psycopg.connect(url, connect_timeout=15)
+        with conn.cursor() as cur:
+            # Once per connection rather than once per COPY (see `_run_copy_uncached`).
+            cur.execute("SET statement_timeout = 0")
+        conn.commit()
+        scope[key] = conn
+    return conn
+
+
+def load_rows_via_copy(table: str, columns: str, key_col: str, values: list,
+                       *, where: dict | None = None) -> list[dict] | None:
+    """`SELECT columns FROM table WHERE key_col = ANY(values)` as dicts, in ONE COPY.
+
+    Returns `None` to mean "fall back to PostgREST" — unconfigured, psycopg missing, or any
+    error. Never raises, never returns a partial list.
+
+    ⚠ WHY THIS EXISTS: PostgREST encodes an IN-clause into the URL, so a long id list must be
+    chunked (`IN_CHUNK_SIZE` = 200) and each chunk is a round trip. `asset_grid` alone costs 11 of
+    them on one Analyse open — 502 analysis ids in three chunks plus eight ISIN batches — and in
+    production a round trip is ~50ms. A COPY has no URL, so the whole list goes in one.
+
+    ⚠⚠ THE ROWS ARE SHIPPED AS JSON, NOT AS CSV COLUMNS, AND THAT IS NOT A STYLE CHOICE. The other
+    COPY loaders in this codebase parse with `line.split(",")`, which is safe only because they
+    select numbers and dates. These selects include `name`, `gf_company_name`, `openfigi_name`,
+    `leonteq_name` — and **1,948 rows in `asset_grid` have a comma in `name`** ("Alphabet, Inc.").
+    Splitting on commas would silently shift every field after the name, producing rows that parse
+    but describe the wrong instrument. `row_to_json` also preserves TYPES (a numeric stays a
+    number, NULL stays None) and distinguishes NULL from the empty string, which bare CSV cannot —
+    so the dicts match what PostgREST returns field for field, rather than approximately.
+
+    ⚠ `table`, `columns` and `key_col` are INTERPOLATED and must never come from a request. Every
+    caller passes a module-level literal; `values` is the only parameterised part.
+    """
+    if not _db_url() or not values:
+        return None
+    if not _SAFE_IDENT.match(table) or not _SAFE_IDENT.match(key_col):
+        log.warning("[common.pg] refusing a COPY with a non-identifier table/key: %r/%r",
+                    table, key_col)
+        return None
+    # ⚠ `where` EXISTS BECAUSE DROPPING A SERVER-SIDE FILTER AND RE-APPLYING IT IN PYTHON IS A
+    # SILENT DATA REGRESSION — right answer, far more bytes. Measured on `airs_holding`: filtering
+    # on `portefeuille` alone and picking the snapshot afterwards fetched **788 rows instead of
+    # 42**, an 18.8x over-fetch, because the table keeps 28 historical snapshots per book. Extra
+    # equality predicates belong in the query.
+    clauses = [f"{key_col} = ANY(%s)"]
+    params: list = [list(values)]
+    for col, val in (where or {}).items():
+        if not _SAFE_IDENT.match(col):
+            log.warning("[common.pg] refusing a COPY with a non-identifier filter: %r", col)
+            return None
+        clauses.append(f"{col} = %s")
+        params.append(val)
+    sql = (f"COPY (SELECT row_to_json(t)::text FROM "
+           f"(SELECT {columns} FROM {table} WHERE {' AND '.join(clauses)}) t) "
+           f"TO STDOUT WITH (FORMAT csv)")
+    buf = _run_copy(sql, tuple(params))
+    if buf is None:
+        return None
+    out: list[dict] = []
+    # csv.reader unquotes the one JSON column, so embedded commas, quotes and newlines survive.
+    for row in csv.reader(io.TextIOWrapper(buf, encoding="utf-8", newline="")):
+        if row and row[0]:
+            out.append(json.loads(row[0]))
+    return out
+
+
+def _drop_scoped_connection() -> None:
+    """Forget this thread's connection after an error, so the next COPY reconnects."""
+    scope = _CONN_SCOPE.get()
+    if scope is None:
+        return
+    conn = scope.pop(threading.get_ident(), None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
 
 # One-shot guard so the "COPY path disabled" warning is logged once per process
 # rather than on every chunked load.
@@ -84,22 +238,44 @@ def _run_copy_uncached(sql: str, params: tuple) -> io.BytesIO | None:
             "using the PostgREST loader instead."
         )
         return None
+    # Reuse this request's connection when a scope is open (see `copy_connection_scope`), which
+    # is where the 220ms-per-connect production cost goes. Falls back to a fresh, self-closing
+    # connection when there is no scope — a script, a scheduler tick, a test.
+    try:
+        conn = _scoped_connection(url)
+    except Exception as e:  # noqa: BLE001 — reuse is an optimisation, never a failure mode
+        log.warning("[common.pg] could not open a scoped connection (%s: %s); "
+                    "falling back to a per-COPY connection", type(e).__name__, e)
+        conn = None
+
     try:
         buf = io.BytesIO()
-        with psycopg.connect(url, connect_timeout=15) as conn:
+        if conn is not None:
             with conn.cursor() as cur:
-                # Disable the server/role statement timeout for THIS session — a
-                # bulk metric COPY over thousands of companies runs for many
-                # seconds and must not be cancelled (57014). Set via an explicit
-                # query (not a libpq `options=` startup param) because Supavisor
-                # — the Supabase pooler — can reject startup options.
-                cur.execute("SET statement_timeout = 0")
+                # `statement_timeout` was set once when this connection was opened.
                 with cur.copy(sql, params) as copy:
                     while (block := copy.read()):
                         buf.write(block)
+        else:
+            with psycopg.connect(url, connect_timeout=15) as fresh:
+                with fresh.cursor() as cur:
+                    # Disable the server/role statement timeout for THIS session — a
+                    # bulk metric COPY over thousands of companies runs for many
+                    # seconds and must not be cancelled (57014). Set via an explicit
+                    # query (not a libpq `options=` startup param) because Supavisor
+                    # — the Supabase pooler — can reject startup options.
+                    cur.execute("SET statement_timeout = 0")
+                    with cur.copy(sql, params) as copy:
+                        while (block := copy.read()):
+                            buf.write(block)
         buf.seek(0)
         return buf
     except Exception as e:  # noqa: BLE001 — any failure → fall back, never raise
+        # ⚠ DROP THE REUSED CONNECTION ON ANY FAILURE. A COPY that errors can leave the session in
+        # a state the next one cannot use, and a broken socket would otherwise fail every
+        # remaining COPY in the request instead of just this one. Reconnecting costs 220ms once;
+        # poisoning the request costs all of them.
+        _drop_scoped_connection()
         log.warning(
             "[common.pg] direct COPY failed (%s: %s); falling back to PostgREST.",
             type(e).__name__, e,

@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 from deps import IN_CHUNK_SIZE, supabase
+from routers._airs_ref import positions as ref_positions
 from routers._airs_portfolio_links import _load_context, link_key, resolve_links
 from routers._airs_portfolio_store import portfolio_label
 from routers._airs_portfolio_variant import portfolio_variant
@@ -284,8 +285,7 @@ def compute_portfolio_correlations(year: int | None = None) -> dict:
     t12_anchor = {pid: max(t12_start, eff_by_pf[pid]) for pid in ids_order}
 
     # ── the shared price/FX load (mirrors compute_portfolio_performance's setup) ───────────────
-    pos = (supabase.table("airs_model_portfolio_position")
-           .select("portfolio_id,isin,percentage,fonds").execute().data or [])
+    pos = ref_positions()                       # one shared read — see `_airs_ref`
     by_pf: dict[int, list[dict]] = {}
     for r in pos:
         by_pf.setdefault(r["portfolio_id"], []).append(r)

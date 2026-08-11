@@ -55,14 +55,18 @@ import time
 from contextlib import contextmanager
 from datetime import date, timedelta
 
+from common.pg import load_rows_via_copy
 from deps import supabase
-
+from routers._airs_ref import model_weights_for as ref_model_weights_for, models as ref_models
 from timeseries import load_series
 
 from ._airs_portfolio_links import link_key, resolve_links
 from ._benchmark_index import _fx_to_eur, _rate
 
 _log = logging.getLogger(__name__)
+
+_HOLDING_GRID_COLS = ("isin,name,openfigi_name,leonteq_name,leonteq_product_type,"
+                      "country,continent,msci_region,asset_class,sector")
 
 
 @contextmanager
@@ -559,12 +563,15 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
 
     with _phase(t, "grid"):
         grid: dict[str, dict] = {}
-        for i in range(0, len(isins), 100):
-            for g in (supabase.table("asset_grid")
-                      .select("isin,name,openfigi_name,leonteq_name,leonteq_product_type,"
-                              "country,continent,msci_region,asset_class,sector")
-                      .in_("isin", isins[i:i + 100]).execute().data or []):
-                grid[g["isin"]] = g
+        # ONE COPY instead of ceil(len/100) round trips; the chunked loop is the fallback.
+        _rows = load_rows_via_copy("asset_grid", _HOLDING_GRID_COLS, "isin", isins)
+        if _rows is None:
+            _rows = []
+            for i in range(0, len(isins), 100):
+                _rows += (supabase.table("asset_grid").select(_HOLDING_GRID_COLS)
+                          .in_("isin", isins[i:i + 100]).execute().data or [])
+        for g in _rows:
+            grid[g["isin"]] = g
 
     # ⚠ AN EXECUTION ROW IS PRICED FROM ITS *ANALYSIS* INSTRUMENT, WHICH CAN BE A DIFFERENT
     # LISTING — that is the design, not a fault. An ADR's execution row is deliberately served by
@@ -619,7 +626,7 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
         links = resolve_links(supabase, owner_id, link_rows)
         # ⚠ The PRETTY name, falling back to AIRS's `Portefeuille` code — see `linkable_context`.
         pf_names = {p["id"]: (p.get("display_name") or p["name"]) for p in (
-            supabase.table("airs_model_portfolio").select("id,name,display_name").execute().data or [])}
+            ref_models())}
 
     rows = []
     for i, h in enumerate(holdings):
@@ -713,8 +720,7 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
     held = {r["holding_name"] for r in rows}
     # Drift, from the book's OWN model report: a line the strategy names and the book does not
     # hold. Same meaning as the old `unmatched_model_positions`, without the pairing.
-    unheld = (supabase.table("airs_model_weight").select("fonds,model_pct")
-              .eq("portefeuille", portefeuille).limit(1000).execute().data or [])
+    unheld = list(ref_model_weights_for(portefeuille).values())
     t["total"] = sum(v for k, v in t.items() if k != "total")
     _log.info("[airs isins] %s: %s", portefeuille,
               ", ".join(f"{k} {v}ms" for k, v in sorted(t.items(), key=lambda kv: -kv[1])))
