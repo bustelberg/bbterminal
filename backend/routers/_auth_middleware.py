@@ -215,10 +215,25 @@ async def enforce_api_auth(
 
     # Lazy import — avoids a circular module-init chain (auth.py pulls the
     # Supabase client, which loads dotenv, etc.).
-    from routers.auth import verify_token  # noqa: PLC0415
+    from routers.auth import AuthBackendUnavailable, verify_token  # noqa: PLC0415
 
     try:
         info = verify_token(request.headers.get("authorization", ""))
+    except AuthBackendUnavailable as e:
+        # !! 503, NOT 401 — WE DID NOT LEARN THAT THE TOKEN IS BAD, WE LEARNED NOTHING.
+        # A 401 here tells the user their login failed and invites a frontend to throw
+        # away a valid session, while the real fault is that the identity provider is
+        # unreachable. See AuthBackendUnavailable for the incident that motivated this.
+        _log.error(
+            "[auth] identity provider unreachable (%s) — 503 on %s %s. "
+            "This is NOT a bad token: check DB/GoTrue health before touching auth config.",
+            e, request.method, path,
+        )
+        return JSONResponse(
+            {"detail": "Authentication service temporarily unavailable — please retry."},
+            status_code=503,
+            headers={"Retry-After": "5"},
+        )
     except Exception as e:
         _log.warning(
             "[auth] token verification raised %s: %s — denying %s %s",

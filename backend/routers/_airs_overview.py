@@ -69,11 +69,12 @@ def list_overview() -> list[dict]:
     models = {m["id"]: m for m in (supabase.table("airs_model_portfolio")
                                    .select("id,name,display_name,omschrijving,portfolio_type")
                                    .limit(500).execute().data or [])}
-    positions: dict[int, int] = {}
-    for p in (supabase.table("airs_model_portfolio_position").select("portfolio_id")
-              .limit(20000).execute().data or []):
-        positions[p["portfolio_id"]] = positions.get(p["portfolio_id"], 0) + 1
-
+    # ⚠ THE `airs_model_portfolio_position` READ THAT USED TO SIT HERE IS GONE (2026-08-11). It
+    # counted positions per model into a dict that NOTHING READ — the `isins` column moved to the
+    # account's own count (see below) and only the *use* was deleted, leaving the query behind. It
+    # cost one round trip and 982 rows on every single page load, invisibly, because a read whose
+    # result is discarded cannot produce a wrong answer — only a slow one. Measured: the overview
+    # went 13 → 12 round trips and 3,760 → 2,778 rows.
     out: list[dict] = []
     for a in list_accounts():
         link = links.get(a["portefeuille"]) or {}

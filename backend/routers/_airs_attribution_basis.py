@@ -35,6 +35,7 @@ from __future__ import annotations
 from datetime import date
 
 from deps import supabase
+from routers._airs_ref import positions_for as ref_positions_for
 
 # Bucket sentinels + the classifier live in the analysis module; importing them here is safe
 # because that module reaches this one only through a function-level import (no cycle).
@@ -67,9 +68,7 @@ def model_legs(portfolio_id: int, eff: str | None, start: str) -> list[dict]:
     a date. So the basis switch does not reach this path: the weight is the stated percentage
     either way, and only the exclusions below apply.
     """
-    pos = (supabase.table("airs_model_portfolio_position")
-           .select("isin,fonds,percentage,datum")
-           .eq("portfolio_id", portfolio_id).execute().data or [])
+    pos = ref_positions_for(portfolio_id)       # one shared read — see `_airs_ref`
     if eff:
         pos = [r for r in pos if r.get("datum") == eff]
 

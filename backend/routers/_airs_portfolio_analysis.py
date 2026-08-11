@@ -46,6 +46,7 @@ from datetime import date
 
 from asset_pipeline.geo import msci_region_of
 from deps import IN_CHUNK_SIZE, supabase
+from routers._airs_ref import model as ref_model, mutaties_for as ref_mutaties_for, positions_for as ref_positions_for
 from routers._asset_benchmark import index_returns
 from routers._asset_benchmark import members as _members
 from routers._benchmark_index import SP500_LABEL
@@ -1539,8 +1540,7 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
             .eq("portefeuille", portefeuille)
             .eq("as_of_date", _book_snapshot_date(portefeuille) or "").execute().data or [])
 
-    muts = (supabase.table("airs_mutatie").select("boekdatum,grootboek,fonds,amount_eur")
-            .eq("portefeuille", portefeuille).execute().data or [])
+    muts = ref_mutaties_for(portefeuille)
     income = {f: d.net_eur for f, d in direct_result([Mutatie(
         grootboek=m["grootboek"], fonds=m["fonds"], omschrijving="",
         boekdatum=_date.fromisoformat(str(m["boekdatum"])) if m.get("boekdatum") else None,
@@ -1690,16 +1690,13 @@ def compute_portfolio_analysis(portfolio_id: int,
         _t[name] = int((now - _t0) * 1000)
         _t0 = now
 
-    p = (supabase.table("airs_model_portfolio")
-         .select("id,name,omschrijving,positions_datum")
-         .eq("id", portfolio_id).limit(1).execute().data or [])
+    # Both reads go through `_airs_ref`, which asks the ONE canonical question per table so the
+    # per-request memo can collapse what were 8 + 7 separate round trips. See its module note.
+    p = ref_model(portfolio_id)
     if not p:
         return {"portfolio_id": portfolio_id, "name": None, "axes": [], "holdings": 0}
-    p = p[0]
 
-    pos = (supabase.table("airs_model_portfolio_position")
-           .select("isin,fonds,percentage,datum,categorie")
-           .eq("portfolio_id", portfolio_id).execute().data or [])
+    pos = ref_positions_for(portfolio_id)
     if p.get("positions_datum"):
         pos = [r for r in pos if r.get("datum") == p["positions_datum"]]
 
@@ -2242,12 +2239,34 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
     ⚠ AND THE SYNC FUNCTION KEEPS ITS OWN BEHAVIOUR UNCHANGED. `compute_portfolio_analysis` is
     still callable from a script or a test with no memo at all, which is what an offline caller
     should get: no shared state, no question about how old an answer is.
+
+    ⚠ AND A SECOND, WIDER CACHE SITS IN FRONT OF THE MEMO — `_analysis_cache`. The memo above
+    removes REPEATS WITHIN one request; it can do nothing about the same request arriving twice,
+    which is the common case here (toggle the benchmark and back, switch `weight_by`, reopen the
+    same row) and costs the full ~7s each time. That outer cache is keyed on a FINGERPRINT OF THE
+    DATA, not a clock, so it cannot serve a stale figure — see its module note for why a TTL was
+    the wrong instrument on a page whose discipline is "current or absent".
     """
     from common.read_cache import read_cache  # noqa: PLC0415
 
+    from routers import _analysis_cache as ac  # noqa: PLC0415
+
+    key = (portfolio_id, benchmark_label, weight_by, source, bucket_filter)
+    # The fingerprint is a database read, so it goes to a thread like everything else here.
+    fp = await asyncio.to_thread(ac.fingerprint)
+    hit = ac.get(key, fp)
+    if hit is not None:
+        return hit
+
     with read_cache(f"analysis:{portfolio_id}"):
-        return await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label,
-                                       weight_by, source, bucket_filter)
+        out = await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label,
+                                      weight_by, source, bucket_filter)
+    # ⚠ Stored against the fingerprint read BEFORE the computation, deliberately. If a write lands
+    # mid-computation the payload is a mix of both states — filing it under the OLD fingerprint
+    # means the next request (which sees the new one) misses and recomputes. Filing it under a
+    # fingerprint taken afterwards would publish that mixed payload as if it were the new state.
+    ac.put(key, fp, out)
+    return out
 
 
 def portfolio_basket_request(portfolio_id: int):
@@ -2258,14 +2277,10 @@ def portfolio_basket_request(portfolio_id: int):
 
     from routers._asset_financials import BasketHolding, BasketRequest  # noqa: PLC0415
 
-    p = (supabase.table("airs_model_portfolio")
-         .select("id,name,omschrijving,positions_datum")
-         .eq("id", portfolio_id).limit(1).execute().data or [])
+    p = ref_model(portfolio_id)
     if not p:
         raise HTTPException(404, f"No model portfolio {portfolio_id}.")
-    p = p[0]
-    pos = (supabase.table("airs_model_portfolio_position")
-           .select("isin,percentage,datum").eq("portfolio_id", portfolio_id).execute().data or [])
+    pos = ref_positions_for(portfolio_id)
     if p.get("positions_datum"):
         pos = [r for r in pos if r.get("datum") == p["positions_datum"]]
     holdings = [BasketHolding(isin=r["isin"], weight=float(r.get("percentage") or 0))

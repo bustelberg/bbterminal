@@ -56,6 +56,7 @@ from contextlib import contextmanager
 from datetime import date, timedelta
 
 from deps import supabase
+from routers._airs_ref import model_weights_for as ref_model_weights_for, models as ref_models
 
 from timeseries import load_series
 
@@ -619,7 +620,7 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
         links = resolve_links(supabase, owner_id, link_rows)
         # ⚠ The PRETTY name, falling back to AIRS's `Portefeuille` code — see `linkable_context`.
         pf_names = {p["id"]: (p.get("display_name") or p["name"]) for p in (
-            supabase.table("airs_model_portfolio").select("id,name,display_name").execute().data or [])}
+            ref_models())}
 
     rows = []
     for i, h in enumerate(holdings):
@@ -713,8 +714,7 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
     held = {r["holding_name"] for r in rows}
     # Drift, from the book's OWN model report: a line the strategy names and the book does not
     # hold. Same meaning as the old `unmatched_model_positions`, without the pairing.
-    unheld = (supabase.table("airs_model_weight").select("fonds,model_pct")
-              .eq("portefeuille", portefeuille).limit(1000).execute().data or [])
+    unheld = list(ref_model_weights_for(portefeuille).values())
     t["total"] = sum(v for k, v in t.items() if k != "total")
     _log.info("[airs isins] %s: %s", portefeuille,
               ", ".join(f"{k} {v}ms" for k, v in sorted(t.items(), key=lambda kv: -kv[1])))

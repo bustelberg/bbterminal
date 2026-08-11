@@ -94,6 +94,11 @@ param(
     [string]$ProdDbUrl,
     [string]$Container = 'supabase_db_bbterminal',
     [int]$CompanyChunk = 300,
+    # Provisioned size of prod's disk, in GB. Postgres cannot see its own filesystem, so this cannot
+    # be discovered -- it is the one number the preflight has to be told. !! UPDATE IT WHEN THE
+    # VOLUME IS RESIZED; too high and the guard waves through a run that fills the disk, too low and
+    # it refuses a run that would have fit. Read it off the Supabase dashboard (Database > Disk).
+    [int]$ProdDiskGB = 40,
     [switch]$DryRun,
     [switch]$Force
 )
@@ -133,6 +138,33 @@ $prodUrlNoPw  = "$($Matches.prefix)@$($Matches.rest)"
 # clone is a deliberate bulk maintenance op, so disable the timeout for its
 # sessions. (Session pooler forwards startup options; if a managed setup strips
 # them, the explicit `SET statement_timeout = 0;` in the step-6 script still wins.)
+#
+# !! PGAPPNAME IS NOT COSMETIC -- IT IS THE ONLY HANDLE ON A RUNAWAY STATEMENT. Killing this script
+# (Ctrl-C, closing the window, a laptop sleeping) kills the local psql CLIENT and NOTHING ELSE: the
+# server-side statement keeps running. Postgres only notices a vanished client when it next tries to
+# WRITE to it, and an `INSERT ... SELECT` writes nothing until it finishes -- so it does not notice.
+# Measured 2026-08-11: an aborted step-6 batch went on extending files for 46 more minutes, filled
+# the volume, and exhausted the connection pool; every /api/* request then 500'd with
+# ECHECKOUTTIMEOUT. The database was never broken -- it was busy on a statement nobody was waiting
+# for. TCP keepalives do NOT rescue this, because the peer the server can see is the Supabase
+# session POOLER, which stays connected regardless of what happened to us.
+# So every connection this script opens is stamped, and `Stop-CloneBackends` cancels anything
+# wearing the stamp. See its own comment for why it runs at STARTUP and not only on the way out.
+#
+# !! THE STAMP MUST BE APPLIED IN SQL, NOT VIA PGAPPNAME -- SUPAVISOR OVERWRITES THE STARTUP PACKET.
+# Measured 2026-08-11 through the session pooler: with PGAPPNAME=clone-local-to-prod set,
+# `current_setting('application_name')` came back as literally **`Supavisor`**. The pooler stamps
+# its own name over ours, so a startup-packet handle finds nothing and Stop-CloneBackends would
+# silently match zero rows -- a cleanup that reports success having done nothing. A SQL-level
+# `SET application_name` after connecting DOES stick and IS visible in pg_stat_activity (verified on
+# both the -c and the stdin path), so that is how Invoke-Prod / Invoke-ProdScript stamp themselves.
+$CloneAppName = 'clone-local-to-prod'
+# !! AND PGOPTIONS IS STRIPPED THE SAME WAY. The comment above used to hedge ("if a managed setup
+# strips them, the explicit SET still wins") -- measured, it IS stripped: statement_timeout read
+# back as prod's default **2min**, not 0. So the inline `SET statement_timeout = 0;` that the bulk
+# statements carry is not a belt-and-braces fallback, it is the ONLY thing disabling the timeout.
+# Do not remove it from a long statement on the assumption that the environment handles it.
+# (Kept anyway: harmless, and correct on a direct non-pooled connection.)
 $prodEnv      = @('-e', "PGPASSWORD=$prodPassword", '-e', 'PGOPTIONS=-c statement_timeout=0')
 $repoRoot     = Split-Path $PSScriptRoot -Parent
 $migDir       = Join-Path $repoRoot 'supabase/migrations'
@@ -201,7 +233,14 @@ function Test-TransientDbError([string]$text) {
                      'server closed the connection unexpectedly', 'could not connect to server',
                      'Connection refused', 'Connection reset', 'connection timed out',
                      'no connection to the server', 'terminating connection',
-                     'authentication did not complete', 'server login has been failing')) {
+                     'authentication did not complete', 'server login has been failing',
+                     # Supavisor's own pool-exhaustion error, in Session mode: every client holds a
+                     # backend for its whole session, so a handful of concurrent consumers (the
+                     # Railway backend, a scheduler tick, this script) can leave nothing to check
+                     # out. Observed 2026-08-11 on the very first query of a run, with the next one
+                     # succeeding. It was already retried -- but only by falling through to the
+                     # empty-body catch-all below, i.e. by accident. Naming it makes that deliberate.
+                     'ECHECKOUTTIMEOUT', 'unable to check out connection from the pool')) {
         if ($text -like "*$p*") { return $true }
     }
     # !! AN EMPTY BODY WITH A NON-ZERO EXIT IS ALSO A DROPPED CONNECTION. psql writes its errors to
@@ -231,8 +270,17 @@ function Invoke-Local([string]$sql) {
     }
 }
 function Invoke-Prod([string]$sql) {
+    # !! -q IS LOAD-BEARING, NOT TIDINESS. Without it psql echoes a command tag for every statement
+    # that returns no rows, so the prepended SET emits a literal `SET` line INTO the result -- and
+    # these results are read positionally ($rows[0], -split '|'). Measured: the same query returned
+    # 3 rows instead of 2, with `SET` first, which would have shifted every count, PK list and
+    # version compare by one row while still looking like data. -q suppresses only informational
+    # output; a real SQL error still goes to stderr and still exits non-zero, so the retry
+    # classification below is unaffected. (Same class of bug as the docstring that leaked into
+    # prod-reclaim-disk.ps1's output and invented phantom index rows.)
+    $sql = "SET application_name = '$CloneAppName'; $sql"
     for ($try = 1; $try -le $MaxDbTries; $try++) {
-        $out = docker exec @prodEnv $Container psql $prodUrlNoPw -tA -F'|' -c $sql
+        $out = docker exec @prodEnv $Container psql $prodUrlNoPw -q -tA -F'|' -c $sql
         if ($LASTEXITCODE -eq 0) {
             return @($out | ForEach-Object { "$_".TrimEnd("`r") } | Where-Object { $_ -ne '' })
         }
@@ -245,6 +293,26 @@ function Invoke-Prod([string]$sql) {
         Start-Sleep -Seconds (5 * $try)
     }
 }
+# The FIRST FIELD of the FIRST ROW, as a string, from either side.
+#
+# !! THESE EXIST BECAUSE `(Invoke-Prod $sql)[0]` IS A TRAP, AND IT HAS BITTEN THREE TIMES IN THIS
+# CODEBASE. PowerShell unrolls a one-element array to a bare scalar, so a single-row result IS the
+# string "20 GB" and `[0]` indexes the STRING, yielding "2". Worse with a cast: `[int]("24")[0]` is
+# 50, the ASCII code of '2'. Every such value reads like a plausible number, which is exactly what
+# makes it dangerous -- the disk preflight above would compare bytes against a character code and
+# cheerfully wave through a run that fills the volume. Same fix as prod-reclaim-disk.ps1's helper
+# of the same name and airs-dedupe.ps1's Get-Count; keep using them rather than indexing a result.
+function Invoke-ProdScalar([string]$sql) {
+    $rows = @(Invoke-Prod $sql)
+    if (-not $rows.Count) { return '' }
+    return ($rows[0] -split '\|')[0]
+}
+function Invoke-LocalScalar([string]$sql) {
+    $rows = @(Invoke-Local $sql)
+    if (-not $rows.Count) { return '' }
+    return ($rows[0] -split '\|')[0]
+}
+
 # Run a multi-statement / \copy script against prod via stdin (-f -).
 #
 # !! THIS IS THE ONE THAT ACTUALLY DROPPED. It carries the metric_data batch -- minutes of held
@@ -252,6 +320,10 @@ function Invoke-Prod([string]$sql) {
 # re-sent on a retry, which is safe: it opens with `DROP TABLE IF EXISTS clone_stg.md_batch` and
 # wraps its delete+insert in BEGIN/COMMIT, so a half-finished attempt left nothing behind.
 function Invoke-ProdScript([string]$script) {
+    # Stamp this session too -- THIS is the path that carries the multi-minute metric_data batch,
+    # i.e. the one an abort strands. No -q needed: this output is streamed to the console for
+    # progress rather than parsed, so an extra `SET` line costs nothing.
+    $script = "SET application_name = '$CloneAppName';`n$script"
     for ($try = 1; $try -le $MaxDbTries; $try++) {
         $script | docker exec -i @prodEnv $Container psql $prodUrlNoPw -v ON_ERROR_STOP=1 -f -
         if ($LASTEXITCODE -eq 0) { return }
@@ -262,6 +334,63 @@ function Invoke-ProdScript([string]$script) {
         Write-Host ("  prod script failed (attempt {0}/{1}) -- reconnecting in {2}s..." -f `
                 $try, $MaxDbTries, (10 * $try)) -ForegroundColor Yellow
         Start-Sleep -Seconds (10 * $try)
+    }
+}
+
+# Cancel any prod backend still running this script's work -- ours from a previous life, or ours
+# from a moment ago. Opens its OWN connection (the point is that the old one is unreachable) and
+# excludes itself by pid; it wears the same PGAPPNAME, so that exclusion is load-bearing.
+#
+# !! IT RUNS AT STARTUP, NOT ONLY IN THE `finally`, AND THE STARTUP CALL IS THE ONE THAT MATTERS.
+# A `finally` needs this process to still be alive to execute it -- exactly what is not true when
+# the window was closed, the machine slept, or PowerShell tore the pipeline down before unwinding.
+# Cancelling at startup makes the NEXT run the recovery mechanism, which needs no cooperation from
+# the run that died. That is also why this is safe to call before we have done anything: a stamped
+# backend that exists before we connect cannot be ours, so it is by definition an orphan.
+#
+# !! DO NOT CALL IT MID-RUN. Step [5] runs a local and a prod query as concurrent jobs, so during
+# that window a second stamped backend is a SIBLING, not an orphan, and cancelling it would kill
+# the run that is calling.
+#
+# Cancel first (rolls the statement back cleanly), and only escalate to terminate for something
+# that ignores it -- terminate drops the whole session, which for a COPY in progress is the same
+# rollback but ruder, and for an idle session is gratuitous.
+function Stop-CloneBackends([string]$When) {
+    $find = "SELECT pid, coalesce(to_char(now()-query_start,'HH24:MI:SS'),'-'), " +
+            "left(regexp_replace(coalesce(query,''),'\s+',' ','g'),60) " +
+            "FROM pg_stat_activity WHERE datname = current_database() " +
+            "AND application_name = '$CloneAppName' AND pid <> pg_backend_pid();"
+    # Best-effort by construction: if prod is unreachable we cannot cancel anything, and saying so
+    # is the whole result. Never let cleanup be the thing that throws.
+    try { $rows = @(Invoke-Prod $find) } catch { return }
+    if ($rows.Count -eq 0) { return }
+
+    Write-Host ""
+    Write-Host ("  !! $When : $($rows.Count) leftover clone backend(s) still running on prod.") `
+            -ForegroundColor Yellow
+    foreach ($r in $rows) {
+        $f = $r -split '\|', 3
+        Write-Host ("     pid $($f[0])  running $($f[1])  $($f[2])") -ForegroundColor DarkYellow
+    }
+    try {
+        Invoke-Prod ("SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE datname = " +
+                "current_database() AND application_name = '$CloneAppName' " +
+                "AND pid <> pg_backend_pid();") | Out-Null
+        Start-Sleep -Seconds 5
+        $left = @(Invoke-Prod $find)
+        if ($left.Count -gt 0) {
+            Write-Host "     cancel ignored by $($left.Count) -- terminating." -ForegroundColor Yellow
+            Invoke-Prod ("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = " +
+                    "current_database() AND application_name = '$CloneAppName' " +
+                    "AND pid <> pg_backend_pid();") | Out-Null
+            Start-Sleep -Seconds 3
+        }
+        Write-Host "     cleared." -ForegroundColor Green
+    } catch {
+        Write-Host "     could not clear them: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "     Run this in the Supabase SQL editor:" -ForegroundColor Red
+        Write-Host ("       SELECT pg_cancel_backend(pid) FROM pg_stat_activity " +
+                "WHERE application_name = '$CloneAppName';") -ForegroundColor Red
     }
 }
 
@@ -389,6 +518,68 @@ for ($attempt = 1; $attempt -le 3; $attempt++) {
     }
 }
 Write-Host "  OK: prod db = $probe" -ForegroundColor Green
+
+# Anything wearing our stamp before we have run a single statement is a corpse from a previous run.
+# Clear it FIRST -- it holds a pool slot and may still be writing, so a fresh clone stacked on top
+# of it is how one aborted run becomes an outage. (See Stop-CloneBackends.)
+Stop-CloneBackends "before starting"
+
+# ---- disk preflight --------------------------------------------------------
+# !! A CLONE CANNOT BE ALLOWED TO DISCOVER THE DISK IS FULL BY FILLING IT. Supabase flips the
+# database to READ-ONLY at 95% of the volume, which takes the whole application down -- and the
+# recovery (drop indexes, reindex, rebuild) is slow, manual, and rate-limited by AWS's 6-hour
+# cooldown on volume modifications. Measured 2026-08-11: a run started at 19 GB of 20 GB, and the
+# cost of finding that out the hard way was a multi-hour production outage.
+#
+# Two things are checked, and they answer different questions:
+#   * read_only  -- "is prod ALREADY over the line?" Nothing this script does can help; a clone
+#                   would only add to what has to be cleaned up. Refuse outright, no -Force.
+#   * headroom   -- "will finishing put it over?" The estimate is deliberately crude (see below),
+#                   so this one warns and can be overridden, rather than refusing.
+Write-Host "[1b] Prod disk preflight..."
+$readOnly = (Invoke-ProdScalar "SELECT current_setting('default_transaction_read_only');")
+if ($readOnly -eq 'on') {
+    Write-Host ""
+    Write-Host "ERROR: prod is in READ-ONLY mode -- it is out of disk." -ForegroundColor Red
+    Write-Host "  Nothing can be written until space is reclaimed. Run, in order:" -ForegroundColor Yellow
+    Write-Host "    ./scripts/prod-reclaim-disk.ps1 -Report" -ForegroundColor Yellow
+    Write-Host "    ./scripts/prod-reclaim-disk.ps1 -Reindex -Apply" -ForegroundColor Yellow
+    Write-Host "  then re-run this clone." -ForegroundColor Yellow
+    exit 1
+}
+# !! MEASURE WAL AND THE DATABASE SEPARATELY -- pg_database_size DOES NOT INCLUDE WAL, and WAL is
+# on the same volume. A bulk clone is exactly the workload that grows it (2.3 GB during the
+# 2026-08-11 run), so leaving it out understates usage by whole GB at the moment it matters most.
+$prodBytes = [double](Invoke-ProdScalar "SELECT pg_database_size(current_database());")
+$walBytes  = [double](Invoke-ProdScalar "SELECT coalesce(sum(size),0) FROM pg_ls_waldir();")
+$localBytes = [double](Invoke-LocalScalar "SELECT pg_database_size(current_database());")
+$diskBytes = [double]$ProdDiskGB * 1GB
+$usedGB    = ($prodBytes + $walBytes) / 1GB
+# The clone makes prod look like local, so local's size is the target -- but the transfer PEAKS
+# higher: staged copies in clone_stg, the pre-VACUUM dead tuples every UPDATE leaves behind, and
+# indexes built by insertion rather than by REINDEX. 1.4x is a rule of thumb from the runs so far,
+# not a measured constant; it exists to be conservative, and the number it produces is only ever
+# used to warn.
+$peakGB = [Math]::Max($localBytes * 1.4, $prodBytes) / 1GB + ($walBytes / 1GB)
+Write-Host ("  prod {0:N1} GB + {1:N1} GB WAL = {2:N1} GB of {3} GB ({4:N0}%)" -f `
+        ($prodBytes / 1GB), ($walBytes / 1GB), $usedGB, $ProdDiskGB, (100 * $usedGB / $ProdDiskGB))
+Write-Host ("  local {0:N1} GB -> projected peak ~{1:N1} GB ({2:N0}% of disk)" -f `
+        ($localBytes / 1GB), $peakGB, (100 * $peakGB / $ProdDiskGB))
+if ($peakGB -gt 0.90 * $ProdDiskGB) {
+    Write-Host ""
+    Write-Host ("WARNING: this clone is projected to reach ~{0:N0}% of prod's disk." -f `
+            (100 * $peakGB / $ProdDiskGB)) -ForegroundColor Red
+    Write-Host "  Supabase turns the database READ-ONLY at 95% -- that is a production outage," -ForegroundColor Yellow
+    Write-Host "  and recovering from it is slow (AWS allows one volume resize per 6 hours)." -ForegroundColor Yellow
+    Write-Host "  Before running: reclaim space (./scripts/prod-reclaim-disk.ps1 -Reindex -Apply)," -ForegroundColor Yellow
+    Write-Host "  or raise the disk in the Supabase dashboard and pass -ProdDiskGB <new size>." -ForegroundColor Yellow
+    if (-not $Force) {
+        Write-Host "  Refusing to start. Pass -Force to override." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  -Force given: continuing anyway." -ForegroundColor Yellow
+}
+else { Write-Host "  OK: enough headroom." -ForegroundColor Green }
 
 # ---- schema metadata (discovered from LOCAL, applied to both) ---------------
 Write-Host "[2] Reading schema metadata from local..."
@@ -1209,6 +1400,13 @@ finally {
     # unreachable then this drop cannot work either, and letting its error escape would replace
     # "the FK on company blocked the delete" with "connection refused" -- burying the fault that
     # actually needs fixing. So it warns and rethrows nothing.
+    #
+    # !! CANCEL BEFORE DROPPING, NOT AFTER. A retry inside Invoke-ProdScript abandons its previous
+    # attempt's connection, so a statement from it can still be running and still holding an
+    # ACCESS SHARE lock on a clone_stg table -- and `DROP SCHEMA ... CASCADE` would then block
+    # behind it for as long as it runs, turning cleanup into another hang. Clearing our own
+    # backends first makes the drop uncontended.
+    Stop-CloneBackends "on exit"
     try {
         Invoke-Prod "DROP SCHEMA IF EXISTS clone_stg CASCADE;" | Out-Null
         Write-Host "  clone_stg dropped (staging copy removed from prod)." -ForegroundColor DarkGray

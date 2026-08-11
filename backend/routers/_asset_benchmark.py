@@ -52,6 +52,88 @@ from routers._benchmark_index import (
 )
 
 
+def window_marks_multi(analysis_ids: list[int], lookback: str, start_anchors: list[str],
+                       end: str) -> dict[str, dict[int, dict]]:
+    """`{anchor: window_marks(...)}` for several anchors, in ONE COPY.
+
+    ⚠ WHY: `index_returns` prices a model's YTD **and** its since-inception window, and its
+    docstring said "ONE price load" — but it ran `window_marks` once per anchor, so the Analyse
+    modal issued **two COPYs over the identical 500 ids and the identical date window**, differing
+    only in which anchor selected the opening mark. Measured 2026-08-11: 356 ms + 352 ms, of which
+    one was pure duplication. The bars are the same bars; only the *selection* differs, and
+    selection is what SQL is good at.
+
+    ⚠ THE JUMP SET IS PER-ANCHOR AND MUST STAY THAT WAY. Jumps are filtered to those at or after
+    that anchor's own opening mark (`prev_date >= s.target_date`) — a split BEFORE the opening mark
+    is already absorbed into it and applying it again would rescale a price that was never on the
+    old basis. So `s` is computed per (instrument, anchor) and the jump join carries the anchor.
+    A single shared jump set would be wrong for whichever anchor is later.
+
+    ⚠ `end` IS ANCHOR-INDEPENDENT and is emitted ONCE, then copied into every anchor's dict —
+    emitting it per anchor would multiply the largest part of the result by the anchor count for
+    no information.
+    """
+    anchors = sorted(set(start_anchors))
+    if not analysis_ids or not anchors:
+        # ⚠ SHAPE PARITY WITH THE PER-ANCHOR LOADER, which yields `{anchor: {}}` rather than `{}`.
+        # `index_returns` indexes `marks[s]` directly, so a bare `{}` is a KeyError, not a
+        # fallback.
+        return {a: {} for a in anchors}
+    from common.pg import _run_copy  # noqa: PLC0415
+
+    sql = """
+COPY (
+  WITH a AS (SELECT unnest(%s::date[]) AS anchor),
+  w AS (
+    SELECT analysis_id, target_date, close,
+           lag(close)       OVER (PARTITION BY analysis_id ORDER BY target_date) AS prev_close,
+           lag(target_date) OVER (PARTITION BY analysis_id ORDER BY target_date) AS prev_date
+    FROM asset_price
+    WHERE analysis_id = ANY(%s) AND close IS NOT NULL AND close > 0
+      AND target_date >= %s AND target_date <= %s
+  ),
+  s AS (
+    SELECT DISTINCT ON (w.analysis_id, a.anchor)
+           a.anchor, w.analysis_id, w.target_date, w.close
+      FROM w CROSS JOIN a WHERE w.target_date <= a.anchor
+     ORDER BY w.analysis_id, a.anchor, w.target_date DESC
+  )
+  SELECT 'start' AS kind, anchor::text, analysis_id, target_date::text, close, NULL::numeric FROM s
+  UNION ALL
+  SELECT 'end', '', analysis_id, target_date::text, close, NULL::numeric
+    FROM (SELECT DISTINCT ON (analysis_id) analysis_id, target_date, close
+            FROM w ORDER BY analysis_id, target_date DESC) e
+  UNION ALL
+  SELECT 'jump', s.anchor::text, w.analysis_id, w.target_date::text, w.close, w.prev_close
+    FROM w JOIN s ON s.analysis_id = w.analysis_id
+   WHERE w.prev_close IS NOT NULL AND w.prev_date >= s.target_date
+     AND (w.close / w.prev_close < %s OR w.close / w.prev_close > %s)
+) TO STDOUT WITH CSV
+"""
+    buf = _run_copy(sql, (anchors, list(analysis_ids), lookback, end, _JUMP_LO, _JUMP_HI))
+    if buf is None:
+        return {a: {} for a in anchors}   # COPY unavailable -> caller falls back to the series path
+    out: dict[str, dict[int, dict]] = {a: {} for a in anchors}
+    ends: dict[int, tuple[str, float]] = {}
+    for line in buf.getvalue().decode().splitlines():
+        kind, anchor, aid, d, close, prev = line.split(",")
+        aid_i = int(aid)
+        if kind == "end":
+            ends[aid_i] = (d, float(close))
+            continue
+        rec = out[anchor].setdefault(aid_i, {"start": None, "end": None, "jumps": []})
+        if kind == "jump":
+            rec["jumps"].append((float(prev), float(close)))
+        else:
+            rec["start"] = (d, float(close))
+    # An instrument can have an `end` but no `start` (nothing at or before the anchor) — the
+    # single-anchor loader returns such a row too, so the shapes must match exactly.
+    for anchor in anchors:
+        for aid_i, e in ends.items():
+            out[anchor].setdefault(aid_i, {"start": None, "end": None, "jumps": []})["end"] = e
+    return out
+
+
 def window_marks(analysis_ids: list[int], lookback: str, start_anchor: str,
                  end: str) -> dict[int, dict]:
     """Per instrument, ONLY what pricing one window needs: the opening mark, the closing mark, and
@@ -332,10 +414,13 @@ def index_returns(label: str, starts: list[str]) -> dict[str, dict]:
 
     ids = [m["company_id"] for m in mem]
     fx = _fx_to_eur({(m.get("currency") or "USD") for m in mem}, lookback, today)
-    # ⚠ MARKS PER WINDOW, ONE QUERY EACH — still far less than one whole-series load. Each window
-    # has its own opening mark and its own jump set, and a mark selected for January cannot answer
-    # for a since-inception start. `starts` is one or two dates in practice.
-    marks = {s: window_marks(ids, lookback, s, today) for s in sorted(set(starts))}
+    # ⚠ ONE QUERY FOR ALL WINDOWS. Each window still has its OWN opening mark and its OWN jump
+    # set — a mark selected for January cannot answer for a since-inception start — but the BARS
+    # are identical, so only the selection differs and Postgres does it per anchor in one pass.
+    # This function's docstring already claimed "ONE price load"; until 2026-08-11 it ran one COPY
+    # per anchor (measured: 356ms + 352ms over the identical 500 ids and identical window).
+    # Verified equal to the per-anchor loader field for field, jumps included.
+    marks = window_marks_multi(ids, lookback, sorted(set(starts)), today)
     closes = ({} if all(marks.values()) or not mem
               else _asset_closes(ids, lookback, today))   # COPY unavailable -> the series path
 

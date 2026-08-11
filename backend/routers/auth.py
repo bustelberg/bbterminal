@@ -20,6 +20,8 @@ import hashlib
 import os
 import time
 
+import httpx
+
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from supabase import create_client
@@ -71,6 +73,49 @@ _TOKEN_CACHE: dict[str, tuple[float, dict]] = {}
 _TOKEN_CACHE_TTL = 60.0
 
 
+class AuthBackendUnavailable(RuntimeError):
+    """GoTrue could not be reached — we do not know whether the token is valid.
+
+    !! THIS EXISTS BECAUSE "WE COULDN'T CHECK" AND "YOUR TOKEN IS BAD" ARE
+    DIFFERENT ANSWERS, AND CONFLATING THEM COSTS HOURS. `verify_token` used to
+    catch *everything* from `get_user` and return None, which the gate renders
+    as **401 Authentication required** — a sentence that says the credentials
+    are wrong. On 2026-08-11 a `REINDEX INDEX CONCURRENTLY` saturated prod's
+    disk I/O; every query slowed ~14x (a trivial count went 350ms -> 5,094ms),
+    GoTrue's own DB lookup timed out, and the whole app answered 401. Nothing
+    was wrong with anyone's session, and the 401 sent the diagnosis toward
+    expired logins and broken auth config instead of toward the one process
+    that was eating the disk.
+
+    A 401 tells the client to re-authenticate — which cannot help, and which a
+    frontend may act on by destroying a perfectly good session. The honest
+    answer is 503: transient, not your fault, retry.
+    """
+
+
+# httpx.TransportError is the base of TimeoutException, NetworkError,
+# ProtocolError and ProxyError — i.e. every "never got an answer" case, and
+# nothing that carries an actual auth verdict. Anything else (an AuthApiError
+# saying the JWT is expired or malformed) is a real rejection.
+#
+# The auth client also wraps some transport faults in its own retryable type, and
+# !! THE MODULE IT LIVES IN HAS BEEN RENAMED: it is `supabase_auth.errors` in the
+# version we pin (`gotrue` no longer imports at all). Both spellings are tried so
+# neither a downgrade nor a future rename silently empties this tuple — an empty
+# tuple would not fail loudly, it would just route every timeout back to a 401,
+# which is precisely the bug this code exists to prevent.
+_AUTH_TRANSPORT_ERRORS: tuple[type[BaseException], ...] = (httpx.TransportError,)
+for _mod in ("supabase_auth.errors", "gotrue.errors"):
+    try:
+        _errs = __import__(_mod, fromlist=["AuthRetryableError"])
+    except Exception:  # pragma: no cover - version-dependent
+        continue
+    _retryable = getattr(_errs, "AuthRetryableError", None)
+    if _retryable is not None:
+        _AUTH_TRANSPORT_ERRORS = (*_AUTH_TRANSPORT_ERRORS, _retryable)
+        break
+
+
 def verify_token(authorization: str) -> dict | None:
     """Verify a Bearer token and return {id, email, role} (role defaults to
     'user'), or None when the token is missing/invalid. Cached for
@@ -85,6 +130,9 @@ def verify_token(authorization: str) -> dict | None:
         return hit[1]
     try:
         user_resp = supabase.auth.get_user(token)
+    except _AUTH_TRANSPORT_ERRORS as e:
+        # Never reached GoTrue -> we have no verdict. Say so (503), don't guess 401.
+        raise AuthBackendUnavailable(f"{type(e).__name__}: {e}") from e
     except Exception:
         return None
     user = getattr(user_resp, "user", None) if user_resp else None

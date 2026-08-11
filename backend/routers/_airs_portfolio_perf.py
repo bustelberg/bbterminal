@@ -50,6 +50,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from asset_pipeline.fx import SUBUNIT
+from common.fx_load import load_fx_to_eur
 from deps import IN_CHUNK_SIZE, supabase
 from momentum.diversification import annualized_stats
 from routers._benchmark_index import _at_or_before, _rate, _split_adjust
@@ -241,26 +242,18 @@ def _fx(currencies: set[str], start: str, end: str) -> dict[str, dict[str, float
         page" is only true while the server's cap is at least the page size, which is the very
         assumption that just failed. Advancing by `len(rows)` and stopping on empty is correct
         under any cap, at the cost of one extra empty request per chunk.
+
+    ⚠ THE BODY MOVED TO `common/fx_load.py` (2026-08-11) AND SO DID ITS TWIN'S. Every rule in the
+    docstring above is a correctness rule with an incident behind it, and it had to be right in
+    TWO places at once — here and in `_benchmark_index._fx_to_eur`, which each docstring already
+    called the other's twin. They had drifted in exactly the way that arrangement invites: the
+    benchmark side gained a one-request COPY fast path and this one did not, so the Analyse modal
+    paid **17 sequential PostgREST requests for `fx_rate` (13,617 rows), 14 of them the same query
+    differing only by `offset`**, while the benchmark did the same job in 4 COPYs. One definition
+    now; the shared loader keeps the paging as its fallback, so behaviour is unchanged when the
+    direct-Postgres path is unavailable.
     """
-    out: dict[str, dict[str, float]] = {}
-    cur = sorted({SUBUNIT.get(c, (c, 1.0))[0] for c in currencies if c and c != "EUR"})
-    for i in range(0, len(cur), IN_CHUNK_SIZE):
-        chunk = cur[i:i + IN_CHUNK_SIZE]
-        off = 0
-        while True:
-            rows = (supabase.table("fx_rate")
-                    .select("currency_code,rate_date,rate")
-                    .in_("currency_code", chunk)
-                    .gte("rate_date", start).lte("rate_date", end)
-                    .order("rate_date").order("currency_code")
-                    .range(off, off + _PAGE - 1).execute().data or [])
-            if not rows:
-                break
-            for r in rows:
-                if r["rate"]:
-                    out.setdefault(r["currency_code"], {})[r["rate_date"]] = float(r["rate"])
-            off += len(rows)
-    return out
+    return load_fx_to_eur(currencies, start, end)
 
 
 def _eur_series(series: list[tuple[str, float]], ccy: str | None,

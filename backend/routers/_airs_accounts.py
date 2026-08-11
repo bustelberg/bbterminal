@@ -62,6 +62,7 @@ from datetime import date
 # accounts silently missing from the page.
 from airs_vermogen import REPORTS
 from deps import supabase
+from routers._airs_ref import model_weights_for as ref_model_weights_for, mutaties_for as ref_mutaties_for
 
 # AIRS reports a portfolio's own return; we never recompute it. These are the columns it uses.
 _PERF_COLS = ("portefeuille,periode,beginvermogen,stortingen,onttrekkingen,koersresultaat,"
@@ -224,10 +225,7 @@ def _direct_result(portefeuille: str, holding_names: set[str]):
 
     # Paged for the same reason as `_year_perf` — `.limit(5000)` never overrode the server's
     # 1,000. One account's mutations are under that today; the table only grows.
-    rows = _paged(lambda: supabase.table("airs_mutatie")
-                  .select("boekdatum,grootboek,fonds,omschrijving,amount_eur")
-                  .eq("portefeuille", portefeuille)
-                  .order("boekdatum").order("grootboek").order("fonds"))
+    rows = ref_mutaties_for(portefeuille)   # one shared read — see `_airs_ref`
     empty: dict = {"gross": None, "tax": None, "funds": None}
     if not rows:
         return {}, empty
@@ -257,10 +255,7 @@ def _model_weights(portefeuille: str) -> dict[str, dict]:
     The cash-line rename is already applied at parse time (`airs_model.NAME_ALIASES`), so this is
     a straight dictionary lookup on the holding's own name.
     """
-    rows = (supabase.table("airs_model_weight")
-            .select("fonds,model_pct,actual_pct,drift_pct,drift_eur,buy,sell")
-            .eq("portefeuille", portefeuille).limit(1000).execute().data or [])
-    return {r["fonds"]: r for r in rows}
+    return ref_model_weights_for(portefeuille)   # one shared read — see `_airs_ref`
 
 
 def parse_holding_counts_csv(raw: str) -> tuple[dict[str, int], dict[str, str]]:
