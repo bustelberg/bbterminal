@@ -220,12 +220,17 @@ describe('gridWidths — the geometry must not depend on the data', () => {
   it('⚠ EMITS ONE WIDTH PER RENDERED COLUMN, and the Fetch column is admin-only', () => {
     // A `<col>` list out of step with the columns does not fail loudly — every column after the
     // gap silently takes its neighbour's width, which looks like a styling bug rather than an
-    // off-by-one. Admin: # · Company · Fetch · Ticker · Ccy · Cap · Weight. User: the same
+    // off-by-one. Admin: # · Company · Fetch · Exch · Ticker · Ccy · Cap · Weight. User: the same
     // without Fetch, because the ingest it fires 403s for them.
-    expect(gridWidths(labels, true).widths).toHaveLength(7 + labels.length);
-    expect(gridWidths(labels, false).widths).toHaveLength(6 + labels.length);
-    expect(fixedWidthsRem(true)).toHaveLength(7);
-    expect(fixedWidthsRem(false)).toHaveLength(6);
+    //
+    // ⚠ THESE COUNTS ARE 8/7 SINCE **Exch** WAS ADDED, and this test held 7/6 for a while after —
+    // failing in the one direction that is only annoying rather than dangerous. Exchange is the
+    // other half of the identifier (GuruFocus addresses a stock as `EXCHANGE:TICKER`), so it is a
+    // real column and the source is what is right here.
+    expect(gridWidths(labels, true).widths).toHaveLength(8 + labels.length);
+    expect(gridWidths(labels, false).widths).toHaveLength(7 + labels.length);
+    expect(fixedWidthsRem(true)).toHaveLength(8);
+    expect(fixedWidthsRem(false)).toHaveLength(7);
   });
 
   it('⚠ Fetch is inserted AFTER Company, so the sticky pair keeps its widths', () => {

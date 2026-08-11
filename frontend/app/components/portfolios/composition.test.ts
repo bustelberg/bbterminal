@@ -41,12 +41,21 @@ describe('visibleBuckets', () => {
     expect(visibleBuckets(rows).map((r) => r.bucket)).toEqual(['kept']);
   });
 
-  it('⚠ hides a bucket that is small-but-nonzero, because it still PRINTS "0%"', () => {
-    // The bug this file was written for and did not catch: values render at ZERO decimals, so
-    // 0.2% prints "0%". A threshold calibrated to one decimal (0.05) let it through a filter
-    // written to remove it, and the reader still saw "Pacific 0%".
-    expect(visibleBuckets([row('Pacific', 0, 0.2)])).toEqual([]);
-    expect(visibleBuckets([row('Pacific', 0.49, 0)])).toEqual([]);
+  it('⚠ hides a bucket that is small-but-nonzero, because it still PRINTS "0.00%"', () => {
+    // The bug this file was written for and did not catch: a threshold calibrated to a different
+    // precision than the formatter let a bucket through a filter written to remove it, and the
+    // reader still saw "Pacific 0%".
+    //
+    // ⚠ THE LITERALS MOVED WITH `DISPLAY_DECIMALS` 0 -> 2, AND THE RULE DID NOT. They were 0.2 and
+    // 0.49, chosen when values printed at zero decimals so both rendered "0%". At two decimals
+    // they render "0.20%" and "0.49%" — visible information, correctly KEPT — so this test was
+    // asserting the old precision's behaviour, not the invariant. The invariant is "hidden if and
+    // only if it would render as zero", and below 0.005 it still is.
+    expect(visibleBuckets([row('Pacific', 0, 0.002)])).toEqual([]);
+    expect(visibleBuckets([row('Pacific', 0.004, 0)])).toEqual([]);
+    // ...and the pair that used to be hidden is now shown, which is the point of the extra digits.
+    expect(visibleBuckets([row('Pacific', 0, 0.2)]).map((r) => r.bucket)).toEqual(['Pacific']);
+    expect(visibleBuckets([row('Pacific', 0.49, 0)]).map((r) => r.bucket)).toEqual(['Pacific']);
   });
 
   it('the filter and the formatter agree by construction', () => {

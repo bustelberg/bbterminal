@@ -146,13 +146,35 @@ class TestRetrievedIsNotTheSameAsNonEmpty:
     healthy accounts — so the refresh sets its own flag where the fetch succeeded.
     """
 
-    def _wire(self, monkeypatch, *, mut_rows=0, model_rows=0, volk_raises=False):
-        """Drive `scan_one` with every download stubbed — no network, no database."""
+    def _wire(self, monkeypatch, *, mut_rows=0, model_rows=0, trans_rows=0, volk_raises=False):
+        """Drive `scan_one` with every download stubbed — no network, no database.
+
+        ⚠⚠ "EVERY" HAS TO MEAN EVERY, AND FOR A WHILE IT DID NOT. `REPORTS` gained a fifth leg
+        (`trans`) when Transacties shipped on 2026-08-05 and this stub was never extended — so
+        `_trans` ran for real, launching Playwright against live AirSPMS. It passed on a dev
+        machine (browser installed, BROKER_* in .env.local) and failed on CI with
+        `BrowserType.launch: Executable doesn't exist`, which is the worst possible split: the
+        suite is green exactly where nobody is watching it.
+
+        ⚠ AND THE FAILURE WAS NOT "TRANSACTIES IS MISSING". It cost `trans` from `reports_ok` AND
+        added a second entry to `errors`, so the two assertions that broke were about the OTHER
+        four reports — a missing stub reading as a bug in unrelated behaviour.
+
+        ⚠ THE LAZY IMPORT IN `_trans` IS WHY PATCHING THE MODULE WORKS. It does
+        `from routers._airs_transacties import _fetch_live, _store, ytd_window` INSIDE the
+        function, so the attributes resolve at call time and a `setattr` here is seen. Patching
+        `airs_vermogen` instead would do nothing.
+        """
         import airs_scanner
         import portfolio
 
         import airs_vermogen as V
+        from routers import _airs_transacties as T
         from routers import airs as R
+
+        monkeypatch.setattr(T, "_fetch_live",
+                            lambda *a, **k: type("Sheet", (), {"rows": [{}] * trans_rows})())
+        monkeypatch.setattr(T, "_store", lambda *a, **k: None)
 
         monkeypatch.setattr(airs_scanner, "download_portfolio_sync", lambda *a, **k: b"x",
                             raising=False)

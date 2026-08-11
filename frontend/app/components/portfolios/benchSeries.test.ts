@@ -36,7 +36,12 @@ describe('mergeSeries', () => {
 
 describe('benchNote', () => {
   const aex: BenchTarget = { universe: 'AEX', cadence: 'annual' };
-  const drawn = m({ 2020: 5 });
+  // ⚠ TWO PERIODS, NOT ONE — A ONE-POINT SERIES IS NO LONGER "DREW". This fixture was
+  // `m({ 2020: 5 })`, which `benchNote` now reports as "one period only", so the test below broke
+  // on a source change that was correct: a single surviving point is not a line you can read a
+  // trend off, and saying so is the whole job of this function. The one-period case gets its own
+  // assertion under "keeps the absences apart", where it belongs.
+  const drawn = m({ 2019: 4, 2020: 5 });
 
   it('says nothing when no benchmark is selected', () => {
     expect(benchNote(null, null, null, null)).toBeNull();
@@ -44,6 +49,13 @@ describe('benchNote', () => {
 
   it('says nothing when the line drew', () => {
     expect(benchNote(aex, { rows: [] }, null, drawn)).toBeNull();
+  });
+
+  it('⚠ a ONE-period line is an absence too — it draws, and it says nothing readable', () => {
+    // It renders as a single dot beside a full portfolio curve, which looks like a benchmark that
+    // simply tracks nothing rather than one where every other period fell under the coverage floor.
+    expect(benchNote(aex, { rows: [] }, null, m({ 2020: 5 })))
+      .toBe('AEX: one period only — the rest fall under the 80% coverage floor');
   });
 
   it('keeps the three absences apart — they have different fixes', () => {

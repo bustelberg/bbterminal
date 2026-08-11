@@ -171,23 +171,98 @@ $StorageSyncEnabled = [bool]($LocalServiceKey -and $ProdServiceKey -and $ProdSto
 # ---- psql helpers -----------------------------------------------------------
 # Each returns rows as string[]; fields are pipe-delimited (-F'|'), tuples-only
 # (-tA) so there's no header/footer to strip.
+# ---- retry: the network WILL drop during a run this long -------------------
+# !! A CLONE IS 30-90 MINUTES OF OPEN CONNECTIONS, SO A BLIP IS NOT AN EXCEPTION, IT IS AN EVENT
+# TO PLAN FOR. Observed 2026-08-11, mid `metric_data` batch:
+#
+#   psql:<stdin>:12: SSL SYSCALL error: EOF detected
+#   psql:<stdin>:12: error: connection to server was lost
+#
+# Switching wifi <-> ethernet changes the source IP, which kills every established TCP connection
+# outright -- no keepalive setting can survive that, so the only defence is to reconnect and redo
+# the unit of work. Each `docker exec psql` opens its OWN connection, so a retry is a clean
+# reconnect rather than a resumption of a broken one.
+#
+# !! RETRYING IS ONLY SAFE BECAUSE EVERY RETRIED UNIT IS IDEMPOTENT, and that is a property this
+# script had to be given rather than one it happened to have:
+#   * staging (step 4)   `DROP TABLE IF EXISTS` before the CREATE -- added for exactly this;
+#   * upserts (5, 6)     INSERT ... ON CONFLICT DO UPDATE, by definition;
+#   * delete-missing     an anti-join; deleting nothing twice is deleting nothing;
+#   * doom tables        every one is DROP-IF-EXISTS then CREATE;
+#   * sequence resets    setval to MAX, computed fresh each time.
+# !! THE MIGRATIONS IN STEP [3] ARE THE EXCEPTION AND ARE DELIBERATELY NOT RETRIED. A migration
+# that half-applied must be looked at by a human, not re-run by a loop.
+$MaxDbTries = 4
+
+function Test-TransientDbError([string]$text) {
+    # Named patterns rather than "any failure", so a genuine SQL error is reported on the first
+    # attempt instead of being repeated four times with a 30-second pause between.
+    foreach ($p in @('SSL SYSCALL error', 'connection to server was lost', 'EOF detected',
+                     'server closed the connection unexpectedly', 'could not connect to server',
+                     'Connection refused', 'Connection reset', 'connection timed out',
+                     'no connection to the server', 'terminating connection',
+                     'authentication did not complete', 'server login has been failing')) {
+        if ($text -like "*$p*") { return $true }
+    }
+    # !! AN EMPTY BODY WITH A NON-ZERO EXIT IS ALSO A DROPPED CONNECTION. psql writes its errors to
+    # STDERR, which PowerShell does not fold into the captured stdout -- so on a lost connection
+    # the text we can see here is often empty while the exit code is 2. A real SQL error usually
+    # leaves something on stdout (the rows before it, a NOTICE); nothing at all is the signature of
+    # never having got an answer.
+    return [string]::IsNullOrWhiteSpace($text)
+}
+
 function Invoke-Local([string]$sql) {
-    $out = docker exec $Container psql -U postgres -d postgres -tA -F'|' -c $sql
-    if ($LASTEXITCODE -ne 0) { throw "local psql failed: $sql`n$out" }
-    # TrimEnd CR: docker-exec output can carry a stray trailing \r on Windows,
-    # which would silently break version/PK compares + int parses downstream.
-    # ("$_" coerces a possible $null to '' so TrimEnd never throws.)
-    return @($out | ForEach-Object { "$_".TrimEnd("`r") } | Where-Object { $_ -ne '' })
+    for ($try = 1; $try -le $MaxDbTries; $try++) {
+        $out = docker exec $Container psql -U postgres -d postgres -tA -F'|' -c $sql
+        if ($LASTEXITCODE -eq 0) {
+            # TrimEnd CR: docker-exec output can carry a stray trailing \r on Windows,
+            # which would silently break version/PK compares + int parses downstream.
+            # ("$_" coerces a possible $null to '' so TrimEnd never throws.)
+            return @($out | ForEach-Object { "$_".TrimEnd("`r") } | Where-Object { $_ -ne '' })
+        }
+        $text = ($out -join "`n")
+        if ($try -eq $MaxDbTries -or -not (Test-TransientDbError $text)) {
+            throw "local psql failed: $sql`n$text"
+        }
+        Write-Host ("  local connection lost (attempt {0}/{1}) -- retrying in {2}s..." -f `
+                $try, $MaxDbTries, (5 * $try)) -ForegroundColor Yellow
+        Start-Sleep -Seconds (5 * $try)
+    }
 }
 function Invoke-Prod([string]$sql) {
-    $out = docker exec @prodEnv $Container psql $prodUrlNoPw -tA -F'|' -c $sql
-    if ($LASTEXITCODE -ne 0) { throw "prod psql failed: $sql`n$out" }
-    return @($out | ForEach-Object { "$_".TrimEnd("`r") } | Where-Object { $_ -ne '' })
+    for ($try = 1; $try -le $MaxDbTries; $try++) {
+        $out = docker exec @prodEnv $Container psql $prodUrlNoPw -tA -F'|' -c $sql
+        if ($LASTEXITCODE -eq 0) {
+            return @($out | ForEach-Object { "$_".TrimEnd("`r") } | Where-Object { $_ -ne '' })
+        }
+        $text = ($out -join "`n")
+        if ($try -eq $MaxDbTries -or -not (Test-TransientDbError $text)) {
+            throw "prod psql failed: $sql`n$text"
+        }
+        Write-Host ("  prod connection lost (attempt {0}/{1}) -- retrying in {2}s..." -f `
+                $try, $MaxDbTries, (5 * $try)) -ForegroundColor Yellow
+        Start-Sleep -Seconds (5 * $try)
+    }
 }
 # Run a multi-statement / \copy script against prod via stdin (-f -).
+#
+# !! THIS IS THE ONE THAT ACTUALLY DROPPED. It carries the metric_data batch -- minutes of held
+# connection moving millions of rows -- so it is where a network change lands. The whole batch is
+# re-sent on a retry, which is safe: it opens with `DROP TABLE IF EXISTS clone_stg.md_batch` and
+# wraps its delete+insert in BEGIN/COMMIT, so a half-finished attempt left nothing behind.
 function Invoke-ProdScript([string]$script) {
-    $script | docker exec -i @prodEnv $Container psql $prodUrlNoPw -v ON_ERROR_STOP=1 -f -
-    if ($LASTEXITCODE -ne 0) { throw "prod script failed (see output above)." }
+    for ($try = 1; $try -le $MaxDbTries; $try++) {
+        $script | docker exec -i @prodEnv $Container psql $prodUrlNoPw -v ON_ERROR_STOP=1 -f -
+        if ($LASTEXITCODE -eq 0) { return }
+        # stdin scripts stream their output straight to the console (that is how a long \copy shows
+        # progress), so there is nothing captured to classify -- and a lost connection is by far the
+        # likeliest cause of a non-zero exit here. Retry, and let the final attempt throw.
+        if ($try -eq $MaxDbTries) { throw "prod script failed (see output above)." }
+        Write-Host ("  prod script failed (attempt {0}/{1}) -- reconnecting in {2}s..." -f `
+                $try, $MaxDbTries, (10 * $try)) -ForegroundColor Yellow
+        Start-Sleep -Seconds (10 * $try)
+    }
 }
 
 # ---- storage helpers (backtest-results bucket) ------------------------------
@@ -781,6 +856,16 @@ if ($DryRun) {
         # 4,297 scraped ones, which is the difference between a sync and a data
         # loss. Additive tables are marked so their surplus stops looking alarming.
         $flag = ''; $colour = 'Gray'
+        # !! A SKIPPED TABLE MUST NOT BE REPORTED AS "additive", WHICH IS WHAT IT DID ON
+        # 2026-08-11: the dry run showed `airs_holding ... <-- additive: prod keeps +2784`, i.e. it
+        # promised an UPSERT of local's 11,213 rows on a table the run then correctly left alone.
+        # Reporting a stronger action than the one taken is the safe direction to be wrong in and
+        # still the wrong direction to be wrong in -- a dry run exists to be believed.
+        if ($skipTables -contains $t) {
+            Write-Host ("  {0,-28} local={1,-10} prod={2,-10}  <-- NOT TOUCHED (prod owns it)" -f $t, $lc, $pc) `
+                -ForegroundColor DarkGray
+            continue
+        }
         if ($additiveTables -contains $t) {
             if ($pc -gt $lc) { $flag = "  <-- additive: prod keeps +$($pc - $lc)"; $colour = 'DarkGray' }
             elseif ($lc -ne $pc) { $flag = "  <-- $($lc - $pc) to add"; $colour = 'Gray' }
@@ -891,7 +976,11 @@ foreach ($t in $stagedTables) {
     # relied on the PGOPTIONS startup option alone, and the managed session pooler
     # does not forward it (which the PGOPTIONS comment already warned was possible).
     # So a table big enough to outlast the default timeout could never be staged.
-    $loadSql = "SET statement_timeout = 0;`nCREATE TABLE clone_stg.$t (LIKE public.$t INCLUDING DEFAULTS);`n\copy clone_stg.$t ($collist) FROM '$datfile'`n"
+    # !! `DROP TABLE IF EXISTS` MAKES THIS RETRYABLE, which it has to be: a dropped connection
+    # mid-\copy leaves the staging table created and half-loaded, and re-running without the drop
+    # fails on "already exists" -- or worse, succeeds and loads the rows a second time. See the
+    # retry note on Invoke-ProdScript.
+    $loadSql = "SET statement_timeout = 0;`nDROP TABLE IF EXISTS clone_stg.$t;`nCREATE TABLE clone_stg.$t (LIKE public.$t INCLUDING DEFAULTS);`n\copy clone_stg.$t ($collist) FROM '$datfile'`n"
     Invoke-ProdScript $loadSql
 }
 Write-Host "  staged." -ForegroundColor Green
