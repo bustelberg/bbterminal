@@ -292,12 +292,43 @@ def _prepend_opening_bars(closes: dict[int, list[tuple[str, float]]],
     are indistinguishable downstream, which is how one caller showed a blank while another
     priced 23.6% of the same portfolio.
 
-    So the missing bar is fetched directly, per series, and only for the series that lack it —
-    normally none. Mutates `closes` in place; the bar is real history, so a series it is added
-    to is simply more complete for every other anchor too.
+    So the missing bar is fetched directly, and only for the series that lack it. Mutates `closes`
+    in place; the bar is real history, so a series it is added to is simply more complete for every
+    other anchor too.
+
+    ⚠⚠ "NORMALLY NONE" WAS WRONG, AND IT WAS THE SLOWEST THING ON /management-dashboard. Measured
+    2026-08-11 on the portfolios grid: **71 series lacked their opening bar**, each fetched by its
+    own `analysis_id=eq.N … limit 1` round trip. Locally that is 483ms of a 6.4s endpoint; in
+    production, where a PostgREST call is a ~60ms network hop rather than ~5ms, it is **~4.3
+    seconds of latency spent one row at a time**. The models' inception dates reach back before the
+    loaded window, so the "sparse listing" this was written for turns out to be the common case.
+    A comment's guess about frequency is not a measurement, and this one was hiding an N+1.
     """
     missing = [aid for aid in analysis_ids
                if not closes.get(aid) or closes[aid][0][0] > anchor]
+    if not missing:
+        return
+
+    # ⚠ ONE ANCHOR PER CALL IS WHAT MAKES THIS COLLAPSIBLE. Every row wants "the last close on or
+    # before the SAME date", so `DISTINCT ON (analysis_id) … ORDER BY analysis_id, target_date DESC`
+    # answers all of them in one pass — the identical result the loop produced, in one round trip.
+    from common.pg import _run_copy  # noqa: PLC0415
+
+    buf = _run_copy(
+        "COPY (SELECT DISTINCT ON (analysis_id) analysis_id, target_date::text, close "
+        "FROM asset_price WHERE analysis_id = ANY(%s::int[]) AND target_date <= %s "
+        "AND close IS NOT NULL ORDER BY analysis_id, target_date DESC) TO STDOUT WITH CSV",
+        (list(missing), anchor))
+    if buf is not None:
+        for line in buf.getvalue().decode().splitlines():
+            aid_s, d, c = line.split(",")
+            if c:
+                closes.setdefault(int(aid_s), []).insert(0, (d, float(c)))
+        return
+
+    # ⚠ THE PER-SERIES FALLBACK STAYS, because COPY is optional (`SUPABASE_DB_URL` absent, psycopg
+    # missing, a connection fault) and this bar is a CORRECTNESS input, not an optimisation: a
+    # holding without it reads as unpriceable and silently leaves the basket.
     for aid in missing:
         got = (supabase.table("asset_price").select("target_date,close")
                .eq("analysis_id", aid).lte("target_date", anchor)

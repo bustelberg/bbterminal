@@ -166,12 +166,19 @@ export function watchJob(id: string, title: string, after = 0): Promise<JobToast
  * can refresh its own view afterwards without knowing anything about toasts.
  */
 export async function startJob(
-  startUrl: string, title: string,
-): Promise<{ id: string; done: Promise<JobToast> }> {
-  const r = await apiFetch(startUrl, { method: 'POST' });
+  startUrl: string, title: string, init?: RequestInit,
+): Promise<{ id: string; done: Promise<JobToast>; body: Record<string, unknown> }> {
+  // ⚠ `init` IS OPTIONAL AND MERGED AFTER `method`, so a caller can add a JSON body (the basket
+  // fill posts its holdings) without being able to turn this into a GET by accident.
+  const r = await apiFetch(startUrl, { ...init, method: 'POST' });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const b = (await r.json()) as { job_id: string };
-  return { id: b.job_id, done: watchJob(b.job_id, title) };
+  // ⚠ THE START RESPONSE IS HANDED BACK, NOT JUST THE HANDLE. An endpoint often knows something
+  // at start-up that the job itself never reports — the portfolio fill returns how many holdings
+  // it could reach and why the rest it could not, which the caller has to render BEFORE the first
+  // progress line arrives. Discarding it forced a second request for data we already had.
+  // Additive: every existing caller destructures `{ id, done }` and is untouched.
+  return { id: b.job_id, done: watchJob(b.job_id, title), body: b as Record<string, unknown> };
 }
 
 /**

@@ -2673,6 +2673,16 @@ export default function PortfolioAnalysisModal({
       )}
       {fund && (
           <OwnerEarningsModal isin={fund.isin} basket={fund.basket} name={fund.name}
+            // ⚠⚠ EITHER SCOPE, BECAUSE MOST BOOKS ON /management-dashboard HAVE NO MODEL ID.
+            // `PortfolioOverviewPanel.openModal` sets `id` only when the account is PAIRED with a
+            // fixed model; every other row resolves its own ISINs into a basket and opens this
+            // same modal. Requiring the id hid the refresh button on exactly those rows — which is
+            // how it came to be invisible on the screen it was built for.
+            refreshScope={id != null
+              ? { kind: 'portfolio', id, name }
+              : basket
+                ? { kind: 'basket', holdings: basket.holdings, name: basket.label || name }
+                : undefined}
             onClose={() => setFund(null)} />
         )}
       </div>

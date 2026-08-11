@@ -5,6 +5,100 @@ Last updated **2026-08-11**. Delete items as they're done.
 
 ---
 
+## ✅ 2026-08-11: a transient stall no longer 500s a page (`deps._CachingSession._send`)
+
+`httpcore.ReadTimeout` on `GET /api/airs/portfolios/overview`, out of `_year_perf`. ⚠ **NOT a slow
+query** — that read is `airs_performance`, **1,815 rows / 608 kB / 53 accounts, two pages** — so
+optimising it would have fixed nothing. One stall against the 30s PostgREST timeout, on a client
+with no retry, took the page down. `deps`' own comment already described the intent that was never
+implemented ("read endpoints catch + return empty … degrades gracefully rather than wedging").
+
+GET/HEAD now retry once on a transport fault. ⚠⚠ **Writes never replay** — a timed-out POST may
+already have been applied, and the timeout describes the missing RESPONSE, not the write. Pinned by
+`tests/test_postgrest_retry.py`.
+
+**Not done, deliberately:** making the overview DEGRADE (render without the perf columns) when both
+attempts fail. For financial figures a blank that isn't labelled is worse than an error, and
+labelling it is a UI change worth deciding on its own.
+
+## 🐌 /management-dashboard speed — one N+1 fixed, the ranking is measured, more is left.
+
+Measured 2026-08-11 (local; ⚠ **round trips are the number that matters** — local PostgREST is
+~5ms, production is a ~60ms network hop, so a call count predicts production far better than a
+local stopwatch):
+
+```
+load                                   trips  local ms      after
+overview (page load)                      17     1,109   -> 277ms  (read_cache on the endpoint)
+performance (the grid's columns)          93     6,417   -> 37 trips / 3,669ms
+benchmark SP500 (tab 3)                   14     1,704   -> 433ms  (read_cache; tab fires 3)
+one account's holdings (row expand)        2        25    fine
+correlations (tab 2)                      ?         ?    NOT MEASURED — probe used a wrong name
+```
+
+**✅ Fixed: an N+1 in `_prepend_opening_bars`.** Its docstring said the missing-opening-bar case is
+"normally none"; measured, **71 series lacked it**, each fetched by its own
+`analysis_id=eq.N … limit 1` round trip — ~4.3 seconds of pure latency in production, one row at a
+time. All share ONE anchor, so they collapse into a single `DISTINCT ON (analysis_id)` COPY.
+Verified byte-identical to the loop across three anchors (95/96/83 series filled), with the
+per-series path kept as the no-COPY fallback because that bar is a CORRECTNESS input.
+
+**Still open, in order:**
+1. **`performance` is still 37 trips / 3.7s**, now dominated by `COPY x16` — the price load looks
+   per-portfolio rather than once for the fleet. Batching that is the next real win.
+2. **Correlations is unmeasured.** `compute_correlations_async` is not the export name; find it and
+   profile before assuming it is cheap — it is an N×N over every portfolio.
+3. **The memo is opt-in per endpoint** and now covers analysis, basket-analysis, overview and the
+   benchmark index. `/api/airs/model-portfolios/performance` and the account routes do not have it.
+
+---
+
+## 📅 Smart fundamentals refresh — pieces 1 & 2 built, piece 3 (the button) is next.
+
+**1. The detector** (`ingest/earnings/due.py` + `tests/test_fundamentals_due.py`). `period_due()`
+projects the next fiscal period from a company's OWN cadence (3/6/12 months, median-inferred) and
+reports it due `MIN_PUBLICATION_LAG_DAYS` (25) after it ends. Pure, clock injected.
+
+**2. The shared fill** (`routers/_fundamental_fill.py`). The index job's body moved here so the
+portfolio button reuses it rather than copying it; `POST /api/airs/model-portfolios/{id}/
+fundamentals/ingest/job?force=true&only_due=true` is the second entry point.
+
+**3. The button** — `PortfolioFundamentalsRefresh`, in **`OwnerEarningsModal`** (the tabbed
+"Fundamental" modal: Long Equity · Quick Valuation · Deep Valuation · Old charts), right-aligned on
+the tab row immediately left of the SBC-correction tickbox. Progress is the generic job toast, so
+it outlives the dialog and carries the quota spend and a Cancel.
+
+⚠ `FundamentalsModal.tsx` IS A DIFFERENT MODAL — the four-chart one opened from the positions
+table's Soundness column. It has no tabs and no SBC box. The button went in the wrong one first;
+if a second entry point is ever wanted there, the component is standalone and takes `{portfolio,
+onDone}`.
+
+⚠ AND THE SCOPE PROP IS **NOT** `portfolioId`. That existing prop means "show a whole portfolio as
+an aggregate" and drives `isAgg`, which decides the tab set — reusing it for provenance would
+silently strip Quick and Deep Valuation from the modal. `refreshPortfolio` is separate, and absent
+for an ad-hoc basket, which has no book to refresh by.
+
+**⚠ THE `n of m` IS TWO DIFFERENT ABSENCES AND THE BUTTON SAYS WHICH.** Measured after the fix:
+
+```
+AITopSelectie OFF FX : 20 of 20 have company fundamentals · would fetch 15
+BUS_Neutraal_FX      : 24 of 40 · 11 are funds/bonds/cash (none exist)
+                                · 5 have NO COMPANY RECORD  <- the real gap
+                                · would fetch 22
+```
+
+**✅ Taiwan Semiconductor is no longer the gap it was.** `canonical_map` (ISIN aliases) already
+had the ADR→home-line mapping; the endpoint's raw `company.isin` lookup was simply not using it,
+which is why the first measurement said 19 of 20. `_fundamental_coverage` resolves aliases first
+for the same reason — the two now agree about what "reachable" means.
+
+**⚠ Still open: write amplification.** Each refetch upserts ~24,000 `metric_data` rows of which
+~258 are the new quarter. Fine for one portfolio; a habit across 56 of them is the dead-tuple
+pattern that filled prod's disk on 2026-08-11. The fix is the same `IS DISTINCT FROM` guard the
+clone got — deliberately kept out of this feature so it can land on its own.
+
+---
+
 ## ⚡ Analyse modal — memoized. The remaining cost is REAL work, and one number is unverified.
 
 2026-08-11. Profiled one press of Analyse on BUS_Neutraal_FX: **212 database round trips, 103 of

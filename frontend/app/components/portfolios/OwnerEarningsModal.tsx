@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { trace } from '../../../lib/debugTrace';
 import { type Basket } from './types';
 import FundamentalCharts from './FundamentalCharts';
@@ -8,6 +8,7 @@ import FundamentalCoverage from './FundamentalCoverage';
 import LongEquityTab from './LongEquityTab';
 import QuickValuationTab from './QuickValuationTab';
 import DeepValuationTab from './DeepValuationTab';
+import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
 
 type Tab = 'fundamentals' | 'longequity' | 'quickval' | 'deepval';
 
@@ -25,12 +26,22 @@ type Tab = 'fundamentals' | 'longequity' | 'quickval' | 'deepval';
  * "Fundamental" button opens exactly this case.
  */
 export default function OwnerEarningsModal({
-  isin, name, basket, portfolioId, onClose,
+  isin, name, basket, portfolioId, refreshScope, onClose,
 }: {
   isin?: string;
   name?: string | null;
   basket?: Basket;
   portfolioId?: number;    // a whole model portfolio, resolved to a basket server-side
+  /**
+   * What the fundamentals refresh is scoped to — the book this modal was opened FROM, either as a
+   * stored model portfolio or as the basket of ISINs an unpaired account resolves to.
+   *
+   * ⚠ NOT `portfolioId`, AND IT MUST NOT BE. That one means "this modal is showing a whole
+   * portfolio as an aggregate" and drives `isAgg`, which decides the tab set: reusing it to carry
+   * provenance for a single instrument would silently strip Quick and Deep Valuation from the
+   * modal. Two facts, two props.
+   */
+  refreshScope?: RefreshScope;
   onClose: () => void;
 }) {
   const isAgg = !!basket || portfolioId != null;
@@ -43,6 +54,34 @@ export default function OwnerEarningsModal({
   // render, and it is in the child's effect deps — so each fetch would set state, re-render, and
   // fetch again. The blend is an expensive multi-company query; this is not a micro-optimisation.
   const blend = useMemo(() => ({ basket, portfolioId }), [basket, portfolioId]);
+  // ⚠ A MISSING CONTROL LOOKS IDENTICAL TO A BROKEN ONE, SO THE ABSENCE EXPLAINS ITSELF. The
+  // fundamentals refresh needs a real model portfolio to scope to, and the Analyse modal only has
+  // one when it was opened WITH an id — `/portfolios` always passes one, the overview panel's
+  // `analyse` state has `id?: number` and an account or ad-hoc basket row carries none. Without
+  // this line the button is simply not there and there is nothing on screen or in the log to say
+  // why, which is exactly the state this codebase keeps removing.
+  /**
+   * What the refresh acts on — DERIVED FROM WHAT THIS MODAL IS SHOWING, not from how it was
+   * opened.
+   *
+   * ⚠⚠ A CONTROL'S SCOPE MUST MATCH ITS SCREEN, OR IT IS A TRAP. Opened on one company, the modal
+   * charts that company; a button beside those charts that quietly refetched the other nineteen
+   * holdings would spend nineteen API calls the reader never asked for, and take minutes to do
+   * something they cannot see. Opened on the whole book (a basket, or a portfolio aggregate) the
+   * same button correctly means all of it.
+   *
+   * ⚠ ONE COMPANY IS SENT AS A BASKET OF ONE, so there is no third code path — see `RefreshScope`.
+   */
+  const scope = useMemo<RefreshScope | undefined>(
+    () => (!isAgg && isin ? { kind: 'company', isin, name: name || isin } : refreshScope),
+    [isAgg, isin, name, refreshScope]);
+
+  useEffect(() => {
+    if (!scope) {
+      trace('fundamentals', 'no Refresh-fundamentals button: this modal is showing neither a '
+        + 'single instrument nor a book (no isin, no basket, no portfolio) to scope the fill to.');
+    }
+  }, [scope]);
   // ⚠ THE FIRST TAB, WHICH IS NO LONGER `fundamentals`. Demoting those charts to last and naming
   // them "Old charts" while still opening on them would say two opposite things at once — and it
   // is the one tab both an aggregate and a single company have, so the landing tab never depends
@@ -130,13 +169,25 @@ export default function OwnerEarningsModal({
             ))}
           </div>
 
-          {/* Right of the tabs, on the same row. Only on the tab it governs — and it governs four
-              of that tab's charts, which is why it is a tab-level control rather than something
-              inside one card. Stock-based compensation is a real cost paid in shares that never
-              leaves the cash-flow statement, so reported FCF flatters anyone paying in equity;
-              ticked by default, because the uncorrected figure is the flattering one. */}
+          {/* Right of the tabs, on the same row: the portfolio-wide fundamentals refresh, then the
+              SBC toggle.
+
+              ⚠ THE REFRESH IS NOT TAB-SCOPED — it fetches data every tab reads, so hiding it with
+              the SBC box would make the same action appear and disappear depending on which chart
+              you were looking at. It sits in the right-aligned group so it keeps its place when
+              the SBC label comes and goes; `ml-auto` moved onto this wrapper for the same reason. */}
+          <div className="ml-auto flex items-center gap-3 min-w-0">
+          {scope && (
+            <PortfolioFundamentalsRefresh scope={scope}
+              onDone={() => setBlendKey((k) => k + 1)} />
+          )}
+          {/* Only on the tab it governs — and it governs four of that tab's charts, which is why it
+              is a tab-level control rather than something inside one card. Stock-based compensation
+              is a real cost paid in shares that never leaves the cash-flow statement, so reported
+              FCF flatters anyone paying in equity; ticked by default, because the uncorrected
+              figure is the flattering one. */}
           {tab === 'longequity' && (
-            <label className="ml-auto flex items-center gap-2 text-[12px] text-fg-soft cursor-pointer"
+            <label className="flex items-center gap-2 text-[12px] text-fg-soft cursor-pointer"
               title="Subtract stock-based compensation from free cash flow before computing FCF margin, FCF yield, cash return on capital and FCF / Net Income. ⚠ No effect on ROIC, which is GuruFocus's own published ratio — there is no numerator of ours to adjust.">
               <input type="checkbox" checked={sbcCorrection}
                 onChange={(e) => setSbcCorrection(e.target.checked)}
@@ -149,6 +200,7 @@ export default function OwnerEarningsModal({
               SBC correction
             </label>
           )}
+          </div>
           </div>
         )}
 
