@@ -169,6 +169,80 @@ column-unification.
 **Current state of the Analyse modal:** cold **65 HTTP round trips / ~5.1 s**, re-open
 **0 round trips / 35 ms**.
 
+### ✅ D — PROFILED (2026-08-11). ⚠ "~2,450 ms of pandas" WAS WRONG.
+
+`cProfile` sorted by **tottime** (self time — cumulative just re-reports the outer frames and the
+time spent *waiting* on the database). Total **7,244 ms → 5,402 ms** after two fixes:
+
+| self time | what it actually is |
+|---|---|
+| **1.19 s** | `select.select` + `socket.recv` — I/O **WAIT**, not compute. I had counted this as pandas. |
+| **1.16 s** | pydantic `validate_json` + `validate_python` — postgrest deserialisation |
+| 0.26 s → **0** | pandas Arrow `__iter__`, 102,348 calls — **fixed** |
+| 0.23 s | `_rate`, 103,835 calls |
+
+**Fixed: `_closes` was zipping three ARROW-BACKED pandas Series element by element** — one boxed
+scalar per element, 102,348 iterator steps. `.tolist()` does each column in one C pass.
+Cumulative **1.453 s → 0.899 s**. ⚠ Nulls arrive as `None` from an Arrow column and `nan` from a
+numpy one, and `pd.notna` is gone, so BOTH are checked — dropping either turns a missing close into
+a real price of `nan`.
+
+⚠⚠ **A "FREE WIN" THAT WAS 2.3x SLOWER, MEASURED.** `_rate`'s fallback builds a list of every
+earlier date then takes `max()`. Replacing it with `max(d for d in tbl ...)` — same O(n) scan, no
+list allocated — is *obviously* better and is **wrong**: the genexpr profiled at **2,038,758 calls
+/ 0.295 s** with `max` rising 0.048 → 0.283 s. **Since PEP 709 (Python 3.12) a list comprehension
+is INLINED into its enclosing frame, while a generator expression still builds and resumes a frame
+per item.** Reverted, with the measurement in the code so nobody "optimises" it again.
+
+### ✅ The pydantic item — DONE. Cold Analyse **7,244 ms → 3,870 ms** (−47%).
+
+`common/parse_cache.py` reuses the PARSE of a response `read_cache` served from its memo, instead
+of letting postgrest re-run the full pydantic parse on every hit.
+
+    validate_json    196 calls / 0.821 s  ->  102 calls / 0.142 s
+    validate_python  197 calls / 0.338 s  ->  gone from the top 10
+
+⚠ **THE ORIGINAL DOCSTRING WAS HALF RIGHT, AND THE MEASUREMENT SETTLED WHICH HALF.** It refused to
+cache parsed rows because a deep copy is "not obviously cheaper than the query it replaces".
+Measured on the real payloads: **`deepcopy` IS worse than re-parsing** (8.86 ms vs 2.89 ms on
+`airs_performance`) — that instinct was correct. What it got wrong was concluding no copy works:
+a **shallow** copy is 0.23 ms, ~25x cheaper than the full parse.
+
+⚠ **A SHALLOW COPY IS ONLY SAFE WHEN EVERY VALUE IS A SCALAR — CHECKED PER PAYLOAD, NOT ASSUMED.**
+`dict(row)` shares nested values, and the schema has `jsonb` + array columns
+(`asset_universe.params`, `airs_model_portfolio.positions_dates`). `_is_flat` scans once at parse
+time; non-flat payloads deep-copy only their non-scalar values (still 2-3x cheaper than a re-parse).
+None of the six largest payloads on this path has a single nested value.
+
+⚠ **CALLERS DO MUTATE THEIR ROWS** — `_benchmark_index._members` runs `r["currency"] = ...` in
+place. So the pristine parse is kept as a master that is never handed out, and **the first caller
+gets a copy too**. Pinned by `tests/test_parse_cache.py`, including that a mutation of the first
+parse cannot leak into the second.
+
+⚠ **`model_construct`, NOT `APIResponse(...)`, ON A HIT.** The normal constructor re-validates the
+whole payload — that was the entire remaining `validate_python` cost (0.338 s) and would have eaten
+most of what skipping the JSON parse just saved. These rows came out of a validated parse and were
+copied, not built.
+
+⚠ **The cache lives on the `httpx.Response` object itself**, not in an `id()`-keyed map: `read_cache`
+returns the same instance on a hit, so the attribute is exactly as long-lived as the response and
+cannot alias another one after a GC.
+
+**Superseded note, kept for the reasoning:** the original write-up of this item said —
+
+**The real remaining compute item is pydantic, at 1.16 s (21%)** — 196 `validate_json` calls for 65
+HTTP requests, because `read_cache` caches the HTTP RESPONSE and postgrest re-parses it into fresh
+dicts on every memo hit (~103 of those parses are re-parses). That is a deliberate safety property
+(callers cannot corrupt each other's rows), and its docstring judged a deep copy "not obviously
+cheaper". ⚠ Now measurable: a re-parse is ~4.8 ms; `[dict(r) for r in rows]` on the same payload is
+~1 ms. Worth revisiting — but it is a change to a shared safety-critical module, so measure the
+copy cost on the LARGEST payload (`airs_performance`, 150 KB) before touching it.
+
+⚠ The `_rate` scan itself (0.23 s) should NOT be fixed with a bisect over cached sorted keys — the
+cache would key on the `fx` dict's identity and `id()` is reused after GC, so a stale hit converts
+a price at ANOTHER currency's rate. The structural fix is to stop calling `_rate` per date:
+`_eur_series` and the FX table are both date-ordered and could merge-walk once, O(n+m).
+
 ### Next, in value order
 
 **A. CACHE THE ANALYSE PAYLOAD — by far the biggest win, and the only one that changes the feel.**

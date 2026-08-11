@@ -47,8 +47,6 @@ from __future__ import annotations
 import asyncio
 from datetime import date, timedelta
 
-import pandas as pd
-
 from asset_pipeline.fx import SUBUNIT
 from common.fx_load import load_fx_to_eur
 from deps import IN_CHUNK_SIZE, supabase
@@ -200,9 +198,22 @@ def _closes(analysis_ids: list[int], start: str, end: str) -> dict[int, list[tup
     out: dict[int, list[tuple[str, float]]] = {}
     if df.empty:
         return out
-    dates = df[DATE_COL].dt.strftime("%Y-%m-%d")
-    for aid, d, c in zip(df[ENTITY_COL], dates, df["close"], strict=True):
-        if pd.notna(c):
+    # ⚠ `.tolist()` FIRST — DO NOT ZIP THE SERIES DIRECTLY. Iterating a pandas Series yields one
+    # boxed scalar per element, and these columns are ARROW-backed, so every element costs an
+    # ArrowExtensionArray.__iter__ step. Profiled 2026-08-11 on one Analyse call: **102,348 calls
+    # to that iterator, 0.26s of self time** — the largest pure-Python cost in the endpoint, spent
+    # entirely on boxing. `.tolist()` does the whole column in one C-level pass and hands back
+    # native Python objects, after which this is an ordinary zip over lists.
+    #
+    # ⚠ NULLS ARRIVE AS `None` FROM AN ARROW COLUMN AND AS `nan` FROM A NUMPY ONE, and `pd.notna`
+    # is gone now, so BOTH have to be handled here: `c is not None` catches Arrow, `c == c`
+    # catches NaN. Dropping either check silently turns a missing close into a real price of
+    # `nan`, which then propagates through every return computed off this series.
+    dates = df[DATE_COL].dt.strftime("%Y-%m-%d").tolist()
+    aids = df[ENTITY_COL].tolist()
+    closes = df["close"].tolist()
+    for aid, d, c in zip(aids, dates, closes, strict=True):
+        if c is not None and c == c:
             out.setdefault(int(aid), []).append((d, float(c)))
     for s in out.values():
         s.sort()      # `load_series` already sorts by (entity, date); belt and braces

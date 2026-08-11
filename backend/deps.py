@@ -263,6 +263,15 @@ class _LazySupabase:
 
 supabase = _LazySupabase()
 
+# Reuse the PARSE of a response that `read_cache` served from its memo. The memo already removes
+# the round trip; without this, postgrest still re-runs the full pydantic parse on every hit —
+# profiled at 1.16s (~21%) of one Analyse computation. Installed here, beside the session swap,
+# because both are the same kind of thing: a postgrest internal this codebase deliberately
+# reaches into. Best-effort: a failure logs and leaves behaviour exactly as it was.
+from common.parse_cache import install as _install_parse_cache  # noqa: E402, PLC0415
+
+_install_parse_cache()
+
 
 # Default chunk size for `.in_()` queries.
 #
