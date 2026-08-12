@@ -106,7 +106,10 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
    * chart can be guaranteed to mean the same thing. The index arrives cap-weighted; the card's
    * existing weighted average does the rest.
    */
-  const [benchmark, setBenchmark] = useState<string | null>(null);
+  // ⚠ AEX, NOT `BENCHMARKS[0]`. The default is a choice about what this book is measured against —
+  // a Dutch book against the Dutch index — not "whichever we happen to list first", and pinning it
+  // to the array's order means reordering the list silently re-benchmarks every chart in the tab.
+  const [benchmark, setBenchmark] = useState<string | null>('AEX');
   /** ⚠ Memoised for the same reason `holdingsTarget` is — it is an effect dep in twelve cards. */
   const benchTarget = useMemo(
     () => (benchmark ? { universe: benchmark, cadence } : null), [benchmark, cadence]);
@@ -289,23 +292,24 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
       {/* ⚠ ONE CONTROL FOR TWELVE CHARTS. Per-card benchmark pickers would let two charts on one
           screen be measured against different indices — a comparison a reader cannot arbitrate,
           and the same failure the tab-wide cadence toggle avoids. */}
-      <label className="flex items-center gap-1.5 ml-4 cursor-pointer text-fg-faint">
-        <input type="checkbox" className="cursor-pointer"
-          checked={benchmark != null}
-          onChange={(e) => setBenchmark(e.target.checked ? BENCHMARKS[0] : null)} />
+      {/* ⚠ ONE CONTROL, NOT A CHECKBOX PLUS A PICKER. The pair had the benchmark OFF by default and
+          hid which index it would draw until you ticked it, so the common case — measure the book
+          against something — cost two interactions and a guess. A single select shows the answer
+          while it states the question, and `None` is an option rather than a second widget. */}
+      <label className="flex items-center gap-1.5 ml-4 text-fg-faint">
         Benchmark
-      </label>
-      {benchmark != null && (
-        <select value={benchmark} onChange={(e) => setBenchmark(e.target.value)}
+        <select value={benchmark ?? ''}
+          onChange={(e) => setBenchmark(e.target.value || null)}
           aria-label="Benchmark"
           title={'The index each chart is measured against. Its constituents are cap-weighted and '
             + 'run through the SAME formula as the portfolio, so the two lines are comparable. '
             + 'Only constituents whose fundamentals are ingested contribute — the coverage floor '
             + 'applies to the index exactly as it does to the book.'}
           className="cursor-pointer bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-[11px] font-mono text-fg focus:border-accent-500">
+          <option value="">None</option>
           {BENCHMARKS.map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
-      )}
+      </label>
     </div>
     {/* The controls above stay put; only what they govern is replaced while it loads or fails. */}
     {body ?? (
