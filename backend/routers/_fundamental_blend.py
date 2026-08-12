@@ -19,8 +19,21 @@
     LEVEL (Revenue, Net Income, EPS, FCF per share, Price)
         Absolute amounts in each company's own units. Weighting Apple's revenue by 5% and ASML's
         by 3% produces a number that is not any company's revenue and not the portfolio's either.
-        These are REBASED to 100 at the first date every member shares, then weighted — giving a
-        growth index, which is the only honest portfolio-level statement about a level series.
+
+        ⚠⚠ SO THE LINE IS CHAINED FROM WEIGHTED **GROWTH**, NOT AVERAGED FROM REBASED LEVELS
+        (2026-08-12). Between two drawn points the index moves by the cap-weighted average of what
+        its constituents actually did over that interval:
+
+            index[p] = index[anchor] x (1 + Σ w_i·g_i / Σ w_i),   g_i = v_i(p)/v_i(anchor) − 1
+
+        Averaging rebased levels made the line an artefact of WHEN each member's history starts —
+        every member is 100 at its own first period, so a constituent joining the panel dragged the
+        average toward 100 and the index "moved" on composition alone. Measured on the AEX annual
+        revenue line, that drew a 388 → 285 crash into 2023 that no constituent experienced; the
+        same series now reads 211 → 244 → 249.
+
+        The per-member REBASE survives for the audit views (each company's own index, anchored on
+        its first POSITIVE period), but nothing sums those into the line any more.
 
 ⚠⚠ ALIGNED ON THE FISCAL YEAR, NOT THE EXACT DATE — WITHOUT THIS THE BLEND IS EMPTY.
     Companies close their books on different days. Measured across six real members: year-ends on
@@ -258,13 +271,25 @@ def _prepare(members: list[dict], kind: str, bucket=year_bucket) -> tuple[list[d
             # forecast, which would restart at 100 beside an actual that has run to 1,800.
             anchor = {d: float(v) for d, v in (m.get("base_points") or {}).items()
                       if v is not None} or pts
-            base_date = min(anchor)
-            base = anchor[base_date]
-            # ⚠ A zero or negative base cannot be rebased — 100 × v/0 is undefined and a negative
-            # base flips every later point's sign. The member is dropped from THIS metric rather
-            # than contributing an inverted curve.
-            if base <= 0:
+            # ⚠⚠ THE FIRST **POSITIVE** PERIOD, NOT THE FIRST REPORTED ONE. 100 × v/0 is undefined
+            # and a negative base flips every later point's sign — but a leading ZERO on a flow line
+            # is almost never a measurement. GuruFocus back-fills the years before a company existed
+            # separately: Universal Music (2.68% of the AEX) sits inside Vivendi until the 2021
+            # spin-off and its 2017 revenue is stored as `0`, which anchored the rebase on nothing
+            # and threw away nine good years (2018-2025, 6,023 → 12,507). Prosus carries the same
+            # artefact at 2017 and 2018 on its quarterly line. Skipping to the first positive period
+            # keeps the member and starts its curve where its history really starts.
+            positive = [d for d in sorted(anchor) if anchor[d] > 0]
+            if not positive:
                 dropped.append({"index": i, "weight": w, "reason": "non_positive_base"})
+                continue
+            base_date = positive[0]
+            base = anchor[base_date]
+            # ⚠ AND ITS PRE-BASE PERIODS GO WITH IT. A zero before the anchor would rebase to 0 and
+            # read as a company that lost everything, rather than one that had not started.
+            pts = {d: v for d, v in pts.items() if d >= base_date}
+            if not pts:
+                dropped.append({"index": i, "weight": w, "reason": "no_data"})
                 continue
             pts = {d: 100.0 * v / base for d, v in pts.items()}
         ok.append({"index": i, "weight": w, "weights": m.get("weights"),
@@ -373,27 +398,80 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket) -> d
     # The axis every member is carried across — the union of what anybody reported.
     axis = sorted({k for p in prepared for k in p["by_year"]})
     for p in prepared:
+        # ⚠ THE VALUE THIS MEMBER CONTRIBUTED AT EACH PERIOD, kept so the LEVEL path can take a
+        # ratio between two periods that need not be adjacent — see the chaining below. Carried
+        # periods are in it: a member that has not reported since still holds its last figure, so
+        # its growth over the interval is correctly zero rather than absent.
+        p["at"] = {}
         for period, (v, reported) in carry_forward(p["by_year"], axis).items():
             w = _weight_at(p, period)
             if not w:
                 continue
+            p["at"][period] = v
             by_date[period].append((abs(float(w)), v))
             if reported:
                 cover_w[period] += abs(float(p.get("weight") or 0))
                 cover_n[period] += 1
 
-    combine = _weighted_harmonic if kind == "multiple" else _weighted_arithmetic
-    out = []
-    for d in sorted(by_date):
-        pairs = by_date[d]
-        covered = 100.0 * cover_w[d] / total_w
-        covered_n = 100.0 * cover_n[d] / total_n
-        value = combine(pairs)
-        if (value is None or covered < MIN_BLEND_COVERAGE_PCT
-                or covered_n < MIN_BLEND_COVERAGE_NAMES_PCT):
-            continue        # ⚠ omitted, never drawn as a dip — see the docstring
-        out.append({"period": d, "value": round(value, 6), "covered_pct": round(covered, 2),
-                    "covered_names_pct": round(covered_n, 2)})
+    def _clears(d: str) -> bool:
+        return (100.0 * cover_w[d] / total_w >= MIN_BLEND_COVERAGE_PCT
+                and 100.0 * cover_n[d] / total_n >= MIN_BLEND_COVERAGE_NAMES_PCT)
+
+    def _point(d: str, value: float) -> dict:
+        return {"period": d, "value": round(value, 6),
+                "covered_pct": round(100.0 * cover_w[d] / total_w, 2),
+                "covered_names_pct": round(100.0 * cover_n[d] / total_n, 2)}
+
+    out: list[dict] = []
+    if kind == "level":
+        # ⚠⚠ A LEVEL SERIES IS CHAINED FROM WEIGHTED **GROWTH**, NOT AVERAGED FROM REBASED LEVELS.
+        # Between two drawn points the index moves by the cap-weighted average of what its
+        # constituents actually did over exactly that interval:
+        #
+        #     index[p] = index[anchor] x (1 + Σ w_i·g_i / Σ w_i),  g_i = v_i(p)/v_i(anchor) − 1
+        #
+        # Averaging rebased levels instead makes the line an artefact of WHEN each member's history
+        # starts: every member is 100 at its own first period, so a constituent joining the panel
+        # drags the average toward 100 and the index "moves" because the composition changed. Growth
+        # has no such anchor — a member simply has no growth for a step it cannot span, and
+        # contributes from the next one.
+        #
+        # ⚠ AND IT NEEDS NO POSITIVE BASE. A member whose earlier value is <= 0 has no meaningful
+        # ratio, so it sits out THAT STEP and joins at the next — instead of being dropped from the
+        # metric entirely. Universal Music's fabricated 2017 zero costs it one step, not nine years.
+        #
+        # ⚠ THE ANCHOR IS THE LAST **DRAWN** POINT, NOT THE PREVIOUS PERIOD. A period that fails the
+        # floor is not drawn, and measuring the next step from it would compound a move nobody could
+        # see; measuring from the last honest point means no constituent's growth is lost and no
+        # thin period leaks into the level.
+        anchor: str | None = None
+        level = 100.0
+        for d in sorted(by_date):
+            if not _clears(d):
+                continue
+            if anchor is None:                    # the first honest period IS the base
+                anchor = d
+                out.append(_point(d, level))
+                continue
+            pairs = [(w, v / prev - 1.0)
+                     for p in prepared
+                     for w in [_weight_at(p, d)]
+                     for prev in [p["at"].get(anchor)]
+                     for v in [p["at"].get(d)]
+                     if w and prev and prev > 0 and v is not None]
+            step = _weighted_arithmetic([(abs(float(w)), g) for w, g in pairs])
+            if step is None:
+                continue                          # nothing spans this interval — no honest move
+            level *= 1.0 + step
+            out.append(_point(d, level))
+            anchor = d
+    else:
+        combine = _weighted_harmonic if kind == "multiple" else _weighted_arithmetic
+        for d in sorted(by_date):
+            value = combine(by_date[d])
+            if value is None or not _clears(d):
+                continue    # ⚠ omitted, never drawn as a dip — see the docstring
+            out.append(_point(d, value))
     spanned = max((p["covered_pct"] for p in out), default=0.0)
     return {"kind": kind, "points": out, "covered_pct": round(spanned, 2)}
 
@@ -498,7 +576,6 @@ def blend_matrix(members: list[dict], metric_code: str) -> dict:
     not built from — the whole point of an audit view.
     """
     kind = blend_kind(metric_code)
-    combine = _weighted_harmonic if kind == "multiple" else _weighted_arithmetic
     total_w = sum(abs(float(m.get("weight") or 0)) for m in members)
     prepared, dropped = _prepare(members, kind)
 
@@ -525,16 +602,25 @@ def blend_matrix(members: list[dict], metric_code: str) -> dict:
         rows.append({**_label(p["index"]), "cells": cells})
     rows.sort(key=lambda r: r["weight_pct"], reverse=True)
 
-    blended, covered, below_floor = {}, {}, {}
-    for y in periods:
-        pairs = [(p["weight"], p["by_year"][y][1]) for p in prepared if y in p["by_year"]]
-        if kind == "multiple":
-            pairs = [(w, v) for w, v in pairs if v and v > 0]
-        cov = 100.0 * sum(w for w, _ in pairs) / total_w if total_w > 0 else 0.0
-        val = combine(pairs)
-        blended[y] = round(val, 6) if val is not None else None
-        covered[y] = round(cov, 2)
-        below_floor[y] = cov < MIN_BLEND_COVERAGE_PCT
+    # ⚠⚠ THE FOOTER IS THE LINE ITSELF, ASKED FOR RATHER THAN RE-DERIVED. It used to recompute the
+    # aggregate here — a second implementation of the blend, in the one view whose entire job is to
+    # let a reader check the first. The day the LEVEL path became a chained weighted-growth series
+    # (see `blend_series`) this copy went on averaging rebased levels, so the audit grid's footer
+    # disagreed with the chart above it by construction. One call, and they cannot drift again.
+    #
+    # ⚠ IT ALSO BRINGS THE CARRY AND THE NAMES FLOOR WITH IT. Recomputing here missed both: a
+    # semi-annual filer dropped out of the periods it did not file in, and a period two giants
+    # carried on their own passed a weight-only floor.
+    series = blend_series(members, metric_code)
+    pts = {p["period"]: p for p in series["points"]}
+    blended = {y: (pts[y]["value"] if y in pts else None) for y in periods}
+    covered = {y: (pts[y]["covered_pct"] if y in pts
+                   else round(100.0 * sum(p["weight"] for p in prepared
+                                          if y in p["by_year"]) / total_w, 2)
+                   if total_w > 0 else 0.0)
+               for y in periods}
+    # A period the chart does not draw — under either floor, or with nothing spanning the interval.
+    below_floor = {y: y not in pts for y in periods}
 
     excluded = [{**_label(d["index"]), "reason": d["reason"]} for d in dropped]
     excluded.sort(key=lambda r: r["weight_pct"], reverse=True)
@@ -591,6 +677,89 @@ def merge_relative_growth(price_bd: dict, oe_bd: dict, period: str) -> dict:
         # A holding with no price series at all (the anchor line) is the one worth naming.
         "excluded": price_bd.get("excluded", []),
     }
+
+
+def _level_breakdown(members: list[dict], metric_code: str, period: str, prepared: list[dict],
+                     reporting: list[dict], excluded: list[dict], total_w: float,
+                     _label) -> dict:
+    """A LEVEL point, decomposed into the holdings that MOVED it.
+
+    ⚠⚠ A LEVEL'S VALUE IS NOT A SUM OF ANYTHING ANY MORE, SO IT CANNOT BE SHARED OUT. The line is
+    chained (`index[p] = index[anchor] × (1 + Σ w·g / Σ w)`), so its LEVEL at a period is a
+    cumulative product and no set of per-member numbers can add up to it. What is decomposable is
+    the STEP into the period — and that is the more useful question anyway: "who moved it", not
+    "who is in it".
+
+        growth_pct        this member's own change over the interval, v(p)/v(anchor) − 1
+        contribution_pp   w·g ÷ Σw, in percentage POINTS of the step — these sum to `step_pct`
+        swing             the step WITHOUT this member, in pp (leave-one-out)
+
+    ⚠ THE ANCHOR IS THE PREVIOUS **DRAWN** PERIOD, taken from `blend_series` rather than assumed to
+    be the previous column: a period under the floor is not drawn, and a decomposition measured
+    over a different interval from the one the chart moved over would not reconcile with it.
+
+    ⚠ `share_pct` IS NULL HERE, DELIBERATELY. A share of a step is unbounded — when the step is
+    near zero a 0.1pp contributor reads as 400% of it, and a member that moved the other way reads
+    negative. `contribution_pp` says the same thing in a unit that stays readable, and the caller
+    renders that instead.
+    """
+    series = blend_series(members, metric_code)
+    pts = {p["period"]: p for p in series["points"]}
+    order = [p["period"] for p in series["points"]]
+    anchor = order[order.index(period) - 1] if period in pts and order.index(period) > 0 else None
+
+    rows: list[dict] = []
+    if anchor is not None:
+        # ⚠⚠ A MEMBER THAT CANNOT SPAN THE INTERVAL STAYS IN THE TABLE, WITH NO GROWTH. It reported
+        # this period — it is behind the line's LEVEL — it simply has nothing to have moved FROM
+        # (it did not report the anchor, or reported a non-positive figure there). Excluding it
+        # would quietly shrink every consumer of this payload: `merge_relative_growth` builds the
+        # price-vs-owner-earnings table by pairing two of these, and a holding present in one and
+        # absent from the other loses its ratio for reasons that have nothing to do with it.
+        contrib = []
+        for p in reporting:
+            w = _weight_at(p, period)
+            prev = p["at"].get(anchor) if "at" in p else p["by_year"].get(anchor, (None, None))[1]
+            now = p["at"].get(period) if "at" in p else p["by_year"].get(period, (None, None))[1]
+            spans = bool(w) and bool(prev) and (prev or 0) > 0 and now is not None
+            contrib.append((p, abs(float(w or 0)), (now / prev - 1.0) if spans else None))
+        # ⚠ THE DENOMINATOR IS THE MEMBERS THAT MOVED, not everyone in the table — a member with no
+        # growth to measure must not dilute the step toward zero. It appears with nulls; it is not
+        # counted as 0%.
+        moved = [(p, w, g) for p, w, g in contrib if g is not None]
+        den = sum(w for _p, w, _g in moved)
+        step = 100.0 * sum(w * g for _p, w, g in moved) / den if den else None
+        for p, w, g in contrib:
+            # ⚠ LEAVE-ONE-OUT BY IDENTITY, not by index — `moved` is a subset of `contrib`, so
+            # positions do not line up and an index test would drop the wrong member.
+            others = [(q_w, q_g) for q_p, q_w, q_g in moved if q_p is not p]
+            od = sum(x for x, _ in others)
+            without = 100.0 * sum(x * y for x, y in others) / od if od else None
+            rows.append({
+                **_label(p["index"]),
+                "value": round(p["by_year"][period][1], 6) if period in p["by_year"] else None,
+                "raw_value": round(p["raw_by_year"][period][1], 6)
+                if period in p["raw_by_year"] else None,
+                # ⚠ NULL, NEVER 0. A member with nothing to move from did not grow by zero — it has
+                # no growth to state, and a 0.0% would read as "flat" and drag the eye to a holding
+                # that simply has no prior figure.
+                "growth_pct": round(100.0 * g, 4) if g is not None else None,
+                "contribution_pp": round(100.0 * w * g / den, 4) if (g is not None and den) else None,
+                "share_pct": None,
+                "swing": round(step - without, 4)
+                if (g is not None and step is not None and without is not None) else None,
+            })
+        rows.sort(key=lambda r: abs(r["contribution_pp"] or 0), reverse=True)
+    else:
+        step = None
+    covered = pts.get(period, {}).get("covered_pct", 0.0)
+    excluded.sort(key=lambda r: r["weight_pct"], reverse=True)
+    return {"kind": "level", "metric_code": metric_code, "period": period,
+            # The line's own level, so the panel can still show what it is decomposing the move OF.
+            "value": pts.get(period, {}).get("value"),
+            "anchor": anchor, "step_pct": round(step, 4) if step is not None else None,
+            "covered_pct": covered, "excluded_pct": round(100.0 - covered, 2),
+            "members": rows, "excluded": excluded}
 
 
 def blend_breakdown(members: list[dict], metric_code: str, period: str) -> dict:
@@ -651,6 +820,10 @@ def blend_breakdown(members: list[dict], metric_code: str, period: str) -> dict:
 
     value = combine(pairs)
     covered = 100.0 * sum(w for w, _ in pairs) / total_w if total_w > 0 else 0.0
+
+    if kind == "level":
+        return _level_breakdown(members, metric_code, period, prepared, reporting, excluded,
+                                total_w, _label)
 
     # The additive quantity: 1/v for a harmonic blend, v otherwise — see the docstring.
     def _additive(v: float) -> float:

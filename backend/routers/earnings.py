@@ -372,6 +372,11 @@ async def get_earnings_metrics_by_isin(isin: str, cadence: str = "annual"):
         # default stays annual and only a caller that asks gets the rolled-up view.
         loader = _ttm_metric_rows if cadence == "quarterly" else load_company_metric_rows
         rows = await asyncio.to_thread(loader, info["company_id"])
+        if cadence != "quarterly":
+            # ⚠ ANNUAL ONLY. Every point of a quarterly series is already a trailing twelve months,
+            # so the newest one needs no second name — see `_ltm_rows` for why it cannot be derived
+            # on the client from the raw quarters this payload carries.
+            rows = rows + await asyncio.to_thread(_ltm_rows, info["company_id"], rows)
         return {**info, "metrics": rows}
     except HTTPException:
         raise
@@ -429,7 +434,8 @@ class FundamentalCoverageRequest(BaseModel):
     metrics: list[str] | None = None
 
 
-async def _load_and_expand_members(body: FundamentalCoverageRequest) -> list[dict]:
+async def _load_and_expand_members(body: FundamentalCoverageRequest, *,
+                                   all_constituents: bool = False) -> list[dict]:
     """The flat holdings to analyse, with every linked certificate looked THROUGH to the model it
     IS — so its real stocks feed both the coverage table and the blended charts, rather than
     dropping out as one dead CH-ISIN row.
@@ -438,6 +444,9 @@ async def _load_and_expand_members(body: FundamentalCoverageRequest) -> list[dic
     member list and must agree on it — the blend renormalises over the coverage the SAME members
     produce. A look-through applied in one but not another would blend over stocks the coverage
     table never admitted. Raises 422 when neither field is set; returns [] for an empty portfolio.
+
+    `all_constituents` (universe only) keeps the constituents with no stored market cap, at weight
+    0 — the drill-down table lists the whole index; the weighted lines cannot. See `_load_universe`.
     """
     from routers._airs_portfolio_links import expand_members_through_links  # noqa: PLC0415
 
@@ -458,10 +467,24 @@ async def _load_and_expand_members(body: FundamentalCoverageRequest) -> list[dic
         from routers._benchmark_index import _members  # noqa: PLC0415
 
         def _load_universe() -> list[dict]:
+            # ⚠⚠ `all_constituents` IS FOR THE DRILL-DOWN TABLE ONLY, AND IT MUST NOT REACH THE
+            # LINE. A constituent with no stored market cap cannot be weighted, so it has no place
+            # in a cap-weighted average — but it IS in the index, and a table titled "everything
+            # behind the chart" that silently lists 22 of the AEX's 25 hides the fact that RELX,
+            # Shell and Unilever are unreachable (all LSE, outside the GuruFocus subscription).
+            # They come through at weight 0: absent from every average, present as rows whose cells
+            # say `Unsubscribed`, which is the answer the reader came for.
+            #
+            # ⚠ THE FLOORS WOULD MOVE IF THIS WERE THE DEFAULT. `covered_names_pct` divides by the
+            # member count, so quietly adding three members that can never report would drop every
+            # period from 21/22 to 21/25 and change which periods the CHART draws. Two questions,
+            # two member lists, one flag.
+            members = _members(body.universe or "", require_market_cap=not all_constituents)
             return [{"isin": m["isin"], "name": m.get("company_name"),
                      "weight": float(m.get("market_cap_eur") or 0)}
-                    for m in _members(body.universe or "")
-                    if m.get("isin") and (m.get("market_cap_eur") or 0) > 0]
+                    for m in members
+                    if m.get("isin") and (all_constituents
+                                          or (m.get("market_cap_eur") or 0) > 0)]
 
         return await asyncio.to_thread(_load_universe)
 
@@ -719,6 +742,82 @@ def _bulk_blend_rows(cids: list[int], metrics: list[str], cadence: str) -> list[
             for date, val in _ttm_by_period(rows, rule, key="date").items():
                 out.append({"company_id": cid, "metric_code": annual_code,
                             "target_date": date, "numeric_value": val})
+    return out
+
+
+def _ltm_rows(company_id: int, annual_rows: list[dict]) -> list[dict]:
+    """The LTM row per metric, for the ANNUAL payload — one trailing-twelve-month point per metric,
+    at the newest quarterly period-end, when that reaches PAST the last full fiscal year.
+
+    ⚠⚠ EMITTED UNDER AN `ltm__` CODE, NOT THE ANNUAL ONE. Four other screens read this payload
+    (Quick Valuation, Deep Valuation, the old chart suite) and every one of them selects by
+    `metric_code`: an LTM row wearing the annual spelling would silently become an extra "fiscal
+    year" in each of them, at a quarter-end date, and `_latest_per_year` would let it REPLACE the
+    real final year on the same x. A distinct prefix is invisible to everyone who does not ask.
+
+    ⚠ IT EXISTS BECAUSE THE CLIENT CANNOT DERIVE IT. The raw `quarterly__…` rows in this payload are
+    single QUARTERS — the roll-up runs only when the request asks for `cadence=quarterly` — so a
+    card deriving "the newest quarterly point" plots a quarter and calls it a year: ASML showed
+    ~8.8bn against a true 35,327.5. Rebuilding the roll-up client-side would mean a second copy of
+    the cadence rules (sum for flows, mean for share counts, `filings_per_year` so a semi-annual
+    filer is not summed into 24 months). One implementation, on the server.
+    """
+    newest_annual: dict[str, str] = {}
+    for r in annual_rows:
+        code = str(r.get("metric_code") or "")
+        if not code.startswith("annuals__") or r.get("numeric_value") is None:
+            continue
+        d = str(r.get("target_date"))[:10]
+        if d > newest_annual.get(code, ""):
+            newest_annual[code] = d
+    out: list[dict] = []
+    newest_ttm: dict[str, dict] = {}
+    for r in _ttm_metric_rows(company_id):          # already TTM, cadence-aware, annual-coded
+        code = str(r.get("metric_code") or "")
+        d = str(r.get("target_date"))[:10]
+        if r.get("numeric_value") is not None and d > str(newest_ttm.get(code, {}).get(
+                "target_date", ""))[:10]:
+            newest_ttm[code] = r
+    for code, r in newest_ttm.items():
+        # Equal dates mean the trailing twelve months ARE that fiscal year — already in the payload.
+        if str(r["target_date"])[:10] > newest_annual.get(code, ""):
+            out.append({**r, "metric_code": "ltm__" + code[len("annuals__"):], "is_ltm": True})
+    return out
+
+
+def _ltm_by_company(company_ids: list[int], metric: str, cadence: str) -> dict[int, float]:
+    """`{company_id: LTM value}` — the trailing twelve months to each company's newest quarterly
+    filing, for the companies where that reaches PAST their last full fiscal year.
+
+    ⚠ ANNUAL ONLY. Every point of a quarterly series is already a trailing twelve months, so its
+    newest one needs no separate name and adding it would duplicate the last column.
+
+    ⚠⚠ QUALIFIED ON THE PERIOD-END **DATES**, NEVER ON THE LABELS. `2026-Q1` is later than `2025`
+    for a December filer and IS `2025`'s successor for a March one — Prosus's FY2026 ends
+    2026-03-31, which is 2026-Q1. Comparing labels would invent an LTM point for every off-calendar
+    filer (a duplicate of the year already drawn) and miss it for others. `_values_with_dates`
+    keeps the real period end, which is the only thing that answers "is there a newer filing".
+
+    ⚠ IT COSTS ONE EXTRA BULK READ — the quarterly codes alongside the annual ones. That is the
+    same read the quarterly view already does, and it is one chunked query, not one per company.
+    """
+    if cadence == "quarterly" or not company_ids:
+        return {}
+    from routers._benchmark_fundamental_grid import _values_with_dates  # noqa: PLC0415
+
+    annual = _values_with_dates(company_ids, [metric], "annual").get(metric, {})
+    quarterly = _values_with_dates(company_ids, [metric], "quarterly").get(metric, {})
+    out: dict[int, float] = {}
+    for cid, per in quarterly.items():
+        dated = [(d, v) for d, v in per.values() if v is not None]
+        if not dated:
+            continue
+        q_date, q_val = max(dated)
+        last_annual = max((d for d, v in (annual.get(cid) or {}).values() if v is not None),
+                          default=None)
+        # Equal dates mean the trailing twelve months ARE that fiscal year: already on the chart.
+        if last_annual is None or q_date > last_annual:
+            out[cid] = q_val
     return out
 
 
@@ -1860,11 +1959,19 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
     summed weight). Weight is the share of the WHOLE book (cash/bonds in the denominator, so the
     shown companies sum to under 100%). Holdings with no company row / no revenue are omitted —
     this lists the companies we can actually show revenue for.
+
+    ⚠⚠ FOR AN INDEX IT LISTS **EVERY** CONSTITUENT (`all_constituents=True`), INCLUDING THE ONES THE
+    LINE CANNOT USE. The weighted series drops a constituent with no stored market cap — it cannot
+    be weighted — but a table called "everything behind the chart" that shows 22 of the AEX's 25
+    hides its most useful fact: RELX, Shell and Unilever are LSE-listed, outside the GuruFocus
+    subscription, and unreachable. They arrive at weight 0, so they change no average and no
+    coverage figure; their cells say `Unsubscribed` and their weight column is blank, which is the
+    difference between "in the index, not in the line" and "not in the index".
     """
     from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
     from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
 
-    members = await _load_and_expand_members(body)
+    members = await _load_and_expand_members(body, all_constituents=True)
     if not members:
         raise HTTPException(status_code=404, detail="no holdings")
 
@@ -1887,13 +1994,15 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
         comp: dict[str, dict] = {}
         for i in range(0, len(canon), IN_CHUNK_SIZE):
             for c in (supabase.table("company")
-                      .select("company_id,company_name,isin,gurufocus_ticker,"
+                      .select("company_id,company_name,isin,gurufocus_ticker,financials_fetched_at,"
                               "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
                       .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
                 comp[c["isin"]] = c
 
         rows: list[dict] = []
         years: set[str] = set()
+        ltm = _ltm_by_company([c["company_id"] for c in comp.values() if c.get("company_id")],
+                              metric, body.cadence)
         # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
         # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
         # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
@@ -1927,6 +2036,10 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
             rev = {p: v for p, v in
                    _metric_by_year(c["company_id"], metric, body.cadence).items()
                    if p >= "2015"}
+            # ⚠ THE SAME LTM POINT THE CHART DRAWS, so the table explains the line rather than a
+            # truncated version of it — see `_ltm_by_company` for what qualifies as one.
+            if c["company_id"] in ltm:
+                rev["LTM"] = ltm[c["company_id"]]
             years |= set(rev)
             # WHY revenue is missing, when it is: a company on an exchange outside the GuruFocus
             # subscription (Brookfield on TSX) can't be fetched at all → `unsubscribed`; one on a
@@ -1943,6 +2056,11 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
                 # read straight from `company`, so the drill-down's per-row refresh can key on it.
                 # Sent on both paths — a portfolio's rows come from the same table as an index's.
                 "company_id": c.get("company_id"),
+                # ⚠ WHEN WE ASKED, SO AN EMPTY CELL CAN SAY WHICH KIND OF EMPTY IT IS. A period
+                # ending before this date was covered by a real fetch — GuruFocus publishes nothing
+                # for it. A period ending after it has never been asked about. NULL = never asked
+                # at all, and every cell in the row is then the second kind.
+                "financials_fetched_at": c.get("financials_fetched_at"),
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
                 # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
                 # actually computed from. Sparse: a period with no filed cap is ABSENT,

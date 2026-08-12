@@ -18,7 +18,7 @@ import { AboutCard } from '../../lib/tipCard';
  * Originated in EarningsDashboard; lifted here so any future "help
  * icon next to a label" usage can drop it in.
  */
-export default function InfoTip({ text, content, children }: {
+export default function InfoTip({ text, content, children, className = "" }: {
   text?: string;
   /** Rich JSX body — rendered instead of `text` when given, so a caller can style a structured
    *  card (labels, pills, dividers) while still using this component's viewport-clamped positioning. */
@@ -33,6 +33,18 @@ export default function InfoTip({ text, content, children }: {
    * themselves — wrongly — is worse than no tooltip. This one appears on hover, immediately.
    */
   children?: React.ReactNode;
+  /**
+   * Extra classes for the TRIGGER wrapper. ⚠ Its default is an inline span, so it shrinks to the
+   * thing inside it — for a 10px badge in a table cell that is a target the reader has to aim at,
+   * and missing it by a pixel reads as "the tooltip doesn't work". `className="block"` makes the
+   * whole line the trigger. Appended, never replacing `relative`, which is what the tooltip
+   * positions against.
+   *
+   * ⚠ NAMING A `cursor-*` HERE REPLACES THE DEFAULT `cursor-help`. The help cursor is right for an
+   * "i" icon you must find; it is noise over a badge that already reads as an explanation, and on
+   * Windows it renders as a large white question mark stuck to the pointer.
+   */
+  className?: string;
 }) {
   const [show, setShow] = useState(false);
   // PINNED = clicked open so the reader can SELECT the text (source, formula) and copy it. Hover
@@ -118,8 +130,13 @@ export default function InfoTip({ text, content, children }: {
     return () => document.removeEventListener('mousedown', onDown);
   }, [pinned]);
 
+  // ⚠ THE CALLER'S OWN `cursor-*` WINS, AND IT IS DECIDED HERE RATHER THAN BY CSS ORDER. Emitting
+  // `cursor-help cursor-default` and hoping the second one applies is a coin flip on the order
+  // Tailwind happens to write the two rules — same specificity, no guarantee. So the default is
+  // DROPPED when the caller names a cursor of its own.
   return (
-    <span className="relative cursor-help" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+    <span className={`relative ${className.includes('cursor-') ? '' : 'cursor-help '}${className}`}
+      onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
       <span
         ref={iconRef}
         // Click toggles PINNED. stopPropagation so a badge sitting in a clickable table row
