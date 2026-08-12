@@ -2,11 +2,14 @@
  *  derived on the client from three raw lines so the plotted number and the drill-down can't
  *  disagree. Mirrors {@link ./debtRatioData}. */
 
-import { weightedByYear } from './marginData';
+import { weightedByYear, type Weighted } from './marginData';
 import { correctedFcf } from './sbcCorrection';
 
-export type CashReturnRow = {
-  isin: string; name: string; weight_pct: number; currency: string | null;
+/** ⚠ `Weighted`, NOT a bare `weight_pct` — the server sends `market_cap_by_period` on an INDEX
+ *  request and the invested-capital blend now needs it in the type, not merely at runtime (see
+ *  `investedCapitalIndexByYear`: a period the row cannot be weighted in cannot be its base). */
+export type CashReturnRow = Weighted & {
+  isin: string; name: string; currency: string | null;
   ticker: string | null; exchange: string | null;
   status: 'ok' | 'unsubscribed' | 'no_data';
   fcf: Record<string, number | null>;

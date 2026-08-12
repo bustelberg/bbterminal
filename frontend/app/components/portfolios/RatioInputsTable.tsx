@@ -3,7 +3,8 @@
 import { Fragment, useMemo, useState } from 'react';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
 import {
-  fmtRatioPct, fmtRevM, periodDenoms, transformSeries, type SeriesView, type Weighted,
+  fmtRatioPct, fmtRevM, periodDenoms, transformSeries, weightAt,
+  type SeriesView, type Weighted,
 } from './marginData';
 import { CapWeightLines } from './capWeightLines';
 
@@ -178,6 +179,24 @@ export function RatioInputsTable<R extends InputsRow>({
   /** One line of one row across the axis, under the current view. */
   const viewed = (r: R, of: Getter) => transformSeries(years.map((y) => of(r, y)), v);
 
+  /**
+   * The derived line as the CHART constructs it — every period the row cannot be weighted in
+   * removed first.
+   *
+   * ⚠⚠ THE REBASE'S BASE IS DECIDED BY THIS, WHICH IS THE WHOLE Vertiv BUG. A period with no usable
+   * market cap is one `weightedByYear` skips outright, so the company is not in that period's
+   * average — and a period it is not in cannot be the base of the index it is averaged into.
+   * Vertiv's cap is 0 through 2016–17 (a pre-IPO SPAC shell holding $24k of founder capital), so
+   * unmasked it based there and entered the S&P blend at an index of 2,784,248. See
+   * `investedCapitalIndexByYear`, which applies the identical rule — if these two drift, this table
+   * is explaining a line nobody drew.
+   *
+   * Only for an `amount` card, and only where the chart rebases: the Reported view must keep
+   * showing what was filed, cap or no cap.
+   */
+  const plotSeries = (r: R, view: InputsView) => transformSeries(
+    years.map((y) => (rebasable && weightAt(r, y) == null ? null : derived.of(r, y))), view);
+
   const cellText = (val: number | null, asFiled: (x: number | null | undefined) => string) => (
     val == null ? '—'
       : v === 'reported' ? asFiled(val)
@@ -197,8 +216,7 @@ export function RatioInputsTable<R extends InputsRow>({
   const plotted = useMemo(() => {
     const m = new Map<string, Record<string, number | null>>();
     for (const r of data.rows) {
-      const s = transformSeries(years.map((y) => derived.of(r, y)),
-        rebasable ? 'rebased' : 'reported');
+      const s = plotSeries(r, rebasable ? 'rebased' : 'reported');
       m.set(r.isin, Object.fromEntries(years.map((y, i) => [y, s[i]])));
     }
     return m;
@@ -374,7 +392,9 @@ export function RatioInputsTable<R extends InputsRow>({
                 })}
                 {/* The plotted figure, from the lines above it. */}
                 {(() => {
-                  const shown = viewed(r, derived.of);
+                  // ⚠ THE REBASED VIEW IS THE CHART'S CONSTRUCTION, so it masks the periods the
+                  // chart excludes; Reported and YoY show the figure as filed.
+                  const shown = v === 'rebased' ? plotSeries(r, v) : viewed(r, derived.of);
                   return (
                     <tr className="hover:bg-overlay/[0.02]">
                       <td className="px-3 py-1 sticky left-0 bg-card z-10" /><td /><td /><td /><td />
