@@ -201,6 +201,45 @@ export function carryForward(
   return out;
 }
 
+/** What a drill-down column shows. Lives here rather than beside the table because
+ *  {@link transformSeries} is the thing that gives it meaning. */
+export type SeriesView = 'reported' | 'rebased' | 'yoy';
+
+/**
+ * One line of one company, ordered along the axis, under one of the three views.
+ *
+ * ⚠ AN ARRAY IN, AN ARRAY OUT — the transforms are relative to the row's OWN reported history, so
+ * they cannot be computed a cell at a time without re-deriving that history per cell. `null` means
+ * "not reported" on the way in and "cannot be stated" on the way out, and the two are deliberately
+ * the same hole: a period a company did not report has no index level and no growth rate either.
+ *
+ * ⚠ NULL, NOT A NUMBER, ON A NON-POSITIVE BASE. `100 × v/0` is undefined and a negative base
+ * inverts the curve — the same refusal `_fundamental_blend._prepare` makes server-side, which is
+ * why a company whose equity opens negative is out of the blended line entirely rather than in it
+ * upside-down. The same test guards YoY's denominator.
+ *
+ * ⚠ YoY IS AGAINST THE PREVIOUS PERIOD **THIS ROW REPORTED**, not the previous column. A company
+ * that skipped a period would otherwise show two periods of growth in the same ink as everyone
+ * else's one.
+ */
+export function transformSeries(
+  values: (number | null | undefined)[], view: SeriesView,
+): (number | null)[] {
+  const vs = values.map((v) => v ?? null);
+  if (view === 'reported') return vs;
+  if (view === 'rebased') {
+    const base = vs.find((v) => v != null);
+    return base != null && base > 0 ? vs.map((v) => (v == null ? null : 100 * v / base)) : vs.map(() => null);
+  }
+  let prev: number | null = null;
+  return vs.map((v) => {
+    if (v == null) return null;
+    const before = prev;
+    prev = v;
+    return before != null && before > 0 ? 100 * (v / before - 1) : null;
+  });
+}
+
 export function weightedByYear<T extends Weighted>(
   rows: T[],
   rawYearsOf: (r: T) => string[],

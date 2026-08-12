@@ -107,7 +107,7 @@ export default function GrossMarginInputsModal({ target, portfolioName, benchTar
   };
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
-  const derived = { label: 'Gross margin', of: (r: GrossMarginRow, y: string) => grossMarginOf(r.gross_profit[y], r.revenue[y]) };
+  const derived = { label: 'Gross margin', kind: 'ratio' as const, of: (r: GrossMarginRow, y: string) => grossMarginOf(r.gross_profit[y], r.revenue[y]) };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"

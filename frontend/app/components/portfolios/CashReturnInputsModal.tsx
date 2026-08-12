@@ -105,7 +105,7 @@ export default function CashReturnInputsModal({ target, portfolioName, benchTarg
   };
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
-  const derived = { label: 'Cash return on capital', of: (r: CashReturnRow, y: string) => cashReturnOf(r.fcf[y], r.noncurrent_liabilities[y], r.total_equity[y]) };
+  const derived = { label: 'Cash return on capital', kind: 'ratio' as const, of: (r: CashReturnRow, y: string) => cashReturnOf(r.fcf[y], r.noncurrent_liabilities[y], r.total_equity[y]) };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"

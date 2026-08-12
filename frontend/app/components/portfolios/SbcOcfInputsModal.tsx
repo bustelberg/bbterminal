@@ -104,7 +104,7 @@ export default function SbcOcfInputsModal({ target, portfolioName, benchTarget, 
   };
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
-  const derived = { label: 'SBC / OCF', of: (r: SbcOcfRow, y: string) => sbcOcfOf(r.sbc[y], r.ocf[y]) };
+  const derived = { label: 'SBC / OCF', kind: 'ratio' as const, of: (r: SbcOcfRow, y: string) => sbcOcfOf(r.sbc[y], r.ocf[y]) };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"

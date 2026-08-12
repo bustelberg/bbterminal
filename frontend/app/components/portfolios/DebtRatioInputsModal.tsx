@@ -116,7 +116,7 @@ export default function DebtRatioInputsModal({ target, portfolioName, benchTarge
   };
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
-  const derived = { label: 'Debt / assets ex-GW', of: (r: DebtRatioRow, y: string) => debtRatioOf(r.long_term_debt[y], r.total_assets[y], r.goodwill[y]) };
+  const derived = { label: 'Debt / assets ex-GW', kind: 'ratio' as const, of: (r: DebtRatioRow, y: string) => debtRatioOf(r.long_term_debt[y], r.total_assets[y], r.goodwill[y]) };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"
