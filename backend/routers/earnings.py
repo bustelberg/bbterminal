@@ -818,24 +818,100 @@ def _ltm_by_company(company_ids: list[int], metric: str,
     ⚠ IT COSTS ONE EXTRA BULK READ — the quarterly codes alongside the annual ones. That is the
     same read the quarterly view already does, and it is one chunked query, not one per company.
     """
-    if cadence == "quarterly" or not company_ids:
+    return _ltm_multi(company_ids, [metric], cadence).get(metric, {})
+
+
+def _ltm_multi(company_ids: list[int], metrics: list[str],
+               cadence: str) -> dict[str, dict[int, tuple[str, float]]]:
+    """`{metric: {company_id: (period_end, LTM value)}}` — `_ltm_by_company` for several metrics on
+    ONE pair of bulk reads instead of two per metric.
+
+    ⚠ IT EXISTS SO THE QUALIFYING RULE HAS ONE IMPLEMENTATION. The eleven ratio cards each need
+    three or four lines rolled to the same window; asking metric by metric would have re-stated
+    "is this quarter newer than the last fiscal year" — the rule with the off-calendar-filer trap in
+    it (`_ltm_by_company`) — once per caller, which is how two cards come to disagree about whether
+    a company has an LTM at all.
+    """
+    if cadence == "quarterly" or not company_ids or not metrics:
         return {}
     from routers._benchmark_fundamental_grid import _values_with_dates  # noqa: PLC0415
 
-    annual = _values_with_dates(company_ids, [metric], "annual").get(metric, {})
-    quarterly = _values_with_dates(company_ids, [metric], "quarterly").get(metric, {})
-    out: dict[int, tuple[str, float]] = {}
-    for cid, per in quarterly.items():
-        dated = [(d, v) for d, v in per.values() if v is not None]
-        if not dated:
-            continue
-        q_date, q_val = max(dated)
-        last_annual = max((d for d, v in (annual.get(cid) or {}).values() if v is not None),
-                          default=None)
-        # Equal dates mean the trailing twelve months ARE that fiscal year: already on the chart.
-        if last_annual is None or q_date > last_annual:
-            out[cid] = (q_date, q_val)
+    annual = _values_with_dates(company_ids, metrics, "annual")
+    quarterly = _values_with_dates(company_ids, metrics, "quarterly")
+    out: dict[str, dict[int, tuple[str, float]]] = {}
+    for metric in metrics:
+        per_metric: dict[int, tuple[str, float]] = {}
+        for cid, per in (quarterly.get(metric) or {}).items():
+            dated = [(d, v) for d, v in per.values() if v is not None]
+            if not dated:
+                continue
+            q_date, q_val = max(dated)
+            last_annual = max((d for d, v in ((annual.get(metric) or {}).get(cid) or {}).values()
+                               if v is not None), default=None)
+            # Equal dates mean the trailing twelve months ARE that fiscal year: already on the chart.
+            if last_annual is None or q_date > last_annual:
+                per_metric[cid] = (q_date, q_val)
+        out[metric] = per_metric
     return out
+
+
+def ltm_aligned(company_ids: list[int], metrics: list[str],
+                cadence: str) -> dict[int, tuple[str, dict[str, float]]]:
+    """`{company_id: (period_end, {metric: LTM value})}` for the derived-ratio cards — every line
+    rolled to the SAME twelve months, or none of them.
+
+    ⚠ THE DATE COMES BACK BECAUSE THE CHART NEEDS AN X. `periodToX` turns a period label into a
+    fractional year and `Number("LTM")` is NaN — a valid Map key, which is how nine charts once
+    collapsed onto one point without erroring. The client places the LTM point at this real
+    quarter-end, the same x the growth cards use, so a card's own line and the benchmark beside it
+    cannot sit at different places on the axis while claiming the same period.
+
+    ⚠⚠ A RATIO NEEDS ITS LEGS OVER ONE WINDOW, AND A MISMATCH RENDERS AS A PLAUSIBLE PERCENTAGE.
+    Companies do not file every line on the same schedule: revenue can roll to a 30 June quarter-end
+    while gross profit is only complete to 31 March. Dividing the first by the second is a
+    fourteen-month numerator over a twelve-month denominator, and the result is a margin that looks
+    entirely ordinary — there is no shape on the chart that says "these two came from different
+    windows". So a company whose lines disagree on the period end gets NO LTM point at all rather
+    than a blended one; the last full fiscal year is still drawn, and the chart is a year short
+    instead of quietly wrong.
+
+    ⚠ A LINE WITH NO LTM IS NOT A MISMATCH. A company that reports no SBC has no SBC to roll, which
+    is the same absence the annual series already carries for that metric — the caller handles it
+    exactly as it handles a missing year. Only two DIFFERENT dates disqualify.
+    """
+    per_metric = _ltm_multi(company_ids, metrics, cadence)
+    if not per_metric:
+        return {}
+    out: dict[int, tuple[str, dict[str, float]]] = {}
+    for cid in company_ids:
+        got = {m: hit for m in metrics if (hit := per_metric.get(m, {}).get(cid))}
+        dates = {d for d, _ in got.values()}
+        if not got or len(dates) != 1:
+            continue
+        out[cid] = (dates.pop(), {m: v for m, (_, v) in got.items()})
+    return out
+
+
+def _attach_ltm(cid: int, ltm: dict[int, tuple[str, dict[str, float]]],
+                series: dict[str, dict[str, float]]) -> str | None:
+    """Writes each line's LTM value into its per-period dict under the literal period `LTM`, and
+    returns the quarter-end it was rolled to (None when this company has no aligned LTM).
+
+    ⚠ THE PERIOD IS A STRING KEY, WHICH IS WHY IT NEEDS NO PLUMBING. `'LTM'` sorts after every year
+    (`'2026' < 'LTM'`) and clears the `>= "2015"` floor, so the caller's `years` set, the client's
+    period columns and the chart's x order all pick it up as one more period. The alternative — a
+    parallel `ltm` field beside the series — would need every consumer to learn about it, and the
+    ones that did not would silently draw a chart that stops a year early.
+    """
+    hit = ltm.get(cid)
+    if not hit:
+        return None
+    date, values = hit
+    for metric, by_period in series.items():
+        value = values.get(metric)
+        if value is not None:
+            by_period["LTM"] = value
+    return date
 
 
 def _blend_rows(rows: list[dict], covered: list[dict],
@@ -2184,6 +2260,10 @@ async def margin_inputs(body: FundamentalCoverageRequest):
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
                   ('revenue', 'fcf', 'sbc',), body.cadence)
+        # The trailing twelve months, but only where all three lines roll to the SAME quarter-end —
+        # see `ltm_aligned` for why a ratio across two windows is worse than a missing point.
+        ltm = ltm_aligned([comp[ci]["company_id"] for ci in canon if ci in comp],
+                          ["revenue", "fcf", "sbc"], body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -2192,6 +2272,7 @@ async def margin_inputs(body: FundamentalCoverageRequest):
             rev = _metric_by_year(c["company_id"], "revenue", body.cadence)
             fcf = _metric_by_year(c["company_id"], "fcf", body.cadence)
             sbc = _metric_by_year(c["company_id"], "sbc", body.cadence)
+            _attach_ltm(c["company_id"], ltm, {"revenue": rev, "fcf": fcf, "sbc": sbc})
             years |= set(rev) | set(fcf) | set(sbc)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -2209,7 +2290,8 @@ async def margin_inputs(body: FundamentalCoverageRequest):
                 "status": status, "revenue": rev, "fcf": fcf, "sbc": sbc,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows,
+                "ltm_date": max((d for d, _ in ltm.values()), default=None)}
 
     return await asyncio.to_thread(_run)
 
@@ -2451,6 +2533,9 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
                   ('interest_expense', 'operating_income',), body.cadence)
+        # Both lines to the SAME quarter-end, or neither — see `ltm_aligned`.
+        ltm = ltm_aligned([comp[ci]["company_id"] for ci in canon if ci in comp],
+                          ["interest_expense", "operating_income"], body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -2458,6 +2543,7 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
             gx = (c.get("gurufocus_exchange") or {}) or {}
             ie = _metric_by_year(c["company_id"], "interest_expense", body.cadence)
             oi = _metric_by_year(c["company_id"], "operating_income", body.cadence)
+            _attach_ltm(c["company_id"], ltm, {"interest_expense": ie, "operating_income": oi})
             years |= set(ie) | set(oi)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -2478,7 +2564,8 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
                 "interest_expense": ie, "operating_income": oi,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows,
+                "ltm_date": max((d for d, _ in ltm.values()), default=None)}
 
     return await asyncio.to_thread(_run)
 
@@ -2536,6 +2623,9 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
                   ('sbc', 'ocf',), body.cadence)
+        # Both lines to the SAME quarter-end, or neither — see `ltm_aligned`.
+        ltm = ltm_aligned([comp[ci]["company_id"] for ci in canon if ci in comp],
+                          ["sbc", "ocf"], body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -2543,6 +2633,7 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
             gx = (c.get("gurufocus_exchange") or {}) or {}
             sbc = _metric_by_year(c["company_id"], "sbc", body.cadence)
             ocf = _metric_by_year(c["company_id"], "ocf", body.cadence)
+            _attach_ltm(c["company_id"], ltm, {"sbc": sbc, "ocf": ocf})
             years |= set(sbc) | set(ocf)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -2563,7 +2654,8 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
                 "sbc": sbc, "ocf": ocf,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows,
+                "ltm_date": max((d for d, _ in ltm.values()), default=None)}
 
     return await asyncio.to_thread(_run)
 
@@ -2620,6 +2712,9 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
                   ('capex', 'revenue',), body.cadence)
+        # Both lines to the SAME quarter-end, or neither — see `ltm_aligned`.
+        ltm = ltm_aligned([comp[ci]["company_id"] for ci in canon if ci in comp],
+                          ["capex", "revenue"], body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -2627,6 +2722,7 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
             gx = (c.get("gurufocus_exchange") or {}) or {}
             capex = _metric_by_year(c["company_id"], "capex", body.cadence)
             rev = _metric_by_year(c["company_id"], "revenue", body.cadence)
+            _attach_ltm(c["company_id"], ltm, {"capex": capex, "revenue": rev})
             years |= set(capex) | set(rev)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -2647,7 +2743,8 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
                 "capex": capex, "revenue": rev,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows,
+                "ltm_date": max((d for d, _ in ltm.values()), default=None)}
 
     return await asyncio.to_thread(_run)
 
@@ -2712,6 +2809,12 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest):
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
                   ('gross_profit', 'revenue',), body.cadence)
+        # Both lines to the SAME quarter-end, or neither — see `ltm_aligned`. This is the pair the
+        # rule was written for: a company can complete revenue for a quarter that its cost of sales
+        # has not been broken out for yet, and the margin that falls out of the mismatch is a
+        # believable number with nothing on the chart to mark it.
+        ltm = ltm_aligned([comp[ci]["company_id"] for ci in canon if ci in comp],
+                          ["gross_profit", "revenue"], body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -2719,6 +2822,7 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest):
             gx = (c.get("gurufocus_exchange") or {}) or {}
             gp = _metric_by_year(c["company_id"], "gross_profit", body.cadence)
             rev = _metric_by_year(c["company_id"], "revenue", body.cadence)
+            _attach_ltm(c["company_id"], ltm, {"gross_profit": gp, "revenue": rev})
             years |= set(gp) | set(rev)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -2741,7 +2845,8 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest):
                 "gross_profit": gp, "revenue": rev,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows,
+                "ltm_date": max((d for d, _ in ltm.values()), default=None)}
 
     return await asyncio.to_thread(_run)
 
@@ -2807,6 +2912,9 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest):
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
                   ('fcf', 'sbc', 'net_income',), body.cadence)
+        # All three lines to the SAME quarter-end, or none — see `ltm_aligned`.
+        ltm = ltm_aligned([comp[ci]["company_id"] for ci in canon if ci in comp],
+                          ["fcf", "sbc", "net_income"], body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -2815,6 +2923,7 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest):
             fcf = _metric_by_year(c["company_id"], "fcf", body.cadence)
             sbc = _metric_by_year(c["company_id"], "sbc", body.cadence)
             ni = _metric_by_year(c["company_id"], "net_income", body.cadence)
+            _attach_ltm(c["company_id"], ltm, {"fcf": fcf, "sbc": sbc, "net_income": ni})
             years |= set(fcf) | set(ni)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -2835,7 +2944,8 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest):
                 "fcf": fcf, "sbc": sbc, "net_income": ni,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows,
+                "ltm_date": max((d for d, _ in ltm.values()), default=None)}
 
     return await asyncio.to_thread(_run)
 

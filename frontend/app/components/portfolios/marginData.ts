@@ -107,6 +107,19 @@ export const xToMonth = (x: number): string => {
   return `${d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })} ${d.getUTCFullYear()}`;
 };
 
+/**
+ * Can this period label be placed on the axis at all?
+ *
+ * ⚠⚠ A PERIOD `periodToX` CANNOT PLACE MUST BE DROPPED, NOT PLOTTED AT NaN. `Number("LTM")` is NaN,
+ * NaN is a valid `Map` key, and every such period therefore lands on ONE key — the exact failure
+ * `periodToX` documents, where nine charts went blank while their drill-downs rendered perfectly.
+ * The server now sends an `LTM` period to the six flow-ratio endpoints, so this is a live label and
+ * not a hypothetical one; until each card places it at the response's `ltm_date`, dropping it makes
+ * the new period INERT — the charts read exactly as they did before it existed. Being a year short
+ * is a visible absence; a point silently fused onto NaN is not.
+ */
+export const plottable = (period: string): boolean => Number.isFinite(periodToX(period));
+
 export const xToPeriod = (x: number): string => {
   const y = Math.floor(x);
   const q = Math.round((x - y) * 4);
@@ -190,9 +203,10 @@ export function carryForward(
 
 export function weightedByYear<T extends Weighted>(
   rows: T[],
-  yearsOf: (r: T) => string[],
+  rawYearsOf: (r: T) => string[],
   valueOf: (r: T, year: string) => number | null,
 ): Map<number, number> {
+  const yearsOf = (r: T) => rawYearsOf(r).filter(plottable);
   const total = rows.reduce((a, r) => a + r.weight_pct, 0);
   const out = new Map<number, number>();
   if (total <= 0 || !rows.length) return out;
@@ -262,9 +276,13 @@ export function weightedByYear<T extends Weighted>(
  */
 export function periodDenoms<T extends Weighted>(
   rows: T[],
-  yearsOf: (r: T) => string[],
+  rawYearsOf: (r: T) => string[],
   valueOf: (r: T, year: string) => number | null,
 ): Record<string, number> {
+  // ⚠ THE SAME FILTER AS `weightedByYear`, FOR THE SAME REASON — and because these two must agree.
+  // This function exists to prove the line's weights sum to 100%; a period one of them can see and
+  // the other cannot would make that proof fail on a period nobody plotted. See `plottable`.
+  const yearsOf = (r: T) => rawYearsOf(r).filter(plottable);
   const out: Record<string, number> = {};
   const years = new Set<string>();
   for (const r of rows) for (const y of yearsOf(r)) years.add(y);
@@ -294,9 +312,12 @@ export function periodDenoms<T extends Weighted>(
 
 export function coverageByYear<T extends Weighted>(
   rows: T[],
-  yearsOf: (r: T) => string[],
+  rawYearsOf: (r: T) => string[],
   valueOf: (r: T, year: string) => number | null,
 ): Map<number, number> {
+  // Same filter as the two above: coverage is reported per drawn period, so it must see the same
+  // set of periods the line does. See `plottable`.
+  const yearsOf = (r: T) => rawYearsOf(r).filter(plottable);
   const total = rows.reduce((a, r) => a + r.weight_pct, 0);
   const out = new Map<number, number>();
   if (total <= 0) return out;
