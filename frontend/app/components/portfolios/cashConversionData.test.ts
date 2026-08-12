@@ -57,11 +57,14 @@ describe('cashConversionByYear', () => {
   });
 
   it('⚠ drops the year once too much of the book has no ratio', () => {
-    // The shared `MIN_YEAR_COVERAGE_PCT` (80) floor — a book half in losses must not publish a
-    // "cash conversion" that silently describes only the profitable half.
+    // The shared `MIN_YEAR_COVERAGE_PCT` floor — a book mostly in losses must not publish a "cash
+    // conversion" that silently describes only the profitable part.
+    // ⚠ 40/60, NOT 50/50: the floor moved to 50 (2026-08-12) and `<` is the comparison, so an even
+    // split now clears it BY DESIGN. The case being pinned is "the computable part is under the
+    // floor", which needs it under half.
     const rows = [
-      row({ weight_pct: 50, fcf: { 2025: 110 }, net_income: { 2025: 100 } }),
-      row({ weight_pct: 50, fcf: { 2025: 50 }, net_income: { 2025: -20 } }),
+      row({ weight_pct: 40, fcf: { 2025: 110 }, net_income: { 2025: 100 } }),
+      row({ weight_pct: 60, fcf: { 2025: 50 }, net_income: { 2025: -20 } }),
     ];
     expect(cashConversionByYear(rows).has(2025)).toBe(false);
   });

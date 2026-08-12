@@ -110,9 +110,13 @@ class TestALevelIsRebasedBeforeItIsWeighted:
         assert out["points"][-1]["covered_pct"] == pytest.approx(85.0)
 
     def test_dropping_a_member_can_take_the_date_below_the_floor(self):
-        """And then there is no value at all, which is the honest outcome."""
-        ok = _m(0.5, **{"2023_12_31": 100, "2024_12_31": 150})
-        loss = _m(0.5, **{"2023_12_31": -50, "2024_12_31": 60})
+        """And then there is no value at all, which is the honest outcome.
+
+        ⚠ 40/60, NOT 50/50 — the floor moved to 50 (2026-08-12) and `<` is the comparison, so an
+        even split now CLEARS it by design. The case being pinned is "the survivor is under the
+        floor", which needs the survivor under 50."""
+        ok = _m(0.4, **{"2023_12_31": 100, "2024_12_31": 150})
+        loss = _m(0.6, **{"2023_12_31": -50, "2024_12_31": 60})
         assert blend_series([ok, loss], REV)["points"] == []
 
 
@@ -137,18 +141,36 @@ class TestCoverageIsPerDateAndIsAFloor:
         assert [p["period"] for p in out["points"]] == ["2024"]
 
     def test_the_floor_is_the_documented_one(self):
-        assert MIN_BLEND_COVERAGE_PCT == 80.0
+        assert MIN_BLEND_COVERAGE_PCT == 50.0
 
-    def test_the_newest_fiscal_year_is_not_drawn_off_the_few_who_have_filed(self):
-        """⚠ THE REASON THE FLOOR IS 80. Books close on different dates, so early in a year a
-        couple of holdings have filed and the rest have not. Renormalising over whoever reported
-        turns that into a full-height point on the right edge, in the same ink as a year every
-        holding reported — a move in the sample, read as a move in the book. At 60 this cleared."""
+    def test_a_newest_year_the_MINORITY_has_filed_is_still_refused(self):
+        """The floor's remaining job, and the one it was raised to 80 for.
+
+        Books close on different dates, so early in a fiscal year a few holdings have filed and the
+        rest have not. Renormalising over whoever reported draws that as a full-height point on the
+        right edge, in the same ink as a year everybody reported — a move in the sample, read as a
+        move in the book.
+        """
+        filed = [_m(0.20, **{"2024_12_31": 10, "2025_12_31": 10}),
+                 _m(0.15, **{"2024_12_31": 10, "2025_12_31": 40})]
+        pending = [_m(0.65, **{"2024_12_31": 10})]
+        out = blend_series([*filed, *pending], ROE)
+        assert [p["period"] for p in out["points"]] == ["2024"]   # 2025 spans 35% — omitted
+
+    def test_a_newest_year_the_MAJORITY_has_filed_now_DRAWS_and_that_is_the_trade(self):
+        """⚠ THE ACCEPTED COST OF LOWERING THE FLOOR 80 -> 50 (2026-08-12, on request). This exact
+        case — 65% filed, the rest pending — was the reason the floor went 60 -> 80 in July, and it
+        is now drawn again. It is pinned rather than deleted so the behaviour is a decision on the
+        record instead of a surprise on the right edge of a chart: `covered_pct` says 65 and the
+        point is real, but it spans two thirds of the book beside years that span all of it. If it
+        bites, the fix is a stricter bar on the LATEST period alone — not a single high floor, which
+        also hid the mid-history periods this change was asked for."""
         filed = [_m(0.35, **{"2024_12_31": 10, "2025_12_31": 10}),
                  _m(0.30, **{"2024_12_31": 10, "2025_12_31": 40})]
         pending = [_m(0.35, **{"2024_12_31": 10})]
         out = blend_series([*filed, *pending], ROE)
-        assert [p["period"] for p in out["points"]] == ["2024"]   # 2025 spans 65% — omitted
+        assert [p["period"] for p in out["points"]] == ["2024", "2025"]
+        assert out["points"][-1]["covered_pct"] == pytest.approx(65.0)
 
     def test_no_members_is_no_series_not_a_zero(self):
         assert blend_series([], ROE)["points"] == []

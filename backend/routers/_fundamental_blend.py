@@ -50,18 +50,47 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import date as _date
 
 # Below this share of the blended weight reporting on a date, that date has no honest value.
 #
-# ⚠ RAISED 60 -> 80 (2026-07-28), AND THE NEWEST YEAR IS WHY. Books close on different dates, so
-# early in a fiscal year a handful of holdings have filed and the rest have not — at 60 that year
-# still cleared the floor and was drawn, full height, in the same ink as a year every holding
-# reported. It reads as a move in the book and it is a move in the sample.
+# ⚠ 60 -> 80 (2026-07-28) -> 50 (2026-08-12, on request: "if we have half the companies in a
+# benchmark for a given period, we should display that data point"). Half the weight now draws —
+# `<` is the comparison, so exactly 50.0% clears.
+#
+# ⚠⚠ AND THE REASON IT WENT TO 80 HAS NOT GONE AWAY — IT IS AN ACCEPTED COST NOW, WHICH IS WORTH
+# KNOWING WHEN THE RIGHT EDGE OF A CHART LOOKS ODD. Books close on different dates, so early in a
+# fiscal year a handful of holdings have filed and the rest have not; renormalising over whoever
+# reported draws that as a full-height point in the same ink as a year everybody reported. It reads
+# as a move in the book and it is a move in the sample. Measured on the S&P revenue blend, FY2026
+# was 13.4% covered — still refused — but a 55%-covered newest year now draws where it did not.
+# `covered_pct` rides on every point, so the fix if it bites is a stricter bar on the LATEST period
+# only, not a return to a single high floor that also hid the mid-history periods this lowering was
+# asked for.
 #
 # ⚠ KEPT IN LOCK-STEP WITH THE FRONTEND'S `marginData.MIN_YEAR_COVERAGE_PCT`, which applies the
 # same floor to the ratio cards derived on the client. Two floors that disagree put two cards on
 # the same screen spanning different fractions of the same book.
-MIN_BLEND_COVERAGE_PCT = 80.0
+MIN_BLEND_COVERAGE_PCT = 50.0
+
+# The same bar, counted in CONSTITUENTS rather than weight — and both must clear.
+#
+# ⚠⚠ WEIGHT ALONE LETS ONE GIANT DRAW A PERIOD. Measured 2026-08-12 on the AEX: 2026-Q2 had **2 of
+# 22** constituents reporting and cleared the weight floor at 53.8%, because ASML is enormous. A
+# point built from two companies, drawn in the same ink as one built from twenty-two. Counted in
+# names it is 9.1% and refused.
+#
+# ⚠ AND NAMES ALONE WOULD BE WORSE, which is why this is an AND: ten 0.4% constituents would outvote
+# a missing 7% one. The two answer different questions — "how much of the index reported" and "how
+# many of it" — and a period has to survive both.
+MIN_BLEND_COVERAGE_NAMES_PCT = 50.0
+
+# How long a member's last reported figure stands in for a period it did not report — see
+# `carry_forward`. One year: the longest any still-reporting filer goes between filings, so nothing
+# live is ever dropped, and anything that stops reporting falls out within a year instead of being
+# held at a frozen value for the rest of the axis. 400 rather than 365 for fiscal drift and the
+# 52/53-week filers.
+_MAX_CARRY_DAYS = 400
 
 # A price over something. Aggregates HARMONICALLY.
 #
@@ -108,24 +137,108 @@ def _weighted_harmonic(pairs: list[tuple[float, float]]) -> float | None:
     return None if denom <= 0 else w / denom
 
 
-def _latest_per_year(pts: dict[str, float]) -> dict[str, tuple[str, float]]:
-    """One row per FISCAL YEAR -> {year: (date, value)}. A member reporting twice in a year (a
+def year_bucket(d: str) -> str:
+    """`2025-09-30` → `2025`. The ANNUAL alignment — see the ⚠⚠ at the top of this module."""
+    return d[:4]
+
+
+def quarter_bucket(d: str) -> str:
+    """`2025-09-30` → `2025-Q3`.
+
+    ⚠⚠ THE QUARTERLY ALIGNMENT, AND IT MUST MATCH THE VOCABULARY THE **WEIGHTS** ARE KEYED IN.
+    `period_caps_eur(cadence="quarterly")` returns `{"2025-Q3": cap}`, and `_weight_at` looks a
+    member's weight up BY THE BUCKET KEY. Bucketing the points by year while the caps are keyed by
+    quarter means every lookup misses, every member is dropped from every period, and the series
+    comes back EMPTY — not thin, empty. Measured 2026-08-12 on the AEX quarterly Revenue benchmark:
+    22 constituents, 639 rows, `contributing: 22`, and **zero** points out, while the drill-down
+    table beside it showed 84–93% of the index reporting every quarter. The card then blamed the
+    coverage floor, which had never run.
+
+    ⚠ AND IT IS A CALENDAR QUARTER, deliberately the same derivation as `_ttm_by_period`'s label
+    (`(month - 1) // 3 + 1`), because that is what `period_caps_eur` emits. An off-calendar filer's
+    Q3 is whatever quarter its period-end falls in — the same convention as the annual bucket,
+    which puts a March year-end in the calendar year it ends in.
+    """
+    return f"{d[:4]}-Q{(int(d[5:7]) - 1) // 3 + 1}"
+
+
+def period_end(period: str) -> str:
+    """A bucket key → the date it ends on. `2025` → `2025-12-31`, `2025-Q3` → `2025-09-30`.
+
+    ⚠ A CONVENTION, AND THE ONLY HONEST ONE AVAILABLE. Members close their books on different days,
+    which is why the blend aligns on a shared period rather than a raw date — so no blended point
+    belongs to one real date. The period's own calendar end is the least surprising stand-in, it
+    keeps a year's four quarterly points in order on the axis, and it is what `carry_forward`
+    measures its staleness bound against.
+    """
+    head, _, q = period.partition("-Q")
+    return f"{head}-{['03-31', '06-30', '09-30', '12-31'][int(q) - 1]}" if q else f"{head}-12-31"
+
+
+def carry_forward(by_period: dict[str, tuple[str, float]],
+                  axis: list[str]) -> dict[str, tuple[float, bool]]:
+    """`{period: (value, reported)}` over `axis` — each period's own figure, or the latest one
+    before it, with `reported` saying which.
+
+    ⚠⚠ THE CARRY IS WHAT MAKES THE CONTRIBUTOR SET STABLE, and a stable set is the whole point. A
+    company that files semi-annually has no trailing-twelve-month point in Q1 — but its TTM revenue
+    at Q1 IS its December figure; that is what "trailing" means. Without the carry it simply drops
+    out of Q1, the index alternates between two different baskets, and the line sawtooths ±20% on
+    composition alone (measured on the AEX: 277 → 341 → 297 → 382).
+
+    ⚠⚠ AND `reported` IS WHY THIS IS SAFE. A carried value is used for the AVERAGE and counts for
+    NOTHING in the coverage, so the floor still sees the newest fiscal year for what it is — a
+    handful of filers and everyone else held at last year's figure — and still refuses it. Merge
+    the two and the floor is defeated by the very mechanism that smooths the line.
+
+    ⚠ BOUNDED. A constituent that stops reporting (delisted, acquired, or simply never filed again)
+    must fall out rather than be held at a frozen value for the rest of the axis. One year is the
+    natural bound: it is the longest any live filer goes between reports, so nothing that is still
+    reporting is ever dropped.
+    """
+    out: dict[str, tuple[float, bool]] = {}
+    last: tuple[str, float] | None = None
+    for period in axis:
+        own = by_period.get(period)
+        if own is not None:
+            last = own
+            out[period] = (own[1], True)
+            continue
+        if last is None:
+            continue                     # nothing to carry yet — before this member's first report
+        if (_date.fromisoformat(period_end(period))
+                - _date.fromisoformat(last[0])).days > _MAX_CARRY_DAYS:
+            continue                     # stale beyond the bound — this member is out of the period
+        out[period] = (last[1], False)
+    return out
+
+
+def _latest_per_bucket(pts: dict[str, float],
+                       bucket=year_bucket) -> dict[str, tuple[str, float]]:
+    """One row per PERIOD -> {period: (date, value)}. A member reporting twice in a period (a
     year-end change) keeps its LATEST close rather than being counted twice."""
     latest: dict[str, tuple[str, float]] = {}
     for d, v in pts.items():
-        year = d[:4]
-        if year not in latest or d > latest[year][0]:
-            latest[year] = (d, v)
+        key = bucket(d)
+        if key not in latest or d > latest[key][0]:
+            latest[key] = (d, v)
     return latest
 
 
-def _prepare(members: list[dict], kind: str) -> tuple[list[dict], list[dict]]:
+# The old name, kept because three call sites in `earnings.py` read it as "one point per year".
+_latest_per_year = _latest_per_bucket
+
+
+def _prepare(members: list[dict], kind: str, bucket=year_bucket) -> tuple[list[dict], list[dict]]:
     """Members split into those that can contribute and those that cannot, with the REASON.
 
     ⚠ SHARED BY `blend_series` AND `blend_breakdown` ON PURPOSE. A drill-down that re-derives
     "the same way" is a second copy of these rules, and the copy is what drifts — a panel that
     explains a number the line does not show is worse than no panel, because it is checked once
     and believed thereafter. One preparation, two readers.
+
+    `bucket` is the period alignment — `year_bucket` (default) or `quarter_bucket`. It travels with
+    the weights: see `quarter_bucket` for what happens when the two disagree.
     """
     ok: list[dict] = []
     dropped: list[dict] = []
@@ -156,7 +269,8 @@ def _prepare(members: list[dict], kind: str) -> tuple[list[dict], list[dict]]:
             pts = {d: 100.0 * v / base for d, v in pts.items()}
         ok.append({"index": i, "weight": w, "weights": m.get("weights"),
                    "points": pts, "raw": raw,
-                   "by_year": _latest_per_year(pts), "raw_by_year": _latest_per_year(raw)})
+                   "by_year": _latest_per_bucket(pts, bucket),
+                   "raw_by_year": _latest_per_bucket(raw, bucket)})
     return ok, dropped
 
 
@@ -179,25 +293,62 @@ def _weight_at(m: dict, period: str) -> float | None:
     if ws is None:
         return m.get("weight")
     w = ws.get(period)
-    return w if w else None
+    if w:
+        return w
+    # ⚠ AS-OF, NOT EXACT-MATCH. A market cap is a STOCK: the last one filed is the current one
+    # until a newer one exists, so a period we have no cap FOR is weighted by the newest cap we
+    # have BEFORE it. Without this the current year is unweighted for months — measured on the AEX,
+    # only 1 of 22 constituents had a 2026 cap, so 2026-Q1 weighted one company and 2026-Q2 none.
+    # ⚠ The keys sort correctly for both vocabularies (`2025` < `2026`, `2025-Q3` < `2025-Q4`),
+    # which is why the buckets are formatted the way they are.
+    earlier = [k for k in ws if k <= period and ws[k]]
+    return ws[max(earlier)] if earlier else None
 
 
-def blend_series(members: list[dict], metric_code: str) -> dict:
+def blend_series(members: list[dict], metric_code: str, bucket=year_bucket) -> dict:
     """`members` = [{weight, points: {date: value}, base_points?}] -> one blended series.
+
+    `bucket` aligns the members onto shared periods — `year_bucket` (default) or `quarter_bucket`
+    for a trailing-twelve-month series. ⚠ IT MUST MATCH HOW `weights` IS KEYED; see `quarter_bucket`
+    for the empty series that results when it does not.
 
     `base_points` (optional, LEVELS only) is the series this one continues — a forecast passes the
     ACTUAL it extends, so both are rebased on the same anchor and the forecast picks up where the
     actual stops instead of restarting at 100.
 
-    Returns `{kind, points: [{date, value, covered_pct}], covered_pct}` where `covered_pct` is the
-    share of the blended weight that reported on that date.
+    Returns `{kind, points: [{date, value, covered_pct, covered_names_pct}], covered_pct}` —
+    `covered_pct` is the share of the blended weight that REPORTED that period and
+    `covered_names_pct` the share of the members that did.
+
+    ⚠⚠ THE THREE RULES THIS FUNCTION IMPLEMENTS, and they only work together:
+
+      1. WEIGHT — a member's weight in a period is its cap for that YEAR over the sum of that
+         year's caps (`period_caps_eur` spreads one annual cap across the year's quarters), taken
+         AS-OF when this year is not filed yet (`_weight_at`).
+      2. CARRY — a member's latest reported figure applies until it reports a newer one, bounded to
+         `_MAX_CARRY_DAYS`. Without it the set of contributors CHANGES period to period and the
+         line alternates between two different baskets: measured 2026-08-12, the AEX quarterly
+         revenue index read 277 → 341 → 297 → 382 → 338 → 402, a ±20% sawtooth that is composition,
+         not revenue. Q1/Q3 was the 12 constituents that file quarterly; Q2/Q4 the 21 that file at
+         Jun/Dec.
+      3. FLOOR — a period draws only when at least half the WEIGHT **and** half the NAMES actually
+         reported it. ⚠ A CARRIED VALUE DOES NOT COUNT TOWARD EITHER, which is what stops rule 2
+         defeating the floor: the newest fiscal year, where a handful have filed and everyone else
+         is carried, still reads 13% covered and is still refused rather than drawn as a flat line
+         of last year's figures.
+
+    ⚠ THE TWO FLOORS CATCH DIFFERENT THINGS AND NEITHER IS ENOUGH ALONE. Weight-only lets one giant
+    carry a period: measured on the AEX, 2026-Q2 had **2 of 22** constituents reporting and passed
+    at 53.8% of cap because ASML is enormous. Names-only would let ten tiny constituents outvote a
+    missing giant.
     """
     kind = blend_kind(metric_code)
     total_w = sum(abs(float(m.get("weight") or 0)) for m in members)
-    if total_w <= 0:
+    total_n = len(members)
+    if total_w <= 0 or not total_n:
         return {"kind": kind, "points": [], "covered_pct": 0.0}
 
-    prepared, _ = _prepare(members, kind)
+    prepared, _ = _prepare(members, kind, bucket)
     by_date: dict[str, list[tuple[float, float]]] = defaultdict(list)
     # ⚠⚠ COVERAGE IS MEASURED ON THE **STABLE** WEIGHT, NOT THE PER-PERIOD ONE, AND GETTING THIS
     # WRONG DISABLES THE FLOOR ENTIRELY.
@@ -209,7 +360,8 @@ def blend_series(members: list[dict], metric_code: str) -> dict:
     # the period where almost nobody has reported.
     #
     # Measured on the S&P: FY2026 read **13.4%** covered on the stable basis (correctly under the
-    # 80% floor, so the chart omitted it) and **100.0%** on the per-period one — which drew a full
+    # floor — under the 80 of the day and under today's 50 alike, so the chart omitted it) and
+    # **100.0%** on the per-period one — which drew a full
     # -height point built almost entirely out of NVIDIA, in the same ink as a year every
     # constituent reported. That is the exact failure `MIN_BLEND_COVERAGE_PCT` exists to prevent.
     #
@@ -217,29 +369,43 @@ def blend_series(members: list[dict], metric_code: str) -> dict:
     # present whether or not the company reported. The two quantities answer different questions
     # and are allowed to use different bases; each has to be consistent with ITSELF.
     cover_w: dict[str, float] = defaultdict(float)
+    cover_n: dict[str, int] = defaultdict(int)
+    # The axis every member is carried across — the union of what anybody reported.
+    axis = sorted({k for p in prepared for k in p["by_year"]})
     for p in prepared:
-        for year, (_d, v) in p["by_year"].items():
-            w = _weight_at(p, year)
-            if w:
-                by_date[year].append((abs(float(w)), v))
-                cover_w[year] += abs(float(p.get("weight") or 0))
+        for period, (v, reported) in carry_forward(p["by_year"], axis).items():
+            w = _weight_at(p, period)
+            if not w:
+                continue
+            by_date[period].append((abs(float(w)), v))
+            if reported:
+                cover_w[period] += abs(float(p.get("weight") or 0))
+                cover_n[period] += 1
 
     combine = _weighted_harmonic if kind == "multiple" else _weighted_arithmetic
     out = []
     for d in sorted(by_date):
         pairs = by_date[d]
         covered = 100.0 * cover_w[d] / total_w
+        covered_n = 100.0 * cover_n[d] / total_n
         value = combine(pairs)
-        if value is None or covered < MIN_BLEND_COVERAGE_PCT:
+        if (value is None or covered < MIN_BLEND_COVERAGE_PCT
+                or covered_n < MIN_BLEND_COVERAGE_NAMES_PCT):
             continue        # ⚠ omitted, never drawn as a dip — see the docstring
-        out.append({"period": d, "value": round(value, 6), "covered_pct": round(covered, 2)})
+        out.append({"period": d, "value": round(value, 6), "covered_pct": round(covered, 2),
+                    "covered_names_pct": round(covered_n, 2)})
     spanned = max((p["covered_pct"] for p in out), default=0.0)
     return {"kind": kind, "points": out, "covered_pct": round(spanned, 2)}
 
 
-def explain_empty(members: list[dict], metric_code: str) -> dict | None:
+def explain_empty(members: list[dict], metric_code: str, bucket=year_bucket) -> dict | None:
     """Why `blend_series` drew NOTHING even though holdings carry this metric — or None when none
     of them do.
+
+    ⚠ TAKES THE SAME `bucket` AS THE SERIES IT EXPLAINS. A diagnostic that aligned the periods
+    differently from the run it is explaining would report a different set of periods from the one
+    that drew nothing — which is how "no year clears the floor" came to be printed for a series
+    whose periods never existed.
 
     ⚠ "NO SERIES" AND "NOT INGESTED" ARE DIFFERENT ANSWERS AND THE UI CANNOT TELL THEM APART.
     An empty chart shows one thing; the two reasons behind it are opposites. Measured on a real
@@ -263,19 +429,25 @@ def explain_empty(members: list[dict], metric_code: str) -> dict | None:
     if not reporting:
         return None                         # nothing carries it — that IS "not ingested"
 
-    prepared, dropped = _prepare(members, kind)
+    prepared, dropped = _prepare(members, kind, bucket)
     combine = _weighted_harmonic if kind == "multiple" else _weighted_arithmetic
     by_year: dict[str, list[tuple[float, float]]] = defaultdict(list)
     # The same stable basis `blend_series` measures coverage on — see the ⚠⚠ there. A diagnostic
     # that explained a floor decision using a different denominator from the one that made it
     # would send the reader after the wrong cause.
     cover_w: dict[str, float] = defaultdict(float)
+    # ⚠ THE SAME CARRY AS THE SERIES IT EXPLAINS. A diagnostic that aligned or carried differently
+    # from the run it is explaining reports a different set of periods from the one that drew
+    # nothing — which is how "no year clears the floor" came to be printed for a series whose
+    # periods never existed.
+    axis = sorted({k for p in prepared for k in p["by_year"]})
     for p in prepared:
-        for year, (_d, v) in p["by_year"].items():
+        for year, (v, reported) in carry_forward(p["by_year"], axis).items():
             w = _weight_at(p, year)
             if w:
                 by_year[year].append((abs(float(w)), v))
-                cover_w[year] += abs(float(p.get("weight") or 0))
+                if reported:
+                    cover_w[year] += abs(float(p.get("weight") or 0))
 
     best = 0.0
     below = no_value = 0

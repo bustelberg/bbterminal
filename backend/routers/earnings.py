@@ -17,6 +17,10 @@ import asyncio
 import contextvars
 import logging
 from collections import defaultdict
+# ⚠ ALIASED. Three loops in this file already bind a variable called `date` (they iterate
+# `{date: value}` maps), and importing the type under that name shadows it inside them — the same
+# word meaning two things a few lines apart is how the wrong one gets called.
+from datetime import date as _date
 from routers._blend_cache import cached_blend, cached_metric_reads
 from routers._earnings_pg import rows_by_company_via_copy
 from routers._sse import sse_message as event
@@ -719,7 +723,8 @@ def _bulk_blend_rows(cids: list[int], metrics: list[str], cadence: str) -> list[
 
 
 def _blend_rows(rows: list[dict], covered: list[dict],
-                caps: dict[int, dict[str, float]] | None = None) -> dict:
+                caps: dict[int, dict[str, float]] | None = None,
+                cadence: str = "annual") -> dict:
     """The blend itself, over rows already fetched. Pure of I/O, so the plain endpoint and the
     streaming one cannot drift: they differ only in HOW the rows arrive.
 
@@ -727,8 +732,19 @@ def _blend_rows(rows: list[dict], covered: list[dict],
     period is weighted by what the constituents were worth THEN. `None` for a portfolio, where a
     holding weight is not a market cap and does not vary by period; `_weight_at` reads the absence
     as "one basis for every period". See `_fundamental_blend._weight_at`.
+
+    ⚠⚠ `cadence` DECIDES THE PERIOD ALIGNMENT, AND IT IS NOT COSMETIC. Quarterly rows carry
+    trailing-twelve-month points at four dates a year; aligned on the YEAR they collapse to the
+    latest one (a quarterly toggle that silently draws an annual line) and — for an INDEX, whose
+    `caps` are keyed `2025-Q3` — every weight lookup misses and the series comes back EMPTY.
+    Measured 2026-08-12 on AEX quarterly Revenue: 22 constituents, 639 rows, zero points, while the
+    table beside it showed 84–93% of the index reporting each quarter. See `quarter_bucket`.
     """
-    from routers._fundamental_blend import blend_series, explain_empty  # noqa: PLC0415
+    from routers._fundamental_blend import (  # noqa: PLC0415
+        blend_series, explain_empty, period_end, quarter_bucket, year_bucket,
+    )
+
+    bucket = quarter_bucket if cadence == "quarterly" else year_bucket
 
     by_metric: dict[str, dict[int, dict[str, float]]] = {}
     for r in rows:
@@ -753,21 +769,22 @@ def _blend_rows(rows: list[dict], covered: list[dict],
                           "points": per_company.get(r["company_id"], {}),
                           "base_points": base_by_company.get(r["company_id"], {})}
                          for r in covered]
-        s = blend_series(blend_members, code)
+        s = blend_series(blend_members, code, bucket)
         if not s["points"]:
             # ⚠ AN EMPTY SERIES IS NOT AN EMPTY DATABASE, AND THE CHART CANNOT TELL. Measured on a
             # real book's Dividends per Share: every holding carried the line and the card still
             # read "No dividend/share ingested" — the level rebase drops a series that starts at
             # 0.00. The reason travels with the (absent) series so the card states it instead of
             # sending the reader to re-ingest data they already have.
-            why = explain_empty(blend_members, code)
+            why = explain_empty(blend_members, code, bucket)
             if why is not None:
                 notes[code] = why
         for p in s["points"]:
-            # The fiscal-year key becomes a date the charts can plot. 31 Dec is a convention here,
-            # not a claim about anyone's year-end — members close on different days, which is
-            # exactly why the blend aligns on the year in the first place.
-            out.append({"metric_code": code, "target_date": f"{p['period']}-12-31",
+            # The period key becomes a date the charts can plot. The month-end is a CONVENTION, not
+            # a claim about anyone's year-end — members close on different days, which is exactly
+            # why the blend aligns on a shared period in the first place. `2025` → 2025-12-31,
+            # `2025-Q3` → 2025-09-30.
+            out.append({"metric_code": code, "target_date": period_end(p["period"]),
                         "numeric_value": p["value"], "is_prediction": False})
     return {"metrics": out, "codes": len(by_metric), "blend_notes": notes}
 
@@ -831,14 +848,14 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
             # ⚠ SAME BLEND, DIFFERENT READ. Only the fetch changes — `_blend_rows` is untouched, so
             # a narrowed request cannot blend by a different rule than a full one.
             rows = _bulk_blend_rows([r["company_id"] for r in covered], body.metrics, body.cadence)
-            return _blend_rows(rows, covered, caps)
+            return _blend_rows(rows, covered, caps, body.cadence)
         # The PORTFOLIO path takes the same cadence as the single-company one, through the same
         # roll-up — otherwise a book's Long Equity tab would ignore a toggle its holdings honour.
         load = (_ttm_metric_rows if body.cadence == "quarterly" else _company_metric_rows)
         rows = []
         for r in covered:
             rows += load(r["company_id"])
-        return _blend_rows(rows, covered, caps)
+        return _blend_rows(rows, covered, caps, body.cadence)
 
     return _blend_envelope(await asyncio.to_thread(_build), covered, cov)
 
@@ -862,11 +879,17 @@ async def _blend_metrics_events(body: FundamentalCoverageRequest):
     n = len(covered)
     yield _sse({"type": "progress", "done": 0, "total": n})
     rows: list[dict] = []
+    # ⚠ THE SAME LOADER AND THE SAME CADENCE AS THE PLAIN ENDPOINT. This path used to read
+    # `_company_metric_rows` unconditionally and blend without a cadence — so a BOOK on the
+    # quarterly toggle was served annual rows over the fast path and trailing-twelve-month ones only
+    # when the stream failed and the POST fallback ran. Two answers for one toggle, and the one you
+    # got depended on whether SSE worked.
+    load = (_ttm_metric_rows if body.cadence == "quarterly" else _company_metric_rows)
     try:
         for i, r in enumerate(covered):
-            rows += await asyncio.to_thread(_company_metric_rows, r["company_id"])
+            rows += await asyncio.to_thread(load, r["company_id"])
             yield _sse({"type": "progress", "done": i + 1, "total": n, "name": r.get("name")})
-        built = await asyncio.to_thread(_blend_rows, rows, covered)
+        built = await asyncio.to_thread(_blend_rows, rows, covered, None, body.cadence)
     except Exception as e:  # noqa: BLE001 — see the docstring: there is no status code left to use
         yield _sse({"type": "error", "detail": f"{type(e).__name__}: {e}"})
         return
@@ -1197,16 +1220,65 @@ def _ttm_metric_rows(company_id: int) -> list[dict]:
     return out
 
 
+def filings_per_year(dates: list[str]) -> int:
+    """How many times a year this company reports, from the spacing of its own filings.
+
+    ⚠⚠ NOT EVERY ROW UNDER `quarterly__…` IS A QUARTER, AND ASSUMING SO DOUBLE-COUNTS A WHOLE YEAR.
+    Prosus NV files SEMI-ANNUALLY — every one of its 18 revenue rows lands on 03-31 or 09-30, never
+    06-30 or 12-31 (fiscal year to March, interims to September) — so the four most recent rows are
+    four HALF-years. Summed as "trailing twelve months" that read **13,983.9** against an FY2026
+    annual figure of **8,394.8**: 1.67x, and a perfectly plausible number with nothing on screen to
+    say it spans two years. Measured 2026-08-12; ASML, a true quarterly filer, has 114 rows on all
+    four quarter-ends and is unaffected.
+
+    The frontend's `/earnings` dashboard already learned this (`isQuarterlyCadence` in
+    `earnings/utils.ts`, same 120-day rule and the same warning in its comment). This is the seam
+    the Long Equity tab reads through, and it had no such gate.
+
+    Returns 4 (quarterly), 2 (semi-annual) or 1 (annual-only, which some companies file into the
+    quarterly codes). ⚠ THE MEDIAN, NOT THE MEAN — one restated or duplicated date is enough to
+    drag an average across the 120-day boundary and reclassify a company's whole history.
+    """
+    if len(dates) < 2:
+        # ⚠ REFUSED, NOT GUESSED AT 4. One filing carries no spacing, and calling it quarterly is
+        # what produces a "trailing year" from three months. The caller emits nothing.
+        return 0
+    spans = [(_date.fromisoformat(b) - _date.fromisoformat(a)).days
+             for a, b in zip(dates, dates[1:], strict=False)]
+    gaps = sorted(d for d in spans if d > 0)
+    if not gaps:
+        return 0
+    median = gaps[len(gaps) // 2]
+    if median <= 120:
+        return 4
+    if median <= 220:
+        return 2
+    return 1
+
+
 def _ttm_by_period(rows: list[dict], rule: str, key: str = "label") -> dict[str, float]:
     """Quarterly rows → {period label: trailing-twelve-month value}, per `rule`.
 
-    ⚠ A POINT NEEDS FOUR QUARTERS OR IT IS NOT A TRAILING YEAR. The first three quarters of a
-    company's history produce no TTM point at all — emitting a partial one would draw a line that
-    starts at a quarter of the level and "grows" 4x over its first year, which reads as the
-    business quadrupling. `last` is the one rule that could tolerate a short window (a balance is
-    a balance), but it is held to the same bar so every series on the tab starts at the same
-    place; a debt ratio whose numerator begins three quarters before its denominator is worse
-    than one that starts late.
+    ⚠ A POINT NEEDS A FULL YEAR OF FILINGS OR IT IS NOT A TRAILING YEAR — which is `k` rows, where
+    `k` is how often THIS company reports (see `filings_per_year`), not a hardcoded four. A
+    company's first incomplete year produces no TTM point at all: emitting a partial one would draw
+    a line that starts at a quarter of the level and "grows" 4x over its first year, which reads as
+    the business quadrupling. `last` is the one rule that could tolerate a short window (a balance
+    is a balance), but it is held to the same bar so every series on the tab starts at the same
+    place; a debt ratio whose numerator begins three quarters before its denominator is worse than
+    one that starts late.
+
+    ⚠ AND THE WINDOW MUST NOT REACH BACK PAST ITS OWN YEAR. `k` CONSECUTIVE rows are a year only
+    while the company files without interruption; where a period is missing they reach further, so
+    the sum covers more than twelve months under a twelve-month label — and it double-counts the
+    period that comes round again (a quarterly filer missing Q4 gets two Q1s and no Q4, which is
+    still four rows and still looks right).
+
+    So the bar sits halfway between a healthy span and a holed one: `k` consecutive filings span
+    `(k-1)/k` of a year — 273 days quarterly, 183 semi-annual, 0 annual — and a hole adds at least
+    another `365/k`. `365 * (k - 0.5) / k` is the midpoint (319 / 274 / 182), which clears fiscal
+    drift by weeks and catches a missing period every time. A hole in the history is a hole in the
+    line, not a bigger number.
     """
     by_date: dict[str, float] = {}
     for m in rows:
@@ -1216,21 +1288,30 @@ def _ttm_by_period(rows: list[dict], rule: str, key: str = "label") -> dict[str,
         # Latest observation wins for a given quarter-end — same rule as the annual path.
         by_date[str(m["target_date"])[:10]] = float(v)
     dates = sorted(by_date)
+    k = filings_per_year(dates)
+    if not k:
+        return {}
+    max_span = 365.0 * (k - 0.5) / k
     out: dict[str, float] = {}
-    for i in range(3, len(dates)):
-        window = [by_date[d] for d in dates[i - 3:i + 1]]
+    for i in range(k - 1, len(dates)):
+        first, last_d = dates[i - k + 1], dates[i]
+        if (_date.fromisoformat(last_d) - _date.fromisoformat(first)).days > max_span:
+            continue                             # a missing filing — see the ⚠ above
+        window = [by_date[d] for d in dates[i - k + 1:i + 1]]
         if rule == "sum":
             val = sum(window)
         elif rule == "mean":
-            val = sum(window) / 4.0
+            # ⚠ `len(window)`, NEVER A LITERAL 4. Hardcoded, a semi-annual filer's already-annualised
+            # rate came back HALVED — the quieter twin of the sum's doubling, and harder to spot
+            # because a margin that reads 6% instead of 12% is still a believable margin.
+            val = sum(window) / float(len(window))
         else:                                    # "last"
             val = window[-1]
         # Labelled by the quarter the window ENDS in — the period the figure is as-of. `key="date"`
         # keeps the REAL quarter-end instead, because a fiscal quarter need not end on a calendar
         # one and synthesising 03-31/06-30/09-30/12-31 would move every point of an off-calendar
         # filer.
-        d = dates[i]
-        out[d if key == "date" else f"{d[:4]}-Q{(int(d[5:7]) - 1) // 3 + 1}"] = val
+        out[last_d if key == "date" else f"{last_d[:4]}-Q{(int(last_d[5:7]) - 1) // 3 + 1}"] = val
     return out
 
 
@@ -1456,6 +1537,15 @@ def period_caps_eur(company_ids: list[int],
 
     if not company_ids:
         return {}
+    # ⚠⚠ THE CAP IS READ ANNUALLY WHATEVER THE CADENCE, AND SPREAD ACROSS THE YEAR'S QUARTERS
+    # BELOW. One cap per stock per year, and its weight that year is its share of that year's
+    # caps — which is the whole rule, and it is not the same as reading the cap quarterly.
+    #
+    # Read quarterly, the cap only exists in the quarters the company FILED, so a semi-annual filer
+    # had no weight at all in Q1/Q3 and fell out of those periods. Worse at the front of the axis:
+    # measured 2026-08-12 on the AEX, only **1 of 22** constituents had a 2026 cap (FY2026 is not
+    # filed yet), so 2026-Q1 weighted ONE company and 2026-Q2 none.
+    caps_cadence = "annual"
     currency_by_cid: dict[int, str | None] = {}
     for i in range(0, len(company_ids), IN_CHUNK_SIZE):
         for c in (supabase.table("company")
@@ -1463,7 +1553,7 @@ def period_caps_eur(company_ids: list[int],
                   .in_("company_id", company_ids[i:i + IN_CHUNK_SIZE]).execute().data or []):
             currency_by_cid[c["company_id"]] = (
                 ((c.get("gurufocus_exchange") or {}) or {}).get("currency_code"))
-    dated = _values_with_dates(company_ids, ["market_cap"], cadence).get("market_cap", {})
+    dated = _values_with_dates(company_ids, ["market_cap"], caps_cadence).get("market_cap", {})
     dates = [d for per in dated.values() for d, _v in per.values()]
     if not dates:
         return {}
@@ -1478,7 +1568,21 @@ def period_caps_eur(company_ids: list[int],
             if rate is None:
                 continue
             out.setdefault(cid, {})[period] = (native / rate) * 1e6
-    return out
+    # ⚠ ONE YEAR OF CARRY, IN THE PAYLOAD ITSELF. `_weight_at` resolves a missing period as-of, but
+    # the CLIENT reads these caps by exact key (the ratio cards and the drill-down table), so a cap
+    # only the server can resolve is a cap the two sides disagree about. Carrying the newest year
+    # forward once puts the current — not yet filed — year in the map for everybody: measured on
+    # the AEX, 1 of 22 constituents had a 2026 cap, so without this the current year weights one
+    # company on the client and twenty-two on the server.
+    for per in out.values():
+        newest = max(per)
+        per.setdefault(str(int(newest) + 1), per[newest])
+    if cadence != "quarterly":
+        return out
+    # A year's cap applies to each of its quarters — one cap per stock per year, and its weight that
+    # year is its share of that year's caps.
+    return {cid: {f"{year}-Q{q}": cap for year, cap in per.items() for q in (1, 2, 3, 4)}
+            for cid, per in out.items()}
 
 
 def period_caps_by_isin(comp: dict[str, dict], universe: str | None,
@@ -1832,6 +1936,13 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
             status = "ok" if rev else ("unsubscribed" if subscribed is False else "no_data")
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
+                # ⚠ A GENUINE `company.company_id`, WHICH IS NOT TRUE EVERYWHERE IN THIS APP — the
+                # old constituent table carried an `analysis_id` under that name, and an id off one
+                # of those rows 404s against `company` (see the ⚠⚠ on
+                # `/api/benchmarks/company/{company_id}/fundamentals/ingest/job`). `comp` here is
+                # read straight from `company`, so the drill-down's per-row refresh can key on it.
+                # Sent on both paths — a portfolio's rows come from the same table as an index's.
+                "company_id": c.get("company_id"),
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
                 # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
                 # actually computed from. Sparse: a period with no filed cap is ABSENT,

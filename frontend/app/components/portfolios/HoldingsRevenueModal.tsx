@@ -6,7 +6,10 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
+import { invalidateReadCache } from '../../../lib/readCache';
+import { cancelJob, startJob, type JobToast } from '../../../lib/stores/jobs';
 import { MIN_YEAR_COVERAGE_PCT } from './marginData';
+import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
 
 /**
  * Everything behind one growth chart: the per-company figures its line was built from, and — when
@@ -26,6 +29,10 @@ import { MIN_YEAR_COVERAGE_PCT } from './marginData';
 type Row = {
   isin: string; name: string; weight_pct: number; currency: string | null;
   ticker: string | null; exchange: string | null;
+  /** The key the per-row refresh fetches on — a real `company.company_id`, not the `analysis_id`
+   *  that hides under that name elsewhere. Absent only if the backend predates it, which is why
+   *  the control is rendered conditionally rather than assuming it. */
+  company_id?: number | null;
   status: 'ok' | 'unsubscribed' | 'no_data'; revenue: Record<string, number | null>;
   /** INDEX ROWS ONLY — the numerator the weight beside it was divided out of (cap ÷ Σcap).
    *  Absent on a portfolio, where the weight is a holding weight and no cap is involved. */
@@ -132,7 +139,7 @@ const VIEWS: [View, string, string][] = [
     + 'period-on-period change, not the average of the column above it.'],
 ];
 
-function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onFetch }: {
+function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onFetch, onRefresh }: {
   data: Resp;
   fmt: (v: number | null | undefined) => string;
   noun: string;
@@ -157,12 +164,35 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onFe
    *  Two independent switches would let a reader compare a rebased index against reported euros
    *  and read the gap as a finding. */
   view: View;
-  /** Holdings only: fetch a `no_data` company's financials. Absent ⇒ the cell states the gap,
-   *  which is right for an index nobody is curating row by row. */
+  /**
+   * FIRST load of a `no_data` row, blocking, by ISIN. Absent ⇒ the cell states the gap.
+   *
+   * ⚠ NOT THE SAME ACTION AS `onRefresh`, WHICH IS WHY BOTH EXIST. This one goes through the
+   * by-ISIN endpoint, which can CREATE a missing company row and REPOINT one pinned to an
+   * unsubscribed exchange (Shopify on TSX → NASDAQ) — the two things a `no_data` row most often
+   * needs and neither of which a company-id fetch can do. It is un-forced: replaying a stored blob
+   * is the cheap right answer for a company we have simply never loaded.
+   */
   onFetch?: (isin: string, name: string) => Promise<void>;
+  /**
+   * Re-fetch ONE company as a cancellable JOB, keyed on `company_id`. Returns the handle so the row
+   * can offer the Cancel; the caller reloads the table when it lands.
+   *
+   * ⚠ IT FORCES, AND WITHOUT THAT IT IS A NO-OP THAT LOOKS LIKE A BUTTON. `is_cache_fresh` calls
+   * the stored GuruFocus blob fresh for months, so an un-forced "refresh" of an already-loaded
+   * company rewrites identical rows, spends nothing and changes nothing on screen.
+   */
+  onRefresh?: (row: Row) => Promise<{ id: string; done: Promise<JobToast> }>;
 }) {
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'weight', dir: 'desc' });
   const [ingest, setIngest] = useState<Record<string, { busy?: boolean; msg?: string }>>({});
+  /** Per-row refresh state, keyed by ISIN — separate from `ingest` because the two controls are
+   *  different actions on the same row (first load vs re-ask the vendor) and can each be mid-flight
+   *  with their own outcome. */
+  const [refresh, setRefresh] = useState<
+    Record<string, { busy?: boolean; jobId?: string; msg?: string }>>({});
+  /** Rows whose Cancel was pressed before their job id came back. See `refreshOne`. */
+  const pendingCancel = useRef<Set<string>>(new Set());
   /** Only the index carries a cap — see the row type. A column of dashes on a portfolio would
    *  imply the caps are missing rather than inapplicable. */
   const hasCap = data.rows.some((r) => r.market_cap_eur != null);
@@ -195,7 +225,11 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onFe
       const per = r.market_cap_by_period;
       if (per) {
         const v = per[y];
-        return v && v > 0 ? v : null;
+        if (v && v > 0) return v;
+        // ⚠ AS-OF, mirroring `_weight_at` and `marginData.weightAt`. A cap is a stock: the last
+        // one filed stands until a newer one exists.
+        const earlier = Object.keys(per).filter((k) => k <= y && per[k] > 0);
+        return earlier.length ? per[earlier.reduce((a, b) => (a > b ? a : b))] : null;
       }
       const w = r.market_cap_eur ?? r.weight_pct;
       return w && w > 0 ? w : null;
@@ -224,7 +258,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onFe
     const partOf = new Map<Row, { r: Row; idx: Record<string, number> }>();
     /**
      * ⚠⚠ COVERAGE IS MEASURED ON THE **STABLE** WEIGHT, NOT THE PER-PERIOD CAP — mirroring
-     * `_fundamental_blend.blend_series`, and it is the difference between the 80% floor working
+     * `_fundamental_blend.blend_series`, and it is the difference between the floor working
      * and doing nothing at all.
      *
      * The per-period cap comes out of the same GuruFocus blob as the figure, so a company that has
@@ -273,24 +307,47 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onFe
     // the period's own market cap — what each of them was worth at the time. NVIDIA is 0.63% of
     // FY2018 and 7.46% by today's cap; only the first is a fact about 2018.
     const denom: Record<string, number> = {};
-    for (const y of data.years) {
-      let num = 0;
-      let den = 0;
-      for (const p of parts) {
-        if (p.idx[y] == null) continue;
+    const coverN: Record<string, number> = {};
+    /**
+     * ⚠⚠ EACH ROW'S LATEST FIGURE STANDS UNTIL IT REPORTS AGAIN — the client twin of
+     * `_fundamental_blend.carry_forward`, and the reason this table's figures reconcile with the
+     * line above it. Without the carry a semi-annual filer simply left Q1/Q3, the contributor set
+     * alternated, and the index sawtoothed ±20% on composition alone.
+     *
+     * ⚠ A CARRIED VALUE IS NOT COVERAGE. `coverW`/`coverN` count only the periods a row actually
+     * reported, so the floor still sees the newest period for what it is.
+     *
+     * ⚠ BOUNDED to ~a year (in periods: 4 quarters or 1 year), so a holding that stops reporting
+     * falls out rather than being held flat for the rest of the axis.
+     */
+    const isQuarterly = data.years.some((y) => y.includes('-Q'));
+    const maxCarry = isQuarterly ? 4 : 1;
+    for (const p of parts) {
+      let lastIdx: number | null = null;
+      let since = 0;
+      for (const y of data.years) {
+        const own = p.idx[y];
+        if (own != null) { lastIdx = own; since = 0; } else if (lastIdx != null) { since += 1; }
+        const v = own ?? (lastIdx != null && since <= maxCarry ? lastIdx : null);
+        if (v == null) continue;
         const w = wAt(p.r, y);
-        if (!w) continue;                     // no cap that period ⇒ out of that period entirely
-        num += w * p.idx[y];
-        den += w;
-        // ⚠ THE STABLE WEIGHT, accumulated for the SAME rows the average used — see the ⚠⚠ above.
-        coverW[y] = (coverW[y] ?? 0) + stableW(p.r);
-      }
-      if (den > 0) {
-        denom[y] = den;
-        level[y] = { value: num / den, covered: 100 * (coverW[y] ?? 0) / (coverTotal || 1) };
+        if (!w) continue;                     // no cap on or before this period ⇒ out of it
+        denom[y] = (denom[y] ?? 0) + w;
+        level[y] = { value: (level[y]?.value ?? 0) + w * v, covered: 0 };
+        if (own != null) {
+          // ⚠ THE STABLE WEIGHT, accumulated for the rows that REPORTED — see the ⚠⚠ above.
+          coverW[y] = (coverW[y] ?? 0) + stableW(p.r);
+          coverN[y] = (coverN[y] ?? 0) + 1;
+        }
       }
     }
-    return { level, denom, partOf, wAt, excluded, contributors: parts.length };
+    for (const y of Object.keys(level)) {
+      level[y] = { value: level[y].value / denom[y],
+                   covered: 100 * (coverW[y] ?? 0) / (coverTotal || 1) };
+    }
+    return { level, denom, partOf, wAt, excluded, contributors: parts.length,
+             coveredNames: Object.fromEntries(data.years.map(
+               (y) => [y, 100 * (coverN[y] ?? 0) / (parts.length || 1)])) };
   }, [data]);
 
   /** The cap the weight beneath it was divided out of — the middle line of a period cell.
@@ -398,9 +455,9 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onFe
     ? rowVirtualizer.getTotalSize() - vItems[vItems.length - 1].end
     : 0;
   /** ⚠ MUST TRACK THE HEADER EXACTLY — a spacer one short leaves the table free to re-fit its
-   *  columns around the gap, which is the jitter `Ident` exists to prevent. Company, GF exch,
+   *  columns around the gap, which is the jitter `Ident` exists to prevent. Company, [⟳], GF exch,
    *  Ticker, [Mkt cap], Ccy, Line, then one per period. */
-  const colCount = 5 + (hasCap ? 1 : 0) + data.years.length;
+  const colCount = 5 + (onRefresh ? 1 : 0) + (hasCap ? 1 : 0) + data.years.length;
 
   const fetchOne = async (isin: string, name: string) => {
     if (!onFetch) return;
@@ -413,6 +470,73 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onFe
       // is a real answer; swallowing it would read as "nothing happened".
       setIngest((s) => ({ ...s, [isin]: { msg: e instanceof Error ? e.message : String(e) } }));
     }
+  };
+
+  /**
+   * The per-row refresh, as a JOB.
+   *
+   * ⚠ A JOB RATHER THAN A BLOCKING FETCH, FOR THE CANCEL — not for the progress bar. A plain
+   * request holds the connection open for as long as GuruFocus takes and gives the reader no way
+   * to stop it: abort the fetch and the server carries on, having already decided to spend the
+   * quota. Through `startJob` the row gets the generic toast (its outcome, the running quota spend,
+   * a Cancel that outlives this modal) and several rows can run at once.
+   *
+   * ⚠ `jobId` IS KEPT SO THE ROW ITSELF CAN CANCEL. Losing it would leave the toast as the only
+   * way to stop a fetch the reader started from here, which on a 1,500-row table means hunting for
+   * the right card.
+   */
+  const refreshOne = async (r: Row) => {
+    if (!onRefresh || r.company_id == null) return;
+    // ⚠ `busy` FROM THE CLICK, NOT FROM THE JOB ID. The button has exactly TWO states — Refresh and
+    // Cancel — so it must flip on the press, before the id exists. A third "Refreshing…" state for
+    // the ~200 ms `startJob` takes is a label nobody can act on that flickers past on every press.
+    setRefresh((s) => ({ ...s, [r.isin]: { busy: true } }));
+    try {
+      const { id, done } = await onRefresh(r);
+      setRefresh((s) => ({ ...s, [r.isin]: { busy: true, jobId: id } }));
+      // ⚠ A CANCEL PRESSED DURING THAT GAP IS HONOURED HERE, or the two-state button is a lie: the
+      // reader pressed Cancel, the label said Cancel, and the fetch would have run to completion
+      // anyway because there was nothing to cancel yet. A ref, not state — this closure captured
+      // its `refresh` on the way in and would never see a later press.
+      if (pendingCancel.current.delete(r.isin)) await cancelJob(id);
+      const job = await done;
+      setRefresh((s) => ({ ...s, [r.isin]: job.status === 'failed'
+        ? { msg: job.summary || 'the fetch failed — see the console' } : {} }));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // The row gets one short line (a ⚠ with the text in its tooltip, where there is no room for
+      // more); the console gets it in full, as everywhere else here.
+      console.warn(`[bb:fundamentals] refresh ${r.name} (${r.isin}): ${msg}`, e);
+      pendingCancel.current.delete(r.isin);
+      setRefresh((s) => ({ ...s, [r.isin]: { msg } }));
+    }
+  };
+
+  /**
+   * How much room the Company column gets, before truncation.
+   *
+   * ⚠ AN EXPLICIT FLOOR, BECAUSE `w-full` + `max-w-0` GIVES IT NONE. That pair is what makes this
+   * column take the slack AND truncate instead of stretching the table — but on a wide matrix (a
+   * dozen period columns, each with three stacked numbers) there is no slack left, so its
+   * min-content width is the truncation point: near zero. Every name ended up clipped to a few
+   * characters. `min-width` beats `max-width` when the two conflict, so this widens it without
+   * touching the truncation.
+   *
+   * ⚠ ONE CONSTANT, THREE CELLS. The header, the row and the footer are the same column; declaring
+   * the width in three string literals is how a sticky column comes to have three widths, and the
+   * pinned cells then misalign against each other as you scroll.
+   */
+  const nameCol = 'min-w-[24rem]';
+
+  const cancelRow = async (isin: string) => {
+    const id = refresh[isin]?.jobId;
+    // ⚠ NO INLINE MESSAGE — `cancelJob` puts "cancelling…" on the job's own card the instant it is
+    // pressed, and that card carries the outcome. Two places reporting one job is two to keep in
+    // step.
+    if (id) { await cancelJob(id); return; }
+    // Pressed before the job id came back. Remembered, and `refreshOne` cancels the moment it has
+    // something to cancel — see the ⚠ there.
+    pendingCancel.current.add(isin);
   };
 
   return (
@@ -433,7 +557,17 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onFe
             {/* Company takes the slack so the table fills the width; periods keep natural size.
                 ⚠ z ABOVE ITS OWN ROW: this cell pins in BOTH directions, so it has to outrank the
                 sticky header beside it and the sticky name cells below it. */}
-            <th className="px-3 py-1.5 font-medium text-left sticky left-0 bg-page z-30 w-full" onClick={() => toggle('name')}>Company{caret('name')}</th>
+            <th className={`px-3 py-1.5 font-medium text-left sticky left-0 bg-page z-30 w-full ${nameCol}`}
+              onClick={() => toggle('name')}>Company{caret('name')}</th>
+            {/* ⚠ ITS OWN COLUMN, AND NOT SORTABLE — every other header here toggles a sort, so this
+                one carries `cursor-default` explicitly to opt out of the row-level rule above. The
+                buttons under it are self-labelling, so the heading only has to name the column. */}
+            {onRefresh && (
+              <th className="px-2 py-1.5 font-medium text-left whitespace-nowrap cursor-default!"
+                title="Re-fetch ONE company's financials from GuruFocus — that row only, one API call, bypassing our stored copy of its blob. Progress and a Cancel appear in the pop-ups bottom-right.">
+                Refresh
+              </th>
+            )}
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('exchange')}>GF exch{caret('exchange')}</th>
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('ticker')}>Ticker{caret('ticker')}</th>
             {hasCap && (
@@ -503,13 +637,13 @@ market cap it was weighted by in that period, and the weight that produced.">
             const i = vi.index;
             return (
             <tr key={`${r.isin}-${i}`} data-index={i} ref={rowVirtualizer.measureElement}
-              className="border-b border-neutral-800/20 hover:bg-overlay/[0.02]">
+              className="group border-b border-neutral-800/20 hover:bg-overlay/[0.02]">
               {/* ⚠ THE BADGE LIVES IN THE PINNED NAME CELL, like the fundamentals grid's. The
                   moment you are asking "why is this row's weight empty?" you are scrolled right
                   looking at the empty cells, and a badge in any other column has gone with them.
                   `shrink-0` + `truncate` so a long name yields space to it rather than pushing it
                   out. */}
-              <td className="px-3 py-1.5 text-fg-soft sticky left-0 bg-card z-10 max-w-0">
+              <td className={`px-3 py-1.5 text-fg-soft sticky left-0 bg-card z-10 max-w-0 ${nameCol}`}>
                 <span className="flex items-center gap-1.5 min-w-0">
                   <span className="truncate" title={r.name}>{r.name}</span>
                   {blend.excluded.has(r) && (
@@ -521,8 +655,59 @@ market cap it was weighted by in that period, and the weight that produced.">
                       NOT IN LINE
                     </span>
                   )}
+                  {/* The stated reason, where the `no_data` cell below cannot carry it — this row
+                      has figures, so it renders no such cell. One glyph, full text in the tooltip
+                      and in the console. */}
+                  {refresh[r.isin]?.msg && r.status !== 'no_data' && (
+                    <span className="shrink-0 text-[11px] text-warn-300 cursor-help"
+                      title={refresh[r.isin]?.msg}>⚠</span>
+                  )}
                 </span>
               </td>
+              {/* ⚠ ONE COMPANY, ONE API CALL — the whole point of a per-row control. The two
+                  table-level buttons above are bulk: the book's re-asks every holding, and the
+                  index's fills only the constituents missing the feed ENTIRELY, so it can never
+                  touch one that already carries the sentinel. This is the only way to move a single
+                  row, and on a 1,900-constituent index it is the difference between one call and a
+                  four-figure spend.
+
+                  ⚠ NOT ON AN `unsubscribed` ROW — that exchange is outside the GuruFocus
+                  subscription, so the call is spent and nothing comes back. The cell already says
+                  so, and a control that can only fail is worse than no control.
+
+                  ⚠ NOR WITHOUT A `company_id`. The job is keyed on it; rendering a button that
+                  cannot be wired up would be a control that does nothing when pressed. */}
+              {onRefresh && (
+                <td className="px-2 py-1.5 text-center align-top">
+                  {/* ⚠ EXACTLY TWO STATES: Refresh, or Cancel. Not three — a "Refreshing…" label
+                      for the ~200 ms `startJob` takes is a state nobody can act on that flickers
+                      past on every press. The flip is driven by `busy`, set on the CLICK, and a
+                      Cancel pressed before the job id exists is honoured the moment it does (see
+                      `refreshOne`), so the label never promises something it cannot do.
+
+                      ⚠ ONE CONTROL, as the two bulk buttons above the tables are. The toast carries
+                      a Cancel too and both are correct — the reader who wants to stop it is looking
+                      at the row they just pressed. */}
+                  {r.status !== 'unsubscribed' && r.company_id != null && (
+                    <button type="button"
+                      onClick={() => {
+                        if (refresh[r.isin]?.busy) { void cancelRow(r.isin); } else { void refreshOne(r); }
+                      }}
+                      title={refresh[r.isin]?.busy
+                        ? 'Stop this fetch. It halts at the next feed boundary; whatever was already written stays written.'
+                        : `Re-fetch ${r.name}'s financials from GuruFocus — this company only, one `
+                          + 'API call. It bypasses our stored copy of its blob, which is the only '
+                          + 'thing that can update a row that already has figures. Progress and a '
+                          + 'Cancel appear in the pop-ups bottom-right.'}
+                      className={`cursor-pointer text-[12px] px-2 py-0.5 rounded-lg border
+                                  whitespace-nowrap transition-colors ${refresh[r.isin]?.busy
+                        ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
+                        : 'border-accent-600/40 text-accent-400 hover:bg-overlay/5'}`}>
+                      {refresh[r.isin]?.busy ? 'Cancel' : 'Refresh'}
+                    </button>
+                  )}
+                </td>
+              )}
               <td className="px-3 py-1.5 font-mono text-[12px] text-fg-subtle whitespace-nowrap">
                 <Ident w="w-14">{r.exchange ?? '—'}</Ident>
               </td>
@@ -671,7 +856,7 @@ market cap it was weighted by in that period, and the weight that produced.">
           {/* Sum of the shown companies' weights — under 100% because cash / bonds / any holding
               we can't price aren't listed. */}
           <tr className="border-t border-neutral-800/40 bg-page font-semibold text-fg-strong">
-            <td className="px-3 py-1.5 sticky left-0 bg-page z-10"
+            <td className={`px-3 py-1.5 sticky left-0 bg-page z-10 ${nameCol}`}
               title={view === 'rebased'
                 ? `Weighted average of the ${blend.contributors} contributing rows — this row IS the plotted line.`
                 : view === 'yoy'
@@ -679,6 +864,11 @@ market cap it was weighted by in that period, and the weight that produced.">
                   : undefined}>
               {view === 'rebased' ? 'Weighted (= the line)' : view === 'yoy' ? 'Line YoY' : 'Total'}
             </td>
+            {/* ⚠ THE FOOTER TRACKS THE HEADER COLUMN FOR COLUMN. A cell short here and every period
+                figure in this row sits under the wrong year — a totals line that is quietly one
+                column out is worse than no totals line. (`colCount` guards the virtualiser's
+                spacers for the same reason.) */}
+            {onRefresh && <td className="px-2 py-1.5" />}
             <td className="px-3 py-1.5" />
             <td className="px-3 py-1.5" />
             {/* Σ of the Mkt cap column — TODAY's caps, matching the column above it. ⚠ It is NOT
@@ -735,13 +925,20 @@ divide by that period's own Σ cap instead, on the line directly below this row'
               const value = view === 'reported' ? null
                 : view === 'rebased' ? lv?.value ?? null
                   : (lv && prev && prev.value > 0) ? 100 * (lv.value / prev.value - 1) : null;
-              const thin = lv != null && lv.covered < MIN_YEAR_COVERAGE_PCT;
+              // ⚠ BOTH FLOORS, as the chart applies them: half the weight AND half the names must
+              // have REPORTED. Weight alone let one giant draw a period (AEX 2026-Q2: two
+              // constituents, 53.8% of cap); names alone would let ten tiny ones outvote a missing
+              // giant. A carried figure counts toward neither.
+              const covN = blend.coveredNames[y] ?? 0;
+              const thin = lv != null
+                && (lv.covered < MIN_YEAR_COVERAGE_PCT || covN < MIN_YEAR_COVERAGE_PCT);
               return (
                 <td key={y}
                   className={`px-3 py-1.5 text-right font-mono whitespace-nowrap ${
                     thin ? 'text-fg-faint font-normal' : ''}`}
                   title={lv == null ? undefined
-                    : `${lv.covered.toFixed(1)}% of the contributing weight reported this period`
+                    : `${lv.covered.toFixed(1)}% of the contributing weight and ${covN.toFixed(0)}% `
+                      + 'of the companies reported this period'
                       + (thin ? ` — under the ${MIN_YEAR_COVERAGE_PCT}% floor, so the chart omits it`
                         : '')}>
                   <span className="block">
@@ -813,6 +1010,31 @@ export default function HoldingsRevenueModal({
   const [err, setErr] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   /**
+   * What a "Refresh fundamentals" press here would fill — DERIVED FROM THE TABLE IT SITS OVER, not
+   * from how the modal was opened.
+   *
+   * ⚠ A CONTROL'S SCOPE MUST MATCH ITS SCREEN. This modal is opened from ONE card, over one
+   * portfolio (or one company, or an index) — a button that quietly refetched something else would
+   * spend quota on rows the reader cannot see. The three shapes map straight onto `Target`'s three:
+   * a stored model, an ad-hoc basket, and — on the single-company cards, which send a basket of one
+   * — that company. See `RefreshScope`.
+   */
+  const scope: RefreshScope | null = useMemo(() => {
+    if (target.portfolio_id != null) {
+      return { kind: 'portfolio', id: target.portfolio_id, name: portfolioName || 'this portfolio' };
+    }
+    if (target.universe) {
+      return { kind: 'universe', label: target.universe, name: target.universe };
+    }
+    const hs = target.holdings ?? [];
+    if (!hs.length) return null;
+    if (hs.length === 1) {
+      return { kind: 'company', isin: hs[0].isin, name: hs[0].name || portfolioName || hs[0].isin };
+    }
+    return { kind: 'basket', holdings: hs.map((h) => ({ isin: h.isin })),
+      name: portfolioName || 'this portfolio' };
+  }, [target, portfolioName]);
+  /**
    * ⚠ ONE SWITCH FOR BOTH TABLES. The book above and the index below are here to be read against
    * each other; per-table switches would let someone compare a rebased index with reported euros
    * and take the gap for a finding. It is a view over rows already in hand — no refetch — so
@@ -856,6 +1078,10 @@ export default function HoldingsRevenueModal({
    */
   const [bench, setBench] = useState<Resp | null>(null);
   const [benchErr, setBenchErr] = useState<string | null>(null);
+  /** ⚠ ITS OWN RELOAD KEY, NOT `reloadKey`. Filling the index moves the table below; filling the
+   *  book moves the one above. One key would make each button re-read both tables — twice the wait
+   *  for half a reason, and on ACWI the constituent read is the expensive one. */
+  const [benchReload, setBenchReload] = useState(0);
   const benchKey = benchTarget ? `${benchTarget.universe}|${benchTarget.cadence}` : '';
   useEffect(() => {
     let alive = true;
@@ -872,21 +1098,62 @@ export default function HoldingsRevenueModal({
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [benchKey, metric]);
+  }, [benchKey, metric, benchReload]);
 
-  /** Fetch a `no_data` holding's financials, then reload so its figures appear. Throws the stated
-   *  reason on anything else, which the row renders. Admin-only endpoint. */
-  const fetchRevenue = async (isin: string, name: string) => {
+  /**
+   * Fetch one `no_data` row's financials, then reload the table it is IN. Throws the stated reason
+   * on anything else, which the row renders. Admin-only endpoint.
+   *
+   * ⚠⚠ THE INDEX TABLE NEEDS THIS AS MUCH AS THE BOOK DOES, AND USED NOT TO HAVE IT. "Refresh
+   * benchmark" is an UN-FORCED fill and it selects on ONE sentinel — `annuals__Cashflow
+   * Statement__Free Cash Flow` — while this table shows Revenue. A constituent carrying the
+   * sentinel but missing the line you are looking at is complete as far as that button is
+   * concerned, so no number of presses will ever fetch it, and the row stays empty with nothing on
+   * screen to say why. This path has no sentinel gate: it fetches the company, full stop.
+   *
+   * ⚠ THE RELOAD IS PASSED IN because the two tables have separate reload keys — filling a
+   * constituent must not re-read the book's twenty companies, and vice versa.
+   */
+  const fetchRow = (reload: () => void) => async (isin: string, name: string) => {
     const r = await apiFetch(`${API_URL}/api/earnings/fundamental-coverage/ingest`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ isin, name }),
     });
     const j = (await r.json().catch(() => null)) as { status?: string; detail?: string } | null;
     if (r.ok && j?.status === 'ingested') {
-      setReloadKey((k) => k + 1);
+      reload();
       return;
     }
     throw new Error(j?.detail ?? j?.status ?? `HTTP ${r.status}`);
+  };
+
+  /**
+   * Re-fetch ONE row's company from GuruFocus as a cancellable job, then reload that row's table.
+   *
+   * ⚠ A JOB, SO PROGRESS AND CANCEL BELONG TO THE TOAST STACK — the same generic system the two
+   * bulk buttons above use. It outlives this modal, which matters: three feeds against GuruFocus
+   * is not instant, and a reader who closes the drill-down has not cancelled anything.
+   *
+   * ⚠ `force=true&feeds=statements` — one API call that fills every line this table draws, and the
+   * force is what makes it able to change a row that already has figures (see `onRefresh`).
+   *
+   * ⚠ AND THE READ CACHES ARE DROPPED WHEN IT LANDS, not when it started. `apiFetch` invalidates on
+   * the request that STARTS a job, which is minutes before the data moves; without this the reload
+   * below would be served from entries cached during the fetch and the row would come back exactly
+   * as it was — a refresh that visibly does nothing. Same rule as `PortfolioFundamentalsRefresh`.
+   */
+  const refreshRow = (reload: () => void) => async (row: Row) => {
+    const started = await startJob(
+      `${API_URL}/api/benchmarks/company/${row.company_id}/fundamentals/ingest/job`
+      + '?force=true&feeds=statements',
+      `${row.name} fundamentals`);
+    void started.done.then((job) => {
+      if (job.status !== 'failed') {
+        invalidateReadCache(`fundamentals refetched for ${row.name}`);
+        reload();
+      }
+    });
+    return started;
   };
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
@@ -949,9 +1216,26 @@ export default function HoldingsRevenueModal({
 
           {/* 1 — the book (or the single company), on the same three views as the index below it. */}
           <div className="space-y-1.5">
-            <h3 className={section}>
-              {portfolioName ? `${portfolioName} — ` : ''}{noun} by period
-            </h3>
+            {/* ⚠ THE FILL SITS ON THE TABLE IT FILLS, and there are two of them. A `no_data` row
+                here has a per-row Fetch already; this is the same action over every company at
+                once, which is what you want when the table is half empty rather than missing one
+                name. The index has its own button below — same component, different endpoint and a
+                deliberately different spend (see `RefreshScope`). */}
+            <div className="flex items-baseline gap-3">
+              <h3 className={section}>
+                {portfolioName ? `${portfolioName} — ` : ''}{noun} by period
+              </h3>
+              {scope && (
+                <span className="ml-auto shrink-0">
+                  <PortfolioFundamentalsRefresh scope={scope}
+                    // ⚠ "portfolio" WOULD BE A LIE ON THE SINGLE-COMPANY CARDS, which open this
+                    // modal with a basket of one and title it with that company's listing. Named
+                    // for what it acts on, as its neighbour below is.
+                    label={scope.kind === 'company' ? 'Refresh company' : 'Refresh portfolio'}
+                    onDone={() => setReloadKey((k) => k + 1)} />
+                </span>
+              )}
+            </div>
             {err && <p className="text-xs text-neg-300">{err}</p>}
             {!data && !err && <p className="text-xs text-fg-subtle">Loading…</p>}
             {data && data.rows.length === 0 && !err && (
@@ -959,14 +1243,30 @@ export default function HoldingsRevenueModal({
             )}
             {data && data.rows.length > 0 && (
               <MatrixTable data={data} fmt={fmtM} noun={noun} metricLabel={seriesLabel ?? noun}
-                valueIsCurrency={valueIsCurrency} view={view} onFetch={fetchRevenue} />
+                valueIsCurrency={valueIsCurrency} view={view}
+                onFetch={fetchRow(() => setReloadKey((k) => k + 1))}
+                onRefresh={refreshRow(() => setReloadKey((k) => k + 1))} />
             )}
           </div>
 
           {/* 3 — the same, for the index, on demand. */}
           {benchTarget && (
             <div className="space-y-1.5">
-              <h3 className={section}>{benchLabel} constituents — {noun} by period</h3>
+              <div className="flex items-baseline gap-3">
+                <h3 className={section}>{benchLabel} constituents — {noun} by period</h3>
+                {/* ⚠ SEPARATE FROM THE BOOK'S, AND IT MUST BE. The two fills are different work
+                    over different companies with wildly different quota costs — ACWI is ~1,900
+                    constituents against a book's twenty — so one button doing both would make the
+                    cheap press unavailable. It fills only the constituents we are MISSING, which is
+                    what raises this table's row count and the line's coverage with it. */}
+                <span className="ml-auto shrink-0">
+                  <PortfolioFundamentalsRefresh
+                    scope={{ kind: 'universe', label: benchTarget.universe,
+                      name: benchLabel || benchTarget.universe }}
+                    label="Refresh benchmark"
+                    onDone={() => setBenchReload((k) => k + 1)} />
+                </span>
+              </div>
               {!bench && !benchErr && (
                 <p className="text-xs text-fg-subtle">Loading {benchLabel} constituents…</p>
               )}
@@ -1006,7 +1306,9 @@ export default function HoldingsRevenueModal({
                       removed from `_benchmark_index.weight_basis` — so a compact form (a count, with
                       the names in a tooltip) can be put back without touching the backend. */}
                   <MatrixTable data={bench} fmt={fmtM} noun={noun} metricLabel={seriesLabel ?? noun}
-                valueIsCurrency={valueIsCurrency} view={view} />
+                valueIsCurrency={valueIsCurrency} view={view}
+                onFetch={fetchRow(() => setBenchReload((k) => k + 1))}
+                onRefresh={refreshRow(() => setBenchReload((k) => k + 1))} />
                 </>
               )}
             </div>

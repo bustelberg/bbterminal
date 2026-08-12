@@ -629,18 +629,25 @@ export default function PortfolioOverviewPanel() {
    * cascade leaves a parent fresh against stale children — the exact state that endpoint exists to
    * avoid. So Cancel is honoured at the job boundary; the button says the chain finishes first.
    */
+  /**
+   * ⚠ NO INLINE `refreshMsg` LINE ON EITHER CANCEL — the same rule the two refresh actions above
+   * already follow, which these two had quietly broken. `cancelJob` puts "cancelling…" on the job's
+   * own card the instant the button is pressed (`cancelRequested`), and that card then carries the
+   * outcome, how far it got and the countdown. A banner saying the same thing is a second place to
+   * keep in step, in a different corner of the screen, that nothing ever clears.
+   *
+   * ⚠ AND IT WAS NOT CARRYING THE NUANCE EITHER — both buttons' own tooltips say the in-flight
+   * account (or chain) finishes first and everything already downloaded is kept, which is the one
+   * moment it is worth reading: BEFORE the press.
+   */
   const cancelRefreshRow = async (portefeuille: string) => {
     const id = rowJobs[portefeuille];
     if (!id) return;
-    setRefreshMsg({ text: `${portefeuille}: cancelling — the chain in flight finishes first.`,
-      kind: 'warn' });
     await cancelJob(id);
   };
 
   const cancelRefreshAll = async () => {
     if (!fleetJob) return;
-    setRefreshMsg({ text: 'Cancelling — the account being read finishes first, then it stops.',
-      kind: 'warn' });
     await cancelJob(fleetJob);
   };
 

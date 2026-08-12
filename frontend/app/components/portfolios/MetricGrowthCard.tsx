@@ -208,7 +208,10 @@ export default function MetricGrowthCard({
    *  card still draws — in absolute units, which is the honest fallback — so this says which basis
    *  is on screen instead of reporting an empty series. */
   const note = benchLabel
-    ? benchNote({ universe: benchLabel, cadence }, benchMetrics, benchErr ?? null, benchByX)
+    // ⚠ `false` — THIS CARD APPLIES NO FLOOR. `benchByX` is the blended rows as they arrived; the
+    // coverage decision was made on the server. Claiming the floor here is a diagnosis this
+    // component cannot make — see `benchNote`.
+    ? benchNote({ universe: benchLabel, cadence }, benchMetrics, benchErr ?? null, benchByX, false)
       ?? (benchByX && !isRatio && !indexed
         ? `${benchLabel}: no year in common with a positive value — showing absolute, not indexed`
         : null)

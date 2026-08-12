@@ -54,12 +54,14 @@ describe('grossMarginByYear', () => {
   });
 
   it('⚠ refuses the year entirely once too much of the book has no gross margin', () => {
-    // `MIN_YEAR_COVERAGE_PCT` (80) is the shared floor every card on this tab honours. A book that
-    // is half banks would otherwise print a confident "gross margin" describing the other half —
-    // the same renormalise-over-what-we-can-price fabrication the AIRS coverage floor guards.
+    // `MIN_YEAR_COVERAGE_PCT` is the shared floor every card on this tab honours. A book that is
+    // mostly banks would otherwise print a confident "gross margin" describing the rest — the same
+    // renormalise-over-what-we-can-price fabrication the AIRS coverage floor guards.
+    // ⚠ 40/60, NOT 50/50: the floor moved to 50 (2026-08-12) and an even split now clears it by
+    // design, so the refusal has to be tested below half.
     const rows = [
-      row({ weight_pct: 50, gross_profit: { 2025: 40 }, revenue: { 2025: 100 } }),
-      row({ weight_pct: 50, gross_profit: {}, revenue: { 2025: 100 } }),             // banks
+      row({ weight_pct: 40, gross_profit: { 2025: 40 }, revenue: { 2025: 100 } }),
+      row({ weight_pct: 60, gross_profit: {}, revenue: { 2025: 100 } }),             // banks
     ];
     expect(grossMarginByYear(rows).has(2025)).toBe(false);
   });

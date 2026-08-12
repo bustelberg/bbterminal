@@ -14,7 +14,6 @@ import { RefreshIcon } from './RefreshIcon';
 import AttributionPanel from './AttributionPanel';
 import HoldingTimingModal from './HoldingTimingModal';
 import BucketDetailPanel from './BucketDetailPanel';
-import CompositionDataModal from './CompositionDataModal';
 import OwnerEarningsModal from './OwnerEarningsModal';
 import { type Basket } from './types';
 
@@ -410,17 +409,14 @@ function Chip({ label, value, valueClass, hint }: {
   );
 }
 
-function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
-  name, onBucket, selected, stale = false }: {
+function Chart({ axis, rows, unpricedPct, excluded, benchmark,
+  onBucket, selected, stale = false }: {
   axis: string;
   rows: Row[];
   /** True while these bars are the PREVIOUS selection's, waiting on the current one. The bars stay
    *  (blanking them on every class click is worse), but nothing that makes a CLAIM about them may
    *  be shown — see the warning below and `stale` on the modal. */
   stale?: boolean;
-  /** The denominator in words, and how many positions it spans — from the server, per axis. */
-  basis?: string | null;
-  positions?: number | null;
   /** The weight held but unpriceable — a genuine hole in the bars, unlike funds/cash.
    *  ⚠ `attributable_pct` is deliberately NOT read here: a coverage figure phrased as an absence
    *  ("87% of the book has a sector") is heard as a data-quality problem with the stocks, when the
@@ -428,14 +424,9 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
   unpricedPct?: number | null;
   excluded?: Axis['excluded'];
   benchmark: string;
-  name: string;
   onBucket: (axis: string, bucket: string) => void;
   selected: string | null;
 }) {
-  // ⚠ A HEADER BUTTON, NOT A CLICK ON THE CHART BODY. The bars are ALREADY a click target — they
-  // open the per-bucket attribution panel — so making the surface around them open a second thing
-  // would put two different drill-downs a few pixels apart.
-  const [showData, setShowData] = useState(false);
   // Sector is an EQUITY-only view; a non-equity selection leaves it with no portfolio side, so say
   // so rather than draw the benchmark's sectors beside an empty portfolio.
   const sectorEmpty = axis === 'sector' && rows.every((r) => (r.portfolio_pct ?? 0) === 0);
@@ -455,13 +446,11 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
   return (
     <section className={`bg-card border rounded-xl p-4 ${
       selected ? 'border-accent-500/40' : 'border-neutral-800/40'}`}>
+      {/* ⚠ NO PER-AXIS "Data" BUTTON (removed 2026-08-12, with `CompositionDataModal`). Three of
+          them — one per axis — each opened a table of the same holdings under a different grouping,
+          beside a chart whose bars are already the click target for the per-bucket attribution. */}
       <div className="flex items-baseline gap-2">
         <h4 className="text-sm font-semibold text-fg-strong">{AXIS_LABEL[axis] ?? axis}</h4>
-        <button type="button" onClick={() => setShowData(true)}
-          title="Show every holding behind these bars, at the weight each bar counted it at — and what the percentages are a share of."
-          className="ml-auto cursor-pointer text-[11px] px-1.5 py-0.5 rounded-md border border-neutral-800/40 text-fg-faint hover:text-accent-300 hover:border-accent-500/50 transition-colors">
-          Data
-        </button>
       </div>
       <p className="text-[12px] text-fg-faint mt-0.5">{AXIS_NOTE[axis]}</p>
       {/* ⚠ ONLY THE UNPRICED HOLDINGS GET A WARNING, AND THIS IS THE WHOLE DISTINCTION. A fund, a
@@ -476,7 +465,7 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
           request — a caveat that appears and then vanishes on its own, which is worse than none. */}
       {!stale && (unpricedPct ?? 0) > 0.005 && (
         <p className="text-[12px] text-warn-300 mt-0.5"
-          title="Real holdings, in real buckets, that we have no price series for. They are absent from the bars, so the buckets they belong to read lower than they are. Open Data for the names.">
+          title="Real holdings, in real buckets, that we have no price series for. They are absent from the bars, so the buckets they belong to read lower than they are. The holdings table below names them, and the Resolved column on the portfolio row counts them.">
           ⚠ {unpricedPct!.toFixed(1)}% held but unpriceable — missing from these bars
         </p>
       )}
@@ -489,15 +478,10 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
           about the bars, and during a class change the bars are the previous selection's. */}
       {!stale && excludedWeight > 0.005 && (
         <p className="text-[12px] text-fg-faint mt-0.5"
-          title="Funds, bonds and cash have no sector of their own — they are their own slices of the allocation chart above. Open Data for the names.">
+          title="Funds, bonds and cash have no sector of their own — they are their own slices of the allocation chart above, and the holdings table below names them.">
           Excludes {excludedWeight.toFixed(1)}% in funds, bonds and cash — no{' '}
           {AXIS_LABEL[axis]?.toLowerCase() ?? axis} to place
         </p>
-      )}
-      {showData && (
-        <CompositionDataModal axis={axis} rows={rows} basis={basis} positions={positions}
-          unpricedPct={unpricedPct} excluded={excluded}
-          benchmark={benchmark} name={name} onClose={() => setShowData(false)} />
       )}
       {sectorEmpty ? (
         <p className="text-[12px] text-fg-subtle py-8 text-center">
@@ -2634,7 +2618,6 @@ export default function PortfolioAnalysisModal({
                 <div className="grid gap-4 lg:grid-cols-3">
                   {(data.axes ?? []).map((a) => (
                     <Chart key={a.axis} axis={a.axis} rows={a.rows}
-                      basis={a.basis} positions={a.positions} name={name}
                       unpricedPct={a.unpriced_pct} excluded={a.excluded} stale={stale}
                       benchmark={data.benchmark ?? 'SP500'}
                       onBucket={(axis, b) => { if (isBasket) return; setWhy(null); setBucket(

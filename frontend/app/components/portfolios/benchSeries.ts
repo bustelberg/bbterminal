@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
+import { MIN_YEAR_COVERAGE_PCT } from './marginData';
 
 /**
  * The benchmark line every Long Equity chart can carry.
@@ -86,7 +87,7 @@ export function useBenchInputs<T>(
  *
  * ⚠ THE ABSENCES LOOK IDENTICAL ON SCREEN AND HAVE DIFFERENT FIXES: the request is still in flight
  * (wait), the request failed (read the console), or it succeeded and every period fell under the
- * 80% weight-coverage floor (`MIN_YEAR_COVERAGE_PCT`). Collapsing them into "no line" is the same
+ * weight-coverage floor (`MIN_YEAR_COVERAGE_PCT`). Collapsing them into "no line" is the same
  * mistake as showing an unpriced holding as 0%.
  *
  * ⚠ THE FLOOR IS WHY A WHOLE CARD CAN HAVE NO INDEX LINE, AND IT IS USUALLY STRUCTURAL RATHER THAN
@@ -94,9 +95,11 @@ export function useBenchInputs<T>(
  * operating income, and **a bank does not report an operating income line at all** (GuruFocus
  * template 'B') — ING, ABN AMRO, JPMorgan, Bank of America, Morgan Stanley and Goldman all carry
  * interest expense with no operating income, and insurers (NN, ASR, Aegon) carry neither. Their
- * weight still sits in the denominator, so AEX coverage lands at 72–80% and clears the floor in
- * exactly ONE year of twelve; the S&P clears it in none. A book of 20 industrials clears it every
- * year, which is why the portfolio line is there and the index's is not.
+ * weight still sits in the denominator, so AEX coverage lands at 72–80% and cleared the 80% floor
+ * in exactly ONE year of twelve; the S&P cleared it in none. A book of 20 industrials clears it
+ * every year, which is why the portfolio line is there and the index's is not. ⚠ Those measured
+ * figures are why the floor moved to 50 (2026-08-12): at 72–80% covered, that card's index line was
+ * being withheld over a fifth of a book it genuinely spans.
  *
  * ⚠ ONE PERIOD IS CALLED OUT SEPARATELY, because a lone dot on a chart reads as a rendering glitch.
  * (It is also why the benchmark carries dots at all — a one-point series drawn as a bare line is
@@ -105,15 +108,41 @@ export function useBenchInputs<T>(
 export function benchNote(
   target: BenchTarget | null | undefined,
   data: unknown, error: string | null, series: Map<number, number | null> | null,
+  /**
+   * Whether THIS caller applied the coverage floor to `series`.
+   *
+   * ⚠⚠ IT USED TO ASSERT THE FLOOR UNCONDITIONALLY, AND THAT SENT ME AFTER THE WRONG BUG. The ratio
+   * cards build their series through `*ByYear`, which applies `MIN_YEAR_COVERAGE_PCT` here — for
+   * them the sentence is measured and true. The GROWTH cards pass raw blended rows with no floor
+   * applied on the client at all, so an empty series there could be anything, and naming the floor
+   * turned "the benchmark returned nothing" into a confident diagnosis. Measured 2026-08-12: AEX
+   * quarterly Revenue reported "no period clears the coverage floor" while the real cause was the
+   * blend aligning points by YEAR against weights keyed by QUARTER — every point dropped before
+   * coverage was computed at all (`quarter_bucket`).
+   */
+  flooredHere = true,
 ): string | null {
   if (!target) return null;
   if (error) return `${target.universe}: ${error}`;
   if (!data) return `${target.universe}: loading…`;
+  if (!flooredHere) {
+    // What is observable from here, and nothing more. The reason lives on the server's
+    // `blend_notes` for this code.
+    if (!series || series.size === 0) {
+      return `${target.universe}: the blended series came back empty — see the console`;
+    }
+    return series.size === 1
+      ? `${target.universe}: one period only — a single dot, not a line` : null;
+  }
+  // ⚠ THE NUMBER IS READ, NEVER SPELT. It used to be "80%" in both strings, so the day the floor
+  // moved the legend would have gone on quoting a floor that no longer existed — a caption that
+  // contradicts the chart it explains, and nothing would have failed.
   if (!series || series.size === 0) {
-    return `${target.universe}: no period clears the 80% coverage floor`;
+    return `${target.universe}: no period clears the ${MIN_YEAR_COVERAGE_PCT}% coverage floor`;
   }
   if (series.size === 1) {
-    return `${target.universe}: one period only — the rest fall under the 80% coverage floor`;
+    return `${target.universe}: one period only — the rest fall under the `
+      + `${MIN_YEAR_COVERAGE_PCT}% coverage floor`;
   }
   return null;
 }

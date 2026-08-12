@@ -234,10 +234,18 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
             # `list(...)` so exceptions surface here rather than being swallowed by the executor's
             # lazy iterator.
             list(pool.map(_one, work))
-    # Drop the cached blends only if something was actually written. A fill with no work spends zero
-    # API calls and leaves every cached line correct; clearing them would buy nothing but a rebuild.
-    if ok:
-        _blend_cache.invalidate()
+    # ⚠⚠ ALWAYS, NOT `if ok`. This used to clear the caches only when the fill had written
+    # something, reasoning that a no-work press leaves every cached line correct. It does not:
+    # "correct" there means *consistent with what THIS process last read*, and the rows can have
+    # moved underneath it — a per-row Fetch in the same modal, the scheduler, a script, another
+    # replica. The cached metric reads live 30 minutes, so a press could legitimately return a
+    # byte-identical stale table, which from the reader's seat is indistinguishable from a broken
+    # button. That is exactly how "I pressed Refresh benchmark and the row is still empty" happens
+    # for a company whose data is sitting in `metric_data`.
+    #
+    # The saving it bought was a lazy rebuild of a ≤24-entry cache, on a button pressed by hand. A
+    # refresh control that can hand back a stale view is not worth seconds of rebuild.
+    _blend_cache.invalidate()
     return (f"{label} — {ok} companies {'refetched' if force else 'loaded'}"
             + (f", {failed} failed" if failed else "")
             + f", {rows:,} data points"

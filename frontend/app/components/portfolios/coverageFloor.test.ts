@@ -37,9 +37,12 @@ describe('weightedByYear', () => {
   });
 
   it('⚠ measures coverage against the CHARTED SET, not the whole book', () => {
-    // Weights are shares of the whole book, so they sum to 70 here (cash and bonds make up the
-    // rest). Against 100 nothing could ever clear 80 and every chart would go blank.
-    const out = weightedByYear(rows(w(40, { 2024: 10 }), w(30, { 2024: 10 })), YEARS, VALUE);
+    // Weights are shares of the WHOLE book, so they need not sum to 100 — cash, bonds and anything
+    // unpriceable make up the rest. Both of these reported, so the charted set is 100% covered and
+    // the year draws. ⚠ The weights sum to 40 on purpose: against a denominator of 100 this would
+    // read 40% and be refused, so the case still separates the two bases now the floor is 50 (at
+    // the old 80 any book under 80% invested made the point, which is why it read 70 before).
+    const out = weightedByYear(rows(w(20, { 2024: 10 }), w(20, { 2024: 10 })), YEARS, VALUE);
     expect(out.get(2024)).toBeCloseTo(10);
   });
 
@@ -48,7 +51,18 @@ describe('weightedByYear', () => {
   });
 
   it('the floor is the documented one, shared with the backend blend', () => {
-    expect(MIN_YEAR_COVERAGE_PCT).toBe(80);
+    // 60 → 80 (2026-07-28) → 50 (2026-08-12, on request: half the constituents should draw).
+    // ⚠ Must equal `_fundamental_blend.MIN_BLEND_COVERAGE_PCT` — two floors that disagree put two
+    // cards on one screen spanning different fractions of the same book.
+    expect(MIN_YEAR_COVERAGE_PCT).toBe(50);
+  });
+
+  it('⚠ an EVEN SPLIT draws — that is what the floor was lowered for', () => {
+    // `<` is the comparison, so exactly 50% covered clears. Half the book reporting is a data
+    // point about half the book, labelled as such by `coverageByYear`, rather than a blank.
+    const out = weightedByYear(
+      rows(w(50, { 2024: 10 }), w(50, {})), YEARS, VALUE);
+    expect(out.get(2024)).toBeCloseTo(10);
   });
 });
 

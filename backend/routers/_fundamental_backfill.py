@@ -159,6 +159,30 @@ def eligible(c: dict) -> str | None:
     return None
 
 
+def feed_flags(force: bool, feeds: str, missing: dict | None = None) -> dict:
+    """The `need_fin`/`need_est`/`need_ind` flags for one company — the ONE place that decides
+    which GuruFocus feeds a press pays for.
+
+    ⚠⚠ `force` MEANS "IGNORE WHAT WE HOLD", NEVER "RUN EVERYTHING". Expressed as flags it can be
+    narrowed afterwards; passed to `ingest_company(force=True)` it CANNOT, because that argument
+    short-circuits the flags (`if force or c.get(flag, True)`) and runs all three feeds. The
+    /benchmarks index fill always knew this — the per-company job did not, so the drill-down's
+    per-row Refresh (`?force=true&feeds=statements`) spent **3 API calls per company instead of 1**
+    on estimates and indicators no table on that screen draws. Measured on DSM-Firmenich, 2026-08-12.
+
+    `missing` is the `needs()` row when we probed; absent under `force`, where every feed is work by
+    definition and probing would only be an expensive way to reach the same answer.
+    """
+    flags = ({"need_fin": True, "need_est": True, "need_ind": True} if force
+             else {k: bool((missing or {}).get(k)) for k in ("need_fin", "need_est", "need_ind")})
+    # ⚠ NARROWS, NEVER WIDENS — and it is applied last for exactly that reason. `statements` is one
+    # call and fills every line the fundamentals grid and the Long Equity tab draw, market cap
+    # included; the other two feed the forward-EPS and indicator charts and nothing else.
+    if feeds == "statements":
+        flags = {**flags, "need_est": False, "need_ind": False}
+    return flags
+
+
 def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
                    on_step: Callable[[str, int, int], None] | None = None,
                    should_stop: Callable[[], bool] | None = None) -> dict:

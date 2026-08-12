@@ -136,7 +136,11 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     void (async () => {
       setMetrics(null); setErr(null);
       try {
-        const r = await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin)}/metrics`);
+        // ⚠ `?cadence=annual` spelt out so this shares the Long Equity tab's cached payload — see
+        // the same line in `QuickValuationTab`. It is the server's default, so the wire is
+        // unchanged; only the cache key matches.
+        const r = await apiFetch(
+          `${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin)}/metrics?cadence=annual`);
         if (r.status === 404) { if (alive) setMetrics([]); return; }
         const b = await r.json().catch(() => null);
         if (!alive) return;
