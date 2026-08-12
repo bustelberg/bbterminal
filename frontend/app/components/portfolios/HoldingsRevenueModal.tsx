@@ -1331,6 +1331,38 @@ export default function HoldingsRevenueModal({
    */
   const [view, setView] = useState<View>('reported');
 
+  /**
+   * ⚠ A ZERO ON A MONEY LINE IS A PLACEHOLDER, NOT A MEASUREMENT — AND IT READS AS A FACT.
+   *
+   * GuruFocus returns a company's whole history as one rectangular block, so a period that predates
+   * the company's separate accounts comes back as `0` rather than being left out. Universal Music
+   * is the case: it was inside Vivendi until the September 2021 spin-off, its carve-out accounts
+   * begin at 2018 (6,023), and 2017 arrives as `0`. Rendered as "0M" that is a claim — a €48bn
+   * business earning nothing — sitting in the same column, same font, as nine real filings.
+   *
+   * The chart has ignored these all along (`_prepare` rebases a level series on its first POSITIVE
+   * period, which is what put UMG back in the AEX line), so blanking them here does not change a
+   * number — it makes the table agree with the line it is supposed to explain. Downstream this is
+   * one edit rather than four: `cellState`, the carry, the rebased view and the sort all read
+   * `revenue`, so a gap declared once is a gap everywhere.
+   *
+   * ⚠ MONEY ONLY, AND EXACTLY ZERO. A margin of `0%` is a real reading and a share count is a plain
+   * count; blanking those would hide measurements instead of placeholders. Negative figures are
+   * untouched — a loss is a fact, and the whole point is to stop inventing ones.
+   */
+  const zeroesAreGaps = (resp: Resp): Resp => {
+    if (!valueIsCurrency) return resp;
+    return {
+      ...resp,
+      rows: resp.rows.map((row) => {
+        if (!Object.values(row.revenue).some((v) => v === 0)) return row;
+        const revenue: Record<string, number | null> = {};
+        for (const [p, v] of Object.entries(row.revenue)) revenue[p] = v === 0 ? null : v;
+        return { ...row, revenue };
+      }),
+    };
+  };
+
   const load = async (body: Target): Promise<Resp> => {
     const r = await apiFetch(`${API_URL}/api/earnings/portfolio-revenue-matrix?metric=${encodeURIComponent(metric)}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1338,7 +1370,7 @@ export default function HoldingsRevenueModal({
     });
     const b = await r.json().catch(() => null);
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
-    return b as Resp;
+    return zeroesAreGaps(b as Resp);
   };
 
   useEffect(() => {
