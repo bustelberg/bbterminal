@@ -72,6 +72,23 @@ export const longDate = (iso: string): string =>
   new Date(iso).toLocaleDateString('en-GB',
     { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 
+/**
+ * The placeholder a three-line period cell uses for a line it has no value for.
+ *
+ * ⚠⚠ A NO-BREAK SPACE, NOT `' '`, AND WRITTEN AS AN ESCAPE. A block box whose only content is
+ * COLLAPSIBLE whitespace generates no line box and is zero pixels tall — so a company with a gap
+ * period gets a two-line cell among three-line ones, the `<td>` centres its content, and every
+ * figure in that row sits half a line off its neighbours. It reads as a CSS problem and it is a
+ * missing character.
+ *
+ * ⚠ IT IS THE LITERAL U+00A0 BYTE AND IT IS INVISIBLE HERE — nothing on screen distinguishes it
+ * from the plain space it must not be. Centralising it IS the mitigation: one occurrence to
+ * protect instead of three scattered through the cell markup, and a NAME at each use site saying
+ * what is meant. If a bulk rewrite normalises whitespace this is the line to check; the symptom is
+ * figures sitting half a line off their neighbours in any row with a gap period.
+ */
+const NBSP = ' ';
+
 /** A period label → the date it ends on. The client twin of `_fundamental_blend.period_end`, and
  *  the only reason a cell can tell "we asked and there is nothing" from "nobody has asked yet": a
  *  fetch covers a period only if the period had already ENDED when the fetch ran. */
@@ -351,6 +368,27 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
      * as a number that is supposed to be a constant and isn't.
      */
     const from: Record<string, Record<string, string>> = {};
+    /**
+     * ⚠⚠ COVERAGE IS COUNTED FIRST, IN ITS OWN PASS, SO THE CARRY CAN BE GATED ON IT. A carried
+     * figure exists to hold the basket still in a period the chart DRAWS — at AEX Q1/Q3 only twelve
+     * of twenty-two constituents file, and without it the index alternates between two baskets and
+     * sawtooths ±20% on composition alone. In a period the chart REFUSES it does nothing at all:
+     * FY2026 has one reporter, the floor rejects it, and twenty-one companies were showing their
+     * 2025 figure in a column that feeds no line. That reads as a projection, which it is not.
+     *
+     * Counting coverage here is what makes the gate possible: it is computed from the OWN values
+     * only (a carried figure is never coverage), so it does not depend on the carry it decides.
+     */
+    for (const p of parts) {
+      for (const y of data.years) {
+        if (p.idx[y] == null || !wAt(p.r, y)) continue;
+        coverW[y] = (coverW[y] ?? 0) + stableW(p.r);
+        coverN[y] = (coverN[y] ?? 0) + 1;
+      }
+    }
+    const drawn = (y: string) =>
+      (100 * (coverW[y] ?? 0) / (coverTotal || 1)) >= MIN_YEAR_COVERAGE_PCT
+      && (100 * (coverN[y] ?? 0) / (parts.length || 1)) >= MIN_YEAR_COVERAGE_PCT;
     /** Each part's value at each period it contributed to — own or carried. The chaining below
      *  takes ratios between periods that need not be adjacent, so the values have to be kept. */
     const at = new Map<typeof parts[number], Record<string, number>>();
@@ -361,7 +399,9 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
       for (const y of data.years) {
         const own = p.idx[y];
         if (own != null) { last = { idx: own, y }; since = 0; } else if (last) { since += 1; }
-        const carried = own == null && last && since <= maxCarry ? last : null;
+        // ⚠ ONLY INTO A PERIOD THE CHART DRAWS — see the ⚠⚠ on `drawn`. Elsewhere a carried figure
+        // holds up nothing and reads as a projection.
+        const carried = own == null && last && since <= maxCarry && drawn(y) ? last : null;
         const v = own ?? carried?.idx ?? null;
         if (v == null) continue;
         const w = wAt(p.r, y);
@@ -369,11 +409,6 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
         denom[y] = (denom[y] ?? 0) + w;
         at.get(p)![y] = v;
         if (carried) (from[p.r.isin] ??= {})[y] = carried.y;
-        if (own != null) {
-          // ⚠ THE STABLE WEIGHT, accumulated for the rows that REPORTED — see the ⚠⚠ above.
-          coverW[y] = (coverW[y] ?? 0) + stableW(p.r);
-          coverN[y] = (coverN[y] ?? 0) + 1;
-        }
       }
     }
     /**
@@ -391,12 +426,10 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
      * ⚠ THE ANCHOR IS THE LAST DRAWN PERIOD, not the previous one: a period under the floor is not
      * drawn, and measuring the next step from it would compound a move nobody could see.
      */
-    const clears = (y: string) => (100 * (coverW[y] ?? 0) / (coverTotal || 1)) >= MIN_YEAR_COVERAGE_PCT
-      && (100 * (coverN[y] ?? 0) / (parts.length || 1)) >= MIN_YEAR_COVERAGE_PCT;
     let anchor: string | null = null;
     let chained = 100;
     for (const y of data.years) {
-      if (!denom[y] || !clears(y)) continue;
+      if (!denom[y] || !drawn(y)) continue;
       if (anchor != null) {
         let num = 0;
         let den = 0;
@@ -524,7 +557,19 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * With no stamp it says so rather than implying a recent check: the row's figures prove a fetch
    * happened, they just cannot say when.
    */
-  const stateTitle = (r: Row, state: 'no_data' | 'not_tried' | 'unsubscribed'): string => {
+  const stateTitle = (r: Row, state: 'no_data' | 'not_tried' | 'unsubscribed',
+                      y: string): string => {
+    // ⚠⚠ A PERIOD THAT HAS NOT ENDED IS NOT "NOT TRIED" — nobody can have reported it, and no
+    // number of presses will change that. Both sentences are arithmetically true ("this period
+    // ends after our last fetch"), but one sends the reader to press Refresh for a fiscal year
+    // that is still running. Measured: Adyen's FY2026 ends 31 December, we fetched 12 August, and
+    // the cell asked for a refresh that could never help. The LTM column is the answer for the
+    // year in progress, so the message points there instead.
+    if (state === 'not_tried' && periodEndDate(y) > new Date().toISOString().slice(0, 10)) {
+      return `${y} has not ended yet, so nobody has reported it — this is not something a refresh `
+        + 'can fill. The LTM column is the trailing twelve months to the newest quarterly filing, '
+        + 'which is what this company has published so far.';
+    }
     if (state === 'unsubscribed') {
       return `${r.ticker ?? ''}@${r.exchange ?? '?'} is on an exchange outside our GuruFocus `
         + 'subscription, so this period cannot be fetched at all.';
@@ -702,7 +747,22 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    *  agreement is between two cells and is a MEASUREMENT, not a token; inline it is applied
    *  directly and both sides read the same constant. */
   const numCell = { width: NUM_W, minWidth: NUM_W, maxWidth: NUM_W };
-  const nameStick = { left: NUM_W };
+  /**
+   * ⚠⚠ THE COMPANY COLUMN IS NOW A FIXED WIDTH, AND IT HAD TO BECOME ONE. A third frozen column
+   * pins at `first + second`, so the second's width has to be a NUMBER — and `w-full` made it
+   * whatever slack the table had left, which is a different value on every screen and on every
+   * cadence (twelve period columns or forty). Pinned against a guess, the Refresh column would sit
+   * over the names on a wide table and leave a gap on a narrow one.
+   *
+   * ⚠ THE TABLE STILL FILLS: `<table className="w-full">` distributes what is left across the
+   * period columns instead. They are the ones that should absorb it — a wider window shows more of
+   * the figures, not more whitespace under a company name.
+   */
+  const NAME_W = '24rem';
+  const nameStick = { left: NUM_W, width: NAME_W, minWidth: NAME_W, maxWidth: NAME_W };
+  /** The third frozen column, at the sum of the two before it. One expression, so it cannot drift
+   *  from the widths it is derived from. */
+  const refreshStick = { left: `calc(${NUM_W} + ${NAME_W})` };
 
   const cancelRow = async (isin: string) => {
     const id = refresh[isin]?.jobId;
@@ -739,13 +799,13 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
             <th className={`px-2 py-1.5 font-medium text-right sticky left-0 bg-page z-30
                             cursor-default!`} style={numCell}
               title="Row number in the current sort — it renumbers when you re-sort.">#</th>
-            <th className={`px-3 py-1.5 font-medium text-left sticky bg-page z-30 w-full ${nameCol}`} style={nameStick}
+            <th className={`px-3 py-1.5 font-medium text-left sticky bg-page z-30 ${nameCol}`} style={nameStick}
               onClick={() => toggle('name')}>Company{caret('name')}</th>
             {/* ⚠ ITS OWN COLUMN, AND NOT SORTABLE — every other header here toggles a sort, so this
                 one carries `cursor-default` explicitly to opt out of the row-level rule above. The
                 buttons under it are self-labelling, so the heading only has to name the column. */}
             {onRefresh && (
-              <th className="px-2 py-1.5 font-medium text-left whitespace-nowrap cursor-default!"
+              <th className="px-2 py-1.5 font-medium text-left whitespace-nowrap cursor-default! sticky bg-page z-30" style={refreshStick}
                 title="Re-fetch ONE company's financials from GuruFocus — that row only, one API call, bypassing our stored copy of its blob. Progress and a Cancel appear in the pop-ups bottom-right.">
                 Refresh
               </th>
@@ -819,7 +879,15 @@ market cap it was weighted by in that period, and the weight that produced.">
             const i = vi.index;
             return (
             <tr key={`${r.isin}-${i}`} data-index={i} ref={rowVirtualizer.measureElement}
-              className="group border-b border-neutral-800/20 hover:bg-overlay/[0.02]">
+              // ⚠⚠ THE RULE IS ON THE CELLS, NOT THE ROW. A `border-b` on a `<tr>` is drawn by the
+              // TABLE under `border-collapse: collapse` (Preflight sets it), and a `position:
+              // sticky` cell paints its own background in a later stacking context — so the two
+              // frozen columns, and any cell whose height the virtualiser has re-measured, can
+              // cover the row's border and leave the line broken in patches. Per-cell borders are
+              // painted by each cell, so every column draws its own segment and the rule is
+              // continuous whatever is pinned or re-measured above it.
+              className="group [&>td]:border-b [&>td]:border-neutral-800/20
+                         hover:bg-overlay/[0.02]">
               {/* ⚠ THE POSITION IN THE SORTED LIST, NOT AN ID. It renumbers 1..n when you re-sort,
                   which is the point: it answers "how far down is this" and "how many are there",
                   and it gives two people looking at the same screen a way to say which row they
@@ -832,7 +900,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                   looking at the empty cells, and a badge in any other column has gone with them.
                   `shrink-0` + `truncate` so a long name yields space to it rather than pushing it
                   out. */}
-              <td className={`px-3 py-1.5 text-fg-soft sticky bg-card z-10 max-w-0 ${nameCol}`} style={nameStick}>
+              <td className={`px-3 py-1.5 text-fg-soft sticky bg-card z-10 ${nameCol}`} style={nameStick}>
                 <span className="flex items-center gap-1.5 min-w-0">
                   {/* ⚠ THE `NOT IN LINE` BADGE WAS REMOVED (2026-08-12, on request) — THE EXCLUSION
                       IT ANNOUNCED WAS NOT. `_prepare` still drops a member whose first reported
@@ -866,7 +934,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                   ⚠ NOR WITHOUT A `company_id`. The job is keyed on it; rendering a button that
                   cannot be wired up would be a control that does nothing when pressed. */}
               {onRefresh && (
-                <td className="px-2 py-1.5 text-center align-top">
+                <td className="px-2 py-1.5 text-center align-top sticky bg-card z-10" style={refreshStick}>
                   {/* ⚠ EXACTLY TWO STATES: Refresh, or Cancel. Not three — a "Refreshing…" label
                       for the ~200 ms `startJob` takes is a state nobody can act on that flickers
                       past on every press. The flip is driven by `busy`, set on the CLICK, and a
@@ -1022,7 +1090,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                             // ⚠ `cursor-default` — the badge already reads as a state, so the help
                             // cursor adds nothing but a question mark dragged across the table.
                             // Naming a cursor drops `InfoTip`'s default; see its `className` note.
-                            <InfoTip text={stateTitle(r, state)} className="block cursor-default">
+                            <InfoTip text={stateTitle(r, state, y)} className="block cursor-default">
                               {state === 'unsubscribed'
                                 ? <StateBadge label="Unsubscribed" tone={BADGE_TONE.warn} />
                                 : state === 'no_data'
@@ -1038,7 +1106,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                           because it is the input and the weight is the answer. */}
                       {hasPeriodCap && (
                         <span className="block text-[11px] leading-tight text-fg-dim">
-                          <Cell>{cap == null ? ' ' : capBn(cap)}</Cell>
+                          <Cell>{cap == null || w == null ? NBSP : capBn(cap)}</Cell>
                         </span>
                       )}
                       {/* ⚠ ` `, NOT `''` AND NOT A PLAIN `' '`. A block box whose only content
@@ -1089,7 +1157,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                 figure in this row sits under the wrong year — a totals line that is quietly one
                 column out is worse than no totals line. (`colCount` guards the virtualiser's
                 spacers for the same reason.) */}
-            {onRefresh && <td className="px-2 py-1.5" />}
+            {onRefresh && <td className="px-2 py-1.5 sticky bg-page z-10" style={refreshStick} />}
             <td className="px-3 py-1.5" />
             <td className="px-3 py-1.5" />
             {/* Σ of the Mkt cap column — TODAY's caps, matching the column above it. ⚠ It is NOT
@@ -1176,7 +1244,7 @@ divide by that period's own Σ cap instead, on the line directly below this row'
                       weighting by today's cap threw away. */}
                   {hasPeriodCap && (
                     <span className="block text-[11px] leading-tight text-fg-dim">
-                      <Cell>{blend.denom[y] == null ? ' ' : capBn(blend.denom[y])}</Cell>
+                      <Cell>{blend.denom[y] == null ? NBSP : capBn(blend.denom[y])}</Cell>
                     </span>
                   )}
                   {/* ⚠ COVERAGE, PROMOTED OUT OF THE TOOLTIP — it is what the weights above are

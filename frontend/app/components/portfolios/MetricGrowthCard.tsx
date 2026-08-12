@@ -227,6 +227,15 @@ export default function MetricGrowthCard({
     if (!benchMetrics) return null;
     const raw = new Map<number, number | null>(
       extractPoints(benchMetrics, cfg.codes, cadence).map((p) => [p.year, p.value]));
+    // ⚠⚠ THE INDEX GETS ITS LTM THROUGH THE SAME HELPER AS THE COMPANY, which is the only reason
+    // the two land on the same x. The blend stamps its LTM point with the newest constituent
+    // filing behind it (not with today), so for ASML both sit on 2026-06-30 → 2026.25. Without it
+    // the company line ran a quarter past an index line that simply stopped, and the gap read as
+    // outperformance in a period the index did not cover.
+    if (cadence === 'annual') {
+      const bl = ltmPoint(benchMetrics, cfg.codes);
+      if (bl) raw.set(bl.year, bl.value);
+    }
     return raw.size ? raw : null;
   }, [benchMetrics, cfg, cadence]);
 

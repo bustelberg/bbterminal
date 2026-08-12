@@ -742,6 +742,22 @@ def _bulk_blend_rows(cids: list[int], metrics: list[str], cadence: str) -> list[
             for date, val in _ttm_by_period(rows, rule, key="date").items():
                 out.append({"company_id": cid, "metric_code": annual_code,
                             "target_date": date, "numeric_value": val})
+    # ⚠⚠ THE LTM PERIOD, UNDER THE LITERAL DATE KEY `LTM`. `year_bucket` is `d[:4]`, so `'LTM'`
+    # buckets to itself — it becomes a real period that sorts after every year (`'2026' < 'LTM'`)
+    # and the chained series picks it up as one more step off the last drawn year. A constituent
+    # with no LTM of its own is CARRIED into it (its last fiscal year is still its latest twelve
+    # months), which is the same rule every other period follows.
+    if cadence != "quarterly":
+        for m in metrics:
+            annual_code = _metric_codes(m)[0]
+            for cid, (d, val) in _ltm_by_company(cids, m, cadence).items():
+                # ⚠ `ltm_date` RIDES ALONG so the blended point can be stamped with a REAL
+                # quarter-end. `_blend_rows` stamps every period with `period_end(period)`, which
+                # for `LTM` is today — and the card places the benchmark's LTM at that x while the
+                # company's own sits at its filing's quarter-end. Two LTM points at different x on
+                # a chart that exists to compare them. See `_blend_rows`.
+                out.append({"company_id": cid, "metric_code": annual_code,
+                            "target_date": "LTM", "numeric_value": val, "ltm_date": d})
     return out
 
 
@@ -785,7 +801,8 @@ def _ltm_rows(company_id: int, annual_rows: list[dict]) -> list[dict]:
     return out
 
 
-def _ltm_by_company(company_ids: list[int], metric: str, cadence: str) -> dict[int, float]:
+def _ltm_by_company(company_ids: list[int], metric: str,
+                    cadence: str) -> dict[int, tuple[str, float]]:
     """`{company_id: LTM value}` — the trailing twelve months to each company's newest quarterly
     filing, for the companies where that reaches PAST their last full fiscal year.
 
@@ -807,7 +824,7 @@ def _ltm_by_company(company_ids: list[int], metric: str, cadence: str) -> dict[i
 
     annual = _values_with_dates(company_ids, [metric], "annual").get(metric, {})
     quarterly = _values_with_dates(company_ids, [metric], "quarterly").get(metric, {})
-    out: dict[int, float] = {}
+    out: dict[int, tuple[str, float]] = {}
     for cid, per in quarterly.items():
         dated = [(d, v) for d, v in per.values() if v is not None]
         if not dated:
@@ -817,7 +834,7 @@ def _ltm_by_company(company_ids: list[int], metric: str, cadence: str) -> dict[i
                           default=None)
         # Equal dates mean the trailing twelve months ARE that fiscal year: already on the chart.
         if last_annual is None or q_date > last_annual:
-            out[cid] = q_val
+            out[cid] = (q_date, q_val)
     return out
 
 
@@ -844,6 +861,9 @@ def _blend_rows(rows: list[dict], covered: list[dict],
     )
 
     bucket = quarter_bucket if cadence == "quarterly" else year_bucket
+    # The newest constituent filing behind the LTM period — an "as of" for the blended point. Max,
+    # not min: the point stands at the latest information any member has published.
+    ltm_date = max((str(r["ltm_date"]) for r in rows if r.get("ltm_date")), default=None)
 
     by_metric: dict[str, dict[int, dict[str, float]]] = {}
     for r in rows:
@@ -883,6 +903,17 @@ def _blend_rows(rows: list[dict], covered: list[dict],
             # a claim about anyone's year-end — members close on different days, which is exactly
             # why the blend aligns on a shared period in the first place. `2025` → 2025-12-31,
             # `2025-Q3` → 2025-09-30.
+            #
+            # ⚠⚠ THE LTM POINT IS THE EXCEPTION, TWICE OVER. It goes out under an `ltm__` code so
+            # nothing that selects the annual code picks it up as an extra fiscal year, and it is
+            # stamped with the NEWEST constituent filing behind it rather than `period_end("LTM")`
+            # (today) — that date is what puts it at the same x as a company's own LTM point, which
+            # is the entire reason the two lines can be read against each other there.
+            if p["period"] == "LTM":
+                out.append({"metric_code": "ltm__" + code[len("annuals__"):],
+                            "target_date": ltm_date or period_end("LTM"),
+                            "numeric_value": p["value"], "is_prediction": False})
+                continue
             out.append({"metric_code": code, "target_date": period_end(p["period"]),
                         "numeric_value": p["value"], "is_prediction": False})
     return {"metrics": out, "codes": len(by_metric), "blend_notes": notes}
@@ -2039,7 +2070,7 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
             # ⚠ THE SAME LTM POINT THE CHART DRAWS, so the table explains the line rather than a
             # truncated version of it — see `_ltm_by_company` for what qualifies as one.
             if c["company_id"] in ltm:
-                rev["LTM"] = ltm[c["company_id"]]
+                rev["LTM"] = ltm[c["company_id"]][1]
             years |= set(rev)
             # WHY revenue is missing, when it is: a company on an exchange outside the GuruFocus
             # subscription (Brookfield on TSX) can't be fetched at all → `unsubscribed`; one on a

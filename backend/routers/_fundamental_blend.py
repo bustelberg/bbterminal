@@ -184,6 +184,13 @@ def period_end(period: str) -> str:
     keeps a year's four quarterly points in order on the axis, and it is what `carry_forward`
     measures its staleness bound against.
     """
+    # ⚠⚠ `LTM` IS A PERIOD, NOT A DATE, AND PARSING IT AS ONE RAISES. Split on `-Q` it yields
+    # `LTM-12-31`, which `carry_forward` hands to `date.fromisoformat` — a ValueError that takes the
+    # whole blend down, not a wrong number. Its window ends at the newest filing, which is on or
+    # before today, so today is the honest bound: it never carries backwards into a real period and
+    # nothing is ever carried INTO it (it is the last bucket on the axis).
+    if period == "LTM":
+        return _date.today().isoformat()
     head, _, q = period.partition("-Q")
     return f"{head}-{['03-31', '06-30', '09-30', '12-31'][int(q) - 1]}" if q else f"{head}-12-31"
 
