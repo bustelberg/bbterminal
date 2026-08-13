@@ -86,7 +86,24 @@ const WEIGHT_HINT = 'Share of the attributable holdings (funds, cash and unprice
  *  identical question — "which names are behind this bucket, on each side" — off the identical
  *  payload. A second table with its own columns, sort and overlap treatment would be two
  *  appearances of one fact, and the reader would have to learn which is which. */
-export function Holdings({ rows }: { rows: Name[] }) {
+export function Holdings({ rows, startLabel = 'Start of window' }: {
+  rows: Name[];
+  /**
+   * WHEN the weight was measured, named in the header.
+   *
+   * ⚠⚠ A PROP, NOT THE LITERAL "Start of year", BECAUSE THIS TABLE SERVES TWO WINDOWS. The
+   * `/bucket` drill-down pins `window=ytd`, so there the start IS 1 January — but `AttributionPanel`
+   * has a window toggle and renders this same table for SINCE-INCEPTION, where the weight is the
+   * one held at the model's inception and could be any date in 2024. Hardcoding the year would put
+   * a wrong date on half the drill-downs, in the calmest possible way: a header that reads correctly
+   * and describes a different measurement.
+   *
+   * ⚠ THE DEFAULT IS THE VAGUE-BUT-TRUE ONE. A caller that forgets to say which window it is on
+   * gets "Start of window", which is right for every window; it does not get a confident "Start of
+   * year" that is right for one of them.
+   */
+  startLabel?: string;
+}) {
   // Sortable — click a header to toggle direction. Default: weight, largest first. Each table sorts
   // on its OWN state (your names and the index's are independent lists).
   const [key, setKey] = useState<SortKey>('weight');
@@ -154,8 +171,17 @@ export function Holdings({ rows }: { rows: Name[] }) {
               only mean "sort by the current sort". It renumbers whenever the sort changes. */}
           <th className="pr-1 text-right font-normal">#</th>
           <th className={`${th} pr-2 text-left`} onClick={() => click('name')}>Name{caret('name')}</th>
+          {/* ⚠ THE QUALIFIER SITS ON ITS OWN LINE, not beside the word. "Weight (Start of year)" is
+              ~130px of nowrap text in a 6rem column, and under `table-fixed` that does not shrink
+              the column — it spills over Return. A `block` span wraps it instead, so the column
+              keeps its width and the Name column beside it keeps the space it would have lost.
+              `whitespace-normal` because the shared `th` class is nowrap, which would otherwise
+              stop the qualifier wrapping inside its own line too. */}
           <th className={`${th} px-1 text-right`} onClick={() => click('weight')} title={WEIGHT_HINT}>
-            Weight <span className="normal-case text-fg-subtle">(start)</span>{caret('weight')}
+            Weight{caret('weight')}
+            <span className="block normal-case whitespace-normal font-normal text-fg-subtle">
+              ({startLabel})
+            </span>
           </th>
           <th className={`${th} px-1 text-right`} onClick={() => click('return')}>Return{caret('return')}</th>
           <th className={`${th} pl-1 text-right`} onClick={() => click('contrib')}>Contrib.{caret('contrib')}</th>
@@ -342,7 +368,10 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
                       <span className="text-accent-400"> · {shared(row.portfolio_holdings)} in both</span>
                     )}
                   </p>
-                  <Holdings rows={row.portfolio_holdings ?? []} />
+                  {/* ⚠ "Start of year" IS SAFE HERE ONLY BECAUSE THIS PANEL PINS `window=ytd` in
+                      its own request (see the fetch above). If that ever becomes a toggle, this
+                      label has to follow it — see `Holdings`'s `startLabel`. */}
+                  <Holdings rows={row.portfolio_holdings ?? []} startLabel="Start of year" />
                 </div>
                 <div>
                   <p className="text-[12px] font-medium text-fg-muted mb-1">
@@ -362,7 +391,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
                       {' '}· weighted at window open
                     </span>
                   </p>
-                  <Holdings rows={row.benchmark_holdings ?? []} />
+                  <Holdings rows={row.benchmark_holdings ?? []} startLabel="Start of year" />
                 </div>
               </div>
               {(row.portfolio_holdings ?? []).some((h) => h.in_both) && (

@@ -56,7 +56,13 @@ TERMINAL = ("done", "failed", "cancelled")
 
 class JobCancelled(Exception):
     """Raised by `JobCtx.check()` when cancellation was requested. The runner catches it and marks
-    the job `cancelled` — a worker should let it propagate rather than swallowing it."""
+    the job `cancelled` — a worker should let it propagate rather than swallowing it.
+
+    ⚠ ITS MESSAGE, IF IT HAS ONE, BECOMES THE SUMMARY. A worker that stops part-way usually knows
+    something the registry cannot — which account it stopped before, what it had already stored,
+    what is now stale — and that is the whole reason a reader looks at a cancelled card. Raised
+    bare (as `check()` does) it still reads "cancelled", so nothing had to change to keep working.
+    """
 
 
 @dataclass
@@ -182,12 +188,13 @@ def start(kind: str, label: str, fn: Callable[[JobCtx], str | None]) -> Job:
             job.summary = summary
             job.status = "done"
             ctx.emit("done", summary or "finished")
-        except JobCancelled:
+        except JobCancelled as e:
             job.status = "cancelled"
-            job.summary = "cancelled"
+            # The worker's own account of where it stopped when it gave one — see `JobCancelled`.
+            job.summary = str(e) or "cancelled — stopped at a safe point"
             # ⚠ NAMED AS AN OUTCOME, NOT AN ERROR. A cancelled job did what it was told; rendering
             # it in red beside a genuine failure teaches the reader to ignore both.
-            ctx.emit("cancelled", "cancelled — stopped at a safe point")
+            ctx.emit("cancelled", job.summary)
         except Exception as e:  # noqa: BLE001
             _log.warning("[job] %s (%s) failed — %s: %s", label, kind, type(e).__name__, e)
             job.status = "failed"

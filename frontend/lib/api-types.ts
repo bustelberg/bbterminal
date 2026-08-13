@@ -336,6 +336,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/db-growth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin Db Growth
+         * @description HOW FAST THE DATABASE IS GROWING, PER TABLE — bytes on disk, over a window.
+         *
+         *     ⚠⚠ BYTES, NOT ROWS WRITTEN, AND THE DIFFERENCE INVERTS THE RANKING. Asking each job to count
+         *     its own inserts would put `crm_relaties_refresh` — which OVERWRITES its table, thousands of rows
+         *     written and zero growth — above the month-end price refresh. Several jobs here are
+         *     delete-then-insert snapshots or upserts. A row count is also blind to INDEXES and BLOAT, which
+         *     on an 18 GB table are most of the disk.
+         *
+         *     ⚠ IT ANSWERS "WHAT GREW", NEVER "WHO GREW IT". The measurement is taken from outside every job,
+         *     which is what makes it impossible for a job to forget to report or to drift — and is exactly
+         *     why it cannot attribute. Per-job attribution is a separate, lossier measurement.
+         *
+         *     ⚠ `delta` IS NULL, NOT 0, UNTIL THE HISTORY REACHES BACK `days`. A fresh install has sizes and
+         *     no growth; rendering that as "0 MB added" would present an unmeasured database as a static one.
+         *     `has_baseline` says which of the two you are looking at.
+         *
+         *     ⚠ SUPABASE STORAGE IS NOT COUNTED — the `gurufocus-raw` bucket of cached vendor JSON is not in
+         *     Postgres. Reconciling this against the hosting's disk figure will show a gap; that is the gap.
+         */
+        get: operations["admin_db_growth_api_admin_db_growth_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/egress-ip": {
         parameters: {
             query?: never;
@@ -550,6 +587,80 @@ export interface paths {
         get: operations["network_diagnostics_api_admin_network_diagnostics_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/scheduled-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin Scheduled Jobs
+         * @description EVERY JOB THAT IS SUPPOSED TO RUN BY ITSELF — declared, registered, and last actually run.
+         *
+         *     ⚠⚠ IT ANSWERS "IS ANYTHING MISSING", WHICH NOTHING ELSE COULD. `/schedule` shows the ingest
+         *     pipeline's own history and `scheduler.list_scheduled_jobs()` shows what APScheduler is holding
+         *     right now — and BOTH look healthy in the one case that matters, a job that is not registered at
+         *     all. `list_scheduled_jobs()` is empty under `DISABLE_SCHEDULER`, empty before startup finishes,
+         *     and empty of any job whose `add_job` threw; none of those is distinguishable from an idle
+         *     scheduler by looking at the list. The declaration in `scheduled_jobs.py` is what makes an
+         *     absence visible, and this endpoint is the join.
+         *
+         *     ⚠ THE READ IS PER-PROCESS AND SAYS SO. The scheduler is in-process by design (one instance,
+         *     `DISABLE_SCHEDULER=1` on any replica), so `registered`/`next_run_at` describe *the container
+         *     that served this request* — which is the honest scope, and the reason `scheduler_running` is
+         *     reported rather than inferred from an empty list.
+         *
+         *     ⚠ SIX OF THE EIGHT JOBS REPORT `unknown`, ON PURPOSE. They leave no durable record — only a log
+         *     line that scrolls away — so "did it run?" genuinely has no answer for them yet. Green would be a
+         *     fabrication and red would cry wolf; either teaches the reader to stop reading the page. They say
+         *     so, and `record_run` is what will fill them in.
+         */
+        get: operations["admin_scheduled_jobs_api_admin_scheduled_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/scheduled-jobs/{job_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Run Scheduled Job
+         * @description Kick one declared job off NOW, as a cancellable registry job with a progress toast.
+         *
+         *     ⚠ THE SAME BODY THE SCHEDULER TICK RUNS (`scheduler.JOB_BODIES`), never a second copy — a
+         *     button that ran its own implementation would drift from the thing the schedule does, and the
+         *     drift would only ever surface as the button disagreeing with the nightly result.
+         *
+         *     ⚠⚠ CANCELLATION IS COOPERATIVE, AND ITS LATENCY DIFFERS PER JOB. The AIRS scan stops between
+         *     ACCOUNTS (an account's four reports are stored as a unit); the drift probe stops between
+         *     COMPANIES; the FX, CRM and size jobs are seconds long and have no useful boundary at all.
+         *     "Stops immediately" is not on offer for a scraper mid-download, and a Cancel that claimed it
+         *     would be the decorative control this codebase has already removed once. The UI says which is
+         *     which rather than implying they are the same.
+         *
+         *     ⚠ A JOB WITH NO BODY IS 404, WHICH IS AN ANSWER. The 20-second queue worker has nothing worth
+         *     triggering, and the two pipeline jobs already own a richer Run-now with a live console tail —
+         *     `runnable` on `/api/admin/scheduled-jobs` says so per row, so the button is simply absent
+         *     rather than present-and-failing.
+         */
+        post: operations["admin_run_scheduled_job_api_admin_scheduled_jobs__job_id__run_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1836,10 +1947,19 @@ export interface paths {
          *     job path is exactly the drift its own docstring exists to prevent. The plain POST above stays
          *     for scripts and for anything that wants one blocking answer.
          *
-         *     ⚠ NO `ctx.check()` INSIDE THE SCAN. Cancellation is cooperative and the natural boundary is
-         *     BETWEEN accounts — but a half-cascade leaves a parent fresh against stale children, which is
-         *     the state this endpoint exists to avoid. So the job is not cancellable mid-chain: it reports,
-         *     it does not stop. `_LOCK` already refuses a second one.
+         *     ⚠⚠ IT IS CANCELLABLE BETWEEN ACCOUNTS, AND THAT REVERSES WHAT THIS DOCSTRING USED TO SAY
+         *     (2026-08-13). It passed no `should_stop` and argued that a half-cascade leaves a parent fresh
+         *     against stale children, so the job "reports, it does not stop". The cost of that was a Cancel
+         *     button — on the row, in the Analyse modal and on the toast itself — that changed nothing for
+         *     minutes while its card read "cancelling…" and then finished `done`. The argument also proves too
+         *     much: `cascade=False` produces the identical state on purpose. So the scan now stops at an
+         *     account boundary and NAMES the books it left stale (`cancelled_at`, `stale_books`), which is the
+         *     honest version of the same compromise. `_LOCK` still refuses a second one.
+         *
+         *     ⚠ AND THE JOB ENDS `cancelled`, NOT `done`. `_work` returning a string — however carefully it is
+         *     worded — is a `done` job to the registry, so the toast would go green and the summary would be
+         *     the only thing saying otherwise. `JobCancelled` is what makes the card amber, and it carries the
+         *     detail as its message so the summary still names the books left stale.
          */
         post: operations["airs_portfolio_refresh_job_api_airs_portfolios__portefeuille__refresh_job_post"];
         delete?: never;
@@ -4948,6 +5068,14 @@ export interface paths {
          *     summed weight). Weight is the share of the WHOLE book (cash/bonds in the denominator, so the
          *     shown companies sum to under 100%). Holdings with no company row / no revenue are omitted —
          *     this lists the companies we can actually show revenue for.
+         *
+         *     ⚠⚠ FOR AN INDEX IT LISTS **EVERY** CONSTITUENT (`all_constituents=True`), INCLUDING THE ONES THE
+         *     LINE CANNOT USE. The weighted series drops a constituent with no stored market cap — it cannot
+         *     be weighted — but a table called "everything behind the chart" that shows 22 of the AEX's 25
+         *     hides its most useful fact: RELX, Shell and Unilever are LSE-listed, outside the GuruFocus
+         *     subscription, and unreachable. They arrive at weight 0, so they change no average and no
+         *     coverage figure; their cells say `Unsubscribed` and their weight column is blank, which is the
+         *     difference between "in the index, not in the line" and "not in the index".
          */
         post: operations["portfolio_revenue_matrix_api_earnings_portfolio_revenue_matrix_post"];
         delete?: never;
@@ -12856,6 +12984,39 @@ export interface operations {
             };
         };
     };
+    admin_db_growth_api_admin_db_growth_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header: {
+                authorization: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_egress_ip_api_admin_egress_ip_get: {
         parameters: {
             query?: never;
@@ -13062,6 +13223,70 @@ export interface operations {
                 authorization: string;
             };
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_scheduled_jobs_api_admin_scheduled_jobs_get: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_run_scheduled_job_api_admin_scheduled_jobs__job_id__run_post: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
+            };
+            path: {
+                job_id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;

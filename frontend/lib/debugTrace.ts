@@ -123,13 +123,37 @@ export async function traceScope<T>(scope: string, label: string, fn: () => Prom
  * A 401 after a token expiry, a 502 from the gateway, a request that takes 40 seconds: all of
  * them show up here without a single line in the caller.
  */
-export function traceRequest(method: string, url: string): (resp: Response | null, err?: unknown) => void {
+export function traceRequest(
+  method: string, url: string,
+): (resp: Response | null, err?: unknown, cancelled?: boolean) => void {
   const t0 = performance.now();
   const path = shortUrl(url);
-  return (resp, err) => {
+  return (resp, err, cancelled) => {
     if (!enabled()) return;
     try {
       if (err || !resp) {
+        /**
+         * ⚠⚠ A REQUEST WE CANCELLED OURSELVES IS NOT A FAILURE, AND CALLING IT ONE IS WORSE THAN
+         * SAYING NOTHING. Every long-lived read on this app ends by being aborted — an SSE stream
+         * when the tab is hidden or the page unmounts, a fetch superseded by a newer selection —
+         * so the normal, healthy lifecycle was painting red `FAILED` lines in the console:
+         *
+         *     [bb:api] GET /api/schedule/stream — FAILED after 7,801 ms AbortError: signal is
+         *     aborted without reason
+         *
+         * Nothing failed there; the page closed a stream it had deliberately opened. A console
+         * that cries wolf on its own teardown is a console people stop reading, which costs the
+         * genuine 502 sitting two lines below it.
+         *
+         * ⚠ THE CALLER TELLS US, we do not sniff the error. `AbortError` alone is ambiguous — it is
+         * also what an `AbortSignal.timeout()` raises, and a timeout IS a failure. `apiFetch` knows
+         * whether ITS signal was the one that fired.
+         */
+        if (cancelled) {
+          console.log(`%c[${PREFIX}:api]%c ${method} ${path} — cancelled after ${ms(performance.now() - t0)}`,
+            'color:#6b7280', '');
+          return;
+        }
         console.error(`%c[${PREFIX}:api]%c ${method} ${path} — FAILED after ${ms(performance.now() - t0)}`,
           'color:#c33', '', err ?? '');
         return;

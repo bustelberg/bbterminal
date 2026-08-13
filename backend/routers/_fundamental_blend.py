@@ -64,6 +64,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date as _date
+from statistics import median
 
 # Below this share of the blended weight reporting on a date, that date has no honest value.
 #
@@ -97,6 +98,38 @@ MIN_BLEND_COVERAGE_PCT = 50.0
 # a missing 7% one. The two answer different questions — "how much of the index reported" and "how
 # many of it" — and a period has to survive both.
 MIN_BLEND_COVERAGE_NAMES_PCT = 50.0
+
+# ⚠⚠ HOW BIG A MEMBER'S STARTING FIGURE MUST BE, RELATIVE TO ITS OWN TYPICAL SIZE, FOR THE RATIO
+# OFF IT TO BE A GROWTH RATE AT ALL — and this is the constant that stops ONE holding deleting a
+# whole chart (2026-08-13).
+#
+# The step is `g = v(period)/v(anchor) − 1`, guarded only by `v(anchor) > 0`. That guard catches
+# zero and negatives and misses the case that actually bites: a base that is positive and
+# NEAR zero. Measured on the AEX FCF/share index — Prosus's first positive figure is **0.0090** a
+# share (2021), against a median of 0.1485 over its own history, i.e. a rounding artefact of a
+# holding company that hovers around break-even. Its 2022 figure of −0.24 divided by it is
+# **g = −27.0**, i.e. "−2,700% growth", carried at a **26% index weight**:
+#
+#     step = −3.47   ->   level = 589.4 x (1 − 3.471) = −1,456
+#
+# From there the index is NEGATIVE, and the level cards plot on a LOG axis — so every point after
+# the crossing is dropped as unplottable, silently, one per year. Measured: AEX annual drew **6 of
+# 10** points and AEX quarterly **26 of 32**, with `connectNulls` drawing a confident straight line
+# across the hole. Nothing on screen said anything; `benchNote` only speaks at zero or one point.
+#
+# ⚠ IT IS SYMMETRIC, AND THE UPSIDE IS THE HALF A SIGN-CHANGE TEST WOULD MISS. The same 0.0090 base
+# gives Prosus **+7,677%** on the way back up, which is how an index quadruples on one constituent.
+# The pathology is the DIVISOR, not the direction, so that is what is tested.
+#
+# ⚠ RELATIVE, NEVER ABSOLUTE. "0.009 is small" is not a fact about a number — it is a fact about
+# Prosus. NVIDIA's whole FCF/share series lives at 0.04–0.16 a share and is perfectly real. So the
+# bar is the member's own median |value|, which makes it scale-free and currency-free.
+#
+# ⚠ 0.10 IS READ OFF THE DISTRIBUTION, NOT PICKED. base ÷ median|value| over the two books measured:
+# AMD **0.0078** and Prosus **0.0606** are the two pathological anchors; the next-lowest are Adyen
+# **0.150** and Lam Research **0.184**, and the bulk sit 0.21–1.0. Adyen's is a real 6.7x growth
+# story and must survive. 0.10 sits in the gap, twice over.
+_MIN_STEP_BASE_FRACTION = 0.10
 
 # How long a member's last reported figure stands in for a period it did not report — see
 # `carry_forward`. One year: the longest any still-reporting filer goes between filings, so nothing
@@ -306,6 +339,51 @@ def _prepare(members: list[dict], kind: str, bucket=year_bucket) -> tuple[list[d
     return ok, dropped
 
 
+def member_scale(at: dict[str, float]) -> float:
+    """A member's own typical magnitude — the median |value| across the periods it contributes.
+
+    ⚠ MEDIAN, NOT MEAN. The thing being measured against is an outlier, and a mean is moved by the
+    very outlier it is supposed to identify: Prosus's own values run 0.0090 … 0.70, and one of them
+    is the artefact. The median is the figure the series actually lives at.
+
+    ⚠ COMPUTED ON THE **REBASED** VALUES, WHICH IS SAFE BECAUSE THE TEST IS A RATIO. `_prepare`
+    scales a level member by a per-member constant (100/base); it divides out of `prev ÷ scale`, so
+    this needs neither the raw series nor a currency.
+    """
+    vals = [abs(v) for v in at.values()]
+    return median(vals) if vals else 0.0
+
+
+def step_growth(prev: float | None, now: float | None, scale: float) -> float | None:
+    """One member's growth over one interval — or None when it has none to give.
+
+    ⚠⚠ THE ONE DEFINITION, READ BY BOTH THE LINE (`blend_series`) AND THE PANEL THAT EXPLAINS IT
+    (`_level_breakdown`). They each derive `prev`/`now` their own way, from their own member lists,
+    and used to apply the rule twice — so a breakdown could attribute a −2,700% move to a holding
+    the line no longer moved on. The client's twin in `HoldingsRevenueModal` mirrors this exactly.
+
+    Three refusals and a floor, in order:
+
+    * NO ANCHOR / NO VALUE — the member cannot span this interval. It sits out THIS step and joins
+      at the next; it is never dropped from the metric.
+    * A NON-POSITIVE ANCHOR — there is no ratio to a zero or a negative.
+    * AN IMMATERIAL ANCHOR — see `_MIN_STEP_BASE_FRACTION`. This is the one that stops a single
+      near-break-even holding turning an index inside out.
+    * FLOORED AT −100%. ⚠ BELOW ZERO THERE IS NO SCALE. A per-share figure of −0.24 against a base
+      of +0.30 is not "180% worse" in any sense an INDEX can carry: an index is a product of
+      (1 + g), so a term below −1 does not make it small, it makes it NEGATIVE — and a negative
+      index is not a low reading, it is not an index at all. −100% is the most a level can lose, so
+      that is what a member that has gone to or below zero contributes. It costs a real distinction
+      (−150% and −400% both read as −100%) and buys the structural guarantee that the line cannot
+      cross zero, which is the only reason the log axis can be trusted to be showing everything.
+    """
+    if prev is None or now is None or prev <= 0:
+        return None
+    if prev < _MIN_STEP_BASE_FRACTION * scale:
+        return None
+    return max(now / prev - 1.0, -1.0)
+
+
 def _weight_at(m: dict, period: str) -> float | None:
     """This member's weight IN THIS PERIOD, or None when it has none and is left out of it.
 
@@ -419,6 +497,10 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket) -> d
             if reported:
                 cover_w[period] += abs(float(p.get("weight") or 0))
                 cover_n[period] += 1
+        # ⚠ ONCE PER MEMBER, NOT ONCE PER STEP. It is the same figure at every interval — the
+        # member's own typical magnitude — and the level chain asks for it O(periods x members)
+        # times. Computed here, where `at` has just been filled, so the two cannot fall out of step.
+        p["scale"] = member_scale(p["at"])
 
     def _clears(d: str) -> bool:
         return (100.0 * cover_w[d] / total_w >= MIN_BLEND_COVERAGE_PCT
@@ -460,15 +542,25 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket) -> d
                 anchor = d
                 out.append(_point(d, level))
                 continue
-            pairs = [(w, v / prev - 1.0)
+            # ⚠ ONE RULE, IN ONE PLACE — `step_growth`. The guard that used to live inline here
+            # (`prev > 0`) missed the near-zero base, which is the failure that deletes a chart.
+            pairs = [(abs(float(w)), g)
                      for p in prepared
                      for w in [_weight_at(p, d)]
-                     for prev in [p["at"].get(anchor)]
-                     for v in [p["at"].get(d)]
-                     if w and prev and prev > 0 and v is not None]
-            step = _weighted_arithmetic([(abs(float(w)), g) for w, g in pairs])
+                     for g in [step_growth(p["at"].get(anchor), p["at"].get(d), p["scale"])]
+                     if w and g is not None]
+            step = _weighted_arithmetic(pairs)
             if step is None:
                 continue                          # nothing spans this interval — no honest move
+            # ⚠ EVERY CONSTITUENT WIPED OUT. `step_growth` floors each member at −100%, so this can
+            # only be an exact −1: the whole panel went to or below zero over one interval. The
+            # index is 0 from here and would stay 0 for ever — points a LOG axis cannot draw, which
+            # is precisely the silent truncation this guard exists to end. Ending the series is the
+            # honest form of that: a line that STOPS is visible, where a run of unplottable zeroes
+            # is not. (It is a backstop, not a path anything reaches today — the materiality bar
+            # above is what keeps a single member from getting anywhere near it.)
+            if 1.0 + step <= 0:
+                break
             level *= 1.0 + step
             out.append(_point(d, level))
             anchor = d
@@ -726,10 +818,13 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
         contrib = []
         for p in reporting:
             w = _weight_at(p, period)
-            prev = p["at"].get(anchor) if "at" in p else p["by_year"].get(anchor, (None, None))[1]
-            now = p["at"].get(period) if "at" in p else p["by_year"].get(period, (None, None))[1]
-            spans = bool(w) and bool(prev) and (prev or 0) > 0 and now is not None
-            contrib.append((p, abs(float(w or 0)), (now / prev - 1.0) if spans else None))
+            at = p.get("at") or {k: v for k, (_d, v) in p["by_year"].items()}
+            # ⚠ THE SAME `step_growth` THE LINE USES, INCLUDING THE MATERIALITY BAR AND THE −100%
+            # FLOOR. Re-deriving "the same way" here is how a panel comes to attribute a −2,700%
+            # move to a holding the chart above it no longer moved on — and this panel is checked
+            # once and believed thereafter.
+            g = step_growth(at.get(anchor), at.get(period), p.get("scale", member_scale(at)))
+            contrib.append((p, abs(float(w or 0)), g if w else None))
         # ⚠ THE DENOMINATOR IS THE MEMBERS THAT MOVED, not everyone in the table — a member with no
         # growth to measure must not dilute the step toward zero. It appears with nulls; it is not
         # counted as 0%.

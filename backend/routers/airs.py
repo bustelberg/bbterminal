@@ -2234,10 +2234,19 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
     job path is exactly the drift its own docstring exists to prevent. The plain POST above stays
     for scripts and for anything that wants one blocking answer.
 
-    ⚠ NO `ctx.check()` INSIDE THE SCAN. Cancellation is cooperative and the natural boundary is
-    BETWEEN accounts — but a half-cascade leaves a parent fresh against stale children, which is
-    the state this endpoint exists to avoid. So the job is not cancellable mid-chain: it reports,
-    it does not stop. `_LOCK` already refuses a second one.
+    ⚠⚠ IT IS CANCELLABLE BETWEEN ACCOUNTS, AND THAT REVERSES WHAT THIS DOCSTRING USED TO SAY
+    (2026-08-13). It passed no `should_stop` and argued that a half-cascade leaves a parent fresh
+    against stale children, so the job "reports, it does not stop". The cost of that was a Cancel
+    button — on the row, in the Analyse modal and on the toast itself — that changed nothing for
+    minutes while its card read "cancelling…" and then finished `done`. The argument also proves too
+    much: `cascade=False` produces the identical state on purpose. So the scan now stops at an
+    account boundary and NAMES the books it left stale (`cancelled_at`, `stale_books`), which is the
+    honest version of the same compromise. `_LOCK` still refuses a second one.
+
+    ⚠ AND THE JOB ENDS `cancelled`, NOT `done`. `_work` returning a string — however carefully it is
+    worded — is a `done` job to the registry, so the toast would go green and the summary would be
+    the only thing saying otherwise. `JobCancelled` is what makes the card amber, and it carries the
+    detail as its message so the summary still names the books left stale.
     """
     import jobs as job_registry  # noqa: PLC0415
 
@@ -2246,7 +2255,17 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
     def _work(ctx) -> str:
         res = refresh_one_portfolio(
             portefeuille, cascade,
-            on_step=lambda done, total, msg: ctx.progress(done, total, msg))
+            on_step=lambda done, total, msg: ctx.progress(done, total, msg),
+            # ⚠ THE FLAG, NOT `ctx.check()`. The scan has to reach its own `finally` to release
+            # `_LOCK`; unwinding it with an exception from the inside would leave the AirSPMS
+            # session locked against every later refresh. Same reason the fleet job gives.
+            should_stop=lambda: ctx.cancelled)
+        if res.get("cancelled_at"):
+            stale = res.get("stale_books") or []
+            raise job_registry.JobCancelled(
+                f"cancelled before {res['cancelled_at']}"
+                + (f" — {len(stale)} book(s) left un-refreshed: {', '.join(stale)}"
+                   if stale else " — nothing was read"))
         if res.get("status") == "busy":
             # ⚠ AN ANSWER, NOT A FAILURE. The fleet scan holds the session; this is a "try again",
             # and raising would paint it red beside the real errors.

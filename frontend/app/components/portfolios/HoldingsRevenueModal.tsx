@@ -11,6 +11,7 @@ import { cancelJob, startJob, type JobToast } from '../../../lib/stores/jobs';
 import InfoTip from '../InfoTip';
 import { BADGE_TONE, StateBadge } from '../StateBadge';
 import { MIN_YEAR_COVERAGE_PCT } from './marginData';
+import { memberScale, stepGrowth } from './stepGrowth';
 import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
 
 /**
@@ -426,6 +427,10 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
      * ⚠ THE ANCHOR IS THE LAST DRAWN PERIOD, not the previous one: a period under the floor is not
      * drawn, and measuring the next step from it would compound a move nobody could see.
      */
+    /** ⚠ ONCE PER ROW, NOT ONCE PER STEP — the same figure at every interval, and the loop below
+     *  asks for it periods x rows times. Mirrors where the backend computes it. */
+    const scaleOf = new Map<typeof parts[number], number>(
+      parts.map((p) => [p, memberScale(Object.values(at.get(p) ?? {}))]));
     let anchor: string | null = null;
     let chained = 100;
     for (const y of data.years) {
@@ -434,14 +439,20 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
         let num = 0;
         let den = 0;
         for (const p of parts) {
-          const prev = at.get(p)?.[anchor];
-          const now = at.get(p)?.[y];
           const w = wAt(p.r, y);
-          if (!w || !prev || prev <= 0 || now == null) continue;
-          num += w * (now / prev - 1);
+          // ⚠ THE SHARED RULE, NOT AN INLINE `prev > 0`. That guard caught zero and missed the
+          // near-zero base — which is what let one holding drive an index through zero and take
+          // most of the line off a log axis with it. See `stepGrowth`.
+          const g = stepGrowth(at.get(p)?.[anchor], at.get(p)?.[y], scaleOf.get(p) ?? 0);
+          if (!w || g == null) continue;
+          num += w * g;
           den += w;
         }
         if (den <= 0) continue;               // nothing spans this interval — no honest move
+        // ⚠ EVERY ROW WIPED OUT. `stepGrowth` floors each at −100%, so this is an exact −1 and the
+        // index is 0 from here on — values a log axis cannot draw. It stops rather than emitting
+        // points that would vanish silently, which is the failure this whole rule exists to end.
+        if (1 + num / den <= 0) break;
         chained *= 1 + num / den;
       }
       anchor = y;

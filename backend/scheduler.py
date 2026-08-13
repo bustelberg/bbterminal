@@ -47,7 +47,11 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from job_runlog import record_run
 from routers.ingest_runs import kick_off_refresh
+# ⚠ THE SCHEDULE ITSELF LIVES THERE, NOT HERE — see `_register`. Declaration only: no DB, no
+# APScheduler, so it is safe for both this module and the admin router to import.
+from scheduled_jobs import BY_ID, ORPHAN_MARKER
 
 _log = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
@@ -219,7 +223,11 @@ def _reap_orphan_runs() -> None:
                     "current_phase": "done",
                     "finished_at": now_iso,
                     "error_summary": (
-                        f"Orphaned (backend restart while running) — auto-reaped "
+                        # ⚠ THE PREFIX IS A SHARED CONSTANT — the automatic-jobs overview matches on
+                        # it to report this as `interrupted` rather than as a job fault. Reword it
+                        # here and the overview silently goes back to calling every dev `--reload`
+                        # a failure.
+                        f"{ORPHAN_MARKER} — auto-reaped "
                         f"on next startup. Was stuck in phase "
                         f"{o.get('current_phase') or '?'} with message: "
                         f"{(o.get('current_message') or '')[:200]}"
@@ -443,6 +451,127 @@ def _held_prices_stale() -> bool:
     return age is not None and age >= 1
 
 
+def _body_asset_price_refresh(ctx=None) -> tuple[str, dict]:
+    """⚠ THE EXISTING BODY, UNCHANGED — it already owns its own `record_run` (it has three distinct
+    `skipped` outcomes to report) and its own try/except. Wrapping it again would open a second run
+    row for one run, so `_run_body` skips its own record for this one."""
+    _run_asset_price_refresh("manual run")
+    return "see the run record", {}
+
+
+#: EVERY DECLARED JOB'S BODY, callable twice: by its scheduler tick and by the Run-now button.
+#:
+#: ⚠⚠ ONE BODY, TWO CALLERS — the rule this codebase applies to every scraper and pipeline. A button
+#: that ran a second implementation would drift from the thing the schedule actually runs, and the
+#: drift would only ever be discovered by the button disagreeing with the nightly result.
+#:
+#: ⚠ A JOB WITH NO ENTRY IS NOT RUNNABLE BY HAND, and that is an answer rather than a gap: the
+#: 20-second queue worker has nothing to trigger (it fires three times a minute), and the two
+#: pipeline jobs already have their own richer Run-now with a live console tail in their panels.
+JOB_BODIES: dict = {}
+
+
+def _reporter(ctx):
+    """`(done, total, message)` → the job's progress stream, or nowhere on a scheduler tick.
+
+    ⚠ A REPORTER MUST NEVER BE THE REASON A SCAN FAILS — the rule `airs_vermogen._step` already
+    states. The work is the scan; the line on screen is a courtesy, and a listener that raised
+    would lose a refresh that had already downloaded everything.
+
+    ⚠ `ctx is None` ON THE TICK, which is not a degraded mode: nobody is watching a 09:30 cron, and
+    the run record carries the outcome either way.
+    """
+    def step(done, total, message) -> None:
+        if ctx is None:
+            return
+        try:
+            ctx.progress(int(done or 0), int(total or 0), str(message)[:300])
+        except Exception:  # noqa: BLE001
+            _log.debug("[scheduler] progress listener raised", exc_info=True)
+    return step
+
+
+class _Cancelled(Exception):
+    """Raised by a body that stopped because Cancel was pressed. Translated to the registry's own
+    `JobCancelled` by `_run_body`, so a body never has to import the jobs module."""
+
+
+def _run_body(job_id: str, ctx=None, triggered_by: str = "auto") -> str:
+    """Run one declared job's body inside its run record — the ONE path for both callers."""
+    import jobs as _jobs  # noqa: PLC0415
+
+    body = JOB_BODIES[job_id]
+    # ⚠ THE ASSET REFRESH RECORDS ITSELF (three `skipped` outcomes of its own), so a second record
+    # here would open two rows for one run.
+    if job_id == "asset_price_refresh":
+        body(ctx)
+        return "done"
+    stopped: str | None = None
+    with record_run(job_id, triggered_by=triggered_by) as rec:
+        try:
+            detail, summary = body(ctx)
+        except _Cancelled as e:
+            # ⚠⚠ CAUGHT *INSIDE* THE `with`, NOT OUTSIDE IT. Letting it propagate through
+            # `record_run` closes the row as `error` — measured: a cancelled probe wrote
+            # `status=error, detail=_Cancelled: stopped at step 19` while the toast correctly said
+            # `cancelled`. Two records of one event, disagreeing, and the durable one was the wrong
+            # one. Setting the status here and re-raising after the block leaves the row honest.
+            rec.status = "cancelled"
+            rec.detail = str(e)
+            stopped = str(e)
+        else:
+            rec.done(detail, **{k: v for k, v in (summary or {}).items() if v is not None})
+    if stopped is not None:
+        raise _jobs.JobCancelled(stopped)
+    return detail
+
+
+def _spawn_body(job_id: str) -> None:
+    """The scheduler tick: run the body on a daemon thread, never raising into APScheduler."""
+    def _go() -> None:
+        try:
+            _run_body(job_id)
+        except Exception as e:  # noqa: BLE001
+            _log.exception("[scheduler] %s failed: %s: %s", job_id, type(e).__name__, e)
+    threading.Thread(target=_go, daemon=True, name=job_id.replace("_", "-")).start()
+
+
+def start_job_now(job_id: str):
+    """Kick a declared job off by hand, as a CANCELLABLE registry job with a progress toast.
+
+    ⚠ THE SAME BODY THE TICK RUNS, through `_run_body` — so "Run now" cannot come to mean something
+    different from what the schedule does.
+
+    ⚠ CANCELLATION IS COOPERATIVE AND ITS LATENCY DIFFERS PER JOB, which the UI states rather than
+    hides: the AIRS scan stops between accounts (seconds), the drift probe between companies, and
+    the FX / CRM / size jobs are short enough to have no useful boundary at all. "Immediately" is
+    not on offer for a scraper mid-download, and claiming it would be the decorative Cancel this
+    codebase has already removed once.
+    """
+    import jobs as _jobs  # noqa: PLC0415
+
+    if job_id not in JOB_BODIES:
+        raise KeyError(job_id)
+    label = BY_ID[job_id].label if job_id in BY_ID else job_id
+
+    def _work(ctx) -> str:
+        return _run_body(job_id, ctx, triggered_by="manual")
+
+    return _jobs.start(f"scheduled.{job_id}", label, _work)
+
+
+def scheduler_running() -> bool:
+    """Whether THIS process has a live in-process scheduler.
+
+    ⚠⚠ IT IS NOT `bool(list_scheduled_jobs())`, AND THAT IS THE WHOLE REASON IT EXISTS. An empty job
+    list has two opposite meanings: on a replica with `DISABLE_SCHEDULER=1` it is correct and
+    expected, and on the one instance that is supposed to be running everything it means every
+    registration failed. The list cannot tell them apart — a monitor that infers one from the other
+    reports the fire as normal.
+    """
+    return _scheduler is not None
+
+
 def list_scheduled_jobs() -> list[dict]:
     """Snapshot of every job currently registered on the in-process
     scheduler, for the /schedule "Pipeline activity" strip. Returns one
@@ -648,8 +777,19 @@ def _fire_asset_price_refresh() -> None:
 
 
 def _run_asset_price_refresh(trigger: str) -> None:
-    """The body, shared by the 06:00 tick and the startup catch-up. Never raises."""
-    try:
+    """The body, shared by the 06:00 tick and the startup catch-up. Never raises.
+
+    ⚠ THE THREE EARLY EXITS ARE `skipped`, NOT `ok` AND NOT FAILURES. Standing down for the queue
+    worker, finding everything current, and waiting on a database that has not finished booting are
+    all correct behaviour — but recording them as `ok` would make a job that stood down every single
+    day for a fortnight (because a stalled worker looked live) indistinguishable from one doing its
+    work. The overview can then show the reason.
+    """
+    # ⚠ `startup` IS ITS OWN TRIGGER, so the overview does not read a restart storm under
+    # `uvicorn --reload` as the 06:00 tick having fired forty times.
+    triggered = "startup" if "startup" in trigger else "auto"
+    with record_run("asset_price_refresh", triggered_by=triggered) as rec:
+      try:
         from asset_pipeline import price_refresh, queue as _q  # noqa: PLC0415
 
         # ⚠ FIRST, WAIT FOR THE DATABASE — this fires on startup, in parallel with the Supabase
@@ -657,6 +797,7 @@ def _run_asset_price_refresh(trigger: str) -> None:
         # with PGRST002 until PostgREST has loaded its schema cache. Losing the catch-up to a
         # boot race costs a whole day of stale held prices; see `_await_db_ready`.
         if not _await_db_ready(f"asset price refresh ({trigger})"):
+            rec.skip("the database was not ready in time")
             return
 
         if _q.is_worker_active():
@@ -665,6 +806,7 @@ def _run_asset_price_refresh(trigger: str) -> None:
                 "(last activity %s); adding Yahoo load now risks corrupting the listings it is "
                 "resolving.", trigger, _q.last_activity(),
             )
+            rec.skip(f"the ingest queue worker is live (last activity {_q.last_activity()})")
             return
 
         # Detect BEFORE fetching. A restart must not cost ~220 Yahoo calls just to discover
@@ -676,6 +818,8 @@ def _run_asset_price_refresh(trigger: str) -> None:
                 "[scheduler] asset price refresh (%s): all %s held instrument(s) current as of "
                 "%s — nothing to do", trigger, considered, latest,
             )
+            rec.skip(f"all {considered} held instrument(s) current as of {latest}")
+            rec.done(considered=considered, latest=str(latest), stale=0)
             return
 
         # WARNING, not info: uvicorn leaves the ROOT logger at WARNING, so an `info` here is
@@ -693,7 +837,15 @@ def _run_asset_price_refresh(trigger: str) -> None:
             "[scheduler] asset price refresh (%s) done — %s moved, %s unchanged, %s failed",
             trigger, r["moved"], r["unchanged"], r["failed"],
         )
-    except Exception:  # noqa: BLE001
+        rec.done(f"{r['moved']} moved, {r['unchanged']} unchanged, {r['failed']} failed",
+                 considered=considered, stale=len(stale), moved=r["moved"],
+                 unchanged=r["unchanged"], failed=r["failed"])
+      except Exception as e:  # noqa: BLE001
+        # ⚠ CAUGHT HERE, SO THE RECORD MUST BE SET BY HAND. `record_run` marks a run failed off the
+        # exception PROPAGATING; swallowing it (which this must, to keep the scheduler thread
+        # alive) would otherwise close the row as `ok`.
+        rec.status = "error"
+        rec.detail = f"{type(e).__name__}: {str(e)[:400]}"
         _log.exception("[scheduler] asset price refresh (%s) failed", trigger)
 
 
@@ -727,7 +879,7 @@ def _maybe_kickstart_airs_models() -> None:
     basket. Measured in production 2026-08-03 on `AITopSelectie OFF DYN`: "No valued positions to
     show", beside a portfolios list whose rows expand perfectly.
 
-    Waiting for the next weekday 10:00 Amsterdam tick would leave that state up for as much as a
+    Waiting for the next weekday-morning tick would leave that state up for as much as a
     long weekend after the deploy that was supposed to fix it, which is the same reasoning as
     `_maybe_kickstart_asset_prices`.
 
@@ -754,7 +906,7 @@ def _maybe_kickstart_airs_models() -> None:
             _log.warning(
                 "[scheduler] NO model-portfolio compositions stored — scanning AIRS now. Without "
                 "them no account can be paired to a model, so Analyse falls back to an unpaired "
-                "basket for every portfolio. This runs once; the Mon-Fri 10:00 tick keeps them "
+                "basket for every portfolio. This runs once; the weekday morning tick keeps them "
                 "current afterwards.")
             from airs_scanner import (  # noqa: PLC0415
                 count_model_portfolio_holdings_sync,
@@ -798,23 +950,43 @@ def _fire_history_drift_check() -> None:
     requests/day — instead of all of it.
 
     Own daemon thread; never raises into the scheduler."""
-    def _run() -> None:
-        try:
-            from ingest.history_drift import daily_drift_check  # noqa: PLC0415
+    _spawn_body("history_drift_check")
 
-            res = daily_drift_check(
-                on_step=lambda m, lvl: (
-                    _log.warning if lvl in ("warn", "error") else _log.info
-                )("[drift] %s", m),
-            )
-            if res.get("drifted"):
-                _log.warning(
-                    "[scheduler] history drift: %s of %s probed companies had rewritten "
-                    "history and were refetched", len(res["drifted"]), res.get("probed"),
-                )
-        except Exception as e:
-            _log.exception("[scheduler] history drift check failed: %s: %s", type(e).__name__, e)
-    threading.Thread(target=_run, daemon=True, name="history-drift").start()
+
+def _body_history_drift(ctx=None) -> tuple[str, dict]:
+    """⚠ CANCEL LANDS AT THE NEXT PROBE. `on_step` fires per company, so this is one of the bodies
+    that CAN stop quickly — it walks a fifth of the universe and each probe is one request."""
+    from ingest.history_drift import daily_drift_check  # noqa: PLC0415
+
+    seen = {"n": 0}
+    report = _reporter(ctx)
+
+    def _step(m, lvl) -> None:
+        (_log.warning if lvl in ("warn", "error") else _log.info)("[drift] %s", m)
+        # ⚠ NO TOTAL — the walk's size is decided inside `daily_drift_check` and never handed out,
+        # so the bar stays indeterminate and the LINE carries the progress. A fabricated total
+        # would give a bar that reaches 100% and keeps going.
+        seen["n"] += 1
+        report(seen["n"], 0, m)
+        # ⚠ RAISED, NOT RETURNED. `daily_drift_check` has no stop hook, so the only way out is to
+        # unwind it from the callback it does have — at a per-company boundary, where the last
+        # company is either fully refetched or untouched.
+        if ctx is not None and getattr(ctx, "cancelled", False):
+            raise _Cancelled(
+                f"stopped after {seen['n']} probe(s); everything refetched so far is kept")
+
+    res = daily_drift_check(on_step=_step)
+    drifted = res.get("drifted") or []
+    if drifted:
+        _log.warning("[scheduler] history drift: %s of %s probed companies had rewritten "
+                     "history and were refetched", len(drifted), res.get("probed"))
+    # ⚠ FINDING NOTHING IS THE JOB WORKING, NOT THE JOB SKIPPING. Most days no vendor rewrote
+    # anything, and that is `ok` with a count of zero — the number is the point, because a probe
+    # count that quietly falls to 0 means the WALK stopped, which looks identical to a clean week
+    # if only the drift count is recorded.
+    return (f"{len(drifted)} drifted of {res.get('probed')} probed",
+            {"probed": res.get("probed"), "drifted": len(drifted),
+             "names": [str(d) for d in drifted][:20]})
 
 
 def _fire_fx_sync() -> None:
@@ -824,25 +996,32 @@ def _fire_fx_sync() -> None:
     currencies would otherwise go stale on the /fx-rates page. Idempotent +
     cheap: `sync_fx_rates_to_db` fetches only the gap since each currency's last
     stored date. Own daemon thread; never raises into the scheduler."""
-    def _run() -> None:
-        try:
-            from datetime import date as _date  # noqa: PLC0415
+    _spawn_body("fx_sync")
 
-            from deps import supabase  # noqa: PLC0415
-            from fx_rates import ECB_CURRENCIES, _USD_PEGS  # noqa: PLC0415
-            from momentum.data import sync_fx_rates_to_db  # noqa: PLC0415
 
-            currencies = list(ECB_CURRENCIES) + list(_USD_PEGS.keys()) + ["TWD"]
-            status = sync_fx_rates_to_db(supabase, currencies, _date(2000, 1, 1), _date.today())
-            synced = sum(1 for s in status.values() if s.get("status") == "synced")
-            errors = sum(1 for s in status.values() if s.get("status") == "error")
-            _log.info(
-                "[scheduler] fx sync done: %s/%s currencies updated, %s errors",
-                synced, len(status), errors,
-            )
-        except Exception as e:
-            _log.exception("[scheduler] fx sync failed: %s: %s", type(e).__name__, e)
-    threading.Thread(target=_run, daemon=True, name="fx-sync").start()
+def _body_fx_sync(ctx=None) -> tuple[str, dict]:
+    """⚠ NOT CANCELLABLE MID-RUN, and `ctx` is accepted only so every body has one shape. The whole
+    sync is a handful of ECB requests over seconds; there is no boundary worth checking, and a
+    partial FX table is worse than a complete one (a missing rate silently drops a holding from its
+    portfolio — see `_fx`'s paging note)."""
+    from datetime import date as _date  # noqa: PLC0415
+
+    from deps import supabase  # noqa: PLC0415
+    from fx_rates import ECB_CURRENCIES, _USD_PEGS  # noqa: PLC0415
+    from momentum.data import sync_fx_rates_to_db  # noqa: PLC0415
+
+    currencies = list(ECB_CURRENCIES) + list(_USD_PEGS.keys()) + ["TWD"]
+    status = sync_fx_rates_to_db(supabase, currencies, _date(2000, 1, 1), _date.today())
+    synced = sum(1 for s in status.values() if s.get("status") == "synced")
+    errors = sum(1 for s in status.values() if s.get("status") == "error")
+    _log.info("[scheduler] fx sync done: %s/%s currencies updated, %s errors",
+              synced, len(status), errors)
+    # ⚠ A SYNC THAT UPDATED NOTHING IS THE NORMAL CASE, NOT A SKIP. It is idempotent and fetches
+    # only the gap, so on a day the ECB has already been read every currency is correctly up to
+    # date — `ok` with a count of 0, which is what makes a run of zeros over a WEEK legible as the
+    # ECB feed having died.
+    return (f"{synced}/{len(status)} currencies updated, {errors} error(s)",
+            {"currencies": len(status), "synced": synced, "errors": errors})
 
 
 def _fire_airs_vermogen() -> None:
@@ -854,13 +1033,48 @@ def _fire_airs_vermogen() -> None:
     ⚠ IT FORCES. The manual button is incremental — it skips an account fully scanned in the last
     `AIRS_FRESH_HOURS` — but this is the once-a-day pass that has to actually pick up the day's
     valuation. Somebody pressing Refresh all at 08:00, before AIRS had valued the books, would
-    otherwise make the 11:00 job skip the whole fleet and the new valuation would land a day late.
+    otherwise make this job skip the whole fleet and the new valuation would land a day late.
+    (That sentence said "the 11:00 job" and the tick has been 10:00 for months — a restated time is
+    a time that goes stale. The schedule is declared once, in `scheduled_jobs.SCHEDULED_JOBS`.)
+
+    ⚠⚠ AND THAT SAME REASONING NOW CUTS THE OTHER WAY, SINCE THE TICK MOVED TO 09:30 (2026-08-13).
+    If AIRS has not valued the books by then, this run stores YESTERDAY's valuation — and because
+    it forces and fires once, nothing re-reads it until tomorrow. The symptom is holdings that are
+    a full day behind while looking perfectly current. If that appears, add a second attempt later
+    in the morning; do not move this one earlier.
     """
-    def _run():
+    _spawn_body("airs_vermogen_refresh")
+
+
+def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
+      """⚠⚠ CANCEL LANDS BETWEEN ACCOUNTS, NEVER INSIDE ONE — `run_airs_vermogen_refresh_sync`
+      already takes the `should_stop` hook and checks it at exactly that boundary, because an
+      account's four reports are downloaded and stored as a unit. Everything already stored is kept.
+
+      ⚠ ONE RESULT FOR BOTH HALVES, because it is one JOB — but each half keeps its own try/except,
+      so a failed composition scan still cannot cost the daily valuation. It reports `error` if
+      EITHER failed and names which: "not fatal to the accounts refresh" is a statement about
+      control flow, not a reason to report a failure as ok."""
+      summary: dict = {}
+      failures: list[str] = []
+      stop = (lambda: bool(getattr(ctx, "cancelled", False))) if ctx is not None else None
+      step = _reporter(ctx)
+      if True:
         try:
             from airs_vermogen import run_airs_vermogen_refresh_sync  # noqa: PLC0415
-            run_airs_vermogen_refresh_sync(triggered_by="auto", force=True)
+            # ⚠ TWO PHASES, TWO COUNTERS, AND THE MESSAGE SAYS WHICH. The accounts pass counts
+            # accounts and the model pass counts models; the totals are only known when each starts,
+            # so the bar restarts between them. A restarting bar reads as a failure unless the line
+            # under it names the phase — hence the prefixes below.
+            res = run_airs_vermogen_refresh_sync(
+                triggered_by="auto", force=True, should_stop=stop,
+                on_step=lambda d, t, m: step(d, t, f"Accounts · {m}")) or {}
+            summary.update(accounts=res.get("complete_accounts"),
+                           portfolios_found=res.get("portfolios_found"),
+                           holdings_rows=res.get("holdings_rows"),
+                           cancelled_at=res.get("cancelled_at"))
         except Exception as e:
+            failures.append(f"accounts: {type(e).__name__}: {e}")
             _log.exception(
                 "[scheduler] airs_vermogen refresh failed: %s: %s", type(e).__name__, e,
             )
@@ -877,33 +1091,105 @@ def _fire_airs_vermogen() -> None:
         # ⚠ AFTER the accounts, in the SAME thread, never beside it. Both drive one authenticated
         # AirSPMS session through Playwright; two scrapers at once is a contended login, and the
         # failure mode there is a half-finished scan rather than an error.
+        # ⚠ SKIPPED ENTIRELY ON A CANCEL. Running minutes more of scraping after the reader asked
+        # to stop is the same mistake the fleet refresh already refuses to make.
         try:
+            if stop is not None and stop():
+                raise _Cancelled("stopped between accounts; everything stored so far is kept")
             from airs_scanner import (  # noqa: PLC0415
                 count_model_portfolio_holdings_sync,
                 fetch_model_portfolios_sync,
             )
             from routers import _airs_portfolio_store as store  # noqa: PLC0415
 
-            def _quiet(_msg_type: str, **_kw) -> None:
-                """The scan streams progress for the UI; here there is nobody to stream to."""
+            # ⚠ THE SCANNER ALREADY EMITS PER-ITEM EVENTS — it was being handed a no-op. Both
+            # `fetch_model_portfolios_sync` and `count_model_portfolio_holdings_sync` send a
+            # `message` per portfolio; forwarding them is the difference between a toast that says
+            # "starting…" for four minutes and one that names the book it is on.
+            #
+            # ⚠ THE COUNT PHASE CARRIES `i/n` INSIDE ITS MESSAGE, NOT AS done/total — the scanner
+            # does not expose the pair. Parsing "12/95" back out of prose to drive a bar would be a
+            # format dependency between two modules; the line itself is the progress.
+            models_seen = {"n": 0}
 
-            rows = fetch_model_portfolios_sync(_quiet)
+            def _relay(kind: str, **kw) -> None:
+                msg = kw.get("message")
+                if not msg:
+                    return
+                if kind == "count":
+                    models_seen["n"] += 1
+                step(models_seen["n"], 0, f"Models · {msg}")
+                # ⚠ CHECKED HERE TOO. The model scan is the long half (one edit page + one XLS per
+                # portfolio, minutes); without this a Cancel pressed during it would be honoured
+                # only after every remaining book had been downloaded.
+                if stop is not None and stop():
+                    raise _Cancelled(
+                        f"stopped after {models_seen['n']} model(s); everything stored is kept")
+
+            rows = fetch_model_portfolios_sync(_relay)
             store.save_portfolios(rows)
             # ⚠ WRITES AS IT GOES (`on_positions`), so a scan that dies halfway leaves behind
             # what it did reach — the same contract the manual button has.
             count_model_portfolio_holdings_sync(
-                rows, _quiet,
+                rows, _relay,
                 on_positions=store.save_positions,
                 on_error=store.save_positions_error,
             )
             _log.warning("[scheduler] airs model-portfolio scan: %d portfolio(s) stored", len(rows))
+            summary["models"] = len(rows)
+        except _Cancelled:
+            raise
         except Exception as e:
             # Best effort, and NEVER fatal to the accounts refresh above — that one is the daily
             # valuation and must not be lost to a failure in the composition scan.
+            failures.append(f"models: {type(e).__name__}: {e}")
             _log.exception(
                 "[scheduler] airs model-portfolio scan failed: %s: %s", type(e).__name__, e,
             )
-    threading.Thread(target=_run, daemon=True, name="airs-vermogen").start()
+      if failures:
+          raise RuntimeError(" · ".join(failures)[:400])
+      return (f"{summary.get('accounts')} account(s), {summary.get('models')} model(s)", summary)
+
+
+def _fire_table_size_sample() -> None:
+    """Nightly: record every public table's size on disk.
+
+    ⚠ BYTES, NOT ROWS WRITTEN — see `db_growth`. Instrumenting the jobs to count their own inserts
+    would rank the CRM scrape (which overwrites its table: thousands of rows, zero growth) above the
+    month-end price refresh, and would be blind to indexes and bloat.
+
+    Cheap enough to need no gating: one catalog read and ~50 small inserts. Own daemon thread for
+    consistency with every other tick; never raises into the scheduler.
+    """
+    _spawn_body("table_size_sample")
+
+
+def _body_table_size_sample(ctx=None) -> tuple[str, dict]:
+    """⚠ NOT CANCELLABLE, AND NOT WORTH MAKING SO — one catalog read and ~50 small inserts, over in
+    milliseconds. A cancel would land after it finished."""
+    from db_growth import sample_table_sizes  # noqa: PLC0415
+
+    res = sample_table_sizes()
+    _log.info("[scheduler] db size snapshot: %s tables, %s MB total (biggest %s)",
+              res.get("tables"), res.get("total_mb"), res.get("biggest"))
+    return f"{res.get('tables')} tables, {res.get('total_mb')} MB total", res
+
+
+def _register_bodies() -> None:
+    """Fill `JOB_BODIES` once every body is defined.
+
+    ⚠ AT THE BOTTOM OF THE MODULE, NOT AT THE DICT. The bodies are defined throughout the file
+    beside the ticks they belong to; naming them where the dict is declared would be forward
+    references to functions that do not exist yet.
+    """
+    JOB_BODIES.update({
+        "fx_sync": _body_fx_sync,
+        "crm_relaties_refresh": _body_crm_relaties,
+        "airs_vermogen_refresh": _body_airs_vermogen,
+        "history_drift_check": _body_history_drift,
+        "asset_price_refresh": _body_asset_price_refresh,
+        "table_size_sample": _body_table_size_sample,
+    })
 
 
 def _fire_crm_relaties() -> None:
@@ -911,17 +1197,23 @@ def _fire_crm_relaties() -> None:
     Amsterdam, every day). Downloads the export + OVERWRITES airs_crm_relatie
     with the latest snapshot. Own daemon thread so the Playwright scrape doesn't
     block the scheduler worker."""
-    def _run():
-        try:
-            from airs_crm import run_crm_relaties_refresh_sync  # noqa: PLC0415
-            res = run_crm_relaties_refresh_sync()
-            _log.info("[scheduler] CRM relaties refresh — %s relations (%s KB)",
-                      res.get("rows"), (res.get("bytes") or 0) // 1024)
-        except Exception as e:
-            _log.exception(
-                "[scheduler] CRM relaties refresh failed: %s: %s", type(e).__name__, e,
-            )
-    threading.Thread(target=_run, daemon=True, name="crm-relaties").start()
+    _spawn_body("crm_relaties_refresh")
+
+
+def _body_crm_relaties(ctx=None) -> tuple[str, dict]:
+    """⚠ NOT CANCELLABLE MID-RUN. It is one Playwright download followed by a single table replace;
+    stopping between those two would be the worst possible moment, and there is no other."""
+    from airs_crm import run_crm_relaties_refresh_sync  # noqa: PLC0415
+
+    res = run_crm_relaties_refresh_sync()
+    rows = res.get("rows")
+    _log.info("[scheduler] CRM relaties refresh — %s relations (%s KB)",
+              rows, (res.get("bytes") or 0) // 1024)
+    # ⚠ THE ROW COUNT IS THE POINT. This OVERWRITES the table rather than appending, so a run that
+    # "succeeded" with 0 rows has emptied the CRM — a success by every other measure and a data
+    # loss by the only one that matters. Recorded so a drop from 4,000 to 0 is visible on the
+    # overview instead of only in a page that looks empty.
+    return f"{rows} relations", {"rows": rows, "bytes": res.get("bytes")}
 
 
 def register_scheduler(app) -> None:
@@ -942,6 +1234,26 @@ def register_scheduler(app) -> None:
             return
 
         sched = BackgroundScheduler(timezone="UTC")
+
+        def _register(job_id: str, fn) -> None:
+            """Register one declared job — ⚠ THE SCHEDULE COMES FROM `scheduled_jobs.py`.
+
+            Every cadence below used to be a `CronTrigger(...)` literal at the call site. That was
+            fine while nothing else claimed to know the schedule; the moment an admin page shows
+            "every day, 05:00 UTC" the literal becomes a SECOND copy, and the copy is the one that
+            drifts — leaving a page confidently reporting a cadence nothing runs at. Now there is
+            one number, it lives in the declaration, and this reads it.
+
+            The trigger KIND is decided by which field the spec set: cron by default, interval for
+            the queue worker. `options` carries the per-job coalesce / grace / max_instances, which
+            are behaviour under load rather than schedule — but they belong beside the schedule they
+            modify, not here.
+            """
+            spec = BY_ID[job_id]
+            trigger = (IntervalTrigger(seconds=spec.interval_seconds)
+                       if spec.interval_seconds is not None
+                       else CronTrigger(**(spec.trigger or {})))
+            sched.add_job(fn, trigger, id=spec.id, replace_existing=True, **spec.options)
         # Single daily tick at 05:00 UTC (~07:00 CEST / 06:00 CET) that runs the
         # split pipeline's two operations IN ORDER (see `ingest.phases.pipeline`):
         #   1. price-update — re-price the held companies + refresh MTD;
@@ -957,17 +1269,10 @@ def register_scheduler(app) -> None:
         # has Friday's settled close, so a first-Monday rebalance decides on
         # Friday's close. Weekend ticks are cheap no-ops via the per-company
         # freshness short-circuit.
-        sched.add_job(
-            _fire_daily_sequence,
-            CronTrigger(day_of_week="mon-sun", hour=5, minute=0, timezone="UTC"),
-            id="daily_pipeline",
-            replace_existing=True,
-            # If a startup coincides with the tick (e.g. a deploy right at
-            # 02:00 UTC), `coalesce=True` collapses any backlog into a single
-            # run and `misfire_grace_time` gives 10 min of slack.
-            coalesce=True,
-            misfire_grace_time=600,
-        )
+        # If a startup coincides with the tick (e.g. a deploy right at 05:00 UTC),
+        # `coalesce=True` collapses any backlog into a single run and
+        # `misfire_grace_time` gives 10 min of slack — both declared with the schedule.
+        _register("daily_pipeline", _fire_daily_sequence)
         # Month-end FULL price refresh — re-price EVERY company (most-stale
         # first), bounded by the monthly GuruFocus quota that's about to reset.
         # Fires DAILY at 12:00 UTC (07:00 EST, safely inside the EST usage month
@@ -977,15 +1282,9 @@ def register_scheduler(app) -> None:
         # day retries the next day in the window (vs the old single last-day tick
         # a deploy could drop for the whole month). Prices-only; serializes
         # against the daily ops via the pipeline lock.
-        sched.add_job(
-            _fire_month_end_refresh,
-            CronTrigger(hour=12, minute=0, timezone="UTC"),
-            id="month_end_price_refresh",
-            replace_existing=True,
-            coalesce=True,
-            misfire_grace_time=3600,
-        )
-        # Daily AIRS refresh — working days (Mon–Fri) at 10:00 Amsterdam time.
+        _register("month_end_price_refresh", _fire_month_end_refresh)
+        # Daily AIRS refresh — working days, morning, Amsterdam-local (the hour is declared in
+        # `scheduled_jobs.SCHEDULED_JOBS`, not restated here).
         # The per-job timezone makes APScheduler handle the CET/CEST DST shift;
         # only weekday holidays aren't skipped (a holiday run just re-stores the
         # prior close, harmless). Re-discovers the live AirSPMS portfolio list
@@ -996,39 +1295,22 @@ def register_scheduler(app) -> None:
         # nothing scheduled ever did. Their compositions are what the account↔model PAIRING is
         # guessed from, so on a deployment where nobody pressed "Scan AIRS" by hand every book
         # was unpaired and Analyse fell back to a basket. See `_fire_airs_vermogen`.
-        sched.add_job(
-            _fire_airs_vermogen,
-            CronTrigger(day_of_week="mon-fri", hour=10, minute=0, timezone="Europe/Amsterdam"),
-            id="airs_vermogen_refresh",
-            replace_existing=True,
-            coalesce=True,
-            misfire_grace_time=3600,
-        )
+        _register("airs_vermogen_refresh", _fire_airs_vermogen)
         # Daily CRM "Alle relaties" refresh — EVERY day at 11:00 Amsterdam time.
         # Downloads the export and OVERWRITES airs_crm_relatie with the latest
         # snapshot (full table replace, not a per-date accumulation). Dedicated
         # job (separate from the portfolio refresh) so the CRM table is reliably
         # fresh daily; its own thread for the Playwright scrape.
-        sched.add_job(
-            _fire_crm_relaties,
-            CronTrigger(day_of_week="mon-sun", hour=11, minute=0, timezone="Europe/Amsterdam"),
-            id="crm_relaties_refresh",
-            replace_existing=True,
-            coalesce=True,
-            misfire_grace_time=3600,
-        )
+        _register("crm_relaties_refresh", _fire_crm_relaties)
+        # Nightly database-size snapshot — one row per public table, so "how fast is this growing
+        # and which tables" is a subtraction rather than a guess. Reads the Postgres catalog; it
+        # writes ~50 tiny rows and takes milliseconds.
+        _register("table_size_sample", _fire_table_size_sample)
         # Daily ECB FX sync — weekdays 16:30 UTC, after the ECB ~16:00 CET
         # reference-rate publication, so the `fx_rate` table (and the /fx-rates
         # page) shows EVERY currency current, not just the held ones the daily
         # pipeline happens to sync. Idempotent + cheap (fetches only the gap).
-        sched.add_job(
-            _fire_fx_sync,
-            CronTrigger(day_of_week="mon-fri", hour=16, minute=30, timezone="UTC"),
-            id="fx_sync",
-            replace_existing=True,
-            coalesce=True,
-            misfire_grace_time=3600,
-        )
+        _register("fx_sync", _fire_fx_sync)
         # Daily Yahoo price refresh for the HELD instruments — the `asset_price` twin of the
         # 05:00 GuruFocus price update, which `asset_price` never had (it aged silently: 197 of
         # 223 held instruments were stale, and a portfolio whose window opened after its
@@ -1038,27 +1320,11 @@ def register_scheduler(app) -> None:
         # daily sequence rather than racing it. `max_instances=1` so a slow run (≈220 gap fetches
         # at ~1.5s each) can never overlap the next day's tick, and the job itself stands down
         # entirely while the ingest queue is resolving — see `_fire_asset_price_refresh`.
-        sched.add_job(
-            _fire_asset_price_refresh,
-            CronTrigger(day_of_week="mon-sun", hour=6, minute=0, timezone="UTC"),
-            id="asset_price_refresh",
-            replace_existing=True,
-            coalesce=True,
-            max_instances=1,
-            misfire_grace_time=3600,
-        )
+        _register("asset_price_refresh", _fire_asset_price_refresh)
         # Daily history-drift probe — the early warning between monthly full
         # refetches. 07:00 UTC: after the 05:00 pipeline sequence and the 06:00
         # asset-price refresh, so it never competes with them for GuruFocus.
-        sched.add_job(
-            _fire_history_drift_check,
-            CronTrigger(day_of_week="mon-fri", hour=7, minute=0, timezone="UTC"),
-            id="history_drift_check",
-            replace_existing=True,
-            coalesce=True,
-            max_instances=1,
-            misfire_grace_time=3600,
-        )
+        _register("history_drift_check", _fire_history_drift_check)
         # Asset-pipeline ingest-queue worker — OPT-IN (ASSET_QUEUE_INPROCESS=1).
         # By default the worker is the STANDALONE `scripts/asset_queue_worker.py`
         # process, which survives backend restarts (dev --reload / redeploys) and
@@ -1068,15 +1334,7 @@ def register_scheduler(app) -> None:
         # 20s drain one slice; max_instances=1 + coalesce run slices back-to-back
         # without overlap; empty queue → instant no-op.
         if os.environ.get("ASSET_QUEUE_INPROCESS", "").lower() in ("1", "true", "yes"):
-            sched.add_job(
-                _fire_asset_ingest_queue,
-                IntervalTrigger(seconds=20),
-                id="asset_ingest_queue",
-                replace_existing=True,
-                max_instances=1,
-                coalesce=True,
-                misfire_grace_time=30,
-            )
+            _register("asset_ingest_queue", _fire_asset_ingest_queue)
             _log.info("[scheduler] ASSET_QUEUE_INPROCESS set — in-process ingest-queue worker enabled")
         sched.start()
         _scheduler = sched
@@ -1147,3 +1405,8 @@ def register_scheduler(app) -> None:
             _log.warning("[scheduler] shutdown failed: %s: %s", type(e).__name__, e)
         finally:
             _scheduler = None
+
+
+# ⚠ AT IMPORT, AFTER EVERY BODY IS DEFINED — see `_register_bodies`. Without this the Run-now
+# endpoint would find an empty registry and report every job as not runnable by hand.
+_register_bodies()

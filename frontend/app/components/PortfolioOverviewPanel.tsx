@@ -214,6 +214,34 @@ export default function PortfolioOverviewPanel() {
    */
   const [fleetJob, setFleetJob] = useState<string | null>(null);
   const [rowJobs, setRowJobs] = useState<Record<string, string>>({});
+  /**
+   * WHICH ROWS THE READER HAS ASKED TO STOP — the PRESS, not the job's state.
+   *
+   * ⚠⚠ THE BUTTON MUST FLIP ON THE PRESS, NOT ON THE JOB ID ARRIVING, and that is what this is for.
+   * Keyed on `rowJobs` the flip waited a round-trip: for that window the control read "Refresh",
+   * enabled, over work that had already started — so a second press started a SECOND job (the
+   * backend `_LOCK` then answered "busy") and a second toast appeared beside the first. The reader
+   * sees their own click, so the state that follows it has to be one we set ourselves, synchronously.
+   *
+   * ⚠ AND A CANCEL PRESSED IN THAT SAME WINDOW MUST NOT BE LOST. There is nothing to cancel until
+   * `startJob` returns an id, so the intent is recorded here and `refreshOne` fires it the instant
+   * the id lands. Dropping it would be the same broken control seen from the other side.
+   *
+   * ⚠ A REF BESIDE THE STATE, KEPT IN STEP BY THE TWO HELPERS BELOW AND NOTHING ELSE. The state is
+   * what renders; the ref is what `refreshOne` reads AFTER its `await`, where the closure's copy is
+   * a snapshot from before the press. Neither is optional and neither is written directly.
+   */
+  const [cancelWanted, setCancelWanted] = useState<Set<string>>(new Set());
+  const cancelWantedRef = useRef<Set<string>>(new Set());
+  /** ⚠ THE SYNCHRONOUS "is this row already running", which `refreshingRows` cannot be: React
+   *  batches, so two clicks in one tick both read the pre-click Set and both start a job. */
+  const refreshingRef = useRef<Set<string>>(new Set());
+  const setCancelWantedFor = (pf: string, wanted: boolean) => {
+    const next = new Set(cancelWantedRef.current);
+    if (wanted) next.add(pf); else next.delete(pf);
+    cancelWantedRef.current = next;
+    setCancelWanted(next);
+  };
   /** Bumped when a row refresh finishes, so an open Analyse modal re-reads what it rebuilt. */
   const [refreshSeq, setRefreshSeq] = useState(0);
   const [deletingRows, setDeletingRows] = useState<Set<string>>(new Set());
@@ -492,12 +520,22 @@ export default function PortfolioOverviewPanel() {
    * the countdown. `refreshMsg` stays for everything else on this panel that is NOT a job.
    */
   const refreshOne = async (portefeuille: string) => {
+    // ⚠ ONE JOB PER ROW, ENFORCED HERE AND NOT BY THE BUTTON'S `disabled`. A second job on the same
+    // account cannot do any work — the backend `_LOCK` answers "busy" — but it DOES get a job id
+    // and therefore a second toast, which is the duplicate card this guard exists to prevent. The
+    // ref, not `refreshingRows`: React batches, so two clicks in one tick see the same stale Set.
+    if (refreshingRef.current.has(portefeuille)) return;
+    refreshingRef.current = new Set(refreshingRef.current).add(portefeuille);
     setRefreshingRows((s) => new Set(s).add(portefeuille));
     try {
       const { id, done } = await startJob(
         `${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh/job`,
         portefeuille);
       setRowJobs((m) => ({ ...m, [portefeuille]: id }));
+      // ⚠ THE CANCEL THAT ARRIVED BEFORE THE ID. The button flips on the press, so Cancel is
+      // pressable during the round-trip above — and a press that reached a control offering it must
+      // act, not evaporate because the handle it needed was still in flight.
+      if (cancelWantedRef.current.has(portefeuille)) void cancelJob(id);
       const job = await done;
       // ⚠ RELOAD ON ANYTHING THAT REACHED THE SERVER, not only on `done`. A failed cascade still
       // wrote every account it got through, so leaving the pre-refresh figures on screen would
@@ -513,8 +551,13 @@ export default function PortfolioOverviewPanel() {
       logDetail(`refresh ${portefeuille} threw`, e);
       setRefreshMsg({ text: `${portefeuille}: ${e instanceof Error ? e.message : String(e)}`, kind: 'error' });
     } finally {
+      refreshingRef.current = (() => {
+        const n = new Set(refreshingRef.current); n.delete(portefeuille); return n;
+      })();
       setRefreshingRows((s) => { const n = new Set(s); n.delete(portefeuille); return n; });
       setRowJobs((m) => { const n = { ...m }; delete n[portefeuille]; return n; });
+      // The press is spent with the job it was aimed at — the row goes back to offering Refresh.
+      setCancelWantedFor(portefeuille, false);
       // ⚠ AND THE ANALYSE MODAL, IF IT IS OPEN ON THIS PORTFOLIO. It is drawn from the composition
       // and holdings this scan just re-read, and it has already loaded — so without a nudge it
       // would sit showing pre-scan figures while the row behind it updated, which reads as the
@@ -641,6 +684,11 @@ export default function PortfolioOverviewPanel() {
    * moment it is worth reading: BEFORE the press.
    */
   const cancelRefreshRow = async (portefeuille: string) => {
+    if (cancelWantedRef.current.has(portefeuille)) return;   // already asked; asking twice is a no-op
+    // ⚠ RECORDED BEFORE THE REQUEST, so the button changes on the press rather than on the reply.
+    // If the job id is not back yet this is ALL that happens here and `refreshOne` fires the cancel
+    // the moment it has one — the press is never dropped, only deferred.
+    setCancelWantedFor(portefeuille, true);
     const id = rowJobs[portefeuille];
     if (!id) return;
     await cancelJob(id);
@@ -892,41 +940,47 @@ export default function PortfolioOverviewPanel() {
                           {/* Re-scan just this portfolio (a few seconds). stopPropagation so it does
                               not also toggle the row's holdings. `items-stretch` on the wrapper keeps
                               this exactly the height of the Analyse button beside it. */}
-                          {isAdmin && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                // ⚠ ONE BUTTON, TWO ACTIONS — chosen by whether a job of OURS is
-                                // in flight, not by `refreshingRows`. A row can be busy for a
-                                // moment before `startJob` returns an id, and offering a Cancel
-                                // that has nothing to cancel is worse than showing none.
-                                if (rowJobs[r.dynamic_portefeuille]) {
-                                  void cancelRefreshRow(r.dynamic_portefeuille);
-                                } else {
-                                  void refreshOne(r.dynamic_portefeuille);
-                                }
-                              }}
-                              // ⚠ NOT DISABLED WHILE RUNNING ANY MORE — that is the whole change.
-                              // A disabled spinner is the state this panel kept being reported as
-                              // "stuck": nothing to press, nothing moving, no way out. It is only
-                              // inert in the gap before the job id arrives, which is milliseconds.
-                              disabled={refreshingRows.has(r.dynamic_portefeuille)
-                                        && !rowJobs[r.dynamic_portefeuille]}
-                              title={rowJobs[r.dynamic_portefeuille]
-                                ? 'Cancel this re-scan. The look-through chain in flight finishes first, and everything already downloaded is kept.'
-                                : "Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."}
-                              aria-label={rowJobs[r.dynamic_portefeuille]
-                                ? 'Cancel this refresh' : 'Refresh this portfolio'}
-                              className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded border transition-colors disabled:opacity-50 disabled:cursor-wait ${
-                                rowJobs[r.dynamic_portefeuille]
-                                  ? 'border-warn-500/40 text-warn-400 hover:bg-warn-500/10'
-                                  : 'border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300'}`}
-                            >
-                              {rowJobs[r.dynamic_portefeuille]
-                                ? <span className="text-[10px] leading-none px-0.5">✕</span>
-                                : <RefreshIcon spinning={refreshingRows.has(r.dynamic_portefeuille)} size={12} />}
-                            </button>
-                          )}
+                          {isAdmin && (() => {
+                            const pf = r.dynamic_portefeuille;
+                            const busy = refreshingRows.has(pf);
+                            const stopping = cancelWanted.has(pf);
+                            // ⚠ THE FLIP KEYS ON `busy` — THE PRESS — NOT ON `rowJobs`. See
+                            // `cancelWanted`: keyed on the id it waited a round-trip, during which
+                            // the control read "Refresh" over work already running and a second
+                            // press started a second job and a second toast.
+                            const cancellable = busy && !stopping;
+                            return (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (stopping) return;                 // already asked
+                                  if (busy) void cancelRefreshRow(pf);
+                                  else void refreshOne(pf);
+                                }}
+                                // ⚠ INERT ONLY ONCE THE CANCEL IS IN. A disabled spinner is the
+                                // state this panel kept being reported as "stuck": nothing to
+                                // press, nothing moving, no way out — so while it runs there is
+                                // always something to press, and afterwards there is nothing left
+                                // to ask for.
+                                disabled={stopping}
+                                title={stopping
+                                  ? 'Cancelling — the account being downloaded finishes first.'
+                                  : cancellable
+                                    ? 'Cancel this re-scan. It stops at the next account boundary; everything already downloaded is kept, and the toast names the books left un-refreshed.'
+                                    : "Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."}
+                                aria-label={stopping ? 'Cancelling this refresh'
+                                  : cancellable ? 'Cancel this refresh' : 'Refresh this portfolio'}
+                                className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded border transition-colors disabled:opacity-50 disabled:cursor-wait ${
+                                  busy
+                                    ? 'border-warn-500/40 text-warn-400 hover:bg-warn-500/10'
+                                    : 'border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300'}`}
+                              >
+                                {busy
+                                  ? <span className="text-[10px] leading-none px-0.5">✕</span>
+                                  : <RefreshIcon spinning={false} size={12} />}
+                              </button>
+                            );
+                          })()}
                         </div>
                       </td>
                       <td className="px-3 py-1.5 text-fg whitespace-nowrap">
@@ -1076,6 +1130,13 @@ export default function PortfolioOverviewPanel() {
           onRefresh={isAdmin && analyse.pf ? () => void refreshOne(analyse.pf!) : undefined}
           refreshing={!!analyse.pf && refreshingRows.has(analyse.pf)}
           refreshTitle="Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."
+          // ⚠ THE ROW'S OWN CANCEL, NOT A SECOND ONE — and passed unconditionally while the modal
+          // has a portfolio behind it, so the button flips on the PRESS exactly as the row's does.
+          // Gating it on `rowJobs` would reintroduce the round-trip window where the modal offered
+          // "Refresh" over work already running (see `cancelWanted`).
+          onCancelRefresh={analyse.pf ? () => void cancelRefreshRow(analyse.pf!) : undefined}
+          cancelRequested={!!analyse.pf && cancelWanted.has(analyse.pf)}
+          cancelTitle="Cancel this re-scan. It stops at the next account boundary; everything already downloaded is kept, and the toast names the books left un-refreshed."
           refreshSeq={refreshSeq}
           onClose={() => setAnalyse(null)} />
       )}

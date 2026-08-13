@@ -43,7 +43,11 @@ export function useEventStream(
 
     const connect = async () => {
       if (stopped || document.hidden) return;
-      abort = new AbortController();
+      // ⚠ HELD LOCALLY AS WELL AS IN `abort`. The shared `abort` is reassigned by the NEXT
+      // connect, so a catch block reading it could ask "was I aborted?" of a controller belonging
+      // to a later attempt. `ctrl` is this attempt's own.
+      const ctrl = new AbortController();
+      abort = ctrl;
       try {
         await runSSE(
           `${API_URL}${path}`,
@@ -57,13 +61,29 @@ export function useEventStream(
               setData((prev) => ({ ...prev, [f.topic]: f.payload }));
             }
           },
-          abort.signal,
+          ctrl.signal,
         );
         // Clean end (server closed at its cap) — reconnect promptly.
         setConnected(false);
         if (!stopped && !document.hidden) scheduleReconnect(500);
       } catch {
         setConnected(false);
+        /**
+         * ⚠⚠ AN ABORT WE CAUSED IS NOT A CONNECTION FAILURE, AND COUNTING IT HAS A CONSEQUENCE
+         * BEYOND THE CONSOLE. `failures` is what trips `failed=true`, which tells every caller to
+         * abandon the stream and fall back to POLLING — so a page that was hidden and shown a few
+         * times could talk itself into permanent polling while the stream was working perfectly.
+         * The visibility handler resets the counter, which is why this has not bitten yet; that is
+         * a coincidence of ordering, not a design.
+         *
+         * `ctrl.signal.aborted` rather than the error's name: only OUR controller firing means we
+         * asked for this. Anything else — a dropped connection, a 502 from the gateway — is a real
+         * failure and must still count toward the fallback.
+         */
+        if (ctrl.signal.aborted) {
+          if (!stopped && !document.hidden) scheduleReconnect(500);
+          return;
+        }
         failures += 1;
         if (failures >= maxFailures) setFailed(true);
         if (!stopped && !document.hidden) scheduleReconnect(Math.min(30000, 1000 * 2 ** failures));

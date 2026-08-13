@@ -123,7 +123,11 @@ export async function apiFetch(
   } catch (e) {
     // A network failure never reaches the caller's `resp.ok` check — it throws, and without this
     // the console shows nothing at all for a request that was made and died.
-    done(null, e);
+    //
+    // ⚠ UNLESS WE ARE THE ONES WHO STOPPED IT. `init.signal.aborted` is the precise test — not
+    // `e.name === 'AbortError'`, which an `AbortSignal.timeout()` also raises and which IS a real
+    // failure. See `traceRequest`: a stream closed on unmount was logging as a red FAILED.
+    done(null, e, init.signal?.aborted === true);
     throw e;
   }
 }

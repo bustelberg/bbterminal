@@ -173,12 +173,15 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
     #
     # "AIRS listed this account" and "we scanned this account" are different facts about different
     # sets. `reports_at` is this function's timestamp; `last_seen_at` is `_record_roster`'s.
-    # ⚠ UPDATE ONLY — AN ACCOUNT DISCOVERY HAS NEVER SEEN CANNOT BE INSERTED HERE, AND TRYING
-    # TOOK THE WHOLE BATCH DOWN WITH IT. PostgREST's `upsert` is INSERT ... ON CONFLICT, so for a
-    # portefeuille with no roster row the INSERT ran without `last_seen_at` — a NOT NULL column
-    # with no default, by design (see the migration: the live set IS `last_seen_at = max(...)`,
-    # so a per-row default would let this function redefine it). Measured in production
-    # 2026-08-03, refreshing one account:
+    # ⚠ UPDATE ONLY — AN ACCOUNT DISCOVERY HAS NEVER SEEN CANNOT BE INSERTED HERE. `last_seen_at`
+    # is NOT NULL with no default, by design (see the migration: the live set IS
+    # `last_seen_at = max(...)`, so a per-row default would let this function redefine it).
+    #
+    # ⚠⚠ THE FIRST ATTEMPT AT THIS FIX WAS THE `known` READ BELOW AND IT DID NOT WORK — see the
+    # note on the write itself. Omitting a NOT NULL column fails whether or not the row exists,
+    # because Postgres validates the tuple before it arbitrates the conflict. The read survives
+    # only to WARN about accounts discovery has not seen; the write is now a plain UPDATE.
+    # Measured in production 2026-08-03, refreshing one account:
     #
     #   null value in column "last_seen_at" of relation "airs_account_roster" violates not-null
     #   constraint — Failing row contains (AITopSelectie OFF DYN, null, ...)
@@ -216,14 +219,36 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
             "(the portfolios scan) — only discovery may create a roster row, because "
             "`last_seen_at` defines the live set.", len(unknown), ", ".join(unknown[:10]))
 
-    rows = [{"portefeuille": n, "reports_ok": sorted(outcomes[n]), "reports_at": stamp}
-            for n in names if n in known]
-    if not rows:
+    todo = [n for n in names if n in known]
+    if not todo:
         return
+    # ⚠⚠ UPDATE, NOT UPSERT — AND THE `known` GUARD ABOVE NEVER FIXED THIS (2026-08-13). PostgREST's
+    # upsert is `INSERT ... ON CONFLICT DO UPDATE`, and Postgres forms and VALIDATES the candidate
+    # tuple before it arbitrates the conflict: a payload omitting `last_seen_at` — NOT NULL with no
+    # default, by design — fails 23502 even when the row exists and would have been updated.
+    # Measured directly:
+    #
+    #   select count(*) filter (where portefeuille='BUS_WTS_Dividend_Dyn')  ->  1   (it exists)
+    #   insert ... on conflict (portefeuille) do update ...                 ->  23502
+    #
+    # So the 2026-08-03 fix — "only write rows discovery has already seen" — addressed the wrong
+    # cause and left every account failing. On this scan that was ALL 44, silently: the outcome
+    # table is what marks a row "att did not arrive", so the failure suppressed exactly the warning
+    # it should have raised, and a stale figure kept looking healthy.
+    #
+    # ⚠ GROUPED BY THE OUTCOME SET, so a 44-account fleet scan is ~3 requests rather than 44: almost
+    # every book yields the same `{att,model,mut,trans,volk}`, and the ones that differ are the
+    # interesting ones. An `update ... in (…)` cannot carry a per-row value, which is exactly why
+    # the grouping is by the value.
+    by_outcome: dict[tuple[str, ...], list[str]] = {}
+    for n in todo:
+        by_outcome.setdefault(tuple(sorted(outcomes[n])), []).append(n)
     try:
-        for i in range(0, len(rows), 200):
-            supabase.table("airs_account_roster").upsert(
-                rows[i:i + 200], on_conflict="portefeuille").execute()
+        for reports, group in by_outcome.items():
+            for i in range(0, len(group), 200):
+                (supabase.table("airs_account_roster")
+                 .update({"reports_ok": list(reports), "reports_at": stamp})
+                 .in_("portefeuille", group[i:i + 200]).execute())
     except Exception as e:  # noqa: BLE001
         _log.warning("[airs_vermogen] could not record report outcomes: %s: %s",
                      type(e).__name__, e)
@@ -235,8 +260,11 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
 # once a day exactly as before — this only collapses the repeat presses in between.
 # ⚠ 20, NOT 12 — AIRS VALUES ONCE A DAY. The window only has to be shorter than the gap between
 # two valuations; at 12h a mid-afternoon press re-downloaded the whole fleet for a valuation that
-# had not moved since the morning. 20h still guarantees the daily job (a fixed 10:00 Amsterdam
-# tick, ~24h apart) never skips a real one, and collapses every repeat press in between.
+# had not moved since the morning. 20h still guarantees the daily job (a fixed weekday-morning
+# tick, ~24h apart — see `scheduled_jobs.SCHEDULED_JOBS`) never skips a real one, and collapses
+# every repeat press in between. ⚠ The time is NOT restated here: it moved 10:00 → 09:30 and a
+# second copy of it would now be wrong. What this window depends on is the ~24h SPACING, not the
+# hour — and the daily job forces anyway, so it cannot be skipped by this at all.
 AIRS_FRESH_HOURS = float(os.environ.get("AIRS_FRESH_HOURS", "20"))
 
 # Fewer holdings than this and a book is not a portfolio: the AIRS benchmarks carry exactly 1 and
@@ -1119,7 +1147,8 @@ def dependent_accounts(portefeuille: str) -> list[str]:
 
 
 def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
-                          on_step: Callable[[int, int, str], None] | None = None) -> dict:
+                          on_step: Callable[[int, int, str], None] | None = None,
+                          should_stop: Callable[[], bool] | None = None) -> dict:
     """Re-scan ONE portfolio's Rendement (ATT) + Vermogensoverzicht (VOLK) and store both — the
     per-row "Refresh" on the overview table.
 
@@ -1144,6 +1173,21 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
     indistinguishable from a broken one. It is a hook rather than a second, streaming copy of this
     function: two implementations of "refresh one portfolio" is exactly what the ⚠ above says this
     body exists to prevent.
+
+    ⚠⚠ `should_stop()` MAKES CANCEL REAL, AND IT REVERSES A PREVIOUS REFUSAL (2026-08-13). The job
+    wrapper used to pass no such hook and documented why: stopping mid-cascade leaves the parent
+    fresh against stale children, "the state this endpoint exists to avoid". The argument does not
+    survive contact with the alternative — `cascade=False` is a supported mode that produces the
+    IDENTICAL state deliberately, and the one thing the refusal actually guaranteed was that a
+    Cancel button changed nothing for minutes while its toast read "cancelling…". A control that
+    does nothing is worse than a documented compromise: it teaches the reader that Cancel is
+    decorative everywhere else too.
+
+    So it stops BETWEEN accounts (never inside one — an account's reports are downloaded and stored
+    as a unit) and the outcome SAYS SO: `cancelled_at` names the book it stopped before and
+    `stale_books` names the ones left un-refreshed, so a half-cascade can never be mistaken for a
+    clean one. Same hook, same shape and same `cancelled_at` key as `run_airs_vermogen_refresh_sync`
+    — one vocabulary for cancellation, not two.
     """
     if not _LOCK.acquire(blocking=False):
         return {"status": "busy", "message": "An AIRS refresh is already running", "portefeuille": portefeuille}
@@ -1175,6 +1219,14 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
         _step(0, total, f"{portefeuille} — scanning AIRS reports"
                         + (f" (+{len(deps)} book{'s' if len(deps) != 1 else ''} it is built from)"
                            if deps else ""))
+        # ⚠ THE FIRST BOUNDARY, AND THE ONE THAT MATTERS MOST — it is where a misclick is undone.
+        # Nothing has been downloaded or written yet, so stopping here is not a compromise at all:
+        # the account is exactly as it was. `dependent_accounts` above is a lookup, not a scan.
+        if should_stop is not None and should_stop():
+            _step(0, total, f"{portefeuille} — cancelled before anything was read")
+            return {"status": "cancelled", "portefeuille": portefeuille,
+                    "cancelled_at": portefeuille, "cascaded": [], "stale_books": deps,
+                    "holdings_rows": 0, "errors": [], "reports_ok": []}
         res = scan_one(portefeuille, van, tot)
         ok = res["reports_ok"]
         _step(1, total, f"{portefeuille} — {res['holdings']} holdings, "
@@ -1191,7 +1243,18 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
         # and releasing per account would let the fleet scan interleave halfway through a cascade
         # and leave the parent fresh against half-stale children.
         cascaded: list[dict] = []
+        cancelled_at: str | None = None
+        stale_books: list[str] = []
         for i, dep in enumerate(deps, 1):
+            # ⚠ BEFORE THE ACCOUNT, NOT INSIDE IT, and `break` rather than `return` — the run still
+            # falls through to the result below and reports what it DID store. The same idiom the
+            # fleet scan uses; abandoning here would lose the parent's own refresh, which is
+            # already downloaded, stored, and the reason the button was pressed.
+            if should_stop is not None and should_stop():
+                cancelled_at = dep
+                stale_books = deps[i - 1:]
+                _step(i, total, f"cancelled before {dep} — {i - 1} of {len(deps)} book(s) refreshed")
+                break
             _step(i, total, f"{dep} — book {i} of {len(deps)} behind {portefeuille}")
             try:
                 sub = scan_one(dep, van, tot)
@@ -1224,7 +1287,15 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
                          ", ".join(c["portefeuille"] for c in cascaded))
 
         return {
-            "status": "ok" if ("att" in ok or "volk" in ok) else "error",
+            # ⚠ CANCELLED OUTRANKS OK. The parent's own reports are stored and fresh, so `ok` would
+            # be defensible on its own terms and completely misleading: the books its look-through
+            # figures are computed FROM were not re-read. One word for "we stopped", named the same
+            # way the fleet scan names it.
+            "status": "cancelled" if cancelled_at
+            else ("ok" if ("att" in ok or "volk" in ok) else "error"),
+            "cancelled_at": cancelled_at,
+            # The books the cancel left behind — the reason the outcome cannot be read as clean.
+            "stale_books": stale_books,
             "portefeuille": portefeuille,
             # ⚠ The books BEHIND this one, each with its own outcome. A cascade that half-failed
             # must not read as a clean refresh — the parent's figures are only as fresh as the
