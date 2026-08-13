@@ -200,6 +200,28 @@ export function mergeSeries(
  * ⚠ REFUSES RATHER THAN INVENTING ONE. A null here means the caller keeps ABSOLUTE values, which
  * is the honest fallback — the raw number is always true, it just is not comparable.
  */
+/**
+ * Does this level series change sign — i.e. can it be an INDEX ON A LOG AXIS at all?
+ *
+ * ⚠⚠ THE TWO DECISIONS ("index it?" and "which axis?") ARE ONE DECISION, AND SPLITTING THEM IS
+ * WHAT BROKE. `rebaseSeries` refused to index a sign-changing series and the card fell back to
+ * absolute values, saying so in the legend — but the Y axis stayed LOGARITHMIC and the chart data
+ * still nulled everything ≤ 0. The fallback promised the real numbers and then hid exactly the
+ * ones that had triggered it. Measured: AMD's 2015-16 losses and Intel's 2024 were invisible on
+ * both paths, so a reader saw a line that simply began late, with nothing to say why.
+ *
+ * ⚠ `!(v > 0)` RATHER THAN `v <= 0`, so a null or a NaN counts as "cannot be logged" too. A hole
+ * in the series is not a sign change, but it is equally unplottable on a log axis, and the honest
+ * axis for either is the linear one.
+ *
+ * ⚠ REVENUE NEVER TRIPS THIS. It is EPS, FCF/share and net income — the lines that go negative —
+ * which is why the check is on the DATA and not on the metric's name.
+ */
+export function seriesCrossesZero(values: Iterable<number | null | undefined>): boolean {
+  for (const v of values) if (!(typeof v === 'number' && v > 0)) return true;
+  return false;
+}
+
 export function rebaseSeries(
   own: Map<number, number | null>, bench: Map<number, number | null> | null,
 ): { own: Map<number, number | null>; bench: Map<number, number | null> | null; anchor: number } | null {

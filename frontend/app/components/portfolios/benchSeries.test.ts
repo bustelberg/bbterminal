@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { benchNote, mergeSeries, rebaseSeries, withBench, type BenchTarget } from './benchSeries';
+import {
+  benchNote, mergeSeries, rebaseSeries, seriesCrossesZero, withBench, type BenchTarget,
+} from './benchSeries';
 
 /**
  * The pure halves of the Long Equity benchmark overlay.
@@ -151,5 +153,48 @@ describe('rebaseSeries', () => {
     expect(out.anchor).toBe(2019);
     expect(out.own.get(2020)).toBe(125);
     expect(out.bench).toBeNull();
+  });
+});
+
+describe('seriesCrossesZero', () => {
+  /**
+   * ⚠⚠ THE BUG THIS CLOSES: "do not index it" and "do not put it on a log axis" were two separate
+   * decisions, and only the first was made. `rebaseSeries` refused a sign-changing series, the card
+   * fell back to absolute values and SAID SO in the legend — and then plotted them on a log axis,
+   * which nulls everything ≤ 0. The fallback promised the real numbers and hid exactly the ones
+   * that had triggered it: AMD's 2015-16 losses and Intel's 2024 were invisible either way, and the
+   * line just appeared to start late.
+   */
+  it('is false for a series that never goes non-positive', () => {
+    expect(seriesCrossesZero([3.21, 5.4, 24.71])).toBe(false);
+  });
+
+  it('is TRUE for a company with a loss year (AMD 2015-16, Intel 2024)', () => {
+    expect(seriesCrossesZero([-0.741, -0.35, 0.3, 4.17])).toBe(true);
+    expect(seriesCrossesZero([2.49, 1.2, -0.13, 0.42])).toBe(true);
+  });
+
+  it('treats an exact zero as a crossing — a log axis cannot draw it either', () => {
+    expect(seriesCrossesZero([1, 0, 2])).toBe(true);
+  });
+
+  it('treats a hole as unplottable too, which is the same axis decision', () => {
+    // Not a sign change, but equally impossible on a log axis — and `!(v > 0)` covers both without
+    // a second rule to keep in step.
+    expect(seriesCrossesZero([1, null, 2])).toBe(true);
+    expect(seriesCrossesZero([1, undefined, 2])).toBe(true);
+    expect(seriesCrossesZero([1, NaN, 2])).toBe(true);
+  });
+
+  it('an empty series does not claim to cross anything', () => {
+    expect(seriesCrossesZero([])).toBe(false);
+  });
+
+  it('⚠ agrees with rebaseSeries: anything it flags cannot be indexed against itself', () => {
+    // The two must not disagree — that disagreement IS the bug. A series with no positive year has
+    // no anchor at all, so `rebaseSeries` refuses and the axis must go linear.
+    const vals = [-2, -1, -0.5];
+    expect(seriesCrossesZero(vals)).toBe(true);
+    expect(rebaseSeries(m({ 2020: -2, 2021: -1, 2022: -0.5 }), null)).toBeNull();
   });
 });

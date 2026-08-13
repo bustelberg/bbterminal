@@ -14,7 +14,7 @@ import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
 import HoldingsIngestPanel from './HoldingsIngestPanel';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
 import { paddedLogDomain , xToPeriod } from './marginData';
-import { benchNote, rebaseSeries } from './benchSeries';
+import { benchNote, rebaseSeries, seriesCrossesZero } from './benchSeries';
 
 /**
  * One "Long Equity" growth card: a metric per fiscal year on a LOG axis with an exponential-trend
@@ -253,11 +253,31 @@ export default function MetricGrowthCard({
    * shared year with both values positive; the raw series is still true, just not comparable, so
    * that is what gets drawn (and `indexed` says so, for the axis label and the tooltip).
    */
+  /**
+   * ⚠⚠ THE SERIES CHANGES SIGN — SO IT CANNOT BE AN INDEX ON A LOG AXIS, AND SAYING SO IS THE FIX.
+   *
+   * EPS and FCF/share go negative; revenue does not. Before this, a loss year was dropped TWICE
+   * over: `rebaseSeries` refuses to index (100 × v/−2 inverts the curve), the card fell back to
+   * absolute values and said so in the legend — and then plotted them on a LOG axis, where
+   * `chartData` nulls everything ≤ 0. The fallback promised the real numbers and then hid exactly
+   * the ones that triggered it. Measured: AMD's 2015–16 losses and Intel's 2024 were invisible on
+   * both paths, so a reader saw a line that simply began late with no indication why.
+   *
+   * A sign change is a fact about the business, not a gap. On a LINEAR absolute axis it draws — a
+   * negative point below a zero line — which is the truth and needs no ratio invented for it.
+   */
+  const crossesZero = !isRatio && seriesCrossesZero(points.map((p) => p.value));
+  /** Linear axis + absolute values: a ratio (already comparable, can be negative) or a level series
+   *  that changes sign. Everything else keeps the indexed log axis. */
+  const linear = isRatio || crossesZero;
   const { indexed, ownByX, benchRawByX } = useMemo(() => {
     const own = new Map(points.map((p) => [p.year, p.value as number | null]));
-    if (isRatio) return { indexed: null, ownByX: own, benchRawByX: benchByX };
+    // ⚠ NO REBASE WHEN IT CROSSES ZERO, even though `rebaseSeries` would refuse anyway on its own:
+    // deciding it here keeps "which axis" and "indexed or not" one decision instead of two that
+    // could disagree — which is precisely how the log-axis-under-absolute-values bug survived.
+    if (linear) return { indexed: null, ownByX: own, benchRawByX: benchByX };
     return { indexed: rebaseSeries(own, benchByX), ownByX: own, benchRawByX: benchByX };
-  }, [points, isRatio, benchByX]);
+  }, [points, linear, benchByX]);
 
   /** ⚠ THE FOURTH ABSENCE, WHICH ONLY THE LEVEL CARDS HAVE: the two series may share no year where
    *  both values are positive, and `rebaseSeries` then refuses rather than inventing a base. The
@@ -307,10 +327,14 @@ export default function MetricGrowthCard({
       const t = trendByYear.get(year);
       return {
         year,
-        // A log axis can't plot ≤ 0; a linear ratio can (ROIC can be negative), so keep it.
-        value: isRatio ? v : (v != null && v > 0 ? v : null),
-        trend: isRatio ? null : (t != null ? t * trendScale : null),
-        bench: isRatio ? b : (b != null && b > 0 ? b : null),
+        // A log axis can't plot ≤ 0; a LINEAR one can, which is the whole point of `crossesZero`.
+        value: linear ? v : (v != null && v > 0 ? v : null),
+        // ⚠ NO TREND ON A SIGN-CHANGING SERIES. `logLinearFit` regresses ln(value) and silently
+        // DROPS every non-positive point (it reports `dropped`, which nothing was reading) — so on
+        // AMD it would fit a constant-growth exponential to 2017-2025 and draw it across 2015-16 as
+        // though those years were on it. A dashed line through two losses, at full confidence.
+        trend: linear ? null : (t != null ? t * trendScale : null),
+        bench: linear ? b : (b != null && b > 0 ? b : null),
         // Carried for the tooltip only — never plotted.
         //
         // ⚠ ONLY A SINGLE COMPANY HAS ONE. A portfolio's series is ALREADY a blended index from
@@ -321,7 +345,7 @@ export default function MetricGrowthCard({
         rawValue: isAgg ? null : (ownByX.get(year) ?? null),
       };
     });
-  }, [points, fit, isRatio, indexed, ownByX, benchRawByX, isAgg]);
+  }, [points, fit, linear, indexed, ownByX, benchRawByX, isAgg]);
 
   // Log axis: pad the domain (multiplicatively) so the min/max points + trend endpoints don't clip.
   const logDomain = useMemo(() =>
@@ -427,17 +451,37 @@ export default function MetricGrowthCard({
               </>
             ) : (
               <>
-                <Stat label="R²" value={fit.r2 == null ? '—' : fit.r2.toFixed(2)} color={chartTheme.accent}
+                {/* ⚠⚠ WITHHELD WHEN THE SERIES CROSSES ZERO, NOT COMPUTED FROM THE GOOD YEARS.
+                    `logLinearFit` regresses ln(value) and DROPS every non-positive point — it even
+                    returns `dropped`, which nothing was reading. So on AMD it would have printed a
+                    CAGR fitted to 2017-2025 while the tile said "over 9 years", with the two loss
+                    years silently excluded from a number describing the whole chart. A dash that
+                    explains itself beats a plausible figure measured over a period nobody chose. */}
+                <Stat label="R²" value={linear ? '—' : (fit.r2 == null ? '—' : fit.r2.toFixed(2))}
+                  color={chartTheme.accent}
                   info={<InfoTip content={<AspectCard
                     what={`How tightly ${cfg.noun} hugs a constant-growth line (0–1).`}
-                    where="Computed here — a log-linear regression on the points below."
-                    when={`Over the ${fit.n} year(s) shown.`}
-                    how={`R² of ln(${cfg.noun}) vs year. 1.0 = perfectly steady compounding; low = lumpy or cyclical.`} />} />} />
-                <Stat label="CAGR" value={cagr(fit.cagr)} color={chartTheme.accent}
+                    where={linear
+                      ? 'Not computed — this series changes sign.'
+                      : 'Computed here — a log-linear regression on the points below.'}
+                    when={linear
+                      ? `${fit.dropped} of ${reported.length} year(s) are zero or negative.`
+                      : `Over the ${fit.n} year(s) shown.`}
+                    how={linear
+                      ? 'A constant-growth exponential has no logarithm at or below zero, so it '
+                        + 'cannot describe a series that crosses it. Fitting the positive years '
+                        + 'alone would measure a period nobody chose and label it as the whole.'
+                      : `R² of ln(${cfg.noun}) vs year. 1.0 = perfectly steady compounding; low = lumpy or cyclical.`} />} />} />
+                <Stat label="CAGR" value={linear ? '—' : cagr(fit.cagr)} color={chartTheme.accent}
                   info={<InfoTip content={<AspectCard
                     what="The compound annual growth rate of the fitted trend."
-                    where="Computed here from the same fit." when={`Over the ${fit.n} year(s) shown.`}
-                    how="e^(slope) − 1 of the log-linear regression." />} />} />
+                    where={linear ? 'Not computed — see R².' : 'Computed here from the same fit.'}
+                    when={linear ? 'Undefined across a sign change.' : `Over the ${fit.n} year(s) shown.`}
+                    how={linear
+                      ? 'Growth from a negative base is not a percentage: −1 → +2 is not "+300%" '
+                        + 'in any sense that compounds, and −2 → −1 would read as +50% growth for '
+                        + 'a company still making a loss.'
+                      : 'e^(slope) − 1 of the log-linear regression.'} />} />} />
               </>
             )}
           </div>
@@ -449,9 +493,11 @@ export default function MetricGrowthCard({
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
                 <XAxis dataKey="year" tickFormatter={(x: number) => (ltm && x === ltm.year ? "LTM" : xToPeriod(x))}
                   tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
-                {isRatio ? (
-                  <YAxis tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
-                    tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
+                {linear ? (
+                  // ⚠ LINEAR AND ABSOLUTE — a ratio, or a level series that changes sign. The
+                  // units differ: a ratio ticks in %, a sign-changing level in its own amounts.
+                  <YAxis tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={isRatio ? 48 : 60}
+                    tickFormatter={(v: number) => (isRatio ? `${v.toFixed(0)}%` : fmt(v))} />
                 ) : (
                   // Log scale: an exponential (constant-%) growth trend draws as a straight line.
                   <YAxis scale="log" domain={logDomain ?? ['dataMin', 'dataMax']} allowDataOverflow
@@ -483,10 +529,13 @@ export default function MetricGrowthCard({
                     if (raw == null) return [fmtIndex(plotted, 1), label];
                     return [`${ccy}${fmt(raw)}  (index ${fmtIndex(plotted, 1)})`, label];
                   }} />
-                {isRatio && <ReferenceLine y={0} stroke={chartTheme.zeroLine} />}
+                {/* ⚠ ON EVERY LINEAR AXIS, NOT JUST A RATIO'S. Zero is where a sign-changing level
+                    changes meaning — profit above it, loss below — and without the line a small
+                    negative reads as a small positive at a glance. */}
+                {linear && <ReferenceLine y={0} stroke={chartTheme.zeroLine} />}
                 {isRatio && avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 <Line dataKey="value" name="value" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
-                {!isRatio && <Line dataKey="trend" name="trend" type="monotone" stroke={chartTheme.warn} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />}
+                {!linear && <Line dataKey="trend" name="trend" type="monotone" stroke={chartTheme.warn} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />}
                 {/* ⚠ ONE COLOUR FOR THE BENCHMARK ON ALL FOURTEEN CHARTS — green (`chartTheme.pos`).
                     It has to be the same everywhere or the eye re-learns which line is the index on
                     every card. Validated, not eyeballed (`dataviz/scripts/validate_palette.js`):
@@ -499,8 +548,22 @@ export default function MetricGrowthCard({
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
               <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />{cfg.title}{isRatio ? ' (avg dashed)' : ''}</span>
-              {!isRatio && (
+              {!linear && (
                 <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.warn }} />Trend (R² {fit.r2 == null ? '—' : fit.r2.toFixed(2)})</span>
+              )}
+              {/* ⚠ THE AXIS CHANGED, SO IT SAYS SO. A reader who knows this card as an indexed log
+                  chart would otherwise read absolute euros as an index. It also names WHY, because
+                  "this company made a loss" is the finding, not a rendering detail. */}
+              {crossesZero && (
+                <span className="text-fg-faint"
+                  title={'A level series that changes sign cannot be indexed (100 × v/−2 inverts '
+                    + 'the curve) and cannot sit on a log axis. Shown as actual amounts on a linear '
+                    + 'axis instead, with a zero line — so the loss years are visible rather than '
+                    + 'missing. No trend or CAGR: a constant-growth exponential cannot describe a '
+                    + 'series that crosses zero, and fitting one to the positive years only would '
+                    + 'draw a confident line straight through the losses.'}>
+                  absolute — the series crosses zero
+                </span>
               )}
               {benchByX && (
                 <span className="flex items-center gap-1.5"

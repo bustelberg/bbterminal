@@ -42,6 +42,32 @@ const BENCHMARKS = ['SP500', 'ACWI', 'AEX'];
 
 const CARDS: MetricCfg[] = [
   {
+    /**
+     * ⚠ FIRST ON THE TAB, DELIBERATELY — it is the line the whole page is about. Revenue says how
+     * much a business sold; this says what reached a share. The card indexes it to 100 at the
+     * first year it shares with the benchmark, so what is compared is the GROWTH — the same idea
+     * as /earnings' Share-Price-vs-Owner-Earnings chart, minus the price leg.
+     *
+     * ⚠⚠ "EXCLUDING NON-RECURRING ITEMS" IS THE WHOLE POINT AND IT IS ONE OF THREE NEAR-IDENTICAL
+     * LINES. GuruFocus also publishes `EPS (Diluted)` and `Earnings per Share (Diluted)`, both of
+     * which INCLUDE one-offs — an impairment, a disposal, a tax settlement. They agree with this
+     * one in most years, which is exactly what makes the wrong choice hard to catch: the series
+     * looks right until a single distorted year bends the fitted trend, and the CAGR printed above
+     * the chart IS that trend's slope. Same line `_RG_OE_CODE` uses on /earnings, so the two
+     * surfaces cannot come to mean different things by "earnings".
+     *
+     * ⚠ EPS GOES NEGATIVE, AND THE CARD ALREADY KNOWS. A loss year cannot be plotted on a log axis
+     * and cannot be a rebase base (100 × v/−2 inverts the curve), so `rebaseSeries` refuses when
+     * there is no shared positive year and the card falls back to ABSOLUTE values, saying so in
+     * the legend. That is the same treatment FCF/share gets and it is why neither is silently
+     * wrong for a loss-making company — the gap is visible instead.
+     */
+    title: 'EPS (excl. non-recurring)', noun: 'EPS', unit: 'per_share', kind: 'growth',
+    benchmarkMetric: 'eps_nri',
+    codes: ['annuals__Per Share Data__EPS without NRI',
+      'annuals__per_share_data__EPS without NRI'],
+  },
+  {
     title: 'Revenue', noun: 'revenue', unit: 'millions', kind: 'growth', benchmarkMetric: 'revenue',
     codes: ['annuals__Income Statement__Revenue', 'annuals__income_statement__Revenue'],
   },
@@ -243,10 +269,10 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
       ? <p className="text-xs text-fg-subtle py-16 text-center">{blendLoadingLabel(progress)}</p>
       : null;
 
-  // Fixed order across the grid: Revenue, FCF/share, FCF-SBC margin, Cash return on capital,
-  // Debt / assets ex-GW, Interest / op. profit, Shares outstanding, SBC / OCF, Invested capital,
-  // Capex margin, Dividend yield, FCF-SBC yield.
-  const [revenue, fcfPs, shares] = CARDS;
+  // Fixed order across the grid: EPS (excl. non-recurring), Revenue, FCF/share, FCF-SBC margin,
+  // Cash return on capital, Debt / assets ex-GW, Interest / op. profit, Shares outstanding,
+  // SBC / OCF, Invested capital, Capex margin, Dividend yield, FCF-SBC yield.
+  const [epsNri, revenue, fcfPs, shares] = CARDS;
   // Single-company only: an empty growth card can fetch this company's financials, then reload.
   const ingestIsin = isAgg ? undefined : isin;
   const onIngested = () => setReloadKey((k) => k + 1);
@@ -314,6 +340,9 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
     {/* The controls above stay put; only what they govern is replaced while it loads or fails. */}
     {body ?? (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      {/* ⚠ FIRST IN THE GRID — the line the tab is about. See its entry in `CARDS`. */}
+      <MetricGrowthCard key={epsNri.title} cfg={epsNri}
+        {...growth} />
       <MetricGrowthCard key={revenue.title} cfg={revenue}
         {...growth} />
       <MetricGrowthCard key={fcfPs.title} cfg={fcfPs}

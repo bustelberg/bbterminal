@@ -1209,6 +1209,16 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
                    "annuals__income_statement__Net Income"),
     "fcf_ps": ("annuals__Per Share Data__Free Cash Flow per Share",
                "annuals__per_share_data__Free Cash Flow per Share"),
+    # ⚠ "WITHOUT NRI" IS THE POINT, NOT A DETAIL. GuruFocus publishes three EPS lines and they are
+    # near-identical most years, which is exactly what makes picking the wrong one hard to notice:
+    # `EPS (Diluted)` and `Earnings per Share (Diluted)` both include non-recurring items, so a
+    # single impairment, disposal or tax settlement puts a spike in the series that says nothing
+    # about the business — and on a LOG growth chart with a fitted trend, one such year bends the
+    # CAGR for every year around it. This is the same line the Share-Price-vs-Owner-Earnings chart
+    # uses as its earnings side (`_RG_OE_CODE`), so the two cannot disagree about what "earnings"
+    # means.
+    "eps_nri": ("annuals__Per Share Data__EPS without NRI",
+                "annuals__per_share_data__EPS without NRI"),
     "fcf": ("annuals__Cashflow Statement__Free Cash Flow",
             "annuals__cashflow_statement__Free Cash Flow"),
     "sbc": ("annuals__Cashflow Statement__Stock Based Compensation",
@@ -1331,7 +1341,11 @@ _TTM_RULE: dict[str, str] = {
     # Flows — income statement and cash flow.
     "revenue": "sum", "gross_profit": "sum", "operating_income": "sum", "net_income": "sum",
     "fcf": "sum", "ocf": "sum", "sbc": "sum", "capex": "sum", "interest_expense": "sum",
-    "fcf_ps": "sum", "div_ps": "sum",
+    # ⚠ `eps_nri` SUMS, like every other per-share FLOW. A trailing-twelve-month EPS is four
+    # quarters of earnings added up — taking `last` would report ONE quarter under an annual label,
+    # a quarter of the real figure, on the same axis as full fiscal years. Same trap `MetricGrowthCard`
+    # documents for the LTM point it plots.
+    "fcf_ps": "sum", "div_ps": "sum", "eps_nri": "sum",
     # Balances and market values — a point in time.
     "total_assets": "last", "total_equity": "last", "goodwill": "last",
     "long_term_debt": "last", "noncurrent_liabilities": "last",
