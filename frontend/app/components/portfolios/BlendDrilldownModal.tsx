@@ -21,7 +21,15 @@ type Member = {
   weight_pct: number;
   value: number;
   raw_value: number | null;
+  /** ⚠ NULL FOR A LEVEL — see `Breakdown.step_pct`. A level's line is a chained product, so there
+   *  is no total to take a share OF; `contribution_pp` is what a level decomposes into. */
   share_pct: number | null;
+  /** LEVEL ONLY: this holding's own change over the interval, `v(period)/v(anchor) − 1`, in %. */
+  growth_pct?: number | null;
+  /** LEVEL ONLY: `w·g ÷ Σw` in percentage POINTS of the step. These sum to `step_pct`. */
+  contribution_pp?: number | null;
+  /** The line without this holding — in the metric's unit for a multiple/ratio, in pp of the STEP
+   *  for a level. */
   swing: number | null;
 };
 
@@ -32,6 +40,10 @@ type Breakdown = {
   metric_code: string;
   period: string;
   value: number | null;
+  /** LEVEL ONLY: the previously DRAWN period this move is measured from, and the move itself in %.
+   *  Null when this is the first drawn point (nothing to move from). */
+  anchor?: string | null;
+  step_pct?: number | null;
   covered_pct: number;
   excluded_pct: number;
   members: Member[];
@@ -112,8 +124,15 @@ const SHARE_NOTE: Record<Breakdown['kind'], string> = {
     + 'weight (e.g. 6.2% @ 16.2x contributes 6.2 ÷ 16.2 = 0.38; 9.7% @ 34.8x only 0.28).',
   ratio: 'Blends arithmetically: share = (weight × value) ÷ Σ(weight × value) over the holdings '
     + 'reporting here. Sums to 100%.',
-  level: 'Each holding is rebased to 100 at its own first year (an index); share = (weight × index) '
-    + '÷ Σ(weight × index). The amount as reported is shown beside it.',
+  // ⚠⚠ A LEVEL DECOMPOSES THE **MOVE**, NOT THE LEVEL — the line is chained
+  // (`index[p] = index[anchor] × (1 + Σ w·g / Σ w)`), so its value at a period is a cumulative
+  // product and no set of per-holding numbers can add up to it. What is decomposable is the step
+  // into the period, which is the more useful question anyway: who moved it, not who is in it.
+  level: 'The line is chained from weighted GROWTH, so this decomposes the MOVE into this period, '
+    + 'not the level. Growth is each holding\'s own change since the previous drawn period; '
+    + 'contribution = (weight × growth) ÷ Σweight, in percentage POINTS, and the contributions sum '
+    + 'to the step. Swing is the step without that holding — a flat holding shows a NEGATIVE swing '
+    + 'because removing it would have left the step higher.',
 };
 
 export default function BlendDrilldownModal({
@@ -201,14 +220,18 @@ export default function BlendDrilldownModal({
     const get: Record<SortKey, (m: Member) => number | string | null | undefined> = {
       holding: (m) => (m.name ?? m.isin ?? '').toLowerCase(),
       weight: (m) => m.weight_pct,
-      value: (m) => m.value,
+      // ⚠ THE TWO LEVEL COLUMNS REUSE THE `value`/`contribution` SORT KEYS, so a click has to sort
+      // what the column actually SHOWS. On a level that is growth and contribution-in-pp, not the
+      // index and the harmonic contribution — sorting a Growth column by the underlying index
+      // would order the rows by something not on screen.
+      value: (m) => (data?.kind === 'level' && m.growth_pct != null ? m.growth_pct : m.value),
       raw: (m) => m.raw_value,
       share: (m) => m.share_pct,
       inverse: inverseOf,
-      contribution: contribOf,
+      contribution: (m) => (data?.kind === 'level' ? m.contribution_pp ?? null : contribOf(m)),
     };
     return [...pMembers].sort((a, b) => cmp(get[sort.key](a), get[sort.key](b), sort.dir));
-  }, [pMembers, sort]);
+  }, [pMembers, sort, data?.kind]);
   const caret = (k: SortKey) => (sort.key === k ? (sort.dir === 'desc' ? ' ▾' : ' ▴') : '');
 
   return (
@@ -340,13 +363,30 @@ export default function BlendDrilldownModal({
             const rawCol: Col = { key: 'raw', label: 'As reported', align: 'right',
               cell: (m) => (m.raw_value == null ? '—' : m.raw_value.toLocaleString(undefined, { maximumFractionDigits: 2 })) };
             const shareCol: Col = { key: 'share', label: 'Share', align: 'right', cell: shareCell, foot: '100%' };
+            // ⚠ THE LEVEL PAIR THAT REPLACES `Share`. Growth is the holding's own change over the
+            // interval; contribution is its share of the STEP in percentage points, and the column
+            // FOOTS to `step_pct` — which is the check that the decomposition is the move the chart
+            // made, not a re-derivation of it.
+            const growthCol: Col = { key: 'value', label: 'Growth', align: 'right',
+              cell: (m) => (m.growth_pct == null ? '—'
+                : `${m.growth_pct >= 0 ? '+' : ''}${m.growth_pct.toFixed(1)}%`),
+              foot: data.step_pct == null ? '—'
+                : `${data.step_pct >= 0 ? '+' : ''}${data.step_pct.toFixed(1)}%` };
+            const contribPpCol: Col = { key: 'contribution', label: 'Contribution', align: 'right',
+              strong: true,
+              cell: (m) => (m.contribution_pp == null ? '—'
+                : `${m.contribution_pp >= 0 ? '+' : ''}${m.contribution_pp.toFixed(2)}pp`),
+              foot: data.step_pct == null ? '—'
+                : `${data.step_pct >= 0 ? '+' : ''}${data.step_pct.toFixed(2)}pp` };
 
             // ⚠ For a MULTIPLE the whole arithmetic is laid out so it reconciles on screen: P/E,
             // its inverse, weight, contribution (weight × inverse), share (contribution ÷ Σ).
             const cols: Col[] = isMult
               ? [holdingCol, valueCol, inverseCol, weightCol, contribCol, shareCol]
               : data.kind === 'level'
-                ? [holdingCol, weightCol, valueCol, rawCol, shareCol]
+                // ⚠ NO `Share` COLUMN ON A LEVEL — there is no total to take a share of. The pair
+                // that replaces it reconciles instead: Σ contributions = the step.
+                ? [holdingCol, weightCol, valueCol, rawCol, growthCol, contribPpCol]
                 : [holdingCol, weightCol, valueCol, shareCol];
 
             const bodyTd = (c: Col) => c.align === 'left'

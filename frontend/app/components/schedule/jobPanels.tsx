@@ -1,71 +1,34 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Spinner from '../Spinner';
-import LoadingDots from '../LoadingDots';
 import { API_URL } from '../../../lib/apiUrl';
 import { apiFetch } from '../../../lib/apiFetch';
 import { dialog } from '../../../lib/dialog';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
 import { useNow } from '../../../lib/hooks/useNow';
-import { usePollingFetch } from '../../../lib/hooks/usePollingFetch';
-import { useEventStream } from '../../../lib/hooks/useEventStream';
 import { watchRun, type RunRow } from '../../../lib/watchRun';
 import CollapsibleCard from '../momentum/CollapsibleCard';
-import DailyHoldingsSection from './DailyHoldingsSection';
 import { PriceRefreshPanel, useStockRefresh } from './priceRefresh';
 import { tailRunToConsole } from './runConsole';
 import { relTime, formatExecAt, countdownLeft, formatDur } from './utils';
+// ⚠ THE FETCHING MOVED OUT (step 3). This file draws; `usePipelineActivity` reads. That is what
+// lets a panel be rendered from a registry inside a table row instead of only where its own
+// stream-owning component happened to sit.
 import type {
-  ScheduleUpcoming,
+  ApiUsage, CoverageCompany, CoverageEndpoint, PipelineCtx, PriceCoverage, UniverseCoverage,
+  UniverseCoverageRow,
+} from './usePipelineActivity';
+import type {
   HeldCompaniesResponse,
   HeldCompany,
   RunningJob,
   IngestRun,
-  ScheduledStrategy,
 } from './types';
 
 /** GuruFocus monthly request cap per region — mirrors `ApiUsageBadge.LIMIT`
  * and the backend `MONTHLY_API_LIMIT`. */
 const API_LIMIT = 20000;
-type ApiUsage = { usa: number; europe: number; asia: number; month: string };
-
-/** Freshest / most-stale company by latest close-price date — from
- * `/api/data/price-coverage`. Lets the month-end refresh show prices moved. */
-type CoverageCompany = {
-  company_id: number;
-  company_name: string | null;
-  ticker: string | null;
-  exchange: string | null;
-  date: string;
-};
-type PriceCoverage = {
-  newest: CoverageCompany | null;
-  oldest: CoverageCompany | null;
-  priced_companies: number;
-};
-
-/** Per-universe price + volume freshness — from `/api/data/universe-coverage`.
- * For each STATIC (frozen) universe, the min (most-stale) / max (freshest)
- * latest close-price and volume date across its active members, each with the
- * company responsible, plus a per-universe manual refresh button. */
-type CoverageEndpoint = {
-  date: string;
-  company_id: number;
-  ticker: string | null;
-  exchange: string | null;
-  company_name: string | null;
-};
-type CoverageRange = { min: CoverageEndpoint | null; max: CoverageEndpoint | null; priced: number };
-type UniverseCoverageRow = {
-  universe_id: number;
-  label: string | null;
-  frozen_from: string | null;
-  members: number;
-  price: CoverageRange;
-  volume: CoverageRange;
-};
-type UniverseCoverage = { universes: UniverseCoverageRow[] };
 
 /** On-demand depth + gap check — from `/api/data/universe-history?label=`. Per
  * metric: earliest date, how many members have data / <1yr history / a >14-day
@@ -126,134 +89,68 @@ type UniverseStaleness = {
   companies: StalenessCompany[];
 };
 
-/** Three independent operations of the split pipeline, stacked:
- *   1. Price update — re-prices the held companies + refreshes MTD (daily).
- *   2. Rebalance    — rebalances strategies that are due, from a fresh
- *      universe (runs when due; no-op otherwise).
- * They never run concurrently — the backend serializes them, so triggering
- * one while the other runs just queues it. Each section has its own status,
- * Run-now button, and detail. */
-export default function SmartPipelineActivity() {
-  const [active, setActive] = useState(true);
-  // PRIMARY transport: ONE SSE stream that pushes each topic only when it
-  // changes (routers/_sse_stream.py) — no idle polling, closes when the tab is
-  // hidden. Server-side each topic recomputes fast while a run is active, slow
-  // when idle (coverage stays at 30s/5min). Polling below is a FALLBACK, enabled
-  // only if the stream can't connect, so the page still works if SSE is blocked.
-  const { data: stream, failed: sseFailed } = useEventStream('/api/schedule/stream');
-  const triggerInterval = active ? 3000 : 30000;
-  const statusInterval = active ? 3000 : 120000;
-  const coverageInterval = active ? 30000 : 300000;
-  const fb = (p: string) => (sseFailed ? `${API_URL}${p}` : null);
-  const { data: upPoll, error: upErr } = usePollingFetch<ScheduleUpcoming>(fb('/api/schedule/upcoming'), triggerInterval);
-  const { data: heldPoll, error: heldErr } = usePollingFetch<HeldCompaniesResponse>(fb('/api/scheduled-strategies/held-companies'), statusInterval);
-  const { data: stratPoll } = usePollingFetch<ScheduledStrategy[]>(fb('/api/scheduled-strategies'), statusInterval);
-  const { data: runsPoll } = usePollingFetch<IngestRun[]>(fb('/api/ingest/runs?limit=20'), statusInterval);
-  const { data: usagePoll } = usePollingFetch<ApiUsage>(fb('/api/usage'), statusInterval);
-  const { data: covPoll } = usePollingFetch<PriceCoverage>(fb('/api/data/price-coverage'), coverageInterval);
-  const { data: uCovPoll } = usePollingFetch<UniverseCoverage>(fb('/api/data/universe-coverage'), coverageInterval);
+/**
+ * THE PANEL EACH JOB OWNS — a registry, so the jobs table renders a job's detail without knowing
+ * anything about what that detail IS.
+ *
+ * ⚠⚠ THIS IS WHAT RETIRED THE "Smart pipeline activity" CARD. Those four sections used to be a
+ * page-level component with its own heading, sitting below the table and duplicating its
+ * countdowns; the table then had to LINK DOWN to it. Now the table is the only index, a job's
+ * detail is behind its own row, and adding a panel for a new job is an entry here rather than an
+ * edit to the page.
+ *
+ * ⚠ ONE JOB CAN OWN TWO PANELS. `daily_pipeline` is ONE scheduler entry that fires price-update and
+ * rebalance in order — pointing it at a single card would quietly claim the other belongs to
+ * something else.
+ *
+ * ⚠ AND MOST JOBS OWN NONE, WHICH IS THE NORMAL CASE. `fx_sync` has nothing to add to its own row;
+ * a panel invented for symmetry is a card that repeats the table.
+ *
+ * ⚠ THE CONTEXT IS PASSED IN, NEVER FETCHED HERE. `usePipelineActivity` is called once by the
+ * table; a panel that opened its own stream would put a second SSE consumer (and six polling
+ * fallbacks) behind every row a reader expands.
+ */
+export const JOB_PANELS: Record<string, (ctx: PipelineCtx) => ReactNode> = {
+  daily_pipeline: (ctx) => (
+    <>
+      <PriceUpdateSection
+        running={ctx.running('price_update')}
+        lastRun={ctx.lastRun('price_update')}
+        retryAt={ctx.retryAt}
+        schedulerOff={ctx.schedulerOff}
+        held={ctx.held}
+        nowMs={ctx.nowMs}
+        collapsed={false}
+      />
+      <RebalanceSection
+        running={ctx.running('rebalance')}
+        lastRun={ctx.lastRun('rebalance')}
+        nextDue={ctx.nextDue}
+        schedulerOff={ctx.schedulerOff}
+        nowMs={ctx.nowMs}
+        collapsed={false}
+      />
+    </>
+  ),
+  month_end_price_refresh: (ctx) => (
+    <FullPriceRefreshSection
+      running={ctx.running('full_price_refresh')}
+      lastRun={ctx.lastRun('full_price_refresh')}
+      schedulerOff={ctx.schedulerOff}
+      usage={ctx.usage}
+      coverage={ctx.coverage}
+      universeCoverage={ctx.universeCoverage}
+      universeRefreshRunning={ctx.running('universe_price_refresh')}
+      nowMs={ctx.nowMs}
+      collapsed={false}
+    />
+  ),
+};
 
-  // Prefer the streamed payload; the poll value is only populated on SSE failure.
-  const upcoming = (stream.upcoming as ScheduleUpcoming | undefined) ?? upPoll ?? null;
-  const held = (stream.held as HeldCompaniesResponse | undefined) ?? heldPoll ?? null;
-  // Guard against a non-array payload (e.g. an error body if the endpoint 500s)
-  // so the whole card can't crash on `.filter`.
-  const strategies: ScheduledStrategy[] | null =
-    (Array.isArray(stream.strategies) ? (stream.strategies as ScheduledStrategy[]) : null)
-    ?? (Array.isArray(stratPoll) ? stratPoll : null);
-  const recentRuns = (stream.runs as IngestRun[] | undefined) ?? runsPoll ?? null;
-  const usage = (stream.usage as ApiUsage | undefined) ?? usagePoll ?? null;
-  const coverage = (stream.price_coverage as PriceCoverage | undefined) ?? covPoll ?? null;
-  const universeCoverage = (stream.universe_coverage as UniverseCoverage | undefined) ?? uCovPoll ?? null;
-  const loadError = upErr ?? heldErr;
-  // 1s tick so every relative-time / countdown display (next run, due, last run,
-  // retry) advances to the second — an at-a-glance "is it live?" signal. Only
-  // this lightweight header/status text depends on it; the heavy tables re-render
-  // trivially since their props don't change.
-  const nowMs = useNow(1000);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setActive((upcoming?.running?.length ?? 0) > 0);
-  }, [upcoming]);
-
-  const running = (job: string): RunningJob | null =>
-    upcoming?.running?.find((r) => r.job_name === job) ?? null;
-  const lastRun = (job: string): IngestRun | null =>
-    recentRuns?.find((r) => r.job_name === job) ?? null;
-
-  // Both ops fire off the one daily tick — its next fire time drives "next run".
-  const dailyJob = upcoming?.jobs?.find((j) => j.id === 'daily_pipeline') ?? null;
-  // One-shot stale-held-price retry (scheduled +3h out by the backend when held
-  // prices are still behind after a price_update). Present only while a retry is
-  // pending — drives the "Trying again in" countdown on the price-update card.
-  const retryJob = upcoming?.jobs?.find((j) => j.id === 'price_update_retry') ?? null;
-  // The month-end full-price-refresh job (its own monthly cron).
-  const monthEndJob = upcoming?.jobs?.find((j) => j.id === 'month_end_price_refresh') ?? null;
-  const schedulerOff = upcoming?.scheduler_enabled === false;
-  const loading = upcoming == null && held == null;
-
-  // Earliest upcoming rebalance across enabled strategies.
-  const nextDue = (strategies ?? [])
-    .filter((s) => s.enabled && s.next_due_at)
-    .map((s) => s.next_due_at as string)
-    .sort()[0] ?? null;
-
-  return (
-    <div className="space-y-3">
-      <h2 className="text-sm uppercase tracking-wider text-fg-muted font-medium">
-        Smart pipeline activity
-      </h2>
-
-      {loading && !loadError && (
-        <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-3">
-          <LoadingDots label="Loading" />
-        </div>
-      )}
-      {loadError && loading && (
-        <div className="bg-card rounded-xl border border-neutral-800/40 px-5 py-3">
-          <span className="text-xs text-neg-300">Failed to load: {loadError}</span>
-        </div>
-      )}
-
-      {!loading && (
-        <>
-          <PriceUpdateSection
-            running={running('price_update')}
-            lastRun={lastRun('price_update')}
-            nextRunAt={dailyJob?.next_run_at ?? null}
-            retryAt={retryJob?.next_run_at ?? null}
-            schedulerOff={schedulerOff}
-            held={held}
-            nowMs={nowMs}
-          />
-          <RebalanceSection
-            running={running('rebalance')}
-            lastRun={lastRun('rebalance')}
-            nextDue={nextDue}
-            schedulerOff={schedulerOff}
-            nowMs={nowMs}
-          />
-          <FullPriceRefreshSection
-            running={running('full_price_refresh')}
-            lastRun={lastRun('full_price_refresh')}
-            nextRunAt={monthEndJob?.next_run_at ?? null}
-            schedulerOff={schedulerOff}
-            usage={usage}
-            coverage={coverage}
-            universeCoverage={universeCoverage}
-            universeRefreshRunning={running('universe_price_refresh')}
-            nowMs={nowMs}
-          />
-          {/* Not a pipeline operation — an on-demand question ABOUT one. It sits
-              here because it is read from the same place the operations are, but
-              it has no schedule, no run row and writes nothing. */}
-          <DailyHoldingsSection strategies={strategies} />
-        </>
-      )}
-    </div>
-  );
-}
+// ⚠ `DailyHoldingsSection` IS NOT RE-EXPORTED FROM HERE. It was the fourth card of the retired
+// component but it is not a job — no schedule, no run row, writes nothing — so it has no row to
+// live behind. `/schedule` imports it directly and hands it the strategies the page already has,
+// rather than it opening the activity stream for one read.
 
 /** Fire the trigger endpoint and tail the run's step transcript into the
  * browser console: every phase, every company the price refresh touched, every
@@ -355,9 +252,13 @@ function ForceRebalanceButton({ busy }: { busy: boolean }) {
   );
 }
 
-/** Exact next-execution time (the viewer's local timezone, with the tz
- * abbreviation) + a precise "Xd Yh left" countdown — shown in each pipeline
- * section's header bar. */
+/** Exact time (the viewer's local timezone, with the tz abbreviation) + a precise "Xd Yh left"
+ * countdown.
+ *
+ * ⚠ ONE CALLER LEFT, AND IT IS NOT A SCHEDULER TIME. This used to head every pipeline section with
+ * that section's next FIRE time — the same value the Automatic jobs table reads, so the page ran
+ * two clocks for one event. The only survivor is the rebalance card's `nextDue`: the earliest date
+ * a strategy is actually due, which no scheduler knows and the table cannot show. */
 function NextRun({ at, nowMs }: { at: string | null; nowMs: number }) {
   if (!at) return null;
   return (
@@ -494,15 +395,21 @@ function sortHeld(companies: HeldCompany[], { key, dir }: HeldSort): HeldCompany
 }
 
 function PriceUpdateSection({
-  running, lastRun, nextRunAt, retryAt, schedulerOff, held, nowMs,
+  running, lastRun, retryAt, schedulerOff, held, nowMs, collapsed = true,
 }: {
   running: RunningJob | null;
   lastRun: IngestRun | null;
-  nextRunAt: string | null;
+  /** ⚠ THE ONE-SHOT RETRY STAYS — it is NOT the daily schedule. The backend schedules it +3h out
+   *  only when held prices are still behind, so it exists sometimes and the table has no row for
+   *  it; "↻ trying again in" is a fact about THIS job's last outcome, not a second clock. */
   retryAt: string | null;
   schedulerOff: boolean;
   held: HeldCompaniesResponse | null | undefined;
   nowMs: number;
+  /** ⚠ TRUE OUTSIDE A ROW, FALSE INSIDE ONE. Rendered from `JOB_PANELS` the card is already behind
+   *  a disclosure the reader just opened, so starting collapsed would cost a second click to see
+   *  the thing they asked for. */
+  collapsed?: boolean;
 }) {
   const fresh = held?.freshness_summary;
   const staleish = (fresh?.stale_count ?? 0) + (fresh?.missing_count ?? 0);
@@ -525,7 +432,7 @@ function PriceUpdateSection({
   return (
     <CollapsibleCard
       title="Price update"
-      defaultCollapsed
+      defaultCollapsed={collapsed}
       bodyClassName="px-5 py-4 space-y-3"
       rightSlot={
         <>
@@ -534,7 +441,12 @@ function PriceUpdateSection({
             schedulerOff={schedulerOff}
             lastRun={lastRun}
             nowMs={nowMs}
-            idleNode={nextRunAt ? <NextRun at={nextRunAt} nowMs={nowMs} /> : <LastResult run={lastRun} nowMs={nowMs} />}
+            // ⚠ NO "NEXT RUN" HERE ANY MORE — the Automatic jobs table above owns every "when"
+            // (2026-08-13). It and `/api/schedule/upcoming` both read `list_scheduled_jobs()`, so
+            // this card was a second live countdown to the same fire time, free to disagree with
+            // the one two rows up. What is left is what only this card can say: what it will do,
+            // and to how much.
+            idleNode={<LastResult run={lastRun} nowMs={nowMs} />}
           />
           {held && <span className="text-fg-faint">{held.total_companies} held</span>}
           {staleish > 0
@@ -611,13 +523,18 @@ function PriceUpdateSection({
 }
 
 function RebalanceSection({
-  running, lastRun, nextDue, schedulerOff, nowMs,
+  running, lastRun, nextDue, schedulerOff, nowMs, collapsed = true,
 }: {
   running: RunningJob | null;
   lastRun: IngestRun | null;
+  /** ⚠ NOT A SCHEDULER TIME, WHICH IS WHY IT SURVIVED THE CLEAN-UP. This is the earliest
+   *  `next_due_at` across the enabled STRATEGIES — when a rebalance will next have something to
+   *  do. The table's "next run" is when the 05:00 tick fires, which is tomorrow either way. */
   nextDue: string | null;
   schedulerOff: boolean;
   nowMs: number;
+  /** See `PriceUpdateSection.collapsed`. */
+  collapsed?: boolean;
 }) {
   // Strategies actually rebalanced in the last run (status ok).
   const rebalanced = (lastRun?.momentum_summary ?? []).filter(
@@ -640,7 +557,7 @@ function RebalanceSection({
   return (
     <CollapsibleCard
       title="Rebalance"
-      defaultCollapsed
+      defaultCollapsed={collapsed}
       bodyClassName="px-5 py-4 text-xs space-y-1.5"
       rightSlot={
         <>
@@ -1507,12 +1424,13 @@ function StalePricesPanel({ busy }: { busy: boolean }) {
 }
 
 function FullPriceRefreshSection({
-  running, lastRun, nextRunAt, schedulerOff, usage, coverage, universeCoverage,
-  universeRefreshRunning, nowMs,
+  running, lastRun, schedulerOff, usage, coverage, universeCoverage,
+  universeRefreshRunning, nowMs, collapsed = true,
 }: {
   running: RunningJob | null;
   lastRun: IngestRun | null;
-  nextRunAt: string | null;
+  /** See `PriceUpdateSection.collapsed`. */
+  collapsed?: boolean;
   schedulerOff: boolean;
   usage: ApiUsage | null | undefined;
   coverage: PriceCoverage | null | undefined;
@@ -1537,7 +1455,7 @@ function FullPriceRefreshSection({
   return (
     <CollapsibleCard
       title="Month-end full price refresh"
-      defaultCollapsed
+      defaultCollapsed={collapsed}
       bodyClassName="px-5 py-4 text-xs space-y-3"
       rightSlot={
         <>
@@ -1546,7 +1464,9 @@ function FullPriceRefreshSection({
             schedulerOff={schedulerOff}
             lastRun={lastRun}
             nowMs={nowMs}
-            idleNode={nextRunAt ? <NextRun at={nextRunAt} nowMs={nowMs} /> : <LastResult run={lastRun} nowMs={nowMs} />}
+            // ⚠ NO "NEXT RUN" HERE — see the same note on the price-update card. The table above
+            // is the single reader of the scheduler.
+            idleNode={<LastResult run={lastRun} nowMs={nowMs} />}
           />
           {usage && <span className="text-fg-faint font-mono">{totalLeft.toLocaleString()} calls left</span>}
           <RunNowButton job="full_price_refresh" busy={!!running} />
@@ -1556,7 +1476,12 @@ function FullPriceRefreshSection({
       <div className="text-fg-soft">
         Re-prices <span className="text-fg">every company</span>{' '}in the database (most-stale first), capped by the
         monthly GuruFocus quota that resets on the 1st — so the remaining budget is spent before it&apos;s lost.
-        {nextRunAt && <> Runs automatically <span className="font-mono text-fg">{relTime(nextRunAt, nowMs)}</span> (last day of the month).</>}
+        {/* ⚠ THE GATING, NOT THE CLOCK. This used to add "Runs automatically in 22h" off the same
+            `next_run_at` the table above now owns — and it was the more misleading of the two,
+            because the tick is DAILY and only acts at month end, so a 22h countdown read as "the
+            full refresh is 22h away" on the 3rd of the month. The cadence column says it once,
+            correctly. */}
+        {' '}It wakes daily and acts only in the last days of the month.
       </div>
 
       {showBar && (

@@ -14,7 +14,6 @@ import { RefreshIcon } from './RefreshIcon';
 import AttributionPanel from './AttributionPanel';
 import HoldingTimingModal from './HoldingTimingModal';
 import BucketDetailPanel from './BucketDetailPanel';
-import CompositionDataModal from './CompositionDataModal';
 import OwnerEarningsModal from './OwnerEarningsModal';
 import { type Basket } from './types';
 
@@ -410,17 +409,14 @@ function Chip({ label, value, valueClass, hint }: {
   );
 }
 
-function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
-  name, onBucket, selected, stale = false }: {
+function Chart({ axis, rows, unpricedPct, excluded, benchmark,
+  onBucket, selected, stale = false }: {
   axis: string;
   rows: Row[];
   /** True while these bars are the PREVIOUS selection's, waiting on the current one. The bars stay
    *  (blanking them on every class click is worse), but nothing that makes a CLAIM about them may
    *  be shown — see the warning below and `stale` on the modal. */
   stale?: boolean;
-  /** The denominator in words, and how many positions it spans — from the server, per axis. */
-  basis?: string | null;
-  positions?: number | null;
   /** The weight held but unpriceable — a genuine hole in the bars, unlike funds/cash.
    *  ⚠ `attributable_pct` is deliberately NOT read here: a coverage figure phrased as an absence
    *  ("87% of the book has a sector") is heard as a data-quality problem with the stocks, when the
@@ -428,14 +424,9 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
   unpricedPct?: number | null;
   excluded?: Axis['excluded'];
   benchmark: string;
-  name: string;
   onBucket: (axis: string, bucket: string) => void;
   selected: string | null;
 }) {
-  // ⚠ A HEADER BUTTON, NOT A CLICK ON THE CHART BODY. The bars are ALREADY a click target — they
-  // open the per-bucket attribution panel — so making the surface around them open a second thing
-  // would put two different drill-downs a few pixels apart.
-  const [showData, setShowData] = useState(false);
   // Sector is an EQUITY-only view; a non-equity selection leaves it with no portfolio side, so say
   // so rather than draw the benchmark's sectors beside an empty portfolio.
   const sectorEmpty = axis === 'sector' && rows.every((r) => (r.portfolio_pct ?? 0) === 0);
@@ -455,13 +446,11 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
   return (
     <section className={`bg-card border rounded-xl p-4 ${
       selected ? 'border-accent-500/40' : 'border-neutral-800/40'}`}>
+      {/* ⚠ NO PER-AXIS "Data" BUTTON (removed 2026-08-12, with `CompositionDataModal`). Three of
+          them — one per axis — each opened a table of the same holdings under a different grouping,
+          beside a chart whose bars are already the click target for the per-bucket attribution. */}
       <div className="flex items-baseline gap-2">
         <h4 className="text-sm font-semibold text-fg-strong">{AXIS_LABEL[axis] ?? axis}</h4>
-        <button type="button" onClick={() => setShowData(true)}
-          title="Show every holding behind these bars, at the weight each bar counted it at — and what the percentages are a share of."
-          className="ml-auto cursor-pointer text-[11px] px-1.5 py-0.5 rounded-md border border-neutral-800/40 text-fg-faint hover:text-accent-300 hover:border-accent-500/50 transition-colors">
-          Data
-        </button>
       </div>
       <p className="text-[12px] text-fg-faint mt-0.5">{AXIS_NOTE[axis]}</p>
       {/* ⚠ ONLY THE UNPRICED HOLDINGS GET A WARNING, AND THIS IS THE WHOLE DISTINCTION. A fund, a
@@ -476,7 +465,7 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
           request — a caveat that appears and then vanishes on its own, which is worse than none. */}
       {!stale && (unpricedPct ?? 0) > 0.005 && (
         <p className="text-[12px] text-warn-300 mt-0.5"
-          title="Real holdings, in real buckets, that we have no price series for. They are absent from the bars, so the buckets they belong to read lower than they are. Open Data for the names.">
+          title="Real holdings, in real buckets, that we have no price series for. They are absent from the bars, so the buckets they belong to read lower than they are. The holdings table below names them, and the Resolved column on the portfolio row counts them.">
           ⚠ {unpricedPct!.toFixed(1)}% held but unpriceable — missing from these bars
         </p>
       )}
@@ -489,15 +478,10 @@ function Chart({ axis, rows, basis, positions, unpricedPct, excluded, benchmark,
           about the bars, and during a class change the bars are the previous selection's. */}
       {!stale && excludedWeight > 0.005 && (
         <p className="text-[12px] text-fg-faint mt-0.5"
-          title="Funds, bonds and cash have no sector of their own — they are their own slices of the allocation chart above. Open Data for the names.">
+          title="Funds, bonds and cash have no sector of their own — they are their own slices of the allocation chart above, and the holdings table below names them.">
           Excludes {excludedWeight.toFixed(1)}% in funds, bonds and cash — no{' '}
           {AXIS_LABEL[axis]?.toLowerCase() ?? axis} to place
         </p>
-      )}
-      {showData && (
-        <CompositionDataModal axis={axis} rows={rows} basis={basis} positions={positions}
-          unpricedPct={unpricedPct} excluded={excluded}
-          benchmark={benchmark} name={name} onClose={() => setShowData(false)} />
       )}
       {sectorEmpty ? (
         <p className="text-[12px] text-fg-subtle py-8 text-center">
@@ -2308,12 +2292,26 @@ const BENCHMARKS = ['SP500', 'ACWI', 'AEX'] as const;
  *
  * Per-control additions stay at the call site: the select's width, the button's disabled state.
  */
-const HEADER_CTL = 'cursor-pointer text-xs px-3 py-1.5 rounded-lg border border-neutral-700 '
-  + 'bg-page text-fg-soft transition-colors hover:text-accent-300 hover:border-accent-500/50';
+const HEADER_CTL_BASE = 'cursor-pointer text-xs px-3 py-1.5 rounded-lg border bg-page '
+  + 'transition-colors';
+const HEADER_CTL = `${HEADER_CTL_BASE} border-neutral-700 text-fg-soft `
+  + 'hover:text-accent-300 hover:border-accent-500/50';
+/**
+ * The same control wearing the STOP ink — Refresh becomes Cancel while its job is in flight.
+ *
+ * ⚠ A SEPARATE STRING, NOT `${HEADER_CTL} text-warn-400 …` APPENDED. Two utilities setting the same
+ * property (`text-fg-soft` and `text-warn-400`) are the same specificity, so which one wins is
+ * decided by their order in the generated stylesheet, NOT by their order in this attribute — the
+ * button would take whichever Tailwind happened to emit last and silently flip back the next time
+ * the class set changes. Splitting the shared geometry into `HEADER_CTL_BASE` and giving each state
+ * its own colours means the two never both apply.
+ */
+const HEADER_CTL_STOP = `${HEADER_CTL_BASE} border-warn-500/40 text-warn-400 `
+  + 'hover:bg-warn-500/10 hover:border-warn-500/60';
 
 export default function PortfolioAnalysisModal({
   id, name, basket, onRefresh, refreshing = false, refreshTitle, refreshTick = null,
-  refreshSeq = 0, onClose,
+  onCancelRefresh, cancelRequested = false, cancelTitle, refreshSeq = 0, onClose,
 }: {
   id?: number; name: string; basket?: Basket; onClose: () => void;
   /**
@@ -2334,6 +2332,35 @@ export default function PortfolioAnalysisModal({
   refreshTitle?: string;
   /** The latest line from the running refresh — the same tail the expanded row shows. */
   refreshTick?: string | null;
+  /**
+   * Stop the refresh this modal started — the SAME cancel the row's button offers, passed in for
+   * the same reason `onRefresh` is.
+   *
+   * ⚠ ITS PRESENCE IS THE SIGNAL, AND IT MUST NOT BE GATED ON A JOB ID. The caller records the
+   * press synchronously and defers the actual cancel until it has a handle; gating this on "the
+   * job id has arrived" reintroduces a round-trip during which the button reads "Refresh" over work
+   * already running — which is how a second press started a second job and put a second progress
+   * toast beside the first.
+   *
+   * ⚠ WITHOUT IT THE BUTTON STAYS DISABLED WHILE RUNNING, which is the old behaviour and still the
+   * right one for a caller whose refresh is a bare SSE with nothing to call off. It is not a
+   * degraded mode — it is the honest one.
+   */
+  onCancelRefresh?: () => void;
+  /**
+   * The cancel has been asked for and the job has not stopped yet.
+   *
+   * ⚠ IT IS A THIRD STATE, NOT THE ABSENCE OF THE SECOND. Cancellation is cooperative — the account
+   * being downloaded finishes first — so between the press and the stop there is a real interval
+   * where neither "Cancel" (already asked; pressing again does nothing) nor "Refresh" (the work is
+   * still running, and starting a second job is the bug) is true. The button says `Cancelling…` and
+   * is inert, which is the only reading that matches what the server is doing.
+   */
+  cancelRequested?: boolean;
+  /** ⚠ THE CALLER'S OWN WORDING AGAIN, and here it carries the nuance that decides whether to
+   *  press: the scan stops at an account boundary, so the download in flight finishes first and
+   *  everything already stored is kept. That is worth reading BEFORE the click, not after. */
+  cancelTitle?: string;
   /**
    * Bumped by the caller when a refresh finishes.
    *
@@ -2449,6 +2476,20 @@ export default function PortfolioAnalysisModal({
   // 'Equity' (Stocks) keeps the sector / benchmark composition view.
   const sleeve = selected && selected !== 'Equity' ? selected : null;
 
+  /**
+   * ONE BUTTON, THREE STATES — and which one it is right now.
+   *
+   * ⚠ IT KEYS ON `refreshing`, WHICH THE CALLER SETS ON THE PRESS. That is the whole point: the
+   * reader sees their own click, so the control must change on the click and not a round-trip
+   * later. `stopping` is the interval after Cancel while the scan finishes the account in flight.
+   */
+  const canStop = !!onCancelRefresh;
+  const stopping = refreshing && canStop && cancelRequested;
+  const cancellable = refreshing && canStop && !stopping;
+  /** ⚠ A CALLER WITH NOTHING TO CANCEL KEEPS THE OLD BUTTON — spinner, "Refreshing…", disabled.
+   *  Painting a ✕ it cannot honour would be the same broken control in the opposite direction. */
+  const inert = stopping || (refreshing && !canStop);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/60"
       onClick={onClose} role="dialog" aria-modal="true">
@@ -2474,12 +2515,29 @@ export default function PortfolioAnalysisModal({
                 the caller passes no handler: a basket has no AIRS portfolio behind it to re-scan,
                 and the panels gate the row's button on `isAdmin` for the same reason they gate
                 everything that writes. */}
+            {/* ⚠ AND IT BECOMES CANCEL WHILE IT RUNS, when the caller can offer one — the same flip
+                the row's button makes, so the two are still one control. A disabled spinner with no
+                way out is the state this refresh kept being reported as "stuck": the work is
+                minutes (five downloads per account over a chain reaching nine), it survives closing
+                this modal, and pressing it by accident used to mean waiting it out. */}
             {onRefresh && (
-              <button type="button" onClick={onRefresh} disabled={refreshing}
-                title={refreshTitle} aria-label="Refresh this portfolio"
-                className={`${HEADER_CTL} inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-wait`}>
-                <RefreshIcon spinning={refreshing} size={12} />
-                {refreshing ? 'Refreshing…' : 'Refresh'}
+              <button type="button" onClick={cancellable ? onCancelRefresh : onRefresh}
+                // ⚠ INERT ONLY ONCE THE CANCEL IS IN. While it runs there is always something to
+                // press — a disabled spinner with no way out is the state this action kept being
+                // reported as "stuck" — and once the stop has been asked for there is nothing left
+                // to ask for. It is never a live "Refresh" over work already running: that window
+                // is exactly how a second job and a second progress toast used to appear.
+                disabled={inert}
+                title={stopping ? 'Cancelling — the account being downloaded finishes first.'
+                  : cancellable ? cancelTitle : refreshTitle}
+                aria-label={stopping ? 'Cancelling this refresh'
+                  : cancellable ? 'Cancel this refresh' : 'Refresh this portfolio'}
+                className={`${refreshing && canStop ? HEADER_CTL_STOP : HEADER_CTL} inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-wait`}>
+                {refreshing && canStop
+                  ? <span className="text-[10px] leading-none">✕</span>
+                  : <RefreshIcon spinning={refreshing} size={12} />}
+                {stopping ? 'Cancelling…' : cancellable ? 'Cancel'
+                  : refreshing ? 'Refreshing…' : 'Refresh'}
               </button>
             )}
             {/* ⚠ THE CAPTION SITS OUTSIDE THE CONTROL, which is what lets the select match the two
@@ -2634,7 +2692,6 @@ export default function PortfolioAnalysisModal({
                 <div className="grid gap-4 lg:grid-cols-3">
                   {(data.axes ?? []).map((a) => (
                     <Chart key={a.axis} axis={a.axis} rows={a.rows}
-                      basis={a.basis} positions={a.positions} name={name}
                       unpricedPct={a.unpriced_pct} excluded={a.excluded} stale={stale}
                       benchmark={data.benchmark ?? 'SP500'}
                       onBucket={(axis, b) => { if (isBasket) return; setWhy(null); setBucket(

@@ -6,7 +6,9 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { fmtRevM } from './marginData';
 import { type CashReturnInputs, type CashReturnRow } from './cashReturnData';
-import { RatioInputsTable, type InputsLine } from './RatioInputsTable';
+import {
+  InputsViewSwitch, RatioInputsTable, type InputsLine, type InputsView,
+} from './RatioInputsTable';
 import { type BenchTarget } from './benchSeries';
 import { type Target } from './HoldingsRevenueModal';
 
@@ -114,7 +116,17 @@ export default function InvestedCapitalInputsModal({ target, portfolioName, benc
   };
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
-  const derived = { label: 'Invested capital', of: (r: CashReturnRow, y: string) => investedOf(r, y), fmt: fmtRevM };
+  /** ⚠ `kind: 'amount'` — THE ONLY DERIVED LINE ON THE TAB THAT IS ONE, and it is what unlocks the
+   *  Reported / Rebased / YoY switch below. The chart cannot plot this level directly (mixed
+   *  reporting currencies do not sum), so it rebases each company to 100 at its own first period
+   *  and weight-averages the indices — `Rebased` is that construction, cell by cell. On the ten
+   *  RATIO cards the same two transforms are meaningless, which is why they declare `'ratio'` and
+   *  get no switch; see `InputsView`. */
+  const derived = { label: 'Invested capital', kind: 'amount' as const, of: (r: CashReturnRow, y: string) => investedOf(r, y), fmt: fmtRevM };
+  /** ⚠ ONE SWITCH FOR BOTH TABLES. Owned here rather than inside `RatioInputsTable`, which this
+   *  modal renders twice — a per-table switch would let a reader set the book to Rebased and the
+   *  index to Reported and read the gap between an index and a pile of euros as a finding. */
+  const [view, setView] = useState<InputsView>('reported');
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"
@@ -132,13 +144,16 @@ export default function InvestedCapitalInputsModal({ target, portfolioName, benc
         <div className="flex-1 overflow-auto px-6 py-4 space-y-5">
           <p className="text-[12px] text-fg-faint">Non-current liabilities and total equity as reported (millions, native currency). Invested capital = non-current liabilities + total equity.</p>
 
+          {/* The switch, above everything it governs — both tables. */}
+          <InputsViewSwitch view={view} onChange={setView} />
+
           <div className="space-y-1.5">
             <h3 className={section}>{portfolioName ? `${portfolioName} — ` : ''}inputs by year</h3>
             {err && <p className="text-xs text-neg-300">{err}</p>}
             {!data && !err && <p className="text-xs text-fg-subtle">Loading…</p>}
             {data && data.rows.length === 0 && !err && <p className="text-xs text-fg-subtle">No held company has these figures ingested.</p>}
             {data && data.rows.length > 0 && (
-              <RatioInputsTable data={data} lines={LINES} derived={derived} onFetch={fetchFinancials} />
+              <RatioInputsTable data={data} lines={LINES} derived={derived} view={view} onFetch={fetchFinancials} />
             )}
           </div>
 
@@ -158,7 +173,7 @@ export default function InvestedCapitalInputsModal({ target, portfolioName, benc
                     {bench.rows.filter((r) => r.status === 'ok').length} with figures feed the line,
                     renormalised each period
                   </p>
-                  <RatioInputsTable data={bench} lines={LINES} derived={derived} />
+                  <RatioInputsTable data={bench} lines={LINES} derived={derived} view={view} />
                 </>
               )}
             </div>

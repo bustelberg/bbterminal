@@ -106,7 +106,10 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
    * chart can be guaranteed to mean the same thing. The index arrives cap-weighted; the card's
    * existing weighted average does the rest.
    */
-  const [benchmark, setBenchmark] = useState<string | null>(null);
+  // ⚠ AEX, NOT `BENCHMARKS[0]`. The default is a choice about what this book is measured against —
+  // a Dutch book against the Dutch index — not "whichever we happen to list first", and pinning it
+  // to the array's order means reordering the list silently re-benchmarks every chart in the tab.
+  const [benchmark, setBenchmark] = useState<string | null>('AEX');
   /** ⚠ Memoised for the same reason `holdingsTarget` is — it is an effect dep in twelve cards. */
   const benchTarget = useMemo(
     () => (benchmark ? { universe: benchmark, cadence } : null), [benchmark, cadence]);
@@ -123,6 +126,16 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
 
   useEffect(() => {
     let alive = true;
+    /**
+     * ⚠ ABORTED ON THE WAY OUT, NOT MERELY IGNORED. A book's blend is a read per holding and runs
+     * for a minute; the `alive` flag alone dropped the RESULT but left the work running, so
+     * flipping the cadence twice had two blends of forty companies in flight, competing for the
+     * same connections while the reader waited on the second. Switching now cancels the first.
+     *
+     * ⚠ THE STREAM HONOURS IT PROPERLY — `runSSE` wires abort to `reader.cancel()`, so the server
+     * stops mid-book rather than finishing into a dropped connection.
+     */
+    const ctrl = new AbortController();
     void (async () => {
       setErr(null); setData(null); setProgress(null);
       try {
@@ -133,6 +146,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
         if (isAgg) {
           const out = await loadBlendMetrics<MetricsResponse>(
             { basket, portfolioId, cadence }, (p) => { if (alive) setProgress(p); },
+            ctrl.signal,
           );
           if (!alive) return;
           if (out.kind === 'none') { setData({ metrics: [] }); return; }
@@ -141,17 +155,20 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
           return;
         }
         const r = await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin ?? '')}`
-          + `/metrics?cadence=${cadence}`);
+          + `/metrics?cadence=${cadence}`, { signal: ctrl.signal });
         if (r.status === 404) { if (alive) setData({ metrics: [] }); return; }
         const b = await r.json().catch(() => null);
         if (!alive) return;
         if (!r.ok) { setErr(b?.detail ?? `HTTP ${r.status}`); return; }
         setData(b as MetricsResponse);
       } catch (e) {
+        // ⚠ AN ABORT IS NOT AN ERROR. It is this component cancelling its own request, and
+        // rendering "AbortError" where a chart was would turn a deliberate switch into a failure.
+        // `alive` is already false by then — this only guards a future caller that forgets.
         if (alive) setErr(e instanceof Error ? e.message : String(e));
       }
     })();
-    return () => { alive = false; };
+    return () => { alive = false; ctrl.abort(); };
   }, [isin, isAgg, basket, portfolioId, reloadKey, metricsKey, cadence]);
 
   /**
@@ -169,11 +186,15 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
   const [benchErr, setBenchErr] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
+    // Same rule as the book's own load above: a switch cancels the index read it replaces. An
+    // index blend is the most expensive read on the tab (~1,500 constituents on ACWI).
+    const ctrl = new AbortController();
     void (async () => {
       setBenchMetrics(null); setBenchErr(null);
       if (!benchmark) return;
       try {
         const r = await apiFetch(`${API_URL}/api/earnings/fundamental-blend-metrics`, {
+          signal: ctrl.signal,
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           // ⚠ NAME THE THREE METRICS. Unnamed, the blend reads every charted code per constituent —
           // three paged requests each, i.e. ~1,500 round trips for the S&P. Named, it is one
@@ -192,23 +213,35 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
         }
         setBenchMetrics((b as MetricsResponse)?.metrics ?? []);
       } catch (e) {
+        if (!alive) return;                     // aborted by the switch — not a failure to report
         const detail = e instanceof Error ? e.message : String(e);
         console.warn(`[bb:bench] blend ${benchmark}: ${detail}`, e);
-        if (alive) setBenchErr(detail);
+        setBenchErr(detail);
       }
     })();
-    return () => { alive = false; };
+    return () => { alive = false; ctrl.abort(); };
   }, [benchmark, cadence]);
 
-  if (err) return <p className="text-xs text-neg-300 py-16 text-center">{err}</p>;
-
-  // ⚠ ONE COUNT FOR THE WHOLE GRID, NOT TWELVE. Every card below reads this one metrics fetch (or
-  // fires its own once it lands), so twelve boxes each saying "Loading…" showed a wait twelve times
-  // over and none of them could say how far along it was. While the blend is running the grid is a
-  // single line that can.
-  if (isAgg && !data) {
-    return <p className="text-xs text-fg-subtle py-16 text-center">{blendLoadingLabel(progress)}</p>;
-  }
+  /**
+   * ⚠⚠ NEITHER AN ERROR NOR A LOAD MAY TAKE THE CONTROL ROW WITH IT — these used to be early
+   * `return`s, and the toggle that STARTED the load was the first thing to leave the screen.
+   *
+   * A book's blend runs for a minute, so pressing Quarterly replaced the whole tab — cadence
+   * toggle, benchmark picker and all — with one "Loading… (3 of 41 companies)" line, and the
+   * reader who wanted to go straight back to Annual had nothing to click until it finished. A
+   * control that disappears exactly while its own work is in flight is the one moment it is most
+   * needed: switching back now cancels that fetch (see the ⚠ on the effect above) and the cached
+   * answer for the cadence you came from returns instantly.
+   *
+   * ⚠ ONE COUNT FOR THE WHOLE GRID, NOT TWELVE. Every card below reads this one metrics fetch (or
+   * fires its own once it lands), so twelve boxes each saying "Loading…" showed a wait twelve
+   * times over and none of them could say how far along it was.
+   */
+  const body = err
+    ? <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
+    : isAgg && !data
+      ? <p className="text-xs text-fg-subtle py-16 text-center">{blendLoadingLabel(progress)}</p>
+      : null;
 
   // Fixed order across the grid: Revenue, FCF/share, FCF-SBC margin, Cash return on capital,
   // Debt / assets ex-GW, Interest / op. profit, Shares outstanding, SBC / OCF, Invested capital,
@@ -259,24 +292,27 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
       {/* ⚠ ONE CONTROL FOR TWELVE CHARTS. Per-card benchmark pickers would let two charts on one
           screen be measured against different indices — a comparison a reader cannot arbitrate,
           and the same failure the tab-wide cadence toggle avoids. */}
-      <label className="flex items-center gap-1.5 ml-4 cursor-pointer text-fg-faint">
-        <input type="checkbox" className="cursor-pointer"
-          checked={benchmark != null}
-          onChange={(e) => setBenchmark(e.target.checked ? BENCHMARKS[0] : null)} />
+      {/* ⚠ ONE CONTROL, NOT A CHECKBOX PLUS A PICKER. The pair had the benchmark OFF by default and
+          hid which index it would draw until you ticked it, so the common case — measure the book
+          against something — cost two interactions and a guess. A single select shows the answer
+          while it states the question, and `None` is an option rather than a second widget. */}
+      <label className="flex items-center gap-1.5 ml-4 text-fg-faint">
         Benchmark
-      </label>
-      {benchmark != null && (
-        <select value={benchmark} onChange={(e) => setBenchmark(e.target.value)}
+        <select value={benchmark ?? ''}
+          onChange={(e) => setBenchmark(e.target.value || null)}
           aria-label="Benchmark"
           title={'The index each chart is measured against. Its constituents are cap-weighted and '
             + 'run through the SAME formula as the portfolio, so the two lines are comparable. '
             + 'Only constituents whose fundamentals are ingested contribute — the coverage floor '
             + 'applies to the index exactly as it does to the book.'}
           className="cursor-pointer bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-[11px] font-mono text-fg focus:border-accent-500">
+          <option value="">None</option>
           {BENCHMARKS.map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
-      )}
+      </label>
     </div>
+    {/* The controls above stay put; only what they govern is replaced while it loads or fails. */}
+    {body ?? (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
       <MetricGrowthCard key={revenue.title} cfg={revenue}
         {...growth} />
@@ -301,6 +337,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
           leaves after direct cost, then whether the resulting profit turns into money. */}
       <CashConversionCard key={`cashconv-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
     </div>
+    )}
     </>
   );
 }

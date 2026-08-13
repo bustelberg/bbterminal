@@ -108,7 +108,7 @@ export default function MarginInputsModal({ target, portfolioName, benchTarget, 
   };
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
-  const derived = { label: 'FCF-SBC margin', of: (r: MarginRow, y: string) => marginOf(r.revenue[y], r.fcf[y], r.sbc[y]) };
+  const derived = { label: 'FCF-SBC margin', kind: 'ratio' as const, of: (r: MarginRow, y: string) => marginOf(r.revenue[y], r.fcf[y], r.sbc[y]) };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"

@@ -73,6 +73,36 @@ function extractPoints(rows: MetricRow[], codes: string[], cadence: 'annual' | '
   return [...byX.entries()].map(([year, v]) => ({ year, value: v.value })).sort((a, b) => a.year - b.year);
 }
 
+/**
+ * ⚠⚠ THE LTM POINT LIVES IN THE DRILL-DOWN TABLE, NOT HERE — AND THE ATTEMPT TO DERIVE IT ON THE
+ * CLIENT WAS WRONG IN A WAY THAT LOOKED RIGHT (removed 2026-08-12, same day it was added).
+ *
+ * The reasoning was: the payload already carries every metric code, so the quarterly twin's newest
+ * point IS the trailing twelve months and needs no request. It is not. `/by-isin/{isin}/metrics`
+ * returns RAW rows, and the TTM roll-up (`_ttm_metric_rows`, cadence-aware since it has to sum four
+ * quarters for a quarterly filer and TWO half-years for a semi-annual one) only runs when the
+ * REQUEST asks for `cadence=quarterly`. So `quarterly__…__Revenue` here is one quarter: ASML plotted
+ * ~8.8bn as its LTM against a true 35,327.5 — a quarter of the real figure, on a log axis, next to
+ * eleven years of full-year points.
+ *
+ * Rebuilding the roll-up here would mean a second copy of the cadence rules (sum for flows, mean for
+ * share counts, and `filings_per_year` so a semi-annual filer is not summed into 24 months) — the
+ * duplication this tab keeps removing. The value has to come from the server, which already computes
+ * it correctly for the table: see `_ltm_by_company` in `routers/earnings.py`.
+ *
+ * ⚠ RESOLVED: the annual payload now carries it as `ltm__…` rows (`_ltm_rows`) — one trailing
+ * twelve months per metric, at the newest quarter-end, present only when that reaches PAST the last
+ * full fiscal year. This reads those; it does not compute one.
+ */
+function ltmPoint(rows: MetricRow[], codes: string[]): { year: number; value: number } | null {
+  // ⚠ EXTRACTED ON THE **QUARTERLY** AXIS. The row is dated to a quarter-end, and that is where it
+  // belongs on the x: a June LTM sits at 2026.25, a quarter past the last full year, so the gap on
+  // screen is the real interval. Bucketed as annual it would land on 2026 and claim a whole year.
+  const ltm = extractPoints(rows, codes.map(
+    (c) => `ltm__${c.slice(c.indexOf('__') + 2)}`), 'quarterly');
+  return ltm.length ? ltm[ltm.length - 1] : null;
+}
+
 export function Stat({ label, value, tone, color, info }: {
   label: string; value: string; tone?: string; color?: string; info?: React.ReactNode;
 }) {
@@ -166,8 +196,25 @@ export default function MetricGrowthCard({
   };
 
   /** See `extractPoints` — the x unit, and why it has to be a year. */
-  const points = useMemo(
+  const reported = useMemo(
     () => extractPoints(metrics ?? [], cfg.codes, cadence), [metrics, cfg, cadence]);
+  /**
+   * The LTM point that extends an ANNUAL chart past its last full year — see `ltmPoint`.
+   *
+   * ⚠ ANNUAL ONLY. In quarterly view every point already IS a trailing twelve months, so the newest
+   * one needs no special name and appending it would duplicate the last column.
+   *
+   * ⚠ AND ONLY WHEN IT IS NEWER THAN THE LAST REPORTED YEAR. The server already refuses to emit one
+   * that coincides with a fiscal year-end, but a stale payload could still carry a row the annual
+   * series has since caught up with — two points on one x, and the reader cannot tell which is which.
+   */
+  const ltm = useMemo(() => {
+    if (cadence !== 'annual') return null;
+    const p = ltmPoint(metrics ?? [], cfg.codes);
+    const lastYear = reported.length ? reported[reported.length - 1].year : null;
+    return p && (lastYear == null || p.year > lastYear) ? p : null;
+  }, [metrics, cfg, cadence, reported]);
+  const points = useMemo(() => (ltm ? [...reported, ltm] : reported), [reported, ltm]);
 
   /** The index's own series, through the IDENTICAL extraction, and left RAW.
    *
@@ -180,6 +227,15 @@ export default function MetricGrowthCard({
     if (!benchMetrics) return null;
     const raw = new Map<number, number | null>(
       extractPoints(benchMetrics, cfg.codes, cadence).map((p) => [p.year, p.value]));
+    // ⚠⚠ THE INDEX GETS ITS LTM THROUGH THE SAME HELPER AS THE COMPANY, which is the only reason
+    // the two land on the same x. The blend stamps its LTM point with the newest constituent
+    // filing behind it (not with today), so for ASML both sit on 2026-06-30 → 2026.25. Without it
+    // the company line ran a quarter past an index line that simply stopped, and the gap read as
+    // outperformance in a period the index did not cover.
+    if (cadence === 'annual') {
+      const bl = ltmPoint(benchMetrics, cfg.codes);
+      if (bl) raw.set(bl.year, bl.value);
+    }
     return raw.size ? raw : null;
   }, [benchMetrics, cfg, cadence]);
 
@@ -208,7 +264,10 @@ export default function MetricGrowthCard({
    *  card still draws — in absolute units, which is the honest fallback — so this says which basis
    *  is on screen instead of reporting an empty series. */
   const note = benchLabel
-    ? benchNote({ universe: benchLabel, cadence }, benchMetrics, benchErr ?? null, benchByX)
+    // ⚠ `false` — THIS CARD APPLIES NO FLOOR. `benchByX` is the blended rows as they arrived; the
+    // coverage decision was made on the server. Claiming the floor here is a diagnosis this
+    // component cannot make — see `benchNote`.
+    ? benchNote({ universe: benchLabel, cadence }, benchMetrics, benchErr ?? null, benchByX, false)
       ?? (benchByX && !isRatio && !indexed
         ? `${benchLabel}: no year in common with a positive value — showing absolute, not indexed`
         : null)
@@ -218,7 +277,15 @@ export default function MetricGrowthCard({
   // "not ingested" would be false.
   const blendNote = noteFor(blendNotes, cfg.codes);
 
-  const fit = useMemo(() => logLinearFit(points), [points]);            // growth only
+  // ⚠⚠ FITTED ON THE REPORTED YEARS, NOT ON `points` — the LTM point is deliberately out. The
+  // interval into it is a quarter or two, not a year; a log-linear regression that treats it as a
+  // full period reads that stub as a year of growth, and both the trend line and the CAGR headline
+  // (which IS this slope — see the file header) come out overstated. It is drawn, not fitted.
+  // ⚠⚠ FITTED ON THE REPORTED YEARS, NOT ON `points` — the LTM point is deliberately out. The
+  // interval into it is a quarter or two, not a year, and `logLinearFit` treats every x-step as one
+  // unit; including it reads that stub as a year of growth. The CAGR headline IS this slope (see the
+  // file header), so both the trend line and the number above it would come out overstated.
+  const fit = useMemo(() => logLinearFit(reported), [reported]);        // growth only
   const avg = points.length ? points.reduce((a, p) => a + p.value, 0) / points.length : null;  // ratio only
   const latest = points.length ? points[points.length - 1].value : null;
 
@@ -343,7 +410,20 @@ export default function MetricGrowthCard({
                     what={`Average ${cfg.noun} over the years shown.`}
                     where="Computed here from the points below." when={`${points.length} year(s).`}
                     how="A simple mean — a ratio doesn't compound, so there's no growth rate." />} />} />
-                <Stat label="Latest" value={fmt(latest)} color={chartTheme.accent} />
+                {/* ⚠ THE TILE IS RENAMED WHEN IT IS SHOWING THE LTM POINT. `latest` reads the last
+                    plotted value, so on an annual chart that has one it is a trailing-twelve-month
+                    figure, not a fiscal year — and "Latest" over a number nobody filed is the kind
+                    of quiet mislabel this tab keeps removing. */}
+                {/* ⚠ RENAMED WHEN IT IS SHOWING THE LTM POINT. `latest` reads the last plotted
+                    value, so on a chart that has one it is a trailing-twelve-month figure, not a
+                    fiscal year — and "Latest" over a number nobody filed is the quiet mislabel this
+                    tab keeps removing. */}
+                <Stat label={ltm ? 'LTM' : 'Latest'} value={fmt(latest)} color={chartTheme.accent}
+                  info={ltm ? <InfoTip text={'The trailing twelve months to the newest quarterly '
+                    + 'filing — past the last full fiscal year, so it is drawn as an extra point at '
+                    + 'its real position on the axis. It is NOT in the trend fit or the CAGR: the '
+                    + 'interval into it is a quarter or two, and regressing it as a full year would '
+                    + 'overstate the growth rate.'} /> : undefined} />
               </>
             ) : (
               <>
@@ -367,7 +447,8 @@ export default function MetricGrowthCard({
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowHoldings(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+                <XAxis dataKey="year" tickFormatter={(x: number) => (ltm && x === ltm.year ? "LTM" : xToPeriod(x))}
+                  tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
                 {isRatio ? (
                   <YAxis tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                     tickFormatter={(v: number) => `${v.toFixed(0)}%`} />

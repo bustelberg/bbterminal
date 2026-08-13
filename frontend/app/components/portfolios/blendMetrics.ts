@@ -1,5 +1,7 @@
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
+import { trace } from '../../../lib/debugTrace';
+import { readGeneration } from '../../../lib/readCache';
 import { runSSE } from '../../../lib/stream';
 
 /**
@@ -75,6 +77,11 @@ export async function loadBlendMetrics<T>(
   signal?: AbortSignal,
 ): Promise<BlendResult<T>> {
   const body = blendBody(target);
+  const cached = memoFor(body);
+  if (cached) {
+    trace('fundamental', 'blend for this book served from memory — no re-read of its holdings');
+    return cached as BlendResult<T>;
+  }
   let result: BlendResult<T> | null = null;
   try {
     await runSSE(`${BASE}/stream`, {
@@ -97,11 +104,47 @@ export async function loadBlendMetrics<T>(
     if (signal?.aborted) throw e;
     result = null;                       // the stream itself failed — fall back below
   }
-  if (result) return result;
+  if (result) return remember<T>(body, result as BlendResult<T>);
   // ⚠ ALSO REACHED WHEN THE STREAM ENDED WITHOUT A RESULT — a truncated body reads as a clean
   // close, and treating "no frames" as success would render an empty suite as though the book had
   // no fundamentals.
-  return viaPost<T>(body, signal);
+  return remember(body, await viaPost<T>(body, signal));
+}
+
+/**
+ * The blend, remembered for as long as the read cache is.
+ *
+ * ⚠ IT CANNOT LIVE IN `readCache` LIKE EVERY OTHER READ ON THIS SCREEN, and that is not an
+ * oversight: the fast path here is an SSE STREAM, whose body is consumed frame by frame and cannot
+ * be replayed as a `Response`. So the RESULT is memoised instead, keyed by the same request body —
+ * and tied to the cache's generation, so the one rule that keeps the rest of the modal honest ("any
+ * successful write drops everything") governs this too. Without that tie, an ingest would refresh
+ * twelve cards and leave the blend they sit under showing the pre-ingest book.
+ *
+ * ⚠ ONLY A RESOLVED ANSWER IS KEPT, never the in-flight promise. A blend is a read per holding and
+ * a caller can abort it half way (`FundamentalCharts` does, on unmount); sharing the promise would
+ * hand the next caller a request that a component it never heard of had already cancelled.
+ *
+ * ⚠ AND NEVER AN ERROR. `none` — nothing in this book has fundamentals — is a stable fact about the
+ * data and an ingest invalidates it; a failure is a fact about the last minute and must be retried.
+ */
+const memo = new Map<string, BlendResult<unknown>>();
+let memoGeneration = -1;
+
+function memoFor(body: string): BlendResult<unknown> | null {
+  if (memoGeneration !== readGeneration()) {
+    memo.clear();
+    memoGeneration = readGeneration();
+  }
+  return memo.get(body) ?? null;
+}
+
+function remember<T>(body: string, result: BlendResult<T>): BlendResult<T> {
+  if (result.kind !== 'error') {
+    memoFor(body);                     // syncs the generation before writing into it
+    memo.set(body, result as BlendResult<unknown>);
+  }
+  return result;
 }
 
 /** "Loading… (3 of 41 companies)", or plain "Loading…" before the first frame. */

@@ -15,6 +15,7 @@ import AssetChartModal from './AssetChartModal';
 import AssetDividendModal from './AssetDividendModal';
 import AssetFinancialModal, { type LineItem } from './AssetFinancialModal';
 import RowResolveModal from './RowResolveModal';
+import { BADGE_TONE, StateBadge } from './StateBadge';
 import CreateUniverseModal from './CreateUniverseModal';
 
 /** Median daily traded value, EUR — compact. */
@@ -669,27 +670,27 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
 // have already paid for once and cached, so it does not invite a pointless retry.
 const DIV_REASON: Record<string, { label: string; tone: string; title: string }> = {
   not_found: {
-    label: 'NO LISTING', tone: 'bg-overlay/[0.06] text-fg-muted border-neutral-700',
+    label: 'NO LISTING', tone: BADGE_TONE.muted,
     title: 'GuruFocus does not know this ISIN — it has no listing for it, so there is nothing to price. (Cached: we asked once.)',
   },
   unsubscribed: {
-    label: 'UNSUBSCRIBED', tone: 'bg-warn-500/15 text-warn-300 border-warn-500/25',
+    label: 'UNSUBSCRIBED', tone: BADGE_TONE.warn,
     title: 'GuruFocus lists this ISIN only on exchanges outside our subscription, so no dividend data is obtainable for it.',
   },
   no_payouts: {
-    label: 'NO PAYOUTS', tone: 'bg-overlay/[0.06] text-fg-muted border-neutral-700',
+    label: 'NO PAYOUTS', tone: BADGE_TONE.muted,
     title: 'Resolved, fetched, and GuruFocus returned no payments at all — this instrument distributes nothing. An ACCUMULATING ETF (e.g. iShares Core MSCI World) reinvests instead of paying out, and plenty of stocks (Berkshire) simply never declare a dividend. An empty history here is the ANSWER, not a gap.',
   },
   not_applicable: {
-    label: 'NOT EQUITY', tone: 'bg-overlay/[0.06] text-fg-faint border-neutral-800',
+    label: 'NOT EQUITY', tone: BADGE_TONE.faint,
     title: 'This ISIN is a bond, future or FX instrument — not an equity listing. It pays coupons or nothing at all, never a dividend per share, so the question does not apply. (No API call was spent: 30% of the grid is bonds.)',
   },
   no_data: {
-    label: 'NO DATA', tone: 'bg-warn-500/10 text-warn-300/80 border-warn-500/20',
+    label: 'NO DATA', tone: BADGE_TONE.warnSoft,
     title: 'The ISIN resolved to a real listing, but GuruFocus holds no record for it — typically a dead OTC line of an acquired or delisted company (e.g. Micro Focus → OTCPK:MCFUF after the OpenText takeover). This is a GAP, not a claim that the value is zero — which is exactly why it is not badged NO PAYOUTS.',
   },
   fund: {
-    label: 'FUND', tone: 'bg-overlay/[0.06] text-fg-faint border-neutral-800',
+    label: 'FUND', tone: BADGE_TONE.faint,
     title: 'A fund has no revenue: it HOLDS securities, it does not operate a business. GuruFocus agrees — it returns no financials for an ETF at all. A category error, not a data gap, so no API call is spent asking.',
   },
 };
@@ -711,12 +712,10 @@ function revenueReason(r: AssetGridRow): keyof typeof DIV_REASON | null {
 
 function ReasonBadge({ reason }: { reason: keyof typeof DIV_REASON }) {
   const r = DIV_REASON[reason];
-  return (
-    <span title={r.title}
-      className={`text-[10px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border cursor-help ${r.tone}`}>
-      {r.label}
-    </span>
-  );
+  // ⚠ THE MARKUP MOVED TO `StateBadge` so the fundamentals drill-downs wear the identical badge
+  // for the identical word. The REASONS stay here — they are this grid's vocabulary; only the way
+  // a badge looks is shared.
+  return <StateBadge label={r.label} tone={r.tone} title={r.title} />;
 }
 
 /** The Div/share cell states — the SAME four for a stock and an ETF, because both are

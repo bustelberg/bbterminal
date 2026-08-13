@@ -104,7 +104,7 @@ export default function InterestBurdenInputsModal({ target, portfolioName, bench
   };
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
-  const derived = { label: 'Interest / op. profit', of: (r: InterestBurdenRow, y: string) => interestBurdenOf(r.interest_expense[y], r.operating_income[y]) };
+  const derived = { label: 'Interest / op. profit', kind: 'ratio' as const, of: (r: InterestBurdenRow, y: string) => interestBurdenOf(r.interest_expense[y], r.operating_income[y]) };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"

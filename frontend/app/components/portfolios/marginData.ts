@@ -42,11 +42,20 @@ export const fmtRatioPct = (v: number | null | undefined) => (v == null ? '—' 
  * and it is a move in the sample. The same applies at the left edge, where holdings had not listed
  * yet.
  *
+ * ⚠ 60 → 80 (2026-07-28) → 50 (2026-08-12, on request: half the constituents in a period should
+ * draw that period). `<` is the comparison, so exactly 50% clears. The newest-year artifact above
+ * is now an ACCEPTED cost rather than a prevented one — see the backend constant's ⚠⚠, and note
+ * that the targeted fix, if it ever bites, is a stricter bar on the LATEST period alone.
+ *
+ * ⚠ ONE NUMBER, AND EVERY MENTION OF IT READS IT. The two `benchNote` sentences used to spell "80%"
+ * into their text, so lowering the floor would have left the legend confidently quoting a floor
+ * that no longer existed.
+ *
  * Kept in lock-step with the backend's `_fundamental_blend.MIN_BLEND_COVERAGE_PCT`, which does the
  * same job for the blended growth cards. Two floors that disagree would put two cards on the same
  * screen spanning different fractions of the same book.
  */
-export const MIN_YEAR_COVERAGE_PCT = 80;
+export const MIN_YEAR_COVERAGE_PCT = 50;
 
 /**
  * A period LABEL from the server → the numeric x every card plots on.
@@ -98,6 +107,19 @@ export const xToMonth = (x: number): string => {
   return `${d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })} ${d.getUTCFullYear()}`;
 };
 
+/**
+ * Can this period label be placed on the axis at all?
+ *
+ * ⚠⚠ A PERIOD `periodToX` CANNOT PLACE MUST BE DROPPED, NOT PLOTTED AT NaN. `Number("LTM")` is NaN,
+ * NaN is a valid `Map` key, and every such period therefore lands on ONE key — the exact failure
+ * `periodToX` documents, where nine charts went blank while their drill-downs rendered perfectly.
+ * The server now sends an `LTM` period to the six flow-ratio endpoints, so this is a live label and
+ * not a hypothetical one; until each card places it at the response's `ltm_date`, dropping it makes
+ * the new period INERT — the charts read exactly as they did before it existed. Being a year short
+ * is a visible absence; a point silently fused onto NaN is not.
+ */
+export const plottable = (period: string): boolean => Number.isFinite(periodToX(period));
+
 export const xToPeriod = (x: number): string => {
   const y = Math.floor(x);
   const q = Math.round((x - y) * 4);
@@ -111,7 +133,7 @@ export const xToPeriod = (x: number): string => {
  *
  * ⚠ THE DENOMINATOR IS THE CHARTED SET, NOT THE BOOK. `weight_pct` is the share of the WHOLE book
  * (cash and bonds sit in its denominator), so measuring coverage against 100 would mean a
- * portfolio holding 20% cash could never clear an 80% floor and every chart would go blank.
+ * portfolio holding 20% cash could never clear the floor and every chart would go blank.
  * Coverage here answers "of the companies this chart aggregates, how many reported this year".
  */
 export type Weighted = {
@@ -135,42 +157,143 @@ export function weightAt(r: Weighted, year: string): number | null {
   const per = r.market_cap_by_period;
   if (per) {
     const v = per[year];
-    return v && v > 0 ? v : null;
+    if (v && v > 0) return v;
+    // ⚠ AS-OF, MIRRORING THE BACKEND'S `_weight_at`. A market cap is a stock: the last one filed
+    // stands until a newer one exists. The server already carries the newest year forward once in
+    // the payload, so this only bites on an older gap — but the two sides must resolve a missing
+    // cap the same way or a card and the chart behind it weight the same period differently.
+    const earlier = Object.keys(per).filter((k) => k <= year && per[k] > 0);
+    if (earlier.length) return per[earlier.reduce((a, b) => (a > b ? a : b))];
+    return null;
   }
   return r.weight_pct > 0 ? r.weight_pct : null;
 }
 
+/**
+ * Each period's value for one row: its own, or the latest one before it — with `reported` saying
+ * which. The client twin of `_fundamental_blend.carry_forward`; see that docstring for why.
+ *
+ * ⚠ A CARRIED VALUE NEVER COUNTS AS COVERAGE. It keeps the contributor set stable (without it the
+ * line alternates between the companies that file quarterly and the ones that file at Jun/Dec — a
+ * ±20% sawtooth of composition), while the floor still sees only who actually reported, so the
+ * newest period cannot slip through on carried figures.
+ *
+ * ⚠ BOUNDED to one year, so a holding that stops reporting falls out instead of being held at a
+ * frozen value for the rest of the axis. Periods are compared on their own calendar ends —
+ * `periodToX` puts a year and its quarters on one numeric axis, and a year is 1.0 of it.
+ */
+export const MAX_CARRY_YEARS = 1.05;          // ~400 days, matching `_MAX_CARRY_DAYS`
+
+export function carryForward(
+  own: Map<number, number>, axis: number[],
+): Map<number, { value: number; reported: boolean }> {
+  const out = new Map<number, { value: number; reported: boolean }>();
+  let last: { x: number; value: number } | null = null;
+  for (const x of axis) {
+    const v = own.get(x);
+    if (v != null) {
+      last = { x, value: v };
+      out.set(x, { value: v, reported: true });
+    } else if (last && x - last.x <= MAX_CARRY_YEARS) {
+      out.set(x, { value: last.value, reported: false });
+    }
+  }
+  return out;
+}
+
+/** What a drill-down column shows. Lives here rather than beside the table because
+ *  {@link transformSeries} is the thing that gives it meaning. */
+export type SeriesView = 'reported' | 'rebased' | 'yoy';
+
+/**
+ * One line of one company, ordered along the axis, under one of the three views.
+ *
+ * ⚠ AN ARRAY IN, AN ARRAY OUT — the transforms are relative to the row's OWN reported history, so
+ * they cannot be computed a cell at a time without re-deriving that history per cell. `null` means
+ * "not reported" on the way in and "cannot be stated" on the way out, and the two are deliberately
+ * the same hole: a period a company did not report has no index level and no growth rate either.
+ *
+ * ⚠ NULL, NOT A NUMBER, ON A NON-POSITIVE BASE. `100 × v/0` is undefined and a negative base
+ * inverts the curve — the same refusal `_fundamental_blend._prepare` makes server-side, which is
+ * why a company whose equity opens negative is out of the blended line entirely rather than in it
+ * upside-down. The same test guards YoY's denominator.
+ *
+ * ⚠ YoY IS AGAINST THE PREVIOUS PERIOD **THIS ROW REPORTED**, not the previous column. A company
+ * that skipped a period would otherwise show two periods of growth in the same ink as everyone
+ * else's one.
+ */
+export function transformSeries(
+  values: (number | null | undefined)[], view: SeriesView,
+): (number | null)[] {
+  const vs = values.map((v) => v ?? null);
+  if (view === 'reported') return vs;
+  if (view === 'rebased') {
+    const base = vs.find((v) => v != null);
+    return base != null && base > 0 ? vs.map((v) => (v == null ? null : 100 * v / base)) : vs.map(() => null);
+  }
+  let prev: number | null = null;
+  return vs.map((v) => {
+    if (v == null) return null;
+    const before = prev;
+    prev = v;
+    return before != null && before > 0 ? 100 * (v / before - 1) : null;
+  });
+}
+
 export function weightedByYear<T extends Weighted>(
   rows: T[],
-  yearsOf: (r: T) => string[],
+  rawYearsOf: (r: T) => string[],
   valueOf: (r: T, year: string) => number | null,
 ): Map<number, number> {
+  const yearsOf = (r: T) => rawYearsOf(r).filter(plottable);
   const total = rows.reduce((a, r) => a + r.weight_pct, 0);
   const out = new Map<number, number>();
-  if (total <= 0) return out;
-  const years = new Set<string>();
-  for (const r of rows) for (const y of yearsOf(r)) years.add(y);
-  for (const y of years) {
-    let num = 0;
-    let den = 0;
-    // ⚠⚠ COVERAGE IS ACCUMULATED ON THE **STABLE** WEIGHT, NOT THE PER-PERIOD CAP, AND CONFUSING
-    // THE TWO DISABLES THE FLOOR COMPLETELY. The per-period cap comes out of the same GuruFocus
-    // blob as the figure, so a company that has not filed FY2026 has no FY2026 cap either —
-    // measure coverage with it and you divide the filers by the filers, which reads ~100% in
-    // exactly the period where almost nobody has reported. Measured on the S&P revenue blend:
-    // FY2026 is 13.4% covered on this basis and read 100.0% on the per-period one, which drew a
-    // full-height point built almost entirely out of NVIDIA.
-    let cov = 0;
-    for (const r of rows) {
+  if (total <= 0 || !rows.length) return out;
+  // The axis every row is carried across — the union of what anybody reported.
+  const xs = new Set<number>();
+  for (const r of rows) for (const y of yearsOf(r)) if (valueOf(r, y) != null) xs.add(periodToX(y));
+  const axis = [...xs].sort((a, b) => a - b);
+  const label = new Map<number, string>();
+  for (const r of rows) for (const y of yearsOf(r)) label.set(periodToX(y), y);
+
+  const num = new Map<number, number>();
+  const den = new Map<number, number>();
+  // ⚠⚠ COVERAGE IS ACCUMULATED ON THE **STABLE** WEIGHT, NOT THE PER-PERIOD CAP, AND CONFUSING
+  // THE TWO DISABLES THE FLOOR COMPLETELY. The per-period cap comes out of the same GuruFocus
+  // blob as the figure, so a company that has not filed FY2026 has no FY2026 cap either —
+  // measure coverage with it and you divide the filers by the filers, which reads ~100% in
+  // exactly the period where almost nobody has reported. Measured on the S&P revenue blend:
+  // FY2026 is 13.4% covered on this basis and read 100.0% on the per-period one, which drew a
+  // full-height point built almost entirely out of NVIDIA.
+  const cov = new Map<number, number>();
+  const names = new Map<number, number>();
+  for (const r of rows) {
+    const own = new Map<number, number>();
+    for (const y of yearsOf(r)) {
       const v = valueOf(r, y);
-      if (v == null) continue;
-      const w = weightAt(r, y);
-      if (w == null) continue;
-      num += w * v;
-      den += w;
-      cov += r.weight_pct;
+      if (v != null) own.set(periodToX(y), v);
     }
-    if (den > 0 && 100 * cov / total >= MIN_YEAR_COVERAGE_PCT) out.set(periodToX(y), num / den);
+    for (const [x, { value, reported }] of carryForward(own, axis)) {
+      const w = weightAt(r, label.get(x) ?? String(x));
+      if (w == null) continue;
+      num.set(x, (num.get(x) ?? 0) + w * value);
+      den.set(x, (den.get(x) ?? 0) + w);
+      if (reported) {
+        cov.set(x, (cov.get(x) ?? 0) + r.weight_pct);
+        names.set(x, (names.get(x) ?? 0) + 1);
+      }
+    }
+  }
+  // ⚠ BOTH FLOORS, AND ONLY ON WHAT WAS REPORTED. Weight alone lets one giant draw a period (AEX
+  // 2026-Q2: two constituents, 53.8% of cap); names alone would let ten tiny ones outvote a
+  // missing giant. A carried value counts toward neither — that is what stops the carry defeating
+  // the floor in the newest period.
+  for (const x of axis) {
+    const d = den.get(x) ?? 0;
+    if (d <= 0) continue;
+    if (100 * (cov.get(x) ?? 0) / total < MIN_YEAR_COVERAGE_PCT) continue;
+    if (100 * (names.get(x) ?? 0) / rows.length < MIN_YEAR_COVERAGE_PCT) continue;
+    out.set(x, (num.get(x) ?? 0) / d);
   }
   return out;
 }
@@ -192,30 +315,48 @@ export function weightedByYear<T extends Weighted>(
  */
 export function periodDenoms<T extends Weighted>(
   rows: T[],
-  yearsOf: (r: T) => string[],
+  rawYearsOf: (r: T) => string[],
   valueOf: (r: T, year: string) => number | null,
 ): Record<string, number> {
+  // ⚠ THE SAME FILTER AS `weightedByYear`, FOR THE SAME REASON — and because these two must agree.
+  // This function exists to prove the line's weights sum to 100%; a period one of them can see and
+  // the other cannot would make that proof fail on a period nobody plotted. See `plottable`.
+  const yearsOf = (r: T) => rawYearsOf(r).filter(plottable);
   const out: Record<string, number> = {};
   const years = new Set<string>();
   for (const r of rows) for (const y of yearsOf(r)) years.add(y);
-  for (const y of years) {
-    let den = 0;
-    for (const r of rows) {
-      if (valueOf(r, y) == null) continue;
+  // ⚠ THE CARRIED ROWS ARE IN THE DENOMINATOR, BECAUSE THEY ARE IN THE AVERAGE. `weightedByYear`
+  // divides by every row that contributed a figure — its own or its latest — so a denominator
+  // computed over the reporters alone would be smaller than the one the line used, and the
+  // drill-down's weights would not sum to 100%. The point of this function is that they do.
+  const xs = [...new Set([...years].map(periodToX))].sort((a, b) => a - b);
+  const label = new Map<number, string>();
+  for (const r of rows) for (const y of yearsOf(r)) label.set(periodToX(y), y);
+  for (const r of rows) {
+    const own = new Map<number, number>();
+    for (const y of yearsOf(r)) {
+      const v = valueOf(r, y);
+      if (v != null) own.set(periodToX(y), v);
+    }
+    for (const x of carryForward(own, xs).keys()) {
+      const y = label.get(x);
+      if (y == null) continue;
       const w = weightAt(r, y);
       if (w == null) continue;
-      den += w;
+      out[y] = (out[y] ?? 0) + w;
     }
-    if (den > 0) out[y] = den;
   }
   return out;
 }
 
 export function coverageByYear<T extends Weighted>(
   rows: T[],
-  yearsOf: (r: T) => string[],
+  rawYearsOf: (r: T) => string[],
   valueOf: (r: T, year: string) => number | null,
 ): Map<number, number> {
+  // Same filter as the two above: coverage is reported per drawn period, so it must see the same
+  // set of periods the line does. See `plottable`.
+  const yearsOf = (r: T) => rawYearsOf(r).filter(plottable);
   const total = rows.reduce((a, r) => a + r.weight_pct, 0);
   const out = new Map<number, number>();
   if (total <= 0) return out;

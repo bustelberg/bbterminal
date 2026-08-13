@@ -59,11 +59,15 @@ describe('visibleBuckets', () => {
   });
 
   it('the filter and the formatter agree by construction', () => {
-    // ⚠ THE ACTUAL INVARIANT. A row is hidden if and only if both its values render empty. Two
-    // separate notions of "displays as zero" is what broke this the first time.
-    for (const v of [0, 0.01, 0.2, 0.49, 0.5, 0.51, 1, 42.4]) {
+    // ⚠ THE ACTUAL INVARIANT, RESTATED FOR A FORMATTER THAT NO LONGER BLANKS ITS ZEROS
+    // (2026-08-13). It used to read `shown === (formatPct(v) !== '')` — one rule seen from two
+    // sides. Now that a zero PRINTS "0.00%", emptiness is no longer the signal, so the invariant is
+    // the thing it always meant: a row survives exactly when at least one side renders as something
+    // other than zero. Two separate notions of "displays as zero" is what broke this the first time.
+    const rendersZero = (v: number) => formatPct(v) === `${(0).toFixed(2)}%`;
+    for (const v of [0, 0.001, 0.004, 0.005, 0.01, 0.2, 0.49, 0.5, 0.51, 1, 42.4]) {
       const shown = visibleBuckets([row('x', v, 0)]).length === 1;
-      expect(shown).toBe(formatPct(v) !== '');
+      expect(shown).toBe(!rendersZero(v));
     }
   });
 
@@ -74,5 +78,24 @@ describe('visibleBuckets', () => {
 
   it('an all-empty axis yields no rows rather than a fabricated one', () => {
     expect(visibleBuckets([row('x', 0, 0), row('y', 0, 0)])).toEqual([]);
+  });
+});
+
+describe('formatPct', () => {
+  it('⚠ prints a measured zero as "0.00%" — the unowned-sector row is the finding', () => {
+    // Blank there does not read as "zero", it reads as "we could not work this out".
+    expect(formatPct(0)).toBe('0.00%');
+    expect(formatPct(0.004)).toBe('0.00%');
+  });
+
+  it('⚠ still blanks a NON-value, which is a different fact from a zero', () => {
+    expect(formatPct(null)).toBe('');
+    expect(formatPct(undefined)).toBe('');
+    expect(formatPct('n/a')).toBe('');
+  });
+
+  it('prints at the shared precision, so a bar can be checked against the drill-down', () => {
+    expect(formatPct(31.239)).toBe('31.24%');
+    expect(formatPct(6.2)).toBe('6.20%');
   });
 });

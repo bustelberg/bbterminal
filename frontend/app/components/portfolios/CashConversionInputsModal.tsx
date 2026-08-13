@@ -107,7 +107,7 @@ export default function CashConversionInputsModal({ target, portfolioName, bench
   };
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
-  const derived = { label: 'FCF / Net Income', of: (r: CashConversionRow, y: string) => cashConversionOf(r.fcf[y], r.net_income[y]) };
+  const derived = { label: 'FCF / Net Income', kind: 'ratio' as const, of: (r: CashConversionRow, y: string) => cashConversionOf(r.fcf[y], r.net_income[y]) };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"

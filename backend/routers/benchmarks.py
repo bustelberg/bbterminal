@@ -826,7 +826,7 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
 
     from routers._benchmark_fundamentals import constituent_fundamentals  # noqa: PLC0415
     from routers._fundamental_backfill import (  # noqa: PLC0415
-        company_rows, eligible, ingest_company, needs,
+        company_rows, eligible, feed_flags, ingest_company, needs,
     )
 
     # ⚠ THE FEED TAGS ARE INTERNAL AND MUST NOT REACH A READER. `fin`/`est`/`ind` are what the
@@ -872,14 +872,12 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
         why = eligible(c)
         if why:
             return f"{name} — {why}"
-        todo = {**c, **({} if force else next(
-            (n for n in needs(comps) if n["company_id"] == cid),
-            {"need_fin": False, "need_est": False, "need_ind": False}))}
-        # ⚠ APPLIED AFTER `needs`/`force`, SO IT CAN ONLY EVER NARROW. Whichever feeds the company
-        # is missing, `statements` runs at most the one this grid reads — the cap and the eighteen
-        # lines beside it. Folding it into the dict above would let `force=true` widen it back.
-        if feeds == "statements":
-            todo = {**todo, "need_est": False, "need_ind": False}
+        # ⚠⚠ THE FLAGS DECIDE, AND `force` MUST NOT REACH `ingest_company` — see `feed_flags`. It
+        # used to be passed there as well, which short-circuits the flags and runs all three feeds:
+        # the drill-down's per-row Refresh (`force=true&feeds=statements`) spent 3 API calls per
+        # company instead of 1, on estimates and indicators that screen does not draw.
+        todo = {**c, **feed_flags(force, feeds, next(
+            (n for n in needs(comps) if n["company_id"] == cid), None) if not force else None)}
 
         def _step(tag: str, i: int, total: int) -> None:
             ctx.progress(i - 1, total, f"Fetching {feed_label.get(tag, tag)} ({i} of {total})")
@@ -887,7 +885,11 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
         # ⚠ `refresh_cache=force`, SO THE FLAG MEANS ONE THING ON EVERY INGEST ENDPOINT: go and
         # look. The grid's per-row Fetch does not pass `force`, so its cheap cache-friendly
         # behaviour is unchanged — only a caller that explicitly asked for a re-fetch pays.
-        r = ingest_company(todo, force=force, refresh_cache=force,
+        # ⚠ `refresh_cache=force` ONLY. That is the OTHER cache — the GuruFocus blob in Storage,
+        # which `is_cache_fresh` replays for months — and bypassing it is what makes a re-fetch
+        # actually re-ask the vendor. "Ignore what `metric_data` holds" is already said by the
+        # flags above, and saying it twice is what tripled the bill.
+        r = ingest_company(todo, refresh_cache=force,
                            on_step=_step, should_stop=lambda: ctx.cancelled)
         # ⚠ RECORDED BEFORE ANY OF THE EXITS BELOW. A cancelled or failed run has still spent
         # whatever it spent, and those are the two cases where knowing the bill matters most —

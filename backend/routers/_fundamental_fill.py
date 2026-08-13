@@ -35,7 +35,31 @@ from deps import supabase
 #
 # ⚠ AND THAT MEASUREMENT WAS API-ONLY. Each company also uploads to Storage and upserts tens of
 # thousands of `metric_data` rows, which lands on OUR database — the real speed-up is smaller.
-FILL_WORKERS = 8
+#
+# ⚠⚠ EIGHT WAS MEASURED AGAINST THE WRONG BOTTLENECK, AND IN PRODUCTION IT BROKE THE RUN
+# (2026-08-11). An SP500 refresh reported:
+#
+#     [backfill] NYSE:MDT  failed — APIError 57014: canceling statement due to statement timeout
+#     [backfill] NASDAQ:NDAQ failed — APIError 57014
+#     [26/501] Cadence Design Systems — failed — ReadTimeout
+#
+# The API was never the constraint; OUR DATABASE was. Eight concurrent writers each upserting tens
+# of thousands of rows into `metric_data` — whose indexes are **15.2 GB, four times their
+# reindexed size** — pushed individual statements past prod's 2-minute `statement_timeout`. The
+# writes then produced **1,065,898 dead tuples**, autovacuum started on the same table, and the
+# vacuum and the writers fought over the same disk: measured mid-run, query latency spread from
+# 344ms to 5,340ms and connections went 10 → 28.
+#
+# ⚠ AND THE PARALLELISM WAS NEVER BUYING WHAT IT LOOKED LIKE. `_api_request` gates every GuruFocus
+# call behind a GLOBAL 1.5s minimum interval, so the API half of these threads serialises anyway —
+# eight workers cannot go faster than one call per 1.5s no matter how many there are. What the
+# extra threads did buy was eight-way write contention on the slowest table we own. Worst of both.
+#
+# THREE, then. Enough to overlap a Storage upload with another company's DB write, few enough that
+# no single statement queues behind seven others. ⚠ Raising it again is not a tuning knob until
+# `metric_data` has been REINDEXED (15.2 GB → ~3.7 GB) — the bloat is what makes each upsert slow
+# enough to time out.
+FILL_WORKERS = 3
 
 
 def due_company_ids(ids: list[int], today: date | None = None) -> tuple[list[int], str | None]:
@@ -210,10 +234,18 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
             # `list(...)` so exceptions surface here rather than being swallowed by the executor's
             # lazy iterator.
             list(pool.map(_one, work))
-    # Drop the cached blends only if something was actually written. A fill with no work spends zero
-    # API calls and leaves every cached line correct; clearing them would buy nothing but a rebuild.
-    if ok:
-        _blend_cache.invalidate()
+    # ⚠⚠ ALWAYS, NOT `if ok`. This used to clear the caches only when the fill had written
+    # something, reasoning that a no-work press leaves every cached line correct. It does not:
+    # "correct" there means *consistent with what THIS process last read*, and the rows can have
+    # moved underneath it — a per-row Fetch in the same modal, the scheduler, a script, another
+    # replica. The cached metric reads live 30 minutes, so a press could legitimately return a
+    # byte-identical stale table, which from the reader's seat is indistinguishable from a broken
+    # button. That is exactly how "I pressed Refresh benchmark and the row is still empty" happens
+    # for a company whose data is sitting in `metric_data`.
+    #
+    # The saving it bought was a lazy rebuild of a ≤24-entry cache, on a button pressed by hand. A
+    # refresh control that can hand back a stale view is not worth seconds of rebuild.
+    _blend_cache.invalidate()
     return (f"{label} — {ok} companies {'refetched' if force else 'loaded'}"
             + (f", {failed} failed" if failed else "")
             + f", {rows:,} data points"

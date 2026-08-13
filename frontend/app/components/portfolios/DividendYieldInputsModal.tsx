@@ -112,7 +112,7 @@ export default function DividendYieldInputsModal({ target, portfolioName, benchT
   };
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
-  const derived = { label: 'Dividend yield', of: (r: DividendYieldRow, y: string) => dividendYieldOf(r.div_ps[y], r.price_ps[y]) };
+  const derived = { label: 'Dividend yield', kind: 'ratio' as const, of: (r: DividendYieldRow, y: string) => dividendYieldOf(r.div_ps[y], r.price_ps[y]) };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"

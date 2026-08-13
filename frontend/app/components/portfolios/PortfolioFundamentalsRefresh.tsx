@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { API_URL } from '../../../lib/apiUrl';
 import { traceError } from '../../../lib/debugTrace';
-import { startJob } from '../../../lib/stores/jobs';
+import { invalidateReadCache } from '../../../lib/readCache';
+import { cancelJob, startJob } from '../../../lib/stores/jobs';
 
 /**
  * Refresh the GuruFocus fundamentals for every company the PORTFOLIO holds — not just the one on
@@ -40,15 +41,48 @@ export type RefreshScope =
   // ⚠ ONE COMPANY IS A BASKET OF ONE — same endpoint, same fill, one API call. It is a separate
   // `kind` only so the wording can be right: "every company in Fortinet Inc." is not a sentence.
   // The scope follows what the modal is SHOWING, which is the only rule a reader can predict.
-  | { kind: 'company'; isin: string; name: string };
+  | { kind: 'company'; isin: string; name: string }
+  /**
+   * An INDEX's constituents — the benchmark line drawn beside the book.
+   *
+   * ⚠ A DIFFERENT ENDPOINT, ON PURPOSE, AND A DIFFERENT SPEND. The three above go through
+   * `/api/airs/…`, which resolves ISINs to companies; an index is already a list of company rows
+   * (`/api/benchmarks/index/{label}/…`). Sharing this component is still right — one place knows
+   * how to start a fundamentals fill, follow its toast, and drop the read cache when it lands —
+   * but see `run()`: the index is deliberately NOT forced.
+   */
+  | { kind: 'universe'; label: string; name: string };
 
-export default function PortfolioFundamentalsRefresh({ scope, onDone }: {
+export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
   scope: RefreshScope;
   /** Called when the fill ends without failing, so the caller can re-read what it wrote. */
   onDone: () => void;
+  /**
+   * What the button says at rest. Default: "Refresh fundamentals" (the tab row, where it is the
+   * only such control on screen), or "Fetch missing fundamentals" for an index.
+   *
+   * ⚠ IT EXISTS BECAUSE TWO OF THESE CAN SHARE A SCREEN. In the drill-down the book's fill and the
+   * index's fill sit one above the other, and two buttons reading the same words are one button as
+   * far as the reader is concerned — so there they name what they act ON ("Refresh portfolio" /
+   * "Refresh benchmark"), which is the thing that differs. The `title` still carries what each
+   * will actually do, including what the index one will NOT.
+   */
+  label?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  /**
+   * The running job, so this button can BE the Cancel while it runs.
+   *
+   * ⚠ THE TOAST'S CANCEL IS NOT ENOUGH ON ITS OWN. A fill over twenty holdings is minutes, and the
+   * reader who wants to stop it is looking at the button they just pressed — not at the corner of
+   * the screen. Same shape as the Overview scan button: one control, two states.
+   *
+   * ⚠ AND IT IS THE JOB ID, NOT `busy`, THAT DECIDES. There is a gap between the press and the id
+   * coming back, and offering a Cancel in that window would be a button that cannot do what it
+   * says. `busy && !jobId` renders it inert for exactly that gap.
+   */
+  const [jobId, setJobId] = useState<string | null>(null);
 
   const run = async () => {
     setBusy(true);
@@ -60,16 +94,35 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone }: {
       const holdings = scope.kind === 'company' ? [{ isin: scope.isin }]
         : scope.kind === 'basket' ? scope.holdings.map((h) => ({ isin: h.isin }))
           : null;
-      const { done, body } = await startJob(
-        holdings
+      /**
+       * ⚠⚠ THE INDEX IS NOT FORCED, AND THAT ASYMMETRY IS THE POINT.
+       *
+       * A book is ~20 holdings and `only_due=true` bounds a forced press to the companies that
+       * could plausibly have filed since we last looked — usually none, often a handful. An index
+       * is 206 constituents on the S&P and ~1,900 on ACWI, with no due-filter on that endpoint: a
+       * forced press from a chart drill-down would be a four-figure quota spend nobody asked for.
+       * Un-forced, it fills exactly the constituents MISSING the statements feed, which is what
+       * makes the benchmark line cover more of its index — the reason to press it.
+       *
+       * ⚠ SO IT CANNOT REFRESH A CONSTITUENT WE ALREADY HOLD, EVEN A STALE ONE, and the button
+       * says so. `needs()` answers "is the sentinel row present", not "is it current" — the
+       * deliberate full reload lives on the /benchmarks fundamentals grid, which is that page's
+       * whole subject.
+       */
+      const url = scope.kind === 'universe'
+        ? `${API_URL}/api/benchmarks/index/${encodeURIComponent(scope.label)}/fundamentals/ingest/job`
+        : holdings
           ? `${API_URL}/api/airs/basket/fundamentals/ingest/job${q}`
           : `${API_URL}/api/airs/model-portfolios/${(scope as { id: number }).id}`
-            + `/fundamentals/ingest/job${q}`,
+            + `/fundamentals/ingest/job${q}`;
+      const { id, done, body } = await startJob(
+        url,
         `${scope.name} fundamentals`,
         holdings
           ? { headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ holdings, label: scope.name }) }
           : undefined);
+      setJobId(id);
       // ⚠⚠ THE UNREACHED REMAINDER IS TWO DIFFERENT ABSENCES, AND MERGING THEM MAKES A CORRECT
       // ANSWER LOOK BROKEN. Measured: AITopSelectie reaches 20 of 20, while BUS_Neutraal_FX reaches
       // 24 of 40 — of the other 16, ELEVEN are ETFs, funds or cash, which HAVE no company
@@ -97,13 +150,30 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone }: {
       // ⚠ RE-READ ON ANYTHING BUT A FAILURE, INCLUDING A CANCEL. A cancelled fill has still loaded
       // every company it got through, and leaving the pre-fill charts on screen would hide real
       // work that was really done.
-      if (job.status !== 'failed') onDone();
+      //
+      // ⚠⚠ AND DROP THE CACHED READS FIRST, OR THE RE-READ IS SERVED FROM BEFORE THE FILL. This is
+      // the ONE write on this screen the automatic rule in `apiFetch` cannot cover: that fires when
+      // the request succeeds, and what succeeded here was merely STARTING a job that then ran for
+      // minutes. Every chart would refetch, hit the entries cached during the fill, and show the
+      // pre-fill book — a refresh button that visibly does nothing.
+      if (job.status !== 'failed') {
+        invalidateReadCache(`fundamentals fill finished for ${scope.name}`);
+        onDone();
+      }
     } catch (e) {
       traceError('fundamentals', `could not start the fill for ${scope.name}`, e);
       setNote('could not start — see the console');
     } finally {
       setBusy(false);
+      setJobId(null);
     }
+  };
+
+  /** Stop the fill. ⚠ NO INLINE MESSAGE — `cancelJob` puts "cancelling…" on the job's own card the
+   *  instant it is pressed, and that card carries the outcome and how far it got. Two places
+   *  reporting one job is two places to keep in step. */
+  const cancel = async () => {
+    if (jobId) await cancelJob(jobId);
   };
 
   return (
@@ -112,19 +182,46 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone }: {
           arrives — a control that slides sideways when its own result lands is a control you
           have to chase with the pointer. */}
       <span className="text-[11px] text-fg-faint truncate max-w-[22rem]">{note}</span>
-      <button type="button" onClick={() => void run()} disabled={busy}
-        title={(scope.kind === 'company'
-          ? `Fetch the latest GuruFocus fundamentals for ${scope.name}, if it could plausibly have `
-            + 'filed since we last looked. One API call, and none at all when its next quarter '
-            + 'cannot be out yet.'
-          : `Fetch the latest GuruFocus fundamentals for every company in ${scope.name} that could `
-            + 'plausibly have filed since we last looked — one API call each, and none for a '
-            + 'company whose next quarter cannot be out yet.')
-          + ' Progress, the running quota spend and a Cancel appear in the pop-ups bottom-right, '
-          + 'and carry on if you close this.'}
-        className="text-[12px] px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-muted
-                   hover:bg-overlay/5 disabled:opacity-50 whitespace-nowrap shrink-0">
-        {busy ? 'Refreshing…' : 'Refresh fundamentals'}
+      {/* ⚠ ONE CONTROL, TWO STATES — the button BECOMES the Cancel while the fill runs. The toast
+          carries a Cancel too and both are correct, but a fill is minutes and the reader who wants
+          to stop it is looking at the button they just pressed, not at the corner of the screen.
+          Inert only in the gap between the press and the job id arriving. */}
+      <button type="button"
+        onClick={() => { if (jobId) { void cancel(); } else { void run(); } }}
+        disabled={busy && !jobId}
+        title={jobId
+          ? 'Stop the fill. The companies already being read finish first (up to eight at a time), '
+            + 'and everything loaded so far is kept — the charts still re-read afterwards.'
+          : (scope.kind === 'company'
+            ? `Fetch the latest GuruFocus fundamentals for ${scope.name}, if it could plausibly have `
+              + 'filed since we last looked. One API call, and none at all when its next quarter '
+              + 'cannot be out yet.'
+            : scope.kind === 'universe'
+              // ⚠ IT SAYS WHAT IT WILL *NOT* DO. An index fill is un-forced (see `run`), so it adds
+              // the constituents we are missing and cannot update one we already hold — press it
+              // twice and the second press is free and changes nothing, which without this reads as
+              // a broken button rather than as a deliberate scope.
+              ? `Fetch GuruFocus fundamentals for the ${scope.name} constituents we are MISSING — `
+                + 'the ones absent from the table below, which is why the index line covers less of '
+                + 'its index than 100%. One API call each. It does not re-fetch a constituent we '
+                + 'already hold, however old: that full reload lives on the /benchmarks '
+                + 'fundamentals grid.'
+              : `Fetch the latest GuruFocus fundamentals for every company in ${scope.name} that could `
+                + 'plausibly have filed since we last looked — one API call each, and none for a '
+                + 'company whose next quarter cannot be out yet.')
+            + ' Progress, the running quota spend and a Cancel appear in the pop-ups bottom-right, '
+            + 'and carry on if you close this.'}
+        className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors
+                    disabled:opacity-50 disabled:cursor-wait whitespace-nowrap shrink-0 ${jobId
+          ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
+          : 'border-neutral-700 text-fg-muted hover:bg-overlay/5'}`}>
+        {/* ⚠ THE TWO STATES OUTRANK THE CALLER'S LABEL. Whatever the button is named at rest, while
+            it runs it says what pressing it will now DO — a control that keeps its old name while
+            its action has changed underneath is the trap this replaced. */}
+        {jobId ? 'Cancel'
+          : busy ? 'Refreshing…'
+            : label ?? (scope.kind === 'universe' ? 'Fetch missing fundamentals'
+              : 'Refresh fundamentals')}
       </button>
     </span>
   );

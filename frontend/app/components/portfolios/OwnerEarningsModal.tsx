@@ -89,7 +89,15 @@ export default function OwnerEarningsModal({
   const [tab, setTab] = useState<Tab>('longequity');
   /** Which tabs have been opened at least once — the mount set. A tab enters it on first visit
    *  and never leaves, so its data survives every subsequent switch. Seeded with the landing tab
-   *  so it mounts on open like it always did. */
+   *  so it mounts on open like it always did.
+   *
+   *  ⚠ THIS ONLY SURVIVES AS LONG AS THE MODAL DOES, WHICH IS WHY IT IS NOT THE WHOLE STORY. Close
+   *  it and reopen the same holding, open a drill-down over a card that just fetched the identical
+   *  body, flip the cadence to quarterly and back — all of those were full re-reads, because the
+   *  mount set cannot outlive the dialog. The requests themselves are now cached a level down, in
+   *  `lib/readCache.ts` (served by `apiFetch`, dropped by any successful write), so a tab that HAS
+   *  to remount still costs nothing. The two work together: this one keeps the parsed charts and
+   *  the toggles, that one keeps the payloads. */
   const [visited, setVisited] = useState<Set<Tab>>(() => new Set<Tab>(['longequity']));
   const openTab = (t: Tab) => {
     setVisited((v) => {

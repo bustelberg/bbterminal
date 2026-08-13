@@ -30,11 +30,12 @@ import { benchNote, mergeSeries, useBenchInputs, withBench, type BenchTarget } f
  * ratio needs a POSITIVE operating income, and a BANK reports no operating income line at all
  * (GuruFocus template 'B') — measured 2026-08-04, ING, ABN AMRO, JPMorgan, Bank of America, Morgan
  * Stanley and Goldman all carry interest expense with none, and insurers (NN, ASR, Aegon) carry
- * neither. Their index weight stays in the coverage denominator, so AEX lands at 72–80% and clears
- * the 80% floor in ONE year of twelve while the S&P clears it in none. A book of industrials
- * clears it every year, which is why the portfolio line is there and the index's is not. Lowering
- * the floor for the benchmark alone would mean the two lines on this chart were computed under
- * different rules — the one thing this whole overlay refuses to do; see `benchSeries`.
+ * neither. Their index weight stays in the coverage denominator, so AEX lands at 72–80% — which
+ * cleared the OLD 80% floor in exactly ONE year of twelve, and clears the 50% floor throughout.
+ * ⚠ That measurement is one of the reasons the floor was lowered (2026-08-12): this card's index
+ * line was being withheld over a fifth of a book it genuinely spans. Lowering it for the benchmark
+ * ALONE would still be wrong — the two lines on this chart would then be computed under different
+ * rules, the one thing this whole overlay refuses to do; see `benchSeries`.
  */
 
 export default function InterestBurdenCard({ holdingsTarget, holdingsName, benchTarget }: {

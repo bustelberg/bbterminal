@@ -97,7 +97,12 @@ export default function FundamentalCharts({ isin, name, blend }: {
           if (!cancelled) setState(out);
           return;
         }
-        const r = await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin ?? '')}/metrics`, { signal: ctrl.signal });
+        // ⚠ `?cadence=annual` spelt out so all four tabs share ONE cached payload — the server's
+        // default, so nothing about the request changes; see `QuickValuationTab`. (The cadence
+        // toggle on this tab is client-side over these same rows, not a second request.)
+        const r = await apiFetch(
+          `${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin ?? '')}/metrics?cadence=annual`,
+          { signal: ctrl.signal });
         if (cancelled) return;
         if (r.status === 404) { setState({ kind: 'none' }); return; }
         const b = await r.json().catch(() => null);

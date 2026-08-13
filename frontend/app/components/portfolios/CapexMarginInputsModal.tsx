@@ -104,7 +104,7 @@ export default function CapexMarginInputsModal({ target, portfolioName, benchTar
   };
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
-  const derived = { label: 'Capex margin', of: (r: CapexMarginRow, y: string) => capexMarginOf(r.capex[y], r.revenue[y]) };
+  const derived = { label: 'Capex margin', kind: 'ratio' as const, of: (r: CapexMarginRow, y: string) => capexMarginOf(r.capex[y], r.revenue[y]) };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"

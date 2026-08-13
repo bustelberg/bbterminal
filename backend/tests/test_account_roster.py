@@ -135,16 +135,20 @@ class TestRecordingReportsMustNotRedefineTheLiveSet:
 
         airs_vermogen._record_reports({"LIVE_A": ["att", "volk"]}, NEW)
 
-        written = [w for w in fake.writes if w[0] == "insert"]
+        # ⚠ AN `update`, NOT AN `insert` — the write stopped being an upsert on 2026-08-13 because
+        # an upsert omitting the NOT NULL `last_seen_at` fails whether or not the row exists. See
+        # `TestTheWriteIsAnUPDATEAndNeverAnUpsert`.
+        written = [w for w in fake.writes if w[0] == "update"]
         assert written, "the outcome was not recorded at all"
-        payload = written[-1][2] if written[-1][2] is not None else None
-        # The fake echoes the upserted batch back through `.data`; read the row it stored.
-        row = next(r for r in fake.tables["airs_account_roster"]
-                   if r["portefeuille"] == "LIVE_A" and "reports_ok" in r)
+        assert "last_seen_at" not in written[-1][2], "discovery owns last_seen_at — see the docstring"
+
+        row = next(r for r in fake.tables["airs_account_roster"] if r["portefeuille"] == "LIVE_A")
         assert row["reports_ok"] == ["att", "volk"]
         assert row["reports_at"] == NEW
-        assert "last_seen_at" not in row, "discovery owns last_seen_at — see the docstring"
-        assert payload is None or "last_seen_at" not in str(payload)
+        # ⚠ AND THE EXISTING VALUE SURVIVES UNTOUCHED. Under the old upsert the row was replaced,
+        # so "absent" was the only way to express "not written"; an UPDATE leaves the discovery
+        # stamp in place, which is the stronger and more literal form of the same rule.
+        assert row["last_seen_at"] == NEW
 
     def test_discovery_still_owns_last_seen_at(self):
         """The other half of the invariant: something must still stamp it, or nothing is ever live."""
@@ -155,22 +159,59 @@ class TestRecordingReportsMustNotRedefineTheLiveSet:
         assert "last_seen_at" in inspect.getsource(airs_vermogen._record_roster)
 
 
-class TestAnUndiscoveredAccountIsNeverINSERTED:
-    """⚠ MEASURED IN PRODUCTION 2026-08-03, REFRESHING ONE ACCOUNT:
+class TestTheWriteIsAnUPDATEAndNeverAnUpsert:
+    """⚠⚠ THE 2026-08-03 DIAGNOSIS WAS WRONG AND THESE TESTS PASSED ANYWAY (corrected 2026-08-13).
+
+    The symptom was real:
 
         null value in column "last_seen_at" of relation "airs_account_roster" violates not-null
         constraint — Failing row contains (AITopSelectie OFF DYN, null, ...)
 
-    PostgREST's `upsert` is INSERT ... ON CONFLICT, so a portefeuille with no roster row took the
-    INSERT branch — without `last_seen_at`, which is NOT NULL and deliberately has no default
-    (the live set IS `last_seen_at = max(...)`; a default would let this function redefine it).
+    and the cause was believed to be "an account discovery has never seen took the INSERT branch",
+    fixed by filtering to rows already in the roster. It did not work. Postgres forms and VALIDATES
+    the candidate tuple BEFORE it arbitrates the conflict, so an upsert omitting a NOT NULL column
+    with no default fails **whether or not the row exists**. Measured directly against the database
+    on 2026-08-13:
 
-    ⚠ AND THE DAMAGE IS NOT THE MISSING ROW. The upsert is BATCHED, so one unseen account fails
-    the outcomes of every account in its batch — all 44 on a full scan. That table is what marks a
-    row "att did not arrive", so the crash silences the exact warning it should have raised:
-    `AITopSelectie OFF DYN` went on showing +55.20% (June's `cumulatief_rendement`) while July's
-    −11.96% sat unfetched, and the row looked perfectly healthy.
+        select count(*) filter (where portefeuille='BUS_WTS_Dividend_Dyn')  ->  1   (it exists)
+        insert ... on conflict (portefeuille) do update ...                 ->  23502
+
+    ⚠ AND EVERY TEST BELOW WENT ON PASSING, WHICH IS THE LESSON. `FakeSupabase` has no NOT NULL
+    constraint, so it cannot reproduce this class of failure at all — the behavioural tests were
+    asserting on a store that accepts anything. The only check that would have caught it is the
+    structural one: this function must not call `upsert`.
+
+    ⚠ THE DAMAGE WAS NOT THE MISSING ROW. Every account failed, on every scan, silently — and this
+    table is what marks a row "att did not arrive", so the failure suppressed exactly the warning it
+    should have raised. `AITopSelectie OFF DYN` went on showing +55.20% (June's
+    `cumulatief_rendement`) while July's −11.96% sat unfetched, and the row looked perfectly
+    healthy.
     """
+
+    def test_it_never_calls_upsert(self):
+        """⚠ STRUCTURAL, BECAUSE THE FAKE CANNOT ENFORCE `NOT NULL`. `upsert` here is an INSERT
+        whose tuple omits `last_seen_at`, and that is rejected before the ON CONFLICT clause is
+        ever consulted. The only safe write is a plain UPDATE."""
+        import inspect
+
+        import airs_vermogen
+
+        src = inspect.getsource(airs_vermogen._record_reports)
+        assert ".upsert(" not in src, (
+            "an upsert omitting last_seen_at fails 23502 even when the row exists — use update()")
+        assert ".update(" in src
+
+    def test_it_never_writes_last_seen_at(self):
+        """The other half of the rule: the fix must not be "just include last_seen_at". That field
+        defines the live set, and stamping it here re-defines it as "the accounts scanned so far"
+        — the bug this class's first test exists for."""
+        import inspect
+
+        import airs_vermogen
+
+        body = inspect.getsource(airs_vermogen._record_reports)
+        writes = body[body.index("by_outcome"):]
+        assert "last_seen_at" not in writes
 
     def test_an_unknown_account_does_not_take_the_batch_down_with_it(self, monkeypatch):
         import airs_vermogen

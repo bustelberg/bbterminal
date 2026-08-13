@@ -55,7 +55,7 @@ describe('benchNote', () => {
     // It renders as a single dot beside a full portfolio curve, which looks like a benchmark that
     // simply tracks nothing rather than one where every other period fell under the coverage floor.
     expect(benchNote(aex, { rows: [] }, null, m({ 2020: 5 })))
-      .toBe('AEX: one period only — the rest fall under the 80% coverage floor');
+      .toBe('AEX: one period only — the rest fall under the 50% coverage floor');
   });
 
   it('keeps the three absences apart — they have different fixes', () => {
@@ -64,7 +64,7 @@ describe('benchNote', () => {
     expect(benchNote(aex, null, null, null)).toBe('AEX: loading…');
     expect(benchNote(aex, null, 'no holdings', null)).toBe('AEX: no holdings');
     expect(benchNote(aex, { rows: [] }, null, m({}))).toBe(
-      'AEX: no period clears the 80% coverage floor');
+      'AEX: no period clears the 50% coverage floor');
   });
 
   it('calls out a single period, which otherwise reads as a rendering glitch', () => {
@@ -72,7 +72,7 @@ describe('benchNote', () => {
     // financials' weight sits in the denominator uncounted and AEX clears the floor in exactly
     // one year of twelve. A lone dot with no explanation looks like a bug in the chart.
     expect(benchNote(aex, { rows: [] }, null, m({ 2025: 12.3 }))).toBe(
-      'AEX: one period only — the rest fall under the 80% coverage floor');
+      'AEX: one period only — the rest fall under the 50% coverage floor');
   });
 
   it('reports the error even once a stale series is still in hand', () => {

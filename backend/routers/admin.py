@@ -1218,6 +1218,160 @@ async def list_etfs(authorization: str = Header(...)):
 # ─── Health ────────────────────────────────────────────────────────
 
 
+@router.get("/api/admin/scheduled-jobs")
+async def admin_scheduled_jobs(authorization: str = Header(...)):
+    """EVERY JOB THAT IS SUPPOSED TO RUN BY ITSELF — declared, registered, and last actually run.
+
+    ⚠⚠ IT ANSWERS "IS ANYTHING MISSING", WHICH NOTHING ELSE COULD. `/schedule` shows the ingest
+    pipeline's own history and `scheduler.list_scheduled_jobs()` shows what APScheduler is holding
+    right now — and BOTH look healthy in the one case that matters, a job that is not registered at
+    all. `list_scheduled_jobs()` is empty under `DISABLE_SCHEDULER`, empty before startup finishes,
+    and empty of any job whose `add_job` threw; none of those is distinguishable from an idle
+    scheduler by looking at the list. The declaration in `scheduled_jobs.py` is what makes an
+    absence visible, and this endpoint is the join.
+
+    ⚠ THE READ IS PER-PROCESS AND SAYS SO. The scheduler is in-process by design (one instance,
+    `DISABLE_SCHEDULER=1` on any replica), so `registered`/`next_run_at` describe *the container
+    that served this request* — which is the honest scope, and the reason `scheduler_running` is
+    reported rather than inferred from an empty list.
+
+    ⚠ SIX OF THE EIGHT JOBS REPORT `unknown`, ON PURPOSE. They leave no durable record — only a log
+    line that scrolls away — so "did it run?" genuinely has no answer for them yet. Green would be a
+    fabrication and red would cry wolf; either teaches the reader to stop reading the page. They say
+    so, and `record_run` is what will fill them in.
+    """
+    _require_admin(authorization)
+
+    import os  # noqa: PLC0415
+
+    from routers._scheduled_jobs_status import build_rows, evidence_names, summarize  # noqa: PLC0415, E501
+    from scheduled_jobs import registrable  # noqa: PLC0415
+    from scheduler import JOB_BODIES, list_scheduled_jobs, scheduler_running  # noqa: PLC0415
+
+    now = datetime.now(timezone.utc)
+    specs = registrable(dict(os.environ))
+    registered = list_scheduled_jobs()
+    running = scheduler_running()
+    # ⚠ READ FROM THE BODY REGISTRY, NOT ASSUMED PER ROW. A "Run now" rendered for a job with no
+    # body is a control that 404s on press.
+    runnable = set(JOB_BODIES)
+
+    def _runs() -> list[dict]:
+        # ⚠⚠ THE NEWEST ROW **PER JOB**, NEVER A WINDOW OF ROWS FILTERED CLIENT-SIDE. See
+        # `evidence_names`: a windowed `.limit(500)` is filled by the noisy jobs and pushes the
+        # quiet ones off the end, so the endpoint accuses exactly the jobs that are behaving.
+        # One-row queries; no window to tune and nothing to truncate.
+        out: list[dict] = []
+        for name in evidence_names(specs):
+            out += (supabase.table("ingest_run")
+                    .select("job_name,started_at,finished_at,status,error_summary")
+                    .eq("job_name", name)
+                    .order("started_at", desc=True)
+                    .limit(1).execute().data or [])
+        # ⚠ NORMALISED ONTO `job_name` SO THE JOIN HAS ONE KEY SPACE. `scheduled_job_run` is keyed
+        # by the APScheduler job id and `ingest_run` by a pipeline job_name; renaming here — rather
+        # than teaching the join about two shapes — is what keeps "which source won" from becoming
+        # a rule anybody has to remember.
+        for spec in specs:
+            if not spec.records:
+                continue
+            for row in (supabase.table("scheduled_job_run")
+                        .select("job_id,started_at,finished_at,status,detail,summary")
+                        .eq("job_id", spec.id)
+                        .order("started_at", desc=True)
+                        .limit(1).execute().data or []):
+                out.append({**row, "job_name": row.pop("job_id")})
+        return out
+
+    try:
+        runs = await asyncio.to_thread(_runs)
+    except APIError as e:
+        # ⚠ THE PAGE STILL RENDERS. Losing the history costs the "did it run" column; it must not
+        # cost the "is it registered" one, which is the half that needs no database at all.
+        runs = []
+        rows = build_rows(specs, registered, runs, now, scheduler_running=running,
+                          runnable=runnable)
+        return {"jobs": rows, "summary": summarize(rows), "scheduler_running": running,
+                "checked_at": now.isoformat(),
+                "history_error": f"{type(e).__name__}: {e}"}
+
+    rows = build_rows(specs, registered, runs, now, scheduler_running=running,
+                      runnable=runnable)
+    return {
+        "jobs": rows,
+        "summary": summarize(rows),
+        "scheduler_running": running,
+        "disable_scheduler": os.environ.get("DISABLE_SCHEDULER", ""),
+        "checked_at": now.isoformat(),
+    }
+
+
+@router.post("/api/admin/scheduled-jobs/{job_id}/run")
+async def admin_run_scheduled_job(job_id: str, authorization: str = Header(...)):
+    """Kick one declared job off NOW, as a cancellable registry job with a progress toast.
+
+    ⚠ THE SAME BODY THE SCHEDULER TICK RUNS (`scheduler.JOB_BODIES`), never a second copy — a
+    button that ran its own implementation would drift from the thing the schedule does, and the
+    drift would only ever surface as the button disagreeing with the nightly result.
+
+    ⚠⚠ CANCELLATION IS COOPERATIVE, AND ITS LATENCY DIFFERS PER JOB. The AIRS scan stops between
+    ACCOUNTS (an account's four reports are stored as a unit); the drift probe stops between
+    COMPANIES; the FX, CRM and size jobs are seconds long and have no useful boundary at all.
+    "Stops immediately" is not on offer for a scraper mid-download, and a Cancel that claimed it
+    would be the decorative control this codebase has already removed once. The UI says which is
+    which rather than implying they are the same.
+
+    ⚠ A JOB WITH NO BODY IS 404, WHICH IS AN ANSWER. The 20-second queue worker has nothing worth
+    triggering, and the two pipeline jobs already own a richer Run-now with a live console tail —
+    `runnable` on `/api/admin/scheduled-jobs` says so per row, so the button is simply absent
+    rather than present-and-failing.
+    """
+    _require_admin(authorization)
+
+    from scheduler import start_job_now  # noqa: PLC0415
+
+    try:
+        job = await asyncio.to_thread(start_job_now, job_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"{job_id} cannot be run by hand — it has no body in scheduler.JOB_BODIES",
+        ) from None
+    return {"job_id": job.id, "label": job.label, "kind": job.kind}
+
+
+@router.get("/api/admin/db-growth")
+async def admin_db_growth(days: int = 7, authorization: str = Header(...)):
+    """HOW FAST THE DATABASE IS GROWING, PER TABLE — bytes on disk, over a window.
+
+    ⚠⚠ BYTES, NOT ROWS WRITTEN, AND THE DIFFERENCE INVERTS THE RANKING. Asking each job to count
+    its own inserts would put `crm_relaties_refresh` — which OVERWRITES its table, thousands of rows
+    written and zero growth — above the month-end price refresh. Several jobs here are
+    delete-then-insert snapshots or upserts. A row count is also blind to INDEXES and BLOAT, which
+    on an 18 GB table are most of the disk.
+
+    ⚠ IT ANSWERS "WHAT GREW", NEVER "WHO GREW IT". The measurement is taken from outside every job,
+    which is what makes it impossible for a job to forget to report or to drift — and is exactly
+    why it cannot attribute. Per-job attribution is a separate, lossier measurement.
+
+    ⚠ `delta` IS NULL, NOT 0, UNTIL THE HISTORY REACHES BACK `days`. A fresh install has sizes and
+    no growth; rendering that as "0 MB added" would present an unmeasured database as a static one.
+    `has_baseline` says which of the two you are looking at.
+
+    ⚠ SUPABASE STORAGE IS NOT COUNTED — the `gurufocus-raw` bucket of cached vendor JSON is not in
+    Postgres. Reconciling this against the hosting's disk figure will show a gap; that is the gap.
+    """
+    _require_admin(authorization)
+
+    from db_growth import growth  # noqa: PLC0415
+
+    # ⚠ CLAMPED. `days` reaches a SQL `make_interval`, and a silly value is a silly window rather
+    # than an error — but an unbounded one invites a negative, which would make `earlier` newer
+    # than `latest` and report shrinkage.
+    window = max(1, min(int(days), 365))
+    return await asyncio.to_thread(growth, window)
+
+
 @router.get("/api/admin/health")
 async def get_health(authorization: str = Header(...)):
     """Composite go/no-go. Returns a single boolean `is_healthy` plus

@@ -7,6 +7,7 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { traceError } from '../../../lib/debugTrace';
 import { useIsAdmin } from '../../../lib/hooks/useEffectiveRole';
+import { invalidateReadCache } from '../../../lib/readCache';
 import { startJob } from '../../../lib/stores/jobs';
 import type { FundamentalGrid, FundamentalGridRow } from '../../../lib/types/api';
 import {
@@ -176,7 +177,11 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
       // ⚠ RELOAD ON `done` ONLY. A cancelled run may have written one feed of three and a failed
       // one may have written none — re-reading either is harmless but pointless, and re-reading
       // after a cancel would quietly undo the impression that anything was stopped.
-      if (job.status === 'done') await reloadHeld();
+      // ⚠ The ingest also moves the INDEX's fundamentals, which the Long Equity benchmark overlay
+      // caches by universe — a fill whose result only ever appears here would leave that line drawn
+      // off the pre-fill constituents. The job started minutes ago, so `apiFetch`'s automatic
+      // invalidation (on the request that started it) is long spent.
+      if (job.status === 'done') { invalidateReadCache(`fundamentals ingested for ${who}`); await reloadHeld(); }
     } catch (e) {
       traceError('benchmarks', `could not start the fundamentals ingest for ${who}`, e);
     } finally {
@@ -207,7 +212,10 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
       // ⚠ RE-READ AFTER A CANCEL TOO, UNLIKE A SINGLE ROW. A cancelled bulk run has still loaded
       // every company it got through — often hundreds — so leaving the pre-fill figures on screen
       // would hide real work that was really done.
-      if (job.status !== 'failed') await reloadHeld();
+      if (job.status !== 'failed') {
+        invalidateReadCache(`${label} fundamentals fill finished`);
+        await reloadHeld();
+      }
     } catch (e) {
       traceError('benchmarks', `could not start the fill for ${label}`, e);
     } finally {

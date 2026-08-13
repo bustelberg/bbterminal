@@ -105,7 +105,7 @@ export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTar
   };
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
-  const derived = { label: 'FCF-SBC yield', of: (r: FcfSbcYieldRow, y: string) => fcfSbcYieldOf(r.fcf[y], r.sbc[y], r.market_cap[y]) };
+  const derived = { label: 'FCF-SBC yield', kind: 'ratio' as const, of: (r: FcfSbcYieldRow, y: string) => fcfSbcYieldOf(r.fcf[y], r.sbc[y], r.market_cap[y]) };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"

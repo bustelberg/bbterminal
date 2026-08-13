@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -43,6 +44,8 @@ _USER_AGENT = (
 
 _last_api_call: float = 0.0
 _API_MIN_INTERVAL = 1.5  # seconds between requests
+# Guards the read-modify-write of `_last_api_call` above — see `_api_request`.
+_RATE_LIMIT = threading.Lock()
 
 
 class ApiResult:
@@ -132,11 +135,30 @@ def _api_request_urllib(url: str, timeout: int = 30) -> ApiResult:
 
 
 def _api_request(url: str, timeout: int = 30) -> ApiResult:
+    """One GuruFocus call, no faster than `_API_MIN_INTERVAL` after the previous one.
+
+    ⚠⚠ THE LOCK IS NOT DEFENSIVE — WITHOUT IT THIS LIMITER LEAKS UNDER CONCURRENCY, AND IT HAS
+    HAD CONCURRENT CALLERS SINCE THE FUNDAMENTALS FILL WENT MULTI-THREADED. The body is a
+    read-modify-write of a module global: every thread reads the SAME `_last_api_call`, each
+    computes the same short sleep, they all wake together and fire at once. So N threads produce a
+    BURST of N simultaneous requests and then a gap — the precise opposite of a minimum interval,
+    and a plausible cause of the `ReadTimeout`s an SP500 refresh returned (GuruFocus answering an
+    overloaded caller slowly, exactly as Yahoo answers one with an empty list).
+
+    ⚠ THE SLEEP IS INSIDE THE LOCK, DELIBERATELY. Holding it across the wait is what SERIALISES
+    callers; releasing before sleeping would let them all through together again and reduce this
+    to the racy version with extra steps. The cost is that a caller waits for the queue ahead of
+    it, which is what a global rate limit means.
+    ⚠ THE HTTP CALL IS OUTSIDE IT. Holding the lock across a 30-second request would serialise the
+    RESPONSES too, making the limiter a global mutex on GuruFocus and undoing every worker.
+    """
     global _last_api_call
-    elapsed = time.time() - _last_api_call
-    if elapsed < _API_MIN_INTERVAL:
-        time.sleep(_API_MIN_INTERVAL - elapsed)
-    _last_api_call = time.time()
+    with _RATE_LIMIT:
+        elapsed = time.time() - _last_api_call
+        if elapsed < _API_MIN_INTERVAL:
+            time.sleep(_API_MIN_INTERVAL - elapsed)
+        # Stamped AFTER the wait, so the interval is measured between DEPARTURES.
+        _last_api_call = time.time()
 
     if _cf_is_available():
         return _api_request_cf(url, timeout)

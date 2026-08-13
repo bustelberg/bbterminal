@@ -96,24 +96,45 @@ class TestALevelIsRebasedBeforeItIsWeighted:
         small = _m(0.5, **{"2023_12_31": 10, "2024_12_31": 13})
         assert blend_series([big, small], REV)["points"][1]["value"] == pytest.approx(120.0)
 
-    def test_a_non_positive_base_is_dropped_not_rebased(self):
-        """⚠ 100 × v/0 is undefined and a NEGATIVE base flips every later point's sign — a loss
-        year as the base would invert that member's whole curve."""
-        # ⚠ Weighted so the SURVIVOR alone clears the coverage floor. A dropped member still
-        # counts in the denominator — correctly, since the metric genuinely does not span it — so
-        # at 50/50 the whole date would be omitted instead, which is a different (also correct)
-        # behaviour tested below.
+    def test_a_negative_base_costs_the_member_ITS_EARLY_YEARS_not_the_metric(self):
+        """⚠⚠ REWRITTEN 2026-08-13 — THE BEHAVIOUR CHANGED DELIBERATELY AND THE TEST DID NOT.
+
+        It used to assert that a member whose FIRST reported period is negative is dropped from the
+        metric outright (`covered_pct == 85`, the survivor's weight alone). `_prepare` now anchors
+        on the first POSITIVE period instead and keeps the member from there — because dropping it
+        threw away every good year it had: Universal Music's fabricated 2017 zero cost it 2018-2025
+        (6,023 → 12,507), and Prosus carries the same artefact.
+
+        So the loss member contributes at 2024, where it reported, and 2023 — before its anchor —
+        is the only thing it is absent from. 100 × v/0 is still undefined and a negative base still
+        flips a curve; the fix is to move the anchor, not to discard the company.
+        """
         ok = _m(0.85, **{"2023_12_31": 100, "2024_12_31": 150})
         loss = _m(0.15, **{"2023_12_31": -50, "2024_12_31": 60})
         out = blend_series([ok, loss], REV)
-        assert out["points"][-1]["value"] == pytest.approx(150.0)   # the loss member is out
-        assert out["points"][-1]["covered_pct"] == pytest.approx(85.0)
+        # The line is unchanged: `loss` has no 2023→2024 growth to contribute (no positive anchor
+        # at 2023), so the step is the survivor's +50% either way.
+        assert out["points"][-1]["value"] == pytest.approx(150.0)
+        # ...but it IS behind the 2024 point now, so coverage is the whole book rather than 85%.
+        assert out["points"][-1]["covered_pct"] == pytest.approx(100.0)
+        assert out["points"][0]["covered_pct"] == pytest.approx(85.0), (
+            "2023 is still the survivor alone — the loss member's history starts at its anchor")
 
-    def test_dropping_a_member_can_take_the_date_below_the_floor(self):
-        """And then there is no value at all, which is the honest outcome."""
-        ok = _m(0.5, **{"2023_12_31": 100, "2024_12_31": 150})
-        loss = _m(0.5, **{"2023_12_31": -50, "2024_12_31": 60})
-        assert blend_series([ok, loss], REV)["points"] == []
+    def test_the_period_BEFORE_a_members_anchor_can_fall_under_the_floor(self):
+        """The surviving half of the old "dropping a member takes the date below the floor" case.
+
+        ⚠ IT IS NOW ABOUT THE EARLY PERIOD, NOT THE WHOLE SERIES. A member anchored at 2024 is
+        absent from 2023, so 2023 is covered by 40% of the book and is refused — while 2024, which
+        both report, is drawn. The old test expected NO points at all, which stopped being true
+        when the anchor moved.
+
+        ⚠ 40/60, NOT 50/50 — the floor is 50 and the comparison is `>=`, so an even split clears.
+        """
+        ok = _m(0.4, **{"2023_12_31": 100, "2024_12_31": 150})
+        loss = _m(0.6, **{"2023_12_31": -50, "2024_12_31": 60})
+        pts = blend_series([ok, loss], REV)["points"]
+        assert [p["period"] for p in pts] == ["2024"]
+        assert pts[0]["covered_pct"] == pytest.approx(100.0)
 
 
 class TestCoverageIsPerDateAndIsAFloor:
@@ -137,18 +158,36 @@ class TestCoverageIsPerDateAndIsAFloor:
         assert [p["period"] for p in out["points"]] == ["2024"]
 
     def test_the_floor_is_the_documented_one(self):
-        assert MIN_BLEND_COVERAGE_PCT == 80.0
+        assert MIN_BLEND_COVERAGE_PCT == 50.0
 
-    def test_the_newest_fiscal_year_is_not_drawn_off_the_few_who_have_filed(self):
-        """⚠ THE REASON THE FLOOR IS 80. Books close on different dates, so early in a year a
-        couple of holdings have filed and the rest have not. Renormalising over whoever reported
-        turns that into a full-height point on the right edge, in the same ink as a year every
-        holding reported — a move in the sample, read as a move in the book. At 60 this cleared."""
+    def test_a_newest_year_the_MINORITY_has_filed_is_still_refused(self):
+        """The floor's remaining job, and the one it was raised to 80 for.
+
+        Books close on different dates, so early in a fiscal year a few holdings have filed and the
+        rest have not. Renormalising over whoever reported draws that as a full-height point on the
+        right edge, in the same ink as a year everybody reported — a move in the sample, read as a
+        move in the book.
+        """
+        filed = [_m(0.20, **{"2024_12_31": 10, "2025_12_31": 10}),
+                 _m(0.15, **{"2024_12_31": 10, "2025_12_31": 40})]
+        pending = [_m(0.65, **{"2024_12_31": 10})]
+        out = blend_series([*filed, *pending], ROE)
+        assert [p["period"] for p in out["points"]] == ["2024"]   # 2025 spans 35% — omitted
+
+    def test_a_newest_year_the_MAJORITY_has_filed_now_DRAWS_and_that_is_the_trade(self):
+        """⚠ THE ACCEPTED COST OF LOWERING THE FLOOR 80 -> 50 (2026-08-12, on request). This exact
+        case — 65% filed, the rest pending — was the reason the floor went 60 -> 80 in July, and it
+        is now drawn again. It is pinned rather than deleted so the behaviour is a decision on the
+        record instead of a surprise on the right edge of a chart: `covered_pct` says 65 and the
+        point is real, but it spans two thirds of the book beside years that span all of it. If it
+        bites, the fix is a stricter bar on the LATEST period alone — not a single high floor, which
+        also hid the mid-history periods this change was asked for."""
         filed = [_m(0.35, **{"2024_12_31": 10, "2025_12_31": 10}),
                  _m(0.30, **{"2024_12_31": 10, "2025_12_31": 40})]
         pending = [_m(0.35, **{"2024_12_31": 10})]
         out = blend_series([*filed, *pending], ROE)
-        assert [p["period"] for p in out["points"]] == ["2024"]   # 2025 spans 65% — omitted
+        assert [p["period"] for p in out["points"]] == ["2024", "2025"]
+        assert out["points"][-1]["covered_pct"] == pytest.approx(65.0)
 
     def test_no_members_is_no_series_not_a_zero(self):
         assert blend_series([], ROE)["points"] == []
@@ -240,10 +279,34 @@ class TestTheBreakdownAgreesWithTheLineItExplains:
             assert out["value"] == pytest.approx(point["value"])
             assert out["covered_pct"] == pytest.approx(point["covered_pct"])
 
-    @pytest.mark.parametrize("code", [PE, ROE, REV])
+    @pytest.mark.parametrize("code", [PE, ROE])
     def test_the_shares_sum_to_one_hundred_percent(self, code):
+        """⚠ REV IS DELIBERATELY EXCLUDED (2026-08-13) — A LEVEL HAS NO SHARES TO SUM.
+
+        Once the level line became a CHAINED product rather than a weighted sum, its value at a
+        period stopped being decomposable: no set of per-member numbers can add to a cumulative
+        product. `_level_breakdown` therefore reports `share_pct = None` on purpose and gives
+        `contribution_pp` instead — a share OF A STEP is unbounded (near a zero step a 0.1pp
+        contributor reads as 400% of it, and a member that moved the other way reads negative).
+
+        Parametrising REV in here asserted the old additive shape; the level's own decomposition is
+        checked by `contribution_pp` summing to `step_pct` below.
+        """
         out = blend_breakdown(self.MEMBERS, code, "2025")
         assert sum(m["share_pct"] for m in out["members"]) == pytest.approx(100.0, abs=0.05)
+
+    def test_a_LEVEL_has_no_shares_and_its_FIRST_point_has_no_step_either(self):
+        """The level's replacement for `share_pct` is `contribution_pp` — a share of the STEP into
+        the period.
+
+        ⚠ AND AT THE FIRST DRAWN PERIOD THERE IS NO STEP, which is the honest answer rather than a
+        gap: the index starts there, so nothing moved it and there is nothing to attribute. These
+        members report one period each, so 2025 IS the first — every contribution is None, and that
+        must not be mistaken for "they contributed zero"."""
+        out = blend_breakdown(self.MEMBERS, REV, "2025")
+        assert all(m["share_pct"] is None for m in out["members"]), (
+            "a cumulative product cannot be shared out — see the docstring above")
+        assert all(m.get("contribution_pp") is None for m in out["members"])
 
 
 class TestTheMatrixAgreesWithTheLineToo:
@@ -444,24 +507,36 @@ class TestAnEmptySeriesIsNotAnEmptyDatabase:
         members = [{"weight": 0.5, "points": {}}, {"weight": 0.5, "points": {}}]
         assert explain_empty(members, DIV_PS) is None
 
-    def test_a_dividend_series_starting_at_zero_is_named_as_the_cause(self):
-        """The measured case: a level is rebased to 100 at its first observation, and 100 x v/0 is
-        undefined — so a company that began paying mid-window is dropped from the metric entirely.
-        Two of three holdings here, which takes every year under the coverage floor."""
+    def test_a_company_that_STARTED_paying_keeps_the_years_it_paid(self):
+        """⚠⚠ REWRITTEN 2026-08-13 — THIS IS THE CASE THAT MOVED THE ANCHOR.
+
+        It used to assert that a dividend series beginning at 0.00 is dropped from the metric
+        outright, taking every year under the floor and drawing nothing. That WAS the behaviour and
+        it was the bug: two holdings that simply started paying mid-window silenced the whole
+        chart, and the card read "No dividend/share ingested" while all three carried the line.
+
+        `_prepare` now anchors on the first POSITIVE period, so a company that began paying keeps
+        the years it actually paid and is absent only from the ones before it — which is what the
+        data says. The leading 0.00 is still refused as a divisor; it just no longer costs the
+        company its history.
+        """
         members = [
             {"weight": 0.4, "points": {"2015-12-31": 0.0, "2024-12-31": 1.2}},
             {"weight": 0.4, "points": {"2015-12-31": 0.0, "2024-12-31": 0.8}},
             {"weight": 0.2, "points": {"2015-12-31": 1.0, "2024-12-31": 2.0}},
         ]
-        assert blend_series(members, DIV_PS)["points"] == []      # the chart draws nothing
+        pts = blend_series(members, DIV_PS)["points"]
+        # 2015 is the one payer alone (20% — under the floor); 2024 is all three.
+        assert [p["period"] for p in pts] == ["2024"]
+        assert pts[0]["covered_pct"] == pytest.approx(100.0)
+        # ⚠ AND NOTHING IS DROPPED ANY MORE — the note that used to blame `non_positive_base` for
+        # two of three holdings now reports all three contributing. (`explain_empty` is a
+        # diagnostic the caller only reaches when the series came back empty; called directly it
+        # always answers, so the assertion is on WHAT it says, not on its absence.)
         why = explain_empty(members, DIV_PS)
-        assert why["reporting"] == 3                              # ⚠ all three HAVE the data
-        assert why["reporting_pct"] == pytest.approx(100.0)
-        assert why["contributing"] == 1
-        assert why["dropped"] == {"non_positive_base": 2}
-        assert why["best_covered_pct"] == pytest.approx(20.0)
-        assert why["floor_pct"] == MIN_BLEND_COVERAGE_PCT
-        assert why["years_below_floor"] == 2
+        assert why["dropped"] == {}
+        assert why["contributing"] == 3
+        assert why["best_covered_pct"] == pytest.approx(100.0)
 
     def test_a_thin_year_is_reported_as_the_floor_not_as_a_drop(self):
         """Every member survives preparation; there simply is not enough weight reporting. A note

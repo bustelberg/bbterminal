@@ -101,7 +101,12 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
       // from the previous company it would convert this one's close at that one's currency.
       setMetrics(null); setCurrency(null); setLiveRes(null); setErr(null);
       try {
-        const r = await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin)}/metrics`);
+        // ⚠ `?cadence=annual` IS SPELT OUT ONLY SO THIS SHARES THE LONG EQUITY TAB'S PAYLOAD. It is
+        // the server's default (`cadence != "quarterly"` runs the identical loader), so the URL is
+        // a no-op on the wire — but the read cache keys on the URL, and the tab a reader lands on
+        // asks for it explicitly. Same request, same key, no second 12,000-row download.
+        const r = await apiFetch(
+          `${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin)}/metrics?cadence=annual`);
         if (r.status === 404) { if (alive) setMetrics([]); return; }
         const b = await r.json().catch(() => null);
         if (!alive) return;

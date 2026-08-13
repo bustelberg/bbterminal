@@ -6,7 +6,7 @@ array aligned with the block's period column. We flatten that nested
 structure into one `metric_data` row per (field path, period)."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from itertools import zip_longest
 from typing import Any
 from urllib.parse import quote
@@ -212,4 +212,23 @@ def fetch_financials(
     _log(f"Parsed {len(rows)} rows, {result.metrics_found} metrics")
     result.rows_loaded = _upsert_metric_rows(supabase, rows)
     _log(f"Loaded {result.rows_loaded} rows into DB")
+    _stamp_fetched(supabase, company_id, _log)
     return result
+
+
+def _stamp_fetched(supabase: Client, company_id: int, _log: callable) -> None:
+    """Record that we ASKED — see the migration `20260812000000`.
+
+    ⚠ STAMPED WHENEVER WE GOT AN ANSWER, INCLUDING AN EMPTY ONE. The whole point is to tell "no
+    data published" from "not tried yet", and gating this on rows-loaded would leave it NULL for
+    exactly the companies whose blank periods most need explaining.
+
+    ⚠ AND IT NEVER FAILS THE INGEST. The data is already written by the time this runs; a stamp we
+    could not save is a worse table, not a failed fetch.
+    """
+    try:
+        (supabase.table("company")
+         .update({"financials_fetched_at": datetime.now(timezone.utc).isoformat()})
+         .eq("company_id", company_id).execute())
+    except Exception as e:  # noqa: BLE001 — see the docstring
+        _log(f"could not stamp financials_fetched_at: {e}")

@@ -27,7 +27,22 @@ import { Holdings } from './BucketDetailPanel';
  */
 type Axis = 'sector' | 'region' | 'currency';
 
-const pct = (v: number | null | undefined, dp = 2) =>
+/**
+ * DECIMALS ON EVERY FIGURE IN THIS PANEL — one constant, because "all of it" is the requirement.
+ *
+ * ⚠ IT WAS THREE PRECISIONS, AND THAT IS WHY THIS EXISTS (2026-08-13, on request). `pct`/`pp`
+ * defaulted to 2 but were CALLED with an explicit `1` in six places, and the weights were bare
+ * `.toFixed(1)` literals in nine more — so one row showed `34.4` against a tooltip quoting
+ * `34.38%`, and the arithmetic printed in the ⓘ ("wt × return = contribution") could not be
+ * reproduced from the digits beside it. A default that every call site overrides is not a default.
+ *
+ * ⚠ THE ⓘ CARDS QUOTE THE SAME FORMATTERS, not their own `toFixed`. The whole point of printing
+ * `(4.30% − 6.10%) × (…)` is that a reader can check it against the row; a card rounded differently
+ * from the cells it explains is worse than no card.
+ */
+const DP = 2;
+
+const pct = (v: number | null | undefined, dp = DP) =>
   v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(dp)}%`;
 
 /** Pydantic-defaulted fields come back optional in the generated types. A missing effect is 0 —
@@ -36,8 +51,18 @@ const n = (v: number | null | undefined) => v ?? 0;
 
 /** `pp` — an effect is percentage POINTS, never percent. The excess is a difference of two
  *  returns; a `%` here would claim a different quantity. */
-const pp = (v: number | null | undefined, dp = 2) =>
+const pp = (v: number | null | undefined, dp = DP) =>
   v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(dp)}pp`;
+
+/**
+ * A WEIGHT — bare digits, no unit and no sign.
+ *
+ * ⚠ NO LEADING `+`, unlike `pct`/`pp`. A weight is a share of a base and cannot be negative, so a
+ * sign on it would imply a direction it does not have; a return and an effect both can go either
+ * way, which is why those two carry one. The `%` stays at the call site because the main table puts
+ * it in the column header and the tooltips put it inline.
+ */
+const wt = (v: number | null | undefined, dp = DP) => n(v).toFixed(dp);
 
 /**
  * A number with its OWN ⓘ.
@@ -68,7 +93,11 @@ function Num({ children, prov }: { children: React.ReactNode; prov: React.ReactN
  *  weight × return decomposition of the excess, all of them in `pp`. */
 function Eff({ v, prov }: { v?: number | null; prov?: React.ReactNode }) {
   if (v == null) return <span className="text-fg-faint">—</span>;
-  const body = Math.abs(v) < 0.005
+  // ⚠ THE THRESHOLD IS DERIVED FROM `DP`, NOT A LITERAL 0.005 THAT HAPPENS TO MATCH IT. It means
+  // "this would print as zero", so it has to move with the precision — a hardcoded one drifts the
+  // moment DP changes and leaves some "0.00pp" cells shown and others dashed, with no rule a
+  // reader can infer. Same lesson as `composition.DISPLAY_EPSILON`.
+  const body = Math.abs(v) < 0.5 / 10 ** DP
     ? <span className="text-fg-faint">—</span>
     : <span className={v >= 0 ? 'text-pos-400' : 'text-neg-400'}>{pp(v)}</span>;
   return prov ? <Num prov={prov}>{body}</Num> : body;
@@ -139,12 +168,17 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
       <table className="w-full text-[12px] table-fixed">
         {/* ⚠ Widened for the per-cell ⓘ. Every numeric column now carries a 14px chip plus its
             gap OUTSIDE the digits, and at the old `w-9` the weight column could not fit "4.7%"
-            and an icon — under `table-fixed` that does not wrap, it spills over the neighbour. */}
+            and an icon — under `table-fixed` that does not wrap, it spills over the neighbour.
+            ⚠ AND WIDENED AGAIN, x1.2 (2026-08-13, on request), because the digits grew: every
+            figure in this panel moved to two decimals (see `DP`), so "4.7%" became "4.70%" and
+            "+59.2%" became "+59.24%" — two more glyphs in a column that was already sized to the
+            character. `table-fixed` does not resize to fit, it OVERLAPS, so a precision change is
+            a width change. 3rem -> 3.6rem, 4.5rem -> 5.4rem, exactly x1.2 on all three. */}
         <colgroup>
           <col />
-          <col className="w-12" />
-          <col className="w-[4.5rem]" />
-          <col className="w-[4.5rem]" />
+          <col className="w-[3.6rem]" />
+          <col className="w-[5.4rem]" />
+          <col className="w-[5.4rem]" />
         </colgroup>
         {/* Three bare percentages in a row (10.0% · +59.2% · +5.92%) are unreadable without
             labels — worse than an unexplained header, because there is nothing to hover. */}
@@ -183,16 +217,16 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
                 <Num prov={<Provenance source={src} asOf={asOf} kind="copied"
                   what={`${r.name ?? r.ticker ?? r.isin}'s share of ${owner}.`}
                   note={`weight in ${owner}`}
-                  how={`${weightHow} ÷ Σ over ${owner} = ${n(r.weight_pct).toFixed(1)}%.`} />}>
-                  {n(r.weight_pct).toFixed(1)}%
+                  how={`${weightHow} ÷ Σ over ${owner} = ${wt(r.weight_pct)}%.`} />}>
+                  {wt(r.weight_pct)}%
                 </Num>
               </td>
               <td className="py-1 px-1 text-right font-mono text-fg-subtle">
                 <Num prov={<Provenance source={src} asOf={asOf} kind="formula"
                   what={`What ${r.name ?? r.ticker ?? r.isin} returned, in EUR.`}
                   note="EUR return over the window"
-                  how={`${returnHow} = ${pct(r.return_pct, 1)}.`} />}>
-                  {pct(r.return_pct, 1)}
+                  how={`${returnHow} = ${pct(r.return_pct)}.`} />}>
+                  {pct(r.return_pct)}
                 </Num>
               </td>
               <td className="py-1 pl-1 text-right font-mono font-semibold">
@@ -202,7 +236,7 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
                       ? `How much of ${owner}'s return ${r.name ?? r.ticker ?? r.isin} is responsible for.`
                       : `What ${r.name ?? r.ticker ?? r.isin} was worth to ${owner}.`}
                     note={held ? `share of ${owner}'s return` : `what it was worth to ${owner}`}
-                    how={`${n(r.weight_pct).toFixed(1)}% × ${pct(r.return_pct, 1)} = ${pp(r.contribution_pct)}.`} />} />
+                    how={`${wt(r.weight_pct)}% × ${pct(r.return_pct)} = ${pp(r.contribution_pct)}.`} />} />
               </td>
             </tr>
           ))}
@@ -222,7 +256,8 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
  *
  * ⚠ BOTH LISTS ARE ON THE SAME BASE AS THE ROW ABOVE THEM. The backend renormalises each side's
  * per-holding weights over what that side can attribute, so the weights in each list ADD UP to the
- * "Your wt" / "Index wt" figures in the row that opened it — the check a reader will actually try.
+ * "Your weight" / "Index weight" figures in the row that opened it — the check a reader will
+ * actually try.
  * They were raw shares of the whole portfolio once: Technology read 34.38% while its own holdings
  * summed to 9.11%, out by exactly 100/attributable_pct, and neither number was wrong on its own.
  *
@@ -230,10 +265,14 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
  * allocation bet with no picks to judge — exactly what the row's Selection column says by being
  * 0.00pp. Saying so beats an empty box.
  */
-function BucketNames({ row, bucket, benchmark }: {
+function BucketNames({ row, bucket, benchmark, startLabel }: {
   row: NonNullable<ModelPortfolioAttribution['rows']>[number];
   bucket: string;
   benchmark: string;
+  /** ⚠ WHEN the weights were measured — passed down because THIS panel has a window toggle and the
+   *  `/bucket` drill-down does not. A YTD window opens on 1 January; a since-inception one opens on
+   *  the model's own effective date. See `Holdings`'s `startLabel`. */
+  startLabel: string;
 }) {
   const mine = row.portfolio_holdings ?? [];
   const theirs = row.benchmark_holdings ?? [];
@@ -247,11 +286,11 @@ function BucketNames({ row, bucket, benchmark }: {
             Your holdings <span className="text-fg-faint">({mine.length})</span>
             {shared(mine) > 0 && <span className="text-accent-400"> · {shared(mine)} in both</span>}
             {mine.length > 0 && (
-              <span className="text-fg-faint"> · {sum(mine).toFixed(1)}% of the attributable model</span>
+              <span className="text-fg-faint"> · {wt(sum(mine))}% of the attributable model</span>
             )}
           </p>
           {mine.length
-            ? <Holdings rows={mine} />
+            ? <Holdings rows={mine} startLabel={startLabel} />
             : (
               <p className="text-[12px] text-fg-subtle py-1">
                 {`You hold nothing in ${bucket} — the whole effect is the decision not to own it, `}
@@ -264,11 +303,11 @@ function BucketNames({ row, bucket, benchmark }: {
             {benchmark} constituents <span className="text-fg-faint">({theirs.length})</span>
             {shared(theirs) > 0 && <span className="text-accent-400"> · {shared(theirs)} in both</span>}
             {theirs.length > 0 && (
-              <span className="text-fg-faint"> · {sum(theirs).toFixed(1)}% of the index</span>
+              <span className="text-fg-faint"> · {wt(sum(theirs))}% of the index</span>
             )}
           </p>
           {theirs.length
-            ? <Holdings rows={theirs} />
+            ? <Holdings rows={theirs} startLabel={startLabel} />
             : (
               <p className="text-[12px] text-fg-subtle py-1">
                 {`${benchmark} holds nothing in ${bucket}, so there is no index return to judge `}
@@ -326,7 +365,29 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
     return () => { cancelled = true; };
   }, [id, benchmark, window, axis, source]);
 
-  const label = window === 'ytd' ? 'YTD' : 'Since inception';
+  /**
+   * The window, spelt out — this is the panel's heading and nothing else reads it.
+   *
+   * ⚠ WRITTEN OUT, NOT "YTD" (2026-08-13, on request). The heading was `Why — YTD vs SP500`, which
+   * is three abbreviations and a dash standing in for a sentence: "Why" names no quantity, "vs"
+   * does not say what is being compared, and the panel underneath is a Brinson decomposition rather
+   * than a difference of two numbers. `Year-to-date performance attribution compared to SP500` says
+   * what the table is.
+   *
+   * ⚠ THE SECOND WINDOW IS HYPHENATED TO MATCH, because both are compound adjectives in front of
+   * "performance attribution" — `Since-inception performance attribution compared to SP500`. Left
+   * as "Since inception" it reads as a sentence fragment where its twin reads as a title.
+   */
+  const label = window === 'ytd' ? 'Year-to-date' : 'Since-inception';
+  /**
+   * WHEN the drill-down's weights were measured — the header under "Weight" in each names table.
+   *
+   * ⚠ DERIVED FROM THE SAME `window` AS THE HEADING, so the two cannot disagree. A YTD window opens
+   * on 1 January; a since-inception one opens on the model's own effective date, which for 27 of
+   * the 56 models is somewhere inside this year. "Start of year" on that second case would be a
+   * confident wrong date on a column a reader uses to check the arithmetic.
+   */
+  const startLabel = window === 'ytd' ? 'Start of year' : 'At inception';
   // ONE source for the word: the axis the server actually computed, NOT the picker's state. If
   // the two disagree — a response still in flight, a server that normalises an unknown axis —
   // the labels must describe the numbers ON SCREEN, not the request that asked for them.
@@ -350,7 +411,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       <div className="flex items-start justify-between gap-3 mb-2">
         <div>
           <h4 className="text-sm font-semibold text-fg-strong">
-            {`Why — ${label} vs ${benchmark}`}
+            {`${label} performance attribution compared to ${benchmark}`}
           </h4>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -384,6 +445,12 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
           {!data.reconciles && (
             <p className="text-[12px] text-neg-300 mb-2">
               {'⚠ The effects do not sum to the excess (residual '}
+              {/* ⚠ THE ONE FIGURE IN THIS PANEL THAT IS NOT AT `DP`, AND DELIBERATELY SO. Every
+                  other number here is a quantity a reader compares; this one is the PROOF that the
+                  three columns are a decomposition, and it only ever appears when that proof has
+                  failed. At two decimals a real 0.004pp break prints "+0.00%" — a banner announcing
+                  a failure while showing zero, which reads as the banner being wrong rather than
+                  the table. It stays at four. */}
               {pct(data.residual_pct, 4)}
               {'). This is NOT a valid decomposition — do not read the rows below as one.'}
             </p>
@@ -422,17 +489,17 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       the convention. A header that needs a hover to be read at all is a header
                       that will be guessed at instead. The tooltip formulas use the same words, so
                       the two cannot drift apart the way symbols and a missing key did. */}
-                  <Th label="Your wt"
+                  <Th label="Your weight"
                     prov={<Provenance source={pSrc} column kind="formula"
                       what={`Your share of the attributable model in each ${w} — funds and cash removed, the rest renormalised to 100%, so it is not the raw model weight.`}
                       note={`your weight in this ${w}`}
                       how={`Σ(${pWeightSrc}) over your ${w} holdings ÷ Σ over all attributable holdings.`} />} />
-                  <Th label="Index wt"
+                  <Th label="Index weight"
                     prov={<Provenance source="benchmark" column kind="formula"
                       what={`${benchmark}'s share in each ${w}, at the START of the window — weighting by today’s cap would be look-ahead.`}
                       note={`${benchmark} weight in this ${w}`}
                       how={`Σ(start-of-window cap weight) over ${benchmark}'s ${w} constituents ÷ Σ over the index.`} />} />
-                  <Th label="Your ret."
+                  <Th label="Your return"
                     prov={<Provenance source={pSrc} column kind="formula"
                       what={`What your holdings in each ${w} returned, in EUR. A dash means you hold nothing there.`}
                       note={`your return in this ${w}`}
@@ -440,7 +507,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                   {/* The reference point. Allocation is scored against THIS number, so it has to
                       be on the screen — an over/underweight is judged by whether its sector beat
                       or lagged the index as a whole, not by whether it went up. */}
-                  <Th label="Index ret."
+                  <Th label="Index return"
                     prov={<Provenance source="benchmark" column kind="formula"
                       what={`What ${benchmark}'s holdings in each ${w} returned, in EUR.`}
                       note={`${benchmark} return in this ${w}`}
@@ -448,15 +515,15 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                   <Th label="Allocation"
                     prov={<Provenance source="derived" column kind="formula" note="Brinson-Fachler allocation"
                       what={`What choosing where to put the money was worth — scored against the index total, so a ${w} that rose by LESS than the index counts against you.`}
-                      how={`(your wt − index wt) × (index ret − index total ${pct(data.benchmark_return_pct, 1)}).`} />} />
+                      how={`(your weight − index weight) × (index return − index total ${pct(data.benchmark_return_pct)}).`} />} />
                   <Th label="Selection"
                     prov={<Provenance source="derived" column kind="formula" note="Brinson selection"
                       what="What choosing which companies to hold was worth, scored at the index’s weight so sizing is held constant."
-                      how="index wt × (your ret − index ret)." />} />
+                      how="index weight × (your return − index return)." />} />
                   <Th label="Interact."
                     prov={<Provenance source="derived" column kind="formula" note="interaction (the cross term)"
                       what="What the tilt and the picks were worth together."
-                      how="(your wt − index wt) × (your ret − index ret)." />} />
+                      how="(your weight − index weight) × (your return − index return)." />} />
                   <Th label="Total"
                     prov={<Provenance source="derived" column kind="formula" note={`this ${w}'s share of the excess`}
                       what={`Each ${w}'s whole share of the excess. The column sums to the excess, and that identity is checked, not assumed.`}
@@ -469,9 +536,9 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                   // reader can check the arithmetic against the digits in the row.
                   const wP = n(r.portfolio_weight_pct);
                   const wB = n(r.benchmark_weight_pct);
-                  const rP = pct(r.portfolio_return_pct, 1);
-                  const rB = pct(r.benchmark_return_pct, 1);
-                  const rBt = pct(data.benchmark_return_pct, 1);
+                  const rP = pct(r.portfolio_return_pct);
+                  const rB = pct(r.benchmark_return_pct);
+                  const rBt = pct(data.benchmark_return_pct);
                   const open = openBucket === r.bucket;
                   return (
                     <Fragment key={r.bucket}>
@@ -493,16 +560,16 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                         <Num prov={<Provenance source={pSrc} asOf={portfolioAsOf} kind="formula"
                           what={`Your share of the attributable model held in ${r.bucket}.`}
                           note={`your weight in ${r.bucket}`}
-                          how={`Σ(${pWeightSrc}) over your ${r.bucket} holdings ÷ Σ over all attributable holdings = ${wP.toFixed(1)}%.`} />}>
-                          {wP.toFixed(1)}
+                          how={`Σ(${pWeightSrc}) over your ${r.bucket} holdings ÷ Σ over all attributable holdings = ${wt(wP)}%.`} />}>
+                          {wt(wP)}
                         </Num>
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
                         <Num prov={<Provenance source="benchmark" asOf={benchmarkAsOf} kind="formula"
                           what={`${benchmark}'s share held in ${r.bucket}.`}
                           note={`${benchmark} weight in ${r.bucket}`}
-                          how={`Σ(start-of-window cap weight) over ${benchmark}'s ${r.bucket} constituents ÷ Σ over the index = ${wB.toFixed(1)}%.`} />}>
-                          {wB.toFixed(1)}
+                          how={`Σ(start-of-window cap weight) over ${benchmark}'s ${r.bucket} constituents ÷ Σ over the index = ${wt(wB)}%.`} />}>
+                          {wt(wB)}
                         </Num>
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
@@ -525,19 +592,19 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                         <Eff v={n(r.allocation_pct)}
                           prov={<Provenance source="derived" kind="formula" note={`allocation — ${r.bucket}`}
                             what={`What your ${r.bucket} over/underweight was worth, scored against the index total (${rBt}).`}
-                            how={`(${wP.toFixed(1)}% − ${wB.toFixed(1)}%) × (${rB} − ${rBt}) = ${pp(r.allocation_pct)}.`} />} />
+                            how={`(${wt(wP)}% − ${wt(wB)}%) × (${rB} − ${rBt}) = ${pp(r.allocation_pct)}.`} />} />
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono">
                         <Eff v={n(r.selection_pct)}
                           prov={<Provenance source="derived" kind="formula" note={`selection — ${r.bucket}`}
                             what={`What your ${r.bucket} company picks were worth, scored at the index’s weight.`}
-                            how={`${wB.toFixed(1)}% × (${rP} − ${rB}) = ${pp(r.selection_pct)}.`} />} />
+                            how={`${wt(wB)}% × (${rP} − ${rB}) = ${pp(r.selection_pct)}.`} />} />
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono">
                         <Eff v={n(r.interaction_pct)}
                           prov={<Provenance source="derived" kind="formula" note={`interaction — ${r.bucket}`}
                             what={`What the ${r.bucket} tilt and picks were worth together.`}
-                            how={`(${wP.toFixed(1)}% − ${wB.toFixed(1)}%) × (${rP} − ${rB}) = ${pp(r.interaction_pct)}.`} />} />
+                            how={`(${wt(wP)}% − ${wt(wB)}%) × (${rP} − ${rB}) = ${pp(r.interaction_pct)}.`} />} />
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono font-semibold">
                         <Eff v={n(r.total_pct)}
@@ -549,7 +616,8 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                     {open && (
                       <tr className="bg-inset/60">
                         <td colSpan={9} className="px-3 py-3">
-                          <BucketNames row={r} bucket={r.bucket} benchmark={benchmark} />
+                          <BucketNames row={r} bucket={r.bucket} benchmark={benchmark}
+                            startLabel={startLabel} />
                         </td>
                       </tr>
                     )}
