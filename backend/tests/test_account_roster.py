@@ -135,16 +135,20 @@ class TestRecordingReportsMustNotRedefineTheLiveSet:
 
         airs_vermogen._record_reports({"LIVE_A": ["att", "volk"]}, NEW)
 
-        written = [w for w in fake.writes if w[0] == "insert"]
+        # ⚠ AN `update`, NOT AN `insert` — the write stopped being an upsert on 2026-08-13 because
+        # an upsert omitting the NOT NULL `last_seen_at` fails whether or not the row exists. See
+        # `TestTheWriteIsAnUPDATEAndNeverAnUpsert`.
+        written = [w for w in fake.writes if w[0] == "update"]
         assert written, "the outcome was not recorded at all"
-        payload = written[-1][2] if written[-1][2] is not None else None
-        # The fake echoes the upserted batch back through `.data`; read the row it stored.
-        row = next(r for r in fake.tables["airs_account_roster"]
-                   if r["portefeuille"] == "LIVE_A" and "reports_ok" in r)
+        assert "last_seen_at" not in written[-1][2], "discovery owns last_seen_at — see the docstring"
+
+        row = next(r for r in fake.tables["airs_account_roster"] if r["portefeuille"] == "LIVE_A")
         assert row["reports_ok"] == ["att", "volk"]
         assert row["reports_at"] == NEW
-        assert "last_seen_at" not in row, "discovery owns last_seen_at — see the docstring"
-        assert payload is None or "last_seen_at" not in str(payload)
+        # ⚠ AND THE EXISTING VALUE SURVIVES UNTOUCHED. Under the old upsert the row was replaced,
+        # so "absent" was the only way to express "not written"; an UPDATE leaves the discovery
+        # stamp in place, which is the stronger and more literal form of the same rule.
+        assert row["last_seen_at"] == NEW
 
     def test_discovery_still_owns_last_seen_at(self):
         """The other half of the invariant: something must still stamp it, or nothing is ever live."""

@@ -334,6 +334,10 @@ def _prepare(members: list[dict], kind: str, bucket=year_bucket) -> tuple[list[d
             pts = {d: 100.0 * v / base for d, v in pts.items()}
         ok.append({"index": i, "weight": w, "weights": m.get("weights"),
                    "points": pts, "raw": raw,
+                   # ⚠ WHETHER THIS MEMBER IS A CONTINUATION — rebased on the series it EXTENDS
+                   # (`base_points`) rather than on its own first point. The level chain needs it:
+                   # a continuation must not restart the index at 100. See `blend_series`.
+                   "continues": bool(m.get("base_points")),
                    "by_year": _latest_per_bucket(pts, bucket),
                    "raw_by_year": _latest_per_bucket(raw, bucket)})
     return ok, dropped
@@ -540,6 +544,23 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket) -> d
                 continue
             if anchor is None:                    # the first honest period IS the base
                 anchor = d
+                # ⚠⚠ UNLESS THE SERIES IS A CONTINUATION, IN WHICH CASE 100 IS A FAKE COLLAPSE.
+                # A forecast is rebased on the ACTUAL it extends (`base_points`), so its value here
+                # is already an index against that base — 1,100 for an actual that ran to 1,000.
+                # Stamping the chain's usual 100 discards it and draws the forecast restarting at
+                # 100 beside an actual at 1,000: a ~90% earnings collapse that exists only in the
+                # arithmetic, at full confidence, on a log axis. Measured on a real book at 1,808.
+                #
+                # ⚠ ONLY WHEN **EVERY** CONTRIBUTOR CONTINUES SOMETHING. Mixing a continuation with
+                # a self-anchored member would average an index-against-the-actual with an
+                # index-against-itself — two different bases in one number, which is the error this
+                # whole level path exists to refuse. Anything mixed falls back to 100.
+                here = [p for p in prepared if p["at"].get(d) is not None and _weight_at(p, d)]
+                if here and all(p.get("continues") for p in here):
+                    carried = _weighted_arithmetic(
+                        [(abs(float(_weight_at(p, d))), p["at"][d]) for p in here])
+                    if carried is not None:
+                        level = carried
                 out.append(_point(d, level))
                 continue
             # ⚠ ONE RULE, IN ONE PLACE — `step_growth`. The guard that used to live inline here

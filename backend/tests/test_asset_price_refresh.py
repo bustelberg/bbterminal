@@ -107,15 +107,22 @@ class TestTheSchedulerJob:
         assert 'in_("status", ["done", "failed"])' in inspect.getsource(queue.last_activity)
 
     def test_it_is_registered_daily_and_cannot_overlap_itself(self):
+        """⚠ READ FROM THE DECLARATION, NOT FROM `scheduler`'s SOURCE (2026-08-13). The schedule
+        moved into `scheduled_jobs.SCHEDULED_JOBS` so the admin overview and the cron cannot drift;
+        `scheduler.py` now calls `_register("asset_price_refresh", …)` and holds no `hour=` at all.
+        Grepping the source for `id="asset_price_refresh"` was asserting on the shape of the
+        registration rather than on the schedule — this asserts on the schedule itself, which is
+        what the test was always about."""
         import scheduler
+        from scheduled_jobs import BY_ID
 
-        src = inspect.getsource(scheduler)
-        assert 'id="asset_price_refresh"' in src
-        assert "_fire_asset_price_refresh," in src
+        spec = BY_ID["asset_price_refresh"]
+        assert spec.trigger["hour"] == 6          # after the 05:00 sequence, not racing it
+        assert spec.trigger["day_of_week"] == "mon-sun"
         # ~220 gap fetches at ~1.5s each; a slow run must never overlap the next day's tick.
-        block = src.split('_fire_asset_price_refresh,\n', 1)[1].split("misfire_grace_time", 1)[0]
-        assert "max_instances=1" in block
-        assert 'hour=6' in block           # after the 05:00 sequence, not racing it
+        assert spec.options["max_instances"] == 1
+        # ...and it must actually be wired to the tick.
+        assert '_register("asset_price_refresh"' in inspect.getsource(scheduler)
 
     def test_the_scheduler_and_the_script_share_ONE_implementation(self):
         """A cron that drifts from the script you debug with is a cron nobody trusts."""

@@ -44,8 +44,12 @@ import statistics
 from routers._airs_portfolio_perf import (
     MIN_STAT_DAYS,
     _closes,
-    _daily_returns,
+    # ⚠ `_executions` WAS USED AND NEVER IMPORTED — a NameError waiting on the first benchmark
+    # curve computed for a set of members, caught by ruff's F821 rather than by any test (nothing
+    # exercises `benchmark_returns` against real members). `_daily_returns` was the reverse:
+    # imported and never used.
     _eur_series,
+    _executions,
     _fx,
     _index,
 )

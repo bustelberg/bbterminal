@@ -1,8 +1,16 @@
-"""Sanity-check computed beta against real data. A market-wide index against ITSELF must be 1.0."""
+"""Sanity-check computed beta against real data. A market-wide index against ITSELF must be 1.0.
+
+⚠ A SCRIPT, NOT A MODULE — every line below runs AT IMPORT and hits the database. It lives in the
+`backend` package root, so `import _beta` from anywhere would execute a full S&P index load as a
+side effect. Nothing imports it today; if this is meant to be kept, `scripts/` is where the other
+one-off probes live.
+"""
+import statistics
 import time
-from routers._asset_benchmark import index_rows
+
 from routers._airs_portfolio_beta import benchmark_returns, holding_beta
-from routers._airs_portfolio_perf import _closes, _eur_series, _fx, _executions
+from routers._airs_portfolio_perf import _closes, _fx
+from routers._asset_benchmark import index_rows
 
 ANCHOR, END = "2025-01-02", "2026-08-11"
 t = time.perf_counter()
@@ -27,7 +35,6 @@ for r in by_cap[:8]:
     print(f"    {str(r.get('name'))[:30]:<32} {b if b is None else round(b,3)}")
 
 # The index against itself: cov(x,x)/var(x) == 1 exactly.
-import statistics
 xs = list(bench.values())
 self_beta = statistics.pvariance(xs) / statistics.pvariance(xs) if statistics.pvariance(xs) else None
 print(f"\n  CONTROL — index vs itself: {self_beta} (must be 1.0)")

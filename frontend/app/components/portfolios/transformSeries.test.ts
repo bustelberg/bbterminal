@@ -37,18 +37,36 @@ describe('transformSeries', () => {
   });
 
   describe('yoy', () => {
+    /**
+     * ⚠ A GROWTH RATE IS A RATIO, SO IT IS COMPARED APPROXIMATELY. `110/100 − 1` is
+     * `0.10000000000000009` in binary floating point, and `toEqual` against a literal `10` fails
+     * on the last bit — which is a fact about IEEE-754, not about the function. These three
+     * assertions were red for exactly that reason; matching on the value to a sane precision keeps
+     * them checking the arithmetic instead of the representation.
+     *
+     * ⚠ THE NULLS STAY EXACT. Every interesting case in this file is a REFUSAL, and "no value" is
+     * the thing actually being asserted — it must never be swallowed by a tolerance.
+     */
+    const closeTo = (got: (number | null)[], want: (number | null)[]) => {
+      expect(got.map((v) => (v === null ? null : 'n'))).toEqual(
+        want.map((v) => (v === null ? null : 'n')));
+      got.forEach((v, i) => {
+        if (v !== null) expect(v).toBeCloseTo(want[i] as number, 9);
+      });
+    };
+
     it('has nothing to grow from in its first reported period', () => {
-      expect(transformSeries([100, 110], 'yoy')).toEqual([null, 10]);
+      closeTo(transformSeries([100, 110], 'yoy'), [null, 10]);
     });
 
     it('measures against the previous period THIS ROW REPORTED, not the previous column', () => {
       // ⚠ The whole point. A skipped period must not silently show two periods of growth in the
       // same ink as everyone else's one: 121 is compared with 100, and the answer is 21%.
-      expect(transformSeries([100, null, 121], 'yoy')).toEqual([null, null, 21]);
+      closeTo(transformSeries([100, null, 121], 'yoy'), [null, null, 21]);
     });
 
     it('states a decline as a negative, not as a hole', () => {
-      expect(transformSeries([100, 80], 'yoy')).toEqual([null, -20]);
+      closeTo(transformSeries([100, 80], 'yoy'), [null, -20]);
     });
 
     it('refuses only the step off a non-positive base, not the rest of the series', () => {
