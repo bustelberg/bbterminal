@@ -135,6 +135,11 @@ export const periodEndDate = (period: string): string => {
   // company fetched since then reads `No data` for a missing LTM (we asked, nothing newer), and
   // one not fetched since reads `—`.
   if (period === 'LTM') return new Date().toISOString().slice(0, 10);
+  // ⚠ AND `2026e` IS NOT A DATE EITHER — split as-is it yields the string `2026e-12-31`, which is
+  // not garbage that throws but garbage that COMPARES: `'2026e-12-31' > '2026-12-31'` is true, so
+  // every date test it feeds quietly takes a branch nobody chose. The forecast for a fiscal year
+  // ends when that year does; the `e` says who published it, not when it falls.
+  if (isEstimatePeriod(period)) return periodEndDate(period.slice(0, -1));
   const [head, q] = period.split('-Q');
   return q ? `${head}-${['03-31', '06-30', '09-30', '12-31'][Number(q) - 1]}` : `${head}-12-31`;
 };
@@ -474,6 +479,22 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
       at.set(p, {});
       for (const y of data.years) {
         const own = p.idx[y];
+        /**
+         * ⚠⚠ THE CARRY MUST NOT CROSS BETWEEN REPORTED AND FORECAST PERIODS. This walks the union
+         * axis — actuals, then `LTM`, then the `…e` columns — so without this reset a company's
+         * newest REPORTED figure is carried straight into the forecast columns: it takes a weight
+         * there, joins the footer's blended `2026e`, and renders in carried italics. Measured:
+         * NVIDIA (a January filer, FY2026 already closed) showed a weight and italics under
+         * `2026e` while KLA, whose last actual sits a different distance from the column, showed
+         * neither — two rows treated differently by an accident of fiscal calendar.
+         *
+         * It is the same error the server had (`_drop_superseded_forecasts`) and the reason is the
+         * same: a reported number is not a forecast, and carrying one into a forecast period puts
+         * a known figure into a line that claims to be an expectation. Carrying WITHIN the forecast
+         * block (2026e → 2027e) is untouched — that is a forecast holding until the next one, which
+         * is what the server's own `carry_forward` does.
+         */
+        if (last && isEstimatePeriod(y) !== isEstimatePeriod(last.y)) { last = null; since = 0; }
         if (own != null) { last = { idx: own, y }; since = 0; } else if (last) { since += 1; }
         // ⚠ ONLY INTO A PERIOD THE CHART DRAWS — see the ⚠⚠ on `drawn`. Elsewhere a carried figure
         // holds up nothing and reads as a projection.
@@ -1255,8 +1276,14 @@ market cap it was weighted by in that period, and the weight that produced.">
                                      different next step, so each gets a word. The dash stays for
                                      `not_tried` alone — the one state that really is "we have not
                                      asked", and the only one where saying nothing is honest. */
+                                  /* ⚠ "Already filed", NOT "Reported" — measured on a reader, which
+                                     is the only test a label has. In a column headed `2026e` the
+                                     word "Reported" reads as a statement about the ESTIMATE ("the
+                                     estimate has been reported"), which is the opposite of what it
+                                     means. The badge marks a row for which this column does not
+                                     apply, because that year is already history for it. */
                                   : state === 'reported_actual'
-                                    ? <StateBadge label="Reported" tone={BADGE_TONE.warnSoft} />
+                                    ? <StateBadge label="Already filed" tone={BADGE_TONE.warnSoft} />
                                     : state === 'not_covered'
                                       ? <StateBadge label="No estimate" tone={BADGE_TONE.warnSoft} />
                                       : <Cell>—</Cell>}
@@ -1527,8 +1554,10 @@ export default function HoldingsRevenueModal({
     };
   };
 
-  const load = async (body: Target): Promise<Resp> => {
-    const r = await apiFetch(`${API_URL}/api/earnings/portfolio-revenue-matrix?metric=${encodeURIComponent(metric)}`, {
+  const load = async (body: Target, onlyCompanyId?: number): Promise<Resp> => {
+    const r = await apiFetch(`${API_URL}/api/earnings/portfolio-revenue-matrix`
+      + `?metric=${encodeURIComponent(metric)}`
+      + (onlyCompanyId != null ? `&only_company_id=${onlyCompanyId}` : ''), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
@@ -1593,7 +1622,21 @@ export default function HoldingsRevenueModal({
    * bulk buttons above use. It outlives this modal, which matters: three feeds against GuruFocus
    * is not instant, and a reader who closes the drill-down has not cancelled anything.
    *
-   * ⚠⚠ `feeds=all`, AND IT USED TO BE `statements` — THREE API CALLS INSTEAD OF ONE, DELIBERATELY.
+   * ⚠⚠ `feeds=smart`: EVERY FEED, BUT ONLY WHERE A CALL CAN BUY SOMETHING. Per feed it fetches
+   * what we are MISSING or what can plausibly have changed — statements when a new fiscal period
+   * is due (`period_due`), the consensus and the weekly forward-P/E series when our copy is over a
+   * week old. A company with nothing new costs nothing; one that has just filed is picked up.
+   *
+   * ⚠ THE TWO OBVIOUS SETTINGS ARE BOTH WRONG HERE. `all` spends three calls every press on data
+   * we may already hold; an un-forced run tests PRESENCE (`needs()`), which is a no-op on exactly
+   * the company a reader pressed Refresh for — KLA holds financials, so presence skips it and the
+   * FY2026 figures it just filed are never fetched. See `smart_flags`.
+   *
+   * ⚠ AND AN UNSUBSCRIBED EXCHANGE COSTS NOTHING EITHER, already: `eligible()` refuses the
+   * company before any feed is considered, so no probe and no call is spent on a venue GuruFocus
+   * cannot answer for.
+   *
+   * It used to be `statements` — one call, deliberately.
    * That narrowing was correct and measured (DSM-Firmenich, 2026-08-12: the row refresh was
    * spending 3 calls where 1 sufficed) on the argument that "analyst estimates and indicators
    * contribute NOTHING to that table". They do now: the `2026e…` columns to the right of LTM ARE
@@ -1614,15 +1657,50 @@ export default function HoldingsRevenueModal({
    * below would be served from entries cached during the fetch and the row would come back exactly
    * as it was — a refresh that visibly does nothing. Same rule as `PortfolioFundamentalsRefresh`.
    */
-  const refreshRow = (reload: () => void) => async (row: Row) => {
+  /**
+   * Replace ONE row in a loaded table, keeping everything else — including the columns.
+   *
+   * ⚠⚠ THE NARROWED RESPONSE IS NOT A TABLE. Its `years` describe the one company, so taking
+   * them would collapse a twelve-column table to whatever that constituent reports. The columns
+   * belong to the union and are already on screen; only the row is news.
+   *
+   * ⚠ MATCHED ON `company_id`, NOT ON THE ARRAY INDEX. The table is sorted by whatever the
+   * reader last clicked, and a job that lands after a re-sort would otherwise overwrite a
+   * different company with these figures — silently, since every row looks alike in shape.
+   */
+  const patchRow = (prev: Resp | null, fresh: Resp, companyId: number): Resp | null => {
+    if (!prev) return prev;
+    const one = fresh.rows.find((x) => x.company_id === companyId);
+    if (!one) return prev;
+    return { ...prev, rows: prev.rows.map((x) => (x.company_id === companyId ? one : x)) };
+  };
+
+  const refreshRow = (
+    target_: Target,
+    apply: (patch: (p: Resp | null) => Resp | null) => void,
+  ) => async (row: Row) => {
     const started = await startJob(
       `${API_URL}/api/benchmarks/company/${row.company_id}/fundamentals/ingest/job`
-      + '?force=true&feeds=all',
+      + '?feeds=smart',
       `${row.name} fundamentals`);
-    void started.done.then((job) => {
-      if (job.status !== 'failed') {
-        invalidateReadCache(`fundamentals refetched for ${row.name}`);
-        reload();
+    void started.done.then(async (job) => {
+      if (job.status === 'failed' || row.company_id == null) return;
+      // ⚠ THE CACHE DROP STAYS, AND IT STAYS FIRST. `apiFetch` invalidates on the request that
+      // STARTS a job, which is minutes before the data moves; without this the re-read below is
+      // served from entries cached during the fetch and the row comes back exactly as it was.
+      invalidateReadCache(`fundamentals refetched for ${row.name}`);
+      try {
+        // ⚠⚠ ONE ROW, NOT THE TABLE. This used to bump a reload key, which re-POSTed the whole
+        // matrix — on ACWI every constituent's series, every period cap and every LTM window, the
+        // most expensive read on the tab, to update a line already on screen. Exactly one company's
+        // `metric_data` changed; `only_company_id` reads exactly that.
+        const fresh = await load(target_, row.company_id);
+        apply((p) => patchRow(p, fresh, row.company_id as number));
+      } catch (e) {
+        // ⚠ A FAILED PATCH LEAVES THE OLD ROW, WHICH IS STALE BUT TRUE. The fetch succeeded, so the
+        // data IS newer than what is shown; saying so beats silently implying the table is current.
+        console.warn('[bb:matrix] row patch failed — the table still shows the pre-refresh figures'
+          + ' for this company; reopen the drill-down to pick them up', e);
       }
     });
     return started;
@@ -1716,7 +1794,7 @@ export default function HoldingsRevenueModal({
             {data && data.rows.length > 0 && (
               <MatrixTable data={data} fmt={fmtM} noun={noun} metricLabel={seriesLabel ?? noun}
                 valueIsCurrency={valueIsCurrency} view={view}
-                onRefresh={refreshRow(() => setReloadKey((k) => k + 1))} />
+                onRefresh={refreshRow(target, setData)} />
             )}
           </div>
 
@@ -1732,9 +1810,18 @@ export default function HoldingsRevenueModal({
                     what raises this table's row count and the line's coverage with it. */}
                 <span className="ml-auto shrink-0">
                   <PortfolioFundamentalsRefresh
+                    /* ⚠⚠ `estimates`, NOT THE DEFAULT — THIS TABLE'S MISSING COLUMNS ARE THE
+                       FORECAST ONES. The reported side of an index is already filled by the
+                       /benchmarks grid; what is absent here is the consensus, and `statements`
+                       never asks for it, so the old button could not have filled the `…e`
+                       columns or the striped line no matter how often it was pressed. */
                     scope={{ kind: 'universe', label: benchTarget.universe,
-                      name: benchLabel || benchTarget.universe }}
-                    label="Refresh benchmark"
+                      name: benchLabel || benchTarget.universe, feeds: 'estimates' }}
+                    /* ⚠ IT SAYS WHAT IT DOES. "Refresh benchmark" promised a refresh of the whole
+                       index; this fill is un-forced and touches only the constituents missing a
+                       consensus. The component's own default wording was already accurate — the
+                       call site had overridden it to name the TARGET and lost the ACTION. */
+                    label="Fetch missing estimates"
                     onDone={() => setBenchReload((k) => k + 1)} />
                 </span>
               </div>
@@ -1778,7 +1865,7 @@ export default function HoldingsRevenueModal({
                       the names in a tooltip) can be put back without touching the backend. */}
                   <MatrixTable data={bench} fmt={fmtM} noun={noun} metricLabel={seriesLabel ?? noun}
                 valueIsCurrency={valueIsCurrency} view={view}
-                onRefresh={refreshRow(() => setBenchReload((k) => k + 1))} />
+                onRefresh={refreshRow(benchTarget!, setBench)} />
                 </>
               )}
             </div>

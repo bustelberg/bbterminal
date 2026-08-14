@@ -35,6 +35,9 @@ import { cancelJob, startJob } from '../../../lib/stores/jobs';
  * Analyse view. Requiring an id therefore made the control vanish on the rows a reader is most
  * likely to be on — an account is the unit of work here, the model is the optional extra.
  */
+/** Which GuruFocus feed a UNIVERSE fill spends on. See the ⚠⚠ on `run`. */
+export type IndexFeeds = 'statements' | 'estimates' | 'smart';
+
 export type RefreshScope =
   | { kind: 'portfolio'; id: number; name: string }
   | { kind: 'basket'; holdings: { isin: string }[]; name: string }
@@ -51,7 +54,7 @@ export type RefreshScope =
    * how to start a fundamentals fill, follow its toast, and drop the read cache when it lands —
    * but see `run()`: the index is deliberately NOT forced.
    */
-  | { kind: 'universe'; label: string; name: string };
+  | { kind: 'universe'; label: string; name: string; feeds?: IndexFeeds };
 
 export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
   scope: RefreshScope;
@@ -109,8 +112,21 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
        * deliberate full reload lives on the /benchmarks fundamentals grid, which is that page's
        * whole subject.
        */
+      /**
+       * ⚠⚠ WHICH FEED AN INDEX FILL SPENDS ON, AND THE DEFAULT IS STILL `statements`.
+       *
+       * `statements` is one call per constituent and fills every column the fundamentals grid
+       * and the reported side of the Long Equity tab draw. It never asks for a consensus — so an
+       * index's analyst-expectation line can never appear however often that button is pressed.
+       *
+       * `estimates` is the targeted fill for exactly that: one call per constituent MISSING a
+       * consensus and none for the rest. Measured 2026-08-14 on ACWI — 351 of 1,715 charted names
+       * carry one, so it is ~1,364 calls against the ~5,145 that fetching all three feeds for
+       * every constituent would cost, of which two thirds would refill data already held.
+       */
       const url = scope.kind === 'universe'
         ? `${API_URL}/api/benchmarks/index/${encodeURIComponent(scope.label)}/fundamentals/ingest/job`
+          + (scope.feeds ? `?feeds=${scope.feeds}` : '')
         : holdings
           ? `${API_URL}/api/airs/basket/fundamentals/ingest/job${q}`
           : `${API_URL}/api/airs/model-portfolios/${(scope as { id: number }).id}`

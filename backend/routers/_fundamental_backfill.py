@@ -180,6 +180,14 @@ def feed_flags(force: bool, feeds: str, missing: dict | None = None) -> dict:
     # included; the other two feed the forward-EPS and indicator charts and nothing else.
     if feeds == "statements":
         flags = {**flags, "need_est": False, "need_ind": False}
+    # ⚠⚠ `estimates` IS THE TARGETED FILL, AND IT EXISTS BECAUSE NEITHER EXISTING VALUE REACHES THE
+    # FORECAST LINE. `statements` never asks for a consensus, so an index's analyst-expectation leg
+    # can never appear however often it is pressed; `all` reaches it at THREE calls per constituent
+    # — ~5,145 on ACWI — of which two fill a grid that already has them. Measured 2026-08-14: 351 of
+    # ACWI's 1,715 charted names carry a consensus, so this fills the other 1,364 at one call each
+    # and spends nothing on the rest.
+    elif feeds == "estimates":
+        flags = {**flags, "need_fin": False, "need_ind": False}
     return flags
 
 
@@ -260,3 +268,137 @@ def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
         # know about.
         return {"done": done, "rows": rows, "calls": calls,
                 "error": f"{type(e).__name__}: {str(e)[:120]}", "stopped": False}
+
+
+#: How old our copy of a CONTINUOUSLY-REVISED feed may be before a smart press re-asks for it.
+#:
+#: â â  THE ONE NUMBER HERE THAT IS NOT MEASURED, AND IT IS ONLY HALF A GUESS. Statements need no such
+#: rule â a company files on a schedule and `period_due` answers exactly when a new one can exist.
+#: Estimates and indicators have no fiscal boundary: analysts revise a consensus whenever they like,
+#: so "is it stale" can only be a question about elapsed time. Seven days is taken from the one
+#: cadence that IS observable â the forward-P/E series arrives WEEKLY (measured on company 11: 102
+#: of 107 gaps are exactly 7 days) â so a shorter window cannot find new points and a longer one
+#: leaves them unfetched. The estimates feed reuses it for want of anything better to derive from;
+#: if it proves too eager, this is the constant to move.
+SMART_REFRESH_AFTER_DAYS = 7
+
+
+def _is_stale(last: "date | None", today: "date") -> bool:
+    """Is our copy of a continuously-revised feed old enough to be worth re-asking for?
+
+    â  NEVER-WRITTEN COUNTS AS STALE. `None` here means we hold nothing, which is the strongest
+    reason to fetch there is — reading it as "not stale" would make a feed we have never
+    fetched look permanently up to date.
+
+    â  ONE DEFINITION, TWO CALLERS. The row button and the bulk button must not come to disagree
+    about what "smart" means, or the big one stops being N presses of the small one.
+    """
+    return last is None or (today - last).days >= SMART_REFRESH_AFTER_DAYS
+
+
+def _last_written(company_id: int, metric_code: str) -> "date | None":
+    """When we last WROTE a row of this feed for this company, or None if we never have.
+
+    â  `recorded_at`, NOT `target_date` â "when did we ask" against "what period is it about". A
+    forecast's `target_date` is years in the future and says nothing about how old our copy is.
+
+    â  ONE ROW, ORDERED â NOT A SCAN AND A MAX. `indicator_q_forward_pe_ratio` alone is ~535 rows per
+    company, so reading them all to take the newest would make the cheap check the expensive part of
+    the press.
+    """
+    from datetime import date as _d  # noqa: PLC0415
+    try:
+        r = (supabase.table("metric_data").select("recorded_at")
+             .eq("company_id", company_id).eq("metric_code", metric_code)
+             .order("recorded_at", desc=True).limit(1).execute().data or [])
+    except Exception:                    # unreadable â treat as never written, i.e. fetch it
+        return None
+    if not r or not r[0].get("recorded_at"):
+        return None
+    try:
+        return _d.fromisoformat(str(r[0]["recorded_at"])[:10])
+    except ValueError:
+        return None
+
+
+def smart_flags(company_id: int) -> dict:
+    """The `need_*` flags for ONE company under `feeds="smart"`: fetch a feed we are MISSING, or one
+    that could plausibly have changed since we last asked. Nothing else.
+
+    â â  "SKIP IT IF WE ALREADY HAVE SOME" IS THE OBVIOUS RULE AND IT IS THE WRONG ONE. That is what
+    `needs()` answers â is the sentinel row PRESENT â and it makes a Refresh a no-op on exactly the
+    companies a reader presses it for. KLA holds financials, so a presence test skips it, and the
+    FY2026 figures it has just filed are never fetched. This component already carries that as a
+    known defect ("pressing it for ASML today fetches nothing"). Presence is the wrong question; the
+    right one is whether anything NEW can exist.
+
+    â  AND THAT QUESTION HAS A DIFFERENT ANSWER PER FEED, which is why this is per feed rather than
+    per company. A company files statements on a cadence, so `period_due` says precisely when a new
+    period is available â no elapsed-time guess needed. A consensus and a weekly indicator series
+    have no such boundary, so for those it is `SMART_REFRESH_AFTER_DAYS`. Gating all three on the
+    fiscal detector would freeze a consensus for months; gating all three on elapsed days would
+    re-ask for statements that cannot have changed.
+
+    â  THE UNSUBSCRIBED CASE IS NOT HERE, AND DOES NOT NEED TO BE â `eligible()` already refuses such
+    a company before any of this runs, so no call is spent and none of these probes happen either.
+    """
+    from routers._fundamental_fill import due_company_ids  # noqa: PLC0415
+    from datetime import date as _d  # noqa: PLC0415
+
+    today = _d.today()
+    missing = {k: company_id not in _has([company_id], code) for k, code in SENTINELS.items()}
+    due, _note = due_company_ids([company_id], today)
+    stale = {k: _is_stale(_last_written(company_id, SENTINELS[k]), today) for k in ("est", "ind")}
+    return {
+        "need_fin": missing["fin"] or bool(due),
+        "need_est": missing["est"] or stale["est"],
+        "need_ind": missing["ind"] or stale["ind"],
+    }
+
+
+def smart_flags_bulk(cids: list[int]) -> dict[int, dict]:
+    """`smart_flags` for MANY companies, in a fixed number of queries instead of a few per company.
+
+    â â  THE PER-COMPANY VERSION IS CORRECT AND UNUSABLE IN BULK. It costs three sentinel probes plus
+    two `recorded_at` lookups EACH â ~9,700 round trips for ACWI's ~1,949 constituents, to decide
+    which of them are worth a GuruFocus call. The deciding would cost more than the fetching.
+
+    Here it is five reads for the whole list: three sentinels (`_has`, already COPY-backed) and two
+    grouped `max(recorded_at)` queries. Measured on ACWI: 0.21 s for the estimates feed and 2.07 s
+    for the indicator one, against ~3,800 PostgREST round trips for the same two answers.
+
+    â  SAME RULE, ONE IMPLEMENTATION OF IT. The per-feed staleness test lives in `_is_stale` so the
+    row button and the bulk button cannot come to disagree about what "smart" means â which is the
+    whole reason the two are meant to compose. A second copy of "missing OR due OR older than N"
+    is how the big button quietly starts spending differently from N presses of the small one.
+
+    â  A COMPANY ABSENT FROM `due` IS NOT DUE, and one absent from a `recorded_at` map was never
+    written â both read as "fetch it" only when the feed is also missing. Falling back the other way
+    (absent â fresh) would let a company that has never been fetched look up to date for ever.
+    """
+    from datetime import date as _d  # noqa: PLC0415
+
+    from routers._earnings_pg import last_written_via_copy  # noqa: PLC0415
+    from routers._fundamental_fill import due_company_ids  # noqa: PLC0415
+
+    today = _d.today()
+    cids = sorted(set(cids))
+    have = {k: _has(cids, code) for k, code in SENTINELS.items()}
+    due_ids, _note = due_company_ids(cids, today)
+    due = set(due_ids)
+    last = {}
+    for key in ("est", "ind"):
+        got = last_written_via_copy(cids, SENTINELS[key])
+        # â  `None` IS THE FALLBACK SIGNAL, NOT AN EMPTY ANSWER â see the COPY helper. Without a
+        # direct connection there is no cheap way to age these, and the honest default is to treat
+        # them as stale: a smart press then behaves like the old `all`, which is expensive but never
+        # wrong. Silently treating them as fresh would stop the feed being fetched at all.
+        last[key] = got if got is not None else {}
+    return {
+        cid: {
+            "need_fin": cid not in have["fin"] or cid in due,
+            "need_est": cid not in have["est"] or _is_stale(last["est"].get(cid), today),
+            "need_ind": cid not in have["ind"] or _is_stale(last["ind"].get(cid), today),
+        }
+        for cid in cids
+    }

@@ -826,7 +826,7 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
 
     from routers._benchmark_fundamentals import constituent_fundamentals  # noqa: PLC0415
     from routers._fundamental_backfill import (  # noqa: PLC0415
-        company_rows, eligible, feed_flags, ingest_company, needs,
+        company_rows, eligible, feed_flags, ingest_company, needs, smart_flags,
     )
 
     # ⚠ THE FEED TAGS ARE INTERNAL AND MUST NOT REACH A READER. `fin`/`est`/`ind` are what the
@@ -876,8 +876,13 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
         # used to be passed there as well, which short-circuits the flags and runs all three feeds:
         # the drill-down's per-row Refresh (`force=true&feeds=statements`) spent 3 API calls per
         # company instead of 1, on estimates and indicators that screen does not draw.
-        todo = {**c, **feed_flags(force, feeds, next(
-            (n for n in needs(comps) if n["company_id"] == cid), None) if not force else None)}
+        # ⚠⚠ `feeds="smart"` FETCHES WHAT IS MISSING **OR** WHAT CAN HAVE CHANGED, PER FEED.
+        # It is the only mode that both spends nothing on a company with nothing new and still
+        # picks up figures just filed — the two things a Refresh has to do at once. `all` always
+        # spends three calls; an un-forced run tests PRESENCE, so it is a no-op on exactly the
+        # company a reader pressed it for. See `smart_flags`.
+        todo = {**c, **(smart_flags(cid) if feeds == "smart" else feed_flags(force, feeds, next(
+            (n for n in needs(comps) if n["company_id"] == cid), None) if not force else None))}
 
         def _step(tag: str, i: int, total: int) -> None:
             ctx.progress(i - 1, total, f"Fetching {feed_label.get(tag, tag)} ({i} of {total})")
@@ -889,7 +894,13 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
         # which `is_cache_fresh` replays for months — and bypassing it is what makes a re-fetch
         # actually re-ask the vendor. "Ignore what `metric_data` holds" is already said by the
         # flags above, and saying it twice is what tripled the bill.
-        r = ingest_company(todo, refresh_cache=force,
+        # ⚠⚠ SMART BYPASSES THE STORAGE CACHE TOO, OR IT DECIDES NOTHING. There are two caches:
+        # the `need_*` flags say which feeds to run, and `is_cache_fresh` replays the stored
+        # GuruFocus blob for months afterwards. Having judged a feed stale, replaying the same
+        # bytes would rewrite identical rows, spend zero calls and leave the table exactly as it
+        # was — a press that looks like a no-op. The flags are what keep this cheap; this is what
+        # makes the calls it does decide to spend actually re-ask the vendor.
+        r = ingest_company(todo, refresh_cache=(force or feeds == "smart"),
                            on_step=_step, should_stop=lambda: ctx.cancelled)
         # ⚠ RECORDED BEFORE ANY OF THE EXITS BELOW. A cancelled or failed run has still spent
         # whatever it spent, and those are the two cases where knowing the bill matters most —
