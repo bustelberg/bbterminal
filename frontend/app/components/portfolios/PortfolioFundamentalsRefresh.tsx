@@ -213,15 +213,18 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
               + 'filed since we last looked. One API call, and none at all when its next quarter '
               + 'cannot be out yet.'
             : scope.kind === 'universe'
-              // ⚠ IT SAYS WHAT IT WILL *NOT* DO. An index fill is un-forced (see `run`), so it adds
-              // the constituents we are missing and cannot update one we already hold — press it
-              // twice and the second press is free and changes nothing, which without this reads as
-              // a broken button rather than as a deliberate scope.
-              ? `Fetch GuruFocus fundamentals for the ${scope.name} constituents we are MISSING — `
-                + 'the ones absent from the table below, which is why the index line covers less of '
-                + 'its index than 100%. One API call each. It does not re-fetch a constituent we '
-                + 'already hold, however old: that full reload lives on the /benchmarks '
-                + 'fundamentals grid.'
+              // ⚠⚠ IT USED TO SAY WHAT IT WOULD *NOT* DO, AND THAT SENTENCE IS NOW FALSE UNDER
+              // `smart`. The old index fill was un-forced, so it could add a missing constituent
+              // and never update one we already held — press it twice and the second press was free
+              // and changed nothing. Smart mode decides per feed on whether anything NEW can exist
+              // (a filing due, a consensus older than a week), so it does update, and a second
+              // press really is free rather than merely refusing.
+              ? `Refresh the ${scope.name} constituents: for each one, exactly the GuruFocus feeds `
+                + 'it is MISSING or that can plausibly have changed — statements when a new fiscal '
+                + 'period is due, the analyst consensus and the forward-P/E series when our copy is '
+                + 'over a week old. A constituent with nothing new costs no call at all, and one on '
+                + 'an exchange outside the GuruFocus subscription is refused before a call is spent. '
+                + 'It is the per-row Refresh below, run across the index.'
               : `Fetch the latest GuruFocus fundamentals for every company in ${scope.name} that could `
                 + 'plausibly have filed since we last looked — one API call each, and none for a '
                 + 'company whose next quarter cannot be out yet.')

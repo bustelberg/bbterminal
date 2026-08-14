@@ -60,8 +60,12 @@ describe('periodTick', () => {
  */
 describe('stepChanges', () => {
   it('measures against the previous point and reports which one', () => {
+    // ⚠ `toBeCloseTo`, NEVER `toEqual`, ON THE PERCENTAGE. `100 * (110/100 - 1)` is
+    // 10.000000000000009 in binary floating point, so an exact match fails on a step that is
+    // arithmetically exactly 10% — the assertion would be testing IEEE-754, not the rule.
     const s = stepChanges(new Map([[2023, 100], [2024, 110], [2025, 121]]));
-    expect(s.get(2024)).toEqual({ pct: 10, from: 2023 });
+    expect(s.get(2024)?.pct).toBeCloseTo(10, 10);
+    expect(s.get(2024)?.from).toBe(2023);
     expect(s.get(2025)?.pct).toBeCloseTo(10, 10);
     expect(s.get(2025)?.from).toBe(2024);
   });

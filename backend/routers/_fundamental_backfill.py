@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Callable
 
 from deps import supabase
@@ -283,7 +284,7 @@ def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
 SMART_REFRESH_AFTER_DAYS = 7
 
 
-def _is_stale(last: "date | None", today: "date") -> bool:
+def _is_stale(last: date | None, today: date) -> bool:
     """Is our copy of a continuously-revised feed old enough to be worth re-asking for?
 
     â  NEVER-WRITTEN COUNTS AS STALE. `None` here means we hold nothing, which is the strongest
@@ -296,7 +297,7 @@ def _is_stale(last: "date | None", today: "date") -> bool:
     return last is None or (today - last).days >= SMART_REFRESH_AFTER_DAYS
 
 
-def _last_written(company_id: int, metric_code: str) -> "date | None":
+def _last_written(company_id: int, metric_code: str) -> date | None:
     """When we last WROTE a row of this feed for this company, or None if we never have.
 
     â  `recorded_at`, NOT `target_date` â "when did we ask" against "what period is it about". A
@@ -306,7 +307,6 @@ def _last_written(company_id: int, metric_code: str) -> "date | None":
     company, so reading them all to take the newest would make the cheap check the expensive part of
     the press.
     """
-    from datetime import date as _d  # noqa: PLC0415
     try:
         r = (supabase.table("metric_data").select("recorded_at")
              .eq("company_id", company_id).eq("metric_code", metric_code)
@@ -316,7 +316,7 @@ def _last_written(company_id: int, metric_code: str) -> "date | None":
     if not r or not r[0].get("recorded_at"):
         return None
     try:
-        return _d.fromisoformat(str(r[0]["recorded_at"])[:10])
+        return date.fromisoformat(str(r[0]["recorded_at"])[:10])
     except ValueError:
         return None
 
@@ -343,9 +343,8 @@ def smart_flags(company_id: int) -> dict:
     a company before any of this runs, so no call is spent and none of these probes happen either.
     """
     from routers._fundamental_fill import due_company_ids  # noqa: PLC0415
-    from datetime import date as _d  # noqa: PLC0415
 
-    today = _d.today()
+    today = date.today()
     missing = {k: company_id not in _has([company_id], code) for k, code in SENTINELS.items()}
     due, _note = due_company_ids([company_id], today)
     stale = {k: _is_stale(_last_written(company_id, SENTINELS[k]), today) for k in ("est", "ind")}
@@ -376,12 +375,11 @@ def smart_flags_bulk(cids: list[int]) -> dict[int, dict]:
     written â both read as "fetch it" only when the feed is also missing. Falling back the other way
     (absent â fresh) would let a company that has never been fetched look up to date for ever.
     """
-    from datetime import date as _d  # noqa: PLC0415
 
     from routers._earnings_pg import last_written_via_copy  # noqa: PLC0415
     from routers._fundamental_fill import due_company_ids  # noqa: PLC0415
 
-    today = _d.today()
+    today = date.today()
     cids = sorted(set(cids))
     have = {k: _has(cids, code) for k, code in SENTINELS.items()}
     due_ids, _note = due_company_ids(cids, today)

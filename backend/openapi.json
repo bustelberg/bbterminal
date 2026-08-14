@@ -21806,7 +21806,7 @@
     },
     "/api/earnings/portfolio-revenue-matrix": {
       "post": {
-        "description": "Each equity the portfolio HOLDS: its weight, currency, and actual `metric` per fiscal year\n(2015 onwards), in the company's own reporting currency.\n\n\u26a0 THE HOLDINGS, NOT AN INDEX. Members come from the portfolio (looked THROUGH any linked\ncertificate via `_load_and_expand_members`), deduped by ISIN (a name held twice is one row with\nsummed weight). Weight is the share of the WHOLE book (cash/bonds in the denominator, so the\nshown companies sum to under 100%). Holdings with no company row / no revenue are omitted \u2014\nthis lists the companies we can actually show revenue for.\n\n\u26a0\u26a0 FOR AN INDEX IT LISTS **EVERY** CONSTITUENT (`all_constituents=True`), INCLUDING THE ONES THE\nLINE CANNOT USE. The weighted series drops a constituent with no stored market cap \u2014 it cannot\nbe weighted \u2014 but a table called \"everything behind the chart\" that shows 22 of the AEX's 25\nhides its most useful fact: RELX, Shell and Unilever are LSE-listed, outside the GuruFocus\nsubscription, and unreachable. They arrive at weight 0, so they change no average and no\ncoverage figure; their cells say `Unsubscribed` and their weight column is blank, which is the\ndifference between \"in the index, not in the line\" and \"not in the index\".",
+        "description": "Each equity the portfolio HOLDS: its weight, currency, and actual `metric` per fiscal year\n(2015 onwards), in the company's own reporting currency.\n\n\u26a0 THE HOLDINGS, NOT AN INDEX. Members come from the portfolio (looked THROUGH any linked\ncertificate via `_load_and_expand_members`), deduped by ISIN (a name held twice is one row with\nsummed weight). Weight is the share of the WHOLE book (cash/bonds in the denominator, so the\nshown companies sum to under 100%). Holdings with no company row / no revenue are omitted \u2014\nthis lists the companies we can actually show revenue for.\n\n\u26a0\u26a0 FOR AN INDEX IT LISTS **EVERY** CONSTITUENT (`all_constituents=True`), INCLUDING THE ONES THE\nLINE CANNOT USE. The weighted series drops a constituent with no stored market cap \u2014 it cannot\nbe weighted \u2014 but a table called \"everything behind the chart\" that shows 22 of the AEX's 25\nhides its most useful fact: RELX, Shell and Unilever are LSE-listed, outside the GuruFocus\nsubscription, and unreachable. They arrive at weight 0, so they change no average and no\ncoverage figure; their cells say `Unsubscribed` and their weight column is blank, which is the\ndifference between \"in the index, not in the line\" and \"not in the index\".\n\n\u26a0\u26a0 `only_company_id` RE-READS ONE ROW, AND IT EXISTS BECAUSE THE PER-ROW REFRESH RE-READ ~1,700.\nPressing Refresh on a constituent changes exactly that company's `metric_data`; the drill-down\nthen reloaded the whole matrix to show it, which on ACWI means every constituent's series, every\nperiod cap and every LTM window \u2014 the most expensive read on the tab \u2014 to update one line of a\ntable already on screen.\n\n\u26a0 THE WEIGHTS ARE STILL COMPUTED OVER THE **WHOLE** MEMBERSHIP, and that is the entire subtlety.\n`weight_pct` is this company's share of the full book (`weight_by[ci] / total_w`); narrowing the\nmember list instead of the READ would hand back a row weighted 100%, and the client would splice\na confident wrong number into a column that is supposed to sum to the index. So the narrowing is\napplied AFTER the weights are known, and only to `comp` \u2014 the dict every expensive per-company\nread is keyed on.\n\n\u26a0 THE RESPONSE IS THEREFORE NOT A WHOLE TABLE and must not be rendered as one: its `years` cover\nthe one company, not the union. The caller merges the row and keeps its own columns.",
         "operationId": "portfolio_revenue_matrix_api_earnings_portfolio_revenue_matrix_post",
         "parameters": [
           {
@@ -21817,6 +21817,22 @@
               "default": "revenue",
               "title": "Metric",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "only_company_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Only Company Id"
             }
           }
         ],

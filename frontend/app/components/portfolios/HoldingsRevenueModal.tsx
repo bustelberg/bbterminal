@@ -1810,18 +1810,22 @@ export default function HoldingsRevenueModal({
                     what raises this table's row count and the line's coverage with it. */}
                 <span className="ml-auto shrink-0">
                   <PortfolioFundamentalsRefresh
-                    /* ⚠⚠ `estimates`, NOT THE DEFAULT — THIS TABLE'S MISSING COLUMNS ARE THE
-                       FORECAST ONES. The reported side of an index is already filled by the
-                       /benchmarks grid; what is absent here is the consensus, and `statements`
-                       never asks for it, so the old button could not have filled the `…e`
-                       columns or the striped line no matter how often it was pressed. */
+                    /* ⚠⚠ `smart` — THE PER-ROW REFRESH, RUN ACROSS THE INDEX, AND THE NAME IS NOW
+                       HONEST BECAUSE THE BEHAVIOUR IS. It fetches per constituent exactly the feeds
+                       that are missing or that can plausibly have changed, so a name with nothing
+                       new costs nothing — which is what makes "refresh the whole benchmark" an
+                       affordable thing for a button to promise.
+                       ⚠ IT IS THE SAME RULE THE ROW BUTTON USES (`smart_flags` / `smart_flags_bulk`,
+                       sharing `_is_stale`), pinned that way on purpose: the moment the two diverge,
+                       the big button stops being N presses of the small one and this label goes back
+                       to being a claim rather than a description.
+                       ⚠ MEASURED COST, ACWI 2026-08-14: ~5,701 calls on a FIRST press — nearly
+                       everything has something new, so smart ≈ all until the index is current. The
+                       saving is on the second press, not the first. `feeds: 'estimates'` is the
+                       cheaper, narrower fill (~1,597) if only the forecast columns are wanted. */
                     scope={{ kind: 'universe', label: benchTarget.universe,
-                      name: benchLabel || benchTarget.universe, feeds: 'estimates' }}
-                    /* ⚠ IT SAYS WHAT IT DOES. "Refresh benchmark" promised a refresh of the whole
-                       index; this fill is un-forced and touches only the constituents missing a
-                       consensus. The component's own default wording was already accurate — the
-                       call site had overridden it to name the TARGET and lost the ACTION. */
-                    label="Fetch missing estimates"
+                      name: benchLabel || benchTarget.universe, feeds: 'smart' }}
+                    label="Refresh benchmark"
                     onDone={() => setBenchReload((k) => k + 1)} />
                 </span>
               </div>

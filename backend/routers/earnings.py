@@ -1761,8 +1761,16 @@ def _drop_quarter_outliers(by_date: dict[str, float], who: str = "?") -> dict[st
         # a recurring spike can be a seasonal business OR the vendor filing an annual figure in a
         # quarterly slot, and IAG's confirmed garbage recurs annually too (2024-09, 2025-09, both
         # Q3) — so this cannot decide, it can only tell a human where to look.
-        seasons = Counter(f"Q{(int(d[5:7]) - 1) // 3 + 1}" for d in drop)
-        repeat = max(seasons.values())
+        # ⚠⚠ GUARDED, BECAUSE A LOG LINE MUST NOT BE ABLE TO KILL THE THING IT DESCRIBES. This
+        # parses a MONTH out of the key, and the first version assumed every key was an ISO date —
+        # true of every production caller (`_ttm_by_period` builds them from `target_date`) and not
+        # true of the tests, where a series is keyed "a".."e". `int("")` raises, so a diagnostic
+        # nobody reads took the whole outlier guard down with it and three tests went red on a
+        # sentence. Anything unparseable is simply not counted: the periodicity hint is a nudge
+        # toward a human eye, never a reason for the guard itself to fail.
+        seasons = Counter(f"Q{(int(d[5:7]) - 1) // 3 + 1}" for d in drop
+                          if len(d) >= 7 and d[5:7].isdigit() and 1 <= int(d[5:7]) <= 12)
+        repeat = max(seasons.values(), default=0)
         _log.warning(
             "[earnings] %s: dropped %d implausible quarter(s) — more than %.0fx this series' own "
             "median of %.4g, and not part of a run to the newest filing: %s.%s A TTM sum would "
