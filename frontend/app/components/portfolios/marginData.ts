@@ -127,6 +127,66 @@ export const xToPeriod = (x: number): string => {
 };
 
 /**
+ * The axis tick (and tooltip header) for a chart that also carries TRAILING-TWELVE-MONTH points.
+ *
+ * ⚠⚠ AN LTM POINT SITS ON A QUARTER-END x, SO `xToPeriod` NAMES IT A FISCAL QUARTER. On an annual
+ * chart every reported point is on a whole year and the LTM extension is the only fractional x
+ * there is — 2026-06-30 → 2026.25 → **"2026 Q2"**, a quarter nobody filed, in the one place a
+ * reader looks for the newest figure. Measured 2026-08-14 on the ACWI overlay of `EPS (excl.
+ * non-recurring)`: the portfolio blend emitted no LTM row at all, so the card had no LTM x of its
+ * own to match against, and the INDEX's LTM was labelled "2026 Q2" while its line ran a quarter
+ * past the book's. It reads as "the index has reported and we have not", which it was not.
+ *
+ * ⚠ `ltmXs` IS A SET, NOT ONE VALUE. Each blend stamps its trailing year with the newest filing
+ * behind it, so a book and an index that end on different quarters genuinely have two LTM windows —
+ * and both are LTMs. Naming only one puts the fake quarter straight back on the other.
+ */
+export const periodTick = (x: number, ltmXs?: ReadonlySet<number>): string =>
+  (ltmXs?.has(x) ? 'LTM' : xToPeriod(x));
+
+/** One point's change from the previous point the SAME series had: the figure, and the x it is
+ *  measured FROM. `pct: null` means there is a previous point but no honest ratio to it. */
+export type Step = { pct: number | null; from: number };
+
+/**
+ * Each point's change from the period before it, keyed by x.
+ *
+ * ⚠⚠ THIS IS WHAT A LEVEL CHART CANNOT BE READ FOR. The number on the axis is an INDEX, i.e.
+ * cumulative growth since the anchor — so "are we ahead of the benchmark since 2015" is already the
+ * SHAPE of the two lines and needs no figure, while "did we out-grow it THIS year" is invisible on
+ * a log axis where both lines are rising, and it is the question a reader hovers a point to ask.
+ *
+ * ⚠ IT IS NOT "YoY", AND CALLING IT THAT WOULD BE WRONG THREE WAYS ON THIS TAB: the LTM point sits
+ * a quarter or two past the last fiscal year (which is why it is out of the CAGR fit), the
+ * quarterly basis steps one QUARTER at a time on a trailing-twelve-month series, and a period the
+ * coverage floor withheld leaves a two-year gap drawn as one segment. So `from` comes back and the
+ * caller NAMES the interval — "+11.4% vs 2024" — instead of asserting one.
+ *
+ * ⚠ A NON-POSITIVE BASE GETS `null`, NEVER A PERCENTAGE. Same rule as `transformSeries`' YoY view
+ * and the server's `step_growth`, and the same reason this card withholds its CAGR across a sign
+ * change: −2 → −1 reads as "+50% growth" for a company still making a loss, and −1 → +2 is not
+ * "+300%" in any sense that compounds.
+ *
+ * ⚠ SAFE ON EITHER BASIS. A rebase is one constant multiplier per series, so it divides out of
+ * `v / prev` — the step is identical whether computed on the indexed values or the raw ones. Feed
+ * it the RAW series so the answer cannot change when the axis flips to absolute on a sign change.
+ */
+export function stepChanges(series: ReadonlyMap<number, number | null>): Map<number, Step> {
+  const out = new Map<number, Step>();
+  let prev: { x: number; v: number } | null = null;
+  for (const x of [...series.keys()].sort((a, b) => a - b)) {
+    const v = series.get(x);
+    if (v == null) continue;
+    // ⚠ AGAINST THE PREVIOUS POINT THIS SERIES HAS, not the previous column — a line with a hole
+    // would otherwise show two periods of growth in the same ink as everyone else's one.
+    if (prev) out.set(x, { pct: prev.v > 0 ? 100 * (v / prev.v - 1) : null, from: prev.x });
+    prev = { x, v };
+  }
+  return out;
+}
+
+
+/**
  * The one weighted-average-per-year used by every ratio card. Each card supplies the years it
  * could have a value for and a per-holding value; this applies the weights, the renormalisation
  * and the floor in ONE place.

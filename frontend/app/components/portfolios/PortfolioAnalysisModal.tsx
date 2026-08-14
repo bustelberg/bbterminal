@@ -1103,8 +1103,15 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
    *  invisible because a closed position has nothing left to list. Rendered as their own group,
    *  because they have no asset class, no ISIN and no current weight — only a result. */
   realised?: ModelPortfolioAnalysis['realised'];
-  /** Opens the owner-earnings modal for one instrument or a whole class. */
-  onFundamental: (t: { name: string; isin?: string; basket?: Basket }) => void;
+  /** Opens the owner-earnings modal for one instrument or a whole class.
+   *
+   *  ⚠ `weightPct` IS THE CLASS'S SHARE OF THE WHOLE BOOK, and it comes from the allocation SLICE
+   *  rather than from the basket. Summing the basket's own holdings would be close and wrong: the
+   *  basket carries ISIN-bearing rows only (cash and anything unmapped are dropped, because owner
+   *  earnings are per company), so its total is the part we can chart, not the part the portfolio
+   *  holds. Those are two different numbers and only one of them answers "how much of the book is
+   *  this". */
+  onFundamental: (t: { name: string; isin?: string; basket?: Basket; weightPct?: number }) => void;
   /** WHY the table is empty, from the server (`book_note`) — three different faults used to
    *  render as one sentence, next to a portfolios list that visibly has rows. */
   note?: string | null;
@@ -1554,7 +1561,8 @@ ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contributi
                   {g.bucket === EQUITY_BUCKET && g.basket.holdings.length > 0 && (
                     <FundamentalButton className="ml-2 align-middle"
                       title={`Blended owner earnings and price steadiness across the ${g.basket.holdings.length} priced name${g.basket.holdings.length === 1 ? '' : 's'} in ${bucketLabel(g.bucket)}, weighted by what the book holds today.`}
-                      onOpen={() => onFundamental({ name: g.basket.label, basket: g.basket })} />
+                      onOpen={() => onFundamental({
+                        name: g.basket.label, basket: g.basket, weightPct: g.slice?.pct })} />
                   )}
                 </td>
                 <td className="py-2 text-right font-mono font-semibold text-fg-strong whitespace-nowrap">
@@ -2391,7 +2399,8 @@ export default function PortfolioAnalysisModal({
   // click a class. Selecting a class replaces that with the class's OWN return + its breakdown.
   const [assetFilter, setAssetFilter] = useState<string | null>(null);
   /** The instrument or class whose Fundamental is open, over this modal. Null = closed. */
-  const [fund, setFund] = useState<{ name: string; isin?: string; basket?: Basket } | null>(null);
+  const [fund, setFund] = useState<
+    { name: string; isin?: string; basket?: Basket; weightPct?: number } | null>(null);
   // ⚠ The per-holding timing popup. Keyed by AIRS's own holding NAME, because that is what the
   // Transacties sheet joins on — it carries no ISIN.
   const [timingFor, setTimingFor] = useState<string | null>(null);
@@ -2730,6 +2739,10 @@ export default function PortfolioAnalysisModal({
       )}
       {fund && (
           <OwnerEarningsModal isin={fund.isin} basket={fund.basket} name={fund.name}
+            // ⚠ WHOSE BOOK THIS IS. `fund` names the SLICE that was clicked — an ISIN, or a group
+            // like "Stocks" — which is true of every row on the page and identifies none of them.
+            // See `bookName` on the modal.
+            bookName={name} sharePct={fund.weightPct}
             // ⚠⚠ EITHER SCOPE, BECAUSE MOST BOOKS ON /management-dashboard HAVE NO MODEL ID.
             // `PortfolioOverviewPanel.openModal` sets `id` only when the account is PAIRED with a
             // fixed model; every other row resolves its own ISINs into a basket and opens this

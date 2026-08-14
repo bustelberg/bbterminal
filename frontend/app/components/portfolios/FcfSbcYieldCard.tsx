@@ -10,13 +10,14 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { Stat } from './MetricGrowthCard';
+import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import { fcfLabel } from './sbcCorrection';
 import FcfSbcYieldInputsModal from './FcfSbcYieldInputsModal';
 import { fcfSbcYieldByYear, type FcfSbcYieldInputs } from './fcfSbcYieldData';
 import DailyToggle from './DailyToggle';
 import { meanOf, paddedDomain, xToMonth, xToPeriod } from './marginData';
-import { benchNote, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
+import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**
  * FCF-SBC yield card: (Free Cash Flow − Stock-Based Compensation) ÷ Market Cap per fiscal year, on
@@ -77,6 +78,7 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
   const chartData = useMemo(
     () => mergeSeries(yieldByYr, benchByYr, 'yld'), [yieldByYr, benchByYr]);
 
+  const own = holdingsName ?? `${fcfLabel(sbcCorrection)} yield`;
   const avg = meanOf([...yieldByYr.values()]);
   const latestYear = Math.max(-Infinity, ...yieldByYr.keys());
   const latest = Number.isFinite(latestYear) ? yieldByYr.get(latestYear) ?? null : null;
@@ -118,8 +120,8 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
                 <XAxis dataKey="year" tickFormatter={daily ? xToMonth : xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
                 <YAxis domain={paddedDomain(withBench(yieldByYr.values(), benchByYr))} tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
-                <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : `${fcfLabel(sbcCorrection)} yield`]} />
+                <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }} itemSorter={benchmarkFirst}
+                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : own]} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 {/* ⚠ NO DOTS ON A DAILY SERIES — 2,700 markers is a solid band, not a line. */}
@@ -128,8 +130,10 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />{fcfLabel(sbcCorrection)} yield (avg dashed)</span>
-              {benchByYr && <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />{benchTarget?.universe}</span>}
+              <LegendItem color={chartTheme.accent} label={own} />
+              {avg != null && <LegendItem color={chartTheme.accent} stroke="dashed"
+                label={`${own} average`} />}
+              {benchByYr && <LegendItem color={chartTheme.pos} label={benchTarget?.universe} />}
               {note && (
                 <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">
                   {note}

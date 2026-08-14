@@ -26,10 +26,41 @@ type Tab = 'fundamentals' | 'longequity' | 'quickval' | 'deepval';
  * "Fundamental" button opens exactly this case.
  */
 export default function OwnerEarningsModal({
-  isin, name, basket, portfolioId, refreshScope, onClose,
+  isin, name, bookName, sharePct, basket, portfolioId, refreshScope, onClose,
 }: {
   isin?: string;
   name?: string | null;
+  /**
+   * The BOOK this modal was opened from — "Bustelberg Offensief" — as distinct from the slice of it
+   * on screen.
+   *
+   * ⚠⚠ WITHOUT IT THE HEADER NAMES ONLY THE SLICE, AND THE SLICE IS NOT AN IDENTITY. Opening the
+   * equity sleeve of a model portfolio gave "Fundamental · Stocks · group": true, and true of every
+   * book on the page. Which portfolio's stocks was nowhere in the dialog — not in the title, not in
+   * a tooltip — so two of these open side by side were indistinguishable, and a reader who came in
+   * from a row three clicks ago had nothing to check against.
+   *
+   * ⚠ A SEPARATE PROP, NOT `refreshScope.name`. That one is provenance for a WRITE (what a fill
+   * would act on) and is deliberately allowed to differ from what is displayed — see its own note
+   * about `portfolioId`. Reading a label out of it would tie the heading to the refresh button's
+   * scoping rules, so the day one changes the other silently follows. Two facts, two props.
+   */
+  bookName?: string | null;
+  /**
+   * How much of the book this slice IS, as a percentage — "Stocks, 62.4% of the portfolio".
+   *
+   * ⚠⚠ IT REPLACES THE WORD "group", WHICH WAS A CATEGORY WHERE A QUANTITY BELONGS. "Stocks · group"
+   * told the reader what kind of thing they had opened, which they already knew from having clicked
+   * it; the fact they cannot get from anywhere else on this screen is how much of the book these
+   * charts actually speak for. A 62% slice and a 4% one produce identically confident-looking lines.
+   *
+   * ⚠ IT IS THE ALLOCATION SLICE'S FIGURE, NOT THE BASKET'S — see `onFundamental` in
+   * `PortfolioAnalysisModal`. The basket drops cash and anything unmapped, so its own total is the
+   * part we can chart rather than the part the portfolio holds.
+   *
+   * Absent for a whole portfolio (it is trivially 100%) and for a single instrument.
+   */
+  sharePct?: number | null;
   basket?: Basket;
   portfolioId?: number;    // a whole model portfolio, resolved to a basket server-side
   /**
@@ -46,6 +77,47 @@ export default function OwnerEarningsModal({
 }) {
   const isAgg = !!basket || portfolioId != null;
   const title = basket?.label ?? name ?? isin ?? '';
+  /**
+   * The book's name, when it adds something the title does not already say.
+   *
+   * ⚠ SUPPRESSED WHEN IT WOULD ONLY REPEAT. Opened on the WHOLE portfolio the title already IS the
+   * book, and "Bustelberg Offensief   Bustelberg Offensief · portfolio" reads as a rendering fault
+   * rather than as emphasis. It earns its place exactly when the two differ — which is the group
+   * case ("Stocks"), the one that had no identity at all.
+   */
+  const book = isAgg && bookName && bookName !== title ? bookName : null;
+  /**
+   * What every surface inside this modal calls the thing it is charting — the heading, the hover on
+   * each line, the per-holding drill-down, and the name an ingest is filed under.
+   *
+   * ⚠⚠ ONE STRING, COMPUTED ONCE. These used to read `title` independently, so the chart hovers
+   * said "Stocks" while the row that opened them said "Bustelberg Offensief" — the same series
+   * under two names on two screens, which is indistinguishable from two different series.
+   */
+  const subject = book ?? title;
+  /**
+   * Everything that is NOT the name, on one muted line above it: the dialog, and which slice of the
+   * book is on screen.
+   *
+   * ⚠⚠ THE NAME GETS ITS OWN LINE BECAUSE A ROW OF EQUAL WORDS HIDES IT. Run together as
+   * "Fundamental  Bustelberg Offensief  Stocks · group" the one word that says WHOSE book this is
+   * sits between two that do not, at the same size, and the eye has no reason to stop on it. An
+   * eyebrow-over-title split is the ordinary way round that: the small line answers "what am I
+   * looking at", the large one answers "at what", and nothing has to be read left-to-right to be
+   * found.
+   *
+   * ⚠ THE SLICE ONLY APPEARS WHEN IT IS NOT THE SUBJECT. Opened on the whole book the title IS the
+   * book, so it belongs on the title line and the eyebrow reduces to "Fundamental" alone — naming
+   * it in both places would be the same repetition `book` already exists to suppress.
+   *
+   * ⚠⚠ AND THE SLICE IS FOLLOWED BY ITS **WEIGHT**, NOT BY THE WORD "group". A reader who clicked
+   * the Stocks header knows it is a group; what they cannot see anywhere on this screen is how much
+   * of the book it is — and a 62% sleeve and a 4% one draw equally confident lines. `sharePct` is
+   * the allocation slice's own figure, so it agrees with the bars on the screen behind this one.
+   */
+  const eyebrow = ['Fundamental', book ? title : null,
+    book && sharePct != null ? `${sharePct.toFixed(1)}% of the portfolio` : null,
+  ].filter(Boolean).join(' · ');
   // Bumped whenever the coverage panel ingests something, so the blended charts re-fetch and pick
   // up the data that ingest just created (they'd otherwise show the pre-ingest blend until reopen).
   // Used as FundamentalCharts' `key` — a remount is the clean way to force one fresh blend fetch.
@@ -136,15 +208,24 @@ export default function OwnerEarningsModal({
 
         <div className="flex items-start justify-between gap-3 mb-2 shrink-0">
           <div className="min-w-0">
-            <div className="flex items-baseline gap-2 flex-wrap">
-              <span className="text-base font-semibold text-fg-strong">Fundamental</span>
-              {isAgg
-                ? <span className="text-sm text-fg-soft truncate">{title}{basket ? ' · group' : ' · portfolio'}</span>
-                : <>
-                    <span className="text-sm font-mono text-fg-soft">{isin}</span>
-                    {name && <span className="text-sm text-fg-soft truncate">{name}</span>}
-                  </>}
+            {/* ⚠ THE EYEBROW IS EVERYTHING THAT IS TRUE OF OTHER ROWS TOO — the dialog, the slice,
+                the identifier. The line under it is the one thing that is true only of this one.
+                Keeping them at the same size is what made the portfolio's name disappear into a
+                sentence; the size difference IS the answer to "which of these words matters". */}
+            {/* ⚠ SMALL AND MUTED, NOT UPPERCASED. The size and the ink already set the name below
+                apart; small caps on top of that was decoration, and it stopped being harmless once
+                the line carried a sentence — "62.4% OF THE PORTFOLIO" shouts a footnote. */}
+            <div className="flex items-baseline gap-2 flex-wrap text-sm text-fg-muted">
+              <span>{eyebrow}</span>
+              {/* ⚠ NOT WHEN IT IS THE SUBJECT. A company with no name on file is titled BY its ISIN
+                  below, where printing it twice would read as two different identifiers. */}
+              {!isAgg && name && <span className="font-mono">{isin}</span>}
             </div>
+            {/* ⚠ `leading-tight` IS WHAT PAYS FOR THE SIZE. This sits in the modal's FIXED head,
+                above a body that scrolls — every pixel here is taken off the charts for the whole
+                session, not just at the top of the scroll. Default line-height at 2xl would add
+                more than the type itself does. */}
+            <div className="text-2xl font-semibold text-fg-strong truncate leading-tight">{subject}</div>
           </div>
           <button type="button" onClick={onClose} aria-label="Close"
             className="text-fg-faint hover:text-fg-strong text-xl leading-none px-1 -mt-1">×</button>
@@ -245,7 +326,9 @@ export default function OwnerEarningsModal({
         )}
         {(visited.has('longequity') && hasInstrument) && (
           <div className={tab === 'longequity' ? undefined : 'hidden'}>
-            <LongEquityTab isin={isin} name={title} basket={basket} portfolioId={portfolioId}
+            {/* ⚠ `subject`, NOT `title` — this name reaches the chart hovers, the per-holding
+                drill-down and the ingest, and on a group it was the bare "Stocks". See `subject`. */}
+            <LongEquityTab isin={isin} name={subject} basket={basket} portfolioId={portfolioId}
               sbcCorrection={sbcCorrection} />
           </div>
         )}
@@ -259,7 +342,7 @@ export default function OwnerEarningsModal({
               // pseudo-company in the identical payload shape, so this is the same screen — not a
               // second, parallel implementation that would drift from it.
               <>
-                <FundamentalCharts key={blendKey} blend={blend} name={title} />
+                <FundamentalCharts key={blendKey} blend={blend} name={subject} />
                 <div className="mt-6 pt-5 border-t border-neutral-800/40">
                   <FundamentalCoverage basket={basket} portfolioId={portfolioId}
                     onIngested={() => setBlendKey((k) => k + 1)} />

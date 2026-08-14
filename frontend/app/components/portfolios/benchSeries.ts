@@ -38,6 +38,26 @@ import { MIN_YEAR_COVERAGE_PCT } from './marginData';
 export type BenchTarget = { universe: string; cadence: 'annual' | 'quarterly' };
 
 /**
+ * Row order in every Long Equity hover: the BENCHMARK first, then the book. Pass as `itemSorter`.
+ *
+ * ⚠⚠ IT WAS ALREADY COMING OUT THIS WAY, BY ACCIDENT, AND THAT IS THE REASON TO DECLARE IT.
+ * Recharts' default sorter is `'name'` — alphabetical on the SERIES name, not on the label the
+ * formatter produces — and every benchmark line here is named `bench`, which happens to sort before
+ * `margin`, `ratio`, `value`, `yld` and `trend`. Rename one series (or add a card whose line is
+ * called `bench_something`, or `assets`) and that card alone silently flips its two rows, on a
+ * screen of fourteen charts where the reader has learned the first row is the index. An order the
+ * eye relies on across a whole tab cannot rest on the alphabet.
+ *
+ * ⚠ THE INDEX GOES FIRST because it is the constant: it is the same line on all fourteen cards,
+ * so a fixed position makes it the thing you read past rather than the thing you have to find. The
+ * book's own line — the one that differs per card and per portfolio — reads as the answer beneath.
+ *
+ * It is a sort KEY, not a comparator: recharts sorts ascending on what this returns.
+ */
+export const benchmarkFirst = (item: { name?: unknown }): number =>
+  (item.name === 'bench' ? 0 : 1);
+
+/**
  * Fetch one `*-inputs` endpoint for a benchmark, or nothing when no benchmark is selected.
  *
  * The overlay never breaks the chart under it — a failed index costs the second line and nothing

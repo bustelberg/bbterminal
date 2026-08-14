@@ -10,12 +10,13 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { logLinearFit } from '../../../lib/trendFit';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { Stat } from './MetricGrowthCard';
+import { Stat, pctSince } from './MetricGrowthCard';
+import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import InvestedCapitalInputsModal from './InvestedCapitalInputsModal';
 import { investedCapitalIndexByYear, investedCapitalSeries } from './investedCapitalData';
-import { paddedLogDomain , xToPeriod } from './marginData';
-import { benchNote, rebaseSeries, useBenchInputs, type BenchTarget } from './benchSeries';
+import { paddedLogDomain, stepChanges, xToPeriod, type Step } from './marginData';
+import { benchNote, benchmarkFirst, rebaseSeries, useBenchInputs, type BenchTarget } from './benchSeries';
 import { type CashReturnInputs } from './cashReturnData';
 
 /**
@@ -108,6 +109,10 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
     const trendScale = indexed ? 100 / (ownByYr.get(indexed.anchor) as number) : 1;
     const years = new Set<number>(points.map((p) => p.year));
     if (plotBench) for (const y of plotBench.keys()) years.add(y);
+    // ⚠ OFF THE RAW SERIES, NOT THE PLOTTED ONE — same rule, same reason, as the growth cards: a
+    // rebase is one constant per series and divides out of `v / prev`. See `stepChanges`.
+    const ownStep = stepChanges(ownByYr);
+    const benchStep = benchByYr ? stepChanges(benchByYr) : null;
     return [...years].sort((a, b) => a - b).map((year) => {
       const v = plotOwn.get(year) ?? null;
       const b = plotBench ? plotBench.get(year) ?? null : null;
@@ -117,6 +122,10 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
         value: v != null && v > 0 ? v : null,
         trend: t != null ? t * trendScale : null,
         bench: b != null && b > 0 ? b : null,
+        // Tooltip only — the move from the period before. The plotted number is cumulative growth
+        // since the anchor, which the two lines' separation already shows.
+        step: ownStep.get(year) ?? null,
+        benchStep: benchStep?.get(year) ?? null,
         // Tooltip only, and ONLY for a single company: in `isAgg` mode `points` is already a
         // blended index (there is no portfolio capital base), so its "raw" is just another index.
         // The benchmark is always a blend, so it never has one either.
@@ -178,26 +187,43 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
                 <YAxis scale="log" domain={logDomain ?? ['dataMin', 'dataMax']} allowDataOverflow
                   tick={{ fontSize: 12, fill: chartTheme.axisTick }}
                   tickFormatter={(v: number) => (indexed ? fmtIndex(v) : fmt(v))} width={60} />
-                {/* ⚠ THE HOVER READS THE ACTUAL AMOUNT, NOT THE AXIS — see `MetricGrowthCard`. The
-                    plotted number is an index; the EUR figure rides on the row and is what gets
-                    shown, with the index in parentheses so the point stays identifiable. A blend
-                    has no actual amount (there is no portfolio capital base), so it shows the
-                    index alone. */}
-                <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
+                {/* ⚠ THE SAME HOVER AS THE GROWTH CARDS, AND DELIBERATELY NOT A LOOKALIKE OF IT —
+                    this is the same kind of chart as Revenue (a currency level, indexed, on a log
+                    axis), so it reads the same helper (`pctSince`) rather than re-phrasing the same
+                    fact. Never a bare index: the plotted number is cumulative growth since the
+                    anchor, which the two lines' separation already shows, so the row carries the
+                    move from the period BEFORE. A single company keeps its actual amount in front
+                    of it — "this company deploys EUR X of capital" is what makes CROIC's
+                    denominator interpretable — and a blend has none (there is no portfolio capital
+                    base), so it shows the step alone. */}
+                <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }} itemSorter={benchmarkFirst}
+                  labelFormatter={(x) => (typeof x === 'number' ? xToPeriod(x) : x)}
                   formatter={(v, name, item) => {
-                    const row = item?.payload as { rawValue?: number | null } | undefined;
+                    const row = item?.payload as
+                      { rawValue?: number | null; step?: Step | null; benchStep?: Step | null }
+                      | undefined;
                     const plotted = typeof v === 'number' ? v : null;
-                    const label = name === 'trend' ? 'Trend'
-                      : name === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : 'Invested capital';
-                    if (!indexed) return [`${ccy}${fmt(plotted)}`, label];
+                    // ⚠ WHOSE LINE, NOT WHICH METRIC — the card heading already says "Invested
+                    // capital", and the benchmark row was always named for its index.
+                    const label = name === 'bench' ? (benchTarget?.universe ?? 'Benchmark')
+                      : (holdingsName ?? 'Invested capital');
+                    const since = pctSince(name === 'bench' ? row?.benchStep : row?.step);
+                    const tail = since ? `  ·  ${since}` : '';
+                    if (!indexed) return [`${ccy}${fmt(plotted)}${tail}`, label];
                     // Indexed axis: only our own line, and only for a single company, has an
-                    // actual amount behind it. Trend, benchmark and blend do not.
+                    // actual amount behind it. The benchmark and a blend do not.
                     const raw = name === 'value' ? row?.rawValue ?? null : null;
-                    if (raw == null) return [fmtIndex(plotted, 1), label];
-                    return [`${ccy}${fmt(raw)}  (index ${fmtIndex(plotted, 1)})`, label];
+                    // A dash only where the row would otherwise be empty — the first point of a
+                    // series has no previous period, and a blend has no amount to fall back on.
+                    if (raw == null) return [since || '—', label];
+                    return [`${ccy}${fmt(raw)}${tail}`, label];
                   }} />
                 <Line dataKey="value" name="value" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
-                <Line dataKey="trend" name="trend" type="monotone" stroke={chartTheme.warn} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
+                {/* ⚠ `tooltipType="none"` — OUT OF THE HOVER, as on the growth cards. It is a fitted
+                    line, not a measurement: its value at a point is what a constant-growth
+                    exponential says should have happened, listed in the same ink as a figure that
+                    did. The fit is already stated in the R²/CAGR tiles and the dashed legend. */}
+                <Line dataKey="trend" name="trend" tooltipType="none" type="monotone" stroke={chartTheme.warn} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
                 {/* ⚠ THE BENCHMARK IS GREEN ON ALL FOURTEEN CHARTS — see `MetricGrowthCard` for the
                     measured separations, including why green beside this card's amber trend line
                     needs the trend to stay dashed. */}
@@ -205,16 +231,20 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />Invested capital{isIndex ? ' (index)' : ''}</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.warn }} />Trend (R² {fit.r2 == null ? '—' : fit.r2.toFixed(2)})</span>
+              <LegendItem color={chartTheme.accent}
+                label={`${holdingsName ?? 'Invested capital'}${isIndex ? ' (index)' : ''}`} />
+              {/* ⚠ DASHED, because the line is. It wore a SOLID amber swatch while the trend it
+                  names is drawn `strokeDasharray="5 3"` — on a chart whose whole point is telling a
+                  fitted line from a measured one, that is the one distinction the legend must
+                  carry. `(index)` above stays inline: it qualifies the VALUES on that same line,
+                  it is not a second mark on the chart. */}
+              <LegendItem color={chartTheme.warn} stroke="dashed"
+                label={`Trend (R² ${fit.r2 == null ? '—' : fit.r2.toFixed(2)})`} />
               {benchByYr && (
-                <span className="flex items-center gap-1.5"
+                <LegendItem color={chartTheme.pos} label={benchTarget?.universe}
                   title={indexed
                     ? `Both lines are indexed to 100 at ${indexed.anchor}, the first year they share. Only the growth is being compared — hover any point for the actual amount.`
-                    : 'Absolute amounts: the two series share no year with a positive value, so there is no honest base to index them on.'}>
-                  <span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />
-                  {benchTarget?.universe}
-                </span>
+                    : 'Absolute amounts: the two series share no year with a positive value, so there is no honest base to index them on.'} />
               )}
               {note && (
                 <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">

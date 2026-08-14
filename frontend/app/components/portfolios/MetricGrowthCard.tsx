@@ -12,9 +12,10 @@ import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
 import HoldingsIngestPanel from './HoldingsIngestPanel';
+import { LegendItem } from './ChartLegend';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
-import { paddedLogDomain , xToPeriod } from './marginData';
-import { benchNote, rebaseSeries, seriesCrossesZero } from './benchSeries';
+import { paddedLogDomain, periodTick, stepChanges, type Step } from './marginData';
+import { benchNote, benchmarkFirst, rebaseSeries, seriesCrossesZero } from './benchSeries';
 
 /**
  * One "Long Equity" growth card: a metric per fiscal year on a LOG axis with an exponential-trend
@@ -35,6 +36,26 @@ export type MetricCfg = {
   // 'growth' = a compounding series on a LOG axis with an exponential trend + R²/CAGR;
   // 'ratio'  = a % on a LINEAR axis with an average line (a ratio doesn't compound).
   kind?: 'growth' | 'ratio';
+  /**
+   * The ANALYSTS' forecast of this same line — a striped continuation leaving the newest actual
+   * (the LTM when there is one), with a dot on every forecast year exactly as the solid line has
+   * one on every reported year. Omit and the card has no forecast leg, which is the right answer
+   * for every metric nobody publishes a consensus for.
+   *
+   * ⚠⚠ IT IS NOT A MEASUREMENT AND MUST NEVER BE TREATED AS ONE. It is out of the trend fit, out of
+   * the CAGR, out of `crossesZero` and out of the Latest/Avg tiles — every one of those is a claim
+   * about what the business DID, and a consensus is a claim about what people expect. The fit in
+   * particular would be corrupted twice over: it would extend the regression across five years
+   * nobody has lived, and the R² above the chart would then describe how tightly the past hugs a
+   * line drawn partly through the future.
+   *
+   * ⚠ ONLY ON THE ANNUAL BASIS. Analysts publish a figure per forward FISCAL YEAR; there is no
+   * trailing-twelve-month reading of a forecast, and rolling one would invent quarters nobody
+   * published. The backend refuses the metric on the quarterly basis for the same reason.
+   */
+  forecastCodes?: string[];
+  /** The `metric` key for the same forecast in a NARROWED (benchmark) blend request. */
+  forecastMetric?: string;
 };
 
 type MetricRow = { metric_code: string; target_date: string; numeric_value: number | null };
@@ -70,7 +91,34 @@ function extractPoints(rows: MetricRow[], codes: string[], cadence: 'annual' | '
     const cur = byX.get(x);
     if (!cur || d > cur.date) byX.set(x, { date: d, value: m.numeric_value });
   }
-  return [...byX.entries()].map(([year, v]) => ({ year, value: v.value })).sort((a, b) => a.year - b.year);
+  return [...byX.entries()].map(([year, v]) => ({ year, value: v.value, date: v.date }))
+    .sort((a, b) => a.year - b.year);
+}
+
+/**
+ * Where an LTM point belongs on an ANNUAL axis: a fraction of a year past the last reported one.
+ *
+ * ⚠⚠ THE QUARTER BUCKET PUTS IT ON TOP OF A FISCAL YEAR, AND WITH A FORECAST ON THE CHART THAT IS
+ * NO LONGER INVISIBLE. A trailing year ending 2026-03-31 buckets to `2026 + (1−1)/4` = **2026.0** —
+ * the same x as FY2026, which is where the analysts' first estimate sits. So the newest ACTUAL and
+ * the first FORECAST landed on one tick, the LTM appeared to be a year further along than it is,
+ * and the dotted leg started underneath it instead of after it.
+ *
+ * The fix cannot be "use the calendar fraction" either, because the annual axis is not a calendar:
+ * `extractPoints` places a fiscal year at the YEAR IT ENDS IN, so an off-calendar filer's FY2026
+ * (ending 2026-03-31) already sits at 2026 while occupying the same months this LTM does. Measuring
+ * from the entity's OWN last fiscal year end sidesteps the whole question — three months past it is
+ * three months past it, whatever calendar that year was labelled with.
+ *
+ * ⚠ CLAMPED INSIDE THE YEAR, never onto its neighbours. At 0 it would sit on the last actual and
+ * hide it; at 1 it would sit on the first forecast, which is the bug this exists to fix.
+ */
+const YEAR_MS = 365.25 * 24 * 3600 * 1000;
+function ltmYearX(ltmDate: string | undefined, last: { year: number; date?: string } | null) {
+  if (!last) return null;
+  if (!ltmDate || !last.date) return last.year + 0.25;   // no date to measure from: a quarter on
+  const gap = (Date.parse(`${ltmDate}T00:00:00Z`) - Date.parse(`${last.date}T00:00:00Z`)) / YEAR_MS;
+  return last.year + Math.min(0.95, Math.max(0.05, gap));
 }
 
 /**
@@ -94,13 +142,54 @@ function extractPoints(rows: MetricRow[], codes: string[], cadence: 'annual' | '
  * twelve months per metric, at the newest quarter-end, present only when that reaches PAST the last
  * full fiscal year. This reads those; it does not compute one.
  */
-function ltmPoint(rows: MetricRow[], codes: string[]): { year: number; value: number } | null {
+type LtmPoint = { year: number; value: number; date?: string };
+
+function ltmPoint(rows: MetricRow[], codes: string[],
+                  last: { year: number; date?: string } | null): LtmPoint | null {
   // ⚠ EXTRACTED ON THE **QUARTERLY** AXIS. The row is dated to a quarter-end, and that is where it
   // belongs on the x: a June LTM sits at 2026.25, a quarter past the last full year, so the gap on
   // screen is the real interval. Bucketed as annual it would land on 2026 and claim a whole year.
+  //
+  // ⚠ THE FILINGS BEHIND IT ARE NOT READ HERE. They are per HOLDING, and a chart point is a blend
+  // of many — so they belong in the drill-down table, one ⓘ per row of its LTM column, where there
+  // is a company to attribute them to. See `HoldingsRevenueModal`.
   const ltm = extractPoints(rows, codes.map(
     (c) => `ltm__${c.slice(c.indexOf('__') + 2)}`), 'quarterly');
-  return ltm.length ? ltm[ltm.length - 1] : null;
+  const p = ltm.length ? ltm[ltm.length - 1] : null;
+  if (!p) return null;
+  return { ...p, year: ltmYearX(p.date, last) ?? p.year };
+}
+
+/**
+ * A point's move from the period before it, as the hover reads it: `"+11.4% vs 2024"`, or `''`.
+ *
+ * ⚠⚠ AGAINST THE PREVIOUS PERIOD, NOT THE ANCHOR. Cumulative-since-2015 is what the two lines
+ * already SHOW — their separation on a log axis is exactly that comparison, so putting it in the
+ * hover restates the picture instead of adding to it. The per-period step is the part the chart
+ * cannot be read for: two lines both rising steeply say nothing about which one grew faster in the
+ * year under the cursor.
+ *
+ * ⚠ IT NAMES THE PERIOD IT IS MEASURED FROM RATHER THAN SAYING "YoY", because on this tab it
+ * frequently is not a year — the LTM point is a quarter or two past the last fiscal year (the same
+ * stub that is excluded from the CAGR fit, because regressing it as a full period overstates the
+ * rate), the quarterly basis steps one QUARTER at a time, and a period the coverage floor withheld
+ * leaves a two-year interval drawn as one segment. "+4.2% YoY" over any of those is a confident
+ * mislabel of the interval, which is worse than the extra word.
+ *
+ * ⚠ EMPTY, NOT ZERO, WHEN THERE IS NOTHING TO MEASURE FROM — the first point of a series, and a
+ * non-positive base (`pct: null`; see `stepChanges`). "0.0%" there would assert a flat period that
+ * was never observed. The caller renders the emptiness as a dash where the row would otherwise be
+ * blank, and simply omits it where a real value is already printed.
+ *
+ * ⚠ EXPORTED, SO THE LEVEL CARDS SHARE ONE HOVER RATHER THAN RESEMBLING EACH OTHER. Invested
+ * capital is the same kind of chart as Revenue — a currency level, indexed, on a log axis — and a
+ * second copy of this formatting is how the two come to phrase the same fact differently. `ltmXs`
+ * is optional because only the `MetricGrowthCard` charts carry an LTM point; the derived `*-inputs`
+ * cards drop the `LTM` period (`plottable`) and pass nothing.
+ */
+export function pctSince(step: Step | null | undefined, ltmXs?: ReadonlySet<number>): string {
+  if (!step || step.pct == null) return '';
+  return `${step.pct >= 0 ? '+' : ''}${step.pct.toFixed(1)}% vs ${periodTick(step.from, ltmXs)}`;
 }
 
 export function Stat({ label, value, tone, color, info }: {
@@ -120,6 +209,7 @@ export function Stat({ label, value, tone, color, info }: {
 export default function MetricGrowthCard({
   cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin, onIngested,
   blendNotes, onReloadMetrics, cadence = 'annual', benchMetrics, benchLabel, benchErr,
+  benchNotes,
 }: {
   cfg: MetricCfg;
   /** 'annual' = one point per fiscal year. 'quarterly' = one TRAILING-TWELVE-MONTH point per
@@ -150,6 +240,10 @@ export default function MetricGrowthCard({
    */
   benchMetrics?: MetricRow[] | null;
   benchLabel?: string | null;
+  /** The INDEX's `blend_notes` — why a code its constituents carry drew no line. Distinct
+   *  from `blendNotes`, which is the book's: the two answer the same question about two
+   *  different sets of companies and must not be read for each other. */
+  benchNotes?: Record<string, BlendNote>;
   /** Why the blend failed, if it did — so a missing overlay states its reason instead of looking
    *  like an index that happens to track this book exactly. See `benchNote`. */
   benchErr?: string | null;
@@ -158,6 +252,10 @@ export default function MetricGrowthCard({
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<string | null>(null);
   const isRatio = cfg.kind === 'ratio';
+  /** What this card calls ITS OWN line — read by the hover and by the legend, defined once so the
+   *  two cannot drift. ⚠ `ownLabel`, not `own`: a Map called `own` already lives inside the
+   *  `chartData` memo, and a component-scope `own` would be silently shadowed there. */
+  const ownLabel = holdingsName ?? cfg.title;
 
   // A GuruFocus ingest outcome → a plain sentence. Every non-success is a real answer (see the
   // backend's `classify_fetch_outcome`), so it's stated, never swallowed.
@@ -210,11 +308,31 @@ export default function MetricGrowthCard({
    */
   const ltm = useMemo(() => {
     if (cadence !== 'annual') return null;
-    const p = ltmPoint(metrics ?? [], cfg.codes);
-    const lastYear = reported.length ? reported[reported.length - 1].year : null;
-    return p && (lastYear == null || p.year > lastYear) ? p : null;
+    const last = reported.length ? reported[reported.length - 1] : null;
+    const p = ltmPoint(metrics ?? [], cfg.codes, last);
+    // ⚠ `ltmYearX` already clamps it INSIDE the year after the last reported one, so this can
+    // no longer be a same-x collision — it stays as the guard against a stale payload whose
+    // LTM the annual series has since caught up with.
+    return p && (last == null || p.year > last.year) ? p : null;
   }, [metrics, cfg, cadence, reported]);
   const points = useMemo(() => (ltm ? [...reported, ltm] : reported), [reported, ltm]);
+
+  /** ⚠⚠ THE INDEX GETS ITS LTM THROUGH THE SAME HELPER AS THE COMPANY, which is the only reason
+   *  the two land on the same x. The blend stamps its LTM point with the newest constituent filing
+   *  behind it (not with today), so for ASML both sit on 2026-06-30 → 2026.25. Without it the
+   *  company line ran a quarter past an index line that simply stopped, and the gap read as
+   *  outperformance in a period the index did not cover. */
+  const benchLtm = useMemo(
+    () => {
+      if (cadence !== 'annual' || !benchMetrics) return null;
+      // ⚠ MEASURED FROM THE INDEX'S OWN LAST FISCAL YEAR. Placing it a fraction past OUR last
+      // year would put the two lines' LTM points at x positions that differ by whatever the
+      // two books' fiscal calendars differ by — a gap that is pure bookkeeping, drawn as if it
+      // were time.
+      const bench = extractPoints(benchMetrics, cfg.codes, cadence);
+      return ltmPoint(benchMetrics, cfg.codes, bench.length ? bench[bench.length - 1] : null);
+    },
+    [benchMetrics, cfg, cadence]);
 
   /** The index's own series, through the IDENTICAL extraction, and left RAW.
    *
@@ -227,17 +345,37 @@ export default function MetricGrowthCard({
     if (!benchMetrics) return null;
     const raw = new Map<number, number | null>(
       extractPoints(benchMetrics, cfg.codes, cadence).map((p) => [p.year, p.value]));
-    // ⚠⚠ THE INDEX GETS ITS LTM THROUGH THE SAME HELPER AS THE COMPANY, which is the only reason
-    // the two land on the same x. The blend stamps its LTM point with the newest constituent
-    // filing behind it (not with today), so for ASML both sit on 2026-06-30 → 2026.25. Without it
-    // the company line ran a quarter past an index line that simply stopped, and the gap read as
-    // outperformance in a period the index did not cover.
-    if (cadence === 'annual') {
-      const bl = ltmPoint(benchMetrics, cfg.codes);
-      if (bl) raw.set(bl.year, bl.value);
-    }
+    if (benchLtm) raw.set(benchLtm.year, benchLtm.value);
     return raw.size ? raw : null;
-  }, [benchMetrics, cfg, cadence]);
+  }, [benchMetrics, cfg, cadence, benchLtm]);
+
+  /**
+   * Every x on this chart that carries a trailing-twelve-month point — OURS **AND** THE INDEX'S.
+   *
+   * ⚠⚠ KEYED ON THE COMPANY'S LTM ALONE, THE TICK LIED ABOUT THE INDEX'S. An LTM point sits on a
+   * QUARTER-END x (2026-06-30 → 2026.25) while every other point on an annual chart sits on a whole
+   * year, so an LTM the tick formatter does not recognise falls through to `xToPeriod` and renders
+   * as **"2026 Q2"** — a fiscal quarter, on an axis that has none, in the one place a reader is
+   * looking for the newest figure. Measured 2026-08-14 on the ACWI overlay of `EPS (excl.
+   * non-recurring)`: the portfolio blend emitted no LTM row at all (`_ltm_blend_rows`, fixed
+   * server-side), so `ltm` was null, nothing could ever match, and the index's own LTM was labelled
+   * a quarter nobody reported.
+   *
+   * ⚠ A SET, NOT THE COMPANY'S VALUE OR-ELSE THE INDEX'S. The two are stamped with the newest
+   * filing behind each blend, so a book whose holdings have all reported Q2 while the index has not
+   * (or the reverse) genuinely has two LTM windows — and both are LTMs. Labelling only one of them
+   * would put the fake quarter back on the other.
+   */
+  const ltmXs = useMemo(() => {
+    const xs = new Set<number>();
+    if (ltm) xs.add(ltm.year);
+    if (benchLtm) xs.add(benchLtm.year);
+    return xs;
+  }, [ltm, benchLtm]);
+  /** ⚠ SAID OUT LOUD, because two ticks both reading "LTM" otherwise looks like a rendering bug
+   *  rather than the fact it is: the two lines' trailing years end on different quarters, so they
+   *  are not measured over the same twelve months and the gap between them is partly calendar. */
+  const ltmSplit = ltmXs.size > 1;
 
   /**
    * ⚠⚠ THE AXIS IS INDEXED, THE HOVER IS ACTUAL. A level card plots BOTH lines rebased to 100 at
@@ -266,6 +404,65 @@ export default function MetricGrowthCard({
    * A sign change is a fact about the business, not a gap. On a LINEAR absolute axis it draws — a
    * negative point below a zero line — which is the truth and needs no ratio invented for it.
    */
+  /**
+   * The analysts' forecast for a line, as a series that CONTINUES it rather than a second one.
+   *
+   * ⚠⚠ IT IS SEEDED WITH THE LAST REPORTED POINT, and that is what makes the join honest rather
+   * than cosmetic. Two separate recharts `<Line>`s never connect, so without a shared point the
+   * dotted leg would float in mid-air, starting at FY2026 with a visible gap after FY2025 — which
+   * reads as a break in the data. The seed is not a forecast value: it is the ACTUAL, drawn once
+   * more, so the dotted line leaves the solid one exactly where the solid one ends.
+   *
+   * ⚠ FROM THE LAST **REPORTED** YEAR, NOT THE LTM. The estimates are per forward FISCAL year, so
+   * FY2026's consensus continues FY2025 — not a trailing year that happens to end in March 2026.
+   * Seeding from the LTM would draw the consensus as growth from a different, overlapping window.
+   */
+  const forecastOf = (rows: MetricRow[] | null | undefined,
+                      actual: { year: number; value: number }[],
+                      ltmPt: { year: number; value: number } | null) => {
+    if (!cfg.forecastCodes?.length || cadence !== 'annual' || !rows) return null;
+    const pts = extractPoints(rows, cfg.forecastCodes, 'annual');
+    // ⚠⚠ THE SEED IS THE NEWEST ACTUAL, WHICH IS THE **LTM** WHENEVER THERE IS ONE. Leaving from
+    // the last fiscal year instead would draw the dotted leg straight through the LTM point,
+    // as though the trailing year were not on the way from one to the other — and the LTM is
+    // precisely the most recent thing we know. Chronologically it sits between the two.
+    const last = ltmPt ?? (actual.length ? actual[actual.length - 1] : null);
+    // Only points strictly PAST the last reported year — a "forecast" of a year already filed is
+    // a stale estimate, and drawing it over the actual invites reading the gap as a surprise.
+    const fwd = pts.filter((p) => last == null || p.year > last.year);
+    if (!fwd.length) return null;
+    return new Map<number, number | null>(
+      [...(last ? [[last.year, last.value] as const] : []), ...fwd.map((p) => [p.year, p.value] as const)]);
+  };
+  const forecastByX = useMemo(
+    () => forecastOf(metrics, reported, ltm),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [metrics, reported, ltm, cfg, cadence]);
+  const benchForecastByX = useMemo(
+    // ⚠ THE BENCHMARK'S OWN ACTUALS ARE ITS SEED, not ours — a dotted index leaving OUR last point
+    // would draw the two lines as continuous when they are two different series.
+    () => forecastOf(benchMetrics, extractPoints(benchMetrics ?? [], cfg.codes, cadence), benchLtm),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [benchMetrics, benchLtm, cfg, cadence]);
+
+  /**
+   * Where each forecast leg is SEEDED — its lowest x, which is the newest actual drawn a second
+   * time so the striped line leaves the solid one instead of floating.
+   *
+   * ⚠⚠ THAT SEED IS A DUPLICATE, AND THE HOVER MUST NOT REPEAT IT. It is the LTM's own value, so
+   * hovering the LTM listed it twice — once as the book and again as "the book — analyst est." at
+   * an identical number, which reads as analysts forecasting the past, or worse, as two sources
+   * agreeing. The point has to exist for the geometry and has to be silent in the tooltip; only the
+   * FORECAST years are things anyone estimated.
+   */
+  const forecastSeedX = useMemo(
+    () => (forecastByX ? Math.min(...forecastByX.keys()) : null), [forecastByX]);
+  const benchForecastSeedX = useMemo(
+    () => (benchForecastByX ? Math.min(...benchForecastByX.keys()) : null), [benchForecastByX]);
+
+  // ⚠ ON `points`, NOT ON THE FORECAST. A consensus that dips negative is an expectation, not a
+  // loss the company made, and letting it flip this card to a linear absolute axis would restate
+  // the whole history because of something nobody has reported.
   const crossesZero = !isRatio && seriesCrossesZero(points.map((p) => p.value));
   /** Linear axis + absolute values: a ratio (already comparable, can be negative) or a level series
    *  that changes sign. Everything else keeps the indexed log axis. */
@@ -296,6 +493,19 @@ export default function MetricGrowthCard({
   // Present only when the blend saw this metric and still drew nothing — the one case where
   // "not ingested" would be false.
   const blendNote = noteFor(blendNotes, cfg.codes);
+  /**
+   * Why the INDEX has no forecast leg, in one short clause.
+   *
+   * ⚠ THE SERVER'S OWN REASON WHERE THERE IS ONE. `explain_empty` already measured which cause
+   * dominated — a coverage floor, a non-positive rebase base — and restating it here from what the
+   * client can see would be a second, guessing implementation of a diagnosis the blend already made.
+   * The fallback is deliberately vague ("no consensus for enough of its members"), because when the
+   * server recorded nothing the honest answer is that we do not know which it was.
+   */
+  const benchForecastWhy = useMemo(() => {
+    const n = cfg.forecastCodes ? noteFor(benchNotes, cfg.forecastCodes) : undefined;
+    return n ? whyNoLine(n) : 'no consensus for enough of its members to blend.';
+  }, [benchNotes, cfg]);
 
   // ⚠⚠ FITTED ON THE REPORTED YEARS, NOT ON `points` — the LTM point is deliberately out. The
   // interval into it is a quarter or two, not a year; a log-linear regression that treats it as a
@@ -317,16 +527,59 @@ export default function MetricGrowthCard({
     // The trend is fitted on the RAW series, so it has to ride the same multiplier as the line it
     // belongs to — otherwise the dashed fit floats off its own data.
     const trendScale = indexed ? 100 / ((ownByX.get(indexed.anchor) as number)) : 1;
+    const benchBase = indexed ? benchRawByX?.get(indexed.anchor) ?? null : null;
+    const benchScale = benchBase && benchBase > 0 ? 100 / benchBase : 1;
     // ⚠ The x UNION, not our own periods: an index reaches back further than most books, and
     // clipping it to ours would redraw the benchmark's history whenever a holding changed.
     const xs = new Set<number>(points.map((p) => p.year));
     if (plotBench) for (const x of plotBench.keys()) xs.add(x);
+    // The forecast reaches PAST every reported year, so it extends the axis rather than
+    // filling it. Its seed x already exists (it is the last actual).
+    for (const m of [forecastByX, benchForecastByX]) if (m) for (const x of m.keys()) xs.add(x);
+    // ⚠ OFF THE **RAW** SERIES, NOT THE PLOTTED ONE. A rebase is one constant per series and
+    // divides out of `v / prev`, so the step is the same number either way — but computing it on
+    // the raw values means it cannot change when the axis flips to absolute on a sign change, and
+    // it keeps the non-positive-base refusal looking at the real figures. See `stepChanges`.
+    const ownStep = stepChanges(ownByX);
+    const benchStep = benchRawByX ? stepChanges(benchRawByX) : null;
+    // ⚠⚠ A FORECAST YEAR STEPS WITHIN ITS OWN SERIES. Read off the actual line's steps it has
+    // none — that line stops at the last filing — so every estimate hovered as a bare dash,
+    // which is the one thing a consensus is never short of: an expected growth rate. Because
+    // the seed IS the newest actual, the first estimate's step is measured from it: FY2026e
+    // against the LTM is "how much growth is priced in from where we actually are", which is
+    // the number worth reading. FY2027e is then against FY2026e — expectation on expectation,
+    // and the row says "analyst est." so it cannot be mistaken for a realised step.
+    const fcStep = forecastByX ? stepChanges(forecastByX) : null;
+    const bfcStep = benchForecastByX ? stepChanges(benchForecastByX) : null;
     return [...xs].sort((a, b) => a - b).map((year) => {
       const v = plotOwn.get(year) ?? null;
       const b = plotBench ? plotBench.get(year) ?? null : null;
       const t = trendByYear.get(year);
+      // ⚠ THE SAME MULTIPLIER AS THE LINE IT CONTINUES. On a blend the server has already
+      // rebased the forecast onto the ACTUAL it extends (`_FORECAST_BASE`), so it arrives on
+      // the actual's scale; on a single company it is raw EPS, the same units as the actual.
+      // Either way it takes this card's own rebase, never one of its own — a forecast
+      // rebased independently restarts at 100 beside an actual at 1,800.
+      // ⚠⚠ EACH FORECAST TAKES **ITS OWN** LINE'S MULTIPLIER. `rebaseSeries` divides each series by
+      // its own value at the shared anchor, so ours and the index's are two different constants —
+      // scaling the index's forecast by ours would leave it floating off the index it continues, at
+      // whatever ratio the two happened to be at the anchor. That is a wrong number that still
+      // draws a plausible line, which is the failure mode this card keeps removing.
+      const fc = forecastByX?.get(year) ?? null;
+      const bfc = benchForecastByX?.get(year) ?? null;
+      const scaleFc = (x: number | null, k: number) => (x == null ? null
+        : linear ? x : (x > 0 ? x * k : null));
       return {
         year,
+        // Tooltip only, never plotted — the per-period move. The index ON the axis is already
+        // cumulative growth since the anchor; this is the part it hides.
+        step: ownStep.get(year) ?? null,
+        benchStep: benchStep?.get(year) ?? null,
+        forecastStep: fcStep?.get(year) ?? null,
+        benchForecastStep: bfcStep?.get(year) ?? null,
+        // The estimate in its own units — a single company only, same rule as `rawValue`: a
+        // blend has no currency for it to be in.
+        rawForecast: isAgg ? null : (forecastByX?.get(year) ?? null),
         // A log axis can't plot ≤ 0; a LINEAR one can, which is the whole point of `crossesZero`.
         value: linear ? v : (v != null && v > 0 ? v : null),
         // ⚠ NO TREND ON A SIGN-CHANGING SERIES. `logLinearFit` regresses ln(value) and silently
@@ -343,13 +596,15 @@ export default function MetricGrowthCard({
         // call one of them actual. Null here means the tooltip shows the index alone, which is
         // the whole truth available. The benchmark is always a blend, so it never has one.
         rawValue: isAgg ? null : (ownByX.get(year) ?? null),
+        forecast: scaleFc(fc, trendScale),
+        benchForecast: scaleFc(bfc, benchScale),
       };
     });
-  }, [points, fit, linear, indexed, ownByX, benchRawByX, isAgg]);
+  }, [points, fit, linear, indexed, ownByX, benchRawByX, isAgg, forecastByX, benchForecastByX]);
 
   // Log axis: pad the domain (multiplicatively) so the min/max points + trend endpoints don't clip.
   const logDomain = useMemo(() =>
-    paddedLogDomain(chartData.flatMap((d) => [d.value, d.trend, d.bench]).filter((v): v is number => v != null)),
+    paddedLogDomain(chartData.flatMap((d) => [d.value, d.trend, d.bench, d.forecast, d.benchForecast]).filter((v): v is number => v != null)),
   [chartData]);
 
   /**
@@ -489,9 +744,10 @@ export default function MetricGrowthCard({
           <div>
             <ResponsiveContainer width="100%" height={320}>
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
-                style={{ cursor: 'pointer' }} onClick={() => setShowHoldings(true)}>
+                style={{ cursor: 'pointer' }}
+                onClick={() => setShowHoldings(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tickFormatter={(x: number) => (ltm && x === ltm.year ? "LTM" : xToPeriod(x))}
+                <XAxis dataKey="year" tickFormatter={(x: number) => periodTick(x, ltmXs)}
                   tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
                 {linear ? (
                   // ⚠ LINEAR AND ABSOLUTE — a ratio, or a level series that changes sign. The
@@ -504,30 +760,91 @@ export default function MetricGrowthCard({
                     tick={{ fontSize: 12, fill: chartTheme.axisTick }}
                     tickFormatter={(v: number) => (indexed ? fmtIndex(v) : fmt(v))} width={60} />
                 )}
-                {/* ⚠ THE HOVER READS THE ACTUAL NUMBER, NOT THE AXIS. With the lines indexed, the
-                    plotted value is "112.4" — true but not a fact about the company. The raw value
-                    rides along on the row (`rawValue`/`rawBench`) and is what gets shown, with the
-                    index in parentheses so the point on screen is still identifiable. When the
-                    rebase refused, plotted IS raw and the parenthetical is dropped rather than
-                    printed twice. A blended index has no raw value at all — `currency: null`,
-                    there is no portfolio share count — so it correctly shows the index alone. */}
-                <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
+                {/* ⚠⚠ THE HOVER NEVER PRINTS A BARE INDEX, AND WHAT IT PRINTS INSTEAD IS THE STEP —
+                    the move from the period before, not the growth since the anchor. Since-anchor
+                    is what the chart ALREADY SHOWS: both lines start at 100 together, so how far
+                    apart they have drawn is that comparison, and restating it in the hover adds
+                    nothing. Which line grew faster in the year under the cursor is invisible up
+                    there — two lines can both be climbing steeply — and that is what the hover is
+                    for. A single company keeps its ACTUAL value in front of the step; a blended
+                    portfolio and a benchmark have none to keep (`currency: null` — a blend of
+                    members each rebased to 100 has no currency it could be in), so they show the
+                    step alone, which is real for a blend because the units divide out of a ratio.
+                    When the rebase refused (a ratio card, or a level that changes sign), plotted IS
+                    the real number and prints exactly as it did before indexing existed.
+                    ⚠ `labelFormatter` IS NOT COSMETIC EITHER: without it the header is the raw x —
+                    "2026.25", a year that does not exist — on the hover of the very point the
+                    reader opened the chart to check. It is the SAME formatter as the axis tick, so
+                    a point cannot be named one thing below the chart and another inside it.
+                    ⚠ AND THE LTM HEADER CARRIES ITS WINDOW AND ITS AFFORDANCE. "LTM" alone names a
+                    period the reader cannot look up — it is not on the axis anywhere else, it is
+                    not a fiscal year, and the filings under it appear in no other view in the app.
+                    Naming the quarter it ends in makes it locatable; the LTM ⓘ under the chart
+                    carries the arithmetic. */}
+                <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }} itemSorter={benchmarkFirst}
+                  labelFormatter={(x) => (typeof x !== 'number' ? x
+                    : !ltmXs.has(x) ? periodTick(x, ltmXs)
+                      // ⚠ THE REAL QUARTER-END, NOT THE x. The LTM now sits a MEASURED fraction of a
+                      // year past the last reported one, so its x is a position on the axis and no
+                      // longer decodes to a date — `periodTick` would round 2025.24 to "2025 Q2",
+                      // naming a quarter the window does not end in.
+                      : `LTM · 12 months to ${(x === ltm?.year ? ltm?.date : benchLtm?.date)
+                        ?? periodTick(x)}`)}
                   formatter={(v, name, item) => {
-                    const row = item?.payload as { rawValue?: number | null } | undefined;
+                    const row = item?.payload as {
+                      year?: number;
+                      rawValue?: number | null; rawForecast?: number | null;
+                      step?: Step | null; benchStep?: Step | null;
+                      forecastStep?: Step | null; benchForecastStep?: Step | null;
+                    } | undefined;
                     const plotted = typeof v === 'number' ? v : null;
-                    const label = name === 'trend' ? 'Trend'
-                      : name === 'bench' ? (benchLabel ?? 'Benchmark')
-                        : cfg.title;
-                    // A ratio is already in real units; so is the absolute fallback when the
-                    // rebase refused. Both print exactly as they did before indexing existed.
-                    if (isRatio || !indexed) return [`${ccy}${fmt(plotted)}`, label];
-                    // Everything else on this chart is an INDEX. Only our own line, and only for a
-                    // single company, has an actual value behind it — the trend, the benchmark and
-                    // a blended portfolio do not, and inventing one for them is how an index comes
-                    // to be read as an amount.
-                    const raw = name === 'value' ? row?.rawValue ?? null : null;
-                    if (raw == null) return [fmtIndex(plotted, 1), label];
-                    return [`${ccy}${fmt(raw)}  (index ${fmtIndex(plotted, 1)})`, label];
+                    // ⚠ WHOSE LINE, NOT WHICH METRIC. The card's own heading already says
+                    // "EPS (excl. non-recurring)"; repeating it here spent the row on something the
+                    // reader can see and left the two lines distinguished only by colour. The
+                    // benchmark row was always named this way — this is the other side of it.
+                    // ⚠⚠ THE SEED POINT IS DROPPED FROM THE HOVER — see `forecastSeedX`. It is the
+                    // newest ACTUAL, carried into the forecast series only so the striped line
+                    // leaves the solid one; listed, it printed the LTM twice, the second time
+                    // labelled as an estimate — which reads either as analysts forecasting the past
+                    // or as two sources agreeing. Recharts drops a row when the formatter returns a
+                    // non-array nullish value, and that is the only way to OMIT one: a row with an
+                    // empty value still takes a line and still reads as a series with nothing to say.
+                    const rowYear = row?.year;
+                    if ((name === 'forecast' && rowYear === forecastSeedX)
+                      || (name === 'benchForecast' && rowYear === benchForecastSeedX)) return null;
+                    // ⚠ THE FORECAST ROWS SAY SO IN THE HOVER TOO. On screen they are striped; in a
+                    // list of four labelled values, ink is not available and the word has to be.
+                    const label = name === 'bench' ? (benchLabel ?? 'Benchmark')
+                      : name === 'benchForecast' ? `${benchLabel ?? 'Benchmark'} — analyst est.`
+                        : name === 'forecast' ? `${ownLabel} — analyst est.`
+                          : ownLabel;
+                    const since = pctSince(
+                      name === 'bench' ? row?.benchStep
+                        : name === 'forecast' ? row?.forecastStep
+                          : name === 'benchForecast' ? row?.benchForecastStep
+                            : row?.step, ltmXs);
+                    const tail = since ? `  ·  ${since}` : '';
+                    // A ratio is already in real units; so is the absolute fallback when the rebase
+                    // refused. Both keep the number they always printed, with the step beside it.
+                    if (isRatio || !indexed) return [`${ccy}${fmt(plotted)}${tail}`, label];
+                    // Everything else on this chart is an INDEX — a bare "142.6" is unreadable
+                    // without hunting the anchor year out of the legend, and it wears the shape of a
+                    // real quantity. Only our own line, and only for a single company, has an actual
+                    // value behind it; the benchmark and a blended portfolio do not (`currency:
+                    // null` — a blend of members each rebased to 100 has no currency it could be
+                    // in), and inventing one for them is how an index is read as an amount. So they
+                    // show the step alone, which IS real for a blend: a ratio of two of the line's
+                    // own points, units divided out.
+                    // ⚠ A DASH ONLY WHERE THE ROW WOULD OTHERWISE BE EMPTY — the first point of a
+                    // series has no previous period, and a blend has no value to fall back on.
+                    // ⚠ A SINGLE COMPANY'S ESTIMATE HAS UNITS TOO — EUR 23.23 a share is the figure
+                    // analysts actually published, and showing only its growth rate would hide the
+                    // level on the one line that has one. A blend has no currency for it to be in,
+                    // exactly as with `rawValue`.
+                    const raw = name === 'value' ? row?.rawValue ?? null
+                      : name === 'forecast' ? row?.rawForecast ?? null : null;
+                    if (raw == null) return [since || '—', label];
+                    return [`${ccy}${fmt(raw)}${tail}`, label];
                   }} />
                 {/* ⚠ ON EVERY LINEAR AXIS, NOT JUST A RATIO'S. Zero is where a sign-changing level
                     changes meaning — profit above it, loss below — and without the line a small
@@ -535,7 +852,14 @@ export default function MetricGrowthCard({
                 {linear && <ReferenceLine y={0} stroke={chartTheme.zeroLine} />}
                 {isRatio && avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 <Line dataKey="value" name="value" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
-                {!linear && <Line dataKey="trend" name="trend" type="monotone" stroke={chartTheme.warn} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />}
+                {/* ⚠ `tooltipType="none"` — OUT OF THE HOVER, ON PURPOSE. It is a fitted line, not
+                    a measurement: its value at a point is what a constant-growth exponential says
+                    should have happened, printed in the same ink and the same list as two figures
+                    that did. The fit is already described where it belongs — the R² and CAGR tiles
+                    above the chart, and the dashed stroke + legend below it. Recharts' default
+                    tooltip drops any series typed `none`, so this is declared on the series rather
+                    than filtered in the formatter (which can blank a row but not remove it). */}
+                {!linear && <Line dataKey="trend" name="trend" tooltipType="none" type="monotone" stroke={chartTheme.warn} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />}
                 {/* ⚠ ONE COLOUR FOR THE BENCHMARK ON ALL FOURTEEN CHARTS — green (`chartTheme.pos`).
                     It has to be the same everywhere or the eye re-learns which line is the index on
                     every card. Validated, not eyeballed (`dataviz/scripts/validate_palette.js`):
@@ -543,13 +867,69 @@ export default function MetricGrowthCard({
                     ⚠ ON THIS CARD IT ALSO SITS BESIDE THE AMBER TREND, and green↔amber is ΔE 7.9
                     under protanopia — the 6–8 floor band, legal only with a second encoding. It has
                     two: the trend is DASHED where the benchmark is solid, and both are named. */}
+                {/* ⚠ A STRIPED LINE WITH A DOT PER FORECAST YEAR, matching the solid line it
+                    continues — the estimates ARE points (FY2026, FY2027, …), one consensus each,
+                    and a fine dotted stroke with smaller markers read as an annotation rather than
+                    as a series carrying values. The stripe is what says "expected"; the dot is what
+                    says "this is a figure". `r` matches its own line, not the other one's.
+                    ⚠⚠ `strokeDasharray: '0'` ON THE DOT IS LOAD-BEARING, NOT TIDYING. Recharts builds
+                    each marker as `{r: 3, ...lineProps, ...dotProps}` — so the LINE's dash pattern
+                    lands on the little circle's own outline and chops it into arcs. The markers came
+                    out as broken rings while the solid line's were whole, which reads as a rendering
+                    fault rather than as a forecast. The dot object is spread last, so overriding it
+                    here is the fix. */}
+                {forecastByX && <Line dataKey="forecast" name="forecast" type="monotone"
+                  stroke={chartTheme.accent} strokeWidth={2} strokeDasharray="4 3"
+                  dot={{ r: 2.5, strokeDasharray: '0' }} connectNulls />}
+                {benchForecastByX && <Line dataKey="benchForecast" name="benchForecast" type="monotone"
+                  stroke={chartTheme.pos} strokeWidth={2} strokeDasharray="4 3"
+                  dot={{ r: 2, strokeDasharray: '0' }} connectNulls />}
                 {benchByX && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />{cfg.title}{isRatio ? ' (avg dashed)' : ''}</span>
+              <LegendItem color={chartTheme.accent} label={ownLabel} />
+              {/* ⚠ ONE ENTRY PER LINE, EACH WEARING ITS OWN STROKE. The average used to be the words
+                  "(avg dashed)" appended to the series entry, beside a SOLID swatch — a sentence
+                  asking the reader to work out which mark on the chart it meant. */}
+              {isRatio && avg != null && (
+                <LegendItem color={chartTheme.accent} stroke="dashed" label={`${ownLabel} average`} />
+              )}
               {!linear && (
-                <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.warn }} />Trend (R² {fit.r2 == null ? '—' : fit.r2.toFixed(2)})</span>
+                <LegendItem color={chartTheme.warn} stroke="dashed"
+                  label={`Trend (R² ${fit.r2 == null ? '—' : fit.r2.toFixed(2)})`} />
+              )}
+              {/* ⚠⚠ DOTTED, AND NAMED "analyst est." — NOT A SECOND MEASUREMENT. Everything else on
+                  this chart is something that happened; this is what people expect to happen, and
+                  the two must not be able to be confused at a glance. It is dotted where the trend
+                  is dashed and the series solid, it carries its own legend entry rather than a
+                  parenthetical, and it is out of the fit, the CAGR and the tiles. ⚠ ITS COVERAGE IS
+                  THIN — ~1,850 estimate rows against 39,327 actual ones — so on a book it is drawn
+                  from whichever holdings analysts cover, gated by the blend's own coverage floor. */}
+              {forecastByX && (
+                <LegendItem color={chartTheme.accent} stroke="striped"
+                  label={`${ownLabel} — analyst est.`} />
+              )}
+              {benchForecastByX && (
+                <LegendItem color={chartTheme.pos} stroke="striped"
+                  label={`${benchLabel} — analyst est.`} />
+              )}
+              {/* ⚠⚠ A REFUSED FORECAST MUST NAME ITSELF, OR A CORRECT ANSWER READS AS A BUG. Measured
+                  2026-08-14: switching the benchmark from AEX to ACWI dropped the index's expectation
+                  line — 22 of 22 AEX names carry a consensus against 351 of 1,715 ACWI names (20%),
+                  far under the blend's coverage floor, so every forecast period is rightly withheld.
+                  On screen that was a striped line on the book, none on the index, and no way to
+                  tell "the index has no expectations" from "too few of its members are covered".
+                  ⚠ ONLY WHEN WE ASKED AND IT DREW ITS ACTUAL — otherwise this would fire on a card
+                  with no forecast configured, or on an index that failed to load at all. */}
+              {cfg.forecastCodes?.length && benchByX && !benchForecastByX && (
+                <span className="text-fg-faint"
+                  title={'Analysts do not cover enough of this index for a blended consensus. The '
+                    + 'floor is the same one every other line on this tab clears, and a forecast '
+                    + 'drawn from a fifth of the constituents would be a confident line over a '
+                    + 'fraction of the index it names.'}>
+                  {benchLabel}: {benchForecastWhy}
+                </span>
               )}
               {/* ⚠ THE AXIS CHANGED, SO IT SAYS SO. A reader who knows this card as an indexed log
                   chart would otherwise read absolute euros as an index. It also names WHY, because
@@ -565,15 +945,26 @@ export default function MetricGrowthCard({
                   absolute — the series crosses zero
                 </span>
               )}
+              {/* ⚠ TWO "LTM" TICKS ARE A FINDING, NOT A GLITCH — and unexplained they read as one.
+                  Each blend stamps its trailing year with the newest filing behind it, so when the
+                  book and the index end on different quarters the last stretch of the two lines is
+                  measured over different twelve months. Silence there would let a reader take the
+                  gap for performance. */}
+              {ltmSplit && (
+                <span className="text-fg-faint"
+                  title={'The two lines’ trailing twelve months end on different quarters — '
+                    + 'each is stamped with the newest filing behind it. The last point of one '
+                    + 'therefore covers a slightly later year than the other, so part of the gap '
+                    + 'between them at the right-hand edge is calendar, not performance.'}>
+                  two LTM windows — different quarter-ends
+                </span>
+              )}
               {benchByX && (
-                <span className="flex items-center gap-1.5"
+                <LegendItem color={chartTheme.pos} label={benchLabel}
                   title={isRatio ? undefined
                     : indexed
                       ? `Both lines are indexed to 100 at ${indexed.anchor}, the first year they share. Only the growth is being compared — hover any point for the actual value.`
-                      : 'Absolute values: the two series share no year with a positive value, so there is no honest base to index them on.'}>
-                  <span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />
-                  {benchLabel}
-                </span>
+                      : 'Absolute values: the two series share no year with a positive value, so there is no honest base to index them on.'} />
               )}
               {note && (
                 <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">

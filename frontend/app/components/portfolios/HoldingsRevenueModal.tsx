@@ -8,6 +8,7 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { cancelJob, startJob, type JobToast } from '../../../lib/stores/jobs';
+import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { BADGE_TONE, StateBadge } from '../StateBadge';
 import { MIN_YEAR_COVERAGE_PCT } from './marginData';
@@ -40,6 +41,17 @@ type Row = {
    *  which makes every empty period `not_tried` rather than `no_data`. See `cellState`. */
   financials_fetched_at?: string | null;
   status: 'ok' | 'unsubscribed' | 'no_data'; revenue: Record<string, number | null>;
+  /**
+   * The FILINGS this row's `LTM` cell was rolled from, and the rule that rolled them.
+   *
+   * ⚠⚠ THE LTM COLUMN IS THE ONLY ONE THIS APP ASSEMBLED. Every other cell is a figure the company
+   * filed for that fiscal period; the LTM is `k` consecutive filings combined under a declared
+   * rule, and those quarters reach the browser NOWHERE else — the tab's "Quarterly" toggle looks
+   * like the place to check and is not, because the server rolls those too, so it shows more
+   * trailing years rather than the filings under them. Hence one ⓘ per cell of this column.
+   */
+  ltm_parts?: { date: string; value: number }[] | null;
+  ltm_rule?: string | null;
   /** INDEX ROWS ONLY — the numerator the weight beside it was divided out of (cap ÷ Σcap).
    *  Absent on a portfolio, where the weight is a holding weight and no cap is involved. */
   market_cap_eur?: number | null;
@@ -89,6 +101,28 @@ export const longDate = (iso: string): string =>
  * figures sitting half a line off their neighbours in any row with a gap period.
  */
 const NBSP = ' ';
+
+/**
+ * Is this column an analyst FORECAST rather than a reported period? The `e` suffix is the
+ * backend's (`2026e`), chosen so a consensus can never be merged into the year it forecasts —
+ * an off-calendar filer can have both a filed FY2026 and a FY2026 estimate.
+ */
+export const isEstimatePeriod = (p: string) => p.endsWith('e');
+
+/**
+ * Period order: reported, then `LTM`, then the forecast years — the client twin of the backend's
+ * `_period_sort_key`.
+ *
+ * ⚠⚠ A PLAIN SORT IS WRONG IN A WAY THAT LOOKS LIKE DATA. `'LTM' > '2026e'` lexically, so the
+ * trailing twelve months — the newest thing actually known — would sit AFTER five forecast years.
+ * That is not only a column order: the per-row sorts feed the Rebased base (the FIRST period) and
+ * the YoY comparison (the PREVIOUS period), so an estimate would become the thing a reported year
+ * is measured against.
+ */
+export const periodOrder = (a: string, b: string) => {
+  const rank = (p: string) => (p === 'LTM' ? 1 : isEstimatePeriod(p) ? 2 : 0);
+  return rank(a) - rank(b) || a.localeCompare(b);
+};
 
 /** A period label → the date it ends on. The client twin of `_fundamental_blend.period_end`, and
  *  the only reason a cell can tell "we asked and there is nothing" from "nobody has asked yet": a
@@ -156,6 +190,47 @@ type View = 'reported' | 'rebased' | 'yoy';
  * Fixing the CONTENT width fixes the layout under any algorithm: the base widths are identical in
  * all three views, so whatever the browser distributes, it distributes the same way.
  */
+/** `sum` → `+`, `mean` → `·`, `last` → `→`. ⚠ THE OPERATOR IS THE EXPLANATION, not decoration: a
+ *  share count is the MEAN of its quarters (it is already an average over each one), so a `+`
+ *  between them would say the figure is four times what it is. */
+const LTM_JOIN: Record<string, string> = { sum: '+', mean: '·', last: '→' };
+const LTM_RULE_TEXT: Record<string, string> = {
+  sum: 'Summed — a flow measured over each period, so the filings in the window add to a year of it.',
+  mean: 'AVERAGED, not summed — this line is already an average over each quarter, so adding them '
+    + 'would report several times the figure.',
+  last: 'The latest filing in the window — a balance is a point in time, not a flow.',
+};
+
+/**
+ * The arithmetic behind one LTM cell.
+ *
+ * ⚠ THE WINDOW IS NOT "THE LAST FOUR QUARTERS", which is why the dates are listed rather than
+ * implied: it is `k` consecutive filings — two for a semi-annual filer — refused outright when they
+ * span more than a year, and a quarter dropped as implausible is absent from it. What is printed is
+ * what the number was computed from, which is deliberately not everything the vendor filed.
+ *
+ * ⚠ ALWAYS THE REPORTED FIGURE, whatever the view switch says. Rebased and YoY transform the cell
+ * AFTER the roll-up, so filings that reconciled to an index of 118.4 would be arithmetic the reader
+ * cannot check. The tip names the reported value it does add to.
+ */
+function LtmTip({ parts, rule, reported, fmt }: {
+  parts: { date: string; value: number }[];
+  rule?: string | null;
+  reported: number | null;
+  fmt: (v: number | null | undefined) => string;
+}) {
+  const op = LTM_JOIN[rule ?? 'sum'] ?? '·';
+  return (
+    <AspectCard
+      what="Trailing twelve months — the latest full year of trading, which ends mid-fiscal-year rather than on a fiscal year end."
+      where={<span className="font-mono text-[11px]">
+        {parts.map((p) => fmt(p.value)).join(` ${op} `)} = {fmt(reported)}
+      </span>}
+      when={<span className="font-mono text-[11px]">{parts.map((p) => p.date).join('  ·  ')}</span>}
+      how={LTM_RULE_TEXT[rule ?? 'sum'] ?? 'Per this line’s declared roll-up.'} />
+  );
+}
+
 const Cell = ({ children }: { children: React.ReactNode }) => (
   <span className="inline-block w-[4.5rem] text-right tabular-nums">{children}</span>
 );
@@ -315,7 +390,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
       return w && w > 0 ? w : 0;
     };
     for (const r of data.rows) {
-      const periods = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort();
+      const periods = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort(periodOrder);
       if (!periods.length) {
         // Nothing filed at all — the row already says so via `status`, so no second badge.
         continue;
@@ -521,7 +596,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     const v = r.revenue[y];
     if (v == null) return null;
     if (view === 'reported') return v;
-    const periods = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort();
+    const periods = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort(periodOrder);
     if (view === 'rebased') {
       const base = r.revenue[periods[0]] as number;
       return base > 0 ? 100 * v / base : null;
@@ -568,8 +643,46 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * With no stamp it says so rather than implying a recent check: the row's figures prove a fetch
    * happened, they just cannot say when.
    */
-  const stateTitle = (r: Row, state: 'no_data' | 'not_tried' | 'unsubscribed',
+  const stateTitle = (r: Row,
+                      state: 'no_data' | 'not_tried' | 'unsubscribed' | 'not_covered'
+                        | 'reported_actual',
                       y: string): string => {
+    /**
+     * ⚠⚠ IT STATES WHAT IS STORED, NOT WHY — because the two candidate reasons are not
+     * distinguishable from here. Either analysts do not cover this company (most of a broad index:
+     * measured 2026-08-14, 351 of ACWI's 1,715 charted names carry a consensus), or the estimates
+     * feed has never been fetched for it. Unlike the reported statements there is NO per-feed
+     * timestamp to separate them — `needs()` probes for a sentinel row, so an absence is an absence.
+     *
+     * ⚠ AN EARLIER WORDING ASSERTED THE FIRST AND SAID "Refresh cannot fill it". That was wrong
+     * twice: the cause was never established, and the row Refresh was at the time narrowed to
+     * `feeds=statements` and did not even ask for estimates. Both halves are fixed — the button
+     * now asks (`refreshRow`) and this sentence points at it instead of ruling it out.
+     */
+    if (state === 'reported_actual') {
+      return `This company has already REPORTED ${y.slice(0, -1)} — the figure is in the `
+        + `${y.slice(0, -1)} column to the left. The forecast columns are the union across `
+        + 'holdings, so a December filer whose newest year is one back puts this column on the '
+        + 'table while a June filer beside it has already closed that year. Nothing is missing.';
+    }
+    if (state === 'not_covered') {
+      // ⚠⚠ TWO SENTENCES, BECAUSE ONE OF THEM IS ACTIONABLE AND THE OTHER IS NOT. A row that
+      // carries a consensus for ANY year proves the estimates feed was fetched for it, so an
+      // empty year is analysts not forecasting that far — pressing Refresh again cannot help. A
+      // row with none at all is genuinely ambiguous (never asked, or asked and uncovered), and
+      // there is no per-feed timestamp to separate those — so it points at the button instead of
+      // ruling it out. Saying the first sentence over the second case is what sent me looking for
+      // a missing fetch on a company that simply files in June.
+      const has = Object.keys(r.revenue).some(
+        (p) => isEstimatePeriod(p) && r.revenue[p] != null);
+      return has
+        ? `Analysts cover this company, but publish no ${y.slice(0, -1)} figure — their `
+          + 'consensus does not reach this year. Refreshing cannot add it.'
+        : 'No analyst consensus stored for this company. Estimates are a separate GuruFocus feed '
+          + 'from the reported statements, so press Refresh on this row to ask for it. Most '
+          + 'companies in a broad index are not covered at all, in which case an empty cell after '
+          + 'that is the answer rather than a gap.';
+    }
     // ⚠⚠ A PERIOD THAT HAS NOT ENDED IS NOT "NOT TRIED" — nobody can have reported it, and no
     // number of presses will change that. Both sentences are arithmetically true ("this period
     // ends after our last fetch"), but one sends the reader to press Refresh for a fiscal year
@@ -601,8 +714,25 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
       + ' Refreshing will not change the answer unless GuruFocus has published something since.';
   };
 
-  const cellState = (r: Row, y: string): 'value' | 'no_data' | 'not_tried' | 'unsubscribed' => {
+  const cellState = (r: Row, y: string):
+  'value' | 'no_data' | 'not_tried' | 'unsubscribed' | 'not_covered' | 'reported_actual' => {
     if (r.revenue[y] != null) return 'value';
+    /**
+     * ⚠⚠ AN EMPTY FORECAST CELL IS NOT ONE FACT BUT THREE, and `No data` / `—` would misdescribe
+     * all of them. There is no "did we fetch this period" question for a year that has not
+     * happened, so the ordinary two states do not apply.
+     *
+     * ⚠ THE FIRST ONE IS THE SURPRISE: THE COMPANY HAS ALREADY REPORTED THAT YEAR. The estimate
+     * columns are the UNION across holdings, so a December filer whose newest filing is 2025 puts a
+     * `2026e` column on the table — and a JUNE filer sitting beside it has already closed FY2026.
+     * Measured on KLA Corp: actual FY2026 = 3.76 filed 2026-06-30, with a consensus running
+     * 2027e–2031e. Its `2026e` cell is empty because that year is history for KLA, and calling that
+     * "no analyst consensus" is wrong twice over — it has six years of it, and the figure the
+     * reader wants is one column to the left.
+     */
+    if (isEstimatePeriod(y)) {
+      return r.revenue[y.slice(0, -1)] != null ? 'reported_actual' : 'not_covered';
+    }
     // ⚠ A CARRIED PERIOD IS A VALUE, NOT A GAP. The line used a number here — this row's latest —
     // so badging it `No data` would deny a figure that is visibly in the average, and the weight
     // column beneath it would be a share of nothing. The tooltip says where it came from.
@@ -615,7 +745,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     // (it was inside Vivendi until the 2021 spin-off), and those cells read "not tried" purely
     // because `financials_fetched_at` is NULL on every row until its next fetch. The data in front
     // of us answers the question the timestamp was added for.
-    const reported = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort();
+    const reported = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort(periodOrder);
     const newest = reported[reported.length - 1];
     // Lexical order is chronological for both vocabularies — `2015` < `2018`, `2025-Q1` < `2025-Q3`
     // — and every period in one table shares one vocabulary.
@@ -1096,7 +1226,19 @@ market cap it was weighted by in that period, and the weight that produced.">
                           ⚠ AND NO `title` ON THE BADGE HERE, or both tooltips fire. */}
                       <span className="block">{
                         state === 'value'
-                          ? <Cell>{cellText(cellOf(r, y))}</Cell>
+                          // ⚠ THE ⓘ ONLY WHERE THERE IS ARITHMETIC TO SHOW — this column, this row,
+                          // and only when the company actually has a trailing year. Every other
+                          // cell is a filed figure with nothing underneath it, and an icon there
+                          // would promise a derivation that does not exist.
+                          ? (y === 'LTM' && r.ltm_parts?.length
+                            ? (
+                              <span className="inline-flex items-center gap-1">
+                                <Cell>{cellText(cellOf(r, y))}</Cell>
+                                <InfoTip content={<LtmTip parts={r.ltm_parts} rule={r.ltm_rule}
+                                  reported={r.revenue.LTM ?? null} fmt={fmt} />} />
+                              </span>
+                            )
+                            : <Cell>{cellText(cellOf(r, y))}</Cell>)
                           : (
                             // ⚠ `cursor-default` — the badge already reads as a state, so the help
                             // cursor adds nothing but a question mark dragged across the table.
@@ -1106,7 +1248,18 @@ market cap it was weighted by in that period, and the weight that produced.">
                                 ? <StateBadge label="Unsubscribed" tone={BADGE_TONE.warn} />
                                 : state === 'no_data'
                                   ? <StateBadge label="No data" tone={BADGE_TONE.warnSoft} />
-                                  : <Cell>—</Cell>}
+                                  /* ⚠⚠ A FORECAST CELL NEVER RENDERS A BARE DASH. After pressing
+                                     Refresh on a row, a dash is unreadable: it cannot say whether
+                                     the request landed, whether the year is covered, or whether
+                                     the company simply filed it already. Each of those is a
+                                     different next step, so each gets a word. The dash stays for
+                                     `not_tried` alone — the one state that really is "we have not
+                                     asked", and the only one where saying nothing is honest. */
+                                  : state === 'reported_actual'
+                                    ? <StateBadge label="Reported" tone={BADGE_TONE.warnSoft} />
+                                    : state === 'not_covered'
+                                      ? <StateBadge label="No estimate" tone={BADGE_TONE.warnSoft} />
+                                      : <Cell>—</Cell>}
                             </InfoTip>
                           )
                       }</span>
@@ -1440,8 +1593,21 @@ export default function HoldingsRevenueModal({
    * bulk buttons above use. It outlives this modal, which matters: three feeds against GuruFocus
    * is not instant, and a reader who closes the drill-down has not cancelled anything.
    *
-   * ⚠ `force=true&feeds=statements` — one API call that fills every line this table draws, and the
-   * force is what makes it able to change a row that already has figures (see `onRefresh`).
+   * ⚠⚠ `feeds=all`, AND IT USED TO BE `statements` — THREE API CALLS INSTEAD OF ONE, DELIBERATELY.
+   * That narrowing was correct and measured (DSM-Firmenich, 2026-08-12: the row refresh was
+   * spending 3 calls where 1 sufficed) on the argument that "analyst estimates and indicators
+   * contribute NOTHING to that table". They do now: the `2026e…` columns to the right of LTM ARE
+   * the estimates feed. Left narrowed, this button ran, succeeded, and left the very cells a reader
+   * pressed it for still empty — a refresh that cannot fill a visible column is a broken
+   * affordance, and the cost is two calls on ONE deliberately-pressed row.
+   *
+   * ⚠ THE BULK PATHS STAY ON `statements`, and the distinction is the whole point:
+   * `FundamentalGridPane` and `BenchmarksPanel` fill hundreds to ~1,700 constituents at a time, so
+   * tripling them is a quota event, not a rounding error — and the grid those two draw genuinely
+   * does not show estimates. One row, pressed on purpose, is the only place the extra calls buy
+   * something the reader asked for.
+   *
+   * ⚠ `force` is what makes it able to change a row that already has figures (see `onRefresh`).
    *
    * ⚠ AND THE READ CACHES ARE DROPPED WHEN IT LANDS, not when it started. `apiFetch` invalidates on
    * the request that STARTS a job, which is minutes before the data moves; without this the reload
@@ -1451,7 +1617,7 @@ export default function HoldingsRevenueModal({
   const refreshRow = (reload: () => void) => async (row: Row) => {
     const started = await startJob(
       `${API_URL}/api/benchmarks/company/${row.company_id}/fundamentals/ingest/job`
-      + '?force=true&feeds=statements',
+      + '?force=true&feeds=all',
       `${row.name} fundamentals`);
     void started.done.then((job) => {
       if (job.status !== 'failed') {
