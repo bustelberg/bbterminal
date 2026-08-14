@@ -10,11 +10,12 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { Stat } from './MetricGrowthCard';
+import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import CashConversionInputsModal from './CashConversionInputsModal';
 import { cashConversionByYear, type CashConversionInputs } from './cashConversionData';
 import { meanOf, paddedDomain , xToPeriod } from './marginData';
-import { benchNote, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
+import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**
  * Cash-conversion card: Free Cash Flow ÷ Net Income per fiscal year, on a LINEAR % axis. Whether
@@ -81,6 +82,7 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
   const chartData = useMemo(
     () => mergeSeries(marginByYr, benchByYr, 'margin'), [marginByYr, benchByYr]);
 
+  const own = holdingsName ?? 'FCF / Net Income';
   const avg = meanOf([...marginByYr.values()]);
   const latestYear = Math.max(-Infinity, ...marginByYr.keys());
   const latest = Number.isFinite(latestYear) ? marginByYr.get(latestYear) ?? null : null;
@@ -118,8 +120,8 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
                 <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
                 <YAxis domain={paddedDomain(withBench(marginByYr.values(), benchByYr))} tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
-                <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : 'FCF / Net Income']} />
+                <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }} itemSorter={benchmarkFirst}
+                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : own]} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {/* ⚠ 100 IS THE MEANINGFUL LINE ON THIS CHART, NOT 0. Crossing it is the event —
                     profit converting to cash or not — whereas 0 only matters in the rare year FCF
@@ -131,12 +133,16 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
-              <span className="flex items-center gap-1.5"
-                title="The faint dotted line is 100% — profit converting fully into cash. Above it is better, not an error.">
-                <span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />
-                FCF / Net Income (avg dashed · 100% dotted)
-              </span>
-              {benchByYr && <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />{benchTarget?.universe}</span>}
+              <LegendItem color={chartTheme.accent} label={own} />
+              {avg != null && <LegendItem color={chartTheme.accent} stroke="dashed"
+                label={`${own} average`} />}
+              {/* ⚠ ITS OWN ENTRY, because it is its own line — and the one a reader is most
+                  likely to misread: 100% is where profit converts fully into cash, so CROSSING it
+                  is the event this chart exists to show. Packed into the series entry as the words
+                  "100% dotted", beside a solid blue swatch, it named a mark that appears nowhere. */}
+              <LegendItem color={chartTheme.axisTick} stroke="dotted" label="100% — full conversion"
+                title="Profit converting fully into cash. Above this line is better, not an error." />
+              {benchByYr && <LegendItem color={chartTheme.pos} label={benchTarget?.universe} />}
               {note && (
                 <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">
                   {note}

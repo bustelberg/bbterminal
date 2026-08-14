@@ -38,6 +38,26 @@ import { MIN_YEAR_COVERAGE_PCT } from './marginData';
 export type BenchTarget = { universe: string; cadence: 'annual' | 'quarterly' };
 
 /**
+ * Row order in every Long Equity hover: the BENCHMARK first, then the book. Pass as `itemSorter`.
+ *
+ * ⚠⚠ IT WAS ALREADY COMING OUT THIS WAY, BY ACCIDENT, AND THAT IS THE REASON TO DECLARE IT.
+ * Recharts' default sorter is `'name'` — alphabetical on the SERIES name, not on the label the
+ * formatter produces — and every benchmark line here is named `bench`, which happens to sort before
+ * `margin`, `ratio`, `value`, `yld` and `trend`. Rename one series (or add a card whose line is
+ * called `bench_something`, or `assets`) and that card alone silently flips its two rows, on a
+ * screen of fourteen charts where the reader has learned the first row is the index. An order the
+ * eye relies on across a whole tab cannot rest on the alphabet.
+ *
+ * ⚠ THE INDEX GOES FIRST because it is the constant: it is the same line on all fourteen cards,
+ * so a fixed position makes it the thing you read past rather than the thing you have to find. The
+ * book's own line — the one that differs per card and per portfolio — reads as the answer beneath.
+ *
+ * It is a sort KEY, not a comparator: recharts sorts ascending on what this returns.
+ */
+export const benchmarkFirst = (item: { name?: unknown }): number =>
+  (item.name === 'bench' ? 0 : 1);
+
+/**
  * Fetch one `*-inputs` endpoint for a benchmark, or nothing when no benchmark is selected.
  *
  * The overlay never breaks the chart under it — a failed index costs the second line and nothing
@@ -200,6 +220,28 @@ export function mergeSeries(
  * ⚠ REFUSES RATHER THAN INVENTING ONE. A null here means the caller keeps ABSOLUTE values, which
  * is the honest fallback — the raw number is always true, it just is not comparable.
  */
+/**
+ * Does this level series change sign — i.e. can it be an INDEX ON A LOG AXIS at all?
+ *
+ * ⚠⚠ THE TWO DECISIONS ("index it?" and "which axis?") ARE ONE DECISION, AND SPLITTING THEM IS
+ * WHAT BROKE. `rebaseSeries` refused to index a sign-changing series and the card fell back to
+ * absolute values, saying so in the legend — but the Y axis stayed LOGARITHMIC and the chart data
+ * still nulled everything ≤ 0. The fallback promised the real numbers and then hid exactly the
+ * ones that had triggered it. Measured: AMD's 2015-16 losses and Intel's 2024 were invisible on
+ * both paths, so a reader saw a line that simply began late, with nothing to say why.
+ *
+ * ⚠ `!(v > 0)` RATHER THAN `v <= 0`, so a null or a NaN counts as "cannot be logged" too. A hole
+ * in the series is not a sign change, but it is equally unplottable on a log axis, and the honest
+ * axis for either is the linear one.
+ *
+ * ⚠ REVENUE NEVER TRIPS THIS. It is EPS, FCF/share and net income — the lines that go negative —
+ * which is why the check is on the DATA and not on the metric's name.
+ */
+export function seriesCrossesZero(values: Iterable<number | null | undefined>): boolean {
+  for (const v of values) if (!(typeof v === 'number' && v > 0)) return true;
+  return false;
+}
+
 export function rebaseSeries(
   own: Map<number, number | null>, bench: Map<number, number | null> | null,
 ): { own: Map<number, number | null>; bench: Map<number, number | null> | null; anchor: number } | null {

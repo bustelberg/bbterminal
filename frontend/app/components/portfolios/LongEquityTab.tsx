@@ -42,6 +42,46 @@ const BENCHMARKS = ['SP500', 'ACWI', 'AEX'];
 
 const CARDS: MetricCfg[] = [
   {
+    /**
+     * ⚠ FIRST ON THE TAB, DELIBERATELY — it is the line the whole page is about. Revenue says how
+     * much a business sold; this says what reached a share. The card indexes it to 100 at the
+     * first year it shares with the benchmark, so what is compared is the GROWTH — the same idea
+     * as /earnings' Share-Price-vs-Owner-Earnings chart, minus the price leg.
+     *
+     * ⚠⚠ "EXCLUDING NON-RECURRING ITEMS" IS THE WHOLE POINT AND IT IS ONE OF THREE NEAR-IDENTICAL
+     * LINES. GuruFocus also publishes `EPS (Diluted)` and `Earnings per Share (Diluted)`, both of
+     * which INCLUDE one-offs — an impairment, a disposal, a tax settlement. They agree with this
+     * one in most years, which is exactly what makes the wrong choice hard to catch: the series
+     * looks right until a single distorted year bends the fitted trend, and the CAGR printed above
+     * the chart IS that trend's slope. Same line `_RG_OE_CODE` uses on /earnings, so the two
+     * surfaces cannot come to mean different things by "earnings".
+     *
+     * ⚠ EPS GOES NEGATIVE, AND THE CARD ALREADY KNOWS. A loss year cannot be plotted on a log axis
+     * and cannot be a rebase base (100 × v/−2 inverts the curve), so `rebaseSeries` refuses when
+     * there is no shared positive year and the card falls back to ABSOLUTE values, saying so in
+     * the legend. That is the same treatment FCF/share gets and it is why neither is silently
+     * wrong for a loss-making company — the gap is visible instead.
+     */
+    title: 'EPS (excl. non-recurring)', noun: 'EPS', unit: 'per_share', kind: 'growth',
+    benchmarkMetric: 'eps_nri',
+    codes: ['annuals__Per Share Data__EPS without NRI',
+      'annuals__per_share_data__EPS without NRI'],
+    /**
+     * ⚠ THE FORECAST OF **THIS** LINE, not of EPS generally. GuruFocus publishes
+     * `annual_per_share_eps_estimate` beside it and the two agree to a cent on almost every company
+     * (Apple 8.76 vs 8.77), which is exactly why the choice cannot be made by eye: this card's
+     * actual is `EPS without NRI`, so continuing it with an including-NRI consensus would put a
+     * one-off impairment on the wrong side of the join with nothing on screen to say so.
+     *
+     * ⚠ THE ONLY CARD WITH ONE, DELIBERATELY. Analysts forecast earnings; they do not publish a
+     * consensus for FCF/share or a diluted share count, and `_FORECAST_BASE` knows of exactly two
+     * forecast lines (this and dividends per share). A dotted leg on a card with no consensus
+     * behind it would be an extrapolation wearing a forecast's clothes.
+     */
+    forecastCodes: ['annual_eps_nri_estimate'],
+    forecastMetric: 'eps_nri_estimate',
+  },
+  {
     title: 'Revenue', noun: 'revenue', unit: 'millions', kind: 'growth', benchmarkMetric: 'revenue',
     codes: ['annuals__Income Statement__Revenue', 'annuals__income_statement__Revenue'],
   },
@@ -183,6 +223,17 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
    * Silent on failure: the benchmark is an overlay on charts that already work.
    */
   const [benchMetrics, setBenchMetrics] = useState<MetricRow[] | null>(null);
+  /**
+   * The index's own `blend_notes` — why a code its constituents DO carry drew nothing.
+   *
+   * ⚠⚠ IT WAS THROWN AWAY, AND THAT MADE A CORRECT REFUSAL LOOK LIKE A BUG. Switching the
+   * benchmark from AEX to ACWI drops the analyst-expectation line, because 22 of 22 AEX names
+   * carry a consensus and only 351 of 1,715 ACWI names do — 20%, far under the blend's floor,
+   * so every forecast period is refused. That is the right answer and it vanished in silence:
+   * a striped line on the book, none on the index, and nothing on screen to say which of
+   * "the index has no expectations" and "too few of its members are covered" was true.
+   */
+  const [benchNotes, setBenchNotes] = useState<Record<string, BlendNote> | undefined>();
   const [benchErr, setBenchErr] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -190,7 +241,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
     // index blend is the most expensive read on the tab (~1,500 constituents on ACWI).
     const ctrl = new AbortController();
     void (async () => {
-      setBenchMetrics(null); setBenchErr(null);
+      setBenchMetrics(null); setBenchErr(null); setBenchNotes(undefined);
       if (!benchmark) return;
       try {
         const r = await apiFetch(`${API_URL}/api/earnings/fundamental-blend-metrics`, {
@@ -199,8 +250,15 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
           // ⚠ NAME THE THREE METRICS. Unnamed, the blend reads every charted code per constituent —
           // three paged requests each, i.e. ~1,500 round trips for the S&P. Named, it is one
           // chunked query per metric. See the request model's `metrics` field.
+          // ⚠⚠ THE FORECAST METRICS MUST BE NAMED HERE OR THE INDEX SILENTLY HAS NO FORECAST. The
+          // book's own line comes from the UNNARROWED read, which already pages `annual_%estimate`;
+          // a benchmark is a narrowed read and gets exactly what this list asks for. Omitting them
+          // draws a dotted consensus on the book and none on the index — which reads as "the index
+          // has no expectations" rather than "we did not ask for them".
           body: JSON.stringify({
-            universe: benchmark, cadence, metrics: CARDS.map((c) => c.benchmarkMetric),
+            universe: benchmark, cadence,
+            metrics: [...new Set(CARDS.flatMap(
+              (c) => [c.benchmarkMetric, ...(c.forecastMetric ? [c.forecastMetric] : [])]))],
           }),
         });
         const b = await r.json().catch(() => null);
@@ -212,6 +270,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
           return;
         }
         setBenchMetrics((b as MetricsResponse)?.metrics ?? []);
+        setBenchNotes((b as MetricsResponse)?.blend_notes);
       } catch (e) {
         if (!alive) return;                     // aborted by the switch — not a failure to report
         const detail = e instanceof Error ? e.message : String(e);
@@ -243,10 +302,10 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
       ? <p className="text-xs text-fg-subtle py-16 text-center">{blendLoadingLabel(progress)}</p>
       : null;
 
-  // Fixed order across the grid: Revenue, FCF/share, FCF-SBC margin, Cash return on capital,
-  // Debt / assets ex-GW, Interest / op. profit, Shares outstanding, SBC / OCF, Invested capital,
-  // Capex margin, Dividend yield, FCF-SBC yield.
-  const [revenue, fcfPs, shares] = CARDS;
+  // Fixed order across the grid: EPS (excl. non-recurring), Revenue, FCF/share, FCF-SBC margin,
+  // Cash return on capital, Debt / assets ex-GW, Interest / op. profit, Shares outstanding,
+  // SBC / OCF, Invested capital, Capex margin, Dividend yield, FCF-SBC yield.
+  const [epsNri, revenue, fcfPs, shares] = CARDS;
   // Single-company only: an empty growth card can fetch this company's financials, then reload.
   const ingestIsin = isAgg ? undefined : isin;
   const onIngested = () => setReloadKey((k) => k + 1);
@@ -256,7 +315,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
     metrics: data?.metrics ?? null, isAgg, currency: data?.currency,
     blendNotes: data?.blend_notes, holdingsTarget, holdingsName: gName,
     ingestIsin, onIngested, onReloadMetrics, cadence,
-    benchMetrics, benchLabel: benchmark, benchErr,
+    benchMetrics, benchLabel: benchmark, benchErr, benchNotes,
   };
   // ⚠ ONE KEY SUFFIX FOR EVERY DERIVED CARD. They each own their fetch, so without the cadence in
   // the key a switch would leave twelve charts showing the previous basis until something else
@@ -313,7 +372,14 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
     </div>
     {/* The controls above stay put; only what they govern is replaced while it loads or fails. */}
     {body ?? (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {/* ⚠ THREE ACROSS, NOT FOUR. Each card carries a 320px chart with up to five series, a legend
+          that wraps, and stat tiles above it — at four columns the plot area was narrow enough that
+          a twelve-year axis crowded its ticks and the legend took three lines. Only the grid
+          changes; the card order below is fixed and reflows unaltered. */}
+      {/* ⚠ FIRST IN THE GRID — the line the tab is about. See its entry in `CARDS`. */}
+      <MetricGrowthCard key={epsNri.title} cfg={epsNri}
+        {...growth} />
       <MetricGrowthCard key={revenue.title} cfg={revenue}
         {...growth} />
       <MetricGrowthCard key={fcfPs.title} cfg={fcfPs}

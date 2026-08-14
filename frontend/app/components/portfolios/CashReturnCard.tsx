@@ -10,11 +10,12 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { Stat } from './MetricGrowthCard';
+import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import CashReturnInputsModal from './CashReturnInputsModal';
 import { MODES, seriesByYear, type CapitalMode, type CashReturnInputs } from './cashReturnData';
 import { meanOf, paddedDomain , xToPeriod } from './marginData';
-import { benchNote, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
+import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**
  * Cash-return-on-capital card: Free Cash Flow ÷ invested capital (non-current liabilities + total
@@ -73,6 +74,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
   const chartData = useMemo(
     () => mergeSeries(ratioByYr, benchByYr, 'ratio'), [ratioByYr, benchByYr]);
 
+  const own = holdingsName ?? M.title;
   const avg = meanOf([...ratioByYr.values()]);
   const latestYear = Math.max(-Infinity, ...ratioByYr.keys());
   const latest = Number.isFinite(latestYear) ? ratioByYr.get(latestYear) ?? null : null;
@@ -135,8 +137,8 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
                 <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
                 <YAxis domain={paddedDomain(withBench(ratioByYr.values(), benchByYr))} tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
-                <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : M.title]} />
+                <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }} itemSorter={benchmarkFirst}
+                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : own]} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 <Line dataKey="ratio" name="ratio" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
@@ -148,14 +150,13 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
                   second line — the same alignment argument as the header. It still has to be said
                   somewhere: a published ratio has no three lines to check it against, so the chart
                   is not clickable in ROIC mode and a modal must not imply workings it cannot show. */}
-              <span className="flex items-center gap-1.5"
+              <LegendItem color={chartTheme.accent} label={own}
                 title={M.derived
                   ? 'Derived here — click the chart for the three underlying lines per company.'
-                  : "GuruFocus's own figure, read through. There are no underlying lines to drill into."}>
-                <span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />
-                {M.title} (avg dashed)
-              </span>
-              {benchByYr && <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.pos }} />{benchTarget?.universe}</span>}
+                  : "GuruFocus's own figure, read through. There are no underlying lines to drill into."} />
+              {avg != null && <LegendItem color={chartTheme.accent} stroke="dashed"
+                label={`${own} average`} />}
+              {benchByYr && <LegendItem color={chartTheme.pos} label={benchTarget?.universe} />}
               {note && (
                 <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">
                   {note}

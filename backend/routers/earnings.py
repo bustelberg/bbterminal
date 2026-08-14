@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 # ⚠ ALIASED. Three loops in this file already bind a variable called `date` (they iterate
 # `{date: value}` maps), and importing the type under that name shadows it inside them — the same
 # word meaning two things a few lines apart is how the wrong one gets called.
@@ -742,23 +742,7 @@ def _bulk_blend_rows(cids: list[int], metrics: list[str], cadence: str) -> list[
             for date, val in _ttm_by_period(rows, rule, key="date").items():
                 out.append({"company_id": cid, "metric_code": annual_code,
                             "target_date": date, "numeric_value": val})
-    # ⚠⚠ THE LTM PERIOD, UNDER THE LITERAL DATE KEY `LTM`. `year_bucket` is `d[:4]`, so `'LTM'`
-    # buckets to itself — it becomes a real period that sorts after every year (`'2026' < 'LTM'`)
-    # and the chained series picks it up as one more step off the last drawn year. A constituent
-    # with no LTM of its own is CARRIED into it (its last fiscal year is still its latest twelve
-    # months), which is the same rule every other period follows.
-    if cadence != "quarterly":
-        for m in metrics:
-            annual_code = _metric_codes(m)[0]
-            for cid, (d, val) in _ltm_by_company(cids, m, cadence).items():
-                # ⚠ `ltm_date` RIDES ALONG so the blended point can be stamped with a REAL
-                # quarter-end. `_blend_rows` stamps every period with `period_end(period)`, which
-                # for `LTM` is today — and the card places the benchmark's LTM at that x while the
-                # company's own sits at its filing's quarter-end. Two LTM points at different x on
-                # a chart that exists to compare them. See `_blend_rows`.
-                out.append({"company_id": cid, "metric_code": annual_code,
-                            "target_date": "LTM", "numeric_value": val, "ltm_date": d})
-    return out
+    return out + _ltm_blend_rows(cids, metrics, cadence)
 
 
 def _ltm_rows(company_id: int, annual_rows: list[dict]) -> list[dict]:
@@ -855,6 +839,87 @@ def _ltm_multi(company_ids: list[int], metrics: list[str],
     return out
 
 
+def _ltm_blend_rows(cids: list[int], metrics: list[str] | None,
+                    cadence: str) -> list[dict]:
+    """The `LTM` period's rows for `_blend_rows` — one per company per metric that has one.
+
+    ⚠⚠ EVERY PATH INTO `_blend_rows` MUST CALL THIS, AND THE ONE THAT DID NOT IS WHAT BROKE THE
+    CHART. `/fundamental-blend-metrics` has two reads: a NARROWED one (`_bulk_blend_rows`, taken
+    when the request names `metrics` — the benchmark overlay) and a FULL one (`_company_metric_rows`
+    per holding — the portfolio's own line, and the only one the SSE stream can use, since its unit
+    of progress is the holding). The LTM rows used to be appended inside the narrowed branch, so a
+    book on the Long Equity tab drew an index that ran a quarter past its own line, and the extra x
+    rendered through `xToPeriod` as **"2026 Q2"** — a fake fiscal quarter on an annual axis, on the
+    benchmark alone. Not an error, and not obviously a bug: it reads as "the index reported and we
+    have not", which is exactly what it is not.
+
+    `metrics=None` means EVERY line with a declared roll-up (`_TTM_RULE`) — the full read's
+    counterpart to naming them. A metric without one cannot have a trailing twelve months at all
+    (`_codes_and_rule` refuses to guess), so the list is the complete set, not a selection.
+
+    ⚠ ONE `_ltm_multi` CALL, NOT ONE PER METRIC. It reads every named line in a single pair of bulk
+    queries; the old per-metric loop paid two bulk reads per metric over the whole constituent set —
+    eight of them for the four growth cards on a ~1,900-name ACWI.
+
+    ⚠ THE PERIOD IS THE LITERAL DATE KEY `LTM`, and `ltm_date` RIDES ALONG. `year_bucket` is `d[:4]`,
+    so `'LTM'` buckets to itself: a real period that sorts after every year (`'2026' < 'LTM'`) which
+    the chained series picks up as one more step off the last drawn year. A member with no LTM of its
+    own is CARRIED into it (its last fiscal year is still its latest twelve months), the same rule
+    every other period follows. `ltm_date` is what stamps the blended point with a REAL quarter-end —
+    `_blend_rows` would otherwise use `period_end("LTM")`, which is TODAY, putting the two lines'
+    LTM points at different x on a chart that exists to compare them. See `_blend_rows`.
+    """
+    if cadence == "quarterly" or not cids:
+        return []
+    out: list[dict] = []
+    for metric, per_company in _ltm_multi(cids, list(_TTM_RULE) if metrics is None else metrics,
+                                          cadence).items():
+        annual_code = _metric_codes(metric)[0]
+        for cid, (d, val) in per_company.items():
+            out.append({"company_id": cid, "metric_code": annual_code,
+                        "target_date": "LTM", "numeric_value": val, "ltm_date": d})
+    return out
+
+
+def ltm_parts_by_company(cids: list[int], metric: str,
+                         cadence: str) -> dict[int, list[dict]]:
+    """`{company_id: [{date, value}, …]}` — the FILINGS each company's newest trailing year was
+    built from. Behind the ⓘ on every cell of the drill-down's LTM column.
+
+    ⚠⚠ THE WINDOW IS NOT "THE LAST FOUR". It is `k` consecutive filings where `k` is how often that
+    company reports, and it is refused outright when they span more than `365(k−0.5)/k` days —
+    because a hole reaches back past its own year and double-counts the period that comes round
+    again, which still looks like four rows. So this does not re-derive the window: it asks
+    `_ttm_by_period` for the one it actually used (`parts=`). A tooltip that explains a number with
+    filings the number was not computed from is worse than no tooltip — it is checked once and
+    believed thereafter.
+
+    ⚠ THE QUALIFYING GATE STAYS IN `_ltm_multi`. Whether a company HAS an LTM at all — is its newest
+    quarterly filing past its last full fiscal year — has the off-calendar-filer trap in it
+    (Prosus's FY2026 ends 2026-03-31, which IS 2026-Q1), and that rule already has one home. This
+    reads the answer and only adds the arithmetic behind it, so a row cannot show filings for a
+    number the column does not print.
+
+    ⚠ AND A QUARTER DROPPED AS IMPLAUSIBLE IS ABSENT (`_drop_quarter_outliers` runs first). What is
+    shown is what the figure was computed from, which is deliberately not everything the vendor
+    filed.
+    """
+    have = _ltm_multi(cids, [metric], cadence).get(metric, {})
+    if not have:
+        return {}
+    _codes, rule = _codes_and_rule(metric, "quarterly")
+    if rule is None:
+        return {}
+    raw = rows_by_metric(list(have), [metric], "quarterly").get(metric, {})
+    out: dict[int, list[dict]] = {}
+    for cid, (period_end, _val) in have.items():
+        parts: dict[str, list[dict]] = {}
+        _ttm_by_period(raw.get(cid, []), rule, key="date", parts=parts)
+        if period_end in parts:
+            out[cid] = parts[period_end]
+    return out
+
+
 def ltm_aligned(company_ids: list[int], metrics: list[str],
                 cadence: str) -> dict[int, tuple[str, dict[str, float]]]:
     """`{company_id: (period_end, {metric: LTM value})}` for the derived-ratio cards — every line
@@ -914,6 +979,55 @@ def _attach_ltm(cid: int, ltm: dict[int, tuple[str, dict[str, float]]],
     return date
 
 
+def _drop_superseded_forecasts(by_metric: dict[str, dict[int, dict[str, float]]]) -> None:
+    """Remove each company's forecast points for years it has ALREADY REPORTED. In place.
+
+    ⚠⚠ THE VENDOR KEEPS THE PRE-ANNOUNCEMENT CONSENSUS, IT DOES NOT REPLACE IT WITH THE RESULT.
+    Measured 2026-08-14 on the three companies that had reported a year they were also forecast for:
+
+        cid 280  FY2026   estimate 5.69    reported 5.781
+        cid 296  FY2026   estimate 16.78   reported 17.331
+
+    So an estimate row on a closed year is a SUPERSEDED number, not the answer — and blended into
+    the forecast leg it draws a figure we know to be wrong beside figures nobody knows yet.
+
+    ⚠ IT MATTERS MOST FOR OFF-CALENDAR FILERS AND IT GROWS THROUGH THE YEAR. KLA files in June, so
+    its FY2026 is history while every December filer's is still ahead; come next spring the December
+    names report and the same forecast year fills up with stale consensus for them too. The point
+    would quietly turn from an expectation into a mixture of expectation and out-of-date guesses,
+    with nothing on screen marking the change.
+
+    ⚠ THE COMPANY'S ACTUAL IS NOT SUBSTITUTED IN ITS PLACE. It is already on the solid line at that
+    year, and moving it onto the forecast leg would make one point mean "expected" for some members
+    and "reported" for others — a line whose meaning depends on who is in it. A member that has
+    reported simply stops contributing to the forecast, which is what "no longer a forecast" means.
+
+    ⚠ AND IT LIVES HERE, IN `_blend_rows`, BECAUSE BOTH READS PASS THROUGH IT — the narrowed
+    benchmark blend and the full per-holding one. Applied in either fetch instead, the two paths
+    would disagree about the same company. The drill-down table applies the same rule when it builds
+    its `…e` columns, so the table cannot show a different set of forecasts from the line it explains.
+    """
+    for fc_code, base_code in _FORECAST_BASE.items():
+        fc = by_metric.get(fc_code)
+        base = by_metric.get(base_code)
+        if not fc or not base:
+            continue
+        for cid, points in fc.items():
+            # ⚠⚠ `LTM` IS IN THIS DICT AND IT IS NOT A DATE — `_ltm_blend_rows` emits the trailing
+            # year under the SAME annual code, keyed by the literal string. A plain `max()` over the
+            # keys therefore returns `'LTM'` ('L' beats '2'), and `d <= 'LTM'` is true of every real
+            # date, so the first version of this deleted EVERY forecast for 22 of 40 companies and
+            # the line simply vanished. The same trap `period_end`, `periodToX` and
+            # `HoldingsRevenueModal.periodEndDate` each carry their own ⚠ about.
+            #
+            # ⚠ AND IT WOULD BE THE WRONG BOUND EVEN IF IT PARSED. A trailing twelve months is not a
+            # reported fiscal year; it ends mid-year, so it cannot say which years are closed.
+            newest = max((d for d in (base.get(cid) or {}) if d[:4].isdigit()), default=None)
+            if newest:
+                for d in [d for d in points if d <= newest]:
+                    del points[d]
+
+
 def _blend_rows(rows: list[dict], covered: list[dict],
                 caps: dict[int, dict[str, float]] | None = None,
                 cadence: str = "annual") -> dict:
@@ -948,6 +1062,8 @@ def _blend_rows(rows: list[dict], covered: list[dict],
         (by_metric.setdefault(r["metric_code"], {})
                   .setdefault(r["company_id"], {}))[str(r["target_date"])[:10]] = \
             float(r["numeric_value"])
+
+    _drop_superseded_forecasts(by_metric)
 
     out: list[dict] = []
     notes: dict[str, dict] = {}
@@ -1061,6 +1177,10 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
         rows = []
         for r in covered:
             rows += load(r["company_id"])
+        # ⚠ AND THE LTM PERIOD, exactly as the narrowed branch above gets it. Without it this line
+        # stops at its last full fiscal year while a benchmark blended through `_bulk_blend_rows`
+        # runs a quarter further — see `_ltm_blend_rows`.
+        rows += _ltm_blend_rows([r["company_id"] for r in covered], None, body.cadence)
         return _blend_rows(rows, covered, caps, body.cadence)
 
     return _blend_envelope(await asyncio.to_thread(_build), covered, cov)
@@ -1095,6 +1215,12 @@ async def _blend_metrics_events(body: FundamentalCoverageRequest):
         for i, r in enumerate(covered):
             rows += await asyncio.to_thread(load, r["company_id"])
             yield _sse({"type": "progress", "done": i + 1, "total": n, "name": r.get("name")})
+        # ⚠ THE SAME LTM READ THE PLAIN ENDPOINT DOES, and it is NOT part of the per-holding loop:
+        # `_ltm_blend_rows` is two bulk queries over the whole book, not one per company, so there is
+        # no holding to report progress against. Omitting it here is what made the payload depend on
+        # whether SSE worked — the failure this loader's `load` line already documents.
+        rows += await asyncio.to_thread(
+            _ltm_blend_rows, [r["company_id"] for r in covered], None, body.cadence)
         built = await asyncio.to_thread(_blend_rows, rows, covered, None, body.cadence)
     except Exception as e:  # noqa: BLE001 — see the docstring: there is no status code left to use
         yield _sse({"type": "error", "detail": f"{type(e).__name__}: {e}"})
@@ -1209,6 +1335,16 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
                    "annuals__income_statement__Net Income"),
     "fcf_ps": ("annuals__Per Share Data__Free Cash Flow per Share",
                "annuals__per_share_data__Free Cash Flow per Share"),
+    # ⚠ "WITHOUT NRI" IS THE POINT, NOT A DETAIL. GuruFocus publishes three EPS lines and they are
+    # near-identical most years, which is exactly what makes picking the wrong one hard to notice:
+    # `EPS (Diluted)` and `Earnings per Share (Diluted)` both include non-recurring items, so a
+    # single impairment, disposal or tax settlement puts a spike in the series that says nothing
+    # about the business — and on a LOG growth chart with a fitted trend, one such year bends the
+    # CAGR for every year around it. This is the same line the Share-Price-vs-Owner-Earnings chart
+    # uses as its earnings side (`_RG_OE_CODE`), so the two cannot disagree about what "earnings"
+    # means.
+    "eps_nri": ("annuals__Per Share Data__EPS without NRI",
+                "annuals__per_share_data__EPS without NRI"),
     "fcf": ("annuals__Cashflow Statement__Free Cash Flow",
             "annuals__cashflow_statement__Free Cash Flow"),
     "sbc": ("annuals__Cashflow Statement__Stock Based Compensation",
@@ -1255,6 +1391,28 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
     # `per_share_data_array`) between the capitalized and lowercase cohorts.
     "shares": ("annuals__Income Statement__Shares Outstanding (Diluted Average)",
                "annuals__income_statement__Shares Outstanding (Diluted Average)"),
+    # ⚠⚠ A FORECAST, NOT A REPORTED LINE — the analysts' EPS estimate per forward fiscal year, which
+    # is what lets the EPS card draw a dotted continuation of its own solid line.
+    #
+    # ⚠ IT IS THE `eps_nri` TWIN, DELIBERATELY. GuruFocus also publishes `annual_per_share_eps_estimate`,
+    # and on almost every company the two agree to a cent (Apple 8.76 vs 8.77; measured here, one
+    # company reads 23.23 vs 23.68 for FY2026) — which is exactly why the choice cannot be made by
+    # eye. This card's ACTUAL line is `EPS without NRI`, so its forecast is the estimate of THAT
+    # line; extending a without-NRI series with an including-NRI forecast would put a one-off
+    # impairment on the wrong side of the join and nothing on the chart would say so. Both are
+    # nevertheless anchored on the same base in `_FORECAST_BASE`, so either can be drawn as a
+    # continuation — the anchoring is not what distinguishes them.
+    #
+    # ⚠ NAMED ONLY IN THE **NARROWED** READ. The unnarrowed path already pages `annual_%estimate`
+    # (see `_company_metric_rows`), so a portfolio's own line has always carried these; a BENCHMARK
+    # is a narrowed read and would silently get no forecast at all — one dotted line on the book and
+    # none on the index, which reads as "the index has no expectations" rather than "we did not
+    # ask". This key is what closes that asymmetry.
+    #
+    # ⚠ AND IT HAS NO `_TTM_RULE` ENTRY, ON PURPOSE. `_codes_and_rule` therefore refuses it on the
+    # quarterly basis and it is simply omitted there — right, because an annual forecast has no
+    # trailing-twelve-month reading and rolling one would invent quarters analysts never published.
+    "eps_nri_estimate": ("annual_eps_nri_estimate",),
     # Behind the SBC/OCF card: Stock-Based Compensation ÷ Operating Cash Flow (`sbc` above is the
     # numerator). ⚠ Operating cash flow can go NEGATIVE (a bank: JPMorgan) — the ratio is blank
     # there, not computed against a negative denominator.
@@ -1287,6 +1445,34 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
     "market_cap": ("annuals__Valuation and Quality__Market Cap",
                    "annuals__valuation_and_quality__Market Cap"),
 }
+#: `{reported metric: its forecast metric}` — DERIVED from `_FORECAST_BASE`, never restated. That
+#: map already says which forecast continues which line, by CODE; this is the same fact keyed by
+#: `_METRIC_CODES` name, so a second declaration cannot drift from it. A forecast whose base or
+#: whose own code has no metric key (`annual_per_share_eps_estimate`, `annual_dividend_estimate`)
+#: is simply absent — nothing asks for it, so nothing has to be kept in step.
+def _build_forecast_metric_map() -> dict[str, str]:
+    by_code = {codes[0]: metric for metric, codes in _METRIC_CODES.items()}
+    return {by_code[base]: by_code[fc] for fc, base in _FORECAST_BASE.items()
+            if fc in by_code and base in by_code}
+
+
+def _period_sort_key(period: str) -> tuple[int, str]:
+    """Column/period order: reported periods, then `LTM`, then the forecast years.
+
+    ⚠⚠ A PLAIN STRING SORT PUTS THEM IN THE WRONG ORDER, AND THE ORDER IS A CLAIM ABOUT TIME.
+    `'LTM' > '2026e'` lexically ('L' beats '2'), so the trailing twelve months — the newest thing we
+    actually know — would be listed AFTER five years nobody has lived. The same rule sorts the
+    drill-down's columns and the chart's periods, so the table cannot present a different chronology
+    from the line it explains.
+    """
+    if period == "LTM":
+        return (1, "")
+    if period.endswith("e"):
+        return (2, period)
+    return (0, period)
+
+
+_FORECAST_METRIC = _build_forecast_metric_map()
 _REVENUE_CODES = _METRIC_CODES["revenue"]
 _REVENUE_CODE = _REVENUE_CODES[0]   # for blend_kind() only — it classifies, it doesn't query
 
@@ -1331,7 +1517,11 @@ _TTM_RULE: dict[str, str] = {
     # Flows — income statement and cash flow.
     "revenue": "sum", "gross_profit": "sum", "operating_income": "sum", "net_income": "sum",
     "fcf": "sum", "ocf": "sum", "sbc": "sum", "capex": "sum", "interest_expense": "sum",
-    "fcf_ps": "sum", "div_ps": "sum",
+    # ⚠ `eps_nri` SUMS, like every other per-share FLOW. A trailing-twelve-month EPS is four
+    # quarters of earnings added up — taking `last` would report ONE quarter under an annual label,
+    # a quarter of the real figure, on the same axis as full fiscal years. Same trap `MetricGrowthCard`
+    # documents for the LTM point it plots.
+    "fcf_ps": "sum", "div_ps": "sum", "eps_nri": "sum",
     # Balances and market values — a point in time.
     "total_assets": "last", "total_equity": "last", "goodwill": "last",
     "long_term_debt": "last", "noncurrent_liabilities": "last",
@@ -1398,6 +1588,13 @@ def _daily_metric(company_id: int, metric: str, dates: list[str]) -> dict[str, f
 def _ttm_metric_rows(company_id: int) -> list[dict]:
     """The metric ROWS a growth card reads, rolled to trailing twelve months.
 
+    ⚠ IT DOES NOT CARRY THE FILINGS BEHIND EACH WINDOW, AND SHOULD NOT. `_ttm_by_period` can report
+    them (`parts=`) and they are free to compute — the quarters were read and rolled here anyway —
+    but they are not free to SHIP: this returns ~19 lines x ~45 quarters, so attaching four filings
+    to every one is ~140 KB per company of JSON, and this is called PER HOLDING on a blend. The one
+    surface that shows them is the drill-down's LTM column, which needs exactly one window per
+    company and fetches it there (`ltm_parts_by_company`).
+
     ⚠ EMITTED UNDER THE ANNUAL CODE NAME, ON PURPOSE. The three growth cards select their line by
     `metric_code` (`annuals__Income Statement__Revenue`), and the /earnings dashboard reads the
     same payload — so returning `quarterly__…` codes would mean every consumer learning a second
@@ -1415,6 +1612,7 @@ def _ttm_metric_rows(company_id: int) -> list[dict]:
         rows: list[dict] = []
         for qc in qcodes:
             rows += _page_metrics(company_id, qc, exact=True)
+        # The window each point was rolled from — computed only when a caller asked, see the ⚠⚠.
         for date, val in _ttm_by_period(rows, rule, key="date").items():
             # ⚠ `company_id` IS NOT DECORATION HERE. These rows also feed `_blend_rows`, which keys
             # every point by the company that reported it — without it a PORTFOLIO's growth cards
@@ -1462,8 +1660,179 @@ def filings_per_year(dates: list[str]) -> int:
     return 1
 
 
-def _ttm_by_period(rows: list[dict], rule: str, key: str = "label") -> dict[str, float]:
+#: How far out of line with its own neighbours a single quarter may be before it stops being a
+#: measurement. See `_drop_quarter_outliers`.
+_QUARTER_OUTLIER_FACTOR = 50.0
+
+
+def _drop_quarter_outliers(by_date: dict[str, float], who: str = "?") -> dict[str, float]:
+    """Remove quarters that are not plausibly the same series as their neighbours.
+
+    `who` is `company_id/metric_code` — FOR THE WARNING ONLY, and it is not decoration. ⚠⚠ A LOG
+    LINE ABOUT DELETED DATA THAT DOES NOT SAY WHOSE DATA IS UNACTIONABLE. The first version printed
+    the dropped dates, the values and the median, which is enough to see that something was removed
+    and not enough to decide whether it should have been: the same warning fires from seven `*-inputs`
+    endpoints at once, so a reader cannot even tell how many distinct series are involved, let alone
+    look one up. Naming the row is what turns "a number was discarded" into a question with an
+    answer.
+
+    ⚠⚠ THE VENDOR'S QUARTERLY FEED CARRIES OCCASIONAL GARBAGE, AND A TTM SUM LAUNDERS IT INTO A
+    CONFIDENT NUMBER. Measured 2026-08-13 on `EPS without NRI`:
+
+        IAG      0.038  0.174  10,987.996  0.265  0.022  0.089  8,748.852  0.184   (annual: ~0.7-1.2)
+        Workday  676    2.47   2.32   2.21   2.23   1.92   1.89   1.75            (annual: 9.23)
+
+    Two of IAG's quarters are five orders of magnitude out. Summed into a trailing year that is an
+    LTM of 10,988 against annual EPS under 1.20 — and because the ACWI line is a CAP-WEIGHTED index
+    of REBASED members, that single 0.03%-weight constituent supplied **+390pp of the index's
+    +411pp step**, taking the blended EPS line from 1,015 to 5,186 in one quarter. One bad cell,
+    one visibly wrong benchmark, no error anywhere.
+
+    ⚠ JUDGED AGAINST THE COMPANY'S OWN MEDIAN QUARTER, never an absolute threshold. "10,988 is too
+    big" is not a fact about a number — some issuers genuinely report per-share figures in the
+    thousands (KRW, JPY). It is a fact about IAG, whose other quarters are ~0.17.
+
+    ⚠ AND THE FACTOR IS DELIBERATELY HUGE (50x). Real quarterly EPS swings hard — a loss quarter
+    against a profitable one, a seasonal peak, a recovery year — and this must not become a
+    smoother that quietly clips genuine volatility. The measured corruptions are 300x (Workday) and
+    63,000x (IAG); anything a business actually did lands far below 50x. A guard that fires on real
+    data would be worse than the bug.
+
+    ⚠ THE MEDIAN IS OVER **ABSOLUTE** VALUES, so a series that is legitimately negative half the
+    time still has a scale. A dropped quarter is not replaced: the windows containing it lose their
+    TTM point (they no longer have `k` consecutive filings), which is the honest outcome — a hole
+    rather than a fabricated year.
+
+    ⚠⚠ AND BEING OVER THE BAR IS NOT ENOUGH — ONLY AN **ISOLATED** QUARTER IS DROPPED. Size alone
+    cannot tell a bad cell from a business that changed size, and the second version of this guard
+    was deleting the second one. Measured 2026-08-14 on a local run: a series with a median of 19.15
+    reported `960.171 → 1,099.847 → 1,122.77` — its three NEWEST quarters, consecutive, each within
+    ~15% of the next, and only 50-59x over. That is not garbage, that is a level shift (an
+    acquisition, a redenomination, a reverse split), and dropping it removed the newest year from
+    every card built on the line with nothing on screen to say so.
+
+    The discriminator is SHAPE, not magnitude:
+
+        a BAD CELL is alone      0.02   0.17   10,988   0.09   0.18      <- IAG, dropped
+        a LEVEL SHIFT is a run   19.1   19.4    960     1,100  1,123     <- kept
+
+    A corrupt value has healthy quarters either side and the series carries on at its own scale
+    afterwards. A regime change arrives and STAYS. So a flagged quarter with a flagged NEIGHBOUR is
+    kept — both of IAG's are still dropped (they are a year apart, with healthy quarters between),
+    and so is Workday's single one.
+
+    ⚠ THE COST IS EXPLICIT: two ADJACENT corrupt cells would now survive. That is accepted, because
+    from the numbers alone a sustained excursion and a sustained change are the same thing, and when
+    a guard cannot tell it must believe the data rather than delete it. The median is self-limiting
+    in the same direction — once more than half the series sits at the new level it becomes the
+    median and nothing is flagged at all.
+
+    ⚠ A KEPT RUN IS STILL LOGGED, at WARNING, because it is not a non-event: downstream the blended
+    level index chains WEIGHTED GROWTH between periods (`blend_series` / `step_growth`, which floors
+    at −100% but has no ceiling), so a constituent that genuinely 50x's its revenue moves the index
+    by its weight times ~4,900%. That is the correct arithmetic on correct data and it will still
+    look startling on a chart; the line in the log is what connects the two.
+    """
+    if len(by_date) < 4:
+        return by_date                      # too few to say what "out of line" means
+    mags = sorted(abs(v) for v in by_date.values())
+    mid = len(mags) // 2
+    median = mags[mid] if len(mags) % 2 else (mags[mid - 1] + mags[mid]) / 2
+    if median <= 0:
+        return by_date                      # a mostly-zero series has no scale to judge against
+    limit = _QUARTER_OUTLIER_FACTOR * median
+    axis = sorted(by_date)
+    flagged = {d for d in axis if abs(by_date[d]) > limit}
+    if not flagged:
+        return by_date
+    run = _level_shift(flagged, axis)
+    drop = flagged - run
+    if run:
+        _log.warning(
+            "[earnings] %s: KEPT %d quarter(s) over %.0fx this series' own median of %.4g — %s. "
+            "They are consecutive AND run to the newest filing, which is the shape of a level "
+            "shift; an old shift would already BE the median. Not interpreted further — check "
+            "whether this company restated, redenominated or split. Expect a real step in any "
+            "index built on this line.",
+            who, len(run), _QUARTER_OUTLIER_FACTOR, median,
+            {d: by_date[d] for d in sorted(run)})
+    if drop:
+        # The fiscal position of each dropped quarter, e.g. {'Q4': 3}. ⚠ A COUNT, NOT A VERDICT:
+        # a recurring spike can be a seasonal business OR the vendor filing an annual figure in a
+        # quarterly slot, and IAG's confirmed garbage recurs annually too (2024-09, 2025-09, both
+        # Q3) — so this cannot decide, it can only tell a human where to look.
+        # ⚠⚠ GUARDED, BECAUSE A LOG LINE MUST NOT BE ABLE TO KILL THE THING IT DESCRIBES. This
+        # parses a MONTH out of the key, and the first version assumed every key was an ISO date —
+        # true of every production caller (`_ttm_by_period` builds them from `target_date`) and not
+        # true of the tests, where a series is keyed "a".."e". `int("")` raises, so a diagnostic
+        # nobody reads took the whole outlier guard down with it and three tests went red on a
+        # sentence. Anything unparseable is simply not counted: the periodicity hint is a nudge
+        # toward a human eye, never a reason for the guard itself to fail.
+        seasons = Counter(f"Q{(int(d[5:7]) - 1) // 3 + 1}" for d in drop
+                          if len(d) >= 7 and d[5:7].isdigit() and 1 <= int(d[5:7]) <= 12)
+        repeat = max(seasons.values(), default=0)
+        _log.warning(
+            "[earnings] %s: dropped %d implausible quarter(s) — more than %.0fx this series' own "
+            "median of %.4g, and not part of a run to the newest filing: %s.%s A TTM sum would "
+            "have carried them into a confident annual figure.",
+            who, len(drop), _QUARTER_OUTLIER_FACTOR, median,
+            {d: by_date[d] for d in sorted(drop)},
+            "" if repeat < 3 else
+            f" ⚠ {repeat} of them fall in the SAME fiscal quarter ({seasons.most_common(1)[0][0]})"
+            " — worth an eye: either a seasonal business or an annual figure in a quarterly slot.")
+    return {d: v for d, v in by_date.items() if d not in drop}
+
+
+def _level_shift(flagged: set[str], axis: list[str]) -> set[str]:
+    """The flagged quarters forming an unbroken run to the NEWEST filing — the only shape a real
+    level shift can still have by the time it is flagged.
+
+    ⚠⚠ "ADJACENT" WAS NOT ENOUGH, AND THE SWEEP OF 2026-08-14 SHOWED IT: of eight kept runs, six
+    were oscillating garbage that happened to land in consecutive quarters — one series ran
+    `+120, +190, +182, −140, +148, −818, −1700, −120, −2184` against a median of 2.11 and was
+    preserved as a "level shift". A level does not change sign five times.
+
+    The extra condition is not a fitted heuristic, it follows from the median: a shift that happened
+    and PERSISTED becomes the majority of the series and stops being flagged at all (the guard is
+    self-limiting — see the caller). So a run that is still flagged can only be RECENT, and a recent
+    shift necessarily includes the newest filing. A flagged run that ends mid-history is, by
+    construction, an excursion that ENDED — which is exactly what a level shift is not.
+
+    On the measured sweep this separates the set exactly: the two genuine plateaus survive (revenue
+    19.15 → 960/1,100/1,123 and a share count 53 → 3,038/3,038/3,046, both running to 2026-03-31)
+    and all six oscillating runs, every one of them ending in 2015-2017 with normal quarters after,
+    are dropped.
+
+    ⚠ A RUN OF ONE IS NOT A RUN. Workday's confirmed bad cell (676 against a median of 2.2) WAS the
+    newest filing, so "reaches the end" alone would have kept it. Two points is the minimum at which
+    "it stayed there" means anything.
+    """
+    run: set[str] = set()
+    for d in reversed(axis):
+        if d not in flagged:
+            break
+        run.add(d)
+    return run if len(run) >= 2 else set()
+
+
+def _ttm_by_period(rows: list[dict], rule: str, key: str = "label",
+                   parts: dict[str, list[dict]] | None = None) -> dict[str, float]:
     """Quarterly rows → {period label: trailing-twelve-month value}, per `rule`.
+
+    `parts` is an OUT parameter: pass a dict and it is filled with `{label: [{date, value}, …]}` —
+    the filings each window was built from.
+
+    ⚠⚠ AN OUT PARAMETER RATHER THAN A SECOND FUNCTION, BECAUSE THE WINDOW IS THE HARD PART. Which
+    filings belong to a trailing year is not "the last four": it is `k` consecutive rows where `k`
+    is how often THIS company reports, refused entirely when they span more than `365(k−0.5)/k`
+    days because a hole would silently reach back past its own year (see below). A `_ttm_parts()`
+    that re-derived that would be a second copy of the one rule on this page that is genuinely
+    subtle — and the copy would drift, so a panel would explain a number with filings the number
+    was not built from. Same reasoning as `blend_breakdown` sharing `_prepare` with `blend_series`.
+
+    ⚠ AND `_drop_quarter_outliers` RUNS BEFORE THE WINDOWS, so a dropped quarter is absent from
+    `parts` too. That is the point: the breakdown shows what the figure was computed from, which is
+    not the same as everything the vendor filed.
 
     ⚠ A POINT NEEDS A FULL YEAR OF FILINGS OR IT IS NOT A TRAILING YEAR — which is `k` rows, where
     `k` is how often THIS company reports (see `filings_per_year`), not a hardcoded four. A
@@ -1493,6 +1862,13 @@ def _ttm_by_period(rows: list[dict], rule: str, key: str = "label") -> dict[str,
             continue
         # Latest observation wins for a given quarter-end — same rule as the annual path.
         by_date[str(m["target_date"])[:10]] = float(v)
+    # ⚠ OFF THE ROWS, NOT A PARAMETER. Every caller already has these on the rows it passed
+    # (`_page_metrics` / `_rows_by_company` both select `company_id, metric_code`), and threading an
+    # id through nine call sites is nine chances for one of them to pass the wrong one — a log line
+    # that names the wrong company is worse than one that names none.
+    first = rows[0] if rows else {}
+    by_date = _drop_quarter_outliers(
+        by_date, f"{first.get('company_id', '?')}/{first.get('metric_code', '?')}")
     dates = sorted(by_date)
     k = filings_per_year(dates)
     if not k:
@@ -1517,7 +1893,10 @@ def _ttm_by_period(rows: list[dict], rule: str, key: str = "label") -> dict[str,
         # keeps the REAL quarter-end instead, because a fiscal quarter need not end on a calendar
         # one and synthesising 03-31/06-30/09-30/12-31 would move every point of an off-calendar
         # filer.
-        out[last_d if key == "date" else f"{last_d[:4]}-Q{(int(last_d[5:7]) - 1) // 3 + 1}"] = val
+        label = last_d if key == "date" else f"{last_d[:4]}-Q{(int(last_d[5:7]) - 1) // 3 + 1}"
+        out[label] = val
+        if parts is not None:
+            parts[label] = [{"date": d, "value": by_date[d]} for d in dates[i - k + 1:i + 1]]
     return out
 
 
@@ -2057,7 +2436,8 @@ async def benchmark_revenue_matrix(label: str = "AEX"):
 
 
 @router.post("/api/earnings/portfolio-revenue-matrix")
-async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str = "revenue"):
+async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str = "revenue",
+                                   only_company_id: int | None = None):
     """Each equity the portfolio HOLDS: its weight, currency, and actual `metric` per fiscal year
     (2015 onwards), in the company's own reporting currency.
 
@@ -2074,6 +2454,22 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
     subscription, and unreachable. They arrive at weight 0, so they change no average and no
     coverage figure; their cells say `Unsubscribed` and their weight column is blank, which is the
     difference between "in the index, not in the line" and "not in the index".
+
+    ⚠⚠ `only_company_id` RE-READS ONE ROW, AND IT EXISTS BECAUSE THE PER-ROW REFRESH RE-READ ~1,700.
+    Pressing Refresh on a constituent changes exactly that company's `metric_data`; the drill-down
+    then reloaded the whole matrix to show it, which on ACWI means every constituent's series, every
+    period cap and every LTM window — the most expensive read on the tab — to update one line of a
+    table already on screen.
+
+    ⚠ THE WEIGHTS ARE STILL COMPUTED OVER THE **WHOLE** MEMBERSHIP, and that is the entire subtlety.
+    `weight_pct` is this company's share of the full book (`weight_by[ci] / total_w`); narrowing the
+    member list instead of the READ would hand back a row weighted 100%, and the client would splice
+    a confident wrong number into a column that is supposed to sum to the index. So the narrowing is
+    applied AFTER the weights are known, and only to `comp` — the dict every expensive per-company
+    read is keyed on.
+
+    ⚠ THE RESPONSE IS THEREFORE NOT A WHOLE TABLE and must not be rendered as one: its `years` cover
+    the one company, not the union. The caller merges the row and keeps its own columns.
     """
     from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
     from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
@@ -2106,10 +2502,40 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
                       .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
                 comp[c["isin"]] = c
 
+        # ⚠ AFTER THE WEIGHTS, NEVER BEFORE — see the ⚠ in the docstring. Every expensive read below
+        # is keyed on `comp`, so narrowing it here is what turns a whole-index rebuild into one row,
+        # while `weight_by` / `total_w` still describe the full membership and the row keeps the
+        # share it actually has.
+        if only_company_id is not None:
+            comp = {k: c for k, c in comp.items() if c.get("company_id") == only_company_id}
+
         rows: list[dict] = []
         years: set[str] = set()
         ltm = _ltm_by_company([c["company_id"] for c in comp.values() if c.get("company_id")],
                               metric, body.cadence)
+        # ⚠⚠ THE FILINGS BEHIND EACH LTM CELL, AND THIS TABLE IS THE ONLY PLACE THEY CAN GO. Every
+        # other column is a figure the company FILED; the LTM column is one this app assembled, out
+        # of quarters that reach the browser nowhere else — the tab's "Quarterly" toggle looks like
+        # the place to check and is not, because `_ttm_metric_rows` rolls those server-side too, so
+        # it shows more trailing years rather than the filings under them. One extra bulk read, on a
+        # panel that is already a click-through. See `ltm_parts_by_company`.
+        ltm_parts = ltm_parts_by_company(list(ltm), metric, body.cadence)
+        ltm_rule = _TTM_RULE.get(metric) if body.cadence != "quarterly" else None
+        # ⚠⚠ THE ANALYSTS' CONSENSUS, AS ITS OWN COLUMNS PAST LTM — the same series the chart draws
+        # striped, so the table explains the whole line rather than the part that has happened.
+        #
+        # ⚠ SUFFIXED `e`, NEVER MERGED INTO THE REPORTED YEAR. An off-calendar filer can have BOTH a
+        # filed FY2026 and a FY2026 consensus; one key for the two would silently overwrite a figure
+        # somebody reported with one nobody has yet. The suffix also survives into the header, so a
+        # column cannot be read as an actual.
+        #
+        # ⚠ AND ONLY PAST THE NEWEST FILED PERIOD. GuruFocus keeps publishing an estimate for a year
+        # already closed; drawn beside the actual it invites reading the gap as a surprise, which is
+        # a different chart. Same rule the card's forecast leg applies.
+        fc_metric = _FORECAST_METRIC.get(metric) if body.cadence != "quarterly" else None
+        fc_by_company = (metrics_by_company_bulk(
+            [c["company_id"] for c in comp.values() if c.get("company_id")],
+            [fc_metric], body.cadence).get(fc_metric, {}) if fc_metric else {})
         # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
         # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
         # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
@@ -2147,6 +2573,10 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
             # truncated version of it — see `_ltm_by_company` for what qualifies as one.
             if c["company_id"] in ltm:
                 rev["LTM"] = ltm[c["company_id"]][1]
+            newest_filed = max((p for p in rev if p != "LTM"), default="")
+            for p, v in (fc_by_company.get(c["company_id"]) or {}).items():
+                if v is not None and p > newest_filed:
+                    rev[f"{p}e"] = v
             years |= set(rev)
             # WHY revenue is missing, when it is: a company on an exchange outside the GuruFocus
             # subscription (Brookfield on TSX) can't be fetched at all → `unsubscribed`; one on a
@@ -2168,6 +2598,11 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
                 # for it. A period ending after it has never been asked about. NULL = never asked
                 # at all, and every cell in the row is then the second kind.
                 "financials_fetched_at": c.get("financials_fetched_at"),
+                # The filings this row's LTM cell was rolled from, and the rule that rolled them —
+                # empty for a company with no LTM, and on the quarterly basis where every cell is
+                # already a trailing year and no cell is called LTM.
+                "ltm_parts": ltm_parts.get(c["company_id"], []),
+                "ltm_rule": ltm_rule,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
                 # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
                 # actually computed from. Sparse: a period with no filed cap is ABSENT,
@@ -2196,7 +2631,10 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
                    if body.universe else {}),
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        out = {"years": sorted(years), "rows": rows, "holdings": len(members)}
+        # ⚠ `_period_sort_key`, NOT A PLAIN SORT — 'LTM' beats '2026e' lexically, which would list
+        # the newest thing we know AFTER five years nobody has lived. See the helper.
+        out = {"years": sorted(years, key=_period_sort_key), "rows": rows,
+               "holdings": len(members)}
         if body.universe:
             # ⚠ WHO IS **NOT** IN THE INDEX, ON THE ONE SCREEN BUILT FOR CHECKING IT BY HAND. A
             # constituent with no stored market cap is dropped before weighting, and the names

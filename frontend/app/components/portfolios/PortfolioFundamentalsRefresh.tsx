@@ -35,6 +35,9 @@ import { cancelJob, startJob } from '../../../lib/stores/jobs';
  * Analyse view. Requiring an id therefore made the control vanish on the rows a reader is most
  * likely to be on — an account is the unit of work here, the model is the optional extra.
  */
+/** Which GuruFocus feed a UNIVERSE fill spends on. See the ⚠⚠ on `run`. */
+export type IndexFeeds = 'statements' | 'estimates' | 'smart';
+
 export type RefreshScope =
   | { kind: 'portfolio'; id: number; name: string }
   | { kind: 'basket'; holdings: { isin: string }[]; name: string }
@@ -51,7 +54,7 @@ export type RefreshScope =
    * how to start a fundamentals fill, follow its toast, and drop the read cache when it lands —
    * but see `run()`: the index is deliberately NOT forced.
    */
-  | { kind: 'universe'; label: string; name: string };
+  | { kind: 'universe'; label: string; name: string; feeds?: IndexFeeds };
 
 export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
   scope: RefreshScope;
@@ -109,8 +112,21 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
        * deliberate full reload lives on the /benchmarks fundamentals grid, which is that page's
        * whole subject.
        */
+      /**
+       * ⚠⚠ WHICH FEED AN INDEX FILL SPENDS ON, AND THE DEFAULT IS STILL `statements`.
+       *
+       * `statements` is one call per constituent and fills every column the fundamentals grid
+       * and the reported side of the Long Equity tab draw. It never asks for a consensus — so an
+       * index's analyst-expectation line can never appear however often that button is pressed.
+       *
+       * `estimates` is the targeted fill for exactly that: one call per constituent MISSING a
+       * consensus and none for the rest. Measured 2026-08-14 on ACWI — 351 of 1,715 charted names
+       * carry one, so it is ~1,364 calls against the ~5,145 that fetching all three feeds for
+       * every constituent would cost, of which two thirds would refill data already held.
+       */
       const url = scope.kind === 'universe'
         ? `${API_URL}/api/benchmarks/index/${encodeURIComponent(scope.label)}/fundamentals/ingest/job`
+          + (scope.feeds ? `?feeds=${scope.feeds}` : '')
         : holdings
           ? `${API_URL}/api/airs/basket/fundamentals/ingest/job${q}`
           : `${API_URL}/api/airs/model-portfolios/${(scope as { id: number }).id}`
@@ -197,15 +213,18 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
               + 'filed since we last looked. One API call, and none at all when its next quarter '
               + 'cannot be out yet.'
             : scope.kind === 'universe'
-              // ⚠ IT SAYS WHAT IT WILL *NOT* DO. An index fill is un-forced (see `run`), so it adds
-              // the constituents we are missing and cannot update one we already hold — press it
-              // twice and the second press is free and changes nothing, which without this reads as
-              // a broken button rather than as a deliberate scope.
-              ? `Fetch GuruFocus fundamentals for the ${scope.name} constituents we are MISSING — `
-                + 'the ones absent from the table below, which is why the index line covers less of '
-                + 'its index than 100%. One API call each. It does not re-fetch a constituent we '
-                + 'already hold, however old: that full reload lives on the /benchmarks '
-                + 'fundamentals grid.'
+              // ⚠⚠ IT USED TO SAY WHAT IT WOULD *NOT* DO, AND THAT SENTENCE IS NOW FALSE UNDER
+              // `smart`. The old index fill was un-forced, so it could add a missing constituent
+              // and never update one we already held — press it twice and the second press was free
+              // and changed nothing. Smart mode decides per feed on whether anything NEW can exist
+              // (a filing due, a consensus older than a week), so it does update, and a second
+              // press really is free rather than merely refusing.
+              ? `Refresh the ${scope.name} constituents: for each one, exactly the GuruFocus feeds `
+                + 'it is MISSING or that can plausibly have changed — statements when a new fiscal '
+                + 'period is due, the analyst consensus and the forward-P/E series when our copy is '
+                + 'over a week old. A constituent with nothing new costs no call at all, and one on '
+                + 'an exchange outside the GuruFocus subscription is refused before a call is spent. '
+                + 'It is the per-row Refresh below, run across the index.'
               : `Fetch the latest GuruFocus fundamentals for every company in ${scope.name} that could `
                 + 'plausibly have filed since we last looked — one API call each, and none for a '
                 + 'company whose next quarter cannot be out yet.')

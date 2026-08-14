@@ -128,13 +128,17 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     from ingest.api_usage import remaining_budget  # noqa: PLC0415
     from routers import _blend_cache  # noqa: PLC0415
     from routers._fundamental_backfill import (  # noqa: PLC0415
-        company_rows, eligible, ingest_company, needs,
+        company_rows, eligible, ingest_company, needs, smart_flags_bulk,
     )
 
     ids = sorted(set(ids))
     offered = len(ids)
     due_note = None
-    if only_due:
+    # ⚠ `smart` CARRIES ITS OWN DUE TEST, PER FEED. Running the company-level filter as well
+    # would drop a constituent whose statements are not due before its stale consensus was ever
+    # looked at — the two would compound into "skip unless a filing is due", which is the one
+    # thing smart mode exists not to be.
+    if only_due and feeds != "smart":
         ids, due_note = due_company_ids(ids, today)
 
     comps = company_rows(ids)
@@ -146,8 +150,19 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
         # whatever we hold.
         todo = [{**c, "need_fin": True, "need_est": True, "need_ind": True}
                 for c in comps.values()]
+    elif feeds == "smart":
+        # ⚠⚠ THE SAME RULE THE ROW BUTTON USES, over the whole list in five reads rather than
+        # five per company — see `smart_flags_bulk`. This is what makes the bulk press genuinely
+        # "N smart presses" instead of a second, cheaper-looking policy that quietly differs.
+        flags = smart_flags_bulk(list(comps))
+        todo = [{**c, **flags.get(c["company_id"], {})} for c in comps.values()]
+        todo = [c for c in todo if c["need_fin"] or c["need_est"] or c["need_ind"]]
     else:
-        todo = needs(comps, feeds=("fin",) if feeds == "statements" else None)
+        # ⚠ PROBE ONLY THE SENTINEL THIS RUN CAN ACT ON. Each one is its own `metric_data`
+        # read, so asking for three when the fill will only run one is two thirds of the work
+        # thrown away — and `ind`'s sentinel is the expensive one (~535 rows per company).
+        probe = {"statements": ("fin",), "estimates": ("est",)}.get(feeds)
+        todo = needs(comps, feeds=probe)
     # ⚠ SELECTION AND ACTION NARROW TOGETHER, and this is also where `force` is applied — which is
     # why force cannot widen the feeds. A forced run arrives with all three flags true; this clears
     # two of them under `statements`, exactly as for an un-forced one. The `need_fin` filter is a
@@ -158,6 +173,16 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     if feeds == "statements":
         todo = [{**c, "need_est": False, "need_ind": False}
                 for c in todo if c.get("need_fin")]
+    # ⚠⚠ THE ESTIMATES FILL, AND IT SELECTS ON ITS OWN SENTINEL. Under `statements` a company
+    # that already holds financials is skipped — correct there, and fatal here: nearly every
+    # constituent holds financials and almost none holds a consensus, so selecting on `need_fin`
+    # would find nothing to do and the button would report "0 loaded" on an index whose forecast
+    # line is missing for 1,364 of 1,715 names. Same shape of bug as the `require_market_cap`
+    # one the index job carries its own ⚠⚠ about: selecting on the wrong fact removes exactly
+    # the companies the run exists to load.
+    elif feeds == "estimates":
+        todo = [{**c, "need_fin": False, "need_ind": False}
+                for c in todo if c.get("need_est")]
     skipped = [(c, eligible(c)) for c in todo]
     work = [c for c, why in skipped if why is None]
     refused = [(c, why) for c, why in skipped if why]
@@ -202,13 +227,13 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
         # ⚠ `refresh_cache=force` — THE SECOND CACHE. `force` alone only ignores what `metric_data`
         # holds; the GuruFocus blob in Storage would still be replayed, so a forced press over an
         # already-loaded set would rewrite identical rows, spend zero calls and change nothing.
-        r = ingest_company(c, refresh_cache=force)
+        r = ingest_company(c, refresh_cache=(force or feeds == "smart"))
         # ⚠ RETRY ONCE ON AN EMPTY ANSWER. This company was selected because it is missing the feed
         # (or the run is forced), so zero rows with no error means the fetch came back with nothing.
         # It costs one call to correct and, left alone, looks identical to a company that genuinely
         # has no data.
         if not r["error"] and r["rows"] == 0:
-            r = ingest_company(c, refresh_cache=force)
+            r = ingest_company(c, refresh_cache=(force or feeds == "smart"))
         n = next(counter)
         with tally_lock:
             rows += r["rows"]

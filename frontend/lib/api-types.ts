@@ -5076,6 +5076,22 @@ export interface paths {
          *     subscription, and unreachable. They arrive at weight 0, so they change no average and no
          *     coverage figure; their cells say `Unsubscribed` and their weight column is blank, which is the
          *     difference between "in the index, not in the line" and "not in the index".
+         *
+         *     ⚠⚠ `only_company_id` RE-READS ONE ROW, AND IT EXISTS BECAUSE THE PER-ROW REFRESH RE-READ ~1,700.
+         *     Pressing Refresh on a constituent changes exactly that company's `metric_data`; the drill-down
+         *     then reloaded the whole matrix to show it, which on ACWI means every constituent's series, every
+         *     period cap and every LTM window — the most expensive read on the tab — to update one line of a
+         *     table already on screen.
+         *
+         *     ⚠ THE WEIGHTS ARE STILL COMPUTED OVER THE **WHOLE** MEMBERSHIP, and that is the entire subtlety.
+         *     `weight_pct` is this company's share of the full book (`weight_by[ci] / total_w`); narrowing the
+         *     member list instead of the READ would hand back a row weighted 100%, and the client would splice
+         *     a confident wrong number into a column that is supposed to sum to the index. So the narrowing is
+         *     applied AFTER the weights are known, and only to `comp` — the dict every expensive per-company
+         *     read is keyed on.
+         *
+         *     ⚠ THE RESPONSE IS THEREFORE NOT A WHOLE TABLE and must not be rendered as one: its `years` cover
+         *     the one company, not the union. The caller merges the row and keeps its own columns.
          */
         post: operations["portfolio_revenue_matrix_api_earnings_portfolio_revenue_matrix_post"];
         delete?: never;
@@ -18487,6 +18503,7 @@ export interface operations {
         parameters: {
             query?: {
                 metric?: string;
+                only_company_id?: number | null;
             };
             header?: never;
             path?: never;
