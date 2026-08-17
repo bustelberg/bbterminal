@@ -21,7 +21,7 @@ REPORTS_OK = ["att", "volk", "mut", "model"]
 class TestItCountsWhatTheRunDid:
     def test_an_account_with_no_roster_row_is_added(self):
         out = count_outcomes([], known=set(), outcomes={"new_book": REPORTS_OK})
-        assert out == {"added": 1, "updated": 0, "up_to_date": 0, "failed": 0}
+        assert out == {"added": 1, "updated": 0, "up_to_date": 0, "failed": 0, "too_small": 0}
 
     def test_an_account_we_already_had_is_updated(self):
         out = count_outcomes([], known={"old_book"}, outcomes={"old_book": REPORTS_OK})
@@ -31,7 +31,7 @@ class TestItCountsWhatTheRunDid:
     def test_skipped_accounts_are_already_up_to_date(self):
         """Being complete is WHY they were skipped — they are not failures and not work."""
         out = count_outcomes(["a", "b", "c"], known={"a", "b", "c"}, outcomes={})
-        assert out == {"added": 0, "updated": 0, "up_to_date": 3, "failed": 0}
+        assert out == {"added": 0, "updated": 0, "up_to_date": 3, "failed": 0, "too_small": 0}
 
     def test_an_account_that_stored_nothing_is_failed_not_updated(self):
         """⚠ THE ONE THAT MATTERS. Every report can fail while the account is still visited.
@@ -44,20 +44,35 @@ class TestItCountsWhatTheRunDid:
         """Some reports arrived, so something was written — that is an update, not a failure.
         WHICH reports are short is the row's own badge and the console's business."""
         out = count_outcomes([], known={"old"}, outcomes={"old": ["att"]})
-        assert out == {"added": 0, "updated": 1, "up_to_date": 0, "failed": 0}
+        assert out == {"added": 0, "updated": 1, "up_to_date": 0, "failed": 0, "too_small": 0}
 
     def test_a_brand_new_account_that_failed_is_not_added(self):
         """Nothing was stored, so nothing was added — "added" must mean rows exist now."""
         out = count_outcomes([], known=set(), outcomes={"new": []})
-        assert out == {"added": 0, "updated": 0, "up_to_date": 0, "failed": 1}
+        assert out == {"added": 0, "updated": 0, "up_to_date": 0, "failed": 1, "too_small": 0}
 
     def test_the_counts_partition_the_fleet(self):
-        """No account may fall between the four buckets — a reader adds them up."""
+        """No account may fall between the five buckets — a reader adds them up."""
         skipped = ["s1", "s2"]
         outcomes = {"new": REPORTS_OK, "old": REPORTS_OK, "dead": [], "part": ["volk"]}
         out = count_outcomes(skipped, known={"old", "dead", "part", "s1", "s2"}, outcomes=outcomes)
         assert sum(out.values()) == len(skipped) + len(outcomes)
-        assert out == {"added": 1, "updated": 2, "up_to_date": 2, "failed": 1}
+        assert out == {"added": 1, "updated": 2, "up_to_date": 2, "failed": 1, "too_small": 0}
+
+    def test_books_the_run_never_looked_at_are_counted_too(self):
+        """⚠⚠ THE PARTITION HAD QUIETLY STOPPED BEING ONE, AND THAT IS THE WHOLE BUG BEHIND
+        "Refresh all says everything is up to date yet the rows show stale".
+
+        `bogus_accounts` drops books under the holdings floor from `todo` AFTER `accounts_to_scan`
+        has split the fleet, so they landed in neither `skipped` nor `outcomes` — they were in no
+        count at all. Measured 2026-08-17: 45 accounts on the page, 16 dropped, and the summary
+        described 29 of them. Four of the missing sixteen had not been read in twelve trading days.
+        """
+        skipped, small = ["s1"], ["tiny1", "tiny2", "tiny3"]
+        outcomes = {"a": REPORTS_OK, "b": REPORTS_OK}
+        out = count_outcomes(skipped, known={"a", "b", "s1"}, outcomes=outcomes, small=small)
+        assert out["too_small"] == 3
+        assert sum(out.values()) == len(skipped) + len(small) + len(outcomes)
 
 
 class TestTheLineItPrints:
@@ -132,3 +147,30 @@ class TestItNeverClaimsTheDATAIsCurrent:
         msg = format_run_message(
             {"added": 0, "updated": 30, "up_to_date": 0, "failed": 2}, "2026-08-15")
         assert msg.index("2 failed") < msg.index("newest AIRS valuation")
+
+    def test_the_books_it_never_looked_at_are_named_in_the_line(self):
+        """⚠⚠ THE OTHER HALF OF "up to date, yet the rows show stale". The valuation clause explained
+        the rows we DID read; this one accounts for the rows we did not. Without it the sentence
+        describes a subset of the fleet in the voice of the whole of it — measured 2026-08-17, 29 of
+        45 accounts, with four of the unmentioned sixteen twelve trading days behind."""
+        msg = format_run_message(
+            {"added": 0, "updated": 28, "up_to_date": 1, "failed": 0, "too_small": 16})
+        assert "16 not re-read" in msg and "under 5 holdings" in msg
+        # ⚠ AND IT SAYS THE SKIP IS BOUNDED. "not re-read" alone reads as "never", which is what it
+        # used to be and is the reason four rows rotted for twelve trading days.
+        assert "14 days" in msg
+
+    def test_that_clause_is_absent_when_every_book_was_considered(self):
+        """A run that skipped nothing must not carry a clause about nothing — the three fixed counts
+        are the shape; this one is a property of the fleet on that particular run."""
+        msg = format_run_message({"added": 0, "updated": 44, "up_to_date": 0, "failed": 0})
+        assert "not re-read" not in msg
+        assert format_run_message(
+            {"added": 0, "updated": 44, "up_to_date": 0, "failed": 0, "too_small": 0}) == msg
+
+    def test_the_small_clause_comes_before_failed(self):
+        """Same rule as the valuation date: the amber reason stays last of the counts, so it is not
+        buried behind a neutral one."""
+        msg = format_run_message(
+            {"added": 0, "updated": 20, "up_to_date": 0, "failed": 2, "too_small": 5}, "2026-08-15")
+        assert msg.index("5 not re-read") < msg.index("2 failed") < msg.index("newest AIRS")

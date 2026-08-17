@@ -272,8 +272,23 @@ AIRS_FRESH_HOURS = float(os.environ.get("AIRS_FRESH_HOURS", "20"))
 # model-portfolios table uses, so "too small to be real" means one thing across the app.
 MIN_REAL_HOLDINGS = int(os.environ.get("AIRS_MIN_REAL_HOLDINGS", "5"))
 
+# ⚠⚠ HOW LONG A SKIPPED BOOK MAY GO UNREAD BEFORE IT IS READ ANYWAY. The size skip below is a COST
+# decision — 60-odd downloads a run on books nobody opens — and a cost decision must not become a
+# permanent exemption: a book that is never re-read has an `as_of` that never moves, so its row
+# wears the amber "N trading days old" badge for ever while the run reports the fleet up to date.
+#
+# Measured 2026-08-17: the four `BUS_BM_*` benchmark accounts (1 holding each) were last read
+# 2026-07-30 — 12 trading days — and were the ONLY rows on the page whose lag was OURS rather than
+# AIRS's, i.e. the only four a refresh could have fixed, and the only four every refresh refused to
+# touch. 14 days keeps ~90% of the saving (a skipped book costs 4 downloads roughly twice a month)
+# and bounds how wrong a skipped row can get.
+AIRS_BOGUS_MAX_AGE_HOURS = float(os.environ.get("AIRS_BOGUS_MAX_AGE_HOURS", "336"))
 
-def bogus_accounts(counts: dict[str, int], verdicts: dict[str, dict]) -> set[str]:
+
+def bogus_accounts(counts: dict[str, int], verdicts: dict[str, dict],
+                   *, now: datetime | None = None,
+                   max_stale_hours: float | None = AIRS_BOGUS_MAX_AGE_HOURS,
+                   visible: set[str] | None = None) -> set[str]:
     """Accounts too small to be portfolios, lower-cased. Pure.
 
     `counts` is the last known holdings per account (`_holding_counts`); `verdicts` is the roster's
@@ -294,15 +309,62 @@ def bogus_accounts(counts: dict[str, int], verdicts: dict[str, dict]) -> set[str
 
     Measured 2026-07-30: 15 of 46 books qualify — 5 benchmarks at 1 holding, 10 shells at 0 — which
     is 60 downloads a run spent on books nobody looks at. `force` re-checks everything regardless.
+
+    ⚠⚠ BUT A SKIP IS NOT AN EXEMPTION, AND FOR FOUR BOOKS IT HAD BECOME ONE. `max_stale_hours`
+    re-admits a book we have not read in that long (`AIRS_BOGUS_MAX_AGE_HOURS`, 14 days), because a
+    permanently skipped account is one whose `as_of` can never move: its row wears "13 trading days
+    old" for ever, `lagOwner` correctly reports the lag as OURS — the one verdict that tells the
+    reader a Refresh will fix it — and every Refresh then skips it again. Measured 2026-08-17: the
+    four `BUS_BM_*` benchmarks, last read 2026-07-30, were exactly those rows. Pass
+    `max_stale_hours=None` for the pure size question with no clock in it.
+
+    ⚠ A BOOK WITH NO `reports_at` IS NOT RE-ADMITTED BY THE CLOCK. It cannot be stale-by-time if we
+    have no time for it — and it is only in `verdicts` at all because a previous run wrote its
+    `reports_ok`, so `volk` above has already established that we fetched it.
+
+    ⚠⚠ AND ONLY A **VISIBLE** BOOK IS RE-ADMITTED, WHICH IS THE POINT OF THE WHOLE EXERCISE. The
+    justification for reading a one-holding book at all is that its ROW carries a badge a reader
+    cannot clear; a hidden account (`airs_account_hidden`) has no row, so a stale one is invisible by
+    construction and re-reading it buys nothing. Measured 2026-08-17: 16 books are too small, and
+    without this 14 of them would be re-admitted at once — including `wts test 1-4 fx` and the four
+    `_MV` shells, which nobody can see. With it, only the books on the page come back. `visible=None`
+    means "no list available", and then the age rule applies to all of them: failing toward doing the
+    work matches `_roster_verdicts`, which scans everything when it cannot read the roster.
     """
+    cutoff = None
+    if max_stale_hours is not None:
+        cutoff = (now or datetime.now(timezone.utc)) - timedelta(hours=max_stale_hours)
     out: set[str] = set()
     for name, v in verdicts.items():
         key = (name or "").strip().lower()
         if "volk" not in set(v.get("reports_ok") or ()):
             continue                      # never fetched its holdings — unknown, not empty
-        if counts.get(name, counts.get(key, 0)) < MIN_REAL_HOLDINGS:
-            out.add(key)
+        if counts.get(name, counts.get(key, 0)) >= MIN_REAL_HOLDINGS:
+            continue
+        if (cutoff is not None
+                and (visible is None or key in visible)
+                and _older_than(v.get("reports_at"), cutoff)):
+            continue                      # small, ON THE PAGE, and unread for a fortnight
+        out.add(key)
     return out
+
+
+def _older_than(stamp: str | None, cutoff: datetime) -> bool:
+    """Is `stamp` (an ISO timestamp, possibly naive) strictly before `cutoff`?
+
+    ⚠ AN UNPARSEABLE OR ABSENT STAMP IS "NOT OLD", so a bad value cannot silently re-admit every
+    skipped book on every run — that would quietly undo the saving the skip exists for, and nothing
+    on screen would say why the scan got slower.
+    """
+    if not stamp:
+        return False
+    try:
+        ts = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts < cutoff
 
 
 # ⚠⚠ WHERE THE RUN'S NARRATION GOES **NOW**. `_emit` writes to `_STATUS["log"]`, which the
@@ -526,6 +588,7 @@ def summarise_errors(errors: list[dict]) -> list[dict]:
 
 def count_outcomes(
     skipped: list[str], known: set[str], outcomes: dict[str, list[str]],
+    small: list[str] | None = None,
 ) -> dict[str, int]:
     """What the run DID, in the four words an operator actually asks in: added, updated, already up
     to date, failed. Pure — `outcomes` is `{scanned account: the reports that arrived}`.
@@ -540,8 +603,17 @@ def count_outcomes(
     happen, in the one number somebody reads to decide whether to press the button again. So the
     test is `outcomes[name]` being non-empty — at least one report arrived and was written.
 
-    The four counts partition the discovered fleet exactly (`skipped + len(outcomes)`), so they can
-    be read as a whole without wondering where the missing accounts went.
+    ⚠⚠ `small` IS THE FIFTH COUNT AND IT EXISTS BECAUSE THE PARTITION HAD QUIETLY STOPPED BEING ONE.
+    The books `bogus_accounts` drops are removed from `todo` AFTER `accounts_to_scan` has split the
+    fleet, so they were in neither `skipped` nor `outcomes` — they were in nothing. Measured
+    2026-08-17: 45 accounts on the page, 16 of them dropped as too small, and the summary described
+    29. A reader saw "0 added, 28 re-read, 1 skipped" and reasonably concluded the fleet was
+    covered, while four of the missing sixteen had not been read in twelve trading days and wore an
+    amber badge saying so. THAT is the contradiction between this line and the row icons; the
+    valuation-date clause fixed the other half of it.
+
+    The five counts partition the discovered fleet exactly (`skipped + small + len(outcomes)`), so
+    they can be read as a whole without wondering where the missing accounts went.
     """
     added = updated = failed = 0
     for name, ok in outcomes.items():
@@ -551,7 +623,8 @@ def count_outcomes(
             updated += 1
         else:
             added += 1
-    return {"added": added, "updated": updated, "up_to_date": len(skipped), "failed": failed}
+    return {"added": added, "updated": updated, "up_to_date": len(skipped), "failed": failed,
+            "too_small": len(small or ())}
 
 
 def format_run_message(counts: dict[str, int], newest_as_of: str | None = None) -> str:
@@ -589,6 +662,13 @@ def format_run_message(counts: dict[str, int], newest_as_of: str | None = None) 
     line = (f"{a} portfolio{'' if a == 1 else 's'} added, "
             f"{counts['updated']} re-read, "
             f"{counts['up_to_date']} skipped (we read them within {AIRS_FRESH_HOURS:g}h)")
+    # ⚠ THE BOOKS THE RUN NEVER LOOKED AT, NAMED — see `count_outcomes`. Without this clause they
+    # are in no count at all, and the line reads as a statement about the whole fleet while
+    # describing two thirds of it. Only shown when there are some: a fixed shape is worth having
+    # for the three counts a run always produces, and this one is a property of the fleet.
+    if counts.get("too_small"):
+        line += (f", {counts['too_small']} not re-read (under {MIN_REAL_HOLDINGS} holdings — "
+                 f"re-read anyway after {AIRS_BOGUS_MAX_AGE_HOURS / 24:g} days)")
     if counts.get("failed"):
         line += f", {counts['failed']} failed"
     # ⚠ THE DATA'S OWN DATE, NOT OURS — see above. Named "AIRS valuation" rather than "as of" so it
@@ -954,13 +1034,29 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         # all". A benchmark with one holding and a `_MV` shell with none are re-downloaded four
         # times each, every run, for ever — and they are precisely the books that can never be
         # complete, so the freshness skip never catches them either. `force` re-checks everything.
-        from routers._airs_accounts import _holding_counts  # noqa: PLC0415
+        from routers._airs_accounts import (  # noqa: PLC0415
+            _hidden_accounts, _holding_counts, _live_accounts,
+        )
 
         bogus: set[str] = set()
+        # ⚠ HELD FOR THE SUMMARY, NOT ONLY FOR THE LOG. These names used to exist solely inside the
+        # `plan_bogus` event; the one line the page shows never mentioned them, so two thirds of the
+        # fleet could go unread and the sentence still read as a report on all of it.
+        skipped_bogus: list[str] = []
         if not force:
             try:
                 counts, _, _isin = _holding_counts()
-                bogus = bogus_accounts(counts, verdicts)
+                # ⚠⚠ THE PAGE'S OWN TWO FILTERS, IN THE SAME ORDER — `list_accounts` drops an
+                # account that is hidden OR that AIRS did not list on the last discovery, and BOTH
+                # matter here. `airs_account_hidden` is currently empty; it is `_live_accounts` that
+                # removes `wts test 1-4 fx` and the retired `_L` books, which is why filtering on
+                # hidden alone re-admitted fourteen invisible shells instead of the five rows a
+                # reader can actually see. A third definition of "visible" would drift from the list
+                # it is supposed to mirror.
+                live = _live_accounts()
+                roster_keys = {n.strip().lower() for n in verdicts}
+                visible = (live if live is not None else roster_keys) - _hidden_accounts()
+                bogus = bogus_accounts(counts, verdicts, visible=visible)
             except Exception as e:  # noqa: BLE001 — a failed lookup must scan MORE, never less
                 _log.warning("[airs_vermogen] could not read holdings counts (%s: %s) — scanning "
                              "every account", type(e).__name__, e)
@@ -1095,7 +1191,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         # only the scanned ones would report "2/44 accounts complete" after a healthy no-op run,
         # which reads as catastrophic and is the exact opposite of what happened.
         complete = len(current) + sum(1 for ok in outcomes.values() if len(ok) == len(REPORTS))
-        counts = count_outcomes(current, known, outcomes)
+        counts = count_outcomes(current, known, outcomes, skipped_bogus)
         # ⚠ EVERY REPORT THE JOB FETCHES IS NAMED — IN THE LOG. This string was the message, and it
         # said "Rendement 44/44, Vermogensoverzicht 31/44 … 27 report(s) failed", where 44−31=13
         # because `errors` also carried Mutaties and Model failures the message never mentioned:
