@@ -224,8 +224,10 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
    * call sites), because silence there would hide the AMD incident this badge was built for: a
    * 4-day-old cached value read €114,587 / +142% against AIRS-live's €107,086 / +126%.
    */
-  // ⚠ THE PROP WINS OVER THE SUBTREE'S DEFAULT — see `ProvenanceFetchedAt`. `??`, not `||`, so an
-  // explicit null ("we know we do not know") is honoured rather than silently falling back.
+  // ⚠ A DATE OF ITS OWN WINS; ANYTHING ELSE INHERITS THE SUBTREE'S — see `ProvenanceFetchedAt`.
+  // `??` treats an explicit `null` exactly like an absent prop, and that is deliberate: `null` here
+  // means "this call site does not know when we read it", which is precisely when the provider's
+  // answer — about the same account — is the better one.
   const ctxFetchedAt = useContext(FetchedAtContext);
   const fetched = fetchedAt ?? ctxFetchedAt;
   const lag = column ? null : lagOwner(asOf, fetched);

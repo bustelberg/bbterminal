@@ -19,7 +19,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { INFO_ICON_WARN } from './infoIcon';
-import { Provenance } from './provenance';
+import { Provenance, ProvenanceFetchedAt } from './provenance';
 import { snapshotFreshness } from './snapshotAge';
 
 /** Years back, so it is stale under any definition of "trading days behind" — the test must not
@@ -48,6 +48,85 @@ describe('a column-header ⓘ can never go stale', () => {
     expect(html).toMatch(/>i</);
   });
 
+});
+
+/**
+ * ⚠⚠ AMBER MEANS "YOU CAN FIX THIS", NOT "THIS IS OLD".
+ *
+ * Measured 2026-08-17, immediately after a full "Refresh all": 27 of 45 account rows wore the `!`,
+ * and 23 of them had been read that same afternoon — AIRS had simply not valued those books since
+ * (its newest valuation anywhere was 2026-08-15, and many books stop at 08-11/12). Not one of the
+ * 23 could be cleared by any action on the page, which is how an alarm becomes furniture and takes
+ * the four rows that WERE ours to fix down with it.
+ *
+ * The date and its age stay in the card either way. Only the colour moves.
+ */
+describe('the amber chip is reserved for the lag we own', () => {
+  /** Two trading days is the same threshold `snapshotFreshness` uses; a fixed recent date would go
+   *  stale as the test aged, so it is computed from today. */
+  const today = new Date().toISOString().slice(0, 10);
+
+  it('stays quiet when we read the source today and the SOURCE is what is behind', () => {
+    const html = renderToStaticMarkup(
+      <Provenance source="airs_att" asOf={LONG_AGO} fetchedAt={`${today}T13:15:00Z`}
+        kind="copied" note="a value" />,
+    );
+    expect(html).not.toContain(INFO_ICON_WARN);
+    expect(html).toMatch(/>i</);
+  });
+
+  it('still fires when OUR copy is the stale side', () => {
+    const html = renderToStaticMarkup(
+      <Provenance source="airs_att" asOf={LONG_AGO} fetchedAt={`${LONG_AGO}T13:15:00Z`}
+        kind="copied" note="a value" />,
+    );
+    expect(html).toContain(INFO_ICON_WARN);
+    expect(html).toMatch(/>!</);
+  });
+
+  it('⚠ still fires when we do NOT KNOW when we last read it', () => {
+    /** The AMD incident is why: a 4-day-old cached value read EUR 114,587 / +142% against
+     *  AIRS-live's EUR 107,086 / +126%, with nothing on the page saying it was from a past scan.
+     *  Silence on an unknown fetch would hide exactly that, so absence keeps the warning. */
+    const html = renderToStaticMarkup(
+      <Provenance source="airs_att" asOf={LONG_AGO} kind="copied" note="a value" />,
+    );
+    expect(html).toContain(INFO_ICON_WARN);
+  });
+});
+
+describe('a subtree can supply the fetch time once, for all of its icons', () => {
+  const today = new Date().toISOString().slice(0, 10);
+
+  it('an icon with no fetchedAt of its own inherits the provider’s', () => {
+    /** The expanded account panel renders 40 of these against one book — see
+     *  `ProvenanceFetchedAt`. Without the provider each one would go amber on AIRS's lag. */
+    const html = renderToStaticMarkup(
+      <ProvenanceFetchedAt at={`${today}T13:15:00Z`}>
+        <Provenance source="airs_volk" asOf={LONG_AGO} kind="formula" note="a value" />
+      </ProvenanceFetchedAt>,
+    );
+    expect(html).not.toContain(INFO_ICON_WARN);
+  });
+
+  it('an icon with its OWN older fetchedAt is not silenced by the provider', () => {
+    /** The prop wins, so a nested exception stays possible — one number in the subtree may come
+     *  from a read we know to be older than the account's. */
+    const html = renderToStaticMarkup(
+      <ProvenanceFetchedAt at={`${today}T13:15:00Z`}>
+        <Provenance source="airs_volk" asOf={LONG_AGO} fetchedAt={`${LONG_AGO}T09:00:00Z`}
+          kind="formula" note="a value" />
+      </ProvenanceFetchedAt>,
+    );
+    expect(html).toContain(INFO_ICON_WARN);
+  });
+
+  it('outside a provider nothing changes', () => {
+    const html = renderToStaticMarkup(
+      <Provenance source="airs_volk" asOf={LONG_AGO} kind="formula" note="a value" />,
+    );
+    expect(html).toContain(INFO_ICON_WARN);
+  });
 });
 
 // NOT ASSERTED HERE: the card's When line ("per value — each cell carries its own date"). The

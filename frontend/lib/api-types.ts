@@ -8095,6 +8095,8 @@ export interface components {
             dividend_sold_funds?: string[] | null;
             /** Dividend Sold Tax Eur */
             dividend_sold_tax_eur?: number | null;
+            /** Fetched At */
+            fetched_at?: string | null;
             /** Income Eur */
             income_eur?: number | null;
             /** Portefeuille */

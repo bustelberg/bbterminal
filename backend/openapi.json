@@ -297,6 +297,17 @@
             ],
             "title": "Dividend Sold Tax Eur"
           },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
           "income_eur": {
             "anyOf": [
               {
