@@ -2132,8 +2132,9 @@ async def airs_vermogen_refresh_job(force: bool = False):
             raise RuntimeError(res.get("message") or "AIRS scan stored nothing")
         return summary + (f" — {len(errs)} report(s) failed, see the console" if errs else "")
 
-    job = job_registry.start("airs.vermogen.refresh", "Refresh all portfolios", _work)
-    return {"job_id": job.id, "label": "Refresh all portfolios", "force": force}
+    job, reused = job_registry.start("airs.vermogen.refresh", "Refresh all portfolios", _work)
+    return {"job_id": job.id, "label": "Refresh all portfolios", "force": force,
+            "already_running": reused}
 
 
 class AirsAccountDeleted(BaseModel):
@@ -2283,8 +2284,8 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
                 + (f" · also refreshed {len(also)} book(s) it is built from" if also else '')
                 + (f" — {len(bad)} FAILED, see the console" if bad else ''))
 
-    job = job_registry.start("airs.portfolio.refresh", portefeuille, _work)
-    return {"job_id": job.id, "label": portefeuille}
+    job, reused = job_registry.start("airs.portfolio.refresh", portefeuille, _work)
+    return {"job_id": job.id, "label": portefeuille, "already_running": reused}
 
 
 @router.get("/api/airs/vermogen/status")
@@ -3311,9 +3312,10 @@ async def ingest_portfolio_fundamentals_job(portfolio_id: int, force: bool = Tru
         return fill_company_ids(ctx, name, ids, feeds=feeds, force=force, limit=limit,
                                 only_due=only_due)
 
-    job = job_registry.start("fundamentals.portfolio", name, _work)
+    job, reused = job_registry.start("fundamentals.portfolio", name, _work)
     return {"job_id": job.id, "label": name, "holdings": holdings, "reachable": len(ids),
-            "no_fundamentals": no_fundamentals, "no_company": no_company}
+            "no_fundamentals": no_fundamentals, "no_company": no_company,
+            "already_running": reused}
 
 
 @router.post("/api/airs/basket/fundamentals/ingest/job",
@@ -3345,6 +3347,7 @@ async def ingest_basket_fundamentals_job(req: BasketRequest, force: bool = True,
         return fill_company_ids(ctx, name, ids, feeds=feeds, force=force, limit=limit,
                                 only_due=only_due)
 
-    job = job_registry.start("fundamentals.basket", name, _work)
+    job, reused = job_registry.start("fundamentals.basket", name, _work)
     return {"job_id": job.id, "label": name, "holdings": holdings, "reachable": len(ids),
-            "no_fundamentals": no_fundamentals, "no_company": no_company}
+            "no_fundamentals": no_fundamentals, "no_company": no_company,
+            "already_running": reused}

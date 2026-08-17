@@ -12,7 +12,6 @@ import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { BADGE_TONE, StateBadge } from '../StateBadge';
 import { MIN_YEAR_COVERAGE_PCT } from './marginData';
-import { memberScale, stepGrowth } from './stepGrowth';
 import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
 
 /**
@@ -30,49 +29,16 @@ import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFund
  * disagree. The footer row IS the line.
  */
 
-type Row = {
-  isin: string; name: string; weight_pct: number; currency: string | null;
-  ticker: string | null; exchange: string | null;
-  /** The key the per-row refresh fetches on — a real `company.company_id`, not the `analysis_id`
-   *  that hides under that name elsewhere. Absent only if the backend predates it, which is why
-   *  the control is rendered conditionally rather than assuming it. */
-  company_id?: number | null;
-  /** When we last ASKED GuruFocus for this company's financials (ISO). NULL/absent = never asked,
-   *  which makes every empty period `not_tried` rather than `no_data`. See `cellState`. */
-  financials_fetched_at?: string | null;
-  status: 'ok' | 'unsubscribed' | 'no_data'; revenue: Record<string, number | null>;
-  /**
-   * The FILINGS this row's `LTM` cell was rolled from, and the rule that rolled them.
-   *
-   * ⚠⚠ THE LTM COLUMN IS THE ONLY ONE THIS APP ASSEMBLED. Every other cell is a figure the company
-   * filed for that fiscal period; the LTM is `k` consecutive filings combined under a declared
-   * rule, and those quarters reach the browser NOWHERE else — the tab's "Quarterly" toggle looks
-   * like the place to check and is not, because the server rolls those too, so it shows more
-   * trailing years rather than the filings under them. Hence one ⓘ per cell of this column.
-   */
-  ltm_parts?: { date: string; value: number }[] | null;
-  ltm_rule?: string | null;
-  /** INDEX ROWS ONLY — the numerator the weight beside it was divided out of (cap ÷ Σcap).
-   *  Absent on a portfolio, where the weight is a holding weight and no cap is involved. */
-  market_cap_eur?: number | null;
-  /**
-   * INDEX ROWS ONLY — the market cap as at each fiscal period, in EUR, converted at that
-   * period's own end date (`period_caps_eur`).
-   *
-   * ⚠ THIS, NOT `market_cap_eur`, IS WHAT WEIGHTS EACH PERIOD. Weighting 2018's revenue by today's
-   * cap is look-ahead bias: measured on the S&P, NVIDIA is carried at 7.46% of a year it was 0.63%
-   * of. Absent for a portfolio (a holding weight has no market cap behind it), and SPARSE within
-   * an index — a period with no filed cap is missing rather than padded, because the company is
-   * then left out of that period's average entirely.
-   */
-  market_cap_by_period?: Record<string, number>;
-};
-/** Universe requests only: how the weights were arrived at, and who fell out. See the backend's
- *  `weight_basis` — the names it lists are NOT in the index at any weight. */
-type WeightBasis = {
-  members: number; weighted: number; excluded: { name: string | null; reason: string }[];
-};
-type Resp = { years: string[]; rows: Row[]; holdings: number; weight_basis?: WeightBasis };
+/**
+ * ⚠ THE PAYLOAD SHAPE AND THE PERIOD HELPERS MOVED TO `fundamentalBlend.ts`, with the blend maths
+ * that is their only real consumer. Re-exported here because two dozen cards import `Target` (and a
+ * few import the period helpers) from this module, and moving a type should not move a call site.
+ */
+export type { Resp, Row, WeightBasis } from './fundamentalBlend';
+export { isEstimatePeriod, periodOrder } from './fundamentalBlend';
+import { buildBlend, isEstimatePeriod, periodOrder, type Resp, type Row } from './fundamentalBlend';
+import CagrTable, { type CagrBenchmark } from './CagrTable';
+
 /**
  * `2026-08-04T09:12:00Z` → `4 August 2026`. The date we concluded something, in the form a person
  * reads rather than the one a database stores.
@@ -102,27 +68,7 @@ export const longDate = (iso: string): string =>
  */
 const NBSP = ' ';
 
-/**
- * Is this column an analyst FORECAST rather than a reported period? The `e` suffix is the
- * backend's (`2026e`), chosen so a consensus can never be merged into the year it forecasts —
- * an off-calendar filer can have both a filed FY2026 and a FY2026 estimate.
- */
-export const isEstimatePeriod = (p: string) => p.endsWith('e');
 
-/**
- * Period order: reported, then `LTM`, then the forecast years — the client twin of the backend's
- * `_period_sort_key`.
- *
- * ⚠⚠ A PLAIN SORT IS WRONG IN A WAY THAT LOOKS LIKE DATA. `'LTM' > '2026e'` lexically, so the
- * trailing twelve months — the newest thing actually known — would sit AFTER five forecast years.
- * That is not only a column order: the per-row sorts feed the Rebased base (the FIRST period) and
- * the YoY comparison (the PREVIOUS period), so an estimate would become the thing a reported year
- * is measured against.
- */
-export const periodOrder = (a: string, b: string) => {
-  const rank = (p: string) => (p === 'LTM' ? 1 : isEstimatePeriod(p) ? 2 : 0);
-  return rank(a) - rank(b) || a.localeCompare(b);
-};
 
 /** A period label → the date it ends on. The client twin of `_fundamental_blend.period_end`, and
  *  the only reason a cell can tell "we asked and there is nothing" from "nobody has asked yet": a
@@ -181,7 +127,13 @@ function cmp(a: number | string | null | undefined, b: number | string | null | 
  * different lines whenever membership changes mid-series, so both are offered and the footer says
  * which one reproduces the chart.
  */
-type View = 'reported' | 'rebased' | 'yoy';
+/**
+ * ⚠ `table` IS NOT A CELL TRANSFORM LIKE THE OTHER THREE. Reported/Rebased/YoY re-render the same
+ * matrices; `table` REPLACES them with the CAGR summary. It shares the control because it answers
+ * the same question at a different altitude — "how fast is this compounding" against "what are the
+ * figures" — and a second switch beside the first would be one more thing to notice.
+ */
+type View = 'reported' | 'rebased' | 'yoy' | 'table';
 
 /**
  * A period cell's contents, at a WIDTH THAT DOES NOT DEPEND ON THE STRING.
@@ -267,6 +219,9 @@ const VIEWS: [View, string, string][] = [
   ['yoy', 'YoY %', 'Growth from that company’s previous reported period. ⚠ The chart does NOT '
     + 'average these: it averages the Rebased levels. The footer is the plotted line’s own '
     + 'period-on-period change, not the average of the column above it.'],
+  ['table', 'Table', 'Compound annual growth of the weighted line — 5 and 10 years — for this book '
+    + 'against a benchmark you pick. It REPLACES the two matrices rather than adding to them: they '
+    + 'are what it is derived from, and the other views are one click away.'],
 ];
 
 function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRefresh }: {
@@ -329,241 +284,41 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * would put SP500's 264 contributors over its 489 listed rows and every coverage figure — and
    * the floor decision that rides on it — would be wrong by that ratio.
    */
-  const blend = useMemo(() => {
-    /**
-     * This row's weight IN THIS PERIOD — the mirror of the backend's `_fundamental_blend
-     * ._weight_at`, and it has to stay one because the footer below reproduces the plotted line
-     * the server computed. An index weights by the cap it HAD in that period; a portfolio has no
-     * cap history, so its single holding weight applies to every period. The absence of
-     * `market_cap_by_period` is the signal for the second case.
-     *
-     * Null (never 0) when an index constituent has no cap that period: it is left out of that
-     * period's average entirely, numerator and denominator both.
-     */
-    const wAt = (r: Row, y: string): number | null => {
-      const per = r.market_cap_by_period;
-      if (per) {
-        const v = per[y];
-        if (v && v > 0) return v;
-        // ⚠ AS-OF, mirroring `_weight_at` and `marginData.weightAt`. A cap is a stock: the last
-        // one filed stands until a newer one exists.
-        const earlier = Object.keys(per).filter((k) => k <= y && per[k] > 0);
-        return earlier.length ? per[earlier.reduce((a, b) => (a > b ? a : b))] : null;
-      }
-      const w = r.market_cap_eur ?? r.weight_pct;
-      return w && w > 0 ? w : null;
-    };
-    /**
-     * Why a row contributes NOTHING to the line — row-level, so it holds for every period.
-     *
-     * ⚠⚠ THIS EXISTS BECAUSE THE ABSENCE LOOKED LIKE A BUG. Measured on AITopSelectie OFF FX:
-     * Advanced Micro Devices is a 5% holding whose FCF/share the table happily lists, and whose
-     * weight line was simply blank in every period. The reason is real and one line up — its first
-     * reported period (2015) is **−0.411**, and a LEVEL series is rebased to 100 at its own first
-     * point, so `100 × v ÷ −0.411` inverts every later point: AMD's 2020 `+0.644` would plot as
-     * −157, a collapse that exists only in the arithmetic. `_prepare` drops it for exactly this
-     * (`non_positive_base`) and the blend never sees it.
-     *
-     * That is the right maths and it was silent, which is the one thing this table must never be:
-     * a blank a reader cannot account for gets read as a broken cell, and the next move is to go
-     * re-ingest data that is already there.
-     */
-    const excluded = new Map<Row, string>();
-    const parts: { r: Row; idx: Record<string, number> }[] = [];
-    // ⚠ KEYED ON THE ROW OBJECT, NOT ON THE ISIN. A payload can carry the same ISIN twice (a model
-    // listing one instrument at two weights — VTopSelectie holds CapitaLand at 2% and 3%), and an
-    // ISIN key would give both rows the first one's weight. `rows` below is a sort of these same
-    // objects, so identity is stable for the render.
-    const partOf = new Map<Row, { r: Row; idx: Record<string, number> }>();
-    /**
-     * ⚠⚠ COVERAGE IS MEASURED ON THE **STABLE** WEIGHT, NOT THE PER-PERIOD CAP — mirroring
-     * `_fundamental_blend.blend_series`, and it is the difference between the floor working
-     * and doing nothing at all.
-     *
-     * The per-period cap comes out of the same GuruFocus blob as the figure, so a company that has
-     * not filed FY2026 has no FY2026 cap either. Measuring coverage with it divides the filers by
-     * the filers and reads ~100% in exactly the period where almost nobody has reported — which is
-     * how FY2026 came to draw a full-height point made almost entirely of NVIDIA.
-     *
-     * Measured on the S&P: FY2026 is 13.4% covered on this basis and was reading 100.0% on the
-     * per-period one.
-     */
-    const coverW: Record<string, number> = {};
-    let coverTotal = 0;
-    const stableW = (r: Row): number => {
-      const w = r.market_cap_eur ?? r.weight_pct;
-      return w && w > 0 ? w : 0;
-    };
+  const blend = useMemo(() => buildBlend(data), [data]);
+
+  /**
+   * Per-row facts that every one of that row's period cells would otherwise re-derive.
+   *
+   * ⚠⚠ `Object.keys(r.revenue).filter(…).sort(periodOrder)` USED TO RUN PER CELL, and a row has as
+   * many cells as the table has periods. `cellState` wants the newest period a row reported;
+   * `cellOf` wants the ordered list, because the Rebased base is its FIRST period and the YoY
+   * comparison its PREVIOUS one. On an index that is an allocate-filter-sort per cell — ~500 of them
+   * to draw one screenful of ACWI, repeated on every scroll step that mounts a row, for an answer
+   * that depends on the ROW alone and cannot change between two cells of it.
+   *
+   * ⚠ KEYED ON THE ROW OBJECT, NOT ON THE ISIN — the same rule as `blend.partOf` above. A payload
+   * can carry one ISIN twice (a model listing an instrument at two weights), and an ISIN key would
+   * hand both rows the first one's periods.
+   */
+  const rowFacts = useMemo(() => {
+    const m = new Map<Row, { reported: string[]; newest: string | undefined; hasEstimate: boolean }>();
     for (const r of data.rows) {
-      const periods = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort(periodOrder);
-      if (!periods.length) {
-        // Nothing filed at all — the row already says so via `status`, so no second badge.
-        continue;
-      }
-      // ⚠ COUNTED IN THE DENOMINATOR **BEFORE** THE BASE TEST, because that is the order
-      // `blend_series` uses: it takes the total over every member handed to it, and `_prepare`
-      // drops the non-positive bases afterwards. Filtering first would shrink the denominator,
-      // lift every coverage figure, and let a period slip over the floor that the chart omits.
-      coverTotal += stableW(r);
-      const base = r.revenue[periods[0]] as number;
-      if (!(base > 0)) {                      // matches `_prepare`'s non_positive_base drop
-        excluded.set(r, `its first reported period (${periods[0]}) is `
-          + `${base === 0 ? 'zero' : 'negative'} at ${base}, and a level series is indexed to 100 `
-          + 'at its own first point — dividing by it would invert every later point rather than '
-          + 'show growth. The figures below are still this company’s; only the blended line '
-          + 'leaves it out.');
-        continue;
-      }
-      const idx: Record<string, number> = {};
-      for (const p of periods) idx[p] = 100 * (r.revenue[p] as number) / base;
-      const part = { r, idx };
-      parts.push(part);
-      partOf.set(r, part);
+      const reported = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort(periodOrder);
+      m.set(r, {
+        reported,
+        newest: reported[reported.length - 1],
+        // ⚠ WHETHER THE ROW CARRIES A CONSENSUS FOR **ANY** YEAR — what separates "analysts do not
+        // forecast this far" from "the estimates feed has never been fetched for this company".
+        // `reported` is already filtered to non-null, so this is the same test `stateTitle` made.
+        hasEstimate: reported.some(isEstimatePeriod),
+      });
     }
-    const level: Record<string, { value: number; covered: number }> = {};
-    // ⚠⚠ THE DENOMINATOR IN FORCE FOR EACH PERIOD, AND IT IS WHY A PER-YEAR WEIGHT EXISTS AT ALL.
-    // Two things move it: the constituents that REPORTED that period, and — now that the basis is
-    // the period's own market cap — what each of them was worth at the time. NVIDIA is 0.63% of
-    // FY2018 and 7.46% by today's cap; only the first is a fact about 2018.
-    const denom: Record<string, number> = {};
-    const coverN: Record<string, number> = {};
-    /**
-     * ⚠⚠ EACH ROW'S LATEST FIGURE STANDS UNTIL IT REPORTS AGAIN — the client twin of
-     * `_fundamental_blend.carry_forward`, and the reason this table's figures reconcile with the
-     * line above it. Without the carry a semi-annual filer simply left Q1/Q3, the contributor set
-     * alternated, and the index sawtoothed ±20% on composition alone.
-     *
-     * ⚠ A CARRIED VALUE IS NOT COVERAGE. `coverW`/`coverN` count only the periods a row actually
-     * reported, so the floor still sees the newest period for what it is.
-     *
-     * ⚠ BOUNDED to ~a year (in periods: 4 quarters or 1 year), so a holding that stops reporting
-     * falls out rather than being held flat for the rest of the axis.
-     */
-    const isQuarterly = data.years.some((y) => y.includes('-Q'));
-    const maxCarry = isQuarterly ? 4 : 1;
-    /**
-     * ⚠⚠ WHICH PERIOD EACH ROW'S FIGURE CAME FROM — `{}` for its own, the source period when it was
-     * carried. Without this the weight column CANNOT sum to 100%: a carried row is in the
-     * denominator (its figure is in the average) but showed no weight, so the shares silently added
-     * to less than the whole. The Total row totals that column, so the gap would have been visible
-     * as a number that is supposed to be a constant and isn't.
-     */
-    const from: Record<string, Record<string, string>> = {};
-    /**
-     * ⚠⚠ COVERAGE IS COUNTED FIRST, IN ITS OWN PASS, SO THE CARRY CAN BE GATED ON IT. A carried
-     * figure exists to hold the basket still in a period the chart DRAWS — at AEX Q1/Q3 only twelve
-     * of twenty-two constituents file, and without it the index alternates between two baskets and
-     * sawtooths ±20% on composition alone. In a period the chart REFUSES it does nothing at all:
-     * FY2026 has one reporter, the floor rejects it, and twenty-one companies were showing their
-     * 2025 figure in a column that feeds no line. That reads as a projection, which it is not.
-     *
-     * Counting coverage here is what makes the gate possible: it is computed from the OWN values
-     * only (a carried figure is never coverage), so it does not depend on the carry it decides.
-     */
-    for (const p of parts) {
-      for (const y of data.years) {
-        if (p.idx[y] == null || !wAt(p.r, y)) continue;
-        coverW[y] = (coverW[y] ?? 0) + stableW(p.r);
-        coverN[y] = (coverN[y] ?? 0) + 1;
-      }
-    }
-    const drawn = (y: string) =>
-      (100 * (coverW[y] ?? 0) / (coverTotal || 1)) >= MIN_YEAR_COVERAGE_PCT
-      && (100 * (coverN[y] ?? 0) / (parts.length || 1)) >= MIN_YEAR_COVERAGE_PCT;
-    /** Each part's value at each period it contributed to — own or carried. The chaining below
-     *  takes ratios between periods that need not be adjacent, so the values have to be kept. */
-    const at = new Map<typeof parts[number], Record<string, number>>();
-    for (const p of parts) {
-      let last: { idx: number; y: string } | null = null;
-      let since = 0;
-      at.set(p, {});
-      for (const y of data.years) {
-        const own = p.idx[y];
-        /**
-         * ⚠⚠ THE CARRY MUST NOT CROSS BETWEEN REPORTED AND FORECAST PERIODS. This walks the union
-         * axis — actuals, then `LTM`, then the `…e` columns — so without this reset a company's
-         * newest REPORTED figure is carried straight into the forecast columns: it takes a weight
-         * there, joins the footer's blended `2026e`, and renders in carried italics. Measured:
-         * NVIDIA (a January filer, FY2026 already closed) showed a weight and italics under
-         * `2026e` while KLA, whose last actual sits a different distance from the column, showed
-         * neither — two rows treated differently by an accident of fiscal calendar.
-         *
-         * It is the same error the server had (`_drop_superseded_forecasts`) and the reason is the
-         * same: a reported number is not a forecast, and carrying one into a forecast period puts
-         * a known figure into a line that claims to be an expectation. Carrying WITHIN the forecast
-         * block (2026e → 2027e) is untouched — that is a forecast holding until the next one, which
-         * is what the server's own `carry_forward` does.
-         */
-        if (last && isEstimatePeriod(y) !== isEstimatePeriod(last.y)) { last = null; since = 0; }
-        if (own != null) { last = { idx: own, y }; since = 0; } else if (last) { since += 1; }
-        // ⚠ ONLY INTO A PERIOD THE CHART DRAWS — see the ⚠⚠ on `drawn`. Elsewhere a carried figure
-        // holds up nothing and reads as a projection.
-        const carried = own == null && last && since <= maxCarry && drawn(y) ? last : null;
-        const v = own ?? carried?.idx ?? null;
-        if (v == null) continue;
-        const w = wAt(p.r, y);
-        if (!w) continue;                     // no cap on or before this period ⇒ out of it
-        denom[y] = (denom[y] ?? 0) + w;
-        at.get(p)![y] = v;
-        if (carried) (from[p.r.isin] ??= {})[y] = carried.y;
-      }
-    }
-    /**
-     * ⚠⚠ THE LINE IS CHAINED FROM WEIGHTED GROWTH, NOT AVERAGED FROM REBASED LEVELS — the client
-     * twin of `_fundamental_blend.blend_series`'s level path, and the Total row must equal what the
-     * chart draws or this table explains a number that is not on it.
-     *
-     *     index[p] = index[anchor] × (1 + Σ w·g / Σ w),   g = value(p)/value(anchor) − 1
-     *
-     * Averaging rebased levels makes the line an artefact of WHEN each member's history starts:
-     * every member is 100 at its own first period, so a constituent joining the panel drags the
-     * average toward 100 and the index "moves" on composition alone. Measured on the AEX annual
-     * revenue line, that drew a 388 → 285 crash into 2023 that no constituent experienced.
-     *
-     * ⚠ THE ANCHOR IS THE LAST DRAWN PERIOD, not the previous one: a period under the floor is not
-     * drawn, and measuring the next step from it would compound a move nobody could see.
-     */
-    /** ⚠ ONCE PER ROW, NOT ONCE PER STEP — the same figure at every interval, and the loop below
-     *  asks for it periods x rows times. Mirrors where the backend computes it. */
-    const scaleOf = new Map<typeof parts[number], number>(
-      parts.map((p) => [p, memberScale(Object.values(at.get(p) ?? {}))]));
-    let anchor: string | null = null;
-    let chained = 100;
-    for (const y of data.years) {
-      if (!denom[y] || !drawn(y)) continue;
-      if (anchor != null) {
-        let num = 0;
-        let den = 0;
-        for (const p of parts) {
-          const w = wAt(p.r, y);
-          // ⚠ THE SHARED RULE, NOT AN INLINE `prev > 0`. That guard caught zero and missed the
-          // near-zero base — which is what let one holding drive an index through zero and take
-          // most of the line off a log axis with it. See `stepGrowth`.
-          const g = stepGrowth(at.get(p)?.[anchor], at.get(p)?.[y], scaleOf.get(p) ?? 0);
-          if (!w || g == null) continue;
-          num += w * g;
-          den += w;
-        }
-        if (den <= 0) continue;               // nothing spans this interval — no honest move
-        // ⚠ EVERY ROW WIPED OUT. `stepGrowth` floors each at −100%, so this is an exact −1 and the
-        // index is 0 from here on — values a log axis cannot draw. It stops rather than emitting
-        // points that would vanish silently, which is the failure this whole rule exists to end.
-        if (1 + num / den <= 0) break;
-        chained *= 1 + num / den;
-      }
-      anchor = y;
-      level[y] = { value: chained, covered: 100 * (coverW[y] ?? 0) / (coverTotal || 1) };
-    }
-    // The Total row's own check: Σ of the shares the cells above it display. 100.00% by
-    // construction — each is `wAt ÷ denom` and `denom` is their sum — so anything else is drift,
-    // which is exactly why it is worth printing.
-    const weightSum: Record<string, number> = {};
-    for (const y of Object.keys(denom)) weightSum[y] = 100;
-    return { level, denom, partOf, wAt, excluded, from, weightSum,
-             contributors: parts.length,
-             coveredNames: Object.fromEntries(data.years.map(
-               (y) => [y, 100 * (coverN[y] ?? 0) / (parts.length || 1)])) };
+    return m;
   }, [data]);
+
+  /** Today, once per render instead of once per cell. `stateTitle` asks whether a period has ended
+   *  yet, and `new Date().toISOString()` per empty cell is a Date allocation for a constant. */
+  const todayISO = new Date().toISOString().slice(0, 10);
 
   /** The cap the weight beneath it was divided out of — the middle line of a period cell.
    *  Index only; a portfolio has no market cap behind its holding weights. */
@@ -617,7 +372,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     const v = r.revenue[y];
     if (v == null) return null;
     if (view === 'reported') return v;
-    const periods = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort(periodOrder);
+    const periods = rowFacts.get(r)?.reported ?? [];   // computed once per row — see `rowFacts`
     if (view === 'rebased') {
       const base = r.revenue[periods[0]] as number;
       return base > 0 ? 100 * v / base : null;
@@ -694,8 +449,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
       // there is no per-feed timestamp to separate those — so it points at the button instead of
       // ruling it out. Saying the first sentence over the second case is what sent me looking for
       // a missing fetch on a company that simply files in June.
-      const has = Object.keys(r.revenue).some(
-        (p) => isEstimatePeriod(p) && r.revenue[p] != null);
+      const has = rowFacts.get(r)?.hasEstimate ?? false;   // once per row — see `rowFacts`
       return has
         ? `Analysts cover this company, but publish no ${y.slice(0, -1)} figure — their `
           + 'consensus does not reach this year. Refreshing cannot add it.'
@@ -710,7 +464,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     // that is still running. Measured: Adyen's FY2026 ends 31 December, we fetched 12 August, and
     // the cell asked for a refresh that could never help. The LTM column is the answer for the
     // year in progress, so the message points there instead.
-    if (state === 'not_tried' && periodEndDate(y) > new Date().toISOString().slice(0, 10)) {
+    if (state === 'not_tried' && periodEndDate(y) > todayISO) {
       return `${y} has not ended yet, so nobody has reported it — this is not something a refresh `
         + 'can fill. The LTM column is the trailing twelve months to the newest quarterly filing, '
         + 'which is what this company has published so far.';
@@ -766,8 +520,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     // (it was inside Vivendi until the 2021 spin-off), and those cells read "not tried" purely
     // because `financials_fetched_at` is NULL on every row until its next fetch. The data in front
     // of us answers the question the timestamp was added for.
-    const reported = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort(periodOrder);
-    const newest = reported[reported.length - 1];
+    const newest = rowFacts.get(r)?.newest;              // once per row — see `rowFacts`
     // Lexical order is chronological for both vocabularies — `2015` < `2018`, `2025-Q1` < `2025-Q3`
     // — and every period in one table shares one vocabulary.
     if (newest && y <= newest) return 'no_data';
@@ -937,6 +690,51 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     pendingCancel.current.add(isin);
   };
 
+  /**
+   * ⚠⚠ RENDERED ROWS, KEPT BY INDEX — THIS IS WHAT MAKES SCROLLING CHEAP, AND WITHOUT IT
+   * VIRTUALIZATION ONLY HALF WORKS.
+   *
+   * The virtualiser re-renders this component on every scroll step while the window moves by one or
+   * two rows — but the map below rebuilt ALL ~40 of them each time. A row here is not cheap markup:
+   * ~20 cells, a `title` concatenated per period cell, and an `InfoTip` (two `useState`, a
+   * `useLayoutEffect`, an `useEffect`) for every EMPTY one. On ACWI that is several hundred stateful
+   * components re-rendered per frame to move two rows past the header.
+   *
+   * React bails out of re-rendering a subtree when it is handed back the IDENTICAL element object,
+   * so returning the cached element for an unchanged row skips all of it. That is exactly what a
+   * `React.memo` row component buys, without having to thread a dozen helpers through as stable
+   * props — which on this row would mean `useCallback`-ing every one of `cellOf`, `cellState`,
+   * `stateTitle`, `weightAt`… and any one of them missed silently disables the memo again.
+   *
+   * ⚠⚠ THE DEPENDENCY LIST IS THE CORRECTNESS ARGUMENT, NOT AN OPTIMISATION HINT. A cached element
+   * holds the closures it was built with, so EVERY value those closures read has to invalidate this
+   * map. They read `data`, `view`, `blend`, `rowFacts`, `refresh`, `fmt`, `noun`, `metricLabel`,
+   * `valueIsCurrency`, `onRefresh`, `hasCap`, `hasPeriodCap` and the sorted `rows` — all listed. The
+   * helper FUNCTIONS themselves are deliberately absent: they are re-created every render, so
+   * listing them would clear the cache on every frame and undo the whole thing. That is safe
+   * precisely because each is a pure closure over the values above.
+   *
+   * ⚠ SO ARE `numCell` / `nameStick` / `refreshStick` — fresh object literals every render, over
+   * constants that never change. Listing them would also clear the cache every frame.
+   *
+   * ⚠ IT IS PRUNED TO THE WINDOW, or it would retain 1,949 element trees for a table showing forty.
+   * That is not a regression against `React.memo`: a row scrolled out of range is unmounted there
+   * too, and rebuilt on the way back.
+   */
+  const rowCache = useMemo(
+    () => new Map<number, React.ReactElement>(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, data, view, blend, rowFacts, refresh, fmt, noun, metricLabel, valueIsCurrency,
+      onRefresh, hasCap, hasPeriodCap, todayISO],
+  );
+  if (vItems.length && rowCache.size > vItems.length * 4) {
+    // ⚠ ONLY WHEN IT HAS GROWN WELL PAST THE WINDOW, not every frame — walking the map on each
+    // scroll step to delete two entries is the kind of tidying that costs more than it saves.
+    const lo = vItems[0].index;
+    const hi = vItems[vItems.length - 1].index;
+    for (const k of rowCache.keys()) if (k < lo || k > hi) rowCache.delete(k);
+  }
+
   return (
     /* ⚠ `max-h-`, NOT `h-`. The grid's own note argues the opposite ("a fixed height means the box
        is the same size before and after"), and the reason it does not apply here is that this
@@ -1037,9 +835,14 @@ market cap it was weighted by in that period, and the weight that produced.">
         <tbody>
           {padTop > 0 && <tr aria-hidden><td colSpan={colCount} style={{ height: padTop }} /></tr>}
           {vItems.map((vi) => {
+            // ⚠ THE SAME ELEMENT OBJECT FOR AN UNCHANGED ROW — see `rowCache`. This is the line
+            // that tells React to skip the row's whole subtree; building it again would be
+            // indistinguishable on screen and is the cost this exists to remove.
+            const cached = rowCache.get(vi.index);
+            if (cached) return cached;
             const r = rows[vi.index];
             const i = vi.index;
-            return (
+            const el = (
             <tr key={`${r.isin}-${i}`} data-index={i} ref={rowVirtualizer.measureElement}
               // ⚠⚠ THE RULE IS ON THE CELLS, NOT THE ROW. A `border-b` on a `<tr>` is drawn by the
               // TABLE under `border-collapse: collapse` (Preflight sets it), and a `position:
@@ -1322,6 +1125,8 @@ market cap it was weighted by in that period, and the weight that produced.">
               )}
             </tr>
             );
+            rowCache.set(vi.index, el);
+            return el;
           })}
           {padBottom > 0 && <tr aria-hidden><td colSpan={colCount} style={{ height: padBottom }} /></tr>}
         </tbody>
@@ -1523,6 +1328,22 @@ export default function HoldingsRevenueModal({
   const [view, setView] = useState<View>('reported');
 
   /**
+   * The `Table` view's OWN benchmark — see `CagrTable`'s picker.
+   *
+   * ⚠ NOT `benchTarget`. The drill-down inherits whatever index the card behind it was drawn
+   * against, which is right for the matrices (they explain that chart). Here the question is
+   * "compounding against what", and answering it only for the one benchmark the chart happened to
+   * use would make the comparison not worth having. Defaults to AEX.
+   *
+   * ⚠ AND IT FETCHES ONLY WHEN THE VIEW IS OPEN. On ACWI this is ~1,900 constituents; paying for it
+   * on every drill-down, for a tab most opens never reach, is the shape the constituent matrix used
+   * to have before it was measured down to 0.19s — and this one is a second copy of that read.
+   */
+  const [cagrBenchChoice, setCagrBenchChoice] = useState<CagrBenchmark>('AEX');
+  const [cagrBench, setCagrBench] = useState<Resp | null>(null);
+  const [cagrBenchErr, setCagrBenchErr] = useState<string | null>(null);
+
+  /**
    * ⚠ A ZERO ON A MONEY LINE IS A PLACEHOLDER, NOT A MEASUREMENT — AND IT READS AS A FACT.
    *
    * GuruFocus returns a company's whole history as one rectangular block, so a period that predates
@@ -1613,6 +1434,37 @@ export default function HoldingsRevenueModal({
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [benchKey, metric, benchReload]);
+
+  /**
+   * The `Table` view's benchmark constituents.
+   *
+   * ⚠ LAZY, AND KEYED ON THE VIEW BEING OPEN. `view !== 'table'` short-circuits, so opening the
+   * drill-down and never touching Table costs nothing — and switching benchmark refetches only that
+   * index. It reuses `load`, so the Table's line is built from exactly the same payload shape the
+   * matrices use and cannot drift from them.
+   *
+   * ⚠ ITS OWN STATE, NOT `bench`. They can legitimately be different indices at the same time —
+   * the chart was drawn against one, the reader is asking about another — and sharing one slot
+   * would make switching the Table's picker silently rewrite the matrix below it.
+   */
+  useEffect(() => {
+    let alive = true;
+    if (view !== 'table') return;
+    void (async () => {
+      setCagrBench(null); setCagrBenchErr(null);
+      try {
+        const b = await load({ universe: cagrBenchChoice,
+          // The CAGR is annual by definition; the matrices' cadence is about the chart behind them.
+          cadence: 'annual' });
+        if (alive) setCagrBench(b);
+      } catch (e) {
+        console.warn('[bb:cagr] benchmark constituents:', e);
+        if (alive) setCagrBenchErr(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, cagrBenchChoice, metric]);
 
 
   /**
@@ -1759,12 +1611,30 @@ export default function HoldingsRevenueModal({
             <span className="text-fg-faint">
               {view === 'reported' ? 'as filed, each in its own currency'
                 : view === 'rebased' ? 'indexed to 100 at each company’s first period — what the chart weights'
-                  : 'growth on that company’s previous reported period'}
-              {view !== 'reported' && ' · hover a cell for the reported figure'}
+                  : view === 'table' ? 'compound annual growth of the weighted line, vs a benchmark'
+                    : 'growth on that company’s previous reported period'}
+              {view !== 'reported' && view !== 'table' && ' · hover a cell for the reported figure'}
             </span>
           </div>
 
+          {/* ⚠ THE SUMMARY REPLACES THE MATRICES — see the `View` type. They are what it is derived
+              from, and this modal is already 84vh; a summary you scroll past its own inputs to
+              reach is one nobody reads. */}
+          {view === 'table' && (
+            <CagrTable
+              portfolio={data ? buildBlend(data) : null}
+              benchmark={cagrBench ? buildBlend(cagrBench) : null}
+              portfolioName={portfolioName || 'This book'}
+              benchLabel={cagrBenchChoice}
+              metricLabel={seriesLabel ?? noun}
+              benchChoice={cagrBenchChoice}
+              onBenchChoice={setCagrBenchChoice}
+              benchLoading={!cagrBench && !cagrBenchErr}
+              benchErr={cagrBenchErr} />
+          )}
+
           {/* 1 — the book (or the single company), on the same three views as the index below it. */}
+          {view !== 'table' && (
           <div className="space-y-1.5">
             {/* ⚠ THE FILL SITS ON THE TABLE IT FILLS, and there are two of them. A `no_data` row
                 here has a per-row Fetch already; this is the same action over every company at
@@ -1797,9 +1667,10 @@ export default function HoldingsRevenueModal({
                 onRefresh={refreshRow(target, setData)} />
             )}
           </div>
+          )}
 
           {/* 3 — the same, for the index, on demand. */}
-          {benchTarget && (
+          {view !== 'table' && benchTarget && (
             <div className="space-y-1.5">
               <div className="flex items-baseline gap-3">
                 <h3 className={section}>{benchLabel} constituents — {noun} by period</h3>

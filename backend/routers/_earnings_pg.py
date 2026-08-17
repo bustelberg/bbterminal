@@ -31,7 +31,6 @@ import csv
 import io
 import logging
 from collections import defaultdict
-from datetime import date
 
 from common.pg import _db_url, _run_copy
 
@@ -134,49 +133,12 @@ def company_ids_with_metric_via_copy(company_ids: list[int], metric_code: str) -
     return out
 
 
-def last_written_via_copy(company_ids: list[int],
-                          metric_code: str) -> "dict[int, date] | None":
-    """`{company_id: newest recorded_at}` for one feed â ONE grouped query over one connection.
+# ⚠ `last_written_via_copy` LIVED HERE AND IS GONE (2026-08-17). It answered "when did a row of
+# this feed last APPEAR" (`max(metric_data.recorded_at)`), which `smart_flags_bulk` used as its
+# staleness signal — and that was the wrong question: a row only appears when GuruFocus HAS
+# something, so a company it publishes no consensus for was permanently stale and re-asked on every
+# press, 2,392 wasted calls in one ACWI run. The signal is now `company.<feed>_fetched_at` ("when
+# did WE ask", migration `20260817000000`), read straight off `company` in one request, so this had
+# no caller left. Do not reintroduce it as a freshness test; `recorded_at` has a
+# `DEFAULT CURRENT_TIMESTAMP` and no update trigger, so it is a fact about the DATA, never about us.
 
-    The bulk twin of `_fundamental_backfill._last_written`, and it exists for the same reason
-    `company_ids_with_metric_via_copy` does: the per-company version is correct and its cost scales
-    with the SERIES rather than with the question.
-
-    â â  ONE ROW PER COMPANY, COMPUTED IN THE DATABASE. Asked through PostgREST this is two requests
-        per company (`order by recorded_at desc limit 1`, per feed) â ~3,800 round trips for ACWI's
-        ~1,900 constituents across the two continuously-revised feeds, to learn 3,800 dates. A
-        `GROUP BY` returns exactly one row each and the index is already there.
-
-    â  `recorded_at`, NEVER `target_date`. This answers "when did we last ASK", not "what period is
-        it about" â a forecast's `target_date` is years in the future and says nothing about the age
-        of our copy. Confusing the two would mark every company with a 2030 estimate as freshly
-        fetched for ever.
-
-    â  `None` MEANS FALL BACK, and an EMPTY DICT is a real answer. Same contract as its neighbours,
-        and the direction matters: `smart_flags_bulk` reads a missing entry as "never written, so
-        fetch it", so returning `{}` on a failure would spend a GuruFocus call on every constituent
-        rather than none.
-    """
-    if not _db_url() or not company_ids or not metric_code:
-        return None
-    sql = ("COPY (SELECT company_id, max(recorded_at)::date FROM metric_data "
-           "WHERE company_id = ANY(%s) AND metric_code = %s "
-           "GROUP BY company_id) TO STDOUT WITH (FORMAT csv)")
-    try:
-        buf = _run_copy(sql, (company_ids, metric_code))
-    except Exception as e:  # noqa: BLE001 â a fast path must never be the reason a page 500s
-        log.warning("[earnings.pg] max(recorded_at) COPY failed, falling back: %s: %s",
-                    type(e).__name__, e)
-        return None
-    if buf is None:
-        return None
-    out: dict[int, date] = {}
-    if buf.getbuffer().nbytes == 0:
-        return out
-    for row in csv.reader(io.TextIOWrapper(buf, encoding="utf-8", newline="")):
-        if len(row) >= 2 and row[0] and row[1]:
-            try:
-                out[int(row[0])] = date.fromisoformat(row[1][:10])
-            except ValueError:
-                continue
-    return out

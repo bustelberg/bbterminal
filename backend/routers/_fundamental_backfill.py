@@ -46,7 +46,11 @@ SENTINELS: dict[str, str] = {
     "ind": "indicator_q_forward_pe_ratio",
 }
 
+#: ⚠ THE `*_fetched_at` STAMPS RIDE ALONG, and they are free — same row, same query. They are what
+#: lets `order_work` put the least-recently-checked company first without a second read, and they
+#: are on EVERY path (forced, statements-only, smart), not just the one that decides with them.
 COMPANY_SELECT = ("company_id,company_name,gurufocus_ticker,isin,"
+                  "financials_fetched_at,estimates_fetched_at,indicators_fetched_at,"
                   "gurufocus_exchange:gurufocus_exchange(exchange_code)")
 
 
@@ -240,6 +244,13 @@ def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
     cid, tic = c["company_id"], c["gurufocus_ticker"]
     done: list[str] = []
     rows = 0
+    # ⚠⚠ ROWS THE VENDOR GAVE US THAT WERE ALREADY STORED, AND IT IS NOT A CURIOSITY — IT IS HOW
+    # "up to date" IS TOLD FROM "the fetch came back empty". Since `changed_rows`, `rows` counts
+    # what was WRITTEN, and a healthy company that has filed nothing new writes zero. Every caller
+    # that read `rows == 0` as an empty answer needs this number to stay correct; see the retry in
+    # `_fundamental_fill._one`, which without it would spend a second API call on every company in
+    # the index that is already current — i.e. almost all of them.
+    unchanged = 0
     # ⚠ WHAT WAS SPENT, NOT WHAT WAS ASKED FOR. A feed that hits a fresh cache loads rows and
     # costs NOTHING, so counting the feeds we ran would overstate the bill — `EarningsResult`
     # carries the real number and this passes it up. The quota is monthly and finite; a caller
@@ -253,21 +264,24 @@ def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
     try:
         for i, (_flag, fn, tag) in enumerate(feeds, 1):
             if should_stop is not None and should_stop():
-                return {"done": done, "rows": rows, "calls": calls, "error": None, "stopped": True}
+                return {"done": done, "rows": rows, "unchanged": unchanged, "calls": calls,
+                        "error": None, "stopped": True}
             if on_step is not None:
                 on_step(tag, i, len(feeds))
             r = fn(supabase, cid, tic, exch, force_refresh=refresh_cache)
             n = getattr(r, "rows_loaded", 0) or 0
             rows += n
+            unchanged += getattr(r, "rows_unchanged", 0) or 0
             calls += getattr(r, "api_calls", 0) or 0
             done.append(f"{tag} {n}")
-        return {"done": done, "rows": rows, "calls": calls, "error": None, "stopped": False}
+        return {"done": done, "rows": rows, "unchanged": unchanged, "calls": calls,
+                "error": None, "stopped": False}
     except Exception as e:  # noqa: BLE001
         _log.warning("[backfill] %s:%s failed — %s: %s", exch, tic, type(e).__name__, e)
         # ⚠ THE COUNT SURVIVES THE FAILURE. A run that spent two calls and then threw still spent
         # them; reporting 0 because it ended badly would hide exactly the quota you most want to
         # know about.
-        return {"done": done, "rows": rows, "calls": calls,
+        return {"done": done, "rows": rows, "unchanged": unchanged, "calls": calls,
                 "error": f"{type(e).__name__}: {str(e)[:120]}", "stopped": False}
 
 
@@ -283,8 +297,31 @@ def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
 #: if it proves too eager, this is the constant to move.
 SMART_REFRESH_AFTER_DAYS = 7
 
+#: How long a feed GuruFocus returned NOTHING for is left alone before we ask again.
+#:
+#: ⚠⚠ IT IS A POLICY, NOT A MEASUREMENT, AND IT IS THE BIGGEST REMAINING NUMBER ON A BULK PRESS.
+#: Most of a broad index carries no analyst consensus at all — measured on ACWI 2026-08-17,
+#: **1,125 of the 1,464 estimates calls and 1,267 of the 1,551 indicator calls were for companies we
+#: hold nothing for**: 2,392 of 4,326 calls in one press, a full hour at the global 1.5s gate. Every
+#: one of them came back empty and was asked again on the next press, for ever, because nothing
+#: recorded the asking.
+#:
+#: Whether a company gains analyst coverage is a slow, rare event, so thirty days is chosen rather
+#: than derived. Raise it to spend less; lower it to notice new coverage sooner. It has no effect on
+#: a company that already HAS the feed — that keeps the weekly rule above, because there the
+#: question is "has the consensus been revised", not "does it exist at all".
+SMART_RETRY_EMPTY_AFTER_DAYS = 30
 
-def _is_stale(last: date | None, today: date) -> bool:
+#: `company` column recording when we last ASKED for each feed — the mirror of
+#: `ingest.earnings._common.FETCHED_AT_COLUMN`, keyed by the `need_*` tag this module uses.
+FEED_FETCHED_AT = {
+    "fin": "financials_fetched_at",
+    "est": "estimates_fetched_at",
+    "ind": "indicators_fetched_at",
+}
+
+
+def _is_stale(last: date | None, today: date, *, has_rows: bool = True) -> bool:
     """Is our copy of a continuously-revised feed old enough to be worth re-asking for?
 
     â  NEVER-WRITTEN COUNTS AS STALE. `None` here means we hold nothing, which is the strongest
@@ -294,52 +331,65 @@ def _is_stale(last: date | None, today: date) -> bool:
     â  ONE DEFINITION, TWO CALLERS. The row button and the bulk button must not come to disagree
     about what "smart" means, or the big one stops being N presses of the small one.
     """
-    return last is None or (today - last).days >= SMART_REFRESH_AFTER_DAYS
+    # ⚠⚠ `last` IS NOW "WHEN DID WE ASK" (`company.<feed>_fetched_at`), NOT "WHEN DID A ROW APPEAR"
+    # (`max(metric_data.recorded_at)`), and the difference is an hour per press. A row only appears
+    # when GuruFocus HAS something, so for a company it publishes no consensus for the old signal
+    # stayed permanently stale and the feed was re-asked every single time. `recorded_at` also has a
+    # `DEFAULT CURRENT_TIMESTAMP` and no update trigger, so an upsert never advanced it either — it
+    # was never a fact about US, only about the data.
+    #
+    # ⚠ NEVER-ASKED COUNTS AS STALE. `None` means we have no record of looking, which is the
+    # strongest reason to fetch there is; every company reads `None` the first time.
+    if last is None:
+        return True
+    # ⚠ AND AN EMPTY ANSWER IS WORTH LESS RE-ASKING THAN A REVISED ONE — see
+    # `SMART_RETRY_EMPTY_AFTER_DAYS`. "Has this been revised?" and "does this exist yet?" are
+    # different questions with very different answer rates.
+    window = SMART_REFRESH_AFTER_DAYS if has_rows else SMART_RETRY_EMPTY_AFTER_DAYS
+    return (today - last).days >= window
 
 
-def _last_written(company_id: int, metric_code: str) -> date | None:
-    """When we last WROTE a row of this feed for this company, or None if we never have.
+def asked_at_map(rows: list[dict], key: str) -> dict[int, date]:
+    """`{company_id: date}` from `company.<feed>_fetched_at`, skipping the NULLs (= never asked).
 
-    â  `recorded_at`, NOT `target_date` â "when did we ask" against "what period is it about". A
-    forecast's `target_date` is years in the future and says nothing about how old our copy is.
-
-    â  ONE ROW, ORDERED â NOT A SCAN AND A MAX. `indicator_q_forward_pe_ratio` alone is ~535 rows per
-    company, so reading them all to take the newest would make the cheap check the expensive part of
-    the press.
+    ⚠ A DATE, NOT A TIMESTAMP. Everything downstream compares in whole days against `today`, and
+    keeping the time only invites a `datetime`/`date` subtraction error at the one place it matters.
     """
-    try:
-        r = (supabase.table("metric_data").select("recorded_at")
-             .eq("company_id", company_id).eq("metric_code", metric_code)
-             .order("recorded_at", desc=True).limit(1).execute().data or [])
-    except Exception:                    # unreadable â treat as never written, i.e. fetch it
-        return None
-    if not r or not r[0].get("recorded_at"):
-        return None
-    try:
-        return date.fromisoformat(str(r[0]["recorded_at"])[:10])
-    except ValueError:
-        return None
+    col = FEED_FETCHED_AT[key]
+    out: dict[int, date] = {}
+    for r in rows:
+        v = r.get(col)
+        if not v:
+            continue
+        try:
+            out[int(r["company_id"])] = date.fromisoformat(str(v)[:10])
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def smart_flags(company_id: int) -> dict:
     """The `need_*` flags for ONE company under `feeds="smart"`: fetch a feed we are MISSING, or one
     that could plausibly have changed since we last asked. Nothing else.
 
-    â â  "SKIP IT IF WE ALREADY HAVE SOME" IS THE OBVIOUS RULE AND IT IS THE WRONG ONE. That is what
-    `needs()` answers â is the sentinel row PRESENT â and it makes a Refresh a no-op on exactly the
+    ⚠⚠ "SKIP IT IF WE ALREADY HAVE SOME" IS THE OBVIOUS RULE AND IT IS THE WRONG ONE. That is what
+    `needs()` answers — is the sentinel row PRESENT — and it makes a Refresh a no-op on exactly the
     companies a reader presses it for. KLA holds financials, so a presence test skips it, and the
-    FY2026 figures it has just filed are never fetched. This component already carries that as a
-    known defect ("pressing it for ASML today fetches nothing"). Presence is the wrong question; the
-    right one is whether anything NEW can exist.
+    FY2026 figures it has just filed are never fetched. Presence is the wrong question; the right
+    one is whether anything NEW can exist.
 
-    â  AND THAT QUESTION HAS A DIFFERENT ANSWER PER FEED, which is why this is per feed rather than
+    ⚠ AND THAT QUESTION HAS A DIFFERENT ANSWER PER FEED, which is why this is per feed rather than
     per company. A company files statements on a cadence, so `period_due` says precisely when a new
-    period is available â no elapsed-time guess needed. A consensus and a weekly indicator series
-    have no such boundary, so for those it is `SMART_REFRESH_AFTER_DAYS`. Gating all three on the
-    fiscal detector would freeze a consensus for months; gating all three on elapsed days would
+    period is available — no elapsed-time guess needed. A consensus and a weekly indicator series
+    have no such boundary, so for those it is elapsed time since WE LAST ASKED. Gating all three on
+    the fiscal detector would freeze a consensus for months; gating all three on elapsed days would
     re-ask for statements that cannot have changed.
 
-    â  THE UNSUBSCRIBED CASE IS NOT HERE, AND DOES NOT NEED TO BE â `eligible()` already refuses such
+    ⚠⚠ THE ELAPSED-TIME SIDE READS `company.<feed>_fetched_at`, NOT `metric_data.recorded_at`. See
+    `_is_stale`: a row only appears when GuruFocus HAS something, so the old signal made every
+    uncovered company permanently due — 2,392 wasted calls in a single ACWI press.
+
+    ⚠ THE UNSUBSCRIBED CASE IS NOT HERE, AND DOES NOT NEED TO BE — `eligible()` already refuses such
     a company before any of this runs, so no call is spent and none of these probes happen either.
     """
     from routers._fundamental_fill import due_company_ids  # noqa: PLC0415
@@ -347,36 +397,49 @@ def smart_flags(company_id: int) -> dict:
     today = date.today()
     missing = {k: company_id not in _has([company_id], code) for k, code in SENTINELS.items()}
     due, _note = due_company_ids([company_id], today)
-    stale = {k: _is_stale(_last_written(company_id, SENTINELS[k]), today) for k in ("est", "ind")}
+    cols = ",".join(["company_id", *FEED_FETCHED_AT.values()])
+    try:
+        rows = (supabase.table("company").select(cols)
+                .eq("company_id", company_id).execute().data or [])
+    except Exception:                    # unreadable -> no record of asking, i.e. fetch it
+        rows = []
+    asked = {k: asked_at_map(rows, k).get(company_id) for k in ("est", "ind")}
     return {
         "need_fin": missing["fin"] or bool(due),
-        "need_est": missing["est"] or stale["est"],
-        "need_ind": missing["ind"] or stale["ind"],
+        # ⚠ `has_rows` PICKS THE WINDOW — weekly for a feed we hold, monthly for one that has only
+        # ever come back empty. Both are `_is_stale`, so the row button and the bulk button cannot
+        # drift apart on what "smart" means.
+        "need_est": _is_stale(asked["est"], today, has_rows=not missing["est"]),
+        "need_ind": _is_stale(asked["ind"], today, has_rows=not missing["ind"]),
     }
+
 
 
 def smart_flags_bulk(cids: list[int]) -> dict[int, dict]:
     """`smart_flags` for MANY companies, in a fixed number of queries instead of a few per company.
 
-    â â  THE PER-COMPANY VERSION IS CORRECT AND UNUSABLE IN BULK. It costs three sentinel probes plus
-    two `recorded_at` lookups EACH â ~9,700 round trips for ACWI's ~1,949 constituents, to decide
-    which of them are worth a GuruFocus call. The deciding would cost more than the fetching.
+    ⚠⚠ THE PER-COMPANY VERSION IS CORRECT AND UNUSABLE IN BULK. It costs three sentinel probes plus
+    an asked-at read EACH — thousands of round trips for ACWI's ~1,949 constituents, to decide which
+    of them are worth a GuruFocus call. The deciding would cost more than the fetching.
 
-    Here it is five reads for the whole list: three sentinels (`_has`, already COPY-backed) and two
-    grouped `max(recorded_at)` queries. Measured on ACWI: 0.21 s for the estimates feed and 2.07 s
-    for the indicator one, against ~3,800 PostgREST round trips for the same two answers.
+    Here it is four reads for the whole list: three sentinels (`_has`, already COPY-backed) and ONE
+    `company` read carrying every feed's asked-at stamp.
 
-    â  SAME RULE, ONE IMPLEMENTATION OF IT. The per-feed staleness test lives in `_is_stale` so the
-    row button and the bulk button cannot come to disagree about what "smart" means â which is the
-    whole reason the two are meant to compose. A second copy of "missing OR due OR older than N"
+    ⚠ IT ALSO REPLACED TWO GROUPED `max(recorded_at)` QUERIES, one of which measured 3.85s on ACWI —
+    so this is both cheaper to decide AND the correct signal. See `_is_stale` for why `recorded_at`
+    was never a fact about us.
+
+    ⚠ SAME RULE, ONE IMPLEMENTATION OF IT. The per-feed staleness test lives in `_is_stale` so the
+    row button and the bulk button cannot come to disagree about what "smart" means — which is the
+    whole reason the two are meant to compose. A second copy of "missing OR asked long enough ago"
     is how the big button quietly starts spending differently from N presses of the small one.
 
-    â  A COMPANY ABSENT FROM `due` IS NOT DUE, and one absent from a `recorded_at` map was never
-    written â both read as "fetch it" only when the feed is also missing. Falling back the other way
-    (absent â fresh) would let a company that has never been fetched look up to date for ever.
+    ⚠ A COMPANY ABSENT FROM `due` IS NOT DUE, and one absent from the asked-at map has never been
+    asked — which reads as "fetch it". Falling back the other way (absent -> recently asked) would
+    let a company we have never fetched look up to date for ever.
     """
+    from deps import chunked  # noqa: PLC0415
 
-    from routers._earnings_pg import last_written_via_copy  # noqa: PLC0415
     from routers._fundamental_fill import due_company_ids  # noqa: PLC0415
 
     today = date.today()
@@ -384,19 +447,22 @@ def smart_flags_bulk(cids: list[int]) -> dict[int, dict]:
     have = {k: _has(cids, code) for k, code in SENTINELS.items()}
     due_ids, _note = due_company_ids(cids, today)
     due = set(due_ids)
-    last = {}
-    for key in ("est", "ind"):
-        got = last_written_via_copy(cids, SENTINELS[key])
-        # â  `None` IS THE FALLBACK SIGNAL, NOT AN EMPTY ANSWER â see the COPY helper. Without a
-        # direct connection there is no cheap way to age these, and the honest default is to treat
-        # them as stale: a smart press then behaves like the old `all`, which is expensive but never
-        # wrong. Silently treating them as fresh would stop the feed being fetched at all.
-        last[key] = got if got is not None else {}
+
+    cols = ",".join(["company_id", *FEED_FETCHED_AT.values()])
+    rows: list[dict] = []
+    for chunk in chunked(cids):
+        try:
+            rows += (supabase.table("company").select(cols)
+                     .in_("company_id", chunk).execute().data or [])
+        except Exception:                # unreadable -> no record of asking, i.e. fetch it
+            pass
+    asked = {k: asked_at_map(rows, k) for k in ("est", "ind")}
+
     return {
         cid: {
             "need_fin": cid not in have["fin"] or cid in due,
-            "need_est": cid not in have["est"] or _is_stale(last["est"].get(cid), today),
-            "need_ind": cid not in have["ind"] or _is_stale(last["ind"].get(cid), today),
+            "need_est": _is_stale(asked["est"].get(cid), today, has_rows=cid in have["est"]),
+            "need_ind": _is_stale(asked["ind"].get(cid), today, has_rows=cid in have["ind"]),
         }
         for cid in cids
     }

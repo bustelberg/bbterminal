@@ -3630,10 +3630,13 @@ export interface paths {
          *     calls with no way to stop them. Keeping both would have left two transports for one fill and
          *     two places for "ingest" to come to mean different things.
          *
-         *     ⚠ CANCEL LANDS BETWEEN COMPANIES, NOT MID-COMPANY. `_one` checks first thing, so a press stops
-         *     everything still queued at once while the eight already in flight finish the company they are
-         *     on. That is the boundary where the database is consistent — and on a 206-company run it is the
-         *     difference between stopping now and spending the rest of the index.
+         *     ⚠ CANCEL LANDS BETWEEN FEEDS, WHICH IS THE SAME BOUNDARY THE PER-ROW REFRESH USES. A press
+         *     drops everything still queued at once, and each of the three companies in flight stops after the
+         *     GuruFocus feed it is on — that is where the database is consistent, and `needs()` picks up a
+         *     company left with statements but no estimates next time. It used to land between COMPANIES,
+         *     meaning up to three more feeds per worker after the press; see the ⚠⚠ on `should_stop` in
+         *     `_fundamental_fill._one`. On a 1,700-constituent run it is the difference between stopping now
+         *     and spending the rest of the index.
          *
          *     ⚠ IT REPORTS THE QUOTA BEFORE IT STARTS AND THE SKIPS AS IT GOES. A region at zero means every
          *     further call is wasted, and a company on an unsubscribed exchange is a refusal with a reason —
@@ -10598,6 +10601,11 @@ export interface components {
          * @description Just the handle. Everything else arrives on `/api/jobs/{id}/stream`.
          */
         JobStarted: {
+            /**
+             * Already Running
+             * @default false
+             */
+            already_running?: boolean;
             /** Job Id */
             job_id: string;
             /** Label */

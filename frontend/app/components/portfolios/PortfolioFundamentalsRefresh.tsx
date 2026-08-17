@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { API_URL } from '../../../lib/apiUrl';
 import { traceError } from '../../../lib/debugTrace';
 import { invalidateReadCache } from '../../../lib/readCache';
-import { cancelJob, startJob } from '../../../lib/stores/jobs';
+import { cancelJob, jobsStore, startJob, watchJob } from '../../../lib/stores/jobs';
 
 /**
  * Refresh the GuruFocus fundamentals for every company the PORTFOLIO holds — not just the one on
@@ -86,6 +86,57 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
    * says. `busy && !jobId` renders it inert for exactly that gap.
    */
   const [jobId, setJobId] = useState<string | null>(null);
+  /** Cancel has been asked for and the workers have not stopped yet — see `cancel`. */
+  const [cancelling, setCancelling] = useState(false);
+
+  /**
+   * The server's identity for the work THIS button does. `null` where there is no stable one.
+   *
+   * ⚠ IT MUST MATCH `jobs.start`'s KEY EXACTLY, because that is what the server de-duplicates on
+   * and therefore the only thing that can identify "my run" from the outside.
+   */
+  const jobKey = scope.kind === 'universe'
+    ? { kind: 'fundamentals.index', label: scope.label }
+    : null;
+
+  /**
+   * ⚠⚠ ADOPT A RUN ALREADY IN FLIGHT, INSTEAD OF OFFERING TO START ANOTHER.
+   *
+   * This button knew it had a job only from its own React state, so reopening the modal — or
+   * reloading the page — brought it back reading "Refresh benchmark" while the fill was still
+   * running. Pressing it again was the obvious thing to do, and it launched a SECOND run over the
+   * same 1,712 constituents: two fills sharing one global rate limiter so both crawl, and a Cancel
+   * that stops exactly one of them. From the reader's seat that is a Cancel button that does
+   * nothing, because a different run is still going.
+   *
+   * `jobs.start` now refuses to duplicate, so the press would attach rather than double — but the
+   * button should not have needed pressing to find that out. `attachRunningJobs` has already put
+   * every live job in the store by the time this mounts.
+   */
+  const runningJobs = jobsStore.use((s) => s.jobs);
+  useEffect(() => {
+    if (jobId || !jobKey) return;
+    const live = runningJobs.find(
+      (j) => j.status === 'running' && j.kind === jobKey.kind && j.label === jobKey.label);
+    if (!live) return;
+    setJobId(live.id);
+    setBusy(true);
+    setNote('already running — this button now stops it');
+    // ⚠ FOLLOW IT TO THE END, or `busy`/`jobId` never clear and the control is stuck on Cancel
+    // long after the run finished.
+    void watchJob(live.id, `${scope.name} fundamentals`).then((job) => {
+      if (job.status !== 'failed') {
+        invalidateReadCache(`fundamentals fill finished for ${scope.name}`);
+        onDone();
+      }
+      setBusy(false);
+      setJobId(null);
+      setCancelling(false);
+    });
+    // `runningJobs` is deliberately the only trigger — re-running on `onDone`/`scope` identity
+    // would re-adopt the same job on every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runningJobs, jobId]);
 
   const run = async () => {
     setBusy(true);
@@ -146,8 +197,13 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
       // reads as a failure in the second case and says nothing about which five to chase.
       const c = body as unknown as {
         holdings?: number; reachable?: number; no_fundamentals?: number; no_company?: number;
+        already_running?: boolean;
       };
-      if (c?.holdings != null) {
+      // ⚠ SAY SO WHEN THE PRESS ATTACHED RATHER THAN STARTED — see `jobs.start`. Silently adopting
+      // a run in flight is right, but leaving the reader to believe they just kicked off a fresh
+      // one is how "I pressed it twice and nothing changed" becomes "the button is broken".
+      if (c?.already_running) setNote('already running — this button now stops it');
+      else if (c?.holdings != null) {
         if (scope.kind === 'company') {
           // ⚠ "1 of 1 have company fundamentals" IS NOISE; the only thing worth saying about a
           // single instrument is when it CANNOT be fetched — an ETF or a bond has no accounts, and
@@ -182,14 +238,30 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
     } finally {
       setBusy(false);
       setJobId(null);
+      setCancelling(false);
     }
   };
 
-  /** Stop the fill. ⚠ NO INLINE MESSAGE — `cancelJob` puts "cancelling…" on the job's own card the
-   *  instant it is pressed, and that card carries the outcome and how far it got. Two places
-   *  reporting one job is two places to keep in step. */
+  /**
+   * Stop the fill. ⚠ NO INLINE MESSAGE — `cancelJob` puts "cancelling…" on the job's own card the
+   * instant it is pressed, and that card carries the outcome and how far it got. Two places
+   * reporting one job is two places to keep in step.
+   *
+   * ⚠⚠ BUT THE BUTTON ITSELF MUST ACKNOWLEDGE THE PRESS, and it did not. Cancellation is
+   * cooperative: the workers stop at their next feed boundary, which is seconds away, and for that
+   * whole time the button kept saying "Cancel" — unchanged, still clickable, indistinguishable from
+   * a press that went nowhere. This component's own argument for owning a Cancel at all is that the
+   * reader is looking HERE and not at the corner of the screen; the same argument applies to the
+   * acknowledgement. Local state, because the job's `cancel_requested` only comes back on the next
+   * stream tick and the gap is exactly the moment being explained.
+   */
   const cancel = async () => {
-    if (jobId) await cancelJob(jobId);
+    if (!jobId) return;
+    setCancelling(true);
+    // ⚠ AND BACK OUT AGAIN IF THE REQUEST DID NOT LAND. A disabled "Cancelling…" over a job that
+    // never heard the press is the worse version of the bug this fixes: the run continues and the
+    // one control that could stop it has switched itself off.
+    if (!await cancelJob(jobId)) setCancelling(false);
   };
 
   return (
@@ -204,10 +276,17 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
           Inert only in the gap between the press and the job id arriving. */}
       <button type="button"
         onClick={() => { if (jobId) { void cancel(); } else { void run(); } }}
-        disabled={busy && !jobId}
+        // ⚠ INERT ONCE CANCELLING, or the control invites a second press it cannot act on — the
+        // request is already in and pressing again only re-POSTs the same idempotent stop.
+        disabled={(busy && !jobId) || cancelling}
         title={jobId
-          ? 'Stop the fill. The companies already being read finish first (up to eight at a time), '
-            + 'and everything loaded so far is kept — the charts still re-read afterwards.'
+          ? (cancelling
+            ? 'Stopping. Each company in flight finishes the GuruFocus feed it is on — that is where '
+              + 'the database is left consistent — and everything already fetched stays written. '
+              + 'The pop-up bottom-right reports how far it got.'
+            : 'Stop the fill. Work still queued is dropped at once and the three companies in flight '
+              + 'stop at their next feed boundary, seconds away. Everything loaded so far is kept — '
+              + 'press again later and it carries on from there.')
           : (scope.kind === 'company'
             ? `Fetch the latest GuruFocus fundamentals for ${scope.name}, if it could plausibly have `
               + 'filed since we last looked. One API call, and none at all when its next quarter '
@@ -234,10 +313,14 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
                     disabled:opacity-50 disabled:cursor-wait whitespace-nowrap shrink-0 ${jobId
           ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
           : 'border-neutral-700 text-fg-muted hover:bg-overlay/5'}`}>
-        {/* ⚠ THE TWO STATES OUTRANK THE CALLER'S LABEL. Whatever the button is named at rest, while
-            it runs it says what pressing it will now DO — a control that keeps its old name while
-            its action has changed underneath is the trap this replaced. */}
-        {jobId ? 'Cancel'
+        {/* ⚠ THE STATES OUTRANK THE CALLER'S LABEL. Whatever the button is named at rest, while it
+            runs it says what pressing it will now DO — a control that keeps its old name while its
+            action has changed underneath is the trap this replaced.
+            ⚠ AND "Cancelling…" IS A STATE, NOT A THIRD WHEEL. The earlier argument against a
+            transient label (see `busy` in `refreshOne`) was that ~200ms of "Refreshing…" is a state
+            nobody can act on that flickers past; this one lasts as long as the in-flight feeds do
+            and answers the question the reader actually has, which is whether the press landed. */}
+        {jobId ? (cancelling ? 'Cancelling…' : 'Cancel')
           : busy ? 'Refreshing…'
             : label ?? (scope.kind === 'universe' ? 'Fetch missing fundamentals'
               : 'Refresh fundamentals')}
