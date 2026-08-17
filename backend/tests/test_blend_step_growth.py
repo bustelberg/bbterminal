@@ -134,3 +134,49 @@ class TestNothingElseMoved:
                    _member(50.0, {"2020-12-31": 10.0, "2021-12-31": 20.0})]
         pts = blend_series(members, "annuals__Ratios__Net Margin %")["points"]
         assert pts[0]["value"] == pytest.approx((0.001 + 10.0) / 2)
+
+
+class TestAnImplausibleResultIsRefused:
+    """⚠⚠ `_MIN_STEP_BASE_FRACTION` GUARDED THE DIVISOR AND NOTHING GUARDED THE NUMERATOR. A vendor
+    scale error — a per-share figure delivered in the wrong unit — went through as growth, and the
+    chain multiplies it by the member's weight with no bound.
+
+    Measured on ACWI's annual FCF/share, 26,160 accepted steps across 1,712 constituents:
+
+        MITSUBISHI HEAVY  2024->2025      50.78 ->  86,214.52   +169,684%   index +116.12pp
+        DENSO CORP        2024->2025     172.97 -> 108,415.57    +62,580%   index  +17.97pp
+
+    On a line indexed to 100, one corrupt cell in a 0.07%-weight constituent more than doubled it.
+    """
+
+    def test_mitsubishi_heavy_is_refused(self):
+        # scale = its own median |value|, 39.66. The BASE passes comfortably (50.78 >> 3.97);
+        # it is the result that cannot have come from a business.
+        assert step_growth(50.78, 86214.52, 39.66) is None
+
+    def test_denso_is_refused(self):
+        assert step_growth(172.97, 108415.57, 36.22) is None
+
+    def test_the_largest_REAL_step_survives(self):
+        """⚠ Bank of America 2008->2009, +3,818%, recovering from the crisis. A ceiling that deletes
+        this is deleting history, which is why the bar was read off the distribution rather than
+        picked to fit the two bad cells."""
+        assert step_growth(0.42, 16.50, 3.17) == pytest.approx(38.286, abs=0.01)
+
+    def test_the_top_of_the_real_distribution_survives(self):
+        # p99.99 of the 26,160 measured steps is +6,889%.
+        assert step_growth(1.0, 69.89, 1.0) == pytest.approx(68.89)
+
+    def test_the_boundary_is_exactly_100x(self):
+        assert step_growth(1.0, 101.0, 1.0) == pytest.approx(100.0)     # at the bar, kept
+        assert step_growth(1.0, 101.5, 1.0) is None                     # over it
+
+    def test_it_is_one_sided(self):
+        """⚠ There is no matching "too negative" case: the floor at −100% is already the most a
+        level can lose, so the downside was never unbounded."""
+        assert step_growth(86214.52, 226.63, 39.66) == -1.0
+
+    def test_refused_never_capped(self):
+        """⚠ A capped step would be a growth rate nobody reported. Refusing means the member sits
+        out this one interval and rejoins at the next — the behaviour of every refusal above it."""
+        assert step_growth(172.97, 108415.57, 36.22) is None

@@ -16,6 +16,7 @@ import { type Target } from './HoldingsRevenueModal';
 import InvestedCapitalInputsModal from './InvestedCapitalInputsModal';
 import { investedCapitalIndexByYear, investedCapitalSeries } from './investedCapitalData';
 import { paddedLogDomain, stepChanges, xToPeriod, type Step } from './marginData';
+import { periodAxis } from './periodAxis';
 import { benchNote, benchmarkFirst, rebaseSeries, useBenchInputs, type BenchTarget } from './benchSeries';
 import { type CashReturnInputs } from './cashReturnData';
 
@@ -183,7 +184,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+                <XAxis {...periodAxis(xToPeriod)} />
                 <YAxis scale="log" domain={logDomain ?? ['dataMin', 'dataMax']} allowDataOverflow
                   tick={{ fontSize: 12, fill: chartTheme.axisTick }}
                   tickFormatter={(v: number) => (indexed ? fmtIndex(v) : fmt(v))} width={60} />

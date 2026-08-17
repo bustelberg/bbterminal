@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
-  CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  CartesianGrid, ComposedChart, Line, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip,
+  XAxis, YAxis,
 } from 'recharts';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
@@ -347,12 +348,57 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
    *  a position for today, not a period anyone reports in. */
   const yearTicks = useMemo(() => chartRows.map((r) => r.year), [chartRows]);
 
+  /**
+   * The price target, as an INDEX, so it can sit on this chart's one axis.
+   *
+   * ⚠⚠ A `ReferenceDot`, NOT A ROW AND NOT A LINE — which is the whole reason it can come back. The
+   * dashed price-target LINE removed on 2026-08-04 needed two synthetic rows grafted into the
+   * fiscal series and the array re-sorted, and it cost the invariant the comment above still
+   * states: every row in `chartData` is a period the company actually reported. A reference dot is
+   * an annotation drawn over the plot — it touches neither the data nor `yearTicks`, so the
+   * invariant survives and the endpoint is still marked.
+   *
+   * ⚠ INDEXED OFF THE **ANCHOR'S** PRICE, the same divisor `rebase` used for the plotted price
+   * line. Dividing by the latest price instead would put the dot on a second, invisible scale — it
+   * would look like a point on the blue line and be measured from somewhere else.
+   *
+   * ⚠ AND IT MOVES WITH THE CALCULATOR. `target.forecastPrice` is forecast per-share ÷ forecast
+   * yield, both of which the reader can type over — so editing an assumption moves this dot, which
+   * is the point of having it on the chart rather than only in the panel.
+   */
+  const anchorPrice = idx.anchor == null ? null
+    : points.find((p) => p.year === idx.anchor)?.price ?? null;
+  const targetIdx = target.forecastPrice != null && anchorPrice != null && anchorPrice > 0
+    ? target.forecastPrice / anchorPrice * 100 : null;
+  // ⚠ A LOG AXIS CANNOT PLOT ZERO OR LESS — the same rule the series obey (`posOnly`). A negative
+  // forecast yield would produce one, and a dot silently absent is worse than no dot at all.
+  const showTarget = targetIdx != null && targetIdx > 0 && targetYear != null;
+
   const logDomain = useMemo(() => paddedLogDomain(
     chartData.flatMap((r) => [r.price, r.value, r.trend, r.future])
+      // ⚠⚠ THE DOT IS IN THE DOMAIN, OR IT IS OFF THE TOP OF THE CHART. A price target is normally
+      // ABOVE everything plotted — that is what makes it worth drawing — and `allowDataOverflow`
+      // on the axis means anything outside the computed domain is simply not rendered. Left out,
+      // the mark would vanish exactly on the companies with the most upside.
+      .concat(showTarget ? [targetIdx] : [])
       .filter((v): v is number => v != null)),
-  [chartData]);
+  [chartData, showTarget, targetIdx]);
+
+  /**
+   * ⚠ THE X DOMAIN IS EXTENDED TOO, for the same reason. The projection runs to
+   * `lastFitted + PROJECT_YEARS` while the target is quoted at `lastPriceYear + PROJECT_YEARS`; the
+   * two differ whenever the newest price year is not the newest FITTED year, which is the ordinary
+   * state between a filing and the next one. `dataMax` alone would clip the dot off the right edge.
+   */
+  const xMax = Math.max(
+    chartRows.length ? chartRows[chartRows.length - 1].year : 0, showTarget ? targetYear : 0);
 
   const pct = (v: number | null | undefined) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`);
+  const ccy = currency ? `${currency} ` : '';
+  /** ⚠ PRECISION BY MAGNITUDE, NOT A FIXED `toFixed`. A €1,240 target does not want two decimals
+   *  and a €3.40 one is destroyed without them; a single setting is wrong for one of the two. */
+  const fmtPrice = (v: number | null) => (v == null ? '—'
+    : v.toLocaleString(undefined, { maximumFractionDigits: Math.abs(v) < 10 ? 2 : 0 }));
   const yld = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
 
   /**
@@ -460,13 +506,16 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         ) : (
           <>
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
+              {/* ⚠ ROOM ON THE TOP AND RIGHT FOR THE TARGET'S LABEL. Recharts draws a reference
+                  label into the margin, so at the default 5/12 the price would have been half a
+                  label outside the SVG — the one number this chart was asked to show most clearly. */}
+              <ComposedChart data={chartData} margin={{ top: 22, right: 44, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
                 {/* ⚠ NUMERIC, NOT CATEGORICAL — so today can sit at its real distance between two
                     fiscal years (see `nowX`). Ticks are pinned to the reported years; the default
                     numeric ticks would invent 2025.5 as though something were reported there. */}
-                <XAxis dataKey="year" type="number" domain={['dataMin', 'dataMax']}
+                <XAxis dataKey="year" type="number" domain={['dataMin', xMax]}
                   ticks={yearTicks} allowDecimals={false} interval="preserveStartEnd"
                   tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
                 {/* ⚠ LOG SCALE, WHICH IS THE POINT: the fit is log-linear, so a constant-growth
@@ -496,6 +545,29 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
                   strokeWidth={1.5} strokeDasharray="5 3" strokeOpacity={0.75} dot={false} connectNulls />
                 <Line dataKey="future" name="future" type="monotone" stroke={chartTheme.warn}
                   strokeWidth={1.5} strokeDasharray="2 4" strokeOpacity={0.5} dot={false} connectNulls />
+                {/* ⚠⚠ THE PRICE TARGET — THE ONE POINT ON THIS CHART THAT HAS NOT HAPPENED, so it is
+                    drawn as the one mark that is not filled. A solid dot in the price colour would
+                    read as an observed close; HOLLOW (white core, 2px accent ring) is the ordinary
+                    encoding for a projected point, and it cannot be confused with the round dots on
+                    the blue line even at a glance.
+
+                    ⚠ THE WHITE CORE IS ALSO THE SURFACE RING the dot needs to stay legible where it
+                    lands on a gridline — one shape doing both jobs rather than a stroke drawn
+                    around a mark.
+
+                    ⚠ THE LABEL WEARS TEXT INK, NOT THE SERIES COLOUR. `accentStrong` is a mark
+                    colour; identity comes from the ring beside the number. Positioned `top`, which
+                    is what the extra top margin above is for. */}
+                {showTarget && (
+                  <ReferenceDot x={targetYear} y={targetIdx} r={5} ifOverflow="extendDomain"
+                    fill={chartTheme.tooltipCard.contentStyle.backgroundColor}
+                    stroke={chartTheme.accentStrong} strokeWidth={2}
+                    label={{
+                      value: `${ccy}${fmtPrice(target.forecastPrice)}`,
+                      position: 'top', fontSize: 12, fontWeight: 600,
+                      fill: chartTheme.axisLabel,
+                    }} />
+                )}
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
@@ -507,6 +579,23 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
                   <span className="w-3 h-0.5 inline-block rounded"
                     style={{ background: chartTheme.warn, opacity: 0.75 }} />
                   Trend (R² {fit.r2.toFixed(2)}), dotted = {PROJECT_YEARS}y projection
+                </span>
+              )}
+              {/* ⚠ THE DOT IS A SERIES, SO IT IS IN THE LEGEND. A lone unexplained mark on a chart
+                  is read as an outlier in whichever line it sits nearest — here, the blue price
+                  line, which is exactly the wrong reading: it is not a price that happened. The
+                  key repeats the hollow ring so the shape, not just the colour, carries it. */}
+              {showTarget && (
+                <span className="flex items-center gap-1.5 text-fg-muted"
+                  title={`Where the share price lands if ${b.perShare} reaches the forecast in the `
+                    + `panel and the market pays the forecast ${b.yieldInline} for it — `
+                    + `${ccy}${fmtPrice(target.forecastPs)} ÷ ${target.forecastYield?.toFixed(1)}%. `
+                    + '⚠ Not an observation and not anyone’s target: it is the arithmetic of the two '
+                    + 'assumptions beside the chart, and it moves the moment you edit either.'}>
+                  <span className="w-2.5 h-2.5 inline-block rounded-full border-2 box-border"
+                    style={{ borderColor: chartTheme.accentStrong,
+                      background: chartTheme.tooltipCard.contentStyle.backgroundColor }} />
+                  Price target FY{targetYear}
                 </span>
               )}
             </div>
@@ -587,7 +676,10 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         symbol: live?.symbol ?? null, staleDays: live?.stale_days ?? null }}
       fcfStr={fcfStr} onFcf={setFcfStr} defaultForecastFcfPs={forecastPs}
       yieldStr={yieldStr} onYield={setYieldStr} defaultForecastYield={avgYield}
-      onReset={() => { setFcfStr(null); setYieldStr(null); }} />
+      onReset={() => { setFcfStr(null); setYieldStr(null); }}
+      // ⚠ `null`, NOT the default's current value — see the ⚠⚠ on `Input`'s `onRevert`. Null means
+      // "never typed", which is what keeps the box TRACKING the computed figure as it moves.
+      onResetFcf={() => setFcfStr(null)} />
     </div>
   );
 }

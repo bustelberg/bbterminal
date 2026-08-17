@@ -15,6 +15,7 @@ import HoldingsIngestPanel from './HoldingsIngestPanel';
 import { LegendItem } from './ChartLegend';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
 import { paddedLogDomain, periodTick, stepChanges, type Step } from './marginData';
+import { periodAxis } from './periodAxis';
 import { benchNote, benchmarkFirst, rebaseSeries, seriesCrossesZero } from './benchSeries';
 
 /**
@@ -747,8 +748,7 @@ export default function MetricGrowthCard({
                 style={{ cursor: 'pointer' }}
                 onClick={() => setShowHoldings(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tickFormatter={(x: number) => periodTick(x, ltmXs)}
-                  tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+                <XAxis {...periodAxis((x: number) => periodTick(x, ltmXs))} />
                 {linear ? (
                   // ⚠ LINEAR AND ABSOLUTE — a ratio, or a level series that changes sign. The
                   // units differ: a ratio ticks in %, a sign-changing level in its own amounts.

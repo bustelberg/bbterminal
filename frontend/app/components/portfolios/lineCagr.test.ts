@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { cagrExcess, commonEndPeriod, lineCagr, periodQuarter, periodYear } from './lineCagr';
+import {
+  cagrExcess, commonEndPeriod, forwardCagr, lineCagr, periodQuarter, periodYear,
+} from './lineCagr';
 
 /**
  * The CAGR behind the `Table` view.
@@ -120,6 +122,70 @@ describe('period parsing', () => {
   it('reads the quarter, or empty for an annual period', () => {
     expect(periodQuarter('2024-Q3')).toBe('3');
     expect(periodQuarter('2024')).toBe('');
+  });
+});
+
+describe('expected growth, from the actuals into the consensus', () => {
+  // The shape your AEX actually has: actuals to 2025 (2026 is under the floor), 2026e-2030e.
+  const s = lvl([['2023', 80], ['2024', 90], ['2025', 100],
+                 ['2026e', 110], ['2027e', 121], ['2028e', 133.1], ['2029e', 146.41]]);
+
+  it('a 3y expectation runs from the latest ACTUAL to the estimate three years out', () => {
+    const got = forwardCagr(s, 3);
+    expect(got).toMatchObject({ from: '2025', to: '2028e', years: 3 });
+    expect(got.pct).toBeCloseTo(10, 6);            // 100 -> 133.1 over 3 years
+  });
+
+  it('⚠ the base is the ACTUAL, never the nearest estimate', () => {
+    // 2026e -> 2029e would be the consensus's own internal slope: three forecasts compared with
+    // each other, with no contact with anything that happened.
+    expect(forwardCagr(s, 3)).toMatchObject({ from: '2025' });
+  });
+
+  it('⚠ the target is matched by FISCAL YEAR, not by position in the estimate list', () => {
+    // Ragged estimate columns (AEX runs to 2030e, ACWI to 2031e) must not change what "3y" means.
+    const ragged = lvl([['2025', 100], ['2027e', 121], ['2028e', 133.1], ['2031e', 200]]);
+    expect(forwardCagr(ragged, 3)).toMatchObject({ from: '2025', to: '2028e' });
+    // …and asking for 6 finds 2031e, not "the last one".
+    expect(forwardCagr(ragged, 6)).toMatchObject({ to: '2031e' });
+    // …while 4 has no 2029e and refuses rather than taking a neighbour.
+    expect(forwardCagr(ragged, 4).pct).toBeNull();
+  });
+
+  it('names the consensus year it wanted when it is missing', () => {
+    const got = forwardCagr(lvl([['2025', 100], ['2026e', 110]]), 3);
+    expect(got.pct).toBeNull();
+    expect((got as { reason: string }).reason).toContain('2028e');
+  });
+
+  it('⚠ `lineCagr` still refuses to end on an estimate — the two do not overlap', () => {
+    // The whole reason these are separate functions: the historical rate must never reach into the
+    // forecast by accident, and the forward one must ask for it by name.
+    expect(lineCagr(s, 3)).toMatchObject({ to: '2025' });
+    expect(forwardCagr(s, 3)).toMatchObject({ to: '2028e' });
+  });
+
+  it('a shared base pins both sides to the same expectation window', () => {
+    const book = lvl([['2024', 90], ['2025', 100], ['2027e', 121], ['2028e', 133.1]]);
+    const index = lvl([['2024', 90], ['2027e', 110], ['2028e', 116]]);   // no 2025 actual
+    const base = commonEndPeriod(book, index) as string;
+    expect(base).toBe('2024');
+    expect(forwardCagr(book, 3, base)).toMatchObject({ from: '2024', to: '2027e' });
+    expect(forwardCagr(index, 3, base)).toMatchObject({ from: '2024', to: '2027e' });
+  });
+
+  it('a line without the pinned base says so rather than using its own', () => {
+    const got = forwardCagr(lvl([['2024', 90], ['2027e', 110]]), 3, '2025');
+    expect(got.pct).toBeNull();
+    expect((got as { reason: string }).reason).toMatch(/same base/);
+  });
+
+  it('a loss year refuses rather than inverting', () => {
+    expect(forwardCagr(lvl([['2025', -5], ['2028e', 10]]), 3).pct).toBeNull();
+  });
+
+  it('a line with no actuals at all has nothing to grow FROM', () => {
+    expect(forwardCagr(lvl([['2026e', 100], ['2029e', 133]]), 3).pct).toBeNull();
   });
 });
 

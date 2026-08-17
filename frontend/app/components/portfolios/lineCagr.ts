@@ -112,6 +112,58 @@ export function lineCagr(
  * be a number with no meaning that nothing on screen would contradict.
  */
 /**
+ * EXPECTED growth: from the latest reported period to the analyst consensus `years` out.
+ *
+ * ⚠⚠ IT IS A SEPARATE FUNCTION FROM `lineCagr` ON PURPOSE, AND THE ASYMMETRY IS THE SAFETY. That
+ * one REFUSES an estimate endpoint — a forecast wearing the clothes of a track record is the single
+ * easiest way to publish a number nobody meant. Here the forecast IS the question, so it has to be
+ * asked for by name. Adding a flag to `lineCagr` instead would put both behaviours one boolean
+ * apart, and the wrong default would be indistinguishable from the right one on screen.
+ *
+ * ⚠⚠ AND WHAT COMES BACK IS A CONSENSUS, NOT A MEASUREMENT. It is what analysts currently expect —
+ * revised whenever they like, systematically optimistic, and available for only some constituents.
+ * Every surface showing it has to say so; `MetricGrowthCard`'s own config carries the same warning
+ * about the dotted forecast leg it draws.
+ *
+ * ⚠ THE BASE IS THE LATEST REPORTED PERIOD, NOT THE NEAREST ESTIMATE. Measuring 2026e → 2029e would
+ * be the consensus's own internal slope — three forecasts compared with each other, with no contact
+ * with anything that happened. The number worth having is where the business IS against where it is
+ * expected to be, so one end must be real.
+ *
+ * ⚠ THE TARGET IS MATCHED BY FISCAL YEAR, NOT BY POSITION. `reported[last] + years` with an `e`
+ * suffix — so a three-year expectation always spans three years even when the estimate columns are
+ * ragged (the AEX has 2026e-2030e, ACWI 2026e-2031e), and a missing year is a refusal rather than
+ * "whatever estimate is third in the list".
+ */
+export function forwardCagr(
+  level: Record<string, { value: number }>, years: number, basePeriod?: string,
+): Cagr {
+  const reported = Object.keys(level).filter((p) => periodYear(p) !== null).sort(periodOrder);
+  if (!reported.length) return { pct: null, reason: 'the line has no reported period to grow from' };
+
+  const from = basePeriod && level[basePeriod] && periodYear(basePeriod) !== null
+    ? basePeriod
+    : reported[reported.length - 1];
+  if (basePeriod && from !== basePeriod) {
+    return { pct: null, reason: `this line has no ${basePeriod} actual, so it cannot be measured `
+      + 'from the same base as the other one' };
+  }
+  const to = `${(periodYear(from) as number) + years}e`;
+  if (!level[to]) {
+    return { pct: null,
+      reason: `no ${to} consensus on this line — either analysts do not forecast that far, or too `
+        + 'few constituents carry one for the period to be drawn' };
+  }
+
+  const a = level[from].value;
+  const b = level[to].value;
+  if (!(a > 0) || !(b > 0)) {
+    return { pct: null, reason: 'the line is not positive at both ends, so a growth RATE is undefined' };
+  }
+  return { pct: 100 * ((b / a) ** (1 / years) - 1), from, to, years };
+}
+
+/**
  * The latest reported period BOTH lines carry — the window a comparison can honestly use.
  *
  * ⚠ `null` WHEN THEY SHARE NONE, which is a real state (a book of 2020-onwards listings against an

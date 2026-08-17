@@ -68,11 +68,36 @@ function Row({ label, info, children }: {
   );
 }
 
-function Input({ value, onChange, suffix }: {
+function Input({ value, onChange, suffix, onRevert, revertTitle }: {
   value: string; onChange: (v: string) => void; suffix?: string;
+  /**
+   * Put this field back to the figure the panel computed — see the ⚠⚠ below. Absent means the
+   * field has no default to return to.
+   */
+  onRevert?: () => void;
+  revertTitle?: string;
 }) {
   return (
     <span className="flex items-center gap-1 justify-end">
+      {/* ⚠⚠ IT REVERTS TO `null`, NOT TO THE DEFAULT'S CURRENT VALUE, AND THE DIFFERENCE OUTLIVES
+          THE CLICK. `null` means "never typed", which is what makes the box keep TRACKING the
+          computed figure (see `fcfStr`'s own note): the default moves when the live price lands,
+          when the basis switches, when a refetch changes the fit. Writing the number in would put
+          the field back to the right value and then freeze it there — a box that agrees with the
+          panel now and silently disagrees with it a moment later, which is worse than the edit it
+          undid.
+
+          ⚠ IT SITS LEFT OF THE INPUT so the box does not move when it appears. A control that
+          shifts the thing it belongs to, at the moment you start typing in it, is one you have to
+          chase with the pointer. */}
+      {onRevert && (
+        <button type="button" onClick={onRevert} title={revertTitle}
+          aria-label="Reset to the computed figure"
+          className="cursor-pointer text-[11px] leading-none px-1 rounded text-fg-faint
+                     hover:text-accent-400 hover:bg-overlay/5 transition-colors">
+          ↺
+        </button>
+      )}
       <input type="number" value={value} onChange={(e) => onChange(e.target.value)}
         className="w-20 bg-page border border-neutral-700 rounded px-1.5 py-0.5 text-xs font-mono text-fg-strong text-right focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />
       {suffix && <span className="text-[11px] text-fg-muted">{suffix}</span>}
@@ -110,7 +135,7 @@ export default function PriceTargetCalculator({
   target, years, currency, className = '',
   horizonYears, targetYear, price, basis: b,
   fcfStr, onFcf, defaultForecastFcfPs,
-  yieldStr, onYield, defaultForecastYield, onReset,
+  yieldStr, onYield, defaultForecastYield, onReset, onResetFcf,
 }: {
   /** ⚠ COMPUTED BY THE PARENT, because the chart draws the price line out to the same target. One
    *  computation, two readers — see the priceTarget() helper. */
@@ -136,7 +161,17 @@ export default function PriceTargetCalculator({
   yieldStr: string | null;
   onYield: (v: string) => void;
   defaultForecastYield: number | null;
+  /** Clear BOTH typed fields — the card-level control in the header. */
   onReset: () => void;
+  /**
+   * Clear the forecast-per-share field alone.
+   *
+   * ⚠ SEPARATE FROM `onReset`, BECAUSE THE TWO EDITS ARE INDEPENDENT ASSUMPTIONS. The header's
+   * reset throws away the yield you chose along with the per-share figure you were correcting; on
+   * a card whose whole subject is "change one input and watch the target move", that is a control
+   * you learn not to press.
+   */
+  onResetFcf: () => void;
 }) {
   const dirty = fcfStr != null || yieldStr != null;
   const show = (s: string | null, def: number | null, dp: number) =>
@@ -174,8 +209,22 @@ export default function PriceTargetCalculator({
           what={`What the fitted trend says ${b.perShare} will be.`}
           where="The dotted projection on the chart to the left, converted from the index back into currency."
           when={`${years} years past the last reported one.`}
-          how="⚠ An extrapolation, not a forecast anyone made — it continues the exponential through the last decade. Type your own over it." />} />}>
-        <Input value={show(fcfStr, defaultForecastFcfPs, 2)} onChange={onFcf} />
+          how="⚠ An extrapolation, not a forecast anyone made — it continues the exponential through the last decade. Type your own over it, and ↺ puts this one back." />} />}>
+        {/* ⚠⚠ "RESET TO THE OFFICIAL FORECAST" IS NOT AVAILABLE HERE AND THE BUTTON MUST NOT IMPLY
+            IT IS. There is no analyst FCF forecast to return to — `BASIS.fcf.estimateCodes` is
+            `null` because no analyst publishes one, which is a fact about the vendor rather than a
+            gap in our ingest. What this restores is OUR fitted trend, and the tooltip says exactly
+            that; a button labelled for a consensus that does not exist would be the more confident
+            of the two wrong answers. (The EPS basis does have a consensus, but this field's default
+            is the trend on both bases — see `forecastPs` in `QuickValuationTab`.) */}
+        <Input value={show(fcfStr, defaultForecastFcfPs, 2)} onChange={onFcf}
+          onRevert={fcfStr == null ? undefined : onResetFcf}
+          revertTitle={defaultForecastFcfPs == null
+            ? 'Clear your figure. There is no computed forecast to fall back to for this company.'
+            : `Back to ${defaultForecastFcfPs.toFixed(2)} — the panel's own fitted trend, `
+              + `${years} years past the last reported year. ⚠ Not an analyst forecast: nobody `
+              + 'publishes one for free cash flow. The box then keeps tracking that figure as it '
+              + 'moves, which typing the number in would not.'} />
       </Row>
       <Row label={`Current ${b.yieldInline}`}
         info={<InfoTip content={<AspectCard

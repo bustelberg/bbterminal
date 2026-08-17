@@ -131,6 +131,41 @@ MIN_BLEND_COVERAGE_NAMES_PCT = 50.0
 # story and must survive. 0.10 sits in the gap, twice over.
 _MIN_STEP_BASE_FRACTION = 0.10
 
+# The other end of the same question — and it was never asked.
+#
+# ⚠⚠ `_MIN_STEP_BASE_FRACTION` GUARDS THE DIVISOR AND THE NUMERATOR HAD NO CEILING AT ALL. The rule
+# above refuses a base too small to divide by; nothing refused a RESULT too large to believe. So a
+# vendor scale error — a per-share figure delivered in the wrong unit — passed straight through as
+# growth, and the chain multiplies it by the member's weight with no bound.
+#
+# Measured on ACWI's annual FCF/share, 26,160 accepted steps across 1,712 constituents:
+#
+#     MITSUBISHI HEAVY  2024->2025      50.78 ->  86,214.52   +169,684%   moves the index +116.12pp
+#     DENSO CORP        2024->2025     172.97 -> 108,415.57    +62,580%   moves the index  +17.97pp
+#
+# On a line indexed to 100, one corrupt cell in a 0.07%-weight constituent more than DOUBLED it.
+#
+# ⚠ 100x IN ONE YEAR IS READ OFF THE DISTRIBUTION, NOT PICKED — the same method as the constant
+# above. FCF/share: p99 = +718%, p99.9 = +2,386%, p99.99 = +6,889%, and then nothing until DENSO at
+# +62,580%. The largest step that is unambiguously REAL is Bank of America's +3,818% (2008->2009,
+# recovering from the crisis). EPS excl. NRI agrees: p99.9 = +2,609%, and every one of the 20 steps
+# above +10,000% is a scale error — sixteen of them in the SAME 2003->2004 transition across
+# unrelated European filers (Randstad 0.56 -> 160.00, Thales 0.69 -> 193.00, Kesko 0.26 -> 47.25),
+# which is a vendor redenomination and not sixteen simultaneous miracles. Revenue, a level series
+# with no share-count denominator to mis-scale, has ZERO steps over +10,000% and tops out at
+# +5,494% — which is the tell that this pathology belongs to PER-SHARE lines.
+#
+# So the gap is between ~+6,900% (the top of the real distribution) and ~+10,100% (the bottom of the
+# corrupt one). 100x sits in it.
+#
+# ⚠ IT REFUSES THE STEP, IT DOES NOT CAP IT. Capping would invent a growth rate nobody reported;
+# refusing means the member sits out that one interval and rejoins at the next, exactly as the three
+# refusals above it behave. We cannot say what its growth was, so it does not vote.
+#
+# ⚠ AND IT IS NOT SYMMETRIC, DELIBERATELY. The downside is already handled — the floor at −100% is
+# the most a level can lose — so there is no matching "too negative" case to catch.
+_MAX_STEP_GROWTH = 100.0
+
 # How long a member's last reported figure stands in for a period it did not report — see
 # `carry_forward`. One year: the longest any still-reporting filer goes between filings, so nothing
 # live is ever dropped, and anything that stops reporting falls out within a year instead of being
@@ -385,7 +420,13 @@ def step_growth(prev: float | None, now: float | None, scale: float) -> float | 
         return None
     if prev < _MIN_STEP_BASE_FRACTION * scale:
         return None
-    return max(now / prev - 1.0, -1.0)
+    growth = now / prev - 1.0
+    # ⚠ AN IMPLAUSIBLE RESULT — see `_MAX_STEP_GROWTH`. The mirror of the base test above: that one
+    # asks whether the divisor is big enough to divide by, this one whether the answer is small
+    # enough to have come from a business rather than from a unit.
+    if growth > _MAX_STEP_GROWTH:
+        return None
+    return max(growth, -1.0)
 
 
 def _weight_at(m: dict, period: str) -> float | None:
