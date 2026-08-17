@@ -161,8 +161,13 @@ describe('expected growth, from the actuals into the consensus', () => {
   it('⚠ `lineCagr` still refuses to end on an estimate — the two do not overlap', () => {
     // The whole reason these are separate functions: the historical rate must never reach into the
     // forecast by accident, and the forward one must ask for it by name.
-    expect(lineCagr(s, 3)).toMatchObject({ to: '2025' });
-    expect(forwardCagr(s, 3)).toMatchObject({ to: '2028e' });
+    //
+    // ⚠ TWO YEARS, NOT THREE, AND THE DIFFERENCE IS THE FIXTURE'S NOT THE RULE'S. `s` holds
+    // actuals for 2023-2025 only, so a 3-year LOOKBACK wants 2022 and correctly refuses — which
+    // would have proved nothing about estimates. The backward window has to fit inside the actuals
+    // while the forward one reaches into the consensus; that asymmetry is the point being made.
+    expect(lineCagr(s, 2)).toMatchObject({ from: '2023', to: '2025' });
+    expect(forwardCagr(s, 3)).toMatchObject({ from: '2025', to: '2028e' });
   });
 
   it('a shared base pins both sides to the same expectation window', () => {

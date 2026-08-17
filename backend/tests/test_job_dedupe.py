@@ -94,10 +94,13 @@ class TestTheSameWorkTwice:
             release.set()
 
     def test_a_cancelled_job_does_not_block_a_new_one(self):
+        # ⚠ THE CANCEL IS THE ONLY THING THAT STOPS IT — `release` is never set. The first version
+        # set it right after cancelling and the worker raced out through `wait()` returning True
+        # BEFORE its next `ctx.check()`, finishing normally: status `done`, and a test named for
+        # cancellation that never cancelled anything.
         release = threading.Event()
         a, _ = reg.start("test.cancelled", "ACWI", _blocker(release))
         reg.cancel(a.id)
-        release.set()
         for _ in range(200):
             if a.terminal:
                 break

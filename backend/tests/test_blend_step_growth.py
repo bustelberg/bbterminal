@@ -173,8 +173,13 @@ class TestAnImplausibleResultIsRefused:
 
     def test_it_is_one_sided(self):
         """⚠ There is no matching "too negative" case: the floor at −100% is already the most a
-        level can lose, so the downside was never unbounded."""
-        assert step_growth(86214.52, 226.63, 39.66) == -1.0
+        level can lose, so the downside was never unbounded.
+
+        ⚠ AND THE STEP BACK DOWN OFF A CORRUPT VALUE IS **NOT** CLAMPED — it is −99.74%, a real
+        number just short of the floor. That is the residual this ceiling does not fix: refusing the
+        step INTO a bad value leaves the value usable as the next step's base. Small here (the
+        weight is 0.07%), and named so nobody reads the floor as covering it."""
+        assert step_growth(86214.52, 226.63, 39.66) == pytest.approx(-0.99737, abs=1e-5)
 
     def test_refused_never_capped(self):
         """⚠ A capped step would be a growth rate nobody reported. Refusing means the member sits

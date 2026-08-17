@@ -96,7 +96,11 @@ describe('an implausible RESULT is refused, not carried', () => {
 
   it('⚠ it is one-sided — the downside is already handled by the −100% floor', () => {
     // There is no "too negative" case to catch: a level cannot lose more than all of itself.
-    expect(stepGrowth(86214.52, 226.63, 39.66)).toBe(-1);
+    //
+    // ⚠ AND THE STEP BACK DOWN OFF A CORRUPT VALUE IS NOT CLAMPED — it is −99.74%, a real number
+    // just short of the floor. That is the residual: refusing the step INTO a bad value leaves the
+    // value usable as the next step's base. Named here so the floor is not read as covering it.
+    expect(stepGrowth(86214.52, 226.63, 39.66)).toBeCloseTo(-0.99737, 5);
   });
 
   it('⚠ REFUSED, NEVER CAPPED — a capped step would be a growth rate nobody reported', () => {

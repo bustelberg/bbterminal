@@ -39,13 +39,17 @@ def _rig(monkeypatch, api_result):
     monkeypatch.setattr(ind, "_upsert_metric_rows", lambda _sb, rows: (len(rows), 0))
     monkeypatch.setattr(ind, "_stamp_fetched",
                         lambda _sb, _cid, source, _log: stamped.append(source))
+    # ⚠ IT PARSES THE PAYLOAD, RATHER THAN JUST CHECKING IT IS TRUTHY. `{"indicator": []}` — a
+    # well-formed response carrying no series, which is the case this file exists to separate from a
+    # failed request — is itself truthy, so a `not data` fake handed back a row for it and the test
+    # asserting "nothing was loaded" failed against correct code.
     monkeypatch.setattr(ind, "_parse_single_indicator",
-                        lambda data, key, cid: ([] if not data else
-                                                [{"company_id": cid, "metric_code": key,
+                        lambda data, key, cid: ([{"company_id": cid, "metric_code": key,
                                                   "source_code": "gurufocus",
                                                   "target_date": "2026-06-30",
                                                   "numeric_value": 1.0,
-                                                  "is_prediction": False}]))
+                                                  "is_prediction": False}]
+                                                if (data or {}).get("indicator") else []))
     res = ind.fetch_indicators(object(), 7, "AAPL", "NASDAQ", force_refresh=True)
     return res, stamped
 

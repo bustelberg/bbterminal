@@ -130,13 +130,19 @@ class TestTheStopHookIsPassedAtAll:
 class TestWhereTheStopLands:
 
     def test_the_run_stops_after_the_company_that_was_in_flight(self, rig, monkeypatch):
-        # Cancel arms as the 2nd company starts, so #1 completes and #2 halts between feeds.
+        # Cancel arms as the 2nd company starts, so exactly one completes and the second halts
+        # between feeds.
         ctx = FakeCtx(cancel_after=2)
         monkeypatch.setattr("routers._fundamental_backfill.ingest_company",
                             _fake_ingest(rig, ctx))
         with pytest.raises(JobCancelled):
             fill.fill_company_ids(ctx, "IDX", [1, 2, 3, 4, 5], feeds="smart")
-        assert rig["ingested"] == [1], f"expected only company 1 to finish, got {rig['ingested']}"
+        # ⚠ A COUNT, NOT AN ID — AND THAT IS `order_work`'S DOING, NOT A LOOSENING. The work list is
+        # no longer in `company_id` order: it is sorted least-recently-checked-first with a random
+        # tie-break, and every company here is equally never-checked, so WHICH one runs first is
+        # deliberately unpredictable. Asserting `== [1]` was asserting the bug that ordering fixed.
+        assert len(rig["ingested"]) == 1, (
+            f"expected exactly one company to finish, got {rig['ingested']}")
 
     def test_nothing_queued_is_started_after_the_press(self, rig, monkeypatch):
         ctx = FakeCtx(cancel_after=1)

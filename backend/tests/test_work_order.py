@@ -21,7 +21,7 @@ from routers._fundamental_fill import order_work
 FIXED = random.Random(0)      # deterministic tie-breaks, so the assertions are about the ORDER
 
 
-def _co(cid: int, *, fin=None, est=None, ind=None, needs=("fin", "est", "ind")) -> dict:
+def _co(cid: int, *, fin=None, est=None, ind=None, needs=("fin",)) -> dict:
     row = {"company_id": cid, "company_name": f"Co {cid}",
            "financials_fetched_at": fin, "estimates_fetched_at": est,
            "indicators_fetched_at": ind}
@@ -31,6 +31,14 @@ def _co(cid: int, *, fin=None, est=None, ind=None, needs=("fin", "est", "ind")) 
 
 def _ids(rows):
     return [c["company_id"] for c in rows]
+
+
+# ⚠ THE DEFAULT IS `needs=("fin",)`, AND THE FIRST VERSION OF THIS FILE GOT IT WRONG. `order_work`
+# keys on the OLDEST stamp among the feeds the run will fetch, so a fixture that declares all three
+# feeds while stamping only `financials_fetched_at` gives every company `min(fin, "", "") == ""` —
+# every key ties, the random tie-break decides, and four assertions about ordering fail against
+# perfectly correct code. That is the fixture describing a company we would fetch estimates for
+# without ever having asked for them, which is a real state and simply not the one being tested.
 
 
 class TestOldestFirst:
