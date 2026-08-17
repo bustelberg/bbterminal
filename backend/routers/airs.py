@@ -2625,6 +2625,11 @@ class AirsAccountDetail(BaseModel):
 
     portefeuille: str
     as_of: str | None = None
+    # ⚠ `as_of` IS AIRS'S VALUATION DATE; THIS IS WHEN **WE** LAST READ THE BOOK, and the pair is
+    # what lets the panel's ⓘ say whose lag an old date is. Without it every icon in the expanded
+    # view went amber on a book we had read that same afternoon — an alarm nobody could clear, on
+    # the surface with the most room to explain itself. See `_airs_accounts._fetched_at`.
+    fetched_at: str | None = None
     ytd_pct: float | None = None
     price_result_eur: float | None = None
     income_eur: float | None = None

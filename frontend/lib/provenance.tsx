@@ -12,6 +12,7 @@
  * pill states the freshness. Rendered via {@link InfoTip} so it appears instantly (the native
  * `title=` sits for ~1-2s) and can't be clipped by an overflow ancestor.
  */
+import { createContext, useContext } from 'react';
 import InfoTip from '../app/components/InfoTip';
 import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
 import { Field, TipCard } from './tipCard';
@@ -174,6 +175,28 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
  *  can still go amber. So `column` suppresses the warn state outright and the When field says
  *  where the date actually lives. It is not a styling opt-out — it is the statement that this
  *  icon has no observation behind it. */
+/**
+ * A `fetchedAt` for a whole subtree — WHEN WE LAST READ THE THING EVERY NUMBER UNDER IT DESCRIBES.
+ *
+ * ⚠⚠ A CONTEXT AND NOT A PROP, FOR ONE REASON: the expanded account panel renders **40** ⓘ icons
+ * and every one of them carries the SAME account's `as_of`. Threading a second date through all of
+ * them is forty chances to forget one — and a forgotten one is not a visible bug, it is a single
+ * icon that stays amber while its neighbours went quiet, which reads as "this particular number is
+ * stale" and is the most misleading outcome available.
+ *
+ * ⚠ IT MUST WRAP EXACTLY ONE SOURCE-OBJECT'S SUBTREE. The provider says "everything in here was
+ * read at this moment"; wrapping two accounts, or a page, would hand one book's fetch time to
+ * another's numbers and quietly de-amber a row that really is our lag. An explicit `fetchedAt` prop
+ * always wins, so a nested exception stays possible.
+ */
+const FetchedAtContext = createContext<string | null | undefined>(undefined);
+
+export function ProvenanceFetchedAt({ at, children }: {
+  at?: string | null; children: React.ReactNode;
+}) {
+  return <FetchedAtContext.Provider value={at}>{children}</FetchedAtContext.Provider>;
+}
+
 export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = false, what }: {
   source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
   /** When WE last read the source, if the caller knows it. Turns an amber badge from a dead end
@@ -187,9 +210,30 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
 }) {
   // ⚠ `!column &&` FIRST. A column header must never reach the stale branch, whatever it was
   // handed — the guard belongs here, not at ~90 call sites that each have to remember it.
-  const stale = !column && asOf ? snapshotFreshness(asOf)?.tone === 'stale' : false;
+  /**
+   * ⚠⚠ AMBER MEANS "YOU CAN FIX THIS", NOT "THIS IS OLD" — and firing it on AIRS's own lag made it
+   * furniture. Measured 2026-08-17, straight after a full "Refresh all": 27 of 45 account rows wore
+   * the `!`, and 23 of them had been read that same afternoon — AIRS had simply not valued those
+   * books since. Not one of the 23 could be cleared by any action available on the page, and an
+   * alarm that cannot be cleared is one a reader learns to scroll past, which then costs them the
+   * four rows that WERE ours to fix.
+   *
+   * So `source`-side lag demotes the icon to the ordinary `i`: the date and its age are still in the
+   * card, one hover away, with `Whose lag` saying why refreshing cannot move it. Amber is reserved
+   * for the lag we own — and for the case where we do NOT KNOW whose it is (`fetchedAt` absent, most
+   * call sites), because silence there would hide the AMD incident this badge was built for: a
+   * 4-day-old cached value read €114,587 / +142% against AIRS-live's €107,086 / +126%.
+   */
+  // ⚠ THE PROP WINS OVER THE SUBTREE'S DEFAULT — see `ProvenanceFetchedAt`. `??`, not `||`, so an
+  // explicit null ("we know we do not know") is honoured rather than silently falling back.
+  const ctxFetchedAt = useContext(FetchedAtContext);
+  const fetched = fetchedAt ?? ctxFetchedAt;
+  const lag = column ? null : lagOwner(asOf, fetched);
+  const stale = !column && asOf
+    ? snapshotFreshness(asOf)?.tone === 'stale' && lag?.side !== 'source'
+    : false;
   return (
-    <InfoTip content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetchedAt} note={note}
+    <InfoTip content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note}
       how={how} kind={kind} column={column} what={what} />}>
       <span
         className={`ml-1 ${stale ? INFO_ICON_WARN : INFO_ICON}`}

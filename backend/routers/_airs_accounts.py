@@ -618,6 +618,12 @@ def account_holdings(portefeuille: str) -> dict:
     return {
         "portefeuille": portefeuille,
         "as_of": as_of,
+        # ⚠ THE PAIR, HERE TOO — see `_fetched_at`. The list row carries both dates and its badge can
+        # therefore say whether an old valuation is AIRS's lag or ours; the expanded panel showed the
+        # same account through the same component with only `as_of`, so every ⓘ inside it went amber
+        # on a book we had read that afternoon. One fact, two surfaces, and the surface with MORE
+        # room for the explanation was the one that could not give it.
+        "fetched_at": _fetched_at().get((portefeuille or "").strip().lower()),
         # Repeated here so the panel can state, on the same screen as the positions, that these
         # do not add up to it — and why.
         "ytd_pct": perf.get("cumulatief_rendement"),

@@ -6,7 +6,7 @@ import { API_URL } from '../../lib/apiUrl';
 import { trace, traceEmpty, traceError, traceRows, traceScope } from '../../lib/debugTrace';
 import { dialog } from '../../lib/dialog';
 import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
-import { Provenance } from '../../lib/provenance';
+import { Provenance, ProvenanceFetchedAt } from '../../lib/provenance';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
@@ -1665,6 +1665,13 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
   const isHypothetical = basisKey !== 'start';
   const totalReturn = total.returnPct == null ? null : total.returnPct / 100;
   return (
+    /* ⚠⚠ ONE ACCOUNT, ONE FETCH TIME, FORTY ⓘ ICONS. Every provenance card below describes this
+       book, so they all share the moment we last read it — and without that fact each one turns
+       amber on AIRS's own valuation lag, which no button on this page can clear. Supplied once for
+       the subtree rather than as a prop on forty call sites, where the one that got forgotten would
+       be a single amber icon among quiet neighbours, reading as "this number in particular is
+       stale". See `ProvenanceFetchedAt`. */
+    <ProvenanceFetchedAt at={d?.fetched_at}>
     <div className="space-y-2">
       {/* ⚠ THE WHOLE BAR IS THE TOGGLE, not a caret you have to hit. The figures on it are the
           Total row's, so a reader who only wanted the summary has already been answered and the
@@ -2113,5 +2120,6 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
       </div>
       </>)}
     </div>
+    </ProvenanceFetchedAt>
   );
 }
