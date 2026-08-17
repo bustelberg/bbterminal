@@ -17,7 +17,7 @@ import FcfSbcYieldInputsModal from './FcfSbcYieldInputsModal';
 import { fcfSbcYieldByYear, type FcfSbcYieldInputs } from './fcfSbcYieldData';
 import DailyToggle from './DailyToggle';
 import { meanOf, paddedDomain, xToMonth, xToPeriod } from './marginData';
-import { periodAxis } from './periodAxis';
+import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**

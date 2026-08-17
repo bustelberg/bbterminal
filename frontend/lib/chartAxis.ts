@@ -1,12 +1,18 @@
-import { chartTheme } from '../../../lib/chartTheme';
+import { chartTheme } from './chartTheme';
 
 /**
- * The fiscal-period X axis, once, for every Long Equity card.
+ * The tilted X axis, once, for every chart in the Fundamental modal.
  *
  * ⚠ FOURTEEN CARDS HAD THIS INLINE, CHARACTER FOR CHARACTER. They sit in one grid and are read
  * against each other, so an axis that differs between two of them is a difference the reader has to
  * rule out before believing anything else on the screen — and a tilt applied to thirteen of fourteen
  * is exactly the kind of near-miss a copy-paste axis produces.
+ *
+ * ⚠ IT LIVES IN `lib/`, NOT BESIDE THE CARDS, because the Old-charts tab's four charts are in
+ * `components/earnings/` and are shared with the /earnings dashboard. Importing a `portfolios/`
+ * module from them would run the dependency backwards (`portfolios/FundamentalCharts` already
+ * imports all four), and it is the same class of thing as `chartTheme` — chart presentation with no
+ * feature attached — so it belongs where `chartTheme` does.
  *
  * ⚠⚠ `angle` AND `textAnchor` MUST BE ON THE **AXIS**, NOT INSIDE `tick`. Recharts renders a tilted
  * label from either (`CartesianAxis` falls back to `tick.angle`), but the code that decides HOW MANY
@@ -39,6 +45,10 @@ import { chartTheme } from '../../../lib/chartTheme';
  * ⚠ NOTE BOTH CADENCES CONVERGE AT 45°. Past the threshold the formula switches to `h/sin θ`, which
  * has no `w` in it — so a wide label and a narrow one pack identically. That is why the quarterly
  * axis, the crowded one, gains the most: 45px of width stops mattering at all.
+ *
+ * ⚠ WHICH IS ALSO WHY THIS IS WORTH APPLYING TO THE DATE AXES, and not only the fiscal-period ones.
+ * `getTickSize` reads `angle` for ANY horizontal axis — category, numeric or `scale="time"` — so the
+ * Old-charts `2025-06` labels (7 chars, the widest on the screen) gain the most of anything here.
  */
 const TILT_DEGREES = -45;
 
@@ -56,13 +66,18 @@ const TILT_DEGREES = -45;
 export const PERIOD_AXIS_HEIGHT = 46;
 
 /**
- * Props for a fiscal-period `<XAxis>`. Spread it: `<XAxis {...periodAxis(xToPeriod)} />`.
+ * The tilt on its own — spread onto ANY horizontal `<XAxis>`, whatever it is keyed on.
  *
- * `tickFormatter` is the only thing that varies — two cards switch to `xToMonth` on a daily series.
+ * ⚠ IT CARRIES NO `dataKey` AND NO `tickFormatter` ON PURPOSE. The charts in this modal are keyed
+ * five different ways — a fiscal-period index (`year`), a plain category (`date` as `2025-06-30`), a
+ * numeric year with pinned ticks, and two `scale="time"` millisecond axes — and a shared helper that
+ * guessed at the key would silently blank the axis on four of them. Only the presentation is shared.
+ *
+ * `fontSize` varies because it already did: the Long Equity grid draws at 12px and the wider
+ * Old-charts labels at 11px. Standardising it here would be a second, unasked-for change riding
+ * along with the tilt.
  */
-export const periodAxis = (tickFormatter: (x: number) => string) => ({
-  dataKey: 'year',
-  tickFormatter,
+export const tiltedAxis = ({ fontSize = 12 }: { fontSize?: number } = {}) => ({
   angle: TILT_DEGREES,
   // ⚠ `end`, SO THE LABEL HANGS BACK FROM ITS TICK rather than running forward off it. With a
   // negative angle the text rises to the right; anchoring at the start would push each label away
@@ -70,5 +85,16 @@ export const periodAxis = (tickFormatter: (x: number) => string) => ({
   textAnchor: 'end' as const,
   height: PERIOD_AXIS_HEIGHT,
   tickMargin: 4,
-  tick: { fontSize: 12, fill: chartTheme.axisTick },
+  tick: { fontSize, fill: chartTheme.axisTick },
+});
+
+/**
+ * Props for a fiscal-period `<XAxis>`. Spread it: `<XAxis {...periodAxis(xToPeriod)} />`.
+ *
+ * `tickFormatter` is the only thing that varies — two cards switch to `xToMonth` on a daily series.
+ */
+export const periodAxis = (tickFormatter: (x: number) => string) => ({
+  ...tiltedAxis(),
+  dataKey: 'year',
+  tickFormatter,
 });

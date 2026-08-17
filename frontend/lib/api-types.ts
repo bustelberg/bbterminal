@@ -1411,6 +1411,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/scan/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Model Portfolios Scan Job
+         * @description The model-portfolio scan as a CANCELLABLE JOB — phase two of the portfolios page's
+         *     "Refresh all".
+         *
+         *     ⚠⚠ THIS IS THE HALF OF THAT BUTTON THAT RAN BLIND. Phase one (the account scan) has been a job
+         *     since 2026-08-13: a toast with `i/n`, the account in flight, a working Cancel, and it survives a
+         *     reload. Phase two — this — was `runSSE` straight into `console.warn`, so for the MINUTES it runs
+         *     (an edit-page GET plus an XLS download for each of ~58 fixed portfolios) the only thing on
+         *     screen saying anything was happening at all was the button's own label. Navigate away and the
+         *     work was invisible; reload and it was unrecoverable; there was no way to stop it. One button
+         *     reporting two ways, and the slower way was the silent one.
+         *
+         *     ⚠ THE SCAN ITSELF IS UNCHANGED — the same `fetch_model_portfolios_sync` +
+         *     `count_model_portfolio_holdings_sync` the SSE endpoint above and the scheduler both call, with
+         *     two optional hooks. A streaming copy for the job path is exactly the drift `scan_one`'s
+         *     docstring warns about.
+         *
+         *     ⚠ CANCEL STOPS BETWEEN PORTFOLIOS, and the summary says where. A portfolio's XLS is downloaded,
+         *     counted and persisted as a unit; everything already counted is kept.
+         *
+         *     ⚠ `busy` IS AN ANSWER, NOT AN ERROR — and here it guards a REAL hazard rather than a
+         *     bookkeeping one: this shares ONE authenticated AirSPMS session with the account scan, which
+         *     must not be driven by two threads at once. ⚠ IT IS A PARTIAL GUARD AND SAYING SO IS THE POINT:
+         *     `_LOCK` is held by `run_airs_vermogen_refresh_sync` and `refresh_one_portfolio`, so this cannot
+         *     collide with either — but the scheduler's own model-scan ticks (`scheduler.py`) do not take it,
+         *     and neither does the SSE endpoint above, so those two can still overlap this. Non-blocking, so
+         *     it can never deadlock the session it exists to protect.
+         */
+        post: operations["airs_model_portfolios_scan_job_api_airs_model_portfolios_scan_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios/{portfolio_id}/analysis": {
         parameters: {
             query?: never;
@@ -7982,6 +8027,8 @@ export interface components {
             deposits_eur?: number | null;
             /** End Value Eur */
             end_value_eur?: number | null;
+            /** Fetched At */
+            fetched_at?: string | null;
             /** Holdings */
             holdings?: number | null;
             /** Income Eur */
@@ -8535,6 +8582,8 @@ export interface components {
             dynamic_portefeuille: string;
             /** End Value Eur */
             end_value_eur?: number | null;
+            /** Fetched At */
+            fetched_at?: string | null;
             /** Fixed Name */
             fixed_name?: string | null;
             /** Fixed Portfolio Id */
@@ -14201,6 +14250,26 @@ export interface operations {
         };
     };
     airs_model_portfolios_scan_api_airs_model_portfolios_scan_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    airs_model_portfolios_scan_job_api_airs_model_portfolios_scan_job_post: {
         parameters: {
             query?: never;
             header?: never;

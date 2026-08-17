@@ -675,6 +675,22 @@ def _page_metrics(company_id: int, pattern: str, *, exact: bool = False) -> list
     draw them. The panel then reads "No data. Refresh to load." — a truthful message about an
     untruthful read, which is why it looked like a charting bug. In production the same code
     would have lost ~86% of every company's rows.
+
+    ⚠⚠ AND THE SORT KEY MUST BE **UNIQUE**, WHICH `target_date` ALONE IS NOT (fixed 2026-08-17).
+    Postgres makes no promise about the order of TIED rows across separate LIMIT/OFFSET queries, so
+    a page boundary landing inside a tie group serves some rows twice and others never. Here the
+    ties are enormous and unavoidable: a company files ~110 metric codes on the SAME
+    `target_date`, so with `_PAGE = 1000` every boundary falls inside one.
+
+    Measured on Bustelberg Offensief's FCF/share: ASML, Alphabet and Amazon each silently lost
+    their **2018** row and Berkshire its **2019** — a different arbitrary row per company, no
+    error, no empty panel, just a blended line missing a point. It moved the book's 10-year
+    FCF/share CAGR by 0.14pp (27.86% → 28.00%) and was invisible except as a disagreement with the
+    Tables tab, whose `exact=True` reads ONE code (~28 rows) and so never reaches a page boundary
+    at all. Same failure and same fix as the FX pager in `_airs_portfolio_perf` — see CLAUDE.md.
+
+    The primary key is `(company_id, metric_code, source_code, target_date)` and `company_id` is
+    pinned by the filter, so these three order the rows totally.
     """
     out: list[dict] = []
     start = 0
@@ -683,7 +699,8 @@ def _page_metrics(company_id: int, pattern: str, *, exact: bool = False) -> list
                 .select("company_id,metric_code,target_date,numeric_value")
                 .eq("company_id", company_id).like("metric_code", pattern)
                 .gte("target_date", _BLEND_START)
-                .order("target_date").range(start, start + _PAGE - 1).execute().data or [])
+                .order("target_date").order("metric_code").order("source_code")
+                .range(start, start + _PAGE - 1).execute().data or [])
         out += page
         if len(page) < _PAGE:
             return out
@@ -1478,7 +1495,34 @@ _REVENUE_CODE = _REVENUE_CODES[0]   # for blend_kind() only — it classifies, i
 
 
 def _metric_codes(metric: str) -> tuple[str, ...]:
-    return _METRIC_CODES.get(metric, _METRIC_CODES["revenue"])
+    """The GuruFocus codes behind a metric KEY. Unknown key ⇒ refused.
+
+    ⚠⚠ IT USED TO FALL BACK TO REVENUE, AND THAT IS THE WORST POSSIBLE DEFAULT. Every caller here
+    is a chart or a table that has already decided what it is showing and labelled it accordingly,
+    so a key this dict does not carry is a TYPO — and answering a typo with a different, valid,
+    plausible series means the label and the numbers come from two different questions with nothing
+    on screen to say so.
+
+    Measured 2026-08-17, and it took a reader noticing two figures disagree to find it: the Tables
+    tab asked for `fcf_per_share` (the registry key is `fcf_ps`), so its row labelled "FCF / share
+    CAGR" was the book's REVENUE growth. Bustelberg Offensief read **+19.0%** there against the
+    Long Equity card's **+28.0%** on the same book, same window, same modal. Nothing errored,
+    nothing was empty, and both numbers looked entirely reasonable — the only symptom was that they
+    disagreed, and the tab's own footnote offered a *credible wrong explanation* for the gap
+    (point-to-point vs the card's trend fit), which is what made it survive.
+
+    ⚠ RAISING IS SAFE HERE PRECISELY BECAUSE EVERY CALLER PASSES A LITERAL. The keys come from
+    `_METRIC_CODES` itself, from `CARDS[].benchmarkMetric` in the frontend, or from a default of
+    `"revenue"`; there is no user-typed metric reaching this. The one HTTP surface that takes it as
+    a query parameter (`portfolio-revenue-matrix`) validates it into a 422 before it gets here, so
+    a bad request is answered rather than 500'd.
+    """
+    try:
+        return _METRIC_CODES[metric]
+    except KeyError:
+        raise ValueError(
+            f"unknown metric key {metric!r} — expected one of "
+            f"{', '.join(sorted(_METRIC_CODES))}") from None
 
 
 def _metric_rows(company_id: int, metric: str = "revenue") -> list[dict]:
@@ -2473,6 +2517,16 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
     """
     from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
     from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    # ⚠⚠ VALIDATED HERE, BECAUSE THIS IS THE ONE PLACE `metric` ARRIVES AS A STRING FROM OUTSIDE.
+    # It used to be resolved by a `.get(metric, revenue)` deep in `_metric_codes`, so a caller that
+    # misspelt it got REVENUE back under whatever heading it had already written — see that
+    # function for the measured case (a "FCF / share CAGR" row that was revenue, off by 9pp).
+    # A 422 naming the valid keys turns the same typo into a message on the first request.
+    if metric not in _METRIC_CODES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown metric {metric!r} — expected one of {', '.join(sorted(_METRIC_CODES))}")
 
     members = await _load_and_expand_members(body, all_constituents=True)
     if not members:

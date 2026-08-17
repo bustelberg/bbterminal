@@ -64,7 +64,8 @@ class TestTheLineItPrints:
     def test_it_says_only_the_three_counts_when_nothing_failed(self):
         msg = format_run_message(
             {"added": 3, "updated": 41, "up_to_date": 0, "failed": 0})
-        assert msg == "3 portfolios added, 41 updated, 0 already up to date"
+        assert msg == ("3 portfolios added, 41 re-read, "
+                       "0 skipped (we read them within 20h)")
 
     def test_it_names_no_report_and_no_row_count(self):
         """The whole point: no "Rendement 44/44", no holdings/mutaties/model row totals."""
@@ -78,7 +79,7 @@ class TestTheLineItPrints:
         reader only that something is wrong."""
         msg = format_run_message(
             {"added": 0, "updated": 30, "up_to_date": 0, "failed": 14})
-        assert msg.endswith(", 14 failed")
+        assert msg.endswith(", 14 failed")   # still last when no valuation date rides along
 
     def test_a_single_portfolio_is_not_pluralised(self):
         assert format_run_message(
@@ -88,4 +89,46 @@ class TestTheLineItPrints:
     def test_zero_counts_still_show_so_the_shape_is_fixed(self):
         """A line that drops its clauses has to be parsed before it can be read."""
         msg = format_run_message({"added": 0, "updated": 0, "up_to_date": 44, "failed": 0})
-        assert msg == "0 portfolios added, 0 updated, 44 already up to date"
+        assert msg == ("0 portfolios added, 0 re-read, "
+                       "44 skipped (we read them within 20h)")
+
+
+class TestItNeverClaimsTheDATAIsCurrent:
+    """⚠⚠ THE LINE SAID "44 ALREADY UP TO DATE" WHILE THE ROWS SAID "3 TRADING DAYS OLD", AND BOTH
+    WERE TRUE. Every count here is about OUR COPY — what we fetched and when. The ⓘ on each row
+    measures AIRS's VALUATION DATE. Read side by side they are flatly contradictory, and the reader
+    is right to believe the pessimistic one.
+
+    Measured 2026-08-17 on `DealmakersTopSelectie Offensief`: fetched 13:15 that day, all five
+    reports retrieved, `as_of` 2026-08-12 — complete, current, and three trading days old, all at
+    once. AIRS had simply not valued the book since the 12th.
+
+    So the sentence now says what it means, and carries the DATA's own date beside it: a reader who
+    sees "newest AIRS valuation 2026-08-15" cannot read the counts as a claim about today.
+    """
+
+    def test_the_phrase_up_to_date_is_gone(self):
+        msg = format_run_message({"added": 0, "updated": 0, "up_to_date": 44, "failed": 0})
+        assert "up to date" not in msg, (
+            "the summary claims the DATA is current; it only knows when we last fetched it")
+
+    def test_the_skipped_clause_says_why_they_were_skipped(self):
+        msg = format_run_message({"added": 0, "updated": 0, "up_to_date": 44, "failed": 0})
+        assert "skipped" in msg and "we read them" in msg
+
+    def test_the_valuation_date_rides_along_when_known(self):
+        msg = format_run_message(
+            {"added": 3, "updated": 28, "up_to_date": 14, "failed": 0}, "2026-08-15")
+        assert msg.endswith("· newest AIRS valuation 2026-08-15")
+
+    def test_it_is_omitted_when_the_run_read_nothing(self):
+        """⚠ A SKIP-EVERYTHING RUN LEARNED NO VALUATION DATE. Printing the stored one would state
+        a finding this run did not make — the same rule `count_outcomes` follows for `added`."""
+        msg = format_run_message({"added": 0, "updated": 0, "up_to_date": 44, "failed": 0})
+        assert "AIRS valuation" not in msg
+
+    def test_failed_still_comes_before_the_valuation_date(self):
+        """The amber reason must not be pushed past a neutral fact — it is why the banner is amber."""
+        msg = format_run_message(
+            {"added": 0, "updated": 30, "up_to_date": 0, "failed": 2}, "2026-08-15")
+        assert msg.index("2 failed") < msg.index("newest AIRS valuation")

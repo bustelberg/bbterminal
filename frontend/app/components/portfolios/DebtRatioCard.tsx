@@ -15,7 +15,7 @@ import { type Target } from './HoldingsRevenueModal';
 import DebtRatioInputsModal from './DebtRatioInputsModal';
 import { debtRatioByYear, type DebtRatioInputs } from './debtRatioData';
 import { meanOf, paddedDomain , xToPeriod } from './marginData';
-import { periodAxis } from './periodAxis';
+import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**

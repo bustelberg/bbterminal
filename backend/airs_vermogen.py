@@ -305,8 +305,45 @@ def bogus_accounts(counts: dict[str, int], verdicts: dict[str, dict]) -> set[str
     return out
 
 
+# ⚠⚠ WHERE THE RUN'S NARRATION GOES **NOW**. `_emit` writes to `_STATUS["log"]`, which the
+# portfolios panel used to POLL — and stopped, when "Refresh all" became a job reporting into the
+# shared toast. Nothing re-pointed the log at the new surface, so every phase that narrates through
+# `_emit` was narrating to nobody, and `on_step` was wired only to the account loop.
+#
+# The visible symptom, reported 2026-08-17: the toast reads **"starting…" for a long time** before
+# the first portfolio appears. Nothing is wrong — discovery is a headless-browser login, three menu
+# navigations, three filters and a paged scrape of the Front-Office list, and it takes what it
+# takes. It just says nothing while it does, which is the one thing a minutes-long job must not do:
+# a silent scrape is indistinguishable from a hung one, and this file's own `_emit` docstring says
+# so about the phase it then left silent.
+#
+# ⚠ MODULE-LEVEL IS SAFE HERE FOR THE SAME REASON `_STATUS` IS: `_LOCK` serialises every writer
+# (the fleet run, a single-row refresh and the scheduler all take it), so there is exactly one run
+# at a time. It is set inside the lock hold and cleared in the same `finally` that releases it.
+_PROGRESS: Callable[[int, int, str], None] | None = None
+#: The bar's position, carried so a narration line mid-loop does not blank a real 12/44.
+_PROGRESS_AT: dict[str, int] = {"done": 0, "total": 0}
+
+
+def _say(done: int, total: int, message: str) -> None:
+    """Move the bar AND the line. The one place `_PROGRESS` is called with a new position."""
+    _PROGRESS_AT["done"], _PROGRESS_AT["total"] = done, total
+    if _PROGRESS is None:
+        return
+    try:
+        _PROGRESS(done, total, message)
+    except Exception:  # noqa: BLE001 — a reporter must never be the reason a scan fails
+        _log.debug("[airs_vermogen] progress listener raised", exc_info=True)
+
+
 def _emit(kind: str, **fields) -> None:
     """Append one step to the run's live log — what the scan is doing, as it does it.
+
+    ⚠ AND FORWARD IT TO THE JOB'S PROGRESS LINE — see `_PROGRESS`. Every phase before the account
+    loop (discovery, the roster check, the plan) reports ONLY through here, so without this the
+    toast sits on "starting…" through all of it. The bar's position is unchanged: these lines
+    narrate work that has no denominator yet, and re-reporting `0/0` mid-loop would blank a bar
+    that is genuinely at 12/44.
 
     ⚠ A MINUTES-LONG SCRAPE WITH NO NARRATION IS INDISTINGUISHABLE FROM A HUNG ONE. The fleet pass
     is 44 accounts x 4 downloads behind a headless browser; before this the only thing anyone could
@@ -322,6 +359,12 @@ def _emit(kind: str, **fields) -> None:
     entry = {"seq": len(_STATUS.get("log") or []), "kind": kind,
              "at": datetime.now(timezone.utc).isoformat(), **fields}
     _STATUS.setdefault("log", []).append(entry)
+    msg = fields.get("message")
+    if _PROGRESS is not None and msg:
+        try:
+            _PROGRESS(_PROGRESS_AT["done"], _PROGRESS_AT["total"], str(msg).strip())
+        except Exception:  # noqa: BLE001 — telemetry must never break the scan
+            _log.debug("[airs_vermogen] progress listener raised", exc_info=True)
 
 
 def _parse_stamp(raw: str | None) -> datetime | None:
@@ -511,7 +554,7 @@ def count_outcomes(
     return {"added": added, "updated": updated, "up_to_date": len(skipped), "failed": failed}
 
 
-def format_run_message(counts: dict[str, int]) -> str:
+def format_run_message(counts: dict[str, int], newest_as_of: str | None = None) -> str:
     """The ONE line the page shows. Pure.
 
     ⚠ THIS IS THE WHOLE USER-FACING REPORT, AND THAT IS THE POINT. It used to read "30/44 accounts
@@ -526,11 +569,33 @@ def format_run_message(counts: dict[str, int]) -> str:
 
     All three good counts show even at zero: a fixed shape is read at a glance, whereas a line that
     drops its clauses has to be parsed before it can be understood.
+
+    ⚠⚠ IT SAID "ALREADY UP TO DATE" AND THAT DIRECTLY CONTRADICTED THE ROW BADGES. Every count here
+    is about OUR COPY — what we fetched, and when — while the ⓘ on each row measures **AIRS's
+    valuation date**. Both were true at once and they read as opposites: the run reported
+    "44 already up to date" while `DealmakersTopSelectie Offensief` wore "3 trading days old"
+    (measured 2026-08-17: fetched 13:15 today, all five reports, `as_of` 2026-08-12).
+
+    Two changes, and the second is the one that actually reconciles them:
+      * the phrase now says what it means — these accounts were skipped because we READ them
+        recently, not because the data behind them is current;
+      * `newest_as_of` puts **the freshest valuation the fleet actually holds** in the same
+        sentence. A reader who sees "newest AIRS valuation 2026-08-15" cannot then read the counts
+        as a claim that every book is current to today, which is the whole misunderstanding.
+
+    `newest_as_of` is optional so the pure-count callers and the tests keep working unchanged.
     """
     a = counts["added"]
     line = (f"{a} portfolio{'' if a == 1 else 's'} added, "
-            f"{counts['updated']} updated, {counts['up_to_date']} already up to date")
-    return line + (f", {counts['failed']} failed" if counts.get("failed") else "")
+            f"{counts['updated']} re-read, "
+            f"{counts['up_to_date']} skipped (we read them within {AIRS_FRESH_HOURS:g}h)")
+    if counts.get("failed"):
+        line += f", {counts['failed']} failed"
+    # ⚠ THE DATA'S OWN DATE, NOT OURS — see above. Named "AIRS valuation" rather than "as of" so it
+    # cannot be read as the time of the scan.
+    if newest_as_of:
+        line += f" · newest AIRS valuation {newest_as_of}"
+    return line
 
 
 def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
@@ -803,7 +868,14 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
     """
     if not _LOCK.acquire(blocking=False):
         return {"status": "busy", "message": "An AIRS refresh is already running"}
+    global _PROGRESS  # noqa: PLW0603 — see `_PROGRESS`: one run at a time, guarded by `_LOCK`
+    _PROGRESS = on_step
+    _PROGRESS_AT.update(done=0, total=0)
     try:
+        # ⚠ THE FIRST LINE GOES OUT BEFORE ANY WORK, so the toast leaves "starting…" within a
+        # second of the press rather than at the first account — and it names the SLOW thing, so a
+        # reader who presses this at 09:00 knows the wait is a browser login and not a stuck job.
+        _say(0, 0, "signing in to AirSPMS and discovering portfolios…")
 
         today = date.today()
         van, tot = f"{today.year}-01-01", today.isoformat()
@@ -868,6 +940,11 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         # run wrote any — that is what makes "added" mean anything. Re-reading it after the loop
         # would find every account known (this run just recorded them all) and report 0 added for
         # ever, including on the very first scan of a new book.
+        # ⚠ THE DENOMINATOR ARRIVES HERE, AND THE BAR SHOULD TAKE IT IMMEDIATELY. Discovery has an
+        # unknown length (indeterminate bar); from this point the run knows it is 44 accounts, and
+        # the planning reads below are seconds of database work that would otherwise be one more
+        # silent gap between "AIRS lists 44 portfolios" and the first account.
+        _say(0, len(names), f"planning — reading which of {len(names)} accounts are current…")
         verdicts = _roster_verdicts()
         known = set(verdicts)
         todo, current = accounts_to_scan(
@@ -901,6 +978,11 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         _log.info("[airs_vermogen] %d discovered — %d to scan, %d already current%s",
                   len(names), len(todo), len(current), " (forced)" if force else "")
         rendement_ok = vermogen_ok = holdings_total = mutaties_total = model_total = 0
+        # ⚠ THE DATA'S OWN DATE, TRACKED SO THE SUMMARY CAN STATE IT — see
+        # `format_run_message`. Only the accounts this run READ; a skipped one taught us
+        # nothing new, and claiming its stored date as this run's finding would be a
+        # sentence about work that did not happen.
+        newest_as_of: str | None = None
         # ⚠ EVERY SCANNED ACCOUNT GETS AN ENTRY, INCLUDING ONE THAT YIELDS NOTHING. An account
         # missing from this dict would keep whatever verdict a previous run left behind, so a
         # report that started failing today would go on reading as complete. A SKIPPED account is
@@ -932,8 +1014,10 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
                       message=f"[{i}/{len(names)}] cancelled before {name} — "
                               f"{i - 1} account(s) already stored")
                 break
-            if on_step is not None:
-                on_step(i, len(names), f"{i}/{len(names)}: {name}")
+            # ⚠ THROUGH `_say`, NOT `on_step` DIRECTLY — it records the position so the per-report
+            # lines `scan_one` emits underneath ("Vermogensoverzicht: ok — 31 holdings…") keep the
+            # bar at 12/44 instead of resetting it to the 0/0 the pre-loop phases ran at.
+            _say(i, len(names), f"{i}/{len(names)}: {name}")
             if name in skipped_set:
                 _emit("account_skipped", i=i, n=len(names), account=name,
                       message=f"[{i}/{len(names)}] {name}: skipped — all reports current")
@@ -957,6 +1041,8 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
                     message=f"    {report}: {status}{f' — {detail}' if detail else ''}"),
             )
             outcomes[name] = res["reports_ok"]
+            if res.get("as_of") and (newest_as_of is None or res["as_of"] > newest_as_of):
+                newest_as_of = res["as_of"]
             rendement_ok += 1 if "att" in res["reports_ok"] else 0
             vermogen_ok += 1 if "volk" in res["reports_ok"] else 0
             holdings_total += res["holdings"]
@@ -1043,7 +1129,11 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             "accounts_updated": counts["updated"],
             "accounts_up_to_date": counts["up_to_date"],
             "accounts_failed": counts["failed"],
-            "message": format_run_message(counts),
+            # The freshest valuation this run actually READ — see `format_run_message`. Exposed
+            # so the job summary can carry it too; a toast that ends on "44 accounts" and a row
+            # that says "3 trading days old" otherwise look like they disagree.
+            "newest_as_of": newest_as_of,
+            "message": format_run_message(counts, newest_as_of),
             "detail": detail,
         })
         _log.info("[airs_vermogen] %s refresh — %s (%s)",
@@ -1051,6 +1141,11 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         return dict(_STATUS)
     finally:
         _STATUS["running"] = False
+        # ⚠ CLEARED WITH THE LOCK, IN THE SAME BLOCK. A sink left pointing at a finished job's
+        # `ctx.progress` would have the NEXT run's `_emit` lines land on a card that is already
+        # green — and the scheduler's ticks call this with no hook at all, which would leave the
+        # last manual press's toast as the only thing they could reach.
+        _PROGRESS = None
         _LOCK.release()
 
 
@@ -1167,7 +1262,7 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
     other single refreshes) via `_LOCK` — they share ONE AirSPMS session, which must not be driven
     by two threads at once. A few seconds: two downloads (plus a login only if the session lapsed).
 
-    ⚠ `on_step(done, total, message)` IS OPTIONAL AND CHANGES NOTHING ELSE. It exists because the
+    ⚠ `on_say(done, total, message)` IS OPTIONAL AND CHANGES NOTHING ELSE. It exists because the
     cascade makes this unbounded from the reader's side — TOPS_BEOFF_BEH_DYN is NINE accounts at
     five downloads each — and a button that sits disabled for a minute with no line moving is
     indistinguishable from a broken one. It is a hook rather than a second, streaming copy of this
@@ -1192,18 +1287,37 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
     if not _LOCK.acquire(blocking=False):
         return {"status": "busy", "message": "An AIRS refresh is already running", "portefeuille": portefeuille}
 
-    def _step(done: int, total: int, message: str) -> None:
-        # ⚠ A REPORTER MUST NEVER BE THE REASON A SCAN FAILS. The work is the scan; the line on
-        # screen is a courtesy, and a listener that raises would lose a refresh that had already
-        # downloaded everything.
-        if on_step is None:
-            return
-        try:
-            on_step(done, total, message)
-        except Exception:  # noqa: BLE001
-            _log.debug("[airs_vermogen] progress listener raised", exc_info=True)
+    # ⚠⚠ THE SAME RELAY THE FLEET RUN USES — `_say` moves the bar, `_emit` narrates at the position
+    # it left. This function used to own a private `_step` that only the four call sites below
+    # reached, so everything INSIDE an account was silent: the toast read
+    # "AITopSelectie OFF DYN — scanning AIRS reports" at 0% for the whole scan, which for a
+    # nine-book cascade at five downloads apiece is minutes of one unchanging line.
+    #
+    # ⚠ AND THE CAUSE WAS ONE MISSING ARGUMENT. `scan_one` already narrates every download the
+    # moment it lands (`on_report`, with per-report timings) and the fleet loop passes it; this
+    # caller did not, so the work it shares with the fleet reported half as much.
+    global _PROGRESS  # noqa: PLW0603 — see `_PROGRESS`: one run at a time, guarded by `_LOCK`
+    _PROGRESS = on_step
+    _PROGRESS_AT.update(done=0, total=0)
+
+    def _report(acct: str, report: str, status: str, detail: str = "") -> None:
+        """One download's outcome, as it lands — the same shape the fleet emits.
+
+        ⚠ `report` IS ALREADY THE HUMAN LABEL ("Vermogensoverzicht"), not the `att`/`volk` code —
+        `scan_one._step` passes `label` to its `_say`. Mapping it again would print the label
+        unchanged for every report and look like it worked.
+
+        `detail` arrives with the download's own timing ("31 holdings as of 2026-08-15 (3.2s)"),
+        which is the number that answers "is this slow, and which part".
+        """
+        _emit("report", account=acct, report=report, status=status, detail=detail,
+              message=f"{acct} · {report}: {status}" + (f" — {detail}" if detail else ""))
 
     try:
+        # ⚠ BEFORE `dependent_accounts`, WHICH IS NOT FREE. It walks the certificate chain through
+        # `resolve_account_isins` per book — a lookup, but a lookup over up to nine accounts, and
+        # it runs before the old first line was emitted.
+        _say(0, 0, f"{portefeuille} — working out which books it is built from…")
         today = date.today()
         van, tot = f"{today.year}-01-01", today.isoformat()
 
@@ -1216,20 +1330,20 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
         # is a lookup, not a scan.
         deps = list(dependent_accounts(portefeuille)) if cascade else []
         total = 1 + len(deps)
-        _step(0, total, f"{portefeuille} — scanning AIRS reports"
+        _say(0, total, f"{portefeuille} — scanning AIRS reports"
                         + (f" (+{len(deps)} book{'s' if len(deps) != 1 else ''} it is built from)"
                            if deps else ""))
         # ⚠ THE FIRST BOUNDARY, AND THE ONE THAT MATTERS MOST — it is where a misclick is undone.
         # Nothing has been downloaded or written yet, so stopping here is not a compromise at all:
         # the account is exactly as it was. `dependent_accounts` above is a lookup, not a scan.
         if should_stop is not None and should_stop():
-            _step(0, total, f"{portefeuille} — cancelled before anything was read")
+            _say(0, total, f"{portefeuille} — cancelled before anything was read")
             return {"status": "cancelled", "portefeuille": portefeuille,
                     "cancelled_at": portefeuille, "cascaded": [], "stale_books": deps,
                     "holdings_rows": 0, "errors": [], "reports_ok": []}
-        res = scan_one(portefeuille, van, tot)
+        res = scan_one(portefeuille, van, tot, on_report=_report)
         ok = res["reports_ok"]
-        _step(1, total, f"{portefeuille} — {res['holdings']} holdings, "
+        _say(1, total, f"{portefeuille} — {res['holdings']} holdings, "
                         f"{', '.join(sorted(ok)) or 'no reports'}")
 
         # ⚠ THE PER-ROW REFRESH RECORDS ITS VERDICT TOO — it is how an account short a report gets
@@ -1253,11 +1367,11 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
             if should_stop is not None and should_stop():
                 cancelled_at = dep
                 stale_books = deps[i - 1:]
-                _step(i, total, f"cancelled before {dep} — {i - 1} of {len(deps)} book(s) refreshed")
+                _say(i, total, f"cancelled before {dep} — {i - 1} of {len(deps)} book(s) refreshed")
                 break
-            _step(i, total, f"{dep} — book {i} of {len(deps)} behind {portefeuille}")
+            _say(i, total, f"{dep} — book {i} of {len(deps)} behind {portefeuille}")
             try:
-                sub = scan_one(dep, van, tot)
+                sub = scan_one(dep, van, tot, on_report=_report)
             except Exception as e:  # noqa: BLE001 — one child must not lose the parent's result
                 _log.warning("[airs_vermogen] cascade %s failed: %s: %s",
                              dep, type(e).__name__, e)
@@ -1265,7 +1379,7 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
                                  "errors": [f"{type(e).__name__}: {e}"]})
                 # ⚠ A FAILED CHILD IS NAMED ON THE BAR, not folded into the count. A parent
                 # refreshed against a book that did not scan is not fresh.
-                _step(i + 1, total, f"{dep} — FAILED ({type(e).__name__})")
+                _say(i + 1, total, f"{dep} — FAILED ({type(e).__name__})")
                 continue
             _record_reports({dep: sub["reports_ok"]}, datetime.now(timezone.utc).isoformat())
             cascaded.append({
@@ -1316,6 +1430,9 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
             "error_details": res["errors"],
         }
     finally:
+        # ⚠ CLEARED WITH THE LOCK — the same rule the fleet run follows. A sink left pointing
+        # at a finished job would put the NEXT refresh's lines on an already-green card.
+        _PROGRESS = None
         _LOCK.release()
 
 

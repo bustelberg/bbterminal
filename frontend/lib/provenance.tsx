@@ -16,7 +16,7 @@ import InfoTip from '../app/components/InfoTip';
 import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
 import { Field, TipCard } from './tipCard';
 import { trimStop } from './provenanceText';
-import { snapshotFreshness, type SnapshotTone } from './snapshotAge';
+import { lagOwner, snapshotFreshness, type SnapshotTone } from './snapshotAge';
 
 export type SourceKey =
   | 'airs_volk'      // AIRS Vermogensoverzicht — the book's own EUR position values
@@ -83,12 +83,24 @@ export type ProvKind = 'copied' | 'formula';
  * it is the same shell with a different field promoted, and it keeps every call site that has not
  * been given a `what` yet rendering correctly rather than showing an empty heading.
  */
-function ProvenanceCard({ source, asOf, note, how, kind, column, what }: {
-  source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
+function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what }: {
+  source: SourceKey; asOf?: string | null; fetchedAt?: string | null;
+  note?: string; how?: string; kind?: ProvKind;
   column?: boolean; what?: string;
 }) {
   const s = SOURCE[source];
   const f = asOf ? snapshotFreshness(asOf) : null;
+  /**
+   * ⚠⚠ WHOSE LAG IS IT. `asOf` is the day AIRS VALUED the book; `fetchedAt` is the moment we last
+   * READ it. Only the second is ours to fix, and the card used to show only the first — so an old
+   * valuation read as our staleness and the badge sent the reader to a Refresh button that cannot
+   * publish a valuation AIRS has not made. Measured after a full refresh: 31 accounts re-scanned,
+   * newest valuation available anywhere 2026-08-15, twenty of them still dated 2026-08-11/12.
+   *
+   * Silent when `fetchedAt` is absent — most Provenance call sites have no such fact, and inventing
+   * a verdict for them would be worse than the omission this fixes.
+   */
+  const whoseLag = lagOwner(asOf, fetchedAt);
   return (
     // The shared shell — identical chrome to every other tooltip; only the FIELDS differ.
     <TipCard label={what ? 'What' : 'Where'} title={what ?? s.label}
@@ -114,6 +126,14 @@ function ProvenanceCard({ source, asOf, note, how, kind, column, what }: {
               )
               : <span className="text-fg-muted">no dated source (a structural / computed value)</span>}
         </Field>
+        {/* ⚠ ONLY WHEN THE BADGE IS AMBER AND WE KNOW BOTH DATES. A "we read this today" line under
+            a fresh row is noise; under an amber one it is the difference between an action and a
+            dead end. See `whoseLag`. */}
+        {whoseLag && (
+          <Field label="Whose lag">
+            <span className="text-fg-soft leading-relaxed">{whoseLag.text}</span>
+          </Field>
+        )}
         {(kind || how) && (
           <Field label="How">
             <span className="text-fg-soft leading-relaxed">
@@ -154,8 +174,11 @@ function ProvenanceCard({ source, asOf, note, how, kind, column, what }: {
  *  can still go amber. So `column` suppresses the warn state outright and the When field says
  *  where the date actually lives. It is not a styling opt-out — it is the statement that this
  *  icon has no observation behind it. */
-export function Provenance({ source, asOf, note, how, kind, column = false, what }: {
+export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = false, what }: {
   source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
+  /** When WE last read the source, if the caller knows it. Turns an amber badge from a dead end
+   *  into an answer — see `whoseLag` in the card. Optional everywhere. */
+  fetchedAt?: string | null;
   column?: boolean;
   /** WHAT this number is, in one plain sentence — "Your share of the model held in Industrials."
    *  Answered FIRST, because Source/When/How are all questions about a number the reader has
@@ -166,8 +189,8 @@ export function Provenance({ source, asOf, note, how, kind, column = false, what
   // handed — the guard belongs here, not at ~90 call sites that each have to remember it.
   const stale = !column && asOf ? snapshotFreshness(asOf)?.tone === 'stale' : false;
   return (
-    <InfoTip content={<ProvenanceCard source={source} asOf={asOf} note={note} how={how}
-      kind={kind} column={column} what={what} />}>
+    <InfoTip content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetchedAt} note={note}
+      how={how} kind={kind} column={column} what={what} />}>
       <span
         className={`ml-1 ${stale ? INFO_ICON_WARN : INFO_ICON}`}
         aria-label="data source and formula"

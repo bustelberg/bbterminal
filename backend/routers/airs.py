@@ -240,6 +240,105 @@ async def airs_model_portfolios_scan():
     )
 
 
+@router.post("/api/airs/model-portfolios/scan/job")
+async def airs_model_portfolios_scan_job():
+    """The model-portfolio scan as a CANCELLABLE JOB — phase two of the portfolios page's
+    "Refresh all".
+
+    ⚠⚠ THIS IS THE HALF OF THAT BUTTON THAT RAN BLIND. Phase one (the account scan) has been a job
+    since 2026-08-13: a toast with `i/n`, the account in flight, a working Cancel, and it survives a
+    reload. Phase two — this — was `runSSE` straight into `console.warn`, so for the MINUTES it runs
+    (an edit-page GET plus an XLS download for each of ~58 fixed portfolios) the only thing on
+    screen saying anything was happening at all was the button's own label. Navigate away and the
+    work was invisible; reload and it was unrecoverable; there was no way to stop it. One button
+    reporting two ways, and the slower way was the silent one.
+
+    ⚠ THE SCAN ITSELF IS UNCHANGED — the same `fetch_model_portfolios_sync` +
+    `count_model_portfolio_holdings_sync` the SSE endpoint above and the scheduler both call, with
+    two optional hooks. A streaming copy for the job path is exactly the drift `scan_one`'s
+    docstring warns about.
+
+    ⚠ CANCEL STOPS BETWEEN PORTFOLIOS, and the summary says where. A portfolio's XLS is downloaded,
+    counted and persisted as a unit; everything already counted is kept.
+
+    ⚠ `busy` IS AN ANSWER, NOT AN ERROR — and here it guards a REAL hazard rather than a
+    bookkeeping one: this shares ONE authenticated AirSPMS session with the account scan, which
+    must not be driven by two threads at once. ⚠ IT IS A PARTIAL GUARD AND SAYING SO IS THE POINT:
+    `_LOCK` is held by `run_airs_vermogen_refresh_sync` and `refresh_one_portfolio`, so this cannot
+    collide with either — but the scheduler's own model-scan ticks (`scheduler.py`) do not take it,
+    and neither does the SSE endpoint above, so those two can still overlap this. Non-blocking, so
+    it can never deadlock the session it exists to protect.
+    """
+    import jobs as job_registry  # noqa: PLC0415
+    from jobs import JobCancelled  # noqa: PLC0415
+
+    from airs_vermogen import _LOCK  # noqa: PLC0415
+
+    def _work(ctx) -> str:
+        if not _LOCK.acquire(blocking=False):
+            return "Another AIRS scan is already running — nothing was re-read"
+        # ⚠ THE BAR'S POSITION IS CARRIED, NOT RE-DERIVED PER EVENT. `ctx.progress` writes
+        # `done`/`total` onto the job every time, so a narration line emitted mid-count with a
+        # freshly-zeroed pair would blank a bar that is genuinely at 40/58 — and the next `count`
+        # would snap it back. The list phase legitimately has no denominator; 0 renders as
+        # indeterminate (`JobToaster`: `total > 0 ? pct : null`), which is what it is.
+        at = {"done": 0, "total": 0}
+
+        def on_event(kind: str, **kw) -> None:
+            msg = str(kw.get("message") or "")
+            # ⚠ `n` ARRIVES ONE LINE BEFORE THE FIRST `i`. The count phase announces its
+            # denominator ("counting holdings for 58 fixed portfolios") before it downloads
+            # anything, so adopting it from ANY event that carries it puts a real 0/58 on the bar
+            # for the ~10s of the first XLS instead of an indeterminate one.
+            if kw.get("n"):
+                at["total"] = int(kw["n"])
+            if kind == "count":
+                at["done"] = int(kw.get("i") or 0)
+            elif kind == "portfolios":
+                # It carries the whole roster as a payload; the job wants the one number.
+                msg = f"{kw.get('count') or 0} portfolios listed — counting holdings…"
+            # ⚠ NO `error` BRANCH, AND THAT IS NOT AN OVERSIGHT. Neither of these two scanners
+            # reports a fault as an EVENT — they raise, which the job runner already turns into a
+            # `failed` card. (The Front-Office scraper elsewhere in `airs_scanner` does emit one;
+            # this path does not, and handling a kind that never arrives reads as coverage.)
+            if msg:
+                ctx.progress(at["done"], at["total"], msg)
+
+        try:
+            # ⚠ SAME REASON AS THE ACCOUNT SCAN'S FIRST LINE. `_session.get_response` logs in
+            # lazily, so the first narrated event is the first LIST PAGE — everything before it
+            # (launching the browser, signing in) would sit under "starting…". Naming the slow
+            # thing up front is what separates "this takes a minute" from "this is stuck".
+            ctx.progress(0, 0, "signing in to AirSPMS and reading the model-portfolio list…")
+            rows = fetch_model_portfolios_sync(on_event)
+            # ⚠ STORED BEFORE THE SLOW HALF, exactly as the SSE path does it. The list is complete
+            # work in its own right — it is what gives every account its readable name — and a
+            # cancel during the count must not throw it away.
+            store.save_portfolios(rows)
+            count_model_portfolio_holdings_sync(
+                rows, on_event,
+                on_positions=store.save_positions,
+                on_error=store.save_positions_error,
+                should_stop=lambda: ctx.cancelled,
+            )
+        finally:
+            _LOCK.release()
+
+        counted = sum(1 for p in rows if p.get("holdings") is not None)
+        if ctx.cancelled:
+            # ⚠ RAISED, NOT RETURNED — a returned string is a `done` job, and `done` is a word other
+            # code ACTS ON. See the same fix on the account job: returning here would paint a green
+            # card over a run that stopped early. `JobCancelled`'s message becomes the summary, so
+            # nothing is lost by raising it.
+            raise JobCancelled(f"Cancelled — {at['done']}/{at['total']} counted, "
+                               f"{len(rows)} portfolios stored")
+        return f"{len(rows)} portfolios, {counted} with a holdings count"
+
+    job, reused = job_registry.start(
+        "airs.models.scan", "Scan model portfolios", _work)
+    return {"job_id": job.id, "label": "Scan model portfolios", "already_running": reused}
+
+
 class StoredModelPortfolio(BaseModel):
     """A stored portfolio row. `holdings` is derived by the view from the positions, so it
     cannot drift from them — and it keeps three absences apart that are NOT the same thing:
@@ -2107,6 +2206,7 @@ async def airs_vermogen_refresh_job(force: bool = False):
     failures — the same rule the per-row refresh follows.
     """
     import jobs as job_registry  # noqa: PLC0415
+    from jobs import JobCancelled  # noqa: PLC0415
 
     from airs_vermogen import run_airs_vermogen_refresh_sync  # noqa: PLC0415
 
@@ -2124,10 +2224,24 @@ async def airs_vermogen_refresh_job(force: bool = False):
             return "Another AIRS refresh is already running — nothing was re-read"
         stopped = res.get("cancelled_at")
         errs = res.get("errors") or []
+        # ⚠ THE DATA'S OWN DATE RIDES ALONG. The counts are about what WE fetched; the row
+        # badges measure AIRS's valuation date, and without this the two read as contradictory
+        # ("44 accounts" against "3 trading days old"). See `format_run_message`.
         summary = (f"{res.get('complete_accounts', 0)}/{res.get('portfolios_found', 0)} accounts, "
-                   f"{res.get('holdings_rows', 0)} holdings")
+                   f"{res.get('holdings_rows', 0)} holdings"
+                   + (f" · newest AIRS valuation {res['newest_as_of']}"
+                      if res.get('newest_as_of') else ''))
         if stopped:
-            return f"Cancelled before {stopped} — {summary} stored before stopping"
+            # ⚠⚠ RAISED, NOT RETURNED, AND THAT IS A BUG FIX RATHER THAN A TIDY-UP. A worker that
+            # RETURNS is `done` — and `done` is not decoration here, the button ACTS on it: the
+            # frontend runs phase two (the minutes-long model scan) only `if (job.status ===
+            # 'done')`, precisely so a Cancel does not buy the reader minutes more of exactly what
+            # they asked to stop. Returning a string beginning "Cancelled" satisfied the reader and
+            # not the gate, so Cancel painted a green card and then started the slow half anyway —
+            # which from the outside is a Cancel button that does nothing.
+            #
+            # `JobCancelled`'s message becomes the summary, so the sentence below is not lost.
+            raise JobCancelled(f"Cancelled before {stopped} — {summary} stored before stopping")
         if res.get("status") == "error":
             raise RuntimeError(res.get("message") or "AIRS scan stored nothing")
         return summary + (f" — {len(errs)} report(s) failed, see the console" if errs else "")
@@ -2454,6 +2568,10 @@ class AirsAccount(BaseModel):
     # report was short or for whom. The figures here are all real; they just do not all describe
     # the same date, and that is a caveat to display, not a reason to delete the row.
     missing_reports: list[str] = []
+    # When WE last read this account (`airs_account_roster.reports_at`). Paired with `as_of` —
+    # the day AIRS VALUED the book — it is what lets a stale badge say whose lag it is. See
+    # `_airs_accounts._fetched_at`.
+    fetched_at: str | None = None
 
 
 class AirsAccountHolding(BaseModel):
@@ -2627,6 +2745,10 @@ class AirsPortfolioOverview(BaseModel):
     # or for whom. Every figure here is real; they just do not all describe the same date, which is
     # a caveat to display rather than a reason to delete the row.
     missing_reports: list[str] = []
+    # When WE last read this account (`airs_account_roster.reports_at`). Paired with `as_of` —
+    # the day AIRS VALUED the book — it is what lets a stale badge say whose lag it is. See
+    # `_airs_accounts._fetched_at`.
+    fetched_at: str | None = None
 
 
 @router.get("/api/airs/portfolios/overview", response_model=list[AirsPortfolioOverview])

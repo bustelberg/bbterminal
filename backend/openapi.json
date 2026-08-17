@@ -70,6 +70,17 @@
             ],
             "title": "End Value Eur"
           },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
           "holdings": {
             "anyOf": [
               {
@@ -1879,6 +1890,17 @@
               }
             ],
             "title": "End Value Eur"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
           },
           "fixed_name": {
             "anyOf": [
@@ -15241,6 +15263,26 @@
           }
         },
         "summary": "Airs Model Portfolios Scan",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/scan/job": {
+      "post": {
+        "description": "The model-portfolio scan as a CANCELLABLE JOB \u2014 phase two of the portfolios page's\n\"Refresh all\".\n\n\u26a0\u26a0 THIS IS THE HALF OF THAT BUTTON THAT RAN BLIND. Phase one (the account scan) has been a job\nsince 2026-08-13: a toast with `i/n`, the account in flight, a working Cancel, and it survives a\nreload. Phase two \u2014 this \u2014 was `runSSE` straight into `console.warn`, so for the MINUTES it runs\n(an edit-page GET plus an XLS download for each of ~58 fixed portfolios) the only thing on\nscreen saying anything was happening at all was the button's own label. Navigate away and the\nwork was invisible; reload and it was unrecoverable; there was no way to stop it. One button\nreporting two ways, and the slower way was the silent one.\n\n\u26a0 THE SCAN ITSELF IS UNCHANGED \u2014 the same `fetch_model_portfolios_sync` +\n`count_model_portfolio_holdings_sync` the SSE endpoint above and the scheduler both call, with\ntwo optional hooks. A streaming copy for the job path is exactly the drift `scan_one`'s\ndocstring warns about.\n\n\u26a0 CANCEL STOPS BETWEEN PORTFOLIOS, and the summary says where. A portfolio's XLS is downloaded,\ncounted and persisted as a unit; everything already counted is kept.\n\n\u26a0 `busy` IS AN ANSWER, NOT AN ERROR \u2014 and here it guards a REAL hazard rather than a\nbookkeeping one: this shares ONE authenticated AirSPMS session with the account scan, which\nmust not be driven by two threads at once. \u26a0 IT IS A PARTIAL GUARD AND SAYING SO IS THE POINT:\n`_LOCK` is held by `run_airs_vermogen_refresh_sync` and `refresh_one_portfolio`, so this cannot\ncollide with either \u2014 but the scheduler's own model-scan ticks (`scheduler.py`) do not take it,\nand neither does the SSE endpoint above, so those two can still overlap this. Non-blocking, so\nit can never deadlock the session it exists to protect.",
+        "operationId": "airs_model_portfolios_scan_job_api_airs_model_portfolios_scan_job_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Airs Model Portfolios Scan Job",
         "tags": [
           "airs"
         ]

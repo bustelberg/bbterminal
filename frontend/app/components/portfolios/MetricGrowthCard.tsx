@@ -15,7 +15,8 @@ import HoldingsIngestPanel from './HoldingsIngestPanel';
 import { LegendItem } from './ChartLegend';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
 import { paddedLogDomain, periodTick, stepChanges, type Step } from './marginData';
-import { periodAxis } from './periodAxis';
+import { endpointCagr } from './lineCagr';
+import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, rebaseSeries, seriesCrossesZero } from './benchSeries';
 
 /**
@@ -517,6 +518,26 @@ export default function MetricGrowthCard({
   // unit; including it reads that stub as a year of growth. The CAGR headline IS this slope (see the
   // file header), so both the trend line and the number above it would come out overstated.
   const fit = useMemo(() => logLinearFit(reported), [reported]);        // growth only
+  /**
+   * The headline CAGR — POINT TO POINT, the same `endpointCagr` the Tables tab measures with.
+   *
+   * ⚠⚠ IT IS NOT `fit.cagr`, AND THAT IS THE WHOLE CHANGE. This tile used to report the fitted
+   * exponential's slope, so the same book's FCF/share read 29.7% here and 30.1% in the Tables tab
+   * — a 0.4pp gap that is a MODELLING difference, not a data one, and nothing on either screen
+   * said so. Worse, it is not a fixed offset: it is however far the endpoint years sit off the
+   * trend, so it moves per company and per metric.
+   *
+   * ⚠ `fit` IS STILL COMPUTED AND STILL DRAWN — R² and the trend overlay are the fit, and they are
+   * the right thing to keep it for: "how steady" is a question about a model, "what was the rate"
+   * is a question about two reported numbers. So the trend line on the chart may sit slightly off
+   * the two points this number connects, which is not a discrepancy — it is what R² measures.
+   *
+   * ⚠ FED `reported`, NOT `points` — the LTM stub is out, exactly as it is out of the fit. The
+   * interval into it is a quarter or two, so ending a "per annum" rate there overstates it by the
+   * fraction of the year that has not happened.
+   */
+  const ptp = useMemo(() => endpointCagr(reported, (x) => periodTick(x, ltmXs)),
+                      [reported, ltmXs]);
   const avg = points.length ? points.reduce((a, p) => a + p.value, 0) / points.length : null;  // ratio only
   const latest = points.length ? points[points.length - 1].value : null;
 
@@ -632,7 +653,9 @@ export default function MetricGrowthCard({
   };
   // A share count carries no currency, so no ccy prefix on 'shares' (nor on a % ratio).
   const ccy = !isAgg && currency && cfg.unit !== 'percent' && cfg.unit !== 'shares' ? `${currency} ` : '';
-  const cagr = (v: number | null) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`);
+  // ⚠ THE `cagr` FORMATTER IS GONE WITH THE FIT IT FORMATTED. It took a FRACTION (`fit.cagr`,
+  // 0.297) while `endpointCagr` returns PERCENT (29.7) — leaving it here is a ×100 waiting for the
+  // next caller that reaches for the obvious-looking helper.
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
@@ -728,16 +751,29 @@ export default function MetricGrowthCard({
                         + 'cannot describe a series that crosses it. Fitting the positive years '
                         + 'alone would measure a period nobody chose and label it as the whole.'
                       : `R² of ln(${cfg.noun}) vs year. 1.0 = perfectly steady compounding; low = lumpy or cyclical.`} />} />} />
-                <Stat label="CAGR" value={linear ? '—' : cagr(fit.cagr)} color={chartTheme.accent}
+                {/* ⚠⚠ POINT TO POINT, THE SAME `endpointCagr` THE TABLES TAB USES — see `ptp`. The
+                    tile next to it (R²) is still the fit, so the two now answer different
+                    questions on purpose: what the rate WAS, and how steadily it got there. */}
+                <Stat label="CAGR"
+                  value={linear || ptp.pct == null ? '—' : `${ptp.pct >= 0 ? '+' : ''}${ptp.pct.toFixed(1)}%`}
+                  color={chartTheme.accent}
                   info={<InfoTip content={<AspectCard
-                    what="The compound annual growth rate of the fitted trend."
-                    where={linear ? 'Not computed — see R².' : 'Computed here from the same fit.'}
-                    when={linear ? 'Undefined across a sign change.' : `Over the ${fit.n} year(s) shown.`}
+                    what={`The compound annual growth of ${cfg.noun}, first reported period to last.`}
+                    where={linear ? 'Not computed — see R².'
+                      : ptp.pct == null ? 'Not computed.'
+                      : `Computed here from the two endpoints — the same measure, and the same `
+                        + `function, the Tables tab reports. The two agree by construction.`}
+                    when={linear ? 'Undefined across a sign change.'
+                      : ptp.pct == null ? ptp.reason
+                      : `${ptp.from} → ${ptp.to}, ${ptp.years} year(s).`}
                     how={linear
                       ? 'Growth from a negative base is not a percentage: −1 → +2 is not "+300%" '
                         + 'in any sense that compounds, and −2 → −1 would read as +50% growth for '
                         + 'a company still making a loss.'
-                      : 'e^(slope) − 1 of the log-linear regression.'} />} />} />
+                      : '(end ÷ start) ^ (1 ÷ years) − 1. ⚠ NOT the slope of the fitted trend beside '
+                        + 'it: that smooths the endpoints, and how far it differs from this IS what '
+                        + 'the R² is telling you. Only these two periods matter here, so one '
+                        + 'unrepresentative year at either end moves it.'} />} />} />
               </>
             )}
           </div>

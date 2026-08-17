@@ -7,7 +7,6 @@ import { trace, traceEmpty, traceError, traceRows, traceScope } from '../../lib/
 import { dialog } from '../../lib/dialog';
 import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { Provenance } from '../../lib/provenance';
-import { runSSE } from '../../lib/stream';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
@@ -246,6 +245,12 @@ export default function PortfolioOverviewPanel() {
   const [refreshSeq, setRefreshSeq] = useState(0);
   const [deletingRows, setDeletingRows] = useState<Set<string>>(new Set());
   const [scanningModels, setScanningModels] = useState(false);
+  /** Phase two's job id — the same shape as `fleetJob`, so the one button can offer Cancel for
+   *  whichever half of "Refresh all" is currently running. */
+  const [modelsJob, setModelsJob] = useState<string | null>(null);
+  /** Whichever half of "Refresh all" is in flight. They run in sequence, never together, so one
+   *  id is the whole truth — and the ✕ has to mean the same thing in both. */
+  const allJob = fleetJob ?? modelsJob;
   const [opening, setOpening] = useState<string | null>(null);
 
   /**
@@ -349,7 +354,21 @@ export default function PortfolioOverviewPanel() {
    * Until 2026-07-30 it had no button anywhere in the app, so a fresh deployment could never get
    * past "0 analysable" from inside the UI.
    *
-   * SSE because it is minutes long: the list lands in ~6s, then a holdings count per portfolio.
+   * ⚠⚠ A JOB, NOT AN SSE STREAM INTO THE CONSOLE (2026-08-17). It is minutes long — the list lands
+   * in ~6s, then an edit-page GET and an XLS download for each of ~58 fixed portfolios — and it
+   * used to report ONLY via `console.warn`. So for the whole slow half of "Refresh all" the single
+   * thing on screen saying anything was happening was this button's own label: no `i/n`, no name of
+   * the portfolio in flight, nothing at all after a route change or a reload, and no way to stop
+   * it. Phase one had been a proper job since 2026-08-13; the two halves of one button reported
+   * two different ways, and the silent way was the one that took the minutes.
+   *
+   * Now it lands in the shared toast stack beside every other job on this page, re-attaches after a
+   * reload via `attachRunningJobs`, and its Cancel reaches the scan (which stops between
+   * portfolios, keeping everything already counted).
+   *
+   * ⚠ THE CONSOLE NARRATION IS KEPT, DELIBERATELY REDUCED TO THE OUTCOME. The toast answers "is it
+   * moving"; the console answers "what did it do". What is gone is the per-event `console.warn`
+   * relay, which was only ever a stand-in for the progress line this now has.
    */
   const scanModels = async (force: boolean) => {
     // ⚠ SKIPPED UNLESS IT WOULD CHANGE SOMETHING. This is the slow half — a list page plus an
@@ -364,18 +383,15 @@ export default function PortfolioOverviewPanel() {
     }
     setScanningModels(true);
     console.warn('[AIRS models] scanning Stamgegevens → Model portefeuilles (minutes)…');
-    let seen = 0;
     try {
-      await runSSE(`${API_URL}/api/airs/model-portfolios/scan`, { method: 'GET' }, (raw) => {
-        const e = raw as { type?: string; count?: number; message?: string };
-        if (e.type === 'portfolios' || e.type === 'done') {
-          seen = e.count ?? seen;
-          console.warn(`[AIRS models] ${e.type}: ${seen} portfolios`);
-        } else if (e.message) {
-          console.warn(`[AIRS models] ${e.message}`);
-        }
-      });
-      console.warn(`[AIRS models] done — ${seen} model portfolios`);
+      const { id, done } = await startJob(
+        `${API_URL}/api/airs/model-portfolios/scan/job`, 'Scan model portfolios');
+      setModelsJob(id);
+      const job = await done;
+      // ⚠ `failed` GETS THE CONSOLE, THE OTHER TWO GET A LINE. The toast already carries the
+      // outcome; this is the copy you can scroll back to after the card has dismissed itself.
+      if (job.status === 'failed') logDetail('model scan failed', job.summary);
+      else console.warn(`[AIRS models] ${job.status} — ${job.summary ?? ''}`);
     } catch (e) {
       // ⚠ REPORTED, NEVER RAISED INTO THE ACCOUNT SCAN'S RESULT. This is the CRM lesson: a failure
       // in a scan of DIFFERENT objects must not appear in the account refresh's error summary, or
@@ -384,6 +400,7 @@ export default function PortfolioOverviewPanel() {
       console.warn('[AIRS models] scan failed — the accounts are unaffected', e);
     } finally {
       setScanningModels(false);
+      setModelsJob(null);
     }
   };
 
@@ -608,6 +625,11 @@ export default function PortfolioOverviewPanel() {
         force ? 'Refresh all (full re-scan)' : 'Refresh all portfolios');
       setFleetJob(id);
       const job = await done;
+      // ⚠ CLEARED THE MOMENT PHASE ONE RESOLVES, not in the `finally`. Phase two is a job of its
+      // own now, and `allJob = fleetJob ?? modelsJob` is only the LIVE one if the finished half
+      // stops claiming to be running — otherwise the ✕ would spend the whole model scan wired to a
+      // job that had already ended. The `finally` still clears it; setting null twice is free.
+      setFleetJob(null);
       // ⚠ RELOAD ON ANYTHING THAT REACHED THE SERVER — done, failed OR cancelled. The scan stores
       // each account as it goes, so a run stopped after 30 of 44 wrote 30 books; leaving the
       // pre-refresh figures on screen would hide real work that was really done.
@@ -694,7 +716,14 @@ export default function PortfolioOverviewPanel() {
     await cancelJob(id);
   };
 
+  /**
+   * ⚠ WHICHEVER HALF IS RUNNING. "Refresh all" is two jobs in sequence and only one of them can be
+   * in flight, so ONE id is enough — but it must be the live one. Keying this on `fleetJob` alone
+   * left the button reading "Cancel scan" through phase two and cancelling nothing, which is the
+   * decorative-Cancel failure the job registry exists to prevent.
+   */
   const cancelRefreshAll = async () => {
+    if (modelsJob) { await cancelJob(modelsJob); return; }
     if (!fleetJob) return;
     await cancelJob(fleetJob);
   };
@@ -793,22 +822,26 @@ export default function PortfolioOverviewPanel() {
               rather than minutes. Shift-click forces a full re-scan. */}
           {isAdmin && (
             <button type="button"
-              onClick={(e) => { if (fleetJob) { void cancelRefreshAll(); } else { void refreshAll(e.shiftKey); } }}
+              onClick={(e) => { if (allJob) { void cancelRefreshAll(); } else { void refreshAll(e.shiftKey); } }}
               // Inert only in the gap between the press and the job id arriving — see the row button.
-              disabled={refreshingAll && !fleetJob}
-              title={fleetJob
-                ? 'Stop the scan. The account being read finishes first (seconds), then it stops — everything already downloaded is kept.'
+              disabled={refreshingAll && !allJob}
+              title={allJob
+                ? (modelsJob
+                  ? 'Stop the model-portfolio scan. The portfolio being counted finishes first (seconds), then it stops — every count already stored is kept.'
+                  : 'Stop the scan. The account being read finishes first (seconds), then it stops — everything already downloaded is kept.')
                 : 'Everything AIRS has: Rapportage → Front-Office (Actieve · Interne · zonder consolidatie), then Rendement, Vermogensoverzicht, Mutaties and Model for each book — plus the model portfolios if they have never been scanned. An account fully scanned in the last few hours is skipped. Shift-click forces a full re-scan of everything (minutes).'}
               className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-wait ${
-                fleetJob
+                allJob
                   ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
                   : 'border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50'}`}>
-              {fleetJob ? <span className="text-[11px] leading-none">✕</span>
-                        : <RefreshIcon spinning={refreshingAll} size={12} />}
-              {/* ⚠ THE MODEL-SCAN PHASE STILL SPEAKS FOR ITSELF. It runs AFTER the job resolves,
-                  so `fleetJob` is already null and there is no Cancel to offer for it — the label
-                  is the only thing left saying the button is still busy. */}
-              {fleetJob ? 'Cancel scan'
+              {allJob ? <span className="text-[11px] leading-none">✕</span>
+                      : <RefreshIcon spinning={refreshingAll} size={12} />}
+              {/* ⚠ BOTH PHASES NOW OFFER CANCEL. Phase two used to run after the fleet job had
+                  resolved, so `fleetJob` was already null and the label was the only thing left
+                  saying the button was busy — a control that reads "Scanning models…" for minutes
+                  with no way to stop it. It is a job of its own now, so `allJob` is whichever half
+                  is live and the ✕ means the same thing throughout. */}
+              {allJob ? (modelsJob ? 'Cancel model scan' : 'Cancel scan')
                 : refreshingAll ? (scanningModels ? 'Scanning models…' : 'Refreshing…')
                 : 'Refresh all'}
             </button>
@@ -1058,13 +1091,13 @@ export default function PortfolioOverviewPanel() {
                       </td>
                       <td className={`px-3 py-1.5 text-right font-mono font-semibold ${tone(r.ytd_pct)}`}>
                         {pct(r.ytd_pct)}
-                        <Provenance source="airs_att" asOf={r.as_of} kind="copied"
+                        <Provenance source="airs_att" asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
                           what="This account's return so far this year, as AIRS itself reports it."
                           note="cumulatief_rendement — AIRS's own compounded year, net of deposit/withdrawal timing" />
                       </td>
                       <td className={`px-3 py-1.5 text-right font-mono ${tone(r.latest_month_pct)}`}>
                         {pct(r.latest_month_pct)}
-                        <Provenance source="airs_att" asOf={r.as_of} kind="copied"
+                        <Provenance source="airs_att" asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
                           what="What this account returned in the most recent month AIRS has closed."
                           note="rendement — AIRS's return for the most recent month" />
                       </td>
