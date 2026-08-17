@@ -29,6 +29,23 @@
 export const MIN_STEP_BASE_FRACTION = 0.10;
 
 /**
+ * ⚠⚠ THE OTHER END OF THE SAME QUESTION, AND IT WAS NEVER ASKED. `MIN_STEP_BASE_FRACTION` refuses a
+ * DIVISOR too small to divide by; nothing refused a RESULT too large to believe. A vendor scale
+ * error — a per-share figure delivered in the wrong unit — went through as growth, and the chain
+ * multiplies it by the member's weight with no bound. Keep in lock-step with the backend's
+ * `_MAX_STEP_GROWTH`, whose comment carries the measurements. The short version, on ACWI's annual
+ * FCF/share (26,160 accepted steps, 1,712 constituents):
+ *
+ *     MITSUBISHI HEAVY  2024→2025      50.78 →  86,214.52   +169,684%   moves the index +116.12pp
+ *     DENSO CORP        2024→2025     172.97 → 108,415.57    +62,580%   moves the index  +17.97pp
+ *
+ * One corrupt cell in a 0.07%-weight constituent more than doubled a line indexed to 100. 100x in a
+ * year is read off the distribution: p99.99 is +6,889% and the largest unambiguously REAL step is
+ * Bank of America's +3,818%, while the corrupt band starts at +10,097%.
+ */
+export const MAX_STEP_GROWTH = 100;
+
+/**
  * A member's own typical magnitude — the median |value| over the periods it contributes.
  *
  * ⚠ MEDIAN, NOT MEAN: the thing being measured against is an outlier, and a mean is moved by the
@@ -61,5 +78,10 @@ export function stepGrowth(
 ): number | null {
   if (prev == null || now == null || !(prev > 0)) return null;
   if (prev < MIN_STEP_BASE_FRACTION * scale) return null;
-  return Math.max(now / prev - 1, -1);
+  const growth = now / prev - 1;
+  // ⚠ AN IMPLAUSIBLE RESULT — see `MAX_STEP_GROWTH`. Refused, never capped: capping would invent a
+  // growth rate nobody reported, where refusing simply means the member sits out this one interval
+  // and rejoins at the next, exactly as the refusals above it behave.
+  if (growth > MAX_STEP_GROWTH) return null;
+  return Math.max(growth, -1);
 }

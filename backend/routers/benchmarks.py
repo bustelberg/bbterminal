@@ -775,6 +775,11 @@ class JobStarted(BaseModel):
 
     job_id: str
     label: str
+    #: True when this press ATTACHED to a run already in flight instead of starting a new one — see
+    #: `jobs.start`. ⚠ IT IS NOT AN ERROR AND MUST NOT BE RENDERED AS ONE: the reader asked for the
+    #: thing, and it is already happening. It exists so the UI can say so rather than implying a
+    #: second run began, and so a Cancel is understood to stop the run that is actually going.
+    already_running: bool = False
 
 
 @router.post("/api/benchmarks/company/{company_id}/fundamentals/ingest/job",
@@ -946,8 +951,8 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
     row = (supabase.table("company").select("company_name")
            .eq("company_id", company_id).limit(1).execute().data or [])
     label = (row[0].get("company_name") if row else None) or f"company {company_id}"
-    job = job_registry.start("fundamentals.company", label, _work)
-    return {"job_id": job.id, "label": label}
+    job, reused = job_registry.start("fundamentals.company", label, _work)
+    return {"job_id": job.id, "label": label, "already_running": reused}
 
 
 @router.post("/api/benchmarks/index/{label}/refresh/job", response_model=JobStarted)
@@ -1029,8 +1034,8 @@ async def benchmark_refresh_job(label: str):
             out += f" Priced to {s['market_anchor']}."
         return out
 
-    job = job_registry.start("benchmark.refresh", label, _work)
-    return {"job_id": job.id, "label": label}
+    job, reused = job_registry.start("benchmark.refresh", label, _work)
+    return {"job_id": job.id, "label": label, "already_running": reused}
 
 
 @router.post("/api/benchmarks/index/{label}/fundamentals/ingest/job",
@@ -1046,10 +1051,13 @@ async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str =
     calls with no way to stop them. Keeping both would have left two transports for one fill and
     two places for "ingest" to come to mean different things.
 
-    ⚠ CANCEL LANDS BETWEEN COMPANIES, NOT MID-COMPANY. `_one` checks first thing, so a press stops
-    everything still queued at once while the eight already in flight finish the company they are
-    on. That is the boundary where the database is consistent — and on a 206-company run it is the
-    difference between stopping now and spending the rest of the index.
+    ⚠ CANCEL LANDS BETWEEN FEEDS, WHICH IS THE SAME BOUNDARY THE PER-ROW REFRESH USES. A press
+    drops everything still queued at once, and each of the three companies in flight stops after the
+    GuruFocus feed it is on — that is where the database is consistent, and `needs()` picks up a
+    company left with statements but no estimates next time. It used to land between COMPANIES,
+    meaning up to three more feeds per worker after the press; see the ⚠⚠ on `should_stop` in
+    `_fundamental_fill._one`. On a 1,700-constituent run it is the difference between stopping now
+    and spending the rest of the index.
 
     ⚠ IT REPORTS THE QUOTA BEFORE IT STARTS AND THE SKIPS AS IT GOES. A region at zero means every
     further call is wasted, and a company on an unsubscribed exchange is a refusal with a reason —
@@ -1121,9 +1129,14 @@ async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str =
         # ⚠ SELECTION IS ALL THAT IS LEFT HERE. The fill itself moved to
         #   `routers/_fundamental_fill.py` when the portfolio button needed the identical work over
         #   a different id list -- see the ⚠⚠ at the top of that module for why it is not copied.
+        # ⚠ THE FIRST LINE COMES BEFORE THE FIRST QUERY, NOT AFTER IT. Everything this job does is
+        # database work until `fill_company_ids` reaches its own `start` line, and a toast that
+        # reads "starting…" for that whole stretch is indistinguishable from a hung one — which is
+        # how the ACWI press was reported. See the ⚠⚠ on the setup narration in `_fundamental_fill`.
+        ctx.emit("info", f"reading the {label} constituents…")
         ids = sorted({m["company_id"] for m in _members(label, require_market_cap=False)
                       if m.get("company_id")})
         return fill_company_ids(ctx, label, ids, feeds=feeds, force=force, limit=limit)
 
-    job = job_registry.start("fundamentals.index", label, _work)
-    return {"job_id": job.id, "label": label}
+    job, reused = job_registry.start("fundamentals.index", label, _work)
+    return {"job_id": job.id, "label": label, "already_running": reused}

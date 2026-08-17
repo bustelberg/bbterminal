@@ -22,6 +22,7 @@ from ._common import (
     _coerce_float,
     _ensure_bucket,
     _fetch_from_storage,
+    _stamp_fetched,
     _storage_path,
     _upload_to_storage,
     _upsert_metric_rows,
@@ -138,6 +139,10 @@ def fetch_analyst_estimates(
     rows = _parse_analyst_estimates(cached, company_id)
     result.metrics_found = len(set(r["metric_code"] for r in rows))
     _log(f"Parsed {len(rows)} rows, {result.metrics_found} metrics")
-    result.rows_loaded = _upsert_metric_rows(supabase, rows)
-    _log(f"Loaded {result.rows_loaded} rows into DB")
+    result.rows_loaded, result.rows_unchanged = _upsert_metric_rows(supabase, rows)
+    _log(f"Loaded {result.rows_loaded} rows into DB"
+         + (f", {result.rows_unchanged} already identical" if result.rows_unchanged else ""))
+    # ⚠ EVEN WHEN `rows` IS EMPTY — a company analysts do not cover is the case this records. See
+    # `_stamp_fetched`: without it the smart refresh re-asks that company on every press, for ever.
+    _stamp_fetched(supabase, company_id, "analyst_estimates", _log)
     return result

@@ -23,6 +23,19 @@ export type JobToast = {
   id: string;
   /** What the reader pressed — a company name, not the ISIN the server keys on. */
   title: string;
+  /**
+   * The server's identity for this piece of work — `fundamentals.index` + `ACWI`.
+   *
+   * ⚠ IT IS HERE SO A CONTROL CAN FIND ITS OWN RUN AGAIN. A button knows it has a job in flight
+   * only from its own React state, so reopening a modal or reloading the page brings it back
+   * offering to START one while the work is still going. `(kind, label)` is what the server
+   * de-duplicates on (`jobs.start`), so it is also the only key a component can match on to adopt
+   * the run instead of launching a second.
+   *
+   * Empty until the first `job` frame arrives; `attachRunningJobs` fills it immediately.
+   */
+  kind: string;
+  label: string;
   status: JobStatus;
   done: number;
   total: number;
@@ -77,18 +90,28 @@ const upsert = (id: string, patch: Partial<JobToast>) => {
 export const dismissJob = (id: string) =>
   jobsStore.set((s) => ({ jobs: s.jobs.filter((j) => j.id !== id) }));
 
-/** Ask the server to stop. ⚠ It halts at its next safe point, not immediately — the card shows
- *  `cancelRequested` straight away so the press is acknowledged, and `status` follows when the
- *  worker actually stops. */
-export async function cancelJob(id: string) {
+/**
+ * Ask the server to stop. ⚠ It halts at its next safe point, not immediately — the card shows
+ * `cancelRequested` straight away so the press is acknowledged, and `status` follows when the
+ * worker actually stops.
+ *
+ * ⚠ RETURNS WHETHER THE REQUEST LANDED, because a caller that puts its own button into a
+ * "Cancelling…" state has to be able to take it back out again. Swallowing the failure here left
+ * such a button disabled and lying for the rest of the run — the request never arrived, the job
+ * carried on, and the only control that could stop it had turned itself off. Additive: every
+ * existing call site ignores the value and is unchanged.
+ */
+export async function cancelJob(id: string): Promise<boolean> {
   upsert(id, { cancelRequested: true, message: 'cancelling…' });
   try {
     const r = await apiFetch(`${API_URL}/api/jobs/${encodeURIComponent(id)}/cancel`,
       { method: 'POST' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return true;
   } catch (e) {
     traceError('jobs', `could not cancel job ${id}`, e);
-    upsert(id, { message: 'cancel failed — see the console' });
+    upsert(id, { cancelRequested: false, message: 'cancel failed — see the console' });
+    return false;
   }
 }
 
@@ -100,10 +123,12 @@ const isTerminal = (s: JobStatus) => s !== 'running';
  * `after` lets a re-attach ask for the events it missed, so a page reload shows the run's history
  * rather than joining mid-sentence.
  */
-export function watchJob(id: string, title: string, after = 0): Promise<JobToast> {
+export function watchJob(id: string, title: string, after = 0,
+                         seed?: { kind?: string; label?: string }): Promise<JobToast> {
   jobsStore.set((s) => (s.jobs.some((j) => j.id === id) ? {} : {
     jobs: [...s.jobs, {
-      id, title, status: 'running' as JobStatus, done: 0, total: 0,
+      id, title, kind: seed?.kind ?? '', label: seed?.label ?? '',
+      status: 'running' as JobStatus, done: 0, total: 0,
       message: 'starting…', summary: null, apiCalls: 0, cancelRequested: false, dismissed: false,
     }],
   }));
@@ -115,7 +140,8 @@ export function watchJob(id: string, title: string, after = 0): Promise<JobToast
     const finish = () => {
       const job = jobsStore.get().jobs.find((j) => j.id === id);
       resolve(job ?? {
-        id, title, status: 'failed', done: 0, total: 0, message: '', summary: null, apiCalls: 0,
+        id, title, kind: seed?.kind ?? '', label: seed?.label ?? '',
+        status: 'failed', done: 0, total: 0, message: '', summary: null, apiCalls: 0,
         cancelRequested: false, dismissed: false,
       });
     };
@@ -125,7 +151,7 @@ export function watchJob(id: string, title: string, after = 0): Promise<JobToast
       { method: 'GET' },
       (raw) => {
         const e = raw as {
-          type?: string; kind?: string; message?: string; status?: JobStatus;
+          type?: string; kind?: string; label?: string; message?: string; status?: JobStatus;
           done?: number; total?: number; summary?: string | null; cancel_requested?: boolean;
           api_calls?: number;
         };
@@ -137,6 +163,11 @@ export function watchJob(id: string, title: string, after = 0): Promise<JobToast
             summary: e.summary ?? null,
             apiCalls: e.api_calls ?? 0,
             cancelRequested: !!e.cancel_requested,
+            // ⚠ ONLY FROM THE `job` FRAME. A progress EVENT also carries a `kind` and it means
+            // something entirely different there (`progress` / `skip` / `error`) — writing that
+            // into the identity would make every control lose track of its own run one line in.
+            ...(e.kind ? { kind: e.kind } : {}),
+            ...(e.label ? { label: e.label } : {}),
           });
           return;
         }
@@ -193,12 +224,12 @@ export async function attachRunningJobs() {
     const r = await apiFetch(`${API_URL}/api/jobs`);
     if (!r.ok) return;                        // 403 for a non-admin is an answer, not an error
     const rows = (await r.json()) as {
-      id: string; label: string; status: JobStatus;
+      id: string; kind: string; label: string; status: JobStatus;
     }[];
     for (const j of rows) {
       if (j.status !== 'running') continue;   // finished ones are history, not a toast
       if (jobsStore.get().jobs.some((x) => x.id === j.id)) continue;
-      void watchJob(j.id, j.label);
+      void watchJob(j.id, j.label, 0, { kind: j.kind, label: j.label });
     }
   } catch (e) {
     traceError('jobs', 'could not list running jobs', e);

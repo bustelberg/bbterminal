@@ -17,6 +17,7 @@ import FcfSbcYieldInputsModal from './FcfSbcYieldInputsModal';
 import { fcfSbcYieldByYear, type FcfSbcYieldInputs } from './fcfSbcYieldData';
 import DailyToggle from './DailyToggle';
 import { meanOf, paddedDomain, xToMonth, xToPeriod } from './marginData';
+import { periodAxis } from './periodAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**
@@ -117,7 +118,7 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
               <ComposedChart data={chartData} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tickFormatter={daily ? xToMonth : xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+                <XAxis {...periodAxis(daily ? xToMonth : xToPeriod)} />
                 <YAxis domain={paddedDomain(withBench(yieldByYr.values(), benchByYr))} tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }} itemSorter={benchmarkFirst}

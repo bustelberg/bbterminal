@@ -14,7 +14,8 @@ since they only return a 403, so the run spends its calls where a name can
 actually come back.
 
 One GuruFocus call per company (the shared `_api_request` client rate-limits to
-~1.5s/call), so a full ~3k-company run is ~75 min. Companies GuruFocus can't
+`_min_interval()`, 0.75s by default since 2026-08-17 and 1.5s before that), so a
+full ~3k-company run is ~38 min. Companies GuruFocus can't
 resolve (delisted, wrong exchange) are left unchanged.
 
 Observability: emits one flushed line PER company (so a backgrounded run shows

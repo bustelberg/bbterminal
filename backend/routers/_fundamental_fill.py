@@ -19,10 +19,12 @@ never a failure.
 from __future__ import annotations
 
 import itertools
+import random
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
+from common.pg import copy_connection_scope
 from deps import supabase
 
 # How many companies are fetched at once.
@@ -51,15 +53,105 @@ from deps import supabase
 # 344ms to 5,340ms and connections went 10 → 28.
 #
 # ⚠ AND THE PARALLELISM WAS NEVER BUYING WHAT IT LOOKED LIKE. `_api_request` gates every GuruFocus
-# call behind a GLOBAL 1.5s minimum interval, so the API half of these threads serialises anyway —
-# eight workers cannot go faster than one call per 1.5s no matter how many there are. What the
-# extra threads did buy was eight-way write contention on the slowest table we own. Worst of both.
+# call behind a GLOBAL minimum interval, so the API half of these threads serialises anyway — eight
+# workers cannot go faster than one call per interval no matter how many there are. What the extra
+# threads did buy was eight-way write contention on the slowest table we own. Worst of both.
+#
+# ⚠⚠ THAT CALCULUS MOVES WITH THE INTERVAL, AND IT HAS MOVED. At the measured 0.75s, three workers
+# against a ~1.1s vendor latency cap out around 2.7 calls/s while the gate allows 1.33 — the gate is
+# still the constraint, but only by 2x rather than 4x. Below ~0.4s the CONCURRENCY becomes the
+# binding one and this number is what would have to rise. Do not raise it on that reasoning alone:
+# the write-contention argument above is what actually broke production, and it is only dormant
+# because `changed_rows` removed the write volume, not because it was wrong.
 #
 # THREE, then. Enough to overlap a Storage upload with another company's DB write, few enough that
 # no single statement queues behind seven others. ⚠ Raising it again is not a tuning knob until
 # `metric_data` has been REINDEXED (15.2 GB → ~3.7 GB) — the bloat is what makes each upsert slow
 # enough to time out.
+#
+# ⚠⚠ AND SINCE `ingest.metric_upsert.changed_rows` (2026-08-17) RAISING IT WOULD BUY ALMOST NOTHING
+# ANYWAY — the reason to leave it alone has changed from dangerous to pointless, which is worth
+# knowing before someone measures the DB again and concludes the fence can come down. The write
+# volume this number was protecting against is gone: a company that has filed nothing new now writes
+# ZERO rows instead of up to 36,494 (measured — Dassault's whole refresh went 17.48s of upserting to
+# 1.58s end to end). What is left per company is one COPY and a handful of round trips, so the
+# binding constraint is now the GLOBAL gate in `_api_request` (`_min_interval()`), which no worker count can
+# go faster than. More threads would queue on that lock instead of on the database.
 FILL_WORKERS = 3
+
+
+#: The ONE quarterly line the due detector reads the fiscal-period axis off.
+#:
+#: ⚠⚠ IT REPLACED A `LIKE 'quarterly\_\_%'` PREFIX SCAN, AND THAT SCAN WAS THE SINGLE SLOWEST THING
+#: IN A SMART PRESS. A prefix cannot use any index we have — the database collates `en_US.UTF-8`, so
+#: a btree on `metric_code` gives no range for it, and the leading column of the covering index is
+#: `metric_code` anyway. Measured on ACWI (2026-08-17, 69,003,374 rows in `metric_data`): a **Seq
+#: Scan of the whole table**, 31,424,726 rows out, HashAggregated down to 127,001 distinct pairs
+#: with **479 MB spilled to disk** — 26-57s depending on cache, and every second of it BEFORE the
+#: job's first progress line, so the button reads as hung. The same answer off one exact code is an
+#: index scan: **1.8s**.
+#:
+#: ⚠ IT IS THE SAME ANSWER, NOT A CHEAPER APPROXIMATION OF ONE. Measured over all 1,949 ACWI
+#: constituents, this code alone reproduces the prefix scan EXACTLY — 1,712 companies, 127,001
+#: distinct (company, period) pairs, an identical `due` set, and the same newest period for every
+#: single company. The whole quarterly period axis is carried by every line in the block, so one
+#: line is the axis.
+#:
+#: ⚠ AND IT IS NOT THE QUARTERLY TWIN OF THE `fin` SENTINEL, WHICH IS THE OBVIOUS PICK. That would
+#: be `quarterly__Cashflow Statement__Free Cash Flow`, and **11 constituents do not have it** (a
+#: bank's template omits the line, exactly as it omits gross profit) — measured, it returns 126,063
+#: pairs and moves one company in and out of `due`. Coverage here ties out at 1,712, which is
+#: precisely the number carrying the annual `fin` sentinel: present whenever the statements feed has
+#: run, absent otherwise.
+#:
+#: ⚠ AND A COMPANY MISSING THIS LINE IS DUE, NOT FRESH — see the ⚠ in the loop below. The failure
+#: direction of a bad pick here is an extra fetch, never a company that silently stops being offered.
+DUE_PERIOD_CODE = "quarterly__Per Share Data__Revenue per Share"
+
+
+def order_work(work: list[dict], rng: random.Random | None = None) -> list[dict]:
+    """The order companies are fetched in: LEAST RECENTLY CHECKED FIRST, ties broken at random.
+
+    ⚠⚠ THE PROBLEM IS REAL AND IT IS ABOUT RUNS THAT DO NOT FINISH. The work list used to come out
+    in `company_id` order, so a press that is cancelled — or that dies, or that is capped by
+    `limit` — always chewed through the same front of the list. Press it three times for five
+    minutes each and you have fetched the same opening slice three times and never reached the tail.
+    Everything the stamps saved on repeat presses was being spent again on re-treading known ground.
+
+    ⚠ RANDOM WAS THE OBVIOUS FIX AND THIS IS STRICTLY BETTER AT THE SAME JOB. Shuffling makes each
+    press cover a random slice, so coverage after k partial runs is `N(1 - (1 - m/N)^k)` — it
+    approaches everything and never gets there, and two consecutive presses still overlap by chance.
+    Ordering by "when did we last look" makes the frontier ADVANCE: a company just fetched is
+    stamped, sorts to the back, and the next press starts where this one stopped. Full coverage in
+    `ceil(N/m)` presses with no overlap at all, and it is the same rule `ingest/phases/prices.py`
+    already uses for the price refresh ("most-stale-first").
+
+    ⚠ THE RANDOM TIE-BREAK IS NOT DECORATION. Every never-asked company has the same key (no stamp),
+    and a company that FAILS is never stamped — so without it the failures, and any company the
+    vendor has no answer for, would sit at the identical front position press after press. The
+    jitter is what stops a deterministic order from becoming a deterministic rut.
+
+    ⚠ IT ORDERS ON THE FEEDS THIS RUN WILL ACTUALLY FETCH. A company whose statements are due but
+    whose estimates were checked an hour ago should be ranked on the statements stamp — the other
+    one is not what this press is about. An absent flag means "fetch it" (`ingest_company` reads
+    `c.get(flag, True)`), so an unprobed feed counts.
+
+    ⚠ AND A MISSING STAMP SORTS FIRST, BY BEING THE EMPTY STRING. These are ISO timestamps, so
+    lexical order IS chronological and `""` precedes every real one — never asked is exactly what
+    should go first, and it needs no special case.
+    """
+    # ⚠ LAZY, like every other cross-import here — `_fundamental_backfill` imports
+    # `due_company_ids` back out of this module, so a module-level pair would be a cycle.
+    from routers._fundamental_backfill import FEED_FETCHED_AT  # noqa: PLC0415
+
+    rng = rng or random.Random()
+
+    def _key(c: dict) -> tuple[str, float]:
+        stamps = [c.get(col) or "" for tag, col in FEED_FETCHED_AT.items()
+                  if c.get(f"need_{tag}", True)]
+        return (min(stamps) if stamps else "", rng.random())
+
+    return sorted(work, key=_key)
 
 
 def due_company_ids(ids: list[int], today: date | None = None) -> tuple[list[int], str | None]:
@@ -68,11 +160,13 @@ def due_company_ids(ids: list[int], today: date | None = None) -> tuple[list[int
     Returns `(ids, note)`. `note` is non-None when the filter could not run and the caller is
     getting the FULL list back — never a silently narrowed one.
 
-    ⚠ THE `LIKE` PATTERN ESCAPES ITS UNDERSCORES, AND THE UNESCAPED VERSION IS WRONG IN A WAY THAT
-    LOOKS RIGHT. `_` is a single-character wildcard in SQL LIKE, so `'quarterly__%'` also matches
-    `quarterly_revenue_estimate` — the ANALYST FORECAST rows, which carry period dates years in the
-    future (ASML had 2028-03-31). Feeding those to the detector makes every company look
-    comfortably up to date, so the button would go quiet exactly when there is work to do.
+    ⚠ IT ASKS FOR ONE EXACT `metric_code`, NEVER A `quarterly__%` PREFIX — see `DUE_PERIOD_CODE` for
+    what that cost and why one line is the whole period axis. The prefix also had a trap that is now
+    gone by construction: `_` is a single-character wildcard in SQL LIKE, so an UNESCAPED
+    `'quarterly__%'` matches `quarterly_revenue_estimate` too — the ANALYST FORECAST rows, whose
+    period dates are years in the future (ASML had 2028-03-31). Feeding those to the detector makes
+    every company look comfortably up to date, so the button goes quiet exactly when there is work
+    to do. An equality match cannot express that mistake.
 
     ⚠ NO COPY PATH MEANS NO FILTER, NOT A GUESS. Without a direct connection this cannot read the
     period axis cheaply, so it hands back everything and says so. Degrading the OPTIMISATION is
@@ -87,9 +181,9 @@ def due_company_ids(ids: list[int], today: date | None = None) -> tuple[list[int
     if not ids:
         return [], None
     buf = _run_copy(
-        r"COPY (SELECT company_id, target_date::text FROM metric_data "
-        r"WHERE company_id = ANY(%s::int[]) AND metric_code LIKE 'quarterly\_\_%%' "
-        r"GROUP BY 1, 2) TO STDOUT WITH CSV", (list(ids),))
+        "COPY (SELECT company_id, target_date::text FROM metric_data "
+        "WHERE company_id = ANY(%s::int[]) AND metric_code = %s "
+        "GROUP BY 1, 2) TO STDOUT WITH CSV", (list(ids), DUE_PERIOD_CODE))
     if buf is None:
         return list(ids), "no direct-Postgres connection — could not check what is due, so all are offered"
 
@@ -104,6 +198,10 @@ def due_company_ids(ids: list[int], today: date | None = None) -> tuple[list[int
         # ⚠ A COMPANY WITH NO QUARTERLY HISTORY AT ALL IS DUE BY DEFINITION — the detector returns
         # None for it (no spacing to infer a cadence from), and reading that None as "nothing to do"
         # would permanently exclude precisely the companies that have never been fetched.
+        #
+        # ⚠ THIS IS ALSO THE SAFETY NET UNDER `DUE_PERIOD_CODE`. A company that has quarterly data
+        # but not that particular line reads as "no periods" and is offered, costing one call. The
+        # opposite fallback — absent means fresh — would quietly retire it from every future press.
         if not periods.get(cid) or period_due(periods[cid], today) is not None:
             out.append(cid)
     return out, None
@@ -125,6 +223,8 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     argument runs ALL THREE feeds regardless of the flags, so under `statements` it would quietly
     triple the spend on data no page draws.
     """
+    from jobs import JobCancelled  # noqa: PLC0415 — same lazy-import shape as every other caller
+
     from ingest.api_usage import remaining_budget  # noqa: PLC0415
     from routers import _blend_cache  # noqa: PLC0415
     from routers._fundamental_backfill import (  # noqa: PLC0415
@@ -134,6 +234,17 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     ids = sorted(set(ids))
     offered = len(ids)
     due_note = None
+    # ⚠⚠ THE SETUP NARRATES ITSELF, AND IT HAS TO. Everything from here to the `start` line below is
+    # database work with no output — and on an index it is not a moment. Measured on ACWI before the
+    # `DUE_PERIOD_CODE` fix, the deciding alone took **31 seconds** with the toast reading
+    # "starting…" the whole way, and the first per-company line lands only once the first of three
+    # GuruFocus feeds has been fetched AND written on top of that. A card that says nothing for a
+    # minute is indistinguishable from a hung one — which is exactly how this was reported.
+    #
+    # ⚠ NO `done`/`total` ON THESE. The bar stays indeterminate until there is a work list to count
+    # against; putting a number on it here would show a progress percentage of a thing not yet
+    # decided, and it would then jump backwards when the real total arrives.
+    ctx.emit("info", f"{label}: reading what we hold for {offered:,} companies…")
     # ⚠ `smart` CARRIES ITS OWN DUE TEST, PER FEED. Running the company-level filter as well
     # would drop a constituent whose statements are not due before its stale consensus was ever
     # looked at — the two would compound into "skip unless a filing is due", which is the one
@@ -154,6 +265,7 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
         # ⚠⚠ THE SAME RULE THE ROW BUTTON USES, over the whole list in five reads rather than
         # five per company — see `smart_flags_bulk`. This is what makes the bulk press genuinely
         # "N smart presses" instead of a second, cheaper-looking policy that quietly differs.
+        ctx.emit("info", f"{label}: deciding which of {len(comps):,} have anything new…")
         flags = smart_flags_bulk(list(comps))
         todo = [{**c, **flags.get(c["company_id"], {})} for c in comps.values()]
         todo = [c for c in todo if c["need_fin"] or c["need_est"] or c["need_ind"]]
@@ -186,8 +298,20 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     skipped = [(c, eligible(c)) for c in todo]
     work = [c for c, why in skipped if why is None]
     refused = [(c, why) for c, why in skipped if why]
+    # ⚠⚠ ORDER BEFORE `limit`, NOT AFTER, or the whole point is lost — a capped run would take the
+    # same `company_id`-ordered prefix and the reordering would only shuffle within it. See
+    # `order_work`: least recently checked first, so a press that is cancelled or capped picks up
+    # where the last one stopped instead of re-fetching the same opening slice.
+    work = order_work(work)
     if limit:
         work = work[:limit]
+
+    # ⚠ A CANCEL PRESSED DURING THE SETUP LANDS HERE, BEFORE THE FIRST API CALL IS SPENT. Deciding
+    # what to fetch is seconds of database work with nothing on the bar yet, and a press in that
+    # window used to sit unacknowledged until the pool started and the first worker reached its own
+    # check — long enough to look ignored, and on a forced run it is the difference between spending
+    # nothing and spending the first three companies' quota.
+    ctx.check()
 
     scope = ("refetching every one" if force
              else "missing statements" if feeds == "statements"
@@ -205,6 +329,10 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
         "start",
         f"{head} · {len(todo)} {scope} · {len(work)} to fetch"
         + (f" · {len(refused)} can’t be fetched" if refused else "")
+        # ⚠ SAY THE ORDER, because a reader watching names go past will otherwise assume it is
+        # alphabetical or by weight and read the sequence as meaningless. It is the answer to "why
+        # am I not seeing the same companies as last time" — which is the whole point of it.
+        + " · least-recently-checked first"
         + f" · quota left: {left}",
         done=0, total=len(work))
     if due_note:
@@ -217,48 +345,152 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     counter = itertools.count(1)
     tally_lock = threading.Lock()
     ok = failed = rows = calls = 0
+    # Rows the vendor returned that were already stored, so nothing was written for them. Reported
+    # separately in the summary — see `ingest.metric_upsert.changed_rows` for why it is usually the
+    # larger of the two by orders of magnitude.
+    unchanged = 0
+    # ⚠⚠ NARRATE THE FEEDS OF THE FIRST COMPANY ONLY, AND THE "ONLY" IS THE WHOLE DESIGN. A
+    # per-company line is emitted when that company FINISHES, so on a fill whose first unit of work
+    # is three GuruFocus feeds — each gated behind the global 1.5s minimum interval and each
+    # followed by tens of thousands of `metric_data` upserts — the bar sits at 0 for the better part
+    # of a minute with nothing moving. `ingest_company` already offers `on_step`, which fires BEFORE
+    # each feed precisely so that gap is visible.
+    #
+    # ⚠ AND IT STOPS AFTER THE FIRST, FOR TWO REASONS. Three workers narrating every feed would put
+    # three companies' names through one line at random, which reads as thrashing rather than as
+    # progress — and `job.events` is append-only and re-scanned on every 0.15s stream tick, so
+    # tripling 1,700 events into 5,100 makes the watcher's own cost grow with the run. Once the
+    # first company lands, `[n/total]` is moving and the reader has what they need.
+    first_landed = threading.Event()
 
     def _one(c: dict) -> None:
-        nonlocal ok, failed, rows, calls
-        # ⚠ THE CANCEL BOUNDARY, AND IT IS FIRST. Everything still queued raises here the moment
-        # Cancel is pressed; the eight already inside `ingest_company` finish the company they are
-        # on, because that is where the database is left consistent.
+        """One company, inside ONE direct-Postgres connection.
+
+        ⚠ THE SCOPE IS WHY THIS IS A WRAPPER. `changed_rows` runs a `COPY` per feed, and outside a
+        scope every one of them opens a fresh connection — measured in `common/pg.py` at **220ms in
+        production** (TCP, then TLS, then Supavisor auth) against 24ms locally, so a profile taken on
+        a laptop cannot see it. Three feeds is 660ms per company of pure handshake, ~19 minutes over
+        an index. The job runs on a plain `threading.Thread`, and a ContextVar starts empty in a new
+        thread, so nothing upstream had opened one for us.
+
+        ⚠ PER COMPANY, NOT PER RUN — the scope keys its connections by thread id (psycopg is not
+        thread-safe), and holding one open across a whole 2-hour fill would keep three server-side
+        sessions parked for the duration. A company is the unit of work; it is also the right unit
+        of connection.
+        """
+        with copy_connection_scope():
+            _one_inner(c)
+
+    def _one_inner(c: dict) -> None:
+        nonlocal ok, failed, rows, unchanged, calls
+        # ⚠ THE FIRST CANCEL BOUNDARY. Everything still queued raises here the moment Cancel is
+        # pressed — but on its own this only ever bounded the wait by a WHOLE COMPANY; see
+        # `should_stop` below for the one that makes the press feel immediate.
         ctx.check()
+        who = c.get("company_name") or c.get("gurufocus_ticker") or c["company_id"]
+
+        def _step(tag: str, i: int, total: int) -> None:
+            if not first_landed.is_set():
+                ctx.emit("info", f"{who}: fetching {tag} ({i} of {total})…")
+
         # ⚠ `refresh_cache=force` — THE SECOND CACHE. `force` alone only ignores what `metric_data`
         # holds; the GuruFocus blob in Storage would still be replayed, so a forced press over an
         # already-loaded set would rewrite identical rows, spend zero calls and change nothing.
-        r = ingest_company(c, refresh_cache=(force or feeds == "smart"))
+        #
+        # ⚠⚠ `should_stop` IS THE FINE CANCEL BOUNDARY AND IT WAS SIMPLY NOT PASSED — which is why
+        # Cancel felt broken here while the per-row Refresh stopped promptly. `ingest_company` has
+        # taken this hook all along and checks it BETWEEN feeds (`benchmarks.py`'s single-company
+        # job passes it); without it, a company already inside the call runs all THREE of its
+        # remaining GuruFocus fetches to completion after the press — each one a wait on the global
+        # rate gate, an HTTP round trip, a Storage upload and a write. Three workers deep, that is
+        # the tens of seconds of apparently-nothing-happening.
+        #
+        # Between feeds is the right boundary and not merely a convenient one: a feed either
+        # completes and is written or does not, and a company left with statements but no estimates
+        # is a state a half-run backfill has always produced — `needs()` picks it up next time.
+        r = ingest_company(c, refresh_cache=(force or feeds == "smart"), on_step=_step,
+                           should_stop=lambda: ctx.cancelled)
         # ⚠ RETRY ONCE ON AN EMPTY ANSWER. This company was selected because it is missing the feed
-        # (or the run is forced), so zero rows with no error means the fetch came back with nothing.
+        # (or the run is forced), so nothing at all coming back means the fetch returned nothing.
         # It costs one call to correct and, left alone, looks identical to a company that genuinely
         # has no data.
-        if not r["error"] and r["rows"] == 0:
+        #
+        # ⚠⚠ "EMPTY" IS `rows + unchanged == 0`, NOT `rows == 0`, AND THE DIFFERENCE IS AN ENTIRE
+        # SECOND PASS OVER THE INDEX. Since `ingest.metric_upsert.changed_rows`, `rows` counts what
+        # was WRITTEN — so a company that is perfectly up to date now writes zero, which is the
+        # normal outcome and used to be unreachable. Testing `rows == 0` alone would re-fetch every
+        # healthy constituent: on ACWI that is ~1,700 companies x up to 3 feeds of pure waste, and
+        # it would look like the optimisation had made the run twice as expensive.
+        #
+        # ⚠ AND NOT AFTER A STOP. A company that halted between feeds legitimately wrote nothing;
+        # retrying it would spend fresh API calls on the far side of a Cancel — the one moment the
+        # reader has explicitly asked us not to.
+        if not r["error"] and not r.get("stopped") and r["rows"] == 0 and not r.get("unchanged"):
             r = ingest_company(c, refresh_cache=(force or feeds == "smart"))
-        n = next(counter)
+        first_landed.set()
         with tally_lock:
             rows += r["rows"]
+            unchanged += r.get("unchanged", 0)
             calls += r.get("calls", 0)
             if r["error"]:
                 failed += 1
-            else:
+            elif not r.get("stopped"):
+                # ⚠ A STOPPED COMPANY IS NOT A LOADED ONE. It ran some of its feeds and is counted
+                # in neither column — the summary reports where the run stopped instead, so nothing
+                # claims this company was finished.
                 ok += 1
         ctx.spent(r.get("calls", 0))
+        if r.get("stopped"):
+            # ⚠ THE SPEND IS BANKED BEFORE THE RAISE. Those calls came out of the monthly quota
+            # whether or not the run was cancelled, and a cancelled card reporting zero is the one
+            # that gets pressed again. `check()` then raises, because cancellation is why we are
+            # here.
+            ctx.check()
+        n = next(counter)
         # ⚠ THE COUNTER, NOT THE ARRIVAL ORDER, IS THE POSITION. Eight threads report concurrently,
         # so `[7/206]` can reach the toast before `[6/206]`; `n` comes from an atomic counter so the
         # bar only ever moves forward.
-        who = c.get("company_name") or c.get("gurufocus_ticker") or c["company_id"]
         outcome = ("failed — " + r["error"] if r["error"]
-                   # ⚠ AN ANSWER, NOT A NON-EVENT: every feed was already loaded.
+                   # ⚠ AN ANSWER, NOT A NON-EVENT: no feed was selected, so no call was spent.
                    else "already up to date" if not r["done"]
+                   # ⚠⚠ A THIRD OUTCOME, AND SINCE `changed_rows` IT IS THE COMMON ONE ON AN INDEX:
+                   # the feeds RAN, we paid for them, and the vendor's answer matched what we hold
+                   # row for row. Reporting that as "loaded" would credit a fetch with work it did
+                   # not do; reporting it as the line above would claim no call was spent.
+                   else f"no change ({r['unchanged']:,} rows already stored)"
+                        if r["rows"] == 0 and r.get("unchanged")
                    else "loaded")
         ctx.progress(n, len(work), f"[{n}/{len(work)}] {who} — {outcome}",
                      company_id=c["company_id"], failed=bool(r["error"]))
 
+    stopped = False
     if work:
         with ThreadPoolExecutor(max_workers=FILL_WORKERS, thread_name_prefix="fill") as pool:
-            # `list(...)` so exceptions surface here rather than being swallowed by the executor's
-            # lazy iterator.
-            list(pool.map(_one, work))
+            # ⚠⚠ `submit` + explicit futures, NOT `pool.map`, AND THE REASON IS THE `finally`.
+            # `map` submits every item up front too, so a Cancel used to leave ~1,600 queued work
+            # items that the executor still had to START, one per thread hand-off, purely so each
+            # could raise at its own `ctx.check()`. Worse, the only thing dropping them was the
+            # `finally` inside `map`'s result generator — which runs when that generator is
+            # COLLECTED, i.e. cancel latency resting on refcounting. `future.cancel()` on a queued
+            # future is explicit and immediate.
+            futures = [pool.submit(_one, c) for c in work]
+            try:
+                # In submission order, so `f.result()` re-raises the first real failure exactly as
+                # `list(map(...))` did.
+                for f in futures:
+                    f.result()
+            except JobCancelled:
+                # ⚠ CAUGHT, NOT PROPAGATED, SO THE RUN CAN SAY WHERE IT STOPPED. `jobs.py` turns a
+                # `JobCancelled` message into the card's summary, and "cancelled — stopped at a safe
+                # point" answers none of the questions a reader has after pressing it. Re-raised
+                # below with the tally.
+                stopped = True
+            finally:
+                # ⚠ EVERY PATH, NOT JUST THE CANCEL. A genuine failure mid-run left the same queue
+                # behind. `cancel()` is a no-op on a future already running or done, so the ≤3
+                # companies in flight still finish their current feed and are still written.
+                for f in futures:
+                    f.cancel()
     # ⚠⚠ ALWAYS, NOT `if ok`. This used to clear the caches only when the fill had written
     # something, reasoning that a no-work press leaves every cached line correct. It does not:
     # "correct" there means *consistent with what THIS process last read*, and the rows can have
@@ -270,8 +502,33 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     #
     # The saving it bought was a lazy rebuild of a ≤24-entry cache, on a button pressed by hand. A
     # refresh control that can hand back a stale view is not worth seconds of rebuild.
+    #
+    # ⚠⚠ AND A CANCELLED RUN REACHES IT TOO, WHICH IT DID NOT BEFORE. `JobCancelled` used to
+    # propagate straight out of the pool, past this line — so the press that stopped a fill part-way
+    # left the blend cache holding pre-fill rows for whatever the run HAD already written. That is
+    # precisely the "I pressed refresh and the row is still empty" failure the paragraph above is
+    # about, arriving through the one door it was not guarded on.
     _blend_cache.invalidate()
-    return (f"{label} — {ok} companies {'refetched' if force else 'loaded'}"
-            + (f", {failed} failed" if failed else "")
-            + f", {rows:,} data points"
-            + (f", {calls:,} API calls" if calls else ""))
+
+    summary = (f"{label} — {ok} companies {'refetched' if force else 'loaded'}"
+               + (f", {failed} failed" if failed else "")
+               + f", {rows:,} data points"
+               # ⚠ SAID OUT LOUD, BECAUSE A SMALL `data points` FIGURE NOW MEANS SOMETHING GOOD.
+               # Before `changed_rows` this run wrote every row the vendor returned, so the number
+               # was in the millions and measured effort rather than effect. "412 data points ·
+               # 31,204,880 already stored" is the run reporting what it changed and what it did not
+               # have to touch; the first number alone would read as a fill that barely worked.
+               + (f", {unchanged:,} already stored" if unchanged else "")
+               + (f", {calls:,} API calls" if calls else ""))
+    if stopped:
+        # ⚠⚠ THE CANCELLED CARD REPORTS WHAT IT GOT THROUGH, AND THAT IS THE WHOLE ANSWER TO "did
+        # it even work?". `jobs.py` promotes this message to the job's summary precisely so a worker
+        # that stopped part-way can say what the registry cannot — bare, it read "cancelled — stopped
+        # at a safe point", which is indistinguishable from a Cancel that did nothing at all.
+        #
+        # ⚠ AND IT SAYS THE WORK IS KEPT. Every company counted here is fully written; a reader who
+        # believes a cancel rolled something back presses the expensive button again.
+        raise JobCancelled(
+            f"CANCELLED after {ok + failed} of {len(work)} — {summary}. "
+            "Everything fetched before the stop is stored; press again to continue from there.")
+    return summary

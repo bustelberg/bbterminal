@@ -170,13 +170,46 @@ def _prune() -> None:
             _JOBS.pop(jid, None)
 
 
-def start(kind: str, label: str, fn: Callable[[JobCtx], str | None]) -> Job:
-    """Run `fn(ctx)` on a daemon thread and return its Job immediately.
+def find_running(kind: str, label: str) -> Job | None:
+    """The live job for this exact piece of work, if there is one."""
+    with _REGISTRY_LOCK:
+        for j in _JOBS.values():
+            if j.kind == kind and j.label == label and not j.terminal:
+                return j
+    return None
+
+
+def start(kind: str, label: str, fn: Callable[[JobCtx], str | None]) -> tuple[Job, bool]:
+    """Run `fn(ctx)` on a daemon thread. Returns `(job, reused)`.
 
     `fn` returns the summary line, or None. It should call `ctx.check()` wherever stopping is safe
     and let `JobCancelled` propagate.
+
+    ⚠⚠ STARTING IS IDEMPOTENT PER (kind, label), AND WITHOUT THAT CANCEL CANNOT WORK. Nothing used
+    to stop a second press launching a second identical job: two fills over the same 1,712
+    constituents, sharing one global rate limiter so both crawl, and a Cancel that stops exactly one
+    of them. From the outside that is a Cancel button that does nothing — the run "keeps going",
+    because a different run is still going.
+
+    It is not a hypothetical press. `PortfolioFundamentalsRefresh` only knows it has a job in flight
+    from its own React state, so reopening the modal — or reloading the page — brings the button
+    back reading "Refresh benchmark" while the work is still running. Pressing it again is the
+    obvious thing to do and was the wrong thing to do.
+
+    ⚠ ATTACH, DO NOT REFUSE. Returning an error would be correct and useless: the reader wants the
+    thing they asked for, and it is already happening. Handing back the running job means the second
+    press adopts it, the button flips to Cancel, and the UI heals itself.
+
+    ⚠ THE KEY IS (kind, label) BECAUSE THAT IS WHAT "THE SAME WORK" MEANS HERE — two different
+    companies, baskets or indices differ in `label`; the same one twice is a duplicate. A caller that
+    genuinely needs concurrent same-label runs would need a distinguishing label, which is the honest
+    way to express it.
     """
     _prune()
+    existing = find_running(kind, label)
+    if existing is not None:
+        _log.info("[job] %s (%s) is already running as %s — attaching", label, kind, existing.id)
+        return existing, True
     job = Job(id=uuid.uuid4().hex[:12], kind=kind, label=label)
     with _REGISTRY_LOCK:
         _JOBS[job.id] = job
@@ -204,7 +237,7 @@ def start(kind: str, label: str, fn: Callable[[JobCtx], str | None]) -> Job:
             job.ended_at = time.time()
 
     threading.Thread(target=_runner, name=f"job-{job.id}", daemon=True).start()
-    return job
+    return job, False
 
 
 def get(job_id: str) -> Job | None:

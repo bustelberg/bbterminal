@@ -15,6 +15,7 @@ import { type Target } from './HoldingsRevenueModal';
 import CashReturnInputsModal from './CashReturnInputsModal';
 import { MODES, seriesByYear, type CapitalMode, type CashReturnInputs } from './cashReturnData';
 import { meanOf, paddedDomain , xToPeriod } from './marginData';
+import { periodAxis } from './periodAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**
@@ -134,7 +135,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
                 style={{ cursor: M.derived ? 'pointer' : 'default' }}
                 onClick={() => { if (M.derived) setShowInputs(true); }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                <XAxis dataKey="year" tickFormatter={xToPeriod} tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+                <XAxis {...periodAxis(xToPeriod)} />
                 <YAxis domain={paddedDomain(withBench(ratioByYr.values(), benchByYr))} tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }} itemSorter={benchmarkFirst}

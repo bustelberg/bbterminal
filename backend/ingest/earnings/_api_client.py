@@ -5,10 +5,13 @@ ladder) lives in `ingest/_gurufocus_http.py` and is shared with the
 prices ingest. This module is now thin: URL building, key masking,
 JSON parsing, rate limit, urllib fallback.
 
-The 1.5s per-process rate limit protects us against bursting the API in
+The per-process rate limit protects us against bursting the API in
 parallel-fetch scenarios — the worker pool in the backtest stream can
 launch dozens of tasks concurrently, and a bare-bursting client trips
-the GuruFocus daily call cap fast."""
+the GuruFocus daily call cap fast. It is 0.75s by default and settable
+with `GURUFOCUS_MIN_INTERVAL_SECONDS`; see `_min_interval` and
+`_API_MIN_INTERVAL_DEFAULT` for the measurement behind the number, and
+`scripts/measure_gurufocus_rate.py` to re-run it."""
 from __future__ import annotations
 
 import json
@@ -43,7 +46,79 @@ _USER_AGENT = (
 )
 
 _last_api_call: float = 0.0
-_API_MIN_INTERVAL = 1.5  # seconds between requests
+
+
+def _min_interval() -> float:
+    """Seconds between GuruFocus requests, process-wide.
+
+    ⚠⚠ THIS ONE NUMBER SETS THE WALL CLOCK OF EVERY BULK FILL, AND IT HAS NEVER BEEN MEASURED. The
+    lock below makes it a hard global serializer, so a run costs `calls x interval` no matter how
+    many workers there are: an ACWI smart press is ~4,619 calls, which is **1.92 hours at 1.5s** and
+    would be 1.28h at 1.0s or 0.64h at 0.5s. Nothing else in the fill comes close — the database
+    half, after the row-diffing, is well under it.
+
+    ⚠ AND THE FIGURE THAT LOOKS LIKE EVIDENCE FOR 1.5 IS NOT. CLAUDE.md records "6 calls take 15.42s
+    serially and 4.56s on six threads (3.4x, zero refusals)" — but that predates the `_RATE_LIMIT`
+    lock, when the limiter leaked: every thread read the same `_last_api_call`, slept the same short
+    time and fired together. It measured a BURST, not headroom. GuruFocus's real ceiling is unknown.
+
+    ⚠ SO IT IS AN ENV VAR, NOT AN EDIT — because the way to find the ceiling is to measure it, and
+    the measurement has to be repeatable and instantly revertible on a live deployment.
+    `scripts/measure_gurufocus_rate.py` runs the experiment on a bounded sample and reports
+    throughput, refusals and empty bodies. Lower it only on that evidence: the downside is not a
+    slower run, it is throttling that returns EMPTY BODIES rather than 429s (the same failure mode
+    Yahoo has, and the one that has already put a wrong listing in this database once), plus a
+    monthly quota spent on calls that came back with nothing.
+
+    ⚠ READ PER CALL, NOT CACHED AT IMPORT, so a Railway variable change takes effect on the next
+    request rather than the next deploy — which matters when the thing you are tuning is running.
+    """
+    raw = os.environ.get("GURUFOCUS_MIN_INTERVAL_SECONDS")
+    if not raw:
+        return _API_MIN_INTERVAL_DEFAULT
+    try:
+        v = float(raw)
+    except ValueError:
+        log.warning("[gurufocus] GURUFOCUS_MIN_INTERVAL_SECONDS=%r is not a number; using %.2fs",
+                    raw, _API_MIN_INTERVAL_DEFAULT)
+        return _API_MIN_INTERVAL_DEFAULT
+    # ⚠ A FLOOR, NOT A CLAMP TO TASTE. Zero would remove the limiter entirely and let three workers
+    # burst — the exact shape that produced the `ReadTimeout`s on the production SP500 run. 0.2s
+    # still leaves a real minimum interval while allowing a genuine experiment.
+    if v < 0.2:
+        log.warning("[gurufocus] GURUFOCUS_MIN_INTERVAL_SECONDS=%.3f is below the 0.2s floor; "
+                    "using 0.2s", v)
+        return 0.2
+    return v
+
+
+#: The default. ⚠⚠ 0.75s, AND IT IS MEASURED — see `scripts/measure_gurufocus_rate.py`, which
+#: produced this. It was 1.5s on no evidence at all (the "3.4x on six threads" figure predates the
+#: `_RATE_LIMIT` lock and measured a burst). Run 2026-08-17, 3 workers, 12 calls per interval:
+#:
+#:     interval   achieved      wall     refusals   empty bodies
+#:       1.5s     0.67 calls/s  18.1s        0           0
+#:       0.75s    1.34 calls/s  11.2s        0           0
+#:       0.5s     1.81 calls/s   6.6s        0           0
+#:       0.35s    2.35 calls/s   5.1s        0           0
+#:
+#: The vendor's OWN latency, un-gated and serial, was 0.77-1.12s median throughout — it did not
+#: degrade as the interval fell, so at 1.5s the limiter was throttling us roughly 4x below what
+#: three workers could sustain. On an ACWI press (4,316 calls) this takes 1.80h to 0.90h.
+#:
+#: ⚠ HALF, NOT A THIRD, DELIBERATELY. 0.5s and 0.35s measured just as clean, but every sample here
+#: is a ~10-second BURST and a real press is thousands of calls over an hour — a sustained-rate or
+#: daily policy cannot show up in a 12-call probe, and CLAUDE.md records one empty response in
+#: twelve at 12 threads, so something does degrade under pressure somewhere. 0.75s takes the
+#: well-evidenced half and leaves the rest of the headroom unspent.
+#:
+#: ⚠ BELOW ~0.4s THE GATE STOPS BEING THE CONSTRAINT ANYWAY: three workers at ~1.1s latency cap out
+#: near 2.7 calls/s, so going faster than that needs more workers, not a smaller interval — and
+#: `FILL_WORKERS` has its own ⚠⚠ about why it is three.
+#:
+#: To go back, or to try lower: `GURUFOCUS_MIN_INTERVAL_SECONDS=1.5` (read per call, so a Railway
+#: variable takes effect without a deploy).
+_API_MIN_INTERVAL_DEFAULT = 0.75
 # Guards the read-modify-write of `_last_api_call` above — see `_api_request`.
 _RATE_LIMIT = threading.Lock()
 
@@ -135,7 +210,7 @@ def _api_request_urllib(url: str, timeout: int = 30) -> ApiResult:
 
 
 def _api_request(url: str, timeout: int = 30) -> ApiResult:
-    """One GuruFocus call, no faster than `_API_MIN_INTERVAL` after the previous one.
+    """One GuruFocus call, no faster than `_min_interval()` after the previous one.
 
     ⚠⚠ THE LOCK IS NOT DEFENSIVE — WITHOUT IT THIS LIMITER LEAKS UNDER CONCURRENCY, AND IT HAS
     HAD CONCURRENT CALLERS SINCE THE FUNDAMENTALS FILL WENT MULTI-THREADED. The body is a
@@ -153,10 +228,11 @@ def _api_request(url: str, timeout: int = 30) -> ApiResult:
     RESPONSES too, making the limiter a global mutex on GuruFocus and undoing every worker.
     """
     global _last_api_call
+    interval = _min_interval()
     with _RATE_LIMIT:
         elapsed = time.time() - _last_api_call
-        if elapsed < _API_MIN_INTERVAL:
-            time.sleep(_API_MIN_INTERVAL - elapsed)
+        if elapsed < interval:
+            time.sleep(interval - elapsed)
         # Stamped AFTER the wait, so the interval is measured between DEPARTURES.
         _last_api_call = time.time()
 

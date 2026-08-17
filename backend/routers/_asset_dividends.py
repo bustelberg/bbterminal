@@ -307,7 +307,8 @@ class NoDividendData(Exception):
 
 # How many times to re-ask the flaky isin/ endpoint before giving up (transient 500s — see
 # `_resolve_listing`). Measured 2026-07-27 the 500s come in bursts of 5+, so a low ceiling loses a
-# resolvable ISIN to a bad spell. `_api_request` spaces calls 1.5s apart, so this is ~12s worst
+# resolvable ISIN to a bad spell. `_api_request` spaces calls `_min_interval()` apart (0.75s by
+# default since it was measured, 1.5s before), so this is a handful of seconds worst
 # case for a genuinely dead ISIN — but a real `not_found` (200 with []) returns on the FIRST try
 # (it is a list), so only transient-erroring ISINs ever pay the retry cost. A give-up returns an
 # UNCACHED `error`, so the next click/ingest retries fresh rather than being stuck.

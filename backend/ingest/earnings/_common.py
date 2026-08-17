@@ -36,6 +36,11 @@ INDICATOR_KEYS = [
 class EarningsResult:
     source: str = ""  # "financials", "analyst_estimates", "indicators"
     rows_loaded: int = 0
+    #: Rows the vendor gave us that were ALREADY in the database, byte for byte, and so were not
+    #: written. ⚠ `rows_loaded == 0 and rows_unchanged > 0` IS THE HEALTHY, COMMON OUTCOME of a
+    #: refresh — see `_upsert_metric_rows`. Only `rows_loaded == 0 and rows_unchanged == 0` means
+    #: the fetch itself came back with nothing.
+    rows_unchanged: int = 0
     metrics_found: int = 0
     cache_status: str = ""  # "cache_hit", "api_fresh", "api_error"
     logs: list[str] = field(default_factory=list)
@@ -62,11 +67,33 @@ def _storage_path(ticker: str, exchange: str, endpoint: str) -> str:
     return f"{exchange.upper()}_{ticker.upper()}/{endpoint}.json"
 
 
+#: The bucket is created once per PROCESS, not once per fetch. See `_ensure_bucket`.
+_bucket_ready = False
+
+
 def _ensure_bucket(supabase: Client) -> None:
+    """Make sure the raw-response bucket exists.
+
+    ⚠ ONCE PER PROCESS. Every one of the three feed fetchers called this at the top, so a bulk fill
+    spent THREE Storage round trips per company creating a bucket that has existed since the first
+    ingest — 5,136 of them on a 1,712-constituent press. It is 7ms locally and a cloud round trip in
+    production, which is minutes of the run buying literally nothing.
+
+    ⚠ A RACE HERE IS HARMLESS AND UNGUARDED ON PURPOSE. Two workers arriving together make one extra
+    call that the `except` already swallows; a lock would serialise every fetcher in the fill on a
+    no-op.
+    """
+    global _bucket_ready
+    if _bucket_ready:
+        return
     try:
         supabase.storage.create_bucket(_BUCKET, options={"public": False})
     except Exception:
         pass
+    # ⚠ SET EVEN WHEN IT RAISED — "already exists" is the overwhelmingly common failure and is the
+    # answer we wanted. A real outage would fail the upload a moment later with a message that says
+    # so, which is more use than retrying the create 5,000 times.
+    _bucket_ready = True
 
 
 # Magic bytes for gzip (RFC 1952). Magic-byte sniff on read keeps this
@@ -143,10 +170,56 @@ def _yyyy_mm_to_month_end(yyyy_mm: str) -> date | None:
         return None
 
 
-def _upsert_metric_rows(supabase: Client, rows: list[dict]) -> int:
-    """Batched metric_data upsert (no retry — earnings rows are pre-validated).
-    Thin wrapper over the shared `ingest.metric_upsert.upsert_metric_rows` so
-    the submodule call sites (`from ._common import _upsert_metric_rows`) stay
-    put."""
-    from ingest.metric_upsert import upsert_metric_rows  # noqa: PLC0415
-    return upsert_metric_rows(supabase, rows)
+#: `company` column recording when we last ASKED for each feed. See the migration
+#: `20260817000000_company_feed_fetched_at` for why all three exist and what breaks without them.
+FETCHED_AT_COLUMN = {
+    "financials": "financials_fetched_at",
+    "analyst_estimates": "estimates_fetched_at",
+    "indicators": "indicators_fetched_at",
+}
+
+
+def _stamp_fetched(supabase: Client, company_id: int, source: str, _log: callable) -> None:
+    """Record that we ASKED for `source` — see the migration `20260817000000`.
+
+    ⚠⚠ STAMPED WHENEVER WE GOT AN ANSWER, INCLUDING AN EMPTY ONE, and that is the entire point.
+    The smart refresh's other signal is `max(recorded_at)` on the feed's sentinel row, which only
+    moves when a ROW APPEARS — so a company GuruFocus publishes no consensus for never advances it
+    and is re-asked on every press, for ever. Measured on ACWI: 2,392 of 4,326 calls in one press.
+    Gating this on rows-loaded would leave it NULL for exactly those companies.
+
+    ⚠ AND IT NEVER FAILS THE INGEST. The data is already written by the time this runs; a stamp we
+    could not save is a worse decision next time, not a failed fetch.
+    """
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    col = FETCHED_AT_COLUMN.get(source)
+    if not col:
+        return
+    try:
+        (supabase.table("company")
+         .update({col: datetime.now(timezone.utc).isoformat()})
+         .eq("company_id", company_id).execute())
+    except Exception as e:  # noqa: BLE001 — see the docstring
+        _log(f"could not stamp {col}: {e}")
+
+
+def _upsert_metric_rows(supabase: Client, rows: list[dict]) -> tuple[int, int]:
+    """Write only what would actually change. Returns `(rows written, rows already identical)`.
+
+    Thin wrapper over the shared `ingest.metric_upsert` pair so the submodule call sites
+    (`from ._common import _upsert_metric_rows`) stay put.
+
+    ⚠⚠ THE DIFF IS ON THE EARNINGS PATH ONLY, AND IT IS THE DIFFERENCE BETWEEN A BULK FILL BEING
+    AFFORDABLE AND NOT — see `changed_rows`, which carries the measurement. A refresh re-parses the
+    whole GuruFocus blob (up to 36,494 rows for one company) and, measured, changes none of it.
+
+    ⚠ IT RETURNS TWO NUMBERS BECAUSE THEY ANSWER TWO QUESTIONS, and collapsing them is a real bug.
+    "0 written" now means "nothing moved", which for a company that is up to date is the CORRECT and
+    expected outcome — while it used to be reachable only when the vendor returned nothing. Anything
+    that reads a zero as "the fetch came back empty" (the bulk fill's retry-once did exactly that)
+    would spend a second API call on every healthy company. The second number is what tells them
+    apart."""
+    from ingest.metric_upsert import changed_rows, upsert_metric_rows  # noqa: PLC0415
+    fresh, unchanged = changed_rows(supabase, rows)
+    return upsert_metric_rows(supabase, fresh), unchanged

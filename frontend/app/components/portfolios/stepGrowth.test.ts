@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MIN_STEP_BASE_FRACTION, memberScale, stepGrowth } from './stepGrowth';
+import { MAX_STEP_GROWTH, MIN_STEP_BASE_FRACTION, memberScale, stepGrowth } from './stepGrowth';
 
 /**
  * The client twin of `backend/tests/test_blend_step_growth.py`, over the same measured cases —
@@ -60,5 +60,52 @@ describe('memberScale', () => {
 
   it('matches the backend on an odd-length series', () => {
     expect(memberScale([0.70, 0.009, 0.1485])).toBeCloseTo(0.1485);
+  });
+});
+
+describe('an implausible RESULT is refused, not carried', () => {
+  /**
+   * ⚠⚠ THE MEASURED CASES. `MIN_STEP_BASE_FRACTION` guarded the divisor and nothing guarded the
+   * numerator, so a vendor scale error passed through as growth and the chain multiplied it by the
+   * member's weight with no bound. On ACWI's annual FCF/share these two steps moved a line indexed
+   * to 100 by +116.12pp and +17.97pp — from constituents weighing 0.07% and 0.04%.
+   */
+  it('⚠ Mitsubishi Heavy 2024→2025: 50.78 → 86,214.52 is refused', () => {
+    // scale = its own median |value|, 39.66. The base passes (50.78 >> 3.97); the result does not.
+    expect(stepGrowth(50.78, 86214.52, 39.66)).toBeNull();
+  });
+
+  it('⚠ DENSO 2024→2025: 172.97 → 108,415.57 is refused', () => {
+    expect(stepGrowth(172.97, 108415.57, 36.22)).toBeNull();
+  });
+
+  it('⚠⚠ Bank of America’s +3,818% SURVIVES — the largest step that is unambiguously real', () => {
+    // 2008→2009, recovering from the crisis. A ceiling that deletes this is deleting history.
+    expect(stepGrowth(0.42, 16.50, 3.17)).toBeCloseTo(38.286, 2);
+  });
+
+  it('the p99.99 of the real distribution survives', () => {
+    // +6,889% — the top of the legitimate band on 26,160 measured steps.
+    expect(stepGrowth(1, 69.89, 1)).toBeCloseTo(68.89, 4);
+  });
+
+  it('the boundary is exactly 100x, and 100x itself is kept', () => {
+    expect(stepGrowth(1, 101, 1)).toBeCloseTo(100, 6);      // +10,000%, at the bar
+    expect(stepGrowth(1, 101.5, 1)).toBeNull();             // over it
+  });
+
+  it('⚠ it is one-sided — the downside is already handled by the −100% floor', () => {
+    // There is no "too negative" case to catch: a level cannot lose more than all of itself.
+    //
+    // ⚠ AND THE STEP BACK DOWN OFF A CORRUPT VALUE IS NOT CLAMPED — it is −99.74%, a real number
+    // just short of the floor. That is the residual: refusing the step INTO a bad value leaves the
+    // value usable as the next step's base. Named here so the floor is not read as covering it.
+    expect(stepGrowth(86214.52, 226.63, 39.66)).toBeCloseTo(-0.99737, 5);
+  });
+
+  it('⚠ REFUSED, NEVER CAPPED — a capped step would be a growth rate nobody reported', () => {
+    const got = stepGrowth(172.97, 108415.57, 36.22);
+    expect(got).toBeNull();
+    expect(got).not.toBe(MAX_STEP_GROWTH);
   });
 });

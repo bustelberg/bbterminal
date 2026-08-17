@@ -6,11 +6,12 @@ import { type Basket } from './types';
 import FundamentalCharts from './FundamentalCharts';
 import FundamentalCoverage from './FundamentalCoverage';
 import LongEquityTab from './LongEquityTab';
+import TablesTab from './TablesTab';
 import QuickValuationTab from './QuickValuationTab';
 import DeepValuationTab from './DeepValuationTab';
 import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
 
-type Tab = 'fundamentals' | 'longequity' | 'quickval' | 'deepval';
+type Tab = 'fundamentals' | 'longequity' | 'quickval' | 'deepval' | 'tables';
 
 /**
  * The Fundamental modal: one company's fundamental chart suite.
@@ -245,8 +246,12 @@ export default function OwnerEarningsModal({
             {((isAgg
               // ⚠ LAST, AND CALLED WHAT IT IS. These charts are superseded by the three reads to
               // their left; keeping them first made the modal open on the oldest thing in it.
-              ? [['longequity', 'Long Equity'], ['fundamentals', 'Old charts']]
-              : [['longequity', 'Long Equity'], ['quickval', 'Quick Valuation'],
+              // ⚠ `Tables` SITS BESIDE `Long Equity`, NOT AFTER `Old charts`. It is the same three
+              // reads those cards draw, summarised — so it belongs with them, and putting it last
+              // would file the newest thing in the modal behind the one named for being superseded.
+              ? [['longequity', 'Long Equity'], ['tables', 'Tables'], ['fundamentals', 'Old charts']]
+              : [['longequity', 'Long Equity'], ['tables', 'Tables'],
+                ['quickval', 'Quick Valuation'],
                 ['deepval', 'Deep Valuation'], ['fundamentals', 'Old charts']]
             ) as [Tab, string][]).map(([t, label]) => (
               <button key={t} type="button" onClick={() => openTab(t)}
@@ -329,6 +334,21 @@ export default function OwnerEarningsModal({
             {/* ⚠ `subject`, NOT `title` — this name reaches the chart hovers, the per-holding
                 drill-down and the ingest, and on a group it was the bare "Stocks". See `subject`. */}
             <LongEquityTab isin={isin} name={subject} basket={basket} portfolioId={portfolioId}
+              sbcCorrection={sbcCorrection} />
+          </div>
+        )}
+        {(visited.has('tables') && hasInstrument) && (
+          <div className={tab === 'tables' ? undefined : 'hidden'}>
+            {/* ⚠ THE SAME `holdingsTarget` SHAPE THE LONG EQUITY CARDS BUILD, and deliberately
+                `cadence: 'annual'` — a 5-year window of QUARTERS is fifteen months, and a "5y CAGR"
+                off it would be wrong by a factor of four while looking entirely plausible. */}
+            <TablesTab
+              holdingsTarget={isAgg
+                ? (basket
+                  ? { holdings: basket.holdings.map((h) => ({ isin: h.isin, name: h.name, weight: h.weight })), cadence: 'annual' }
+                  : { portfolio_id: portfolioId, cadence: 'annual' })
+                : { holdings: [{ isin: isin ?? '', weight: 1 }], cadence: 'annual' }}
+              holdingsName={subject}
               sbcCorrection={sbcCorrection} />
           </div>
         )}

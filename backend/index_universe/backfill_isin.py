@@ -14,8 +14,9 @@ Two sources, cheapest first:
 Idempotent: only companies whose `isin` is NULL are touched, so the run
 is safe to repeat (e.g. after a universe refresh adds new companies) and
 resumable if interrupted. The GuruFocus pass is rate-limited by the
-shared client (`_api_request`, 1.5s/call), so a full ~1k-company run
-takes ~25-30 minutes — emit progress as we go.
+shared client (`_api_request`, `_min_interval()` per call — 0.75s by
+default since 2026-08-17, 1.5s before that), so a full ~1k-company run
+takes ~13-15 minutes — emit progress as we go.
 
 Usage:
     uv run python -m index_universe.backfill_isin                 # full run
