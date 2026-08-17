@@ -44,7 +44,7 @@ import time
 from collections import defaultdict
 from datetime import date
 
-from asset_pipeline.geo import msci_region_of
+from asset_pipeline.geo import MSCI_REGION, msci_region_of
 from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase
 from routers._airs_ref import model as ref_model, mutaties_for as ref_mutaties_for, positions_for as ref_positions_for
@@ -62,6 +62,11 @@ UNKNOWN_BUCKET = "Unclassified"
 FUND_BUCKET = UNKNOWN_BUCKET
 
 _FUND_CLASSES = {"etf", "fund", "etc", "etp", "crypto", "commodity"}
+
+# The four real MSCI regions, read off the map itself so this cannot drift from `geo`. `_region`
+# validates the stored column against these before trusting it: anything else (a NULL, a country
+# name, a future spelling) would otherwise open a bucket of its own and read as a region.
+_MSCI_REGIONS = frozenset(MSCI_REGION.values())
 
 # ⚠ YAHOO SPEAKS TWO SECTOR VOCABULARIES, AND THE OVERLAP IS A SILENT ATTRIBUTION BUG.
 #
@@ -213,17 +218,64 @@ def _region(row: dict, isin: str | None, codes: dict[str, str]) -> str:
     Eli Lilly, `IE…` for Linde, `CH…` for Chubb, which is exactly what separates the fake
     Europeans from the real ones); and if neither, UNKNOWN. The listing venue is never consulted.
 
-    Known limit, and it is the ISIN-country limit generally: an ADR carries a US ISIN even for a
-    foreign issuer, so a domicile-less ADR would read North America. It only bites when Yahoo
-    gave us no domicile at all — and for an ADR it usually does.
+    ⚠⚠ A DOMICILE THAT EXISTS BUT HAS NO MSCI REGION FALLS THROUGH TO THE ISIN, AND IT DID NOT USED
+    TO. `if dom: return msci_region_of(dom) or UNKNOWN` gave up on the spot, so a known domicile
+    OUTSIDE MSCI's map — every incorporation haven, and a few real markets MSCI does not index —
+    never reached the line below it. MercadoLibre is the case that surfaced it: domiciled Uruguay
+    (its Montevideo head office, which Yahoo reports correctly), incorporated in Delaware, ISIN
+    `US58733R1023`, and it read `Unclassified` in the region tab while `/asset-pipeline` said North
+    America. Two screens, one company, no error.
+
+    ⚠⚠ AND THEN THE STORED COLUMN IS THE **LAST** RESORT — never the first, which is the whole
+    difference. The 18 members left over above are incorporated in havens (Cayman, Bermuda,
+    Luxembourg, Isle of Man, Macau), so neither their domicile nor their ISIN prefix is a market and
+    both steps above yield nothing; leaving those as `Unclassified` threw away an answer
+    `/asset-pipeline` already shows, on 0.24% of ACWI. Reaching step 3 means the domicile did not
+    map, so by construction `asset_grid.msci_region` is `resolve_geo`'s VENUE fallback — it is our
+    choice of listing talking, and it is used only where the issuer's own geography has said nothing.
+
+    That ordering is what keeps the S&P fix intact: those 54 megacaps have NO domicile and a `US…`
+    ISIN, so step 2 answers first and this line is never reached for them. Verified after the change:
+    S&P Europe still 2.1%, ACWI North America unchanged to 0.1pp.
+
+    ⚠ WHAT IT GETS WRONG, AND WHY THE FIX IS NOT HERE. Where our venue choice is the wrong listing,
+    this inherits it: `asset_grid` prices Kingsoft on Stuttgart (`3K1.SG`, EUR 6,550/day), Li Ning on
+    Stuttgart (`LNLB.SG`, EUR 2,594/day) and Orient Overseas on Munich (`ORI1.MU`, EUR 3,056/day), so
+    three HONG KONG companies are bucketed EUROPE — together 0.02% of ACWI. That is a listing defect
+    (their real lines are 3888/2331/0316.HK) and it belongs in `repoint_primary_listing.py`, not in a
+    special case here: every such row is wrong in the price series too, which no region rule can fix.
+    The other fifteen come out right or defensibly so — Zhen Ding EM (Taiwan), Entain Europe (LSE),
+    Allegro/Zabka EM (Warsaw), InPost Europe (Amsterdam), Sands China Pacific (HKSE, which is MSCI's
+    own answer), Arch/Everest/Credo North America (genuinely US businesses, S&P 500 members).
+
+    Known limit, and it is the ISIN-country limit generally: the prefix is where the paper was
+    REGISTERED, not where the business is. An ADR carries a US ISIN even for a foreign issuer; a
+    Cayman- or Bermuda-incorporated issuer carries `KY…`/`BM…`, which MSCI does not index either, so
+    it stays `UNKNOWN_BUCKET` (18 of the 21 unclassified ACWI members, 0.35% of the index — Li Ning,
+    Sands China, XP, StoneCo, ArcelorMittal, Entain…); and an odd-but-VALID prefix is taken at face
+    value — Patria Bank, a Romanian bank on the BVB, carries `MYL1295OO004`, whose check digit is
+    good and whose `MY` reads Malaysia, i.e. Emerging Markets by the right family and the wrong
+    country. Getting those right needs MSCI's own country assignment (business location + listing),
+    which is not derivable from any field we hold — an override table, not a heuristic.
     """
     dom = row.get("domicile_country")
+    # ⚠ NOT `if dom: return … or UNKNOWN` — see above. An unmapped domicile is not an answer.
     if dom:
-        return msci_region_of(dom) or UNKNOWN_BUCKET
+        reg = msci_region_of(dom)
+        if reg:
+            return reg
     if isin and len(isin) >= 2:
         name = codes.get(isin[:2].upper())
         if name:
-            return msci_region_of(name) or UNKNOWN_BUCKET
+            reg = msci_region_of(name)
+            if reg:
+                return reg
+    # ⚠ LAST, AND ONLY BECAUSE BOTH STEPS ABOVE SAID NOTHING — see the docstring. Validated against
+    # the real region names rather than passed through: the column is nullable and a stray value
+    # would otherwise open a bucket of its own in the chart, which reads as a region.
+    stored = row.get("msci_region")
+    if stored in _MSCI_REGIONS:
+        return stored
     return UNKNOWN_BUCKET
 
 

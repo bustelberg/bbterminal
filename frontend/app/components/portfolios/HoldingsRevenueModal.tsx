@@ -133,7 +133,16 @@ function cmp(a: number | string | null | undefined, b: number | string | null | 
  * the same question at a different altitude — "how fast is this compounding" against "what are the
  * figures" — and a second switch beside the first would be one more thing to notice.
  */
-type View = 'reported' | 'rebased' | 'yoy' | 'table';
+/**
+ * ⚠⚠ `contrib` IS THE ONLY ONE OF THE FOUR CELL VIEWS THAT IS **ADDITIVE**, and that is what it is
+ * for. Reported, Rebased and YoY are each a transform of ONE company's own figures, so a column of
+ * them ranks companies by size or by their own growth — neither of which is impact on the line.
+ * `contrib` is that company's share of the LINE's move, in percentage points of it: weight × its own
+ * growth over the interval, summing down the column to the footer. Sorting it is therefore a real
+ * most-to-least-impact ranking, which sorting the other three is not (and they deliberately keep
+ * ranking on the reported figure — see the period header's tooltip).
+ */
+type View = 'reported' | 'rebased' | 'yoy' | 'contrib' | 'table';
 
 /**
  * A period cell's contents, at a WIDTH THAT DOES NOT DEPEND ON THE STRING.
@@ -219,7 +228,12 @@ const VIEWS: [View, string, string][] = [
   ['yoy', 'YoY %', 'Growth from that company’s previous reported period. ⚠ The chart does NOT '
     + 'average these: it averages the Rebased levels. The footer is the plotted line’s own '
     + 'period-on-period change, not the average of the column above it.'],
-  ['table', 'Table', 'Compound annual growth of the weighted line — 5 and 10 years — for this book '
+  ['contrib', 'Contribution', 'How many percentage points of the LINE’s own move each company '
+    + 'accounts for — its weight in that period × its own growth over the interval. ⚠ The column '
+    + 'SUMS to the footer, which is what makes it a decomposition rather than a ranking: sort a '
+    + 'period column here and you get most-to-least impact, the drivers at the top and the '
+    + 'detractors at the bottom. This is the one view whose sort does NOT rank on the figure.'],
+  ['table', 'Table','Compound annual growth of the weighted line — 5 and 10 years — for this book '
     + 'against a benchmark you pick. It REPLACES the two matrices rather than adding to them: they '
     + 'are what it is derived from, and the other views are one click away.'],
 ];
@@ -364,6 +378,19 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
 
   /** The value a period column shows for one row, under the current view. */
   const cellOf = (r: Row, y: string): number | null => {
+    /**
+     * ⚠⚠ READ OFF `blend`, NEVER DERIVED FROM THE CELLS AROUND IT — the same rule as `weightAt`, and
+     * here it is the whole feature. The honest denominator is the weight that spans the INTERVAL,
+     * which is not `blend.denom[y]` and is not visible from this row (see `fundamentalBlend`'s
+     * `step`); anything computed here from this row's two figures and its weight would look right,
+     * sort plausibly, and not add up to the line's move.
+     *
+     * ⚠ IT DOES NOT FOLLOW THE CARRY BELOW. A carried row IS in the step — with the same value at
+     * both ends, so its contribution is exactly 0.00pp, which is the true statement "it was in the
+     * average and it did not move". Recursing to the source period would instead print the pp of a
+     * DIFFERENT interval in this column.
+     */
+    if (view === 'contrib') return blend.contrib.get(r)?.[y]?.pp ?? null;
     // ⚠ A CARRIED PERIOD SHOWS THE FIGURE THE LINE USED, from the period it came from. Leaving it
     // blank while its weight sits in the column below would show a share of a number that is not
     // on screen. `yoy` is the exception: nothing new was reported, so there is no growth to state.
@@ -385,11 +412,28 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     return prev > 0 ? 100 * (v / prev - 1) : null;
   };
 
+  /**
+   * What the FIRST of a cell's stacked numbers is called — in the `Line` column and in the footer's
+   * copy of it.
+   *
+   * ⚠ IT CANNOT BE THE METRIC'S NAME IN `contrib`. Reported, Rebased and YoY are all statements
+   * about the metric (its level, its index, its growth), so naming the line `Revenue` is right in
+   * each; a pp contribution is a share of the LINE's move and naming it `Revenue` would label the
+   * one number here that is not a revenue figure after one. Same reason the total row carries no
+   * currency.
+   */
+  const firstLineLabel = view === 'contrib' ? 'pp of move' : metricLabel;
+
   const cellText = (v: number | null) => (
     v == null ? '—'
       : view === 'reported' ? fmt(v)
         : view === 'rebased' ? v.toFixed(1)
-          : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`);
+          // ⚠ `pp`, NOT `%`, AND TWO DECIMALS. A percentage point of a line's move and a percent of
+          // a company's own revenue are different quantities that would otherwise wear the same
+          // sign; and on a 1,500-name index most contributions are hundredths, so 1dp would round
+          // the whole tail to +0.0 and make the sort look broken where it is working.
+          : view === 'contrib' ? `${v >= 0 ? '+' : ''}${v.toFixed(2)}pp`
+            : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`);
 
   /**
    * WHAT ONE PERIOD CELL IS, and there are exactly four possibilities.
@@ -536,6 +580,22 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     : { key, dir: (key === 'name' || key === 'ccy') ? 'asc' : 'desc' }));
   const caret = (k: string) => (sort.key === k ? (sort.dir === 'desc' ? ' ▾' : ' ▴') : '');
 
+  /**
+   * ⚠⚠ A PERIOD COLUMN SORTS ON THE **REPORTED** FIGURE IN EVERY VIEW BUT ONE, and that is a promise
+   * the header makes in writing. Rebased and YoY are per-company transforms, so ranking a column of
+   * them answers "who is biggest / who grew fastest", not "what moved this line" — and switching
+   * view under a reader is not the moment to also switch what their sort means.
+   *
+   * ⚠ `contrib` IS THE EXCEPTION BECAUSE IT IS THE POINT OF IT: the pp column is additive, so its
+   * order IS the impact ranking. Sorting it by the reported figure instead would rank a
+   * decomposition by company size — the exact thing this view exists to stop doing.
+   *
+   * ⚠ SIGNED, NOT `Math.abs`. Descending puts the drivers at the top and the detractors at the
+   * bottom, so one column read top-and-bottom answers both halves; ranking on magnitude interleaves
+   * a +5pp driver with a −5pp drag and the sign — which is the finding — stops being visible in the
+   * order at all. One click flips it. Rows with no contribution stay NULL and `cmp` keeps nulls last
+   * in both directions: absent is not a small number.
+   */
   const rows = useMemo(() => {
     const get = (r: Row): number | string | null | undefined => (
       sort.key === 'name' ? r.name.toLowerCase()
@@ -544,9 +604,10 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
             : sort.key === 'weight' ? r.weight_pct
               : sort.key === 'cap' ? (r.market_cap_eur ?? null)
                 : sort.key === 'ccy' ? (r.currency ?? '')
-                  : r.revenue[sort.key]);      // a period column
+                  : view === 'contrib' ? (blend.contrib.get(r)?.[sort.key]?.pp ?? null)
+                    : r.revenue[sort.key]);    // a period column
     return [...data.rows].sort((a, b) => cmp(get(a), get(b), sort.dir));
-  }, [data, sort]);
+  }, [data, sort, view, blend]);
 
   /**
    * ⚠⚠ ROW VIRTUALIZATION — AND THIS TABLE HAS ITS OWN SCROLL BOX BECAUSE OF IT.
@@ -826,7 +887,10 @@ market cap it was weighted by in that period, and the weight that produced.">
                   + 'period as companies enter and leave the average, even though the Weight '
                   + 'column beside the name is a single stored number. The second line sums to '
                   + '100% down the column; the footer says what share of the index that is. '
-                  + 'Sorting still ranks on the figure, not the weight.'}>
+                  + (view === 'contrib'
+                    ? 'Sorting ranks on the pp impact in this view — most to least, drivers at the '
+                      + 'top and detractors at the bottom.'
+                    : 'Sorting still ranks on the figure, not the weight.')}>
                 {y}{caret(y)}
               </th>
             ))}
@@ -968,7 +1032,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                 {r.status !== 'unsubscribed' && r.status !== 'no_data' && (
                   <span className="block">
                     <span className="block text-[12px] text-fg-subtle">
-                      {metricLabel}
+                      {firstLineLabel}
                       {valueIsCurrency && view === 'reported' && r.currency
                         ? ` (${r.currency})` : ''}
                     </span>
@@ -1033,7 +1097,45 @@ market cap it was weighted by in that period, and the weight that produced.">
                                 : `${w.toFixed(2)}% of this period’s line`
                                   + (cap != null ? ` — cap €${(cap / 1e9).toFixed(1)}bn as at this `
                                     + 'period ÷ the Σ cap on the total row' : '')}`
-                                + (view === 'reported' ? '' : ` · ${fmt(r.revenue[y])} as reported`)}>
+                                + (view === 'reported' ? '' : ` · ${fmt(r.revenue[y])} as reported`)
+                                /**
+                                 * ⚠ THE MULTIPLICATION, SPELLED OUT — `share × growth = pp`, exact,
+                                 * so the impact ranking can be checked on any row rather than
+                                 * trusted. `sharePct` and not the weight on the line below it: that
+                                 * one is over the whole period, this one over the members that span
+                                 * the interval, and only the second reaches the pp. They differ
+                                 * only when `spanPct` < 100, which is the case the clause names.
+                                 */
+                                + (() => {
+                                  const c = view === 'contrib'
+                                    ? blend.contrib.get(r)?.[y] : null;
+                                  if (!c) {
+                                    // ⚠ TWO DIFFERENT DASHES, AND THEY ARE NOT THE SAME FACT. A
+                                    // whole column of them is "there is no move here to divide up"
+                                    // (the line's first drawn period, or one the coverage floor
+                                    // omits); a single one is about THIS row.
+                                    if (view !== 'contrib') return '';
+                                    return blend.step[y]
+                                      ? ' · Not in this period’s move: it needs a figure at BOTH '
+                                        + 'ends of the interval (and a base big enough to divide '
+                                        + 'by), so it sits this one out and rejoins at the next.'
+                                      : ' · No move to divide up in this column — it is the first '
+                                        + 'period the line is drawn at, or one the coverage floor '
+                                        + 'keeps off the chart, so nothing is measured from it.';
+                                  }
+                                  const st = blend.step[y];
+                                  return ` · ${c.sharePct.toFixed(2)}% × `
+                                    + `${c.growthPct >= 0 ? '+' : ''}${c.growthPct.toFixed(1)}% = `
+                                    + `${c.pp >= 0 ? '+' : ''}${c.pp.toFixed(2)}pp of the line’s `
+                                    + `${st ? `${st.from} → ${y} move `
+                                      + `(${st.growthPct >= 0 ? '+' : ''}${st.growthPct.toFixed(1)}%)`
+                                      : 'move'}`
+                                    + (st && st.spanPct < 99.95
+                                      ? ` — over the ${st.spanPct.toFixed(1)}% of this period’s `
+                                        + 'weight that spans the interval, which is why this share '
+                                        + 'is not the weight on the line below'
+                                      : '');
+                                })()}>
                       {/* ⚠ THE SAME BADGES AS THE /asset-pipeline GRID, from `StateBadge`. The two
                           tables answer the same question about the same instruments, so the same
                           word has to look the same in both — `UNSUBSCRIBED` there and here is one
@@ -1146,8 +1248,22 @@ market cap it was weighted by in that period, and the weight that produced.">
                 ? `Weighted average of the ${blend.contributors} contributing rows — this row IS the plotted line.`
                 : view === 'yoy'
                   ? 'The plotted line’s own period-on-period change. NOT the average of the column above: the chart averages rebased levels, never growth rates.'
-                  : undefined}>
-              {view === 'rebased' ? 'Weighted (= the line)' : view === 'yoy' ? 'Line YoY' : 'Total'}
+                  /* ⚠⚠ THE ONE VIEW WHERE THE FOOTER IS THE **SUM** OF THE COLUMN, and saying so is
+                     the whole guarantee: every pp above is a share of THIS move, taken over the same
+                     denominator, so they add to it exactly. If a column ever does not add up here,
+                     the decomposition is wrong — not the display.
+                     ⚠ AND IT IS THE MOVE FROM THE LAST **DRAWN** PERIOD, which is the previous
+                     column only while every column is drawn. Under the coverage floor the interval
+                     is longer, so it is named per cell rather than assumed to be one period. */
+                  : view === 'contrib'
+                    ? 'The plotted line’s own move, in percentage points — and the sum of the pp '
+                      + 'column above it, exactly. Each cell names the interval it spans, which is '
+                      + 'the move from the last period the chart DRAWS (not necessarily the '
+                      + 'previous column).'
+                    : undefined}>
+              {view === 'rebased' ? 'Weighted (= the line)'
+                : view === 'yoy' ? 'Line YoY'
+                  : view === 'contrib' ? 'Line move (= Σ pp)' : 'Total'}
             </td>
             {/* ⚠ THE FOOTER TRACKS THE HEADER COLUMN FOR COLUMN. A cell short here and every period
                 figure in this row sits under the wrong year — a totals line that is quietly one
@@ -1190,7 +1306,7 @@ divide by that period's own Σ cap instead, on the line directly below this row'
                 Rebased and YoY are an index and a percentage. A reader noticing the missing "(USD)"
                 has noticed the real reason the blend works the way it does. */}
             <td className="px-3 py-1.5 whitespace-nowrap align-top font-normal">
-              <span className="block text-[12px] text-fg-subtle">{metricLabel}</span>
+              <span className="block text-[12px] text-fg-subtle">{firstLineLabel}</span>
               {hasPeriodCap && (
                 <span className="block text-[11px] leading-tight text-fg-dim">Σ cap (EUR)</span>
               )}
@@ -1207,9 +1323,17 @@ divide by that period's own Σ cap instead, on the line directly below this row'
               const lv = blend.level[y];
               const prevY = data.years[data.years.indexOf(y) - 1];
               const prev = prevY ? blend.level[prevY] : undefined;
+              /**
+               * ⚠ THE pp TOTAL IS READ FROM `blend.step`, NOT FROM THE RATIO OF TWO DRAWN LEVELS.
+               * The two agree whenever the previous column is drawn — and where it is not, the
+               * ratio has nothing to divide by while the STEP still exists (the chain measures from
+               * the last drawn period). Deriving it here would leave the one column whose cells sum
+               * to the footer showing a blank footer for a move its own cells decompose.
+               */
               const value = view === 'reported' ? null
                 : view === 'rebased' ? lv?.value ?? null
-                  : (lv && prev && prev.value > 0) ? 100 * (lv.value / prev.value - 1) : null;
+                  : view === 'contrib' ? blend.step[y]?.growthPct ?? null
+                    : (lv && prev && prev.value > 0) ? 100 * (lv.value / prev.value - 1) : null;
               // ⚠ BOTH FLOORS, as the chart applies them: half the weight AND half the names must
               // have REPORTED. Weight alone let one giant draw a period (AEX 2026-Q2: two
               // constituents, 53.8% of cap); names alone would let ten tiny ones outvote a missing
@@ -1229,7 +1353,11 @@ divide by that period's own Σ cap instead, on the line directly below this row'
                   <span className="block">
                     <Cell>
                       {value == null ? ' ' : view === 'rebased' ? value.toFixed(1)
-                        : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`}
+                        // ⚠ 2dp AND `pp`, MATCHING THE CELLS IT IS THE SUM OF. At 1dp a column of
+                        // hundredths visibly fails to add up to its own total, which reads as the
+                        // decomposition being broken rather than as rounding.
+                        : view === 'contrib' ? `${value >= 0 ? '+' : ''}${value.toFixed(2)}pp`
+                          : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`}
                     </Cell>
                   </span>
                   {/* ⚠⚠ THE DENOMINATOR, SPELLED OUT — Σ of the caps this period's weights were
@@ -1612,7 +1740,10 @@ export default function HoldingsRevenueModal({
               {view === 'reported' ? 'as filed, each in its own currency'
                 : view === 'rebased' ? 'indexed to 100 at each company’s first period — what the chart weights'
                   : view === 'table' ? 'compound annual growth of the weighted line, vs a benchmark'
-                    : 'growth on that company’s previous reported period'}
+                    : view === 'contrib'
+                      ? 'percentage points of the line’s own move — sums to the footer, so sorting a '
+                        + 'column ranks impact'
+                      : 'growth on that company’s previous reported period'}
               {view !== 'reported' && view !== 'table' && ' · hover a cell for the reported figure'}
             </span>
           </div>

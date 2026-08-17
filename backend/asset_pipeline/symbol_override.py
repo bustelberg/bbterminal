@@ -29,18 +29,72 @@ same store path, same refusal on a symbol with no bars.
 """
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 
 from deps import supabase
 
 _log = logging.getLogger(__name__)
 
+# ⚠⚠ THE CHECKED-IN HALF OF THE OVERRIDES, AND IT EXISTS BECAUSE A DB ROW DOES NOT DEPLOY.
+#
+# A repoint is a fix to ONE ROW OF DATA, so `git push` + `supabase db push` carry none of it:
+# migrations move schema, and `asset_symbol_override` rows entered locally stay local. That is how a
+# wrong listing gets fixed twice — once here, once by hand in production, or (more likely) once here
+# and never there, leaving two environments that disagree about which venue prices a constituent.
+#
+# So the decisions live in `symbol_overrides.json`, beside this module: reviewable in a diff,
+# identical in every environment the moment the code ships, and impossible to forget to seed. The
+# table stays for ad-hoc entries made against a running system.
+_FILE = Path(__file__).with_name("symbol_overrides.json")
+
+
+def load_file_overrides() -> dict[str, str]:
+    """`symbol_overrides.json` -> {isin: symbol}. Never raises.
+
+    ⚠ A MALFORMED FILE IS LOGGED AT `error` AND YIELDS NOTHING, rather than taking the DB overrides
+    down with it — one broken bracket must not un-pin every other ISIN. The cost of that choice is
+    that a typo here disables these fixes silently at RUNTIME, which is why the shape is asserted in
+    a unit test (`tests/test_symbol_overrides_file.py`): CI is the place that catches it, not a
+    pipeline log nobody is reading at 05:00.
+    """
+    try:
+        raw = json.loads(_FILE.read_text(encoding="utf-8"))
+        out: dict[str, str] = {}
+        for e in raw.get("overrides", []):
+            isin, symbol = (e.get("isin") or "").strip().upper(), (e.get("symbol") or "").strip()
+            if isin and symbol:
+                out[isin] = symbol
+        return out
+    except Exception as e:  # noqa: BLE001
+        _log.error("[symbol_override] %s is unreadable (%s: %s) — NO file overrides applied this "
+                   "run; the DB table's still are. Fix the file: every ISIN it pins is currently "
+                   "free to be re-resolved onto whatever listing ranks first by name.",
+                   _FILE.name, type(e).__name__, e)
+        return {}
+
 
 def load_symbol_overrides() -> dict[str, str]:
-    """{isin: the Yahoo symbol it must resolve to}."""
+    """{isin: the Yahoo symbol it must resolve to} — the file merged over the table.
+
+    ⚠ THE FILE WINS, AND A DISAGREEMENT IS AN `error`. The file is the reviewed, deployed decision
+    and it is the same in every environment; a table row that contradicts it is invisible in a code
+    review and would make local and production price a constituent off different venues. Whichever
+    is wrong, silence is the one outcome that hides it — so the loser is named in the log.
+    """
     rows = (supabase.table("asset_symbol_override").select("isin,yahoo_symbol")
             .limit(2000).execute().data or [])
-    return {r["isin"]: r["yahoo_symbol"] for r in rows if r.get("isin") and r.get("yahoo_symbol")}
+    merged = {r["isin"]: r["yahoo_symbol"] for r in rows
+              if r.get("isin") and r.get("yahoo_symbol")}
+    for isin, symbol in load_file_overrides().items():
+        if merged.get(isin) not in (None, symbol):
+            _log.error("[symbol_override] %s is pinned to %s in %s and to %s in "
+                       "asset_symbol_override. Using %s (the file ships to every environment); "
+                       "delete whichever is wrong.",
+                       isin, symbol, _FILE.name, merged[isin], symbol)
+        merged[isin] = symbol
+    return merged
 
 
 def _needs_repoint(isin: str, symbol: str) -> bool:
