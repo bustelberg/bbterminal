@@ -5,7 +5,9 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { formatPct, visibleBuckets } from './composition';
-import { allocColor, bucketLabel, CASH_BUCKET, EQUITY_BUCKET } from './allocationColors';
+import {
+  allocColor, ALWAYS_SHOWN_BUCKETS, bucketLabel, CASH_BUCKET, EQUITY_BUCKET,
+} from './allocationColors';
 import { classWeightedReturn } from './classReturn';
 import { Provenance, ProvenanceFetchedAt } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
@@ -169,7 +171,21 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
   /** The policy for that profile — the band each class is SUPPOSED to sit in. */
   bands?: Band[];
 }) {
-  const ordered = [...slices].sort((a, b) => b.pct - a.pct);
+  // ⚠⚠ THE PAYLOAD'S ORDER, NOT LARGEST-FIRST. These bars were sorted by size, which reads well
+  // on ONE portfolio and badly on the job this modal is for: comparing books. Stocks, Bonds,
+  // Alternatives and Cash then sit at a different height per portfolio — and worse, at a different
+  // height for the SAME portfolio once a rebalance changes which class is biggest, so a reader
+  // returning to a familiar screen finds the rows moved. A fixed order makes the vertical position
+  // itself carry the class, which is what lets two books be read against each other at a glance.
+  //
+  // ⚠ IT IS ALSO THE ONLY WAY THE EMPTY CLASSES LAND ANYWHERE SENSIBLE. Sorted by size every 0.00%
+  // class sinks to the bottom, so a book with no bonds put Bonds under Cash — the four rows in a
+  // different sequence again, for the reason that they were absent.
+  //
+  // The backend emits `_ALLOC_ORDER` (Stocks, Bonds, Alternatives, Cash, then Unclassified) and
+  // the holdings table below already follows it; this now does too, so the bar and the table
+  // cannot present the same classes in two sequences.
+  const ordered = slices;
   const toggle = onSelect ? (b: string) => onSelect(selected === b ? null : b) : undefined;
   const bandOf = new Map((bands ?? []).map((b) => [b.bucket, b]));
   /** Held outside the permitted range — the finding this whole overlay exists to surface. Only a
@@ -614,7 +630,7 @@ type BookHolding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
  *  denominator, so the class reads as though that weight behaved exactly like the rest — the same
  *  silent renormalisation the coverage floors elsewhere exist to stop. `coveredPct` is on the
  *  cell's card and short coverage is marked in amber, never absorbed. */
-type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution';
+type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution' | 'vol' | 'beta' | 'mom';
 
 /**
  * THE MONEY COLUMNS, GROUPED BY THE ANSWER THEY BUILD UP TO.
@@ -1097,8 +1113,13 @@ function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
   return [...kept, ...folded];
 }
 
-function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, onTiming, onFundamental }: {
+function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised,
+  onTiming, onFundamental }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
+  /** ⚠ THE BETA COLUMN NAMES ITS BASE. A beta with no benchmark on it is not a weaker statement,
+   *  it is an unreadable one — and the modal's picker changes it per request, so it cannot be
+   *  hardcoded here. */
+  benchmark: string;
   /** ⚠ THE POSITIONS THAT NO LONGER HAVE A ROW — sold out entirely during the year. They are the
    *  reason this table could not add up before: measured, 8 names and −2.38pp of one book's year,
    *  invisible because a closed position has nothing left to list. Rendered as their own group,
@@ -1185,22 +1206,37 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
         // ⚠ Cash has no `Beginwaarde` to divide by, and its return is nonetheless known exactly:
         // zero. See the flag's own note — a dash there says "unknown" about the one asset whose
         // return is certain, and hides its drag.
-        ret: classWeightedReturn(rows, bucket === CASH_BUCKET),
+        // ⚠ `rows.length &&` GUARDS THE CASH RULE, and only since the four classes are always
+        // shown. `zeroWhenNoOpening` exists to print cash's certain 0% instead of a dash — but on
+        // an EMPTY cash class that becomes 0.00% stated about nothing held, which is a different
+        // claim from "the cash we hold earned nothing". No rows, no rate.
+        ret: classWeightedReturn(rows, rows.length > 0 && bucket === CASH_BUCKET),
         // ⚠ PLAIN SUMS, and they are allowed to be plain BECAUSE they are euros. A euro column
         // adds; that is the whole reason the result breakdown is in euros and the weight-based
         // arguments elsewhere in this file do not apply to it.
         sum: sumResults(rows),
         // The class as a value-weighted basket, for the Fundamental button on its header. ISIN-
         // bearing rows only: owner earnings are per-company, and cash has no company.
+        //
+        // ⚠⚠ AND NOT THE FUNDS, WHICH THE BUCKET USED TO GUARANTEE AND NO LONGER DOES. An ETF has
+        // an ISIN and is not a company; until `Equity ETF` was retired (2026-08-18) it sat in its
+        // own bucket, so filtering on `isin` alone was enough. With ETFs inside Stocks that filter
+        // would hand the blender instruments with no earnings — and it would do it silently, since
+        // a blend simply weights whatever it is given. See `EQUITY_BUCKET`.
         basket: {
           label: bucketLabel(bucket),
           holdings: rows
-            .filter((h) => h.isin)
+            .filter((h) => h.isin && !h.is_fund)
             .map((h) => ({ isin: h.isin!, weight: h.weight_now_pct ?? 0, name: h.name ?? undefined })),
         } satisfies Basket,
       };
     })
-    .filter((g) => g.rows.length > 0);
+    // ⚠ AN EMPTY CLASS IS KEPT WHEN IT IS ONE OF THE FOUR THE MODAL ALWAYS SHOWS — otherwise the
+    // bar above would carry a Bonds row and the table below would have no Bonds section, which is
+    // the two halves of one screen disagreeing about what the book contains. See
+    // `ALWAYS_SHOWN_BUCKETS`. Anything else (Unclassified) still has to earn its section.
+    .filter((g) => g.rows.length > 0
+      || (ALWAYS_SHOWN_BUCKETS as readonly string[]).includes(g.bucket));
 
   // ⚠ ONLY THE CLOSED-OUT ONES. A name that was TRIMMED still has a holdings row, and its realised
   // result is already grafted onto that row — listing it here too would count it twice and the
@@ -1266,7 +1302,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, realised, o
       return dir === 'asc' ? c : -c;
     }
     const pick = (h: BookHolding) => (sortKey === 'weight' ? (h.weight_now_pct ?? 0)
-      : sortKey === 'contribution' ? h.contribution_pct
+      : sortKey === 'vol' ? h.vol_5y_pct
+        : sortKey === 'beta' ? h.beta_5y
+          : sortKey === 'mom' ? h.mom_12_1_pct
+        : sortKey === 'contribution' ? h.contribution_pct
         : h.own_return_pct);
     const av = pick(a);
     const bv = pick(b);
@@ -1395,6 +1434,56 @@ ${holdings.filter((h) => (h.via_names ?? []).length).length} of ${holdings.lengt
                   how={`Yahoo’s sector for the ISIN, canonicalised so one sector has one name
 
 ${new Set(holdings.map((h) => h.sector).filter((s) => s && s !== 'Unclassified')).size} sectors across ${holdings.filter((h) => sectorLabel(h.sector)).length} rows; ${holdings.filter((h) => !sectorLabel(h.sector)).length} have none (a fund, or unclassifiable)`} />
+              </th>
+              {/* ⚠ BESIDE SECTOR AND WEIGHT — with the columns that DESCRIBE the instrument
+                  rather than the ones that measure this book's year. Sector says what it is, this
+                  says how much it moves, weight says how much of it we hold; the money columns
+                  start after. */}
+              {/* ⚠ FIRST OF THE THREE INSTRUMENT COLUMNS — momentum, risk, exposure. It is the
+                  only one of the three that is SIGNED, so it is the only one that carries colour. */}
+              <th className={`text-right w-24 ${th}`} onClick={() => click('mom')}>
+                Momentum{caret('mom')}
+                <Provenance source="benchmark" asOf={null} kind="formula" column
+                  what="12-1 momentum: the last 12 months' EUR return, excluding the most recent month."
+                  note="signal_engine mom_12_1 — the same one /signal-lab charts"
+                  how={`Price one month ago ÷ price twelve months ago − 1.
+
+⚠ SKIPPING THE LAST MONTH IS THE DEFINITION, not a refinement. The most recent month mean-REVERTS, which is what makes a raw 12-month return a poor momentum signal — this is the standard measure and the one the backtester trades on.
+
+⚠ IT IS NOT THE STRATEGY'S momentum SCORE. That one is min-maxed across the universe it was scored over, so the same stock scores differently against the S&P than against ACWI, and a holding in no universe has none — a ranking within a run rather than a property of the stock. This is absolute, so a column of them compares.
+
+⚠ NEEDS ONLY ~13 MONTHS, unlike the two risk columns beside it, so a young listing can show momentum and a dash for volatility.`} />
+              </th>
+              <th className={`text-right w-24 ${th}`} onClick={() => click('vol')}>
+                5y vol{caret('vol')}
+                {/* ⚠ `benchmark`, NOT `airs_volk`. Every other number in this table is AIRS's own
+                    valuation; this one is computed here from OUR daily EUR price series, and a
+                    column whose card names the wrong source is how a reader comes to trust a
+                    figure's provenance wrongly. */}
+                <Provenance source="benchmark" asOf={null} kind="formula" column
+                  what="How much this instrument's price moves, annualised, over the last 5 years."
+                  note="annualised standard deviation of daily EUR returns"
+                  how={'std(daily return, ddof=1) × √252, over the trailing 5 years of our own '
+                    + 'yfinance closes converted to EUR at each date\'s rate.\n\n'
+                    + '⚠ IN EUR, like every figure on this screen — a euro holder bears the '
+                    + 'currency move, so a dollar stock\'s volatility to them includes it.\n\n'
+                    + '⚠ A DASH IS NOT A ZERO. An instrument with under four years of history has '
+                    + 'no five-year figure; 0.0 would read as remarkably stable.'} />
+              </th>
+              <th className={`text-right w-20 ${th}`} onClick={() => click('beta')}>
+                Beta{caret('beta')}
+                <Provenance source="benchmark" asOf={null} kind="formula" column
+                  what={`How much this instrument moves for each 1% of ${benchmark}, over 5 years.`}
+                  note={`weekly EUR returns, regressed on ${benchmark}`}
+                  how={`cov(instrument, ${benchmark}) ÷ var(${benchmark}), on WEEKLY EUR returns over the trailing 5 years — against ${benchmark}'s investable tracker, priced the same way as the holdings.
+
+⚠ WEEKLY, WHILE THE VOL COLUMN IS DAILY, AND THAT IS DELIBERATE. The trackers are London-listed and close at 16:30 London; a US holding closes at 21:00, so half its day lands in the next benchmark bar and the daily correlation is mechanically halved — every beta biased downward. Measured on this book: Microsoft vs ACWI read 0.72 daily against a true ~1.05, and 1.04 weekly. Volatility is a single-series statistic with nothing to be out of sync with, so it stays daily.
+
+⚠ IT MOVES WITH THE BENCHMARK PICKER above. A beta is meaningless without naming what it is against, so this is not a property of the instrument.
+
+⚠ ALIGNED ON THE DATES BOTH SERIES HAVE. A Stockholm listing and a London-traded ETF do not share a calendar, and pairing the two by position would offset them from the first mismatched holiday onward.
+
+⚠ A DASH IS NOT A ZERO — 0 would claim the stock moves independently of the market, which is a strong statement about something we could not measure.`} />
               </th>
               <th className={`text-right w-[7.2rem] ${th}`} onClick={() => click('weight')}>
                 Weight (now){caret('weight')}
@@ -1566,6 +1655,14 @@ ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contributi
                         name: g.basket.label, basket: g.basket, weightPct: g.slice?.pct })} />
                   )}
                 </td>
+                {/* ⚠ TWO EMPTY CELLS, NOT TWO NUMBERS — vol and beta. A class's volatility is
+                    NOT the average of its holdings' (it is the vol of the COMBINED series, lower by
+                    exactly the diversification between them), and while a class's BETA is a
+                    weighted average, showing one and not the other would read as an oversight. Both
+                    are per instrument here; the portfolio-level figures are in the Risk section. */}
+                <td />
+                <td />
+                <td />
                 <td className="py-2 text-right font-mono font-semibold text-fg-strong whitespace-nowrap">
                   {num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}%
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -1693,8 +1790,12 @@ ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%
                       {/* ⚠ SAME GATE AS THE CLASS ROW, and it has to be here too or the rule is
                           half-applied: an ETF row carries an ISIN, so `h.isin &&` alone put a
                           Fundamental button on every fund, bond and commodity in the table. Owner
-                          earnings are a property of an operating COMPANY; nothing else has them. */}
-                      {h.isin && h.bucket === EQUITY_BUCKET && (
+                          earnings are a property of an operating COMPANY; nothing else has them.
+                          ⚠⚠ `!h.is_fund` IS NOT BELT-AND-BRACES — it is the half of the rule the
+                          bucket used to carry. Since `Equity ETF` was retired the ETFs are in
+                          Stocks, so the bucket test alone puts the button back on every fund it
+                          was written to keep it off. */}
+                      {h.isin && h.bucket === EQUITY_BUCKET && !h.is_fund && (
                         <FundamentalButton
                           className="opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0"
                           title={`Fundamental — is ${h.name ?? h.isin} fundamentally good? (owner earnings + price steadiness)`}
@@ -1720,6 +1821,54 @@ ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%
                   <td className="py-1.5 pr-3 text-fg-muted whitespace-nowrap"
                     title={sectorLabel(h.sector) || 'No sector — a fund, or not classifiable'}>
                     {sectorLabel(h.sector) || <span className="text-fg-faint">—</span>}
+                  </td>
+                  {/* ⚠ THE ONE COLOURED COLUMN OF THE THREE. Momentum has a SIGN — up or down is
+                      the whole reading — while vol and beta are magnitudes where colour would turn
+                      a description into a verdict. */}
+                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.mom_12_1_pct)}`}>
+                    {h.mom_12_1_pct == null ? '—' : `${h.mom_12_1_pct >= 0 ? '+' : ''}${h.mom_12_1_pct.toFixed(1)}%`}
+                    <Provenance source="benchmark" asOf={null} kind="formula"
+                      what={h.mom_12_1_pct == null
+                        ? `${h.name ?? 'This position'} has under ~13 months of price history, so it has no 12-1 momentum.`
+                        : `What ${h.name ?? 'this position'} returned over the 12 months ending one month ago.`}
+                      note={h.mom_12_1_pct == null ? undefined : 'signal_engine mom_12_1, EUR'}
+                      how={h.mom_12_1_pct == null
+                        ? 'A dash is not a zero — 0% would claim it went nowhere.'
+                        : `Price one month ago ÷ price twelve months ago − 1 = ${h.mom_12_1_pct.toFixed(1)}%
+
+The most recent month is excluded on purpose: it mean-reverts, and including it is what makes a raw 12-month return a poor momentum signal.`} />
+                  </td>
+                  {/* ⚠ NO TONE. Volatility is not good or bad — 45% is what a growth stock does,
+                      and colouring it red would make "risky" read as "losing". The signed columns
+                      in this table are the return ones; this is a magnitude. */}
+                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
+                    {h.vol_5y_pct == null ? '—' : `${h.vol_5y_pct.toFixed(1)}%`}
+                    <Provenance source="benchmark" asOf={null} kind="formula"
+                      what={h.vol_5y_pct == null
+                        ? `${h.name ?? 'This position'} has under four years of price history, so it has no five-year volatility.`
+                        : `How much ${h.name ?? 'this position'}'s price moves, annualised, over the last 5 years.`}
+                      note={h.vol_5y_pct == null ? undefined
+                        : 'annualised standard deviation of daily EUR returns'}
+                      how={h.vol_5y_pct == null
+                        ? 'A dash is not a zero — 0.0% would read as remarkably stable.'
+                        : `std(daily return, ddof=1) × √252 = ${h.vol_5y_pct.toFixed(1)}%
+
+Our own yfinance closes, converted to EUR at each date's rate — so the currency move is in it, which is what a euro holder actually bears.`} />
+                  </td>
+                  {/* ⚠ NO TONE, same as the vol column beside it — a beta of 1.4 is not worse
+                      than 0.7, it is a different exposure, and colour would make it a verdict. */}
+                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
+                    {h.beta_5y == null ? '—' : h.beta_5y.toFixed(2)}
+                    <Provenance source="benchmark" asOf={null} kind="formula"
+                      what={h.beta_5y == null
+                        ? `${h.name ?? 'This position'} has too little overlapping history with ${benchmark} to measure a beta.`
+                        : `How much ${h.name ?? 'this position'} moves for each 1% of ${benchmark}.`}
+                      note={h.beta_5y == null ? undefined : `weekly EUR returns vs ${benchmark}, 5 years`}
+                      how={h.beta_5y == null
+                        ? 'A dash is not a zero — 0 would claim it moves independently of the market.'
+                        : `cov(instrument, ${benchmark}) ÷ var(${benchmark}) = ${h.beta_5y.toFixed(2)}
+
+Weekly EUR returns over the trailing 5 years, on the weeks both series have — weekly because the benchmark tracker and a US listing close five hours apart, which halves a daily correlation.`} />
                   </td>
                   <td className="py-1.5 text-right font-mono text-fg tabular-nums whitespace-nowrap">
                     {num2(h.weight_now_pct ?? 0)}%
@@ -1915,6 +2064,14 @@ no result — this position could not be valued at both ends of the window, so t
                     sold out during the year
                   </span>
                 </td>
+                {/* ⚠ TWO EMPTY CELLS, NOT TWO NUMBERS — vol and beta. A class's volatility is
+                    NOT the average of its holdings' (it is the vol of the COMBINED series, lower by
+                    exactly the diversification between them), and while a class's BETA is a
+                    weighted average, showing one and not the other would read as an oversight. Both
+                    are per instrument here; the portfolio-level figures are in the Risk section. */}
+                <td />
+                <td />
+                <td />
                 <td className="py-2 text-right font-mono text-fg-faint">—</td>
                 {/* ⚠ THE UNREALISED PLACEHOLDER, AND IT MUST BE GATED LIKE THE COLUMN IT STANDS IN
                     FOR. A sold-out position has nothing unrealised, so the cell is empty — but an
@@ -2018,6 +2175,14 @@ ${eur0n(p.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(p.contribution_p
                     {holdings.length + sold.length} positions, everything it held or sold
                   </span>
                 </td>
+                {/* ⚠ TWO EMPTY CELLS, NOT TWO NUMBERS — vol and beta. A class's volatility is
+                    NOT the average of its holdings' (it is the vol of the COMBINED series, lower by
+                    exactly the diversification between them), and while a class's BETA is a
+                    weighted average, showing one and not the other would read as an oversight. Both
+                    are per instrument here; the portfolio-level figures are in the Risk section. */}
+                <td />
+                <td />
+                <td />
                 <td />
                 {show('opening') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(grand.opening)}</td>}
                 {show('valuenow') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(grand.valuenow)}</td>}
@@ -2704,6 +2869,7 @@ export default function PortfolioAnalysisModal({
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
                 onFundamental={setFund}
                 note={data.book_note} bookName={data.book_portefeuille} realised={data.realised}
+                benchmark={data.benchmark ?? benchmark}
                 /* ⚠ Only when this modal is a real portfolio with a paired book. An ad-hoc
                    basket has no account and therefore no trades to explain. */
                 onTiming={id && data.realised?.available ? setTimingFor : undefined}

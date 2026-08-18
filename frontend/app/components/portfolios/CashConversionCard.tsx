@@ -9,6 +9,8 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { useLang } from '../../../lib/i18n';
+import { chartTitle } from './longEquityCopy';
 import { Stat } from './MetricGrowthCard';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
@@ -47,6 +49,9 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
   /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
 }) {
+  // ⚠ READ FROM THE STORE, NOT DRILLED THROUGH `LongEquityTab` AS A PROP — see the same
+  // note on the sibling cards. `useLang` is an external store (`lib/i18n.ts`).
+  const [lang] = useLang();
   const [data, setData] = useState<CashConversionInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
@@ -92,7 +97,7 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
       <h4 className="text-base font-semibold text-fg-strong">
-        {sbcCorrection ? '(FCF − SBC) / Net Income' : 'FCF / Net Income'}
+        {chartTitle(lang, 'cashConversion', sbcCorrection)}
       </h4>
 
       {data == null && !err ? (

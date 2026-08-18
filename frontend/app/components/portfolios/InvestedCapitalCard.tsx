@@ -10,6 +10,8 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { logLinearFit } from '../../../lib/trendFit';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { useLang } from '../../../lib/i18n';
+import { chartTitle } from './longEquityCopy';
 import { Stat, pctSince } from './MetricGrowthCard';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
@@ -44,6 +46,11 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
    */
   benchTarget?: BenchTarget | null;
 }) {
+  // ⚠ READ FROM THE STORE, NOT DRILLED THROUGH `LongEquityTab` AS A PROP. Fourteen sibling
+  // cards would mean fourteen chances to forget one, and a card left on English would look
+  // like a missing translation rather than a missing prop. `useLang` is an external store
+  // (see `lib/i18n.ts`), so every card reads the one value directly.
+  const [lang] = useLang();
   const [data, setData] = useState<CashReturnInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
@@ -155,7 +162,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      <h4 className="text-base font-semibold text-fg-strong">Invested capital</h4>
+      <h4 className="text-base font-semibold text-fg-strong">{chartTitle(lang, 'investedCapital')}</h4>
 
       {data == null && !err ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>

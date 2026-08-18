@@ -19,7 +19,7 @@ from routers._airs_holding_isin import (
     BUCKET_BONDS,
     BUCKET_CASH,
     BUCKET_EQUITY,
-    BUCKET_EQUITY_ETF,
+    BUCKET_ORDER,
     _CHECK_STALE_DAYS,
     _MAX_CLOSE_LAG_DAYS,
     _close_lag_days,
@@ -155,10 +155,36 @@ class TestTheClassComesFromTheGridAndTheName:
         g = self._grid(asset_class="equity", sector="Technology", name="ASML Holding NV")
         assert classify_bucket(None, False, "NL0010273215", "ASML Holding", g) == BUCKET_EQUITY
 
-    def test_a_fund_with_no_bond_tell_is_an_equity_etf(self):
+    def test_a_fund_with_no_bond_tell_is_equity_because_that_is_what_it_holds(self):
+        """⚠ NOT ITS OWN BUCKET. `Equity ETF` was retired 2026-08-18: every bucket names what a
+        holding INVESTS IN, and an equity fund invests in equity — a bond ETF has always been
+        `Bonds` rather than "ETF Bonds", which is what made the equity split the inconsistent one.
+        """
         g = self._grid(asset_class="etf", sector="etf", name="iShares Core MSCI World UCITS ETF")
         assert classify_bucket(None, True, "IE00B4L5Y983",
-                               "iShares Core MSCI World", g) == BUCKET_EQUITY_ETF
+                               "iShares Core MSCI World", g) == BUCKET_EQUITY
+
+    def test_the_etf_wrapper_never_changes_the_bucket(self):
+        """⚠⚠ THE INVARIANT THE MERGE CREATED, AND THE ONE A REVERT WOULD BREAK FIRST. `is_etf` may
+        still decide Equity-vs-Unclassified in the fallback, but it may never move a holding
+        between two REAL classes — that is what "the wrapper is not the asset class" means.
+        """
+        for ac, isin, name, grid in (
+            ("Equity", "NL0010273215", "ASML Holding",
+             self._grid(asset_class="equity", sector="Technology", name="ASML Holding NV")),
+            (None, "IE00B4L5Y983", "iShares Core MSCI World",
+             self._grid(asset_class="equity", sector="Technology", name="iShares Core MSCI World")),
+            (None, "IE00B4613386", "iShares Euro Corp Bond",
+             self._grid(asset_class="bond", sector="bonds", name="iShares Euro Corp Bond UCITS")),
+        ):
+            assert (classify_bucket(ac, True, isin, name, grid)
+                    == classify_bucket(ac, False, isin, name, grid)), name
+
+    def test_the_retired_bucket_is_gone_from_the_order(self):
+        """A key nothing renders must not be offerable by the manual-override picker either — the
+        picker is built from `BUCKET_ORDER`, and the DB now rejects the value outright."""
+        assert "Equity ETF" not in BUCKET_ORDER
+        assert BUCKET_ORDER == ["Equity", "Bonds", "Alternatives", "Cash", "Unclassified"]
 
     def test_cash_resolves_with_no_isin_and_no_grid_row(self):
         """The cash line has no ISIN at all, so its name is the only thing that can identify it."""

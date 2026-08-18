@@ -241,7 +241,8 @@ def split_legs(legs: list[dict], idx: int, grid: dict | None = None,
     `sector`; a fund is out on all three. `idx` picks which of `_buckets`'s three answers decides.
 
     ⚠ NO ASSET-CLASS FILTER HERE, DELIBERATELY. The composition's sector axis used to restrict to
-    the {Equity, Equity ETF} sleeve and rely on that to keep bonds out. Two overlapping rules for
+    the {Equity, Equity ETF} sleeve (a pair of buckets that no longer exists — `Equity ETF` was
+    retired 2026-08-18) and rely on that to keep bonds out. Two overlapping rules for
     one question is how the panels diverged in the first place — the ladder alone decides, so the
     two sides match BY CONSTRUCTION rather than by the two rules happening to agree.
     """

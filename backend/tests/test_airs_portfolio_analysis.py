@@ -410,16 +410,23 @@ class TestTheBarsAreTheAttributionWeights:
         assert axes["sector"]["attributable_pct"] == pytest.approx(60.0)
 
     def test_the_excluded_rows_carry_the_class_we_already_store(self, monkeypatch):
-        """So a fund can be shown as "Equity ETF — has no sector" rather than as the ladder's own
-        word "unclassified", which reads as our data having failed."""
+        """So a fund can be shown as "Equity — has no sector" rather than as the ladder's own word
+        "unclassified", which reads as our data having failed.
+
+        ⚠ THE LABEL IS "Equity" AND NOT "Equity ETF" SINCE 2026-08-18 — an equity ETF invests in
+        equity, so the wrapper no longer has a bucket of its own. The point of the test is
+        unchanged: the excluded row keeps the class we already stored for it. What it is NOT
+        allowed to become is the ladder's "unclassified", which claims we failed to classify a row
+        we classified perfectly well and then excluded for a different reason (no equity sector).
+        """
         legs = [{"isin": "US1", "weight_pct": 60.0, "return_pct": 10.0, "airs_name": "Alpha",
                  "is_cash": False},
                 {"isin": "IE9", "weight_pct": 40.0, "return_pct": 3.0, "airs_name": "Tracker",
-                 "is_cash": False, "asset_class": "Equity ETF"}]
+                 "is_cash": False, "asset_class": "Equity"}]
         self._patch(monkeypatch, legs)
         axes = pa._basis_axes(1, "book", None, None)
         assert [(e["isin"], e["asset_class"]) for e in axes["sector"]["excluded"]] \
-            == [("IE9", "Equity ETF")]
+            == [("IE9", "Equity")]
 
     def test_an_unpriceable_holding_is_excluded_and_NAMED(self, monkeypatch):
         """⚠ THE DANGEROUS EXCLUSION. A real equity in a real sector that we cannot price vanishes
@@ -478,7 +485,7 @@ class TestTheBarsAreTheAttributionWeights:
             {"isin": "US2", "weight_pct": 27.0, "return_pct": 5.0, "airs_name": "Beta",
              "is_cash": False, "asset_class": "Equity"},
             {"isin": "IE9", "weight_pct": 12.9, "return_pct": 3.0, "airs_name": "Tracker",
-             "is_cash": False, "asset_class": "Equity ETF"},
+             "is_cash": False, "asset_class": "Equity"},
             {"isin": None, "weight_pct": 0.1, "return_pct": None, "airs_name": "Liquiditeiten",
              "is_cash": True, "asset_class": "Cash"},
         ]
@@ -721,3 +728,54 @@ class TestBookWeighting:
         ])
         pa._book_port_items(7, {})
         assert self.calls == [{"portefeuille": "X_DYN", "freshen": False}]
+
+
+class TestTheAllocationBarAlwaysShowsTheFourClasses:
+    """⚠⚠ AN OMITTED CLASS CANNOT STATE A ZERO.
+
+    `_weigh_alloc` used to drop every empty bucket, so a book holding no bonds produced three bars
+    and the reader had to remember which fourth was missing to tell "holds no bonds" from "bonds
+    not computed". The two read identically, and only one of them is a fact about the portfolio.
+
+    ⚠ AND IT COST THE POLICY OVERLAY ITS MOST IMPORTANT CASE. The allocation bands are drawn per
+    bar: a Defensief book holding NO bonds against a 55% minimum had no bar to draw the breach on,
+    so the single largest violation the policy can express was the one the overlay could not show.
+
+    Pure — no DB, no network.
+    """
+
+    def test_the_four_classes_come_back_even_with_nothing_in_them(self):
+        slices = pa._weigh_alloc([(100.0, "Equity")])
+        assert [s["bucket"] for s in slices] == ["Equity", "Bonds", "Alternatives", "Cash"]
+        empty = {s["bucket"]: s for s in slices if s["bucket"] != "Equity"}
+        for bucket, s in empty.items():
+            assert s["pct"] == 0.0, bucket
+            assert s["holdings"] == 0, bucket
+
+    def test_they_stay_in_the_declared_order_not_the_order_they_were_seen(self):
+        """The bar and the holdings table are both built from this order; a set has none."""
+        slices = pa._weigh_alloc([(10.0, "Cash"), (40.0, "Bonds"), (50.0, "Equity")])
+        assert [s["bucket"] for s in slices] == ["Equity", "Bonds", "Alternatives", "Cash"]
+
+    def test_unclassified_is_not_forced_but_still_appears_when_it_has_rows(self):
+        """⚠ It is not a class anyone allocates to — it is our own failure to classify. An empty
+        one is GOOD news, and printing "Unclassified 0.00%" on every healthy book advertises a
+        problem that does not exist."""
+        assert "Unclassified" not in [s["bucket"] for s in pa._weigh_alloc([(100.0, "Equity")])]
+        with_unknown = pa._weigh_alloc([(90.0, "Equity"), (10.0, "Unclassified")])
+        assert [s["bucket"] for s in with_unknown][-1] == "Unclassified"
+        assert with_unknown[-1]["pct"] == pytest.approx(10.0)
+
+    def test_the_percentages_still_sum_to_a_hundred_over_the_real_holdings(self):
+        """⚠ THE ZEROS MUST NOT ENTER THE DENOMINATOR. A forced bucket is a row on screen, not a
+        holding — if it changed the total, every real class's percentage would fall by being
+        beside an empty one."""
+        slices = pa._weigh_alloc([(75.0, "Equity"), (25.0, "Cash")])
+        assert sum(s["pct"] for s in slices) == pytest.approx(100.0)
+        assert {s["bucket"]: s["pct"] for s in slices}["Equity"] == pytest.approx(75.0)
+
+    def test_an_empty_book_still_returns_nothing(self):
+        """⚠ NO WEIGHT AT ALL IS NOT "A BOOK HOLDING FOUR EMPTY CLASSES" — there is no portfolio to
+        describe, and four 0.00% bars would dress a failed load as a real allocation."""
+        assert pa._weigh_alloc([]) == []
+        assert pa._weigh_alloc([(0.0, "Equity")]) == []

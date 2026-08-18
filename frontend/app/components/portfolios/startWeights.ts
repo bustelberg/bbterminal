@@ -65,7 +65,7 @@ export type StartBasis<T extends ValuedRow> = {
 };
 
 /**
- * One asset-class row (Stocks, Stock ETF, Bonds…), computed from the HOLDINGS UNDER IT.
+ * One asset-class row (Stocks, Bonds, Alternatives…), computed from the HOLDINGS UNDER IT.
  *
  * ⚠ A GROUP ROW THAT DOES NOT ADD UP FROM ITS OWN ROWS IS A SECOND SOURCE OF TRUTH. The backend
  *   publishes its own per-segment figures, but it computes them over the ISIN-resolution rows,

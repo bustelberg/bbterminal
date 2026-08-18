@@ -9,6 +9,8 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { useLang } from '../../../lib/i18n';
+import { chartTitle } from './longEquityCopy';
 import { Stat } from './MetricGrowthCard';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
@@ -35,6 +37,9 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
   /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
 }) {
+  // ⚠ READ FROM THE STORE, NOT DRILLED THROUGH `LongEquityTab` AS A PROP — see the same
+  // note on the sibling cards. `useLang` is an external store (`lib/i18n.ts`).
+  const [lang] = useLang();
   const [data, setData] = useState<CashReturnInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
@@ -93,7 +98,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
       <div className="flex items-center justify-between gap-2 flex-nowrap">
         {/* `min-w-0` is what lets `truncate` actually shrink — a flex item defaults to
             min-width:auto and would push the switch off the card instead of ellipsising. */}
-        <h4 className="text-base font-semibold text-fg-strong truncate min-w-0">{M.title}</h4>
+        <h4 className="text-base font-semibold text-fg-strong truncate min-w-0">{chartTitle(lang, mode)}</h4>
         <div className="inline-flex rounded-lg border border-neutral-700 overflow-hidden shrink-0"
           role="group" aria-label="Capital-return basis">
           {(Object.keys(MODES) as CapitalMode[]).map((k) => (

@@ -795,7 +795,7 @@ class CompositionExcluded(BaseModel):
     isin: str | None = None
     # Its share of the whole book on the same basis — i.e. the weight the chart above does NOT show.
     weight_pct: float = 0.0
-    # The Class it carries in our own system: Equity ETF, Bonds, Cash, Alternatives…
+    # The Class it carries in our own system: Equity, Bonds, Cash, Alternatives…
     asset_class: str | None = None
     reason: str | None = None
 
@@ -974,6 +974,13 @@ class BookHoldingDetail(BaseModel):
     name: str | None = None
     isin: str | None = None
     bucket: str
+    # ⚠⚠ IS THIS A FUND, RATHER THAN A COMPANY — AND IT IS ON THE ROW BECAUSE THE BUCKET NO LONGER
+    # SAYS. Until 2026-08-18 an equity ETF sat in its own `Equity ETF` bucket, so "bucket ==
+    # Equity" doubled as "an operating company", and the Analyse modal gates owner-earnings
+    # blending on exactly that. With the two merged into Stocks the guarantee is gone from the
+    # bucket, so it travels here instead — otherwise the blender would be handed ETFs, which have
+    # no earnings and which this app deliberately does not look through.
+    is_fund: bool | None = None
     # ⚠ THE SECTOR CHART'S OWN BUCKET, NOT `asset_grid.sector` RAW. It runs through the identical
     # `_buckets` the bars and the benchmark use — canonicalised ("Financial Services" -> Financials,
     # the two Yahoo vocabularies), the ETF/asset-class leftovers ("etf", "Equity") stripped back to
@@ -1076,6 +1083,38 @@ class BookHoldingDetail(BaseModel):
     own_return_pct: float | None = None
     own_return_from: str | None = None
     own_return_estimated: bool = False
+    # Annualised volatility of this instrument's DAILY EUR close over the trailing 5 years.
+    #
+    # ⚠ null WHERE THERE IS NOT ENOUGH HISTORY, and that is not the same as low volatility — a
+    # stock that listed last year has no five-year figure, and 0.0 in the column would read as
+    # remarkably stable. See `_holding_risk`; the column renders a dash.
+    vol_5y_pct: float | None = None
+    # Beta of the same daily EUR returns against the SELECTED benchmark's investable tracker, over
+    # the same 5 years and the dates both series share.
+    #
+    # ⚠⚠ IT MOVES WITH THE BENCHMARK PICKER. A beta is meaningless without naming what it is
+    # against, so this is not a property of the instrument — request the modal with a different
+    # `benchmark` and every value here changes.
+    #
+    # ⚠ null RATHER THAN 0. Beta 0 means "moves independently of the market", which is a strong
+    # claim about a stock we simply could not measure.
+    beta_5y: float | None = None
+    # 12-1 momentum: the 12-month EUR price return EXCLUDING the most recent month, in %.
+    #
+    # ⚠⚠ NOT the strategy's `momentum_score`. That is a min-max normalisation ACROSS the universe
+    # it was scored over, so the same stock scores differently against the S&P than against ACWI
+    # and a holding in no universe has none at all — a ranking within a run, not a property of the
+    # stock. This is absolute and needs no universe, which is what makes a column of them
+    # comparable between stocks.
+    #
+    # ⚠ SKIPPING THE LAST MONTH IS THE DEFINITION, not a refinement: the most recent month
+    # mean-REVERTS, so including it is what makes a raw 12-month return a poor momentum signal.
+    # From `signal_engine.daily.compute_single_company_signals` — one definition, shared with
+    # /signal-lab and the backtester.
+    #
+    # ⚠ IT NEEDS ONLY ~13 MONTHS, unlike the risk columns' four years, so a young listing can have
+    # momentum and a dash for vol.
+    mom_12_1_pct: float | None = None
     own_return_source: str | None = None      # "airs" | "yfinance" | None
     # ⚠ WHICH AIRS BOOK THE FIGURE CAME FROM, because it is no longer always this one. A leg held
     # only inside a certificate is valued by the account behind that certificate — the book that
@@ -2833,7 +2872,7 @@ class AirsHoldingIsin(BaseModel):
 
     holding_name: str
     lines: int = 1                 # >1 = AIRS billed this instrument on several rows
-    # The asset-class label — Equity | Equity ETF | Bonds | Alternatives | Cash | Unclassified
+    # The asset-class label — Equity | Bonds | Alternatives | Cash | Unclassified
     # (Unclassified = genuinely unsure). ⚠ From the ASSET GRID and the name only: AIRS's own
     # `categorie` came from the paired model position and went with the pairing (2026-07-23).
     bucket: str | None = None

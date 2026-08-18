@@ -10,6 +10,8 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { logLinearFit } from '../../../lib/trendFit';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { useLang } from '../../../lib/i18n';
+import { chartTitle, type ChartKey } from './longEquityCopy';
 import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
 import HoldingsIngestPanel from './HoldingsIngestPanel';
 import { LegendItem } from './ChartLegend';
@@ -32,6 +34,19 @@ import { benchNote, benchmarkFirst, rebaseSeries, seriesCrossesZero } from './be
 
 export type MetricCfg = {
   title: string;                 // 'Revenue' | 'FCF / share' | 'ROIC'
+  /**
+   * The heading's translation key — see `longEquityCopy`.
+   *
+   * ⚠⚠ A SECOND FIELD RATHER THAN A TRANSLATED `title`, AND THAT IS THE POINT OF IT. `title` is
+   * this config's IDENTITY, not only its label: `LongEquityTab` renders these cards with
+   * `key={cfg.title}`, and a React key that changes with the language would unmount and remount
+   * every card on a switch — refetching all of it to repaint four headings. `title` therefore
+   * stays English and this names the string to draw.
+   *
+   * ⚠ OPTIONAL, so a `MetricCfg` built anywhere else (`QuickValuationTab`) keeps its English
+   * heading rather than being forced into a translation table it has no entry in.
+   */
+  titleKey?: ChartKey;
   noun: string;                  // 'revenue' | 'FCF/share' | 'ROIC' — for labels/messages
   codes: string[];               // company-metric codes (both section spellings)
   benchmarkMetric: string;       // the `metric` param for the holdings drill-down endpoint
@@ -265,6 +280,9 @@ export default function MetricGrowthCard({
    *  like an index that happens to track this book exactly. See `benchNote`. */
   benchErr?: string | null;
 }) {
+  // ⚠ The heading only — see `longEquityCopy` for why the rest of the card
+  // (tiles, legend, tooltips) is deliberately not in scope.
+  const [lang] = useLang();
   const [showHoldings, setShowHoldings] = useState(false);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -711,7 +729,9 @@ export default function MetricGrowthCard({
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      <h4 className="text-base font-semibold text-fg-strong">{cfg.title}</h4>
+      <h4 className="text-base font-semibold text-fg-strong">
+        {cfg.titleKey ? chartTitle(lang, cfg.titleKey) : cfg.title}
+      </h4>
 
       {metrics == null ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>

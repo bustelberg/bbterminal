@@ -9,6 +9,8 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { useLang } from '../../../lib/i18n';
+import { chartTitle } from './longEquityCopy';
 import { Stat } from './MetricGrowthCard';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
@@ -38,6 +40,11 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
   /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
 }) {
+  // ⚠ READ FROM THE STORE, NOT DRILLED THROUGH `LongEquityTab` AS A PROP. Fourteen sibling
+  // cards would mean fourteen chances to forget one, and a card left on English would look
+  // like a missing translation rather than a missing prop. `useLang` is an external store
+  // (see `lib/i18n.ts`), so every card reads the one value directly.
+  const [lang] = useLang();
   const [data, setData] = useState<DividendYieldInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
@@ -99,7 +106,7 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
       <div className="flex items-baseline justify-between gap-2">
-        <h4 className="text-base font-semibold text-fg-strong">Dividend yield</h4>
+        <h4 className="text-base font-semibold text-fg-strong">{chartTitle(lang, 'dividendYield')}</h4>
         <DailyToggle on={daily} onChange={setDaily}
           note={'Daily: the dividend per share stays flat between fiscal periods while the PRICE '
             + 'moves every trading day — a trailing yield. Off, it follows the tab’s cadence.'} />

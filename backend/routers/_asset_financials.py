@@ -1518,7 +1518,17 @@ def _performance_for_isin(isin: str, windows: tuple[int, ...] = _PERF_WINDOWS) -
 # The investable ETF that stands in for each analysis benchmark on the RISK table — ONE real daily
 # series (fast, and it's what you'd actually hold), rather than a 490–2,000-name daily rebuild. The
 # tiny tracking gap vs the cap-weighted rebuild is immaterial for vol / Sharpe / drawdown.
-_BENCHMARK_RISK_ETF = {"SP500": "US78462F1030", "ACWI": "IE00B6R52259"}
+# ⚠ THE INVESTABLE TRACKER PER BENCHMARK LABEL — a real fund with a real daily EUR series, not
+# the reconstructed index. It is what lets a sleeve, a holding's beta and the benchmark itself all
+# be priced the same way; the reconstructed index has no tradeable series to regress against.
+# ⚠ AEX ADDED 2026-08-18 for the per-holding beta column: the Analyse modal's picker offers
+# SP500 | ACWI | AEX, and a label with no entry here silently produced an empty column rather than
+# a stated refusal.
+_BENCHMARK_RISK_ETF = {
+    "SP500": "US78462F1030",   # SPDR S&P 500 ETF Trust
+    "ACWI": "IE00B6R52259",    # iShares MSCI ACWI UCITS ETF USD Acc
+    "AEX": "IE00B0M62Y33",     # iShares AEX UCITS ETF EUR (Dist)
+}
 
 
 @router.get("/api/asset-pipeline/benchmark-risk/{label}", response_model=PerformanceResponse)

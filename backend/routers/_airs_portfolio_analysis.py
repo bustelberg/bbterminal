@@ -96,7 +96,22 @@ _NOT_A_SECTOR = {"equity", "bonds", "commodity", "short commodity", "crypto", "e
 _CATEGORIE_TO_CLASS = {"AAND": "Equity", "OBL": "Bonds", "VAS": "Real estate", "ALTBEL": "Alternatives"}
 # Bucket order for the allocation bar. Must match `_airs_holding_isin.BUCKET_ORDER`; a literal here
 # (not an import) to avoid a module-level cycle — `classify_bucket` is imported per-call instead.
-_ALLOC_ORDER = ["Equity", "Equity ETF", "Bonds", "Alternatives", "Cash", UNKNOWN_BUCKET]
+_ALLOC_ORDER = ["Equity", "Bonds", "Alternatives", "Cash", UNKNOWN_BUCKET]
+
+# ⚠⚠ THE FOUR CLASSES THAT ARE ALWAYS SHOWN, EVEN AT 0%. A bar that simply omits a class a book
+# does not hold cannot say the book does not hold it — the reader sees three rows and has to
+# remember which fourth is missing, and "holds no bonds" then looks identical to "bonds not
+# computed". Rendering the empty class states the zero.
+#
+# ⚠⚠ AND IT IS WHAT MAKES A POLICY BREACH VISIBLE AT ALL IN THE ONE CASE THAT MATTERS MOST. The
+# allocation bands are drawn per bar; a Defensief book holding NO bonds against a 55% minimum had
+# no bar to draw the breach on, so the single largest possible violation was the only one the
+# overlay could not show. At 0% it renders with its band and the breach is unmissable.
+#
+# ⚠ `Unclassified` IS DELIBERATELY NOT IN HERE. It is not a class anyone allocates to — it is our
+# own failure to classify, so an empty one is good news and printing "Unclassified 0.00%" on every
+# healthy book advertises a problem that does not exist. It still appears the moment it has rows.
+_ALWAYS_SHOWN = ("Equity", "Bonds", "Alternatives", "Cash")
 
 
 def _bench_start_caps(label: str, start: str | None) -> dict[str, float]:
@@ -134,7 +149,11 @@ def _bench_start_caps(label: str, start: str | None) -> dict[str, float]:
 
 
 def _weigh_alloc(items: list[tuple[float, str]]) -> list[dict]:
-    """Sum the (weight, bucket) pairs into ordered percentage slices (drops empty buckets).
+    """Sum the (weight, bucket) pairs into ordered percentage slices.
+
+    ⚠ THE FOUR `_ALWAYS_SHOWN` CLASSES COME BACK EVEN WHEN THEY ARE EMPTY, at `pct` 0 and
+    `holdings` 0 — see the ⚠⚠ on that tuple. `Unclassified` appears only when it has something in
+    it. An empty book (no weight at all) still returns nothing: there is no portfolio to describe.
 
     ⚠ `holdings` COUNTS THE EXPANDED LEGS, WHICH IS THE POINT OF COUNTING THEM. After the
     certificates are looked through, a slice is no longer "one certificate" — ToppenbergBeheer
@@ -151,7 +170,7 @@ def _weigh_alloc(items: list[tuple[float, str]]) -> list[dict]:
         agg[b] += w
         cnt[b] += 1
     return [{"bucket": b, "pct": agg[b] / total * 100.0, "holdings": cnt[b]}
-            for b in _ALLOC_ORDER if agg.get(b)]
+            for b in _ALLOC_ORDER if agg.get(b) or b in _ALWAYS_SHOWN]
 
 
 def _sector(raw: str | None) -> str:
@@ -350,7 +369,8 @@ def _basis_axes(portfolio_id: int, source: str, effective: str | None,
     that silently leaves a percentage is the failure the coverage floors elsewhere exist to stop.
 
     ⚠ ONE RULE DECIDES MEMBERSHIP, NOT TWO. The sector axis used to restrict to the
-    {Equity, Equity ETF} sleeve AND let the classifier fold the rest into Unclassified. Two
+    {Equity, Equity ETF} sleeve (one bucket since 2026-08-18) AND let the classifier fold the
+    rest into Unclassified. Two
     overlapping rules for one question is how the panels diverged; the ladder in `split_legs` is
     now the only one, so the bar matches its Brinson row by construction.
 
@@ -780,15 +800,27 @@ def _reclassify_book_rows(rows: list[dict]) -> list[dict]:
     # ⚠ The direct cash line was NOT affected, which is why this hid: `Effectenrekening` comes in
     # already bucketed from `resolve_account_isins` and never reaches here. Only EXPANDED legs
     # arrive with `bucket=None`, so only cash inside a certificate was mislabelled.
-    todo = [r for r in rows if not r.get("bucket")]
-    if not todo:
+    if not rows:
         return rows
-    grid = _grid(sorted({r["isin"] for r in todo if r.get("isin")}))
-    for r in todo:
+    # ⚠⚠ THE GRID IS NOW READ FOR **EVERY** ROW, NOT ONLY THE UNBUCKETED ONES, AND THAT IS THE
+    # POINT OF THIS CHANGE. `is_fund` has to be on every holding: since `Equity ETF` was retired
+    # (2026-08-18) the BUCKET no longer tells a fund from an operating company, and the Analyse
+    # modal gates owner-earnings blending on exactly that distinction. Leaving the flag off the
+    # rows that already had a bucket would hand the blender the ETFs in the Stocks block —
+    # instruments with no earnings, in an app that deliberately does not look through funds.
+    #
+    # ⚠ IT COSTS ONE EXTRA `_grid` READ on a book whose rows all arrived bucketed. That is the
+    # price of the flag being a FACT ABOUT THE INSTRUMENT rather than a by-product of whichever
+    # rows happened to need classifying.
+    grid = _grid(sorted({r["isin"] for r in rows if r.get("isin")}))
+    for r in rows:
         g = grid.get(r["isin"]) if r.get("isin") else None
+        r["is_fund"] = _is_fund(g)
+        if r.get("bucket"):
+            continue
         # An ISIN-less, non-cash row still lands on "Unclassified" — an honest unsure, reached by
         # the classifier rather than by never asking it.
-        r["bucket"] = classify_bucket(None, _is_fund(g), r.get("isin"),
+        r["bucket"] = classify_bucket(None, r["is_fund"], r.get("isin"),
                                       r.get("holding_name") or "", g)
     return rows
 
@@ -1316,6 +1348,12 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             "name": r.get("holding_name"),
             "isin": isin,
             "bucket": b_alloc,
+            # ⚠⚠ CARRIED EXPLICITLY, BECAUSE THIS DICT IS BUILT FRESH AND DROPS WHATEVER IT DOES
+            # NOT NAME. `is_fund` is set upstream on the source row (`_reclassify_book_rows`) and
+            # was silently lost here — the payload went out without it and every consumer's
+            # `!h.is_fund` guard passed on `undefined`, which is exactly the failure the flag
+            # exists to prevent: ETFs back in the fundamentals blend, quietly.
+            "is_fund": bool(r.get("is_fund")),
             "sector": sec,
             "currency": cur,
             "via_names": via,
@@ -1903,7 +1941,11 @@ def compute_portfolio_analysis(portfolio_id: int,
     # sector axis is computed over the equity sleeve alone. Each is then intersected with whatever
     # class the allocation bar has selected (so selecting Bonds empties the sector chart, as it
     # should — sector is not relevant there).
-    _EQUITY = {"Equity", "Equity ETF"}
+    # ⚠ ONE MEMBER SINCE `Equity ETF` WAS RETIRED (2026-08-18), AND STILL A SET ON PURPOSE — it is
+    # "the sleeve the sector axis is defined over", which is a different idea from "the Equity
+    # bucket" even where the two now coincide. The ETFs it used to name are inside `Equity`, so the
+    # denominator below is unchanged by the merge.
+    _EQUITY = {"Equity"}
     general_items = port_items
     general_labels = port_labels
     if bucket_filter:
@@ -1912,8 +1954,9 @@ def compute_portfolio_analysis(portfolio_id: int,
         general_items = [pi for pi, _lb in keep]
         general_labels = [lb for _pi, lb in keep]
     # ⚠ THE SECTOR DENOMINATOR IS THE EQUITY SLEEVE, AND SELECTING A CLASS MUST NOT MOVE IT.
-    # This used to intersect with `bucket_filter` as well, so picking "Stocks" dropped Equity ETFs
-    # out of the denominator and every sector percentage rose: Technology 34.41% -> 35.88% on
+    # This used to intersect with `bucket_filter` as well, so picking "Stocks" dropped the equity
+    # ETFs (then their own bucket) out of the denominator and every sector percentage rose:
+    # Technology 34.41% -> 35.88% on
     # ToppenbergBeheer Defensief, +1.07 to +1.47pp across the three Toppenberg books.
     #
     # Arithmetically that was correct — a different question, honestly answered. As an interface
@@ -2002,7 +2045,7 @@ def compute_portfolio_analysis(portfolio_id: int,
     enriched_holdings = _with_results(
         _with_start_weights(book["holdings_detail"] if book else [],
                             (basis_axes or {}).get("_start_weights") or {}),
-        realised_block)
+        realised_block, benchmark_label)
     _agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])   # [Σ start, Σ result]
     for _h in enriched_holdings:
         _start = _h.get("start_value_eur") or 0.0
@@ -2192,7 +2235,8 @@ def compute_portfolio_analysis(portfolio_id: int,
     }
 
 
-def _with_results(holdings: list[dict], realised: dict) -> list[dict]:
+def _with_results(holdings: list[dict], realised: dict,
+                  benchmark_label: str = "") -> list[dict]:
     """Attach each row's RESULT — unrealised + realised + income — and its contribution.
 
     ⚠ ONE TABLE, BECAUSE THE TWO WERE ANSWERING ONE QUESTION IN TWO PLACES. The composition view
@@ -2298,6 +2342,219 @@ def _with_results(holdings: list[dict], realised: dict) -> list[dict]:
                     # AIRS actually produced.
                     **({"own_return_pct": 0.0}
                        if is_cash and h.get("own_return_pct") is None else {})})
+    # ⚠ ONE CALL FOR THE WHOLE TABLE, AFTER IT IS BUILT — see `_holding_risk`. Asking per row
+    # would turn one batched read into one per holding, and beta would reload the benchmark each
+    # time. ⚠ `benchmark_label` is threaded in rather than read from a module global: beta is only
+    # meaningful against the index the reader picked, and the picker changes it per request.
+    risk = _holding_risk([r.get("isin") for r in out], benchmark_label)
+    for r in out:
+        got = risk.get(r.get("isin") or "") or {}
+        r["vol_5y_pct"] = got.get("vol_5y_pct")
+        r["beta_5y"] = got.get("beta_5y")
+        r["mom_12_1_pct"] = got.get("mom_12_1_pct")
+    return out
+
+
+#: The window the per-holding volatility column measures, in years.
+#:
+#: ⚠ NOT ONE OF `_PERF_WINDOWS` (2/4/8). Those exist so the SAME metric can be compared ACROSS
+#: horizons — a distribution-drift probe. This is one number beside a holding, asked for as "5y".
+#: Declared once so the payload key, the header and the min-bars floor cannot drift apart.
+VOL_YEARS = 5
+
+
+#: Minimum overlapping trading days before a beta is quoted. ⚠ Deliberately the same floor the
+#: volatility uses — a beta measured over one year under a "5y" heading is the same lie the vol
+#: column refuses, and the two must not disagree about which rows have enough history.
+def _min_bars(years: int) -> int:
+    """Four years of trading days. Demanding the full `years` drops every listing a month short;
+    accepting fewer reports a shorter window under this column's heading."""
+    return int(252 * (years - 1))
+
+
+def _daily_eur(isins: list[str], years: int) -> dict[str, list[tuple[str, float]]]:
+    """{isin: [(date, EUR close)]} for the trailing `years` — ONE batched pass.
+
+    ⚠⚠ EXECUTIONS, CLOSES AND FX ARE EACH READ ONCE FOR EVERY HOLDING AT ONCE. A per-ISIN call
+    would add ~20 round trips to a request that already opens 71 at eu-west-3 latency, which is the
+    difference between a column and a slower modal.
+
+    ⚠⚠ AND IT KEYS BY ISIN THROUGHOUT RATHER THAN ZIPPING. `_group_eur_legs` returns weighted legs
+    with the identity dropped and SILENTLY SKIPS a holding with no execution row or no bars — so
+    pairing its output back by position shifts every later ISIN onto the previous holding's series.
+    A table of real figures under the wrong names is the one failure here nothing on screen could
+    contradict.
+
+    ⚠ EUR, LIKE EVERY OTHER FIGURE ON THIS SCREEN. A euro holder bears the currency move, so a
+    dollar stock's risk to them includes it; measuring in the listing's own currency would report a
+    risk nobody in this book actually carries.
+    """
+    from datetime import date, timedelta  # noqa: PLC0415
+
+    from routers._airs_portfolio_perf import (  # noqa: PLC0415
+        _closes, _eur_series, _executions, _fx,
+    )
+
+    want = [i for i in dict.fromkeys(isins) if i]
+    if not want:
+        return {}
+    since = (date.today() - timedelta(days=365 * years + 10)).isoformat()
+    today = date.today().isoformat()
+    ex_map = _executions(want)
+    ccys = {(ex_map[i].get("currency") or "").upper() for i in ex_map} - {"", "EUR"}
+    fx = _fx(ccys, since, today) if ccys else {}
+    aids = [ex_map[i]["analysis_id"] for i in want
+            if i in ex_map and ex_map[i].get("analysis_id")]
+    closes = _closes(aids, since, today) if aids else {}
+
+    out: dict[str, list[tuple[str, float]]] = {}
+    for isin in want:
+        ex = ex_map.get(isin)
+        if not ex or not ex.get("analysis_id"):
+            continue
+        eur = _eur_series(closes.get(ex["analysis_id"]) or [],
+                          (ex.get("currency") or "").upper(), fx)
+        if eur:
+            out[isin] = eur
+    return out
+
+
+def _by_week(series: list[tuple[str, float]]) -> dict[tuple[int, int], float]:
+    """{(iso year, iso week): last close of that week} — the basis beta is measured on.
+
+    ⚠ THE LAST CLOSE OF THE WEEK, NOT THE FRIDAY. A market shut on Friday still has a week, and
+    keying on the weekday would silently drop it for one series and keep it for the other — which
+    is the misalignment the weekly basis exists to remove.
+    """
+    from datetime import date as _date  # noqa: PLC0415
+
+    out: dict[tuple[int, int], float] = {}
+    for d, v in series:
+        if v > 0:
+            y, w, _ = _date.fromisoformat(d).isocalendar()
+            out[(y, w)] = v          # later dates overwrite, so this ends on the week's last close
+    return out
+
+
+def _holding_risk(isins: list[str], benchmark_label: str,
+                  years: int = VOL_YEARS) -> dict[str, dict]:
+    """{isin: {"vol_5y_pct", "beta_5y", "mom_12_1_pct"}} from the daily EUR close.
+
+    ⚠⚠ ONE LOAD FOR BOTH FIGURES. Volatility and beta read the same series over the same window, so
+    computing them apart would be two panels of the same data and two chances for the two columns
+    beside each other to disagree about how much history a row has.
+
+    ⚠⚠ BETA IS ALIGNED ON DATES, NEVER ZIPPED. A Stockholm listing and a London-traded ETF do not
+    share a calendar — Midsummer, Ascension, a US holiday — so pairing the two return series by
+    POSITION silently offsets them from the first mismatched holiday onward and produces a
+    perfectly plausible beta computed against the wrong days. The intersection of the two date sets
+    is the only honest pairing, and it is why this cannot be a `zip`.
+
+    ⚠ AGAINST THE BENCHMARK THE READER PICKED, through its investable tracker
+    (`_BENCHMARK_RISK_ETF`) — a real fund with a real daily series, in the same price world as the
+    holdings. The reconstructed index has no tradeable series to regress against, and regressing on
+    something priced another way would put the vendor difference in the beta.
+
+    ⚠ A DASH IS NOT A ZERO, AND FOR BETA THAT MATTERS MORE THAN FOR VOL: beta 0 means "moves
+    independently of the market", which is a strong claim about a stock we simply cannot measure.
+    Too little history, or a benchmark with no tracker, leaves the key absent.
+    """
+    import numpy as np  # noqa: PLC0415
+    import pandas as pd  # noqa: PLC0415
+
+    from momentum.diversification import annualized_stats  # noqa: PLC0415
+    from signal_engine.daily import compute_single_company_signals  # noqa: PLC0415
+
+    from routers._asset_financials import _BENCHMARK_RISK_ETF  # noqa: PLC0415
+
+    want = [i for i in dict.fromkeys(isins) if i]
+    if not want:
+        return {}
+    bench_isin = _BENCHMARK_RISK_ETF.get((benchmark_label or "").upper())
+    floor = _min_bars(years)
+
+    try:
+        series = _daily_eur(want + ([bench_isin] if bench_isin else []), years)
+    except Exception as e:  # noqa: BLE001 — one missing column must never cost the whole modal
+        _log.warning("[analysis] per-holding risk failed (%s: %s)", type(e).__name__, e)
+        return {}
+
+    bench_w = _by_week(series.get(bench_isin or "", []))
+    # ⚠ FOUR YEARS OF WEEKS, mirroring the daily floor — the two columns must not disagree about
+    # which rows have enough history.
+    floor_w = int(52 * (years - 1))
+
+    out: dict[str, dict] = {}
+    for isin in want:
+        eur = [(d, v) for d, v in series.get(isin, []) if v > 0]
+        if len(eur) < 2:
+            continue
+        row: dict = {}
+
+        # ── MOMENTUM ────────────────────────────────────────────────────────────────────────
+        # ⚠⚠ `mom_12_1` FROM THE SIGNAL ENGINE, NOT THE STRATEGY'S `momentum_score`. That score is
+        # a min-max normalisation ACROSS THE UNIVERSE it was computed over (`scoring._score_
+        # category`), so the same stock scores differently against the S&P than against ACWI, two
+        # outliers set the scale for the other 498, and a holding in no strategy's universe has no
+        # score at all. It ranks within a run; it is not a property of the stock, which is exactly
+        # what a column comparing stocks to each other needs.
+        #
+        # ⚠ THE ENGINE'S OWN FUNCTION, so there is ONE definition of 12-1 momentum in this codebase
+        # — the same one `/signal-lab` charts and the backtester trades on. Reimplementing "twelve
+        # months, skipping the last" is four lines and a second answer.
+        #
+        # ⚠ ITS OWN HISTORY REQUIREMENT, WHICH IS SHORTER THAN VOL'S. 12-1 needs ~13 months; the
+        # risk columns need four years. A stock that listed two years ago therefore gets a momentum
+        # figure and a dash for vol — which is right, and why this is computed before the floor.
+        try:
+            ser = pd.Series([v for _d, v in eur],
+                            index=pd.to_datetime([d for d, _v in eur])).sort_index()
+            mom = compute_single_company_signals(ser).get("mom_12_1")
+            if mom is not None:
+                row["mom_12_1_pct"] = float(mom)
+        except Exception as e:  # noqa: BLE001 — one column must never cost the modal
+            _log.warning("[analysis] momentum failed for %s (%s: %s)", isin, type(e).__name__, e)
+
+        if len(eur) < floor:
+            if row:
+                out[isin] = row
+            continue
+        vals = np.asarray([v for _d, v in eur], dtype=float)
+        # ⚠ THROUGH `annualized_stats` — THE ONE DEFINITION OF VOL IN THIS CODEBASE, shared with the
+        # AIRS model-portfolio metrics and the monthly diversifier. `std(r, ddof=1) × √252` is two
+        # lines to write, and the second place it exists is the place that disagrees.
+        st = annualized_stats((vals[1:] / vals[:-1] - 1.0).tolist(), periods_per_year=252)
+        if st.ann_vol is not None:
+            row["vol_5y_pct"] = round(st.ann_vol * 100.0, 1)
+
+        if bench_w:
+            # ⚠⚠ WEEKLY, AND THAT IS NOT A PERFORMANCE CHOICE — IT IS THE ONLY HONEST CADENCE HERE.
+            # The benchmark trackers are LONDON-listed (ISAC.L, 0KZC.L) and close at 16:30 London;
+            # a US holding closes at 21:00. So half a US stock's trading day lands in the NEXT
+            # benchmark bar, and the daily correlation is mechanically halved — the classic
+            # non-synchronous-trading bias, downward, on every beta.
+            #
+            # Measured 2026-08-18 on this book: Microsoft vs ACWI came out at corr 0.38 / beta 0.72
+            # on daily returns (its true beta is ~1.05), and 0.50 / 1.04 on weekly. AMD 1.41 → 1.98,
+            # ASML 1.27 → 1.74. Weekly spans the gap, so the mismatch washes out; ~260 observations
+            # over five years is a healthy sample.
+            #
+            # ⚠ THE VOL COLUMN STAYS DAILY, and the difference is deliberate. Volatility is a
+            # SINGLE-series statistic — nothing to be out of sync with — and daily is the standard
+            # basis for it. Beta is a PAIR, and only the pair has this problem.
+            weeks = sorted(set(_by_week(eur)) & set(bench_w))
+            if len(weeks) >= floor_w:
+                sv = _by_week(eur)
+                a = np.asarray([sv[w] for w in weeks], dtype=float)
+                b = np.asarray([bench_w[w] for w in weeks], dtype=float)
+                ra, rb = a[1:] / a[:-1] - 1.0, b[1:] / b[:-1] - 1.0
+                var_b = float(np.var(rb, ddof=1))
+                # A flat benchmark has no variance to divide by; `n/a` beats an infinity.
+                if var_b > 0:
+                    cov = float(np.cov(ra, rb, ddof=1)[0][1])
+                    row["beta_5y"] = round(cov / var_b, 2)
+        if row:
+            out[isin] = row
     return out
 
 

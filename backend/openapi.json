@@ -3929,6 +3929,17 @@
             ],
             "title": "Avg Capital Eur"
           },
+          "beta_5y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beta 5Y"
+          },
           "bucket": {
             "title": "Bucket",
             "type": "string"
@@ -4004,6 +4015,17 @@
             ],
             "title": "Income Eur"
           },
+          "is_fund": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Fund"
+          },
           "isin": {
             "anyOf": [
               {
@@ -4014,6 +4036,17 @@
               }
             ],
             "title": "Isin"
+          },
+          "mom_12_1_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mom 12 1 Pct"
           },
           "money_weighted_return_pct": {
             "anyOf": [
@@ -4230,6 +4263,17 @@
             },
             "title": "Via Names",
             "type": "array"
+          },
+          "vol_5y_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vol 5Y Pct"
           },
           "weight_now_pct": {
             "default": 0.0,
