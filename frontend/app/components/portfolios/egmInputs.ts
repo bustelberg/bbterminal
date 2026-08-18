@@ -49,6 +49,25 @@ const FCF_CODES = [
   'annuals__Cashflow Statement__Free Cash Flow',
   'annuals__cashflow_statement__Free Cash Flow',
 ];
+/** The three lines the Reverse DCF normalises FCF with — see `normalisedFcf` for the arithmetic. */
+const SBC_CODES = [
+  'annuals__Cashflow Statement__Stock Based Compensation',
+  'annuals__cashflow_statement__Stock Based Compensation',
+];
+const CAPEX_CODES = [
+  'annuals__Cashflow Statement__Capital Expenditure',
+  'annuals__cashflow_statement__Capital Expenditure',
+];
+/**
+ * ⚠ THE **CASH FLOW** DEPRECIATION LINE, NOT THE INCOME STATEMENT'S. GuruFocus files both
+ * (`Income Statement__Depreciation, Depletion and Amortization` and this one) and they are not
+ * always equal. Capex comes off the cash flow statement, so its maintenance proxy has to as well —
+ * comparing a cash figure with an accrual one is a difference in basis dressed up as growth spend.
+ */
+const DEP_CODES = [
+  'annuals__Cashflow Statement__Cash Flow Depreciation, Depletion and Amortization',
+  'annuals__cashflow_statement__Cash Flow Depreciation, Depletion and Amortization',
+];
 
 export type EgmSource = {
   price: number | null;
@@ -206,15 +225,24 @@ export type ReverseDcfSource = {
   fcf: number | null;
   /** The company's own cost of capital, as a DECIMAL — the discount rate's default. */
   wacc: number | null;
+  /** The normalisation legs, in the vendor's own signs (capex NEGATIVE). ⚠ Passed through rather
+   *  than folded into `fcf`, so the panel can show reported and corrected side by side and a
+   *  reader can see which corrections actually ran. See `normalisedFcf`. */
+  sbc: number | null;
+  capex: number | null;
+  dep: number | null;
 };
 
 /**
  * The reverse-DCF's inputs, from the same payload.
  *
- * Three figures, nothing derived: the share price, the share count and the latest reported free
- * cash flow. ⚠ THE FCF IS AS FILED — no growth-capex add-back, no stock-comp deduction, no forward
- * estimate. A plain DCF compounds the cash flow the company reported, and every adjustment on top
- * of that is an opinion the reader did not ask for.
+ * The share price, the share count, the latest reported free cash flow — and the three lines that
+ * normalise it (stock comp, capex, cash-flow depreciation).
+ *
+ * ⚠ `fcf` IS STILL EXACTLY AS FILED. The normalisation is computed from the legs beside it by
+ * `normalisedFcf`, never folded into the source figure — so the panel can show the reported number
+ * and the corrected one together, and a reader can see which adjustments actually ran. Folding
+ * them in here would make an adjusted figure indistinguishable from a vendor's.
  */
 /** One input as it was actually found: what the vendor filed (`raw`), what the model uses (`used`,
  *  sign-normalised where the two differ), and where it came from. */
@@ -223,6 +251,9 @@ export type SourceObs = {
 };
 export type ReverseDcfWorking = {
   price: SourceObs; shares: SourceObs; fcf: SourceObs; wacc: SourceObs;
+  /** The normalisation legs. ⚠ Each may be absent, and an absent one is NOT a zero — see
+   *  `normalisedFcf`: a company with no SBC line is not a company that pays none. */
+  sbc: SourceObs; capex: SourceObs; dep: SourceObs;
 };
 
 const NONE: SourceObs = { raw: null, used: null, date: null, code: null };
@@ -252,6 +283,12 @@ export function reverseDcfWorking(metrics: MetricRow[]): ReverseDcfWorking {
     price: latestObs(metrics, [PRICE_CODE]),
     shares: latestObs(metrics, SHARES_CODES),
     fcf: latestObs(metrics, FCF_CODES),
+    sbc: latestObs(metrics, SBC_CODES),
+    // ⚠ NOT `magnitude: true`. The vendor files capex NEGATIVE and `growthCapex` takes the
+    // magnitude itself; normalising the sign here too would leave the drill-down showing a
+    // positive number under "as filed", which is the one thing that panel exists to show.
+    capex: latestObs(metrics, CAPEX_CODES),
+    dep: latestObs(metrics, DEP_CODES),
     // ⚠ FILED AS A PERCENT, like every other `… %` line — 8.2 means 8.2%. Passed through unscaled
     // it would be an 820% discount rate, and every company on earth would read as worthless.
     wacc: asDecimal(latestObs(metrics, WACC_CODES)),
@@ -262,6 +299,7 @@ export function reverseDcfSource(metrics: MetricRow[]): ReverseDcfSource {
   const w = reverseDcfWorking(metrics);
   return {
     price: w.price.used, sharesOutstanding: w.shares.used, fcf: w.fcf.used, wacc: w.wacc.used,
+    sbc: w.sbc.used, capex: w.capex.used, dep: w.dep.used,
   };
 }
 

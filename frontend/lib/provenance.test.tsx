@@ -18,8 +18,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { describe, expect, it } from 'vitest';
 
-import { INFO_ICON_WARN } from './infoIcon';
-import { Provenance, ProvenanceFetchedAt } from './provenance';
+import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
+import { Provenance, ProvenanceFetchedAt, provenanceFreshness } from './provenance';
 import { snapshotFreshness } from './snapshotAge';
 
 /** Years back, so it is stale under any definition of "trading days behind" — the test must not
@@ -100,12 +100,19 @@ describe('a subtree can supply the fetch time once, for all of its icons', () =>
 
   it('an icon with no fetchedAt of its own inherits the provider’s', () => {
     /** The expanded account panel renders 40 of these against one book — see
-     *  `ProvenanceFetchedAt`. Without the provider each one would go amber on AIRS's lag. */
+     *  `ProvenanceFetchedAt`. Without the provider each one would go amber on AIRS's lag.
+     *
+     *  ⚠⚠ IT ASSERTS THE **AGED** STATE, NOT MERELY "NOT AMBER", AND THAT WEAKNESS IS WHAT LET
+     *  THE BUG THROUGH. `not.toContain(INFO_ICON_WARN)` also passes when the icon is the ordinary
+     *  BLUE one — which is precisely what shipped: a card reading blue on the outside and
+     *  "⚠ 3 trading days old" on the inside. A negative assertion about one of three states says
+     *  nothing about which of the other two you got. */
     const html = renderToStaticMarkup(
       <ProvenanceFetchedAt at={`${today}T13:15:00Z`}>
         <Provenance source="airs_volk" asOf={LONG_AGO} kind="formula" note="a value" />
       </ProvenanceFetchedAt>,
     );
+    expect(html).toContain(INFO_ICON);
     expect(html).not.toContain(INFO_ICON_WARN);
   });
 
@@ -156,3 +163,76 @@ describe('a subtree can supply the fetch time once, for all of its icons', () =>
 // static render contains the chip and nothing else — reaching it would need an event-driven
 // render, which is the browser-test machinery this repo does not keep. The chip's colour and
 // glyph ARE the at-a-glance signal, and those are what the two tests above pin.
+
+/**
+ * ⚠⚠ THE ⓘ AND ITS CARD MUST ALWAYS SAY THE SAME THING (2026-08-18).
+ *
+ * Reported: an account row whose ⓘ was BLUE while the card it opened read "2026-08-13 · 3 trading
+ * days old" in AMBER. Two answers to one question, one hover apart. The cause was two
+ * computations: the icon read `lagOwner(asOf, fetchedAt)`, the card's When pill read
+ * `snapshotFreshness(asOf)` ALONE. Both are now `provenanceFreshness`, which is why these tests
+ * assert the icon and the pill together rather than either on its own.
+ *
+ * ⚠⚠ AND "CURRENT" MEANS OUR COPY MATCHES THE SOURCE. If we fetched today and the source has
+ * published nothing since, the figure IS current — it is the whole of what is knowable. A middle
+ * state for "old, but not ours to fix" was tried and removed the same day: either the data is
+ * current or it is not, and what date the source stamped on its own valuation is a fact about the
+ * source, stated plainly in the When line rather than coloured as a fault.
+ */
+describe('the icon and its card carry ONE verdict', () => {
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+
+  /** The card is rendered only while the tip is open, so the pill is asserted through
+   *  `provenanceFreshness` directly — the same function the icon reads. */
+  it('⚠ THE REPORTED CASE — read yesterday, valued days ago: BLUE, and the pill is not amber', () => {
+    const html = renderToStaticMarkup(
+      <Provenance source="airs_att" asOf={LONG_AGO} fetchedAt={`${yesterday}T13:00:00Z`}
+        kind="copied" note="a value" />,
+    );
+    expect(html).toContain(INFO_ICON);
+    expect(html).not.toContain(INFO_ICON_WARN);
+    // ...and the card agrees, because it is the same call.
+    expect(provenanceFreshness(LONG_AGO, `${yesterday}T13:00:00Z`).stale).toBe(false);
+  });
+
+  it('the date is still SHOWN when it is the source that is behind — just not as a fault', () => {
+    const f = provenanceFreshness(LONG_AGO, `${yesterday}T13:00:00Z`);
+    expect(f.stale).toBe(false);
+    expect(f.label).toContain("the source's latest");
+  });
+
+  it('OUR lag is amber in both places', () => {
+    const html = renderToStaticMarkup(
+      <Provenance source="airs_att" asOf={LONG_AGO} fetchedAt={`${LONG_AGO}T09:00:00Z`}
+        kind="copied" note="a value" />,
+    );
+    expect(html).toContain(INFO_ICON_WARN);
+    expect(provenanceFreshness(LONG_AGO, `${LONG_AGO}T09:00:00Z`).stale).toBe(true);
+  });
+
+  it('⚠ UNKNOWN WHOSE LAG STAYS AMBER — most call sites pass no fetchedAt', () => {
+    // Silence there would hide the incident this signal exists for: a 4-day-old cached value
+    // reading EUR 114,587 / +142% against AIRS-live's EUR 107,086 / +126%.
+    expect(provenanceFreshness(LONG_AGO, undefined).stale).toBe(true);
+    expect(renderToStaticMarkup(
+      <Provenance source="airs_att" asOf={LONG_AGO} kind="copied" note="a value" />,
+    )).toContain(INFO_ICON_WARN);
+  });
+
+  it('a genuinely current figure is blue with no pill to contradict it', () => {
+    const f = provenanceFreshness(today, `${today}T09:00:00Z`);
+    expect(f.stale).toBe(false);
+    expect(renderToStaticMarkup(
+      <Provenance source="airs_att" asOf={today} fetchedAt={`${today}T09:00:00Z`}
+        kind="copied" note="a value" />,
+    )).toContain(INFO_ICON);
+  });
+
+  it('a column header is never stale in either place', () => {
+    expect(provenanceFreshness(LONG_AGO, undefined, true).stale).toBe(false);
+    expect(renderToStaticMarkup(
+      <Provenance source="airs_att" asOf={LONG_AGO} column kind="copied" note="a value" />,
+    )).not.toContain(INFO_ICON_WARN);
+  });
+});

@@ -8,6 +8,7 @@ import {
   PERPETUITY_GROWTH,
 } from './reverseDcf';
 import { type ReverseDcfSource } from './egmInputs';
+import { normalisedFcf } from './normalisedFcf';
 import ReverseDcfInputsModal from './ReverseDcfInputsModal';
 import { type MetricRow } from './quickValuation';
 
@@ -71,6 +72,42 @@ function Field({ label, value, onChange, suffix, info }: {
   );
 }
 
+/**
+ * A computed row in the input box — the same geometry as `Field`, without the input.
+ *
+ * ⚠⚠ THE WIDTHS ARE COPIED FROM `Field` ON PURPOSE (`w-24` value, `w-2` suffix, `w-9` info). These
+ * rows sit interleaved with the editable ones, so a value slot even a pixel narrower puts the
+ * numbers on two columns and the ⓘ on two more — the exact scattering the ⚠⚠ in `Field` records
+ * fixing. The box border is the only thing that differs, because these cannot be typed in.
+ *
+ * ⚠ `tone` CARRIES NO MEANING BEYOND EMPHASIS. The total is the figure the model actually values,
+ * so it is the one a reader's eye should land on; the two corrections are workings.
+ */
+function DerivedRow({ label, value, info, tone = 'step' }: {
+  label: string; value: string; info?: React.ReactNode; tone?: 'step' | 'total';
+}) {
+  const total = tone === 'total';
+  return (
+    <div className={`flex items-center gap-2 py-1 ${total ? 'border-t border-neutral-800/40' : ''}`}>
+      <span className={`min-w-0 flex-1 truncate text-[12px] ${
+        total ? 'text-fg-soft' : 'text-fg-faint'}`}>{label}</span>
+      {/* ⚠ `border border-transparent` MATCHES `Field`'s INPUT BORDER. Without it this span is 2px
+          shorter than an editable row's box, so the interleaved rows sit at slightly different
+          heights and the numbers drift off each other's baseline — visible precisely because the
+          four rows are meant to read as one sum. */}
+      <span className={`w-24 shrink-0 rounded border border-transparent px-1.5 py-0.5 text-right font-mono text-[12px] ${
+        total ? 'font-semibold text-fg-strong' : 'text-fg-muted'}`}>{value}</span>
+      <span className="w-2 shrink-0" />
+      <span className="flex w-9 shrink-0 items-center">{info}</span>
+    </div>
+  );
+}
+
+/** Appended to both correction cards — one sentence, one place. */
+const NORM_OFF = `
+
+Untick Normalise to value the reported figure instead.`;
+
 export default function ReverseDcfPanel({ src, currency, metrics, name, isin, growthEst }: {
   src: ReverseDcfSource; currency?: string | null;
   metrics: MetricRow[]; name?: string | null; isin: string;
@@ -87,8 +124,29 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   const [perpStr, setPerpStr] = useState<string | null>(null);
   const [yearsStr, setYearsStr] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
+  /**
+   * ⚠ DEFAULT ON, LIKE THE LONG EQUITY TAB'S SBC BOX AND FOR THE SAME REASON: the uncorrected
+   * figure is the flattering one on the SBC leg, and the reported one is the misleading one on the
+   * capex leg (it charges a decade of expansion against a single year). A reader who never touches
+   * this control should get the better number, not the raw one.
+   *
+   * ⚠ IT IS A MODE, NOT AN INPUT, and it still counts as `dirty` when switched OFF so `Reset`
+   * genuinely restores the panel's defaults rather than most of them.
+   */
+  const [normalise, setNormalise] = useState(true);
 
   // The defaults, derived here so the boxes and the model read the same numbers.
+  /**
+   * ⚠⚠ THE BOX HOLDS THE **REPORTED** FIGURE AND THE CORRECTIONS ARE THEIR OWN ROWS BENEATH IT.
+   * It used to hold the corrected number, which meant the one visible input silently disagreed
+   * with the vendor's filing and the only way to find out was to open a tooltip. A reader cannot
+   * check arithmetic they cannot see — so the base, each correction and the total are now four
+   * lines, and the total is what the model values.
+   *
+   * ⚠ AN OVERRIDE TYPED INTO THE BOX STILL FLOWS THROUGH THE CORRECTIONS, because it replaces the
+   * BASE rather than the result. Typing "the FCF was really 9,000" and having the stock comp
+   * silently stop being deducted would be a second, invisible edit.
+   */
   const defFcf = src.fcf;
   const defTarget = marketCapOf(src);
   const defPerp = PERPETUITY_GROWTH;
@@ -100,7 +158,13 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
     const v = parseFloat(s);
     return Number.isFinite(v) ? v : null;
   };
-  const fcf = num(fcfStr) ?? defFcf;
+  const baseFcf = num(fcfStr) ?? defFcf;
+  const norm = useMemo(
+    () => normalisedFcf({ fcf: baseFcf, sbc: src.sbc, capex: src.capex, dep: src.dep }),
+    [baseFcf, src.sbc, src.capex, src.dep]);
+  /** What the model actually values. ⚠ `?? baseFcf` covers the case where nothing was correctable;
+   *  `normalisedFcf` already returns `used === reported` there, so this is a null guard only. */
+  const fcf = normalise ? (norm.used ?? baseFcf) : baseFcf;
   const target = num(targetStr) ?? defTarget;
   const perpetuityGrowth = (num(perpStr) ?? defPerp * 100) / 100;
   const rate = (num(rateStr) ?? defRate * 100) / 100;
@@ -110,9 +174,11 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   const show = (s: string | null, def: number | null, dp = 0) =>
     (s != null ? s : def == null ? '' : def.toFixed(dp));
 
-  const dirty = [fcfStr, targetStr, rateStr, perpStr, yearsStr].some((s) => s != null);
+  const dirty = [fcfStr, targetStr, rateStr, perpStr, yearsStr].some((s) => s != null)
+    || !normalise;
   const reset = () => {
     setFcfStr(null); setTargetStr(null); setRateStr(null); setPerpStr(null); setYearsStr(null);
+    setNormalise(true);
   };
 
   const growth = useMemo(() => impliedGrowth(src, {
@@ -202,9 +268,22 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 beside it through the grid's stretch. The whole panel would jump because someone
                 typed a digit. `visibility: hidden` reserves the geometry and still takes it out of
                 the tab order and the accessibility tree, which `disabled` would not. */}
+            {/* ⚠ `ml-auto` MOVED HERE FROM `Reset`, so the group stays right-aligned as one. The
+                checkbox is always mounted — it is not conditional on anything — so it cannot make
+                the header row grow or shrink under the reader. */}
+            <label className="ml-auto flex items-center gap-1.5 text-[11px] text-fg-soft cursor-pointer whitespace-nowrap"
+              title={'Value free cash flow net of stock compensation and before growth capex.\n\n'
+                + 'SBC is subtracted: it is a real cost that never leaves the cash flow statement.\n'
+                + 'Growth capex (capex above depreciation) is ADDED BACK: reported FCF already '
+                + 'subtracted it, and it buys the very growth this model is solving for.'}>
+              <input type="checkbox" checked={normalise}
+                onChange={(e) => setNormalise(e.target.checked)}
+                className="accent-accent-600 w-3.5 h-3.5" />
+              Normalise
+            </label>
             <button type="button" onClick={reset} aria-hidden={!dirty} tabIndex={dirty ? 0 : -1}
               title="Put every input back to its default"
-              className={`ml-auto rounded border border-neutral-700 px-1.5 py-0.5 text-[11px] text-fg-soft hover:bg-overlay/5 ${
+              className={`rounded border border-neutral-700 px-1.5 py-0.5 text-[11px] text-fg-soft hover:bg-overlay/5 ${
                 dirty ? '' : 'invisible'}`}>
               Reset
             </button>
@@ -217,7 +296,57 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 what="Latest reported free cash flow."
                 where="GuruFocus — cashflow statement, as filed."
                 when="Most recent fiscal year."
-                how={`Raw data, no formula. The box holds MILLIONS${defFcf != null ? ` — ${mn(defFcf)} is ${scaled(defFcf)}` : ''}.`} />} />} />
+                how={`Raw data, no formula. Operating cash flow minus TOTAL capital expenditure — which is why the growth-capex row below ADDS back rather than subtracting.${defFcf != null ? ` The box holds MILLIONS — ${mn(defFcf)} is ${scaled(defFcf)}.` : ' The box holds MILLIONS.'}`} />} />} />
+
+            {/* ⚠⚠ THE CORRECTIONS ARE ROWS, NOT A TOOLTIP. They were both folded into the figure
+                above with the working hidden behind an ⓘ, which meant the one number on screen
+                disagreed with the company's filing and nothing said so. Three lines and a total
+                cost four rows of height and make the arithmetic checkable at a glance.
+
+                ⚠ ALWAYS MOUNTED, INCLUDING WHEN `Normalise` IS OFF — they then read `—` and the
+                total falls back to the reported figure. Hiding them would resize the input box,
+                which resizes the OUTPUT box beside it through the grid's stretch, so the whole
+                panel would jump on a checkbox. Same rule as the Reset button above. */}
+            <DerivedRow label="− Stock compensation"
+              value={normalise && norm.applied.sbc ? mn(norm.sbc) : '—'}
+              info={<InfoTip content={<AspectCard
+                what="Stock-based compensation, subtracted."
+                where="GuruFocus — cashflow statement."
+                when="Most recent fiscal year."
+                how={norm.applied.sbc
+                  ? `A real cost that never leaves the cash flow statement: it is added back into operating cash flow as a non-cash charge, so reported FCF flatters every company that pays people in equity. The shares are issued and the holder bears the dilution.${NORM_OFF}`
+                  : 'Not reported for this company, so nothing is subtracted. ⚠ An absent line is not a zero — this is not a company that pays no stock compensation, it is one we have no figure for.'} />} />} />
+            <DerivedRow label="+ Growth capex"
+              value={normalise && norm.applied.growthCapex ? mn(norm.growthCapex) : '—'}
+              info={<InfoTip content={<AspectCard
+                what="Capital spending above depreciation, added back."
+                where="GuruFocus — cashflow statement: capital expenditure and cash-flow depreciation."
+                when="Most recent fiscal year."
+                how={norm.applied.growthCapex
+                  ? `capex ${mn(Math.abs(src.capex as number))} − depreciation ${mn(src.dep)} = ${mn(norm.growthCapex)}, floored at zero.
+
+⚠ ADDED, NOT SUBTRACTED, because reported FCF already took ALL capex out. What sustains the business is maintenance capex; the excess buys the growth this model is solving for, so leaving it in charges the same expansion twice — once as a cost and again as the thing to explain.
+
+⚠ Depreciation is a PROXY for maintenance capex, not a measurement, and it is weakest for a company building an asset base for the first time: new plant depreciates far less than it costs to build, so nearly all of its capex reads as growth.
+
+⚠ Floored at zero: spending BELOW depreciation is under-investment, and treating that shortfall as a windfall would reward exactly what hollows a business out.${NORM_OFF}`
+                  : 'Capital expenditure or cash-flow depreciation is not reported for this company, so nothing is added back. ⚠ An absent line is not a zero.'} />} />} />
+            <DerivedRow tone="total"
+              label={`Cash flow valued${currency ? ` (${currency}m)` : ' (m)'}`}
+              value={fcf == null ? 'n/a' : mn(fcf)}
+              info={<InfoTip content={<AspectCard
+                what="The figure the model actually discounts."
+                where="Computed here from the three rows above."
+                when="Most recent fiscal year."
+                how={normalise
+                  ? `${mn(baseFcf)} reported${norm.applied.sbc ? ` − ${mn(norm.sbc)} stock comp` : ''}${norm.applied.growthCapex ? ` + ${mn(norm.growthCapex)} growth capex` : ''} = ${mn(fcf)}${
+                    !norm.applied.sbc || !norm.applied.growthCapex
+                      ? `
+
+⚠ ${[!norm.applied.sbc ? 'Stock compensation' : null, !norm.applied.growthCapex ? 'Capex or depreciation' : null].filter(Boolean).join(' and ')} not reported, so that correction did not run.`
+                      : ''}`
+                  : 'Normalise is off, so this is the reported free cash flow unchanged — stock compensation is not deducted and growth capex is not added back.'} />} />} />
+
             <Field label={`Target market cap${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(targetStr, defTarget)} onChange={setTargetStr}
               info={<InfoTip content={<AspectCard
@@ -356,7 +485,19 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
             Implied growth by discount rate
           </div>
           <div className="overflow-x-auto rounded-lg border border-neutral-800/40 max-w-full">
-            <table className="text-xs">
+            {/* ⚠⚠ `w-full` HERE, WHERE THE `Tables` TAB DELIBERATELY USES `w-fit` — the two look
+                like contradictory rules and are the same rule applied to opposite shapes. That
+                table is seven short percentages in a wide modal, so stretching it makes most of it
+                the gaps between its own numbers. This one is FIFTEEN columns that already fill the
+                card; sized to content it stops short of the two rectangles above it and the
+                trailing whitespace reads as a rendering fault rather than a narrow table.
+
+                ⚠ IT STILL SCROLLS ON A NARROW VIEWPORT. Every cell is `whitespace-nowrap`, so the
+                table's minimum width is its content width — `w-full` only ever ADDS space, it
+                cannot compress the columns into each other, and the `overflow-x-auto` wrapper
+                keeps its job. ⚠ NOT `table-fixed`, which would force the sticky label column to
+                the same width as a percentage cell. */}
+            <table className="w-full text-xs">
               <tbody>
                 <tr className="border-b border-neutral-800/40 bg-page">
                   <th className="px-2 py-1 text-left font-medium text-fg-faint text-[11px] uppercase tracking-wide sticky left-0 bg-page">

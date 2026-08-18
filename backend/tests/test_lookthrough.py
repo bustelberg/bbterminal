@@ -194,11 +194,21 @@ class TestTheBookSideIsExpandedToo:
     a toggle.
     """
 
-    def test_value_is_conserved_by_the_expansion(self):
+    def test_value_is_conserved_by_the_expansion(self, monkeypatch):
         """A composition chart that changes the book's total is worse than an opaque one: every
-        percentage on it is a share of a total the reader can no longer check."""
+        percentage on it is a share of a total the reader can no longer check.
+
+        ⚠ `_grid` IS PATCHED HERE AND DID NOT USED TO BE. Every row below already carries a
+        `bucket`, and `_reclassify_book_rows` used to return immediately in that case. Since the
+        `Equity ETF` merge (2026-08-18) it reads the asset grid for EVERY row instead, because
+        `is_fund` has to be on all of them — the bucket no longer distinguishes a fund from an
+        operating company, and the Analyse modal gates owner-earnings blending on that distinction.
+        The lookup is the same one the sibling tests below already stub.
+        """
+        from routers import _airs_portfolio_analysis as A
         from routers._airs_portfolio_analysis import _expand_book_rows
 
+        monkeypatch.setattr(A, "_grid", lambda isins: {})
         rows = [
             {"isin": "CH0000000001", "holding_name": "Star Selection Index",
              "current_value_eur": 100.0, "start_value_eur": 80.0,

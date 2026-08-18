@@ -17,7 +17,7 @@ import InfoTip from '../app/components/InfoTip';
 import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
 import { Field, TipCard } from './tipCard';
 import { trimStop } from './provenanceText';
-import { lagOwner, snapshotFreshness, type SnapshotTone } from './snapshotAge';
+import { lagOwner, snapshotFreshness } from './snapshotAge';
 
 export type SourceKey =
   | 'airs_volk'      // AIRS Vermogensoverzicht — the book's own EUR position values
@@ -48,14 +48,51 @@ const SOURCE: Record<SourceKey, { label: string }> = {
 
 /** The as-of freshness as a small coloured pill: green "current", neutral "1 trading day old",
  *  amber for genuinely stale. The one element in the card that carries colour on purpose. */
-function FreshnessPill({ tone, label }: { tone: SnapshotTone; label: string }) {
-  const cls =
-    tone === 'stale' ? 'bg-warn-500/15 text-warn-600 border-warn-500/40'
-      : tone === 'ok' ? 'bg-neutral-500/10 text-fg-muted border-neutral-700/40'
-        : 'bg-pos-500/15 text-pos-600 border-pos-500/40';
+/**
+ * THE ONE FRESHNESS VERDICT — is what we hold current, or is it not?
+ *
+ * ⚠⚠ IT IS ONE FUNCTION BECAUSE THE ICON AND THE CARD MUST NEVER DISAGREE. They were computed
+ * apart: the icon from `lagOwner(asOf, fetchedAt)` and the card's pill from `snapshotFreshness
+ * (asOf)` alone. So an account read yesterday, valued by AIRS three trading days ago, rendered a
+ * BLUE icon over a card whose When pill said "⚠ 3 trading days old" in amber — two answers to one
+ * question, one hover apart. Anything that colours a provenance signal reads this.
+ *
+ * ⚠⚠ CURRENT MEANS OUR COPY MATCHES THE SOURCE, AND THAT IS THE WHOLE DEFINITION. If we fetched
+ * today and the source has published nothing since, the figure IS current: it is the entirety of
+ * what is knowable. An earlier model called that case "old, but not ours to fix" and gave it a
+ * third colour — a distinction no reader asked for. What date the source chose to stamp on its
+ * valuation is a fact ABOUT THE SOURCE; the When line states it plainly and it is not a defect in
+ * what we hold.
+ *
+ * ⚠ STALE WHEN WE CANNOT TELL. Most call sites pass no `fetchedAt`, and silence there would hide
+ * the incident this signal exists for — a 4-day-old cached value reading €114,587 / +142% against
+ * AIRS-live's €107,086 / +126%, with nothing on the page saying it came from a past scan.
+ *
+ * ⚠ A COLUMN HEADER IS NEVER STALE. It describes a column; staleness is a property of one
+ * observation. The guard lives here rather than at ~90 call sites.
+ */
+export function provenanceFreshness(
+  asOf: string | null | undefined, fetchedAt: string | null | undefined, column?: boolean,
+): { stale: boolean; label: string } {
+  if (column || !asOf) return { stale: false, label: '' };
+  const f = snapshotFreshness(asOf);
+  if (f?.tone !== 'stale') return { stale: false, label: f?.label ?? '' };
+  const lag = lagOwner(asOf, fetchedAt);
+  // The source is behind, not us — see the ⚠⚠ above. The date still shows; it just is not a fault.
+  if (lag?.side === 'source') return { stale: false, label: `${f.label} — the source's latest` };
+  return { stale: true, label: f.label };
+}
+
+function FreshnessPill({ stale, label }: { stale: boolean; label: string }) {
+  if (!label) return null;
+  // ⚠ THE SAME TWO COLOURS THE ICON HAS, DRIVEN BY THE SAME BOOLEAN. A third tone here is how the
+  // pill and the badge came to disagree in the first place.
+  const cls = stale
+    ? 'bg-warn-500/15 text-warn-600 border-warn-500/40'
+    : 'bg-neutral-500/10 text-fg-muted border-neutral-700/40';
   return (
     <span className={`px-1.5 py-px rounded-full text-[10px] font-medium border whitespace-nowrap ${cls}`}>
-      {tone === 'fresh' ? 'current' : label}
+      {label}
     </span>
   );
 }
@@ -84,13 +121,17 @@ export type ProvKind = 'copied' | 'formula';
  * it is the same shell with a different field promoted, and it keeps every call site that has not
  * been given a `what` yet rendering correctly rather than showing an empty heading.
  */
-function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what }: {
+function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what, fresh }: {
   source: SourceKey; asOf?: string | null; fetchedAt?: string | null;
   note?: string; how?: string; kind?: ProvKind;
   column?: boolean; what?: string;
+  /** The one verdict — see `provenanceFreshness`. Passed so the card cannot differ from the icon. */
+  fresh: { stale: boolean; label: string };
 }) {
   const s = SOURCE[source];
-  const f = asOf ? snapshotFreshness(asOf) : null;
+  // ⚠ THE VERDICT IS PASSED IN, NOT RECOMPUTED. See `provenanceFreshness`: this card recomputing
+  // it from `asOf` alone is precisely how it came to contradict the icon that opened it.
+  const f = fresh;
   /**
    * ⚠⚠ WHOSE LAG IS IT. `asOf` is the day AIRS VALUED the book; `fetchedAt` is the moment we last
    * READ it. Only the second is ours to fix, and the card used to show only the first — so an old
@@ -122,7 +163,7 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
               ? (
                 <span className="flex items-center gap-1.5 flex-wrap">
                   <span className="font-mono text-fg">{asOf}</span>
-                  {f && <FreshnessPill tone={f.tone} label={f.label} />}
+                  <FreshnessPill stale={f.stale} label={f.label} />
                 </span>
               )
               : <span className="text-fg-muted">no dated source (a structural / computed value)</span>}
@@ -230,18 +271,20 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
   // answer — about the same account — is the better one.
   const ctxFetchedAt = useContext(FetchedAtContext);
   const fetched = fetchedAt ?? ctxFetchedAt;
-  const lag = column ? null : lagOwner(asOf, fetched);
-  const stale = !column && asOf
-    ? snapshotFreshness(asOf)?.tone === 'stale' && lag?.side !== 'source'
-    : false;
+  // ⚠⚠ COMPUTED ONCE AND HANDED TO BOTH — the icon below and the card's When pill. Two
+  // computations of "is this current" in one component is what produced a blue ⓘ over an amber
+  // "3 trading days old".
+  const fresh = provenanceFreshness(asOf, fetched, column);
   return (
     <InfoTip content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note}
-      how={how} kind={kind} column={column} what={what} />}>
+      how={how} kind={kind} column={column} what={what} fresh={fresh} />}>
       <span
-        className={`ml-1 ${stale ? INFO_ICON_WARN : INFO_ICON}`}
-        aria-label="data source and formula"
+        className={`ml-1 ${fresh.stale ? INFO_ICON_WARN : INFO_ICON}`}
+        // ⚠ THE STATE IS IN THE LABEL, NOT ONLY IN THE HUE. A colour is the whole signal for a
+        // sighted reader and none of it for anyone else.
+        aria-label={`data source and formula${fresh.stale ? ' — not current; refresh to update' : ''}`}
       >
-        {stale ? '!' : 'i'}
+        {fresh.stale ? '!' : 'i'}
       </span>
     </InfoTip>
   );

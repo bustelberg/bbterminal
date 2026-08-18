@@ -1753,7 +1753,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                 ISIN
               </th>
               <th className="px-3 py-1.5 font-medium text-left"
-                title="Smart asset-class label — Stocks · Stock ETF · Bonds · Alternatives · Cash · Unclassified (genuinely unsure). AIRS's own class first, then the instrument's grid data and name.">
+                title="Smart asset-class label — Stocks · Bonds · Alternatives · Cash · Unclassified (genuinely unsure). Every class names what the holding INVESTS IN, so an equity ETF is Stocks and a bond ETF is Bonds. AIRS's own class first, then the instrument's grid data and name.">
                 Class
               </th>
               {/* ⚠ Some holdings are not instruments — they are other model portfolios, wrapped as

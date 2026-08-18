@@ -193,6 +193,18 @@ _DASHBOARD_METRIC_CODES = [
     "annuals__Ratios__Net Margin %",
     # Financials — Cashflow / Income
     "annuals__Cashflow Statement__Free Cash Flow",
+    # ⚠⚠ THE THREE LINES THE REVERSE DCF NORMALISES FCF WITH — added 2026-08-18, and their absence
+    # is worth recording because NOTHING SAID THEY WERE MISSING. The rows are in `metric_data` for
+    # every company (ASML: SBC 202.3, capex -1631.2, D&A 1025.9); this list is an ALLOWLIST, so
+    # codes not on it are simply never sent. `latestObs` then found nothing, `normalisedFcf`
+    # correctly reported the correction as not-applicable, and the panel rendered an honest "—"
+    # for a company that files all three. Every layer behaved; the data stopped at the door.
+    #
+    # ⚠ THE CASH-FLOW DEPRECIATION LINE, NOT THE INCOME STATEMENT'S. Capex is a cash figure, so its
+    # maintenance proxy has to be one too — see `DEP_CODES` in `egmInputs.ts`.
+    "annuals__Cashflow Statement__Stock Based Compensation",
+    "annuals__Cashflow Statement__Capital Expenditure",
+    "annuals__Cashflow Statement__Cash Flow Depreciation, Depletion and Amortization",
     "annuals__Income Statement__Revenue",
     "annuals__Income Statement__Operating Income",
     "annuals__Income Statement__Interest Expense",
@@ -1575,24 +1587,6 @@ _TTM_RULE: dict[str, str] = {
 }
 
 
-def _daily_closes(company_id: int, since: str = "2015-01-01") -> dict[str, float]:
-    """{date: close} — GuruFocus's own daily close for one company.
-
-    ⚠ THIS SERIES, NOT yfinance's `asset_price`, AND THE REASON IS CURRENCY. The Long Equity tab
-    lives in the `company` world and its per-share lines are in the company's REPORTING currency;
-    `asset_price` lives in the `asset_execution` world, reachable only by ISIN, and that bridge
-    carries every wrong-listing hazard this repo documents — a US megacap priced on a thin German
-    line, or `GBp` pence against fundamentals in `GBP`, which is a 100x error that still looks like
-    a number. This series needs no bridge and no conversion: measured on ASML, GuruFocus's annual
-    `Month End Stock Price` IS a sample of it (681.7 / 678.7 / 921.4 at the last three year-ends,
-    ratio 1.0000), so swapping the annual point for the daily one changes the frequency and
-    nothing else.
-    """
-    return {str(r["target_date"])[:10]: float(r["numeric_value"])
-            for r in _page_metrics(company_id, "close_price", exact=True)
-            if r.get("numeric_value") is not None and str(r["target_date"])[:10] >= since}
-
-
 def _step_onto_dates(ttm: dict[str, float], dates: list[str]) -> dict[str, float]:
     """A quarterly TTM series carried across daily dates — the value stays flat until the next
     fiscal period end, which is what makes a daily yield a yield rather than an interpolation.
@@ -1618,15 +1612,79 @@ def _step_onto_dates(ttm: dict[str, float], dates: list[str]) -> dict[str, float
     return out
 
 
-def _daily_metric(company_id: int, metric: str, dates: list[str]) -> dict[str, float]:
-    """A metric's TTM value carried onto `dates` — the numerator of a daily yield."""
-    rule = _TTM_RULE.get(metric)
-    if rule is None:
+def _daily_closes_bulk(company_ids: list[int],
+                       since: str = "2015-01-01") -> dict[int, dict[str, float]]:
+    """{company_id: {date: close}} — the bulk twin of `_daily_closes`, in ONE read.
+
+    ⚠⚠ THE DAILY BRANCHES WERE THE ONE PATH THAT NEVER GOT A BULK READ. Both yield cards carry
+    "⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — a benchmark request carries an index's 489
+    constituents, where the per-company path is 72s" directly above them, and then called
+    `_page_metrics` once per company per code two lines below it. Measured 2026-08-18 on a
+    19-holding book, LOCALLY: the dividend-yield card alone took 116 round trips and 4.58s. The
+    FCF/SBC card reads four series per company, so it is worse. At eu-west-3 latency that is
+    another 5-9s of pure network, and the same endpoints serve the BENCHMARK overlay — where the
+    constituent count is not 19 but ~500 to ~2,000.
+
+    ⚠ THROUGH `timeseries.load_series`, WHICH IS ONE `COPY`. That façade exists for exactly this
+    read (`gf.close` = `company_id` + `metric_data`), and CLAUDE.md records the measurement it was
+    built on: 1,080 ms via PostgREST paging against 89 ms via one COPY.
+
+    ⚠⚠ GURUFOCUS'S CLOSE, NOT yfinance's, AND THE REASON IS CURRENCY. The Long Equity tab lives in
+    the `company` world and its per-share lines are in the company's REPORTING currency;
+    `asset_price` lives in the `asset_execution` world, reachable only by ISIN, and that bridge
+    carries every wrong-listing hazard this repo documents — a US megacap priced on a thin German
+    line, or `GBp` pence against fundamentals in `GBP`, which is a 100x error that still looks like
+    a number. This series needs no bridge and no conversion: measured on ASML, GuruFocus's annual
+    `Month End Stock Price` IS a sample of it (681.7 / 678.7 / 921.4 at the last three year-ends,
+    ratio 1.0000), so swapping the annual point for the daily one changes the frequency and
+    nothing else.
+    """
+    if not company_ids:
         return {}
-    rows: list[dict] = []
-    for code in (c.replace("annuals__", "quarterly__") for c in _metric_codes(metric)):
-        rows += _page_metrics(company_id, code, exact=True)
-    return _step_onto_dates(_ttm_by_period(rows, rule, key="date"), dates)
+    from timeseries import load_series  # noqa: PLC0415
+
+    out: dict[int, dict[str, float]] = {}
+    df = load_series(sorted(set(company_ids)), "gf.close", since, order=False)
+    if df.empty:
+        return out
+    for cid, d, v in zip(df["entity_id"], df["date"], df["close"]):
+        if v is not None:
+            out.setdefault(int(cid), {})[str(d)[:10]] = float(v)
+    return out
+
+
+def _daily_metrics_bulk(company_ids: list[int], metrics: tuple[str, ...],
+                        dates_by_company: dict[int, dict[str, float]],
+                        ) -> dict[str, dict[int, dict[str, float]]]:
+    """{metric: {company_id: {date: TTM value}}} — the bulk twin of `_daily_metric`.
+
+    ⚠⚠ THE BULK PART IS THE READ, NEVER THE MATHS. `metrics_by_company_bulk` looks like the right
+    twin for this and is NOT: it calls `_ttm_by_period` WITHOUT `key="date"`, so its keys are
+    quarter LABELS (`2015-Q4`) where `_step_onto_dates` matches ISO dates (`2015-10-31`). Measured
+    while writing this: the same 43 periods and identical values, and the daily series still came
+    out 42 days shorter for one holding and one day shorter for most of the rest — because the step
+    function could not line the labels up with trading days. Nothing errored and no cell was empty;
+    the chart simply started later. So this reads the ROWS in bulk and then applies the SAME
+    per-company arithmetic the per-company path did.
+
+    ⚠ EACH COMPANY IS STEPPED ONTO ITS OWN TRADING DATES, from `dates_by_company`. A shared date
+    axis would carry a holiday-closed listing's stale value onto a day it did not trade.
+    """
+    out: dict[str, dict[int, dict[str, float]]] = {m: {} for m in metrics}
+    ids = sorted({c for c in company_ids if c in dates_by_company})
+    if not ids:
+        return out
+    wanted = [m for m in metrics if _TTM_RULE.get(m) is not None]
+    if not wanted:
+        return out
+    raw = rows_by_metric(ids, wanted, "quarterly")
+    for metric in wanted:
+        rule = _TTM_RULE[metric]
+        by_company = raw.get(metric, {})
+        for cid in ids:
+            ttm = _ttm_by_period(by_company.get(cid) or [], rule, key="date")
+            out[metric][cid] = _step_onto_dates(ttm, sorted(dates_by_company[cid]))
+    return out
 
 
 def _ttm_metric_rows(company_id: int) -> list[dict]:
@@ -3490,10 +3548,16 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
         # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
         # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
         caps = period_caps_by_isin(comp, body.universe, body.cadence)
+        cids = [comp[ci]["company_id"] for ci in canon if ci in comp]
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
-        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
-                  ('fcf', 'sbc', 'market_cap',), body.cadence)
+        # ⚠⚠ AND THE DAILY BRANCH GETS ITS OWN, WHICH IT NEVER HAD. `_prefetch` loads the ANNUAL
+        # codes; the daily loop below wants `close_price` and the QUARTERLY codes, so it matched
+        # nothing here and fell through to FOUR paged reads per company. See `_daily_closes_bulk`.
+        daily_close = _daily_closes_bulk(cids) if body.cadence == "daily" else {}
+        daily = _daily_metrics_bulk(cids, ('fcf', 'sbc', 'shares'), daily_close)
+        if body.cadence != "daily":
+            _prefetch(cids, ('fcf', 'sbc', 'market_cap',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -3511,11 +3575,10 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
                 # in issue at their own moment; ours uses the TTM diluted average, which is the
                 # basis every other per-share number on this tab is on. Consistency with the tab
                 # beats agreement with a line we do not otherwise use.
-                close = _daily_closes(c["company_id"])
-                dates = sorted(close)
-                fcf = _daily_metric(c["company_id"], "fcf", dates)
-                sbc = _daily_metric(c["company_id"], "sbc", dates)
-                sh = _daily_metric(c["company_id"], "shares", dates)
+                close = daily_close.get(c["company_id"]) or {}
+                fcf = daily['fcf'].get(c["company_id"]) or {}
+                sbc = daily['sbc'].get(c["company_id"]) or {}
+                sh = daily['shares'].get(c["company_id"]) or {}
                 mc = {d: close[d] * sh[d] for d in sh if d in close and sh[d]}
             else:
                 fcf = _metric_by_year(c["company_id"], "fcf", body.cadence)
@@ -3638,10 +3701,17 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest):
         # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
         # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
         caps = period_caps_by_isin(comp, body.universe, body.cadence)
+        cids = [comp[ci]["company_id"] for ci in canon if ci in comp]
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
-        _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
-                  ('div_ps', 'price_ps',), body.cadence)
+        # ⚠⚠ AND THE DAILY BRANCH GETS ITS OWN, WHICH IT NEVER HAD. `_prefetch` loads ANNUAL
+        # `div_ps`/`price_ps`; the daily loop below wanted `close_price` and the QUARTERLY div
+        # codes, so it matched nothing here and fell through to one paged read per company per
+        # code. Two bulk reads now serve every company — see `_daily_closes_bulk`.
+        daily_close = _daily_closes_bulk(cids) if body.cadence == "daily" else {}
+        daily_div = _daily_metrics_bulk(cids, ('div_ps',), daily_close).get('div_ps', {})
+        if body.cadence != "daily":
+            _prefetch(cids, ('div_ps', 'price_ps',), body.cadence)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -3652,11 +3722,12 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest):
                 # period end and is flat between them. That IS a trailing yield — the same shape a
                 # terminal draws — and it is why only the two YIELD cards offer this cadence: the
                 # other ten have no daily input at all.
-                price = _daily_closes(c["company_id"])
-                div = _daily_metric(c["company_id"], "div_ps", sorted(price))
+                div = daily_div.get(c["company_id"]) or {}
                 # ⚠ Only days the numerator reaches. `_step_onto_dates` drops anything before the
-                # first reported period, so `price` alone would put bare denominators on the chart.
-                price = {d: v for d, v in price.items() if d in div}
+                # first reported period, so the close alone would put bare denominators on the
+                # chart.
+                price = {d: v for d, v in (daily_close.get(c["company_id"]) or {}).items()
+                         if d in div}
             else:
                 div = _metric_by_year(c["company_id"], "div_ps", body.cadence)
                 price = _metric_by_year(c["company_id"], "price_ps", body.cadence)

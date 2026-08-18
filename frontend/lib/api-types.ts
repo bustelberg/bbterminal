@@ -9349,6 +9349,8 @@ export interface components {
         BookHoldingDetail: {
             /** Avg Capital Eur */
             avg_capital_eur?: number | null;
+            /** Beta 5Y */
+            beta_5y?: number | null;
             /** Bucket */
             bucket: string;
             /** Capital Book */
@@ -9368,8 +9370,12 @@ export interface components {
             current_value_eur?: number | null;
             /** Income Eur */
             income_eur?: number | null;
+            /** Is Fund */
+            is_fund?: boolean | null;
             /** Isin */
             isin?: string | null;
+            /** Mom 12 1 Pct */
+            mom_12_1_pct?: number | null;
             /** Money Weighted Return Pct */
             money_weighted_return_pct?: number | null;
             /** Name */
@@ -9424,6 +9430,8 @@ export interface components {
              * @default []
              */
             via_names?: string[];
+            /** Vol 5Y Pct */
+            vol_5y_pct?: number | null;
             /**
              * Weight Now Pct
              * @default 0

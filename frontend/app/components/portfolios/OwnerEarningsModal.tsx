@@ -10,6 +10,8 @@ import TablesTab from './TablesTab';
 import QuickValuationTab from './QuickValuationTab';
 import DeepValuationTab from './DeepValuationTab';
 import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
+import LangSwitch from '../LangSwitch';
+import { useLang } from '../../../lib/i18n';
 
 type Tab = 'fundamentals' | 'longequity' | 'quickval' | 'deepval' | 'tables';
 
@@ -194,6 +196,9 @@ export default function OwnerEarningsModal({
    * claim to be doing something to charts it cannot reach.
    */
   const [sbcCorrection, setSbcCorrection] = useState(true);
+  /** ⚠ PERSISTED PER BROWSER, NOT PER MODAL — a language is a property of the reader, so it has to
+   *  survive closing the dialog. See `lib/i18n.ts` for why it cannot be seeded synchronously. */
+  const [lang, setLang] = useLang();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/60"
@@ -275,6 +280,18 @@ export default function OwnerEarningsModal({
             <PortfolioFundamentalsRefresh scope={scope}
               onDone={() => setBlendKey((k) => k + 1)} />
           )}
+          {/* ⚠ ALWAYS ON, NOT ONLY ON THE TAB IT CURRENTLY TRANSLATES. It was tab-scoped first, on
+              the same reasoning as the SBC checkbox below — a control that governs nothing on the
+              visible tab is noise. That was wrong here, and reported immediately as "I do not see
+              it": a LANGUAGE is a property of the reader, not of one tab, so a switch that appears
+              and disappears as you move along the tab bar reads as a control that is missing rather
+              than one that is scoped. The tab-scoped version also could not be FOUND — you have to
+              already be on `Tables` to discover the thing that translates `Tables`.
+
+              Its `title` carries the coverage instead, which is the honest place for it: the
+              control is stable, the scope is stated. */}
+          <LangSwitch lang={lang} onChange={setLang}
+            title="Language. English is the source; so far only the Tables tab is translated — the other tabs stay English whichever is selected." />
           {/* Only on the tab it governs — and it governs four of that tab's charts, which is why it
               is a tab-level control rather than something inside one card. Stock-based compensation
               is a real cost paid in shares that never leaves the cash-flow statement, so reported
@@ -349,7 +366,8 @@ export default function OwnerEarningsModal({
                   : { portfolio_id: portfolioId, cadence: 'annual' })
                 : { holdings: [{ isin: isin ?? '', weight: 1 }], cadence: 'annual' }}
               holdingsName={subject}
-              sbcCorrection={sbcCorrection} />
+              sbcCorrection={sbcCorrection}
+              lang={lang} />
           </div>
         )}
         {visited.has('fundamentals') && (

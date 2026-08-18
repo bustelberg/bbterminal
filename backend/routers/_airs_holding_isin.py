@@ -116,16 +116,28 @@ def _is_etf(grid_row: dict | None) -> bool:
 
 
 # ── The asset-class label a reader sees (and the allocation bar sums to) ──────────────────────
-# Six buckets. Only EQUITY carries the ETF split (Equity vs Equity ETF) — AIRS's `categorie` knows
-# an equity ETF invests in equity (AAND) and a bond ETF in bonds (OBL), so a bond ETF is Bonds, not
-# "ETF Bonds". Defined here, where every signal is at hand, so the column and the bar cannot drift.
+# FIVE buckets, one per thing a holding INVESTS IN. A bond ETF is Bonds and an equity ETF is
+# Equity: the wrapper is not the asset class.
+#
+# ⚠⚠ `Equity ETF` WAS A SIXTH BUCKET AND WAS RETIRED 2026-08-18. It split the equity sleeve on the
+# WRAPPER while every other bucket split on the underlying, so the bar answered two different
+# questions at once — and a book's equity exposure could not be read off it without adding two
+# slices together. Bonds never had the split (a bond ETF has always been Bonds), which is what made
+# the equity one inconsistent rather than merely redundant.
+#
+# ⚠⚠ AND RETIRING IT COST SOMETHING THAT HAD TO BE REPLACED, NOT JUST DELETED. `Equity` was
+# implicitly the "operating companies only" bucket — the Analyse modal gates owner-earnings
+# blending on `bucket === 'Equity'` precisely because a fund has no earnings to blend and this app
+# does not look through funds. With ETFs now inside Equity that guarantee is gone from the bucket,
+# so the fund-ness travels on its own field instead (`is_fund`, set in
+# `_airs_portfolio_analysis._reclassify_book_rows`). A merge that dropped the distinction entirely
+# would have quietly fed ETFs to the fundamentals blender.
 BUCKET_EQUITY = "Equity"
-BUCKET_EQUITY_ETF = "Equity ETF"
 BUCKET_BONDS = "Bonds"
 BUCKET_ALTS = "Alternatives"
 BUCKET_CASH = "Cash"
 BUCKET_UNKNOWN = "Unclassified"
-BUCKET_ORDER = [BUCKET_EQUITY, BUCKET_EQUITY_ETF, BUCKET_BONDS, BUCKET_ALTS, BUCKET_CASH, BUCKET_UNKNOWN]
+BUCKET_ORDER = [BUCKET_EQUITY, BUCKET_BONDS, BUCKET_ALTS, BUCKET_CASH, BUCKET_UNKNOWN]
 
 # asset_grid.asset_class values that mean "a fund wrapper" (yfinance/leonteq vocabulary).
 _GRID_FUND_CLASSES = {"etf", "fund", "etc", "etp"}
@@ -181,7 +193,12 @@ def classify_bucket(asset_class: str | None, is_etf: bool, isin: str | None,
       2. The asset grid's yfinance class (equity / a fund class / crypto / commodity).
       3. The name — a coupon rate or a bond word.
     Returns 'Unclassified' ONLY when nothing above decides — an honest "unsure", never a guess
-    dressed as a fact. Only EQUITY splits on the ETF wrapper; Bonds/Alternatives/Cash do not.
+    dressed as a fact.
+
+    ⚠ NO BUCKET SPLITS ON THE WRAPPER. Every one of them names what the holding invests in, which
+    is why an equity ETF and a share of Apple land in the same place — see the ⚠⚠ on
+    `BUCKET_EQUITY`. `is_etf` survives as a parameter only for the fallback, where "a fund" is the
+    difference between Equity and Unclassified.
     """
     g = grid or {}
     # 1a. Cash — no instrument at all, or an explicit cash line.
@@ -193,7 +210,9 @@ def classify_bucket(asset_class: str | None, is_etf: bool, isin: str | None,
     if asset_class in (BUCKET_ALTS, "Real estate"):
         return BUCKET_ALTS
     if asset_class == BUCKET_EQUITY:
-        return BUCKET_EQUITY_ETF if is_etf else BUCKET_EQUITY
+        # ⚠ `is_etf` NO LONGER CHANGES THE ANSWER HERE — an equity ETF invests in equity. It is
+        # still a parameter because the fallback below needs it to tell a fund from an unknown.
+        return BUCKET_EQUITY
     # 2/3. No AIRS class — the grid, then the name. Since `categorie` was dropped (2026-07-23)
     # this is the ONLY path for every holding, so the order below decides the whole column.
     gac = (g.get("asset_class") or "").lower()
@@ -208,8 +227,9 @@ def classify_bucket(asset_class: str | None, is_etf: bool, isin: str | None,
     if gac == "equity":
         return BUCKET_EQUITY
     if is_etf or gac in _GRID_FUND_CLASSES:
-        # A fund we cannot see into, with no bond tell — the overwhelming default is an equity ETF.
-        return BUCKET_EQUITY_ETF
+        # A fund we cannot see into, with no bond tell — the overwhelming default is an equity
+        # fund, and an equity fund holds equity.
+        return BUCKET_EQUITY
     # 4. Nothing decided — say so.
     return BUCKET_UNKNOWN
 
@@ -467,7 +487,8 @@ def _segments(rows: list[dict]) -> list[dict]:
         timing), which is why it is not computed against that — but it is close, not 14pp off.
     """
     # Group by the CALCULATED CLASS (the six-bucket `bucket` — incl. any manual override), not the
-    # raw AIRS asset_class: Equity and Equity ETF split apart, and a bond ETF sits under Bonds.
+    # raw AIRS asset_class: an equity ETF sits under Equity and a bond ETF under Bonds — the
+    # wrapper is not the asset class (`Equity ETF` retired 2026-08-18).
     by: dict[str, list[dict]] = {}
     for r in rows:
         by.setdefault(r.get("bucket") or BUCKET_UNKNOWN, []).append(r)

@@ -161,7 +161,11 @@ export default function CagrTable({
 
       {/* ⚠⚠ THE CAVEATS THAT DECIDE WHETHER THE NUMBER MEANS ANYTHING, STATED RATHER THAN IMPLIED.
           Each is a thing a reader would otherwise assume and each is false. */}
-      <p className="text-[11px] text-fg-faint leading-relaxed">
+      {/* ⚠ A `<div>`, NOT A `<p>` — see the identical note on the `Tables` footnote. This prose
+          embeds an `InfoTip`, whose card is built from `<div>`s, and the HTML parser closes a
+          paragraph at an opening div: the server's markup then disagrees with React's tree and
+          hydration fails. Purely a correctness fix; the text renders the same. */}
+      <div className="text-[11px] text-fg-faint leading-relaxed">
         Measured on the weighted line, from the latest <strong>reported</strong> period back — never
         from an estimate or from <code>LTM</code>, so the span really is 5 or 10 years (
         <InfoTip text="An estimate endpoint would make this a forecast wearing the clothes of a track record. LTM is real and current, but it ends at the newest quarterly filing, so a span from FY2020 to LTM is five years AND SOME MONTHS — dividing by 5 there overstates the rate and nothing on screen would show the span was not 5.0.">
@@ -170,7 +174,7 @@ export default function CagrTable({
         ). A dash means the line has no point exactly that many years back — hover it for which.
         Both rows are cap-weighted, and a constituent with no stored cap is not in the line at any
         weight.
-      </p>
+      </div>
     </div>
   );
 }

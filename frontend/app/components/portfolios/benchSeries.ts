@@ -34,7 +34,19 @@ import { MIN_YEAR_COVERAGE_PCT } from './marginData';
  * every chart names it. It is never used to say the benchmark is good.
  */
 
-/** A benchmark to draw beside the book: the index label + the cadence the tab is on. */
+/**
+ * A benchmark to draw beside the book: the index label + the cadence the tab is on.
+ *
+ * ⚠⚠ `'daily'` IS DELIBERATELY NOT IN THIS UNION, AND IT IS NOT AN OVERSIGHT. The two yield
+ * cards offer a per-card daily toggle, but it only ever moves `holdingsTarget` — the benchmark
+ * stays on the tab's cadence. Measured 2026-08-18 against the S&P 500: a DAILY benchmark request
+ * returns 490 per-constituent series, 11s of server time and **54 MB** of JSON, all of it reduced
+ * by the client to the single blended line the card draws. The book's own daily request is 2-4 MB.
+ *
+ * Widening this union is therefore a ~25x payload change with no visible cause: the card would
+ * simply take forever and nothing would say why. If a daily benchmark is ever wanted, blend it
+ * SERVER-SIDE first — do not ship 490 daily series so the browser can average them.
+ */
 export type BenchTarget = { universe: string; cadence: 'annual' | 'quarterly' };
 
 /**

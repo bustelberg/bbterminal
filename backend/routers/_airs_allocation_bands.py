@@ -5,9 +5,9 @@ band it is SUPPOSED to hold, written down once per (risk profile, asset class) s
 compared at all.
 
 ⚠ THE GRID IS ALWAYS COMPLETE, THE TABLE IS NOT. The reader edits a fixed 4x4 — four profiles the
-app already classifies portfolios into, four invested classes it already buckets holdings into — so
-the API returns all sixteen cells whether or not a row exists. A grid that renders only the cells
-somebody has already filled in cannot be used to fill in the rest.
+app already classifies portfolios into, four classes it already buckets holdings into — so the API
+returns all sixteen cells whether or not a row exists. A grid that renders only the cells somebody
+has already filled in cannot be used to fill in the rest.
 
 ⚠ NULL IS NOT ZERO, AND THIS IS THE WHOLE REASON THE COLUMNS ARE NULLABLE. "No policy recorded" and
 "hold none of this" are the same for a minimum and OPPOSITE for a default and a maximum. Seeding
@@ -25,16 +25,37 @@ from datetime import UTC, datetime
 
 from deps import supabase
 
-from ._airs_holding_isin import BUCKET_ALTS, BUCKET_BONDS, BUCKET_EQUITY, BUCKET_EQUITY_ETF
+from ._airs_holding_isin import BUCKET_ALTS, BUCKET_BONDS, BUCKET_CASH, BUCKET_EQUITY
 from ._airs_portfolio_variant import VARIANTS
 
 _log = logging.getLogger(__name__)
 
-# The four INVESTED classes, in the order the editor shows them. Cash and Unclassified are
-# deliberately absent: cash is the remainder (which is why the defaults need not sum to 100), and
-# "Unclassified" is our own inability to see inside a fund — neither is something a policy can set
-# a target for.
-POLICY_BUCKETS: tuple[str, ...] = (BUCKET_EQUITY, BUCKET_EQUITY_ETF, BUCKET_BONDS, BUCKET_ALTS)
+# The four classes a policy can be written for, in the order the editor shows them — the same
+# order the Analyse modal's allocation bar uses, so a band and the bar it is drawn over cannot be
+# read in two sequences.
+#
+# ⚠⚠ CASH IS ONE OF THEM AS OF 2026-08-18, HAVING BEEN DELIBERATELY EXCLUDED BEFORE. The old
+# reasoning was that cash is the REMAINDER — whatever the invested classes do not take — so it
+# could not be targeted. That is true of the DEFAULT and false of the bounds, which is where it
+# broke down: "hold at most 10% cash" is a real mandate, it is the one most likely to be breached
+# by drift rather than by decision, and with no band there was no line for the bar to breach. A
+# fully-liquidated book showed 100% cash against no policy at all.
+#
+# ⚠ CONSEQUENCE, AND IT IS THE REASON THE SUM NOTE ON THE EDITOR CHANGED: the defaults may now
+# legitimately reach 100, where before a total of 95 was ordinary. They are still not ENFORCED to —
+# see the ⚠ in `AllocationBandsModal`.
+#
+# ⚠ `Unclassified` REMAINS ABSENT, and for a different reason than cash ever was: it is not a
+# holding decision at all, it is our own inability to see inside an instrument. Nobody can set a
+# target for how much of a book we fail to classify.
+#
+# ⚠⚠ WAS FOUR UNTIL 2026-08-18, when `Equity ETF` was retired as a bucket (see `BUCKET_EQUITY`).
+# The stored bands were folded into `Equity` by migration `20260818120000` — SUMMED, because a
+# separate 0-10-25 ETF band beside a 60-70-80 equity band expressed one intent about equity
+# exposure written across two rows. ⚠ THE SUMMED MAXIMA WERE CAPPED AT 100 AND THAT IS A REAL
+# EDIT, not arithmetic: Offensief's 80 + 25 is 105, which is not a policy. Those cells are flagged
+# in the migration for review rather than left to look deliberate.
+POLICY_BUCKETS: tuple[str, ...] = (BUCKET_EQUITY, BUCKET_BONDS, BUCKET_ALTS, BUCKET_CASH)
 
 _FIELDS = ("min_pct", "default_pct", "max_pct")
 

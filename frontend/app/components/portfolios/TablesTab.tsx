@@ -11,7 +11,9 @@ import { buildBlend, type Blend, type Resp } from './fundamentalBlend';
 import { cagrExcess, commonEndPeriod, forwardCagr, lineCagr, type Cagr } from './lineCagr';
 import { marginByYear, xToPeriod, type MarginInputs } from './marginData';
 import { type Target } from './HoldingsRevenueModal';
+import { COPY, MEASURE_KEYS, type MeasureKey, type TablesCopy } from './tablesCopy';
 import { latestCommonX, meanExcess, windowMean, type WindowMean } from './windowStats';
+import { type Lang } from '../../../lib/i18n';
 
 /**
  * `Tables` — the three quality reads on one screen, book against index, over 5 and 10 years.
@@ -61,23 +63,17 @@ type Window = (typeof WINDOWS)[number];
 const EXPECTED_WINDOW = [3] as const;
 
 /**
- * The rows, declared once.
+ * The rows are declared in `tablesCopy` (`MEASURE_KEYS`), and so are their names.
  *
- * ⚠ THE CHIPS AND THE TABLE BODY READ THE SAME LIST. A visibility control whose labels are typed
+ * ⚠ THE CHIPS AND THE TABLE BODY READ THE SAME KEY. A visibility control whose labels are typed
  * out a second time beside the rows they hide is one rename away from a chip that turns off a row
- * with a different name on it — and the reader has no way to tell which of the two is the lie.
+ * with a different name on it — and the reader has no way to tell which of the two is the lie. So
+ * `rateRow`/`meanRow` take the KEY and look the label up, rather than being handed a string.
  *
- * `chip` is short because a control is scanned, not read: "EPS (excl. NRI) expected, 3y" is the
- * right thing on the row (it has to carry its own window — see the ⚠ there) and far too long on a
- * button sitting beside three others.
+ * ⚠ `copy.chip` IS SHORT WHERE `copy.rowLabel` IS FULL, because a control is scanned and a row is
+ * read: "EPS (excl. NRI) expected, 3y" is the right thing on the row (it has to carry its own
+ * window — see the ⚠ there) and far too long on a button sitting beside three others.
  */
-const MEASURES = [
-  { key: 'fcfCagr', chip: 'FCF / share CAGR' },
-  { key: 'fcfMargin', chip: 'FCF margin' },
-  { key: 'roic', chip: 'ROIC' },
-  { key: 'epsFwd', chip: 'EPS expected' },
-] as const;
-type MeasureKey = (typeof MEASURES)[number]['key'];
 
 /**
  * One filter chip. A TOGGLE, not a segment of a picker — and it has to look like one.
@@ -117,8 +113,8 @@ const pctCell = (v: number, sign: boolean) =>
  * `ownWindow` = this row is measured over a window the column heading does not name (the 3-year
  * expectation). See the ⚠ on the years badge below for why that is not the same thing as `span`.
  */
-function RateCell({ got, span = 1, ownWindow = false }:
-{ got: Cagr | null; span?: number; ownWindow?: boolean }) {
+function RateCell({ got, copy, span = 1, ownWindow = false }:
+{ got: Cagr | null; copy: TablesCopy; span?: number; ownWindow?: boolean }) {
   /**
    * ⚠⚠ A SPANNED CELL IS **CENTRED**, NOT RIGHT-ALIGNED, AND THAT IS NOT A STYLE CHOICE. Right
    * alignment is correct for a number that belongs to a column; this one belongs to NEITHER of the
@@ -139,8 +135,7 @@ function RateCell({ got, span = 1, ownWindow = false }:
     <td colSpan={span} className={`px-2.5 py-1 ${align} font-mono tabular-nums`}>
       {/* ⚠ THE WINDOW IS ON THE NUMBER. "3y" is a claim the data has to support, and the two sides
           do not always support it identically. */}
-      <InfoTip className="cursor-default"
-        text={`${got.from} → ${got.to}, ${got.years} years, compounded annually.`}>
+      <InfoTip className="cursor-default" text={copy.rateTip(got.from, got.to, got.years)}>
         <span className={got.pct >= 0 ? 'text-fg-soft' : 'text-neg-300'}>
           {pctCell(got.pct, true)}
         </span>
@@ -154,7 +149,7 @@ function RateCell({ got, span = 1, ownWindow = false }:
             says `5y`, right-aligned, with nothing left to contradict it — which is the ORIGINAL
             complaint about this row, reintroduced by a feature that has nothing to do with it. */}
         {ownWindow && (
-          <span className="ml-1.5 text-[10px] text-fg-faint">{got.years}y</span>
+          <span className="ml-1.5 text-[10px] text-fg-faint">{got.years}{copy.yearSuffix}</span>
         )}
       </InfoTip>
     </td>
@@ -162,7 +157,7 @@ function RateCell({ got, span = 1, ownWindow = false }:
 }
 
 /** A mean cell — the value, how much of the window it covers, and the window itself on hover. */
-function MeanCell({ got }: { got: WindowMean | null }) {
+function MeanCell({ got, copy }: { got: WindowMean | null; copy: TablesCopy }) {
   if (!got) return <td className="px-2.5 py-1 text-right text-fg-faint">…</td>;
   if (got.mean == null) {
     return (
@@ -177,9 +172,8 @@ function MeanCell({ got }: { got: WindowMean | null }) {
   return (
     <td className="px-2.5 py-1 text-right font-mono tabular-nums text-fg-soft">
       <InfoTip className="cursor-default"
-        text={`Mean of ${got.n} year${got.n === 1 ? '' : 's'} over ${xToPeriod(got.fromX)}–`
-          + `${xToPeriod(got.toX)}${short ? `, of the ${got.of} asked for` : ''}. Weighted per year `
-          + 'by the same weights the Long Equity chart uses — this is that line, averaged.'}>
+        text={copy.meanTip(got.n, xToPeriod(got.fromX), xToPeriod(got.toX),
+          short ? got.of : null)}>
         {pctCell(got.mean, false)}
         {short && <span className="ml-1 text-[10px] text-warn-300">({got.n}/{got.of})</span>}
       </InfoTip>
@@ -187,11 +181,15 @@ function MeanCell({ got }: { got: WindowMean | null }) {
   );
 }
 
-export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection }: {
+export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection, lang }: {
   holdingsTarget: Target;
   holdingsName: string;
   sbcCorrection: boolean;
+  /** ⚠ THE ONLY TRANSLATED SURFACE IN THE APP — see `lib/i18n.ts` for why the switch is rendered
+   *  beside this tab and nowhere else. */
+  lang: Lang;
 }) {
+  const copy = COPY[lang];
   /** ⚠ ITS OWN BENCHMARK, DEFAULTING TO AEX — the tab's other cards follow whatever index the modal
    *  was opened against; here the question IS "against what", so it gets a picker. */
   const [bench, setBench] = useState<CagrBenchmark>('AEX');
@@ -208,8 +206,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection 
    * and says why, rather than being silently inert.
    */
   const [shownW, setShownW] = useState<Set<Window>>(() => new Set(WINDOWS));
-  const [shownM, setShownM] = useState<Set<MeasureKey>>(
-    () => new Set(MEASURES.map((m) => m.key)));
+  const [shownM, setShownM] = useState<Set<MeasureKey>>(() => new Set(MEASURE_KEYS));
   /** ⚠ FILTERED FROM `WINDOWS`, never from the Set — a Set has no order, and 10y/5y reversed is a
    *  table whose headings do not match the order every other read of this data uses. */
   const shown = useMemo(() => WINDOWS.filter((w) => shownW.has(w)), [shownW]);
@@ -323,20 +320,22 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection 
    * pinning both sides to the same window, or starts formatting a negative differently.
    */
   const rateRow = (
-    label: string, note: string, a: Blend | null, b: Blend | null,
+    k: MeasureKey, a: Blend | null, b: Blend | null,
     rate: (lvl: Blend['level'], years: number) => Cagr,
     windows: readonly number[] = shown,
   ) => (
-    <tr key={label} className="[&>td]:border-b [&>td]:border-neutral-800/20">
+    <tr key={k} className="[&>td]:border-b [&>td]:border-neutral-800/20">
       <td className="px-2.5 py-1 text-fg-soft whitespace-nowrap">
-        <InfoTip text={note} className="cursor-default">{label}</InfoTip>
+        <InfoTip text={copy.rowNote[k](sbcCorrection)} className="cursor-default">
+          {copy.rowLabel[k]}
+        </InfoTip>
       </td>
       {windows.map((y) => (
-        <RateCell key={`a${y}`} got={a ? rate(a.level, y) : null}
+        <RateCell key={`a${y}`} got={a ? rate(a.level, y) : null} copy={copy}
           span={shown.length / windows.length} ownWindow={windows !== shown} />
       ))}
       {windows.map((y) => (
-        <RateCell key={`b${y}`} got={b ? rate(b.level, y) : null}
+        <RateCell key={`b${y}`} got={b ? rate(b.level, y) : null} copy={copy}
           span={shown.length / windows.length} ownWindow={windows !== shown} />
       ))}
       {windows.map((y) => {
@@ -360,7 +359,9 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection 
                 </span>
                 {/* Same rule as the value's badge — see `RateCell`. */}
                 {windows !== shown
-                  && <span className="ml-1.5 text-[10px] text-fg-faint">{y}y</span>}
+                  && <span className="ml-1.5 text-[10px] text-fg-faint">
+                    {y}{copy.yearSuffix}
+                  </span>}
               </>}
           </td>
         );
@@ -370,18 +371,20 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection 
 
   /** One metric's three cells (book, index, excess) for one window. */
   const meanRow = (
-    label: string, note: string,
+    k: MeasureKey,
     a: Map<number, number | null>, b: Map<number, number | null>, endX: number | null,
   ) => (
-    <tr key={label} className="[&>td]:border-b [&>td]:border-neutral-800/20">
+    <tr key={k} className="[&>td]:border-b [&>td]:border-neutral-800/20">
       <td className="px-2.5 py-1 text-fg-soft whitespace-nowrap">
-        <InfoTip text={note} className="cursor-default">{label}</InfoTip>
+        <InfoTip text={copy.rowNote[k](sbcCorrection)} className="cursor-default">
+          {copy.rowLabel[k]}
+        </InfoTip>
       </td>
       {shown.map((y) => (
-        <MeanCell key={`a${y}`} got={endX == null ? null : windowMean(a, endX, y)} />
+        <MeanCell key={`a${y}`} copy={copy} got={endX == null ? null : windowMean(a, endX, y)} />
       ))}
       {shown.map((y) => (
-        <MeanCell key={`b${y}`} got={endX == null ? null : windowMean(b, endX, y)} />
+        <MeanCell key={`b${y}`} copy={copy} got={endX == null ? null : windowMean(b, endX, y)} />
       ))}
       {shown.map((y) => {
         if (endX == null) return <td key={`e${y}`} className="px-2.5 py-1 text-right text-fg-faint">…</td>;
@@ -405,19 +408,14 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection 
         {/* ⚠ THE TITLE FOLLOWS THE SELECTION. "Quality, five and ten years" over a table showing
             only one of them is a caption contradicting the thing it captions — and it is the line
             a reader trusts when they have forgotten which chips they left on. */}
-        <h3 className="text-[13px] font-medium text-fg-strong">
-          Quality, {shown.length === WINDOWS.length ? 'five and ten years'
-            : `${shown[0]} years`}
-        </h3>
+        <h3 className="text-[13px] font-medium text-fg-strong">{copy.title(shown)}</h3>
         <div className="ml-auto flex items-center gap-1.5">
           {WINDOWS.map((w) => {
             const last = shownW.has(w) && shownW.size === 1;
             return (
               <Chip key={w} on={shownW.has(w)} onClick={() => toggleW(w)} disabled={last}
-                title={last
-                  ? 'At least one window has to stay on — with none there is nothing to show but the row labels.'
-                  : `Show the ${w}-year column for both sides and the excess.`}>
-                {w}y
+                title={last ? copy.lastWindowLocked : copy.showWindow(w)}>
+                {w}{copy.yearSuffix}
               </Chip>
             );
           })}
@@ -438,11 +436,11 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection 
           of choice: those two reshape the columns, these pick which questions get asked at all.
           Crowded onto one row the four measure names read as more index options. */}
       <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="text-[11px] text-fg-faint mr-0.5">Rows</span>
-        {MEASURES.map((m) => (
-          <Chip key={m.key} on={on(m.key)} onClick={() => toggleM(m.key)}
-            title={on(m.key) ? `Hide ${m.chip}` : `Show ${m.chip}`}>
-            {m.chip}
+        <span className="text-[11px] text-fg-faint mr-0.5">{copy.rowsLabel}</span>
+        {MEASURE_KEYS.map((k) => (
+          <Chip key={k} on={on(k)} onClick={() => toggleM(k)}
+            title={on(k) ? copy.hideRow(copy.chip[k]) : copy.showRow(copy.chip[k])}>
+            {copy.chip[k]}
           </Chip>
         ))}
       </div>
@@ -451,7 +449,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection 
       {index.err && (
         <p className="text-xs text-warn-300">{bench}: {index.err}</p>
       )}
-      {!ready && !err && <p className="text-xs text-fg-subtle">Loading…</p>}
+      {!ready && !err && <p className="text-xs text-fg-subtle">{copy.loading}</p>}
 
       {/* ⚠⚠ `w-fit`, NOT `w-full` — THE STRETCH WAS THE WHITESPACE. Seven columns of short
           percentages under `w-full` are spread across the whole modal, so most of the table is the
@@ -466,9 +464,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection 
           so the chips stay free rather than the last one locking. It just has to say so: a bordered
           box containing nothing but column headings reads as a failed load. */}
       {ready && shownM.size === 0 && (
-        <p className="text-xs text-fg-subtle">
-          No rows selected — turn one on above.
-        </p>
+        <p className="text-xs text-fg-subtle">{copy.noRows}</p>
       )}
 
       {ready && shownM.size > 0 && (
@@ -476,13 +472,15 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection 
           <table className="text-xs">
             <thead className="bg-page">
               <tr className="text-fg-faint text-[10px] uppercase tracking-wide">
-                <th className="px-2.5 py-1 font-medium text-left" rowSpan={2}>Measure</th>
+                <th className="px-2.5 py-1 font-medium text-left" rowSpan={2}>
+                  {copy.colMeasure}
+                </th>
                 <th className="px-2.5 py-1 font-medium text-center border-l border-neutral-800/40"
                   colSpan={shown.length}>{holdingsName}</th>
                 <th className="px-2.5 py-1 font-medium text-center border-l border-neutral-800/40"
                   colSpan={shown.length}>{bench}</th>
                 <th className="px-2.5 py-1 font-medium text-center border-l border-neutral-800/40"
-                  colSpan={shown.length}>Excess (pp)</th>
+                  colSpan={shown.length}>{copy.colExcess}</th>
               </tr>
               <tr className="text-fg-faint text-[10px] uppercase tracking-wide
                              border-b border-neutral-800/40">
@@ -492,7 +490,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection 
                 {[...shown, ...shown, ...shown].map((w, i) => (
                   <th key={i} className={`${th} ${
                     i % shown.length === 0 ? 'border-l border-neutral-800/40' : ''}`}>
-                    {w}y
+                    {w}{copy.yearSuffix}
                   </th>
                 ))}
               </tr>
@@ -500,23 +498,10 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection 
             <tbody>
               {/* ⚠ THE RATE ROWS ARE NAMED `CAGR`/`expected`; the two means are named `avg`.
                   They are different questions and the labels are the only thing saying so. */}
-              {on('fcfCagr') && rateRow('FCF / share CAGR',
-                'Compound annual growth of the weighted FCF-per-share line, point to point. '
-                + '⚠ The Long Equity growth card fits a log-linear TREND through every year instead '
-                + '(that is what its R² is about), so the two will differ — most where one endpoint '
-                + 'year is unrepresentative, which is when the gap is worth seeing.',
-                bookBlend, idxBlend,
+              {on('fcfCagr') && rateRow('fcfCagr', bookBlend, idxBlend,
                 (lvl, y) => lineCagr(lvl, y, fcfEnd ?? undefined))}
-              {on('fcfMargin') && meanRow('FCF margin (avg)',
-                `Free cash flow ${sbcCorrection ? 'net of stock comp ' : ''}÷ revenue, averaged over `
-                + 'the window. A ratio does not compound, so this is a mean and not a rate — it is '
-                + 'the Long Equity margin chart, averaged. Follows the SBC checkbox.',
-                book.margin, index.margin, marginEnd)}
-              {on('roic') && meanRow('ROIC (avg)',
-                'GuruFocus’s own published return on invested capital, weight-weighted per year '
-                + 'and averaged over the window. ⚠ Unaffected by the SBC checkbox — there is no '
-                + 'numerator of ours to adjust.',
-                book.roic, index.roic, roicEnd)}
+              {on('fcfMargin') && meanRow('fcfMargin', book.margin, index.margin, marginEnd)}
+              {on('roic') && meanRow('roic', book.roic, index.roic, roicEnd)}
               {/* ⚠⚠ LAST, AND VISUALLY SEPARATED, BECAUSE IT IS THE ONLY ROW THAT IS NOT A
                   MEASUREMENT. Everything above happened; this is what analysts currently expect,
                   revised whenever they like and systematically optimistic. Sitting it among the
@@ -526,13 +511,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection 
                   eye reaches a number — reported as unclear when the value merely sat under the
                   `10y` heading. Three signals now: the label, the centring, and the `3y` beside the
                   figure; the row is the only place in the table where a heading does not apply. */}
-              {on('epsFwd') && rateRow('EPS (excl. NRI) expected, 3y',
-                'Compound annual growth from the latest REPORTED EPS excluding non-recurring items '
-                + 'to the analyst consensus three years out. ⚠ NOT A MEASUREMENT — it is what '
-                + 'analysts expect today, and only the constituents they cover are in it. The base '
-                + 'is an actual on purpose: measuring 2026e → 2029e would be the consensus’s own '
-                + 'internal slope, with no contact with anything that happened.',
-                bookEps, idxEps,
+              {on('epsFwd') && rateRow('epsFwd', bookEps, idxEps,
                 (lvl, y) => forwardCagr(lvl, y, epsBase ?? undefined),
                 EXPECTED_WINDOW)}
             </tbody>
@@ -545,27 +524,20 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection 
           either can now be false. A note explaining a row that is switched off, or naming a column
           that is not on screen, is worse than no note: it is the part of the page a reader turns to
           precisely when they doubt what they are seeing. */}
-      <p className="text-[11px] text-fg-faint leading-snug max-w-[54rem]">
-        Both sides are measured over the <strong>same</strong> window per row — the latest year they
-        share — so the Excess column subtracts like from like. A dash means one side has nothing
-        there; hover it.
-        {on('epsFwd') && <>
-          {' '}The last row is the <strong>only</strong> one the{' '}
-          {shown.map((w) => `${w}y`).join('/')} heading{shown.length > 1 ? 's do' : ' does'} not
-          apply to: the consensus thins fast (measured on ACWI, 2031e is carried by 166 of 1,761
-          constituents against 2028e’s 1,310), so it is stated over three years and marked{' '}
-          <code className="text-fg-subtle">3y</code> on the figure
-          {shown.length > 1 && ', centred across both columns rather than sitting in either'}.
-        </>}
-        {on('fcfCagr') && <>
-          {' '}The CAGR row is point-to-point and will not match the FCF/share growth card, which
-          fits a trend through every year (
-          <InfoTip text="Point-to-point is (end/start)^(1/n) − 1: only the two endpoint years matter, so one weak year at either end swings it. The card's log-linear fit uses all of them and reports R² for how well they line up. Neither is wrong; a wide gap between them means the endpoints are unrepresentative.">
-            why they differ
-          </InfoTip>
-          ).
-        </>}
-      </p>
+      {/* ⚠ A `<div>`, NOT A `<p>` — AND THAT IS A CORRECTNESS FIX, NOT A STYLING ONE. This footnote
+          embeds an `InfoTip`, whose `TipCard` is built from `<div>`s, and a `<div>` inside a `<p>`
+          is invalid HTML: the browser's parser CLOSES the paragraph at the opening div, so the
+          server's markup and React's tree disagree and hydration fails outright. It only surfaced
+          once the "why they differ" tip was added to the prose. `leading-snug`/`max-w` carry over
+          unchanged; nothing about the rendering was meant to move. */}
+      <div className="text-[11px] text-fg-faint leading-snug max-w-[54rem]">
+        {copy.footnote({
+          windows: shown,
+          showEps: on('epsFwd'),
+          showFcf: on('fcfCagr'),
+          whyLink: <InfoTip text={copy.whyDiffer}>{copy.whyDifferLabel}</InfoTip>,
+        })}
+      </div>
     </div>
   );
 }

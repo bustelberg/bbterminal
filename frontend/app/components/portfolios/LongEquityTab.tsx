@@ -62,7 +62,8 @@ const CARDS: MetricCfg[] = [
      * the legend. That is the same treatment FCF/share gets and it is why neither is silently
      * wrong for a loss-making company — the gap is visible instead.
      */
-    title: 'EPS (excl. non-recurring)', noun: 'EPS', unit: 'per_share', kind: 'growth',
+    title: 'EPS (excl. non-recurring)', titleKey: 'epsNri',
+    noun: 'EPS', unit: 'per_share', kind: 'growth',
     benchmarkMetric: 'eps_nri',
     codes: ['annuals__Per Share Data__EPS without NRI',
       'annuals__per_share_data__EPS without NRI'],
@@ -82,18 +83,21 @@ const CARDS: MetricCfg[] = [
     forecastMetric: 'eps_nri_estimate',
   },
   {
-    title: 'Revenue', noun: 'revenue', unit: 'millions', kind: 'growth', benchmarkMetric: 'revenue',
+    title: 'Revenue', titleKey: 'revenue',
+    noun: 'revenue', unit: 'millions', kind: 'growth', benchmarkMetric: 'revenue',
     codes: ['annuals__Income Statement__Revenue', 'annuals__income_statement__Revenue'],
   },
   {
-    title: 'FCF / share', noun: 'FCF/share', unit: 'per_share', kind: 'growth', benchmarkMetric: 'fcf_ps',
+    title: 'FCF / share', titleKey: 'fcfPs',
+    noun: 'FCF/share', unit: 'per_share', kind: 'growth', benchmarkMetric: 'fcf_ps',
     codes: ['annuals__Per Share Data__Free Cash Flow per Share',
       'annuals__per_share_data__Free Cash Flow per Share'],
   },
   {
     // A count, not currency (no ccy prefix). CAGR reads as the buyback (−) / dilution (+) rate.
     // Uses the INCOME STATEMENT spelling — the only one both cohorts share (see backend `shares`).
-    title: 'Shares outstanding', noun: 'shares outstanding', unit: 'shares', kind: 'growth', benchmarkMetric: 'shares',
+    title: 'Shares outstanding', titleKey: 'shares',
+    noun: 'shares outstanding', unit: 'shares', kind: 'growth', benchmarkMetric: 'shares',
     codes: ['annuals__Income Statement__Shares Outstanding (Diluted Average)',
       'annuals__income_statement__Shares Outstanding (Diluted Average)'],
   },
