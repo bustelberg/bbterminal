@@ -560,6 +560,179 @@ def start_job_now(job_id: str):
     return _jobs.start(f"scheduled.{job_id}", label, _work)
 
 
+def job_health(now=None) -> dict:
+    """The three-way join the automatic-jobs page renders: declared vs registered vs actually ran.
+
+    ⚠⚠ IT LIVES HERE SO THE WATCHDOG AND THE PAGE CANNOT DISAGREE. This assembly used to be a
+    closure inside the admin endpoint. A self-healing tick needs the same verdict, and a second
+    copy of "is this job overdue" is the one thing that must not exist: the page would say `ok`
+    while the watchdog re-fired, or the reverse, and the surface built to tell you what is wrong
+    would be wrong about itself.
+
+    ⚠ THE PURE PART STAYS PURE. `_scheduled_jobs_status` takes every input and reads no clock and
+    no database; this is the impure shell that goes and gets them. `now` is injectable for the
+    same reason.
+
+    Returns `{rows, running, now, history_error}` — `history_error` set when the run history could
+    not be read, in which case `rows` still carries the registered-vs-declared half, which needs no
+    database at all.
+    """
+    import os  # noqa: PLC0415
+    from datetime import datetime as _dt, timezone as _tz  # noqa: PLC0415
+
+    from postgrest.exceptions import APIError  # noqa: PLC0415
+
+    from deps import supabase  # noqa: PLC0415
+    from routers._scheduled_jobs_status import build_rows, evidence_names  # noqa: PLC0415
+    from scheduled_jobs import registrable  # noqa: PLC0415
+
+    now = now or _dt.now(_tz.utc)
+    specs = registrable(dict(os.environ))
+    registered = list_scheduled_jobs()
+    running = scheduler_running()
+    # ⚠ READ FROM THE BODY REGISTRY, NOT ASSUMED PER ROW. A "Run now" rendered for a job with no
+    # body is a control that 404s on press — and a watchdog that fires one raises `KeyError`.
+    runnable = set(JOB_BODIES)
+
+    def _runs() -> list[dict]:
+        # ⚠⚠ THE NEWEST ROW **PER JOB**, NEVER A WINDOW FILTERED CLIENT-SIDE. A windowed
+        # `.limit(500)` is filled by the noisy jobs and pushes the quiet ones off the end, so it
+        # accuses exactly the jobs that are behaving.
+        out: list[dict] = []
+        for name in evidence_names(specs):
+            out += (supabase.table("ingest_run")
+                    .select("job_name,started_at,finished_at,status,error_summary")
+                    .eq("job_name", name)
+                    .order("started_at", desc=True)
+                    .limit(1).execute().data or [])
+        # ⚠ NORMALISED ONTO `job_name` SO THE JOIN HAS ONE KEY SPACE. `scheduled_job_run` is keyed
+        # by the APScheduler job id and `ingest_run` by a pipeline job_name.
+        for spec in specs:
+            if not spec.records:
+                continue
+            for row in (supabase.table("scheduled_job_run")
+                        .select("job_id,started_at,finished_at,status,detail,summary")
+                        .eq("job_id", spec.id)
+                        .order("started_at", desc=True)
+                        .limit(1).execute().data or []):
+                out.append({**row, "job_name": row.pop("job_id")})
+        return out
+
+    err = None
+    try:
+        runs = _runs()
+    except APIError as e:
+        runs, err = [], f"{type(e).__name__}: {e}"
+    rows = build_rows(specs, registered, runs, now, scheduler_running=running, runnable=runnable)
+    return {"rows": rows, "running": running, "now": now, "history_error": err}
+
+
+#: What the watchdog will re-run by itself, and nothing else.
+#:
+#: ⚠⚠ `missing` IS DELIBERATELY ABSENT AND IS THE MOST TEMPTING ONE. It means the job is not
+#: REGISTERED — `add_job` threw, or the whole scheduler is down — and firing the body by hand makes
+#: the page go green while the schedule stays broken. That is the single failure this monitoring
+#: surface exists to catch, and auto-healing it would delete the evidence.
+#:
+#: ⚠ `error` IS ABSENT TOO. It has a recorded reason and a blind re-run is far likelier to repeat
+#: it than to fix it; a job that fails every night should be read, not retried. `interrupted` and
+#: `overdue` are the two where "run it again" IS the fix — the first is a deploy or an OOM landing
+#: mid-run, the second is nothing having completed in the job's own allowance.
+#:
+#: ⚠ `unknown` IS ABSENT because we cannot tell whether it ran; re-running on no evidence is how a
+#: quota gets spent twice.
+_WATCHDOG_HEALS: frozenset[str] = frozenset({"overdue", "interrupted"})
+
+#: Auto re-runs allowed per job per UTC day.
+#:
+#: ⚠⚠ THE CAP IS THE WHOLE SAFETY STORY. Without it a job that fails for a structural reason — no
+#: GuruFocus quota left, AIRS credentials rotated — is re-fired on every tick for ever, which turns
+#: one broken job into a machine that spends the day retrying it. Two is enough to ride out a
+#: transient (a deploy, a blip) and low enough that a genuine fault stays a fault someone reads.
+#: Same shape as the price-update retry's own `max 3/UTC-day`.
+_WATCHDOG_MAX_PER_DAY = 2
+_watchdog_fired: dict[tuple[str, str], int] = {}
+
+
+def _fire_job_watchdog() -> None:
+    """The watchdog tick — see `_body_job_watchdog`."""
+    _spawn_body("job_watchdog")
+
+
+def _body_job_watchdog(ctx=None) -> tuple[str, dict]:
+    """Re-run the jobs the automatic-jobs page is already reporting as broken.
+
+    ⚠⚠ THE PAGE KNEW AND NOTHING ACTED ON IT. `/schedule` has been computing `overdue` and
+    `interrupted` per job for months — an honest three-way join between what is declared, what is
+    registered and what actually ran — and the only consumer was a human reading it. A daily
+    pipeline that dies mid-run therefore stays dead until somebody notices: measured in production
+    2026-08-18 at 7.1 days for `daily_pipeline` and 18 for the month-end refresh, both with a
+    perfectly healthy `next run` beside them, because the TICK was firing and the WORK was not
+    finishing.
+
+    ⚠ IT RE-RUNS, IT DOES NOT DIAGNOSE. The two states it heals are the two where "run it again" is
+    genuinely the fix. See `_WATCHDOG_HEALS` for why `missing`, `error` and `unknown` are not on
+    that list — each of them would have the watchdog erase the evidence rather than the fault.
+
+    ⚠ IT CANNOT MAKE A JOB THAT LEGITIMATELY DOES NOTHING TODAY REPORT A FRESH SUCCESS. The
+    month-end refresh acts only in the last days of the month; re-running it on the 12th is a
+    no-op, so it will still read `interrupted` afterwards. That is a true statement about the job
+    and not a watchdog failure — which is exactly why the cap exists, so it says it twice and stops
+    rather than every hour for a fortnight.
+
+    ⚠ ONE AT A TIME, THROUGH `start_job_now` — the same body the tick runs, as a cancellable
+    registry job with a toast, so an automatic re-run is visible in the same place a manual one is
+    and can be stopped the same way.
+    """
+    from datetime import datetime as _dt, timezone as _tz  # noqa: PLC0415
+
+    step = _reporter(ctx)
+    health = job_health()
+    rows = health["rows"]
+    if health["history_error"]:
+        # ⚠ NO HISTORY MEANS NO VERDICT, AND A WATCHDOG WITHOUT ONE MUST DO NOTHING. Re-running
+        # every job because the database was briefly unreachable is the opposite of self-healing.
+        return (f"skipped — could not read the run history ({health['history_error']})",
+                {"checked": 0, "restarted": 0})
+
+    today = _dt.now(_tz.utc).date().isoformat()
+    broken = [r for r in rows if r.get("status") in _WATCHDOG_HEALS]
+    step(0, len(broken) or 1, f"{len(broken)} job(s) to re-run of {len(rows)} checked")
+
+    restarted, capped, unrunnable = [], [], []
+    for i, row in enumerate(broken, 1):
+        jid = row["id"]
+        if jid not in JOB_BODIES:
+            unrunnable.append(jid)
+            continue
+        key = (jid, today)
+        if _watchdog_fired.get(key, 0) >= _WATCHDOG_MAX_PER_DAY:
+            capped.append(jid)
+            continue
+        _watchdog_fired[key] = _watchdog_fired.get(key, 0) + 1
+        step(i, len(broken), f"re-running {jid} ({row.get('status')})")
+        # ⚠ LOUD. uvicorn leaves the root logger at WARNING, so an INFO line here is invisible in
+        # Railway — and "why did my pipeline run at 11:00" is a question the log has to answer.
+        _log.warning("[watchdog] re-running %s — %s: %s", jid, row.get("status"),
+                     row.get("why") or "")
+        try:
+            start_job_now(jid)
+            restarted.append(jid)
+        except Exception as e:  # noqa: BLE001 — one bad job must not stop the sweep
+            _log.exception("[watchdog] could not start %s: %s: %s", jid, type(e).__name__, e)
+
+    summary = {"checked": len(rows), "broken": len(broken), "restarted": len(restarted),
+               "restarted_ids": restarted, "capped": capped, "unrunnable": unrunnable}
+    if not broken:
+        return f"all {len(rows)} job(s) healthy", summary
+    msg = f"re-ran {len(restarted)}/{len(broken)}"
+    if capped:
+        msg += f" — {len(capped)} already retried {_WATCHDOG_MAX_PER_DAY}× today: {', '.join(capped)}"
+    if unrunnable:
+        msg += f" — {len(unrunnable)} have no body: {', '.join(unrunnable)}"
+    return msg, summary
+
+
 def scheduler_running() -> bool:
     """Whether THIS process has a live in-process scheduler.
 
@@ -1259,6 +1432,7 @@ def _register_bodies() -> None:
         "crm_relaties_refresh": _body_crm_relaties,
         "airs_vermogen_refresh": _body_airs_vermogen,
         "airs_model_prices": _body_airs_model_prices,
+        "job_watchdog": _body_job_watchdog,
         "history_drift_check": _body_history_drift,
         "asset_price_refresh": _body_asset_price_refresh,
         "table_size_sample": _body_table_size_sample,
@@ -1372,6 +1546,8 @@ def register_scheduler(app) -> None:
         # ⚠ THE PRICING HALF, AT 05:00 — see `_body_airs_model_prices`. Registered beside the
         # scrape it deliberately does NOT duplicate.
         _register("airs_model_prices", _fire_airs_model_prices)
+        # ⚠ THE ONE JOB WHOSE SUBJECT IS THE OTHER JOBS — see `_body_job_watchdog`.
+        _register("job_watchdog", _fire_job_watchdog)
         # Daily CRM "Alle relaties" refresh — EVERY day at 11:00 Amsterdam time.
         # Downloads the export and OVERWRITES airs_crm_relatie with the latest
         # snapshot (full table replace, not a per-date accumulation). Dedicated

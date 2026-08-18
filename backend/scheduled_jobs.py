@@ -111,6 +111,30 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              "European EOD closes are published by run time.",
     ),
     JobSpec(
+        id="job_watchdog",
+        label="Watchdog — re-run broken jobs",
+        fills="nothing directly; it re-runs the jobs the automatic-jobs page reports as broken",
+        cadence="Every day, 11:00 UTC",
+        # ⚠⚠ 11:00 UTC, WHICH IS SIX HOURS AFTER THE PIPELINE IT MOSTLY EXISTS FOR. Late enough
+        # that a 05:00 run has certainly either finished or died, and late enough that a re-run of
+        # it is still on the right side of the European EOD publication the 05:00 time was itself
+        # chosen for — a watchdog firing the pipeline at 01:00 would "heal" it into reading
+        # yesterday's closes.
+        #
+        # ⚠ ONCE A DAY, NOT HOURLY. Every job it can heal has a `max_age_hours` measured in days,
+        # so hourly buys a few hours of latency and costs a re-run attempt every hour on anything
+        # genuinely broken. The per-day cap (`_WATCHDOG_MAX_PER_DAY`) is the real bound; this is
+        # the cheap one.
+        trigger={"hour": 11, "minute": 0, "timezone": "UTC"},
+        options={"coalesce": True, "misfire_grace_time": 3600},
+        # ⚠ A DAY AND A HALF. It runs daily and must itself be visible when it stops — a watchdog
+        # nobody watches is the failure it was built to end, one level up.
+        max_age_hours=36,
+        note="Re-runs jobs reporting `overdue` or `interrupted`, at most twice per job per day. "
+             "⚠ It deliberately does NOT touch `missing` (the job is not registered — healing that "
+             "would hide a broken schedule), `error` (it has a reason; read it) or `unknown`.",
+    ),
+    JobSpec(
         id="month_end_price_refresh",
         label="Month-end full price refresh",
         fills="metric_data for EVERY company, most-stale first",

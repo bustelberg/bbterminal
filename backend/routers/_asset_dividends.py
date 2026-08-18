@@ -473,17 +473,21 @@ def _exchange(exchange_id: int | None) -> tuple[str | None, str | None]:
 
 
 def _backfill_fx_history(currency: str, need_from: str) -> str | None:
-    """Extend `fx_rate` BACKWARDS for `currency` to cover `need_from`.
+    """Extend `fx_rate` BACKWARDS for `currency` to cover `need_from`. Returns the new start.
 
-    `momentum.data.fx.sync_fx_rates_to_db` only ever extends FORWARD — it reads the
-    stored max and fetches from max+1. Nothing in the codebase fills history that
-    predates the earliest stored rate, and today the currencies we actually use
-    (USD, CZK, GBP, JPY, CHF) start at 2024-03-07 while ISK/THB/IDR reach back to
-    2000. A dividend history running to 1998 therefore has almost no EUR line.
+    ⚠⚠ IT DELEGATES NOW (2026-08-18). This used to be the ONLY backwards fill in the codebase, a
+    private one in a dividends router, because `momentum.data.fx.sync_fx_rates_to_db` extended
+    forward and nothing extended back. That function now does both legs, so this is a thin call
+    into it rather than a second implementation — two ways to widen one table is two places for the
+    peg derivation and the chunking to drift, on a table whose gaps produce a plausible NUMBER
+    rather than a blank (see `sync_fx_rates_to_db`'s own note).
 
-    One ECB call per currency, upserted, idempotent. Returns the new coverage start.
+    ⚠ ONE CURRENCY, ON DEMAND, from a request path — hence the narrow window and the swallowed
+    failure: no EUR line on a dividend chart is better than a 500.
     """
-    from fx_rates import fetch_history  # noqa: PLC0415
+    from datetime import date as _date  # noqa: PLC0415
+
+    from momentum.data import sync_fx_rates_to_db  # noqa: PLC0415
 
     from deps import supabase  # noqa: PLC0415
 
@@ -491,20 +495,9 @@ def _backfill_fx_history(currency: str, need_from: str) -> str | None:
     if have and have <= need_from:
         return have
     try:
-        rates = fetch_history(currency, need_from)
+        sync_fx_rates_to_db(supabase, [currency], _date.fromisoformat(need_from), _date.today())
     except Exception:  # noqa: BLE001 — no EUR line is better than a 500
         return have
-    rows = [
-        {"currency_code": currency, "rate_date": r["date"], "rate": r["rate"]}
-        for r in (rates or [])
-        if r.get("date") and r.get("rate")
-    ]
-    if not rows:
-        return have
-    for i in range(0, len(rows), 500):
-        supabase.table("fx_rate").upsert(
-            rows[i:i + 500], on_conflict="currency_code,rate_date",
-        ).execute()
     return _fx_coverage_start(currency)
 
 

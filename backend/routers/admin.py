@@ -1242,61 +1242,24 @@ async def admin_scheduled_jobs(authorization: str = Header(...)):
     """
     _require_admin(authorization)
 
+    # ⚠⚠ THE ASSEMBLY MOVED TO `scheduler.job_health` SO THE WATCHDOG SHARES IT. It was a closure
+    # here; the self-healing tick needs the same verdict, and a second copy of "is this job
+    # overdue" is the one thing that must not exist — the page would say `ok` while the watchdog
+    # re-fired, or the reverse, and the surface built to report what is wrong would be wrong about
+    # itself.
     import os  # noqa: PLC0415
 
-    from routers._scheduled_jobs_status import build_rows, evidence_names, summarize  # noqa: PLC0415, E501
-    from scheduled_jobs import registrable  # noqa: PLC0415
-    from scheduler import JOB_BODIES, list_scheduled_jobs, scheduler_running  # noqa: PLC0415
+    from routers._scheduled_jobs_status import summarize  # noqa: PLC0415
+    from scheduler import job_health  # noqa: PLC0415
 
-    now = datetime.now(timezone.utc)
-    specs = registrable(dict(os.environ))
-    registered = list_scheduled_jobs()
-    running = scheduler_running()
-    # ⚠ READ FROM THE BODY REGISTRY, NOT ASSUMED PER ROW. A "Run now" rendered for a job with no
-    # body is a control that 404s on press.
-    runnable = set(JOB_BODIES)
-
-    def _runs() -> list[dict]:
-        # ⚠⚠ THE NEWEST ROW **PER JOB**, NEVER A WINDOW OF ROWS FILTERED CLIENT-SIDE. See
-        # `evidence_names`: a windowed `.limit(500)` is filled by the noisy jobs and pushes the
-        # quiet ones off the end, so the endpoint accuses exactly the jobs that are behaving.
-        # One-row queries; no window to tune and nothing to truncate.
-        out: list[dict] = []
-        for name in evidence_names(specs):
-            out += (supabase.table("ingest_run")
-                    .select("job_name,started_at,finished_at,status,error_summary")
-                    .eq("job_name", name)
-                    .order("started_at", desc=True)
-                    .limit(1).execute().data or [])
-        # ⚠ NORMALISED ONTO `job_name` SO THE JOIN HAS ONE KEY SPACE. `scheduled_job_run` is keyed
-        # by the APScheduler job id and `ingest_run` by a pipeline job_name; renaming here — rather
-        # than teaching the join about two shapes — is what keeps "which source won" from becoming
-        # a rule anybody has to remember.
-        for spec in specs:
-            if not spec.records:
-                continue
-            for row in (supabase.table("scheduled_job_run")
-                        .select("job_id,started_at,finished_at,status,detail,summary")
-                        .eq("job_id", spec.id)
-                        .order("started_at", desc=True)
-                        .limit(1).execute().data or []):
-                out.append({**row, "job_name": row.pop("job_id")})
-        return out
-
-    try:
-        runs = await asyncio.to_thread(_runs)
-    except APIError as e:
+    health = await asyncio.to_thread(job_health)
+    rows, running, now = health["rows"], health["running"], health["now"]
+    if health["history_error"]:
         # ⚠ THE PAGE STILL RENDERS. Losing the history costs the "did it run" column; it must not
-        # cost the "is it registered" one, which is the half that needs no database at all.
-        runs = []
-        rows = build_rows(specs, registered, runs, now, scheduler_running=running,
-                          runnable=runnable)
+        # cost the "is it registered" one, which needs no database at all.
         return {"jobs": rows, "summary": summarize(rows), "scheduler_running": running,
-                "checked_at": now.isoformat(),
-                "history_error": f"{type(e).__name__}: {e}"}
+                "checked_at": now.isoformat(), "history_error": health["history_error"]}
 
-    rows = build_rows(specs, registered, runs, now, scheduler_running=running,
-                      runnable=runnable)
     return {
         "jobs": rows,
         "summary": summarize(rows),
