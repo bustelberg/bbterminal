@@ -16,7 +16,7 @@ import DividendYieldInputsModal from './DividendYieldInputsModal';
 import DailyToggle from './DailyToggle';
 import { coverageByYear, dividendYieldByYear, type DividendYieldInputs } from './dividendYieldData';
 import { meanOf, paddedDomain, xToMonth, xToPeriod } from './marginData';
-import { periodAxis } from './periodAxis';
+import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**

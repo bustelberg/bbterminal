@@ -15,7 +15,7 @@ import { type Target } from './HoldingsRevenueModal';
 import SbcOcfInputsModal from './SbcOcfInputsModal';
 import { sbcOcfByYear, type SbcOcfInputs } from './sbcOcfData';
 import { meanOf, paddedDomain , xToPeriod } from './marginData';
-import { periodAxis } from './periodAxis';
+import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
 /**

@@ -390,6 +390,32 @@ def _live_accounts() -> set[str] | None:
             for r in rows if r.get("last_seen_at") == newest and r.get("portefeuille")}
 
 
+def _fetched_at() -> dict[str, str]:
+    """Per account (lower-cased), when WE last successfully scanned it — `reports_at`.
+
+    ⚠⚠ IT IS A DIFFERENT FACT FROM `as_of`, AND THE ROW WAS SHOWING ONLY ONE OF THEM. `as_of` is
+    the date AIRS VALUED the book; this is the moment we last READ it. The freshness badge was
+    computed from `as_of` alone and told the reader to press Refresh — which cannot help when the
+    gap is AIRS's rather than ours.
+
+    Measured 2026-08-17, immediately after a full "Refresh all": 31 accounts were re-scanned, and
+    the newest valuation AIRS returned for ANY of them was 2026-08-15. Twenty came back dated
+    2026-08-11 or 2026-08-12 — three to four trading days old — from a scan that had just run
+    successfully. 32 of 40 rows wore the amber warning, and not one of them could be cleared by the
+    action the warning named.
+
+    With both dates the row can say which side is behind: a recent `reports_at` with an old `as_of`
+    is AIRS's valuation batch (nothing to do), an old `reports_at` is ours (refresh).
+    """
+    try:
+        rows = (supabase.table("airs_account_roster").select("portefeuille,reports_at")
+                .order("reports_at", desc=True).limit(2000).execute().data or [])
+    except Exception:  # noqa: BLE001 — a missing column must not blank the page
+        return {}
+    return {(r["portefeuille"] or "").strip().lower(): r["reports_at"]
+            for r in rows if r.get("portefeuille") and r.get("reports_at")}
+
+
 def _missing_reports() -> dict[str, list[str]]:
     """Per account (lower-cased), which of the four reports the last refresh did NOT retrieve.
 
@@ -470,6 +496,7 @@ def list_accounts() -> list[dict]:
     hidden = _hidden_accounts()
     live = _live_accounts()
     missing = _missing_reports()
+    fetched = _fetched_at()
     out: list[dict] = []
     for name, r in perf.items():
         # ⚠ Filtered HERE, at the one place the list is built, so every surface that reads it
@@ -493,6 +520,9 @@ def list_accounts() -> list[dict]:
             # row told them nothing at all and threw away the scan's work. Empty list = whole;
             # absent from `missing` also = whole (or never measured), which is the same display.
             "missing_reports": missing.get(key, []),
+            # When WE last read this account — see `_fetched_at`. Paired with `as_of` it is what
+            # lets the row say whether the gap is ours or AIRS's.
+            "fetched_at": fetched.get(key),
             "periode": str(r["periode"]) if r.get("periode") else None,
             "as_of": newest.get(name),
             "begin_value_eur": begin,
@@ -588,6 +618,12 @@ def account_holdings(portefeuille: str) -> dict:
     return {
         "portefeuille": portefeuille,
         "as_of": as_of,
+        # ⚠ THE PAIR, HERE TOO — see `_fetched_at`. The list row carries both dates and its badge can
+        # therefore say whether an old valuation is AIRS's lag or ours; the expanded panel showed the
+        # same account through the same component with only `as_of`, so every ⓘ inside it went amber
+        # on a book we had read that afternoon. One fact, two surfaces, and the surface with MORE
+        # room for the explanation was the one that could not give it.
+        "fetched_at": _fetched_at().get((portefeuille or "").strip().lower()),
         # Repeated here so the panel can state, on the same screen as the positions, that these
         # do not add up to it — and why.
         "ytd_pct": perf.get("cumulatief_rendement"),

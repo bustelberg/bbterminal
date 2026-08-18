@@ -158,14 +158,56 @@ def load_rows_via_copy(table: str, columns: str, key_col: str, values: list,
            f"(SELECT {columns} FROM {table} WHERE {' AND '.join(clauses)}) t) "
            f"TO STDOUT WITH (FORMAT csv)")
     buf = _run_copy(sql, tuple(params))
-    if buf is None:
-        return None
+    return None if buf is None else _rows_from_copy(buf)
+
+
+def _rows_from_copy(buf: io.BytesIO) -> list[dict]:
+    """One `row_to_json`-per-line COPY buffer -> dicts. ⚠ ONE PARSER, shared by every JSON COPY
+    loader here, because the reason it is `csv.reader` and not `line.split(',')` is a measured bug
+    (1,948 `asset_grid` names contain a comma) and a second copy of the loop is where that lesson
+    gets quietly re-broken."""
     out: list[dict] = []
     # csv.reader unquotes the one JSON column, so embedded commas, quotes and newlines survive.
     for row in csv.reader(io.TextIOWrapper(buf, encoding="utf-8", newline="")):
         if row and row[0]:
             out.append(json.loads(row[0]))
     return out
+
+
+def load_table_via_copy(table: str, columns: str = "*",
+                        *, order_by: str | None = None) -> list[dict] | None:
+    """The WHOLE relation as dicts, in ONE statement over the direct connection.
+
+    Returns `None` to mean "fall back to PostgREST" — unconfigured, psycopg missing, or any error.
+    Never raises, never returns a partial list. Same JSON transport, and the same interpolation
+    rule, as `load_rows_via_copy`: `table`, `columns` and `order_by` must never come from a request.
+
+    ⚠⚠ WHY THIS EXISTS, AND IT IS NOT ONLY SPEED. Offset-paging a wide view through PostgREST costs
+    one statement PER PAGE and each one re-materializes the whole view before discarding the rows
+    ahead of the offset — against the 8s `statement_timeout` on the `authenticator` role, which
+    `service_role` inherits. That is what took `/asset-pipeline` down: `asset_grid` slowed to 10.3s
+    (a correlated LATERAL over a view — see migration `20260817010000`), every page from offset
+    ~8,000 on returned **57014**, and the grid never loaded. Measured after the view fix, same 16,613
+    rows: **17 PostgREST pages 12.68s · one COPY 0.80s**.
+
+    So the pager is not merely slower, it is the fragile shape: its per-page budget is a fraction of
+    the whole read's, so the next column somebody adds to the view breaks the endpoint again. One
+    statement also reads ONE MVCC snapshot, which is strictly stronger than the pager's
+    order-by-append-only-PK trick for staying consistent while a batch inserts underneath it.
+    """
+    if not _db_url():
+        return None
+    if not _SAFE_IDENT.match(table):
+        log.warning("[common.pg] refusing a COPY with a non-identifier table: %r", table)
+        return None
+    if order_by is not None and not _SAFE_IDENT.match(order_by):
+        log.warning("[common.pg] refusing a COPY with a non-identifier order: %r", order_by)
+        return None
+    order = f" ORDER BY {order_by}" if order_by else ""
+    sql = (f"COPY (SELECT row_to_json(t)::text FROM "
+           f"(SELECT {columns} FROM {table}{order}) t) TO STDOUT WITH (FORMAT csv)")
+    buf = _run_copy(sql, ())
+    return None if buf is None else _rows_from_copy(buf)
 
 
 def _drop_scoped_connection() -> None:

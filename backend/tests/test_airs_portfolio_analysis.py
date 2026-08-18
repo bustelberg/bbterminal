@@ -81,9 +81,13 @@ class TestRegionIsTheIssuersNotOurVenues:
 
     CODES = {"US": "United States", "IE": "Ireland", "CH": "Switzerland", "JP": "Japan"}
 
-    def _row(self, domicile=None, listing="Germany"):
+    def _row(self, domicile=None, listing="Germany", stored="Europe"):
+        """⚠ `msci_region` DEFAULTS TO THE WRONG ANSWER ON PURPOSE. It is the venue-derived column
+        (`resolve_geo` falls back to the listing), so every test below runs against a row whose
+        stored region says Europe — which is exactly what the S&P megacaps looked like. A rule that
+        only works when the grid happens to agree is not being tested by a row where it does."""
         return {"asset_class": "equity", "sector": "Healthcare", "listing_country": listing,
-                "msci_region": "Europe", "domicile_country": domicile,
+                "msci_region": stored, "domicile_country": domicile,
                 "market_cap_currency": "USD", "currency": "EUR"}
 
     def test_a_us_megacap_on_a_german_venue_is_NOT_europe(self):
@@ -97,16 +101,87 @@ class TestRegionIsTheIssuersNotOurVenues:
         # ...and it holds off the ISIN alone when Yahoo gave no domicile.
         assert pa._region(self._row(domicile=None), "CH0044328745", self.CODES) == "Europe"
 
-    def test_the_listing_venue_is_NEVER_consulted(self):
-        """The whole bug in one assertion: the row says Germany everywhere our venue choice
-        touches it, and the answer is still North America."""
+    def test_the_venue_is_consulted_LAST_and_never_before_the_issuers_own_geography(self):
+        """⚠⚠ THE ORDER **IS** THE FIX, and this is the assertion that guards it.
+
+        The stored `msci_region` is now a third step (see the next two tests), and it says Europe on
+        this row — so if it were ever reached before the ISIN, the 54 US megacaps our grid prices on
+        German venues would all come back Europe again and the S&P would read 7.2% European for the
+        second time. Measured after the change: S&P Europe 2.05%, unmoved.
+
+        The raw `listing_country` is still never read in the code; only the derived column is, and
+        only after both issuer-level signals have said nothing.
+        """
         src = inspect.getsource(pa._region)
         assert "listing_country" not in src.split('"""', 2)[2]   # not in the CODE, only the prose
-        assert pa._region(self._row(domicile=None, listing="Germany"),
+        assert pa._region(self._row(domicile=None, listing="Germany", stored="Europe"),
                           "US0378331005", self.CODES) == "North America"
+        # ...and the same when Yahoo DID give a domicile that simply has no MSCI market.
+        assert pa._region(self._row(domicile="Uruguay", stored="Europe"),
+                          "US58733R1023", self.CODES) == "North America"
 
-    def test_no_domicile_and_no_isin_is_UNCLASSIFIED_not_a_guess(self):
-        assert pa._region(self._row(domicile=None), None, self.CODES) == pa.UNKNOWN_BUCKET
+    def test_no_domicile_no_isin_and_no_stored_region_is_UNCLASSIFIED_not_a_guess(self):
+        assert pa._region(self._row(domicile=None, stored=None), None, self.CODES) \
+            == pa.UNKNOWN_BUCKET
+
+    def test_a_stray_stored_value_is_refused_rather_than_becoming_a_bucket(self):
+        """⚠ The column is nullable and free-form. A country name, a future spelling or anything
+        else would otherwise open a bar of its own on a chart of four regions — which reads as a
+        region rather than as a bad cell. Validated against `geo`'s own map, not a literal list."""
+        for junk in (None, "", "Germany", "EMEA", "north america", 0):
+            assert pa._region(self._row(domicile="Bermuda", stored=junk),
+                              "BMG507361001", self.CODES) == pa.UNKNOWN_BUCKET
+
+    def test_a_domicile_with_no_MSCI_region_falls_through_to_the_isin(self):
+        """⚠ MercadoLibre. Yahoo reports Uruguay — its Montevideo head office, correctly — MSCI has
+        no Uruguay, and the ISIN says Delaware. The first version returned on the spot for ANY
+        domicile (`if dom: return msci_region_of(dom) or UNKNOWN`), so a domicile that existed but
+        did not map never reached the ISIN below it: the region tab read `Unclassified` while
+        `/asset-pipeline` read North America, same company, nothing wrong-looking on either screen.
+        """
+        codes = {**self.CODES, "FR": "France"}
+        assert pa._region(self._row(domicile="Uruguay"), "US58733R1023", codes) == "North America"
+        # Eurofins Scientific: a Luxembourg SE carrying a FRENCH ISIN — recovered by the same step.
+        assert pa._region(self._row(domicile="Luxembourg"), "FR0014000MR3", codes) == "Europe"
+
+    def test_an_incorporation_haven_falls_through_to_the_grids_stored_region(self):
+        """⚠⚠ NEITHER ISSUER-LEVEL SIGNAL IS A MARKET FOR THESE, so the grid's value is the only
+        answer there is — and it is the one `/asset-pipeline` already shows.
+
+        18 of ACWI's 21 unclassified members were incorporated in a haven (Cayman, Bermuda,
+        Luxembourg, Isle of Man, Macau), so the domicile does not map AND the ISIN prefix is the
+        haven itself: Li Ning `KY…`, Jardine Matheson `BM…`, ArcelorMittal `LU…`. Leaving 0.24% of
+        the index in a bucket that means "we do not know", while another screen in the same app
+        showed a region for every one of them, is a worse answer than the venue's.
+
+        Measured after the change: ACWI Unclassified 0.36% -> 0.00%, and the recovered weight lands
+        North America +0.23pp / Europe +0.09pp / EM +0.03pp / Pacific +0.02pp.
+        """
+        codes = {**self.CODES, "KY": "Cayman Islands", "BM": "Bermuda"}
+        assert pa._region(self._row(domicile="Cayman Islands", stored="Emerging Markets"),
+                          "KYG989221000", codes) == "Emerging Markets"   # Zhen Ding, Taiwan-listed
+        assert pa._region(self._row(domicile="Bermuda", stored="North America"),
+                          "BMG0450A1053", codes) == "North America"      # Arch Capital, an S&P name
+        # ...and with no domicile at all, which is what Yahoo returns for the thin German lines.
+        assert pa._region(self._row(domicile=None, stored="Pacific"),
+                          "KYG7800X1079", codes) == "Pacific"            # Sands China, on HKSE
+
+    def test_it_inherits_a_wrong_LISTING_and_that_is_a_listing_bug_not_a_region_bug(self):
+        """⚠⚠ THE PRICE OF THE STEP ABOVE, STATED RATHER THAN HIDDEN.
+
+        Where our venue choice is wrong, the region follows it: `asset_grid` prices Kingsoft on
+        Stuttgart (`3K1.SG`, EUR 6,550/day), Li Ning on Stuttgart (`LNLB.SG`, EUR 2,594/day) and
+        Orient Overseas on Munich (`ORI1.MU`, EUR 3,056/day), so three HONG KONG companies bucket as
+        Europe — together 0.02% of ACWI.
+
+        There is deliberately no special case here. Those rows are wrong in their PRICE SERIES too,
+        which no region rule can fix, and the repair is to repoint them to 3888/2331/0316.HK
+        (`repoint_primary_listing.py --isin`). This test exists so the behaviour is documented and
+        the day the listings are fixed, it is the test that says what changed.
+        """
+        codes = {**self.CODES, "KY": "Cayman Islands"}
+        assert pa._region(self._row(domicile=None, listing="Germany", stored="Europe"),
+                          "KYG5496K1242", codes) == "Europe"
 
 
 class TestCurrencyIsTheCompanysNotOurVenues:

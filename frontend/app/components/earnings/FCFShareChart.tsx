@@ -11,6 +11,7 @@ import { MC, type MetricRow } from './types';
 import { annualSeries, computeCAGR, fmtNum, fmtPct, tooltipStyle } from './utils';
 import { buildMemberSeries, weightedAverageSeries, type PortfolioMemberMetrics } from './portfolioBreakdown';
 import { chartTheme } from '../../../lib/chartTheme';
+import { tiltedAxis } from '../../../lib/chartAxis';
 
 // Series colors — must match ForwardPEChart and RelativeGrowthChart's
 // A/B treatment so the user reads them consistently across panels.
@@ -136,7 +137,7 @@ function FCFShareChartInner({ metrics, metricsB, labelA, labelB, nameA, nameB, t
             }
             : undefined}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-          <XAxis dataKey="date" tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: string) => v.slice(0, 4)} />
+          <XAxis dataKey="date" tickFormatter={(v: string) => v.slice(0, 4)} {...tiltedAxis({ fontSize: 11 })} />
           <YAxis
             tick={{ fontSize: 12, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => `€${v.toFixed(1)}`}

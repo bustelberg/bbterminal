@@ -5,6 +5,7 @@ import {
   CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { chartTheme } from '../../../lib/chartTheme';
+import { tiltedAxis } from '../../../lib/chartAxis';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { Stat } from './MetricGrowthCard';
@@ -164,7 +165,7 @@ export default function MultipleHistoryChart({
                 <XAxis dataKey="t" type="number" scale="time" domain={['dataMin', 'dataMax']}
                   ticks={years} interval="preserveStartEnd"
                   tickFormatter={(t: number) => String(new Date(t).getUTCFullYear())}
-                  tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+                  {...tiltedAxis()} />
                 <YAxis domain={paddedDomain(scaleSet)} allowDataOverflow width={52}
                   tick={{ fontSize: 12, fill: chartTheme.axisTick }}
                   tickFormatter={(v: number) => `${v.toFixed(0)}×`} />

@@ -118,6 +118,10 @@ def list_overview() -> list[dict]:
             # Carried straight through from `list_accounts` — the overview is a composition of that
             # row with its Fixed pairing, so a caveat about the row's freshness belongs on it.
             "missing_reports": a.get("missing_reports") or [],
+            # ⚠ THE PAIR IS THE POINT — see `_airs_accounts._fetched_at`. `as_of` is when AIRS
+            # VALUED the book; this is when WE last read it. Without both, an old valuation reads
+            # as our staleness and the badge sends the reader to a button that cannot help.
+            "fetched_at": a.get("fetched_at"),
             "residual_eur": a.get("residual_eur"),
         })
     # Linked first (they are the ones with a name), then by that name.

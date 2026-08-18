@@ -293,6 +293,42 @@ export function buildBlend(data: Resp) {
      *  asks for it periods x rows times. Mirrors where the backend computes it. */
     const scaleOf = new Map<typeof parts[number], number>(
       parts.map((p) => [p, memberScale(Object.values(at.get(p) ?? {}))]));
+    /**
+     * ⚠⚠ THE LINE'S OWN MOVE, DECOMPOSED BY MEMBER, IN PERCENTAGE POINTS OF THAT MOVE — and it is
+     * computed HERE, inside the loop that chains the line, for the reason everything else in this
+     * file is: `pp_i = 100 · w_i·g_i ÷ Σw` sums to `100 · Σw·g ÷ Σw`, which IS the step the next
+     * line multiplies into the index. So the column adds up to the footer exactly, and "who moved
+     * this line" stops being a guess read off two adjacent figures.
+     *
+     * ⚠⚠ THE DENOMINATOR IS **NEITHER** `denom[y]` NOR THE TABLE'S WEIGHT — it is Σw over the
+     * members that SPAN THIS INTERVAL. A row present at `y` but absent (or refused: a non-positive
+     * anchor, an immaterial base, an implausible step — see `stepGrowth`) at the anchor sits in
+     * `denom[y]` and is not in this move at all. Dividing by `denom[y]` would scale every
+     * contribution down by the weight of whoever could not be measured over the interval, and the
+     * column would land short of the footer by exactly that — a decomposition that does not add up
+     * to its own total is not one, it is a pile of plausible numbers.
+     *
+     * ⚠ `from` IS PART OF THE ANSWER, NOT METADATA. The anchor is the last DRAWN period, which is
+     * the previous column only while every column is drawn; under the coverage floor the move spans
+     * two years (or five quarters), and a pp figure whose interval is unstated reads as one period's
+     * contribution. `spanPct` is how much of the period's line weight the decomposition covers.
+     *
+     * ⚠ KEYED ON THE ROW OBJECT, NOT THE ISIN — the same rule as `partOf` above: one payload can
+     * carry an ISIN twice at two weights, and an ISIN key hands both rows the first one's figures.
+     */
+    const step: Record<string, { from: string; growthPct: number; spanPct: number }> = {};
+    /**
+     * ⚠⚠ BOTH FACTORS, NOT JUST THE PRODUCT — `pp === sharePct × growthPct ÷ 100`, exactly, so the
+     * cell can show a reader the multiplication it is looking at instead of asserting a number.
+     *
+     * ⚠ `sharePct` IS NOT THE WEIGHT THE CELL PRINTS UNDER IT. That one divides by `denom[y]` (the
+     * whole period's line weight); this one divides by `den` (the weight that spans the interval),
+     * because that is the denominator the contribution was actually taken over. They are equal
+     * whenever every member spans the interval — i.e. `spanPct === 100` — and where they are not,
+     * quoting the printed weight as the factor gives a multiplication that does not reach the pp.
+     */
+    const contrib = new Map<Row,
+      Record<string, { pp: number; growthPct: number; sharePct: number }>>();
     let anchor: string | null = null;
     let chained = 100;
     for (const y of data.years) {
@@ -300,6 +336,13 @@ export function buildBlend(data: Resp) {
       if (anchor != null) {
         let num = 0;
         let den = 0;
+        /**
+         * ⚠ HELD, NOT WRITTEN STRAIGHT INTO `contrib`. Each term's share is over the FINAL `den`,
+         * which is not known until every part has been asked — and both guards below can still
+         * discard the whole step, so writing as we go would leave contributions behind for a period
+         * that ends up with no line point for them to be a share of.
+         */
+        const terms: { r: Row; w: number; g: number }[] = [];
         for (const p of parts) {
           const w = wAt(p.r, y);
           // ⚠ THE SHARED RULE, NOT AN INLINE `prev > 0`. That guard caught zero and missed the
@@ -309,6 +352,7 @@ export function buildBlend(data: Resp) {
           if (!w || g == null) continue;
           num += w * g;
           den += w;
+          terms.push({ r: p.r, w, g });
         }
         if (den <= 0) continue;               // nothing spans this interval — no honest move
         // ⚠ EVERY ROW WIPED OUT. `stepGrowth` floors each at −100%, so this is an exact −1 and the
@@ -316,6 +360,20 @@ export function buildBlend(data: Resp) {
         // points that would vanish silently, which is the failure this whole rule exists to end.
         if (1 + num / den <= 0) break;
         chained *= 1 + num / den;
+        step[y] = { from: anchor,
+                    growthPct: 100 * num / den,
+                    spanPct: 100 * den / (denom[y] || 1) };
+        for (const t of terms) {
+          const byPeriod = contrib.get(t.r) ?? {};
+          // ⚠ A ZERO HERE IS A MEASUREMENT, NOT AN ABSENCE — the opposite of the weight line's rule,
+          // and the two sit in the same cell. This member was in the move and did not move (a
+          // carried figure is the common case: same value at both ends, so `g` is exactly 0). "Not
+          // in this step" is the MISSING key, which the reader sees as a dash.
+          byPeriod[y] = { pp: 100 * t.w * t.g / den,
+                          growthPct: 100 * t.g,
+                          sharePct: 100 * t.w / den };
+          contrib.set(t.r, byPeriod);
+        }
       }
       anchor = y;
       level[y] = { value: chained, covered: 100 * (coverW[y] ?? 0) / (coverTotal || 1) };
@@ -325,7 +383,7 @@ export function buildBlend(data: Resp) {
     // which is exactly why it is worth printing.
     const weightSum: Record<string, number> = {};
     for (const y of Object.keys(denom)) weightSum[y] = 100;
-    return { level, denom, partOf, wAt, excluded, from, weightSum,
+    return { level, denom, partOf, wAt, excluded, from, weightSum, step, contrib,
              contributors: parts.length,
              coveredNames: Object.fromEntries(data.years.map(
                (y) => [y, 100 * (coverN[y] ?? 0) / (parts.length || 1)])) };

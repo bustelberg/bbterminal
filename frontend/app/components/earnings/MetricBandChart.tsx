@@ -11,6 +11,7 @@ import { type ChartCadence, type MetricRow } from './types';
 import { dropExtremeOutliers, tooltipStyle } from './utils';
 import { buildMemberSeries, weightedAverageSeries, MemberRanking, type MemberSeries, type PortfolioMemberMetrics } from './portfolioBreakdown';
 import { chartTheme } from '../../../lib/chartTheme';
+import { tiltedAxis } from '../../../lib/chartAxis';
 
 // Series colors — must match the other earnings charts' A/B treatment so the
 // user reads them consistently across panels.
@@ -288,7 +289,7 @@ function MetricBandChartInner({
             }
             : undefined}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-          <XAxis dataKey="date" tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: string) => v.slice(0, 7)} />
+          <XAxis dataKey="date" tickFormatter={(v: string) => v.slice(0, 7)} {...tiltedAxis({ fontSize: 11 })} />
           <YAxis
             domain={[yMin, yMax]}
             allowDataOverflow

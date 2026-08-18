@@ -1,0 +1,22 @@
+{
+  "overrides": [
+    {
+      "isin": "KYG5264Y1089",
+      "symbol": "3888.HK",
+      "name": "Kingsoft Corp Ltd",
+      "note": "Was 3K1.SG - Stuttgart, EUR, median EUR 6,550/day - for a Hong Kong company. An ACWI constituent whose price series came off a German line doing a few thousand euro a day, and whose region therefore read Europe. Escaped repoint_primary_listing.py because Yahoo returns no profile for that line, so it has no market cap and the ADV/cap detector never looked at it."
+    },
+    {
+      "isin": "KYG5496K1242",
+      "symbol": "2331.HK",
+      "name": "Li Ning Co Ltd",
+      "note": "Was LNLB.SG - Stuttgart, EUR, median EUR 2,594/day. Same failure as Kingsoft: an ACWI constituent priced off a German line, read as Europe on the region axis. Cayman-incorporated, so neither the domicile nor the ISIN prefix is a market - the venue was the only signal left and it was the wrong venue."
+    },
+    {
+      "isin": "BMG677491539",
+      "symbol": "0316.HK",
+      "name": "Orient Overseas (International) Ltd",
+      "note": "Was ORI1.MU - Munich, EUR, median EUR 3,056/day. Bermuda-incorporated Hong Kong shipping line; the Munich listing put it in Europe on both the region axis and its own price series."
+    }
+  ]
+}

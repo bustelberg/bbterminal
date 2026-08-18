@@ -176,6 +176,27 @@ class _Query:
         # PostgREST. A stable sort makes the composition exact.
         for col, desc in reversed(self._order):
             rows = sorted(rows, key=lambda r, c=col: (r.get(c) is None, r.get(c)), reverse=desc)
+        # ⚠ APPLIED AFTER THE SORT AND BEFORE THE SLICE — see `unstable_ties`. Rows the ORDER BY
+        # cannot separate come back in an unspecified order, so a page boundary inside a tie group
+        # is a lost row. A total sort key makes every group a singleton and this a no-op.
+        if self._store.unstable_ties and self._order:
+            self._store._tie_shift += 1                                   # noqa: SLF001
+            shift = self._store._tie_shift                                # noqa: SLF001
+
+            def _key(r: dict) -> tuple:
+                return tuple((r.get(c) is None, r.get(c)) for c, _d in self._order)
+
+            out: list[dict] = []
+            i = 0
+            while i < len(rows):
+                j = i + 1
+                while j < len(rows) and _key(rows[j]) == _key(rows[i]):
+                    j += 1
+                group = rows[i:j]
+                k = shift % len(group)
+                out += group[k:] + group[:k]
+                i = j
+            rows = out
         if self._range is not None:
             start, end = self._range
             rows = rows[start : end + 1]
@@ -194,7 +215,23 @@ class FakeSupabase:
         tables: dict[str, list[dict]] | None = None,
         rpc_results: dict[str, list[dict]] | None = None,
         max_rows: int | None = None,
+        unstable_ties: bool = False,
     ):
+        # ⚠⚠ POSTGRES MAKES NO PROMISE ABOUT THE ORDER OF **TIED** ROWS, and a pager whose sort key
+        # is not unique is therefore not a pager: a boundary landing inside a tie group serves some
+        # rows twice and others never. Off by default (a stable sort is the friendlier default for
+        # every other test); set it to prove a reader's ORDER BY is total.
+        #
+        # It rotates each tie group by one more position on every execute, which is the cheapest
+        # faithful model of "unspecified": a unique key leaves every group at size 1 and is
+        # completely unaffected, so a correct pager passes and an incorrect one loses rows.
+        #
+        # Measured motivation (2026-08-17): `earnings._page_metrics` ordered on `target_date`
+        # alone, and a company files ~110 metric codes on the SAME date — so with a 1,000-row page
+        # every boundary fell inside a tie. ASML, Alphabet and Amazon each silently lost their 2018
+        # FCF/share row, Berkshire its 2019.
+        self.unstable_ties = unstable_ties
+        self._tie_shift = 0
         # PostgREST's response cap, off by default. Set it to reproduce the failure mode this
         # project keeps rediscovering: the cap is 1,000 on Supabase cloud and 10,000 locally,
         # a response is truncated SILENTLY, and so a loader that does not page returns a

@@ -164,6 +164,52 @@ export function forwardCagr(
 }
 
 /**
+ * Point-to-point CAGR of a series of `{x, value}` points — first to last, `(b/a)^(1/span) − 1`.
+ *
+ * ⚠⚠ THE **ONE** DEFINITION OF "CAGR" IN THIS APP, AND THE REASON IT EXISTS IS THAT THERE WERE TWO.
+ * The Long Equity growth card used to report the SLOPE OF A FITTED EXPONENTIAL (`logLinearFit`)
+ * while the Tables tab measured endpoints, so the same book's FCF/share read **29.7%** on one
+ * screen and **30.1%** two tabs away. Both were defensible and neither was checkable against the
+ * other; a reader comparing them has no way to know the difference is a modelling choice rather
+ * than a data problem. One definition, both surfaces, so the numbers are equal by construction.
+ *
+ * ⚠ THE FIT DID NOT GO AWAY — R² AND THE DRAWN TREND LINE ARE STILL IT, and that is the right split.
+ * The fit answers "how STEADY is the growth" (which is all R² ever meant); this answers "what WAS
+ * the growth". A CAGR is a fact about two numbers the company reported; a fitted slope is a fact
+ * about a model of them, and it silently smooths away exactly the endpoint that a reader checking
+ * the chart against the table would look at first.
+ *
+ * ⚠ THE SPAN IS FRACTIONAL ON PURPOSE. The card's x is the fiscal period as a NUMBER — `2015` on
+ * an annual axis, `2015.25` on a quarterly one — so `last.x − first.x` is already the elapsed span
+ * in years and the rate is per annum on either cadence. Rounding it to whole years would report a
+ * quarterly series' rate over the wrong denominator.
+ *
+ * ⚠ IT REFUSES A NON-POSITIVE ENDPOINT rather than reaching inward for a positive one. Trimming to
+ * the first positive point would answer over a window nobody chose and label it as the whole chart
+ * — the trap `logLinearFit` fell into by DROPPING those points (it even returned `dropped`, which
+ * nothing read). See the header of this file: a rate out of a negative base is not a large number,
+ * it is a meaningless one, and its sign flips.
+ */
+export function endpointCagr(
+  points: readonly { year: number; value: number }[],
+  label: (x: number) => string = String,
+): Cagr {
+  const pts = points.filter((p) => Number.isFinite(p.value));
+  if (pts.length < 2) return { pct: null, reason: 'fewer than two reported periods' };
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  const years = b.year - a.year;
+  if (!(years > 0)) return { pct: null, reason: 'the first and last points are the same period' };
+  if (!(a.value > 0) || !(b.value > 0)) {
+    return { pct: null,
+      reason: `the series is not positive at both ends (${label(a.year)} ${a.value}, `
+        + `${label(b.year)} ${b.value}), so a compound growth RATE is undefined` };
+  }
+  return { pct: 100 * ((b.value / a.value) ** (1 / years) - 1),
+           from: label(a.year), to: label(b.year), years };
+}
+
+/**
  * The latest reported period BOTH lines carry — the window a comparison can honestly use.
  *
  * ⚠ `null` WHEN THEY SHARE NONE, which is a real state (a book of 2020-onwards listings against an

@@ -12,11 +12,12 @@
  * pill states the freshness. Rendered via {@link InfoTip} so it appears instantly (the native
  * `title=` sits for ~1-2s) and can't be clipped by an overflow ancestor.
  */
+import { createContext, useContext } from 'react';
 import InfoTip from '../app/components/InfoTip';
 import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
 import { Field, TipCard } from './tipCard';
 import { trimStop } from './provenanceText';
-import { snapshotFreshness, type SnapshotTone } from './snapshotAge';
+import { lagOwner, snapshotFreshness, type SnapshotTone } from './snapshotAge';
 
 export type SourceKey =
   | 'airs_volk'      // AIRS Vermogensoverzicht — the book's own EUR position values
@@ -83,12 +84,24 @@ export type ProvKind = 'copied' | 'formula';
  * it is the same shell with a different field promoted, and it keeps every call site that has not
  * been given a `what` yet rendering correctly rather than showing an empty heading.
  */
-function ProvenanceCard({ source, asOf, note, how, kind, column, what }: {
-  source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
+function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what }: {
+  source: SourceKey; asOf?: string | null; fetchedAt?: string | null;
+  note?: string; how?: string; kind?: ProvKind;
   column?: boolean; what?: string;
 }) {
   const s = SOURCE[source];
   const f = asOf ? snapshotFreshness(asOf) : null;
+  /**
+   * ⚠⚠ WHOSE LAG IS IT. `asOf` is the day AIRS VALUED the book; `fetchedAt` is the moment we last
+   * READ it. Only the second is ours to fix, and the card used to show only the first — so an old
+   * valuation read as our staleness and the badge sent the reader to a Refresh button that cannot
+   * publish a valuation AIRS has not made. Measured after a full refresh: 31 accounts re-scanned,
+   * newest valuation available anywhere 2026-08-15, twenty of them still dated 2026-08-11/12.
+   *
+   * Silent when `fetchedAt` is absent — most Provenance call sites have no such fact, and inventing
+   * a verdict for them would be worse than the omission this fixes.
+   */
+  const whoseLag = lagOwner(asOf, fetchedAt);
   return (
     // The shared shell — identical chrome to every other tooltip; only the FIELDS differ.
     <TipCard label={what ? 'What' : 'Where'} title={what ?? s.label}
@@ -114,6 +127,14 @@ function ProvenanceCard({ source, asOf, note, how, kind, column, what }: {
               )
               : <span className="text-fg-muted">no dated source (a structural / computed value)</span>}
         </Field>
+        {/* ⚠ ONLY WHEN THE BADGE IS AMBER AND WE KNOW BOTH DATES. A "we read this today" line under
+            a fresh row is noise; under an amber one it is the difference between an action and a
+            dead end. See `whoseLag`. */}
+        {whoseLag && (
+          <Field label="Whose lag">
+            <span className="text-fg-soft leading-relaxed">{whoseLag.text}</span>
+          </Field>
+        )}
         {(kind || how) && (
           <Field label="How">
             <span className="text-fg-soft leading-relaxed">
@@ -154,8 +175,33 @@ function ProvenanceCard({ source, asOf, note, how, kind, column, what }: {
  *  can still go amber. So `column` suppresses the warn state outright and the When field says
  *  where the date actually lives. It is not a styling opt-out — it is the statement that this
  *  icon has no observation behind it. */
-export function Provenance({ source, asOf, note, how, kind, column = false, what }: {
+/**
+ * A `fetchedAt` for a whole subtree — WHEN WE LAST READ THE THING EVERY NUMBER UNDER IT DESCRIBES.
+ *
+ * ⚠⚠ A CONTEXT AND NOT A PROP, FOR ONE REASON: the expanded account panel renders **40** ⓘ icons
+ * and every one of them carries the SAME account's `as_of`. Threading a second date through all of
+ * them is forty chances to forget one — and a forgotten one is not a visible bug, it is a single
+ * icon that stays amber while its neighbours went quiet, which reads as "this particular number is
+ * stale" and is the most misleading outcome available.
+ *
+ * ⚠ IT MUST WRAP EXACTLY ONE SOURCE-OBJECT'S SUBTREE. The provider says "everything in here was
+ * read at this moment"; wrapping two accounts, or a page, would hand one book's fetch time to
+ * another's numbers and quietly de-amber a row that really is our lag. An explicit `fetchedAt` prop
+ * always wins, so a nested exception stays possible.
+ */
+const FetchedAtContext = createContext<string | null | undefined>(undefined);
+
+export function ProvenanceFetchedAt({ at, children }: {
+  at?: string | null; children: React.ReactNode;
+}) {
+  return <FetchedAtContext.Provider value={at}>{children}</FetchedAtContext.Provider>;
+}
+
+export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = false, what }: {
   source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
+  /** When WE last read the source, if the caller knows it. Turns an amber badge from a dead end
+   *  into an answer — see `whoseLag` in the card. Optional everywhere. */
+  fetchedAt?: string | null;
   column?: boolean;
   /** WHAT this number is, in one plain sentence — "Your share of the model held in Industrials."
    *  Answered FIRST, because Source/When/How are all questions about a number the reader has
@@ -164,10 +210,33 @@ export function Provenance({ source, asOf, note, how, kind, column = false, what
 }) {
   // ⚠ `!column &&` FIRST. A column header must never reach the stale branch, whatever it was
   // handed — the guard belongs here, not at ~90 call sites that each have to remember it.
-  const stale = !column && asOf ? snapshotFreshness(asOf)?.tone === 'stale' : false;
+  /**
+   * ⚠⚠ AMBER MEANS "YOU CAN FIX THIS", NOT "THIS IS OLD" — and firing it on AIRS's own lag made it
+   * furniture. Measured 2026-08-17, straight after a full "Refresh all": 27 of 45 account rows wore
+   * the `!`, and 23 of them had been read that same afternoon — AIRS had simply not valued those
+   * books since. Not one of the 23 could be cleared by any action available on the page, and an
+   * alarm that cannot be cleared is one a reader learns to scroll past, which then costs them the
+   * four rows that WERE ours to fix.
+   *
+   * So `source`-side lag demotes the icon to the ordinary `i`: the date and its age are still in the
+   * card, one hover away, with `Whose lag` saying why refreshing cannot move it. Amber is reserved
+   * for the lag we own — and for the case where we do NOT KNOW whose it is (`fetchedAt` absent, most
+   * call sites), because silence there would hide the AMD incident this badge was built for: a
+   * 4-day-old cached value read €114,587 / +142% against AIRS-live's €107,086 / +126%.
+   */
+  // ⚠ A DATE OF ITS OWN WINS; ANYTHING ELSE INHERITS THE SUBTREE'S — see `ProvenanceFetchedAt`.
+  // `??` treats an explicit `null` exactly like an absent prop, and that is deliberate: `null` here
+  // means "this call site does not know when we read it", which is precisely when the provider's
+  // answer — about the same account — is the better one.
+  const ctxFetchedAt = useContext(FetchedAtContext);
+  const fetched = fetchedAt ?? ctxFetchedAt;
+  const lag = column ? null : lagOwner(asOf, fetched);
+  const stale = !column && asOf
+    ? snapshotFreshness(asOf)?.tone === 'stale' && lag?.side !== 'source'
+    : false;
   return (
-    <InfoTip content={<ProvenanceCard source={source} asOf={asOf} note={note} how={how}
-      kind={kind} column={column} what={what} />}>
+    <InfoTip content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note}
+      how={how} kind={kind} column={column} what={what} />}>
       <span
         className={`ml-1 ${stale ? INFO_ICON_WARN : INFO_ICON}`}
         aria-label="data source and formula"

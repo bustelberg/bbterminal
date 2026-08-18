@@ -132,8 +132,34 @@ export const BASIS: Record<Basis, {
     //                          believe half of it should not be drawing that half.
     //
     // A multiple is a fact about a price and a filing. Neither substitute is one.
+    /**
+     * ⚠⚠ NULL BECAUSE THERE IS NO FCF **SERIES**, NOT BECAUSE NO FORECAST EXISTS — and this comment
+     * used to say the latter, which is false. Probed 2026-08-17: `stock/{sym}/analyst_estimate` has
+     * `operating_cash_flow_estimate` and `operating_cash_flow_per_share_estimate` but no free-cash-
+     * flow line at any cadence, so there is nothing to draw a forward P/FCF LINE from — that part
+     * stands. But `stock/{sym}/summary` → `company_data` carries **`forward_fcf`** and
+     * **`forward_fcf_2nd`** (the consensus for the next two fiscal years, in millions of the
+     * reporting currency) alongside `forward_fcf_yield`. Undocumented, like every other useful thing
+     * on this API. Measured on the 20 largest holdings: 17 carry a non-zero `forward_fcf`; the three
+     * that do not are Berkshire, JPMorgan and a Samsung share-class duplicate — i.e. financials,
+     * where free cash flow is not a meaningful line. That is an answer, not a coverage gap.
+     *
+     * ⚠⚠ AND `forward_fcf_yield` MUST NOT BE SHOWN AS-IS, BECAUSE ITS NUMERATOR SILENTLY SWITCHES
+     * YEARS. The payload is internally consistent on the trailing side — `ttm_total_free_cash_flow /
+     * mktcap` reproduces `FCFyield` to three figures (Andritz 6.645 vs 6.65, Apple 2.781 vs 2.78),
+     * and `price x shares` IS `mktcap` exactly. The forward one does not reconcile against the same
+     * divisor, and solving for the numerator says why: Apple's implies **145,835** against
+     * `forward_fcf` 137,187 and `forward_fcf_2nd` 145,707 — it is FY2, to 0.09%. Andritz's implies
+     * FY1. Apple's fiscal year ends in September and Andritz's in December, so GuruFocus rolls to
+     * the next forward year as a company's own year closes — and nothing in the payload says which
+     * year the quoted yield belongs to.
+     *
+     * So: take `forward_fcf` / `forward_fcf_2nd`, which name their fiscal year, and divide by our
+     * own price — the way `FCFyield` demonstrably works. A yield whose numerator is one of two years
+     * depending on the date is not a number this app can put beside its own.
+     */
     estimateCodes: null,
-    forwardSource: 'There is no forward P/FCF, because no analyst publishes a free-cash-flow forecast. The chart shows the multiple this company has actually traded at, and where it trades today — every point measured, none projected.',
+    forwardSource: 'There is no forward P/FCF LINE, because GuruFocus publishes no free-cash-flow forecast as a SERIES — `analyst_estimate` carries operating cash flow but not FCF. (It does publish a scalar consensus for the next two fiscal years on the summary endpoint; see the note in the code.) The chart shows the multiple this company has actually traded at, and where it trades today — every point measured, none projected.',
   },
   eps: {
     tab: 'EPS',

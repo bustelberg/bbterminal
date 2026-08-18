@@ -11,6 +11,7 @@ import { MC, type MetricRow } from './types';
 import { annualSeries, computeCAGR, fmtPct, timeSeries } from './utils';
 import { buildMemberSeries, weightedReturnIndex, weightedReturnIndexShared, type PortfolioMemberMetrics } from './portfolioBreakdown';
 import { chartTheme } from '../../../lib/chartTheme';
+import { tiltedAxis } from '../../../lib/chartAxis';
 
 type Pt = { date: string; value: number };
 /** The raw series `buildIndexed` needs. Pulled out so a portfolio can supply
@@ -312,8 +313,8 @@ function RelativeGrowthChartInner({ metrics, metricsB, labelA, labelB, nameA, na
             type="number"
             scale="time"
             domain={['dataMin', 'dataMax']}
-            tick={{ fontSize: 12, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => new Date(v).getFullYear().toString()}
+            {...tiltedAxis()}
           />
           <YAxis
             scale="log"

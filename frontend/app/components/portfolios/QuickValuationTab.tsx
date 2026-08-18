@@ -8,6 +8,7 @@ import {
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
+import { tiltedAxis } from '../../../lib/chartAxis';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { Stat } from './MetricGrowthCard';
@@ -515,9 +516,14 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
                 {/* ⚠ NUMERIC, NOT CATEGORICAL — so today can sit at its real distance between two
                     fiscal years (see `nowX`). Ticks are pinned to the reported years; the default
                     numeric ticks would invent 2025.5 as though something were reported there. */}
+                {/* ⚠ THE TILT IS WHAT LETS `ticks` MEAN WHAT IT SAYS. `yearTicks` names every
+                    reported year plus the horizon, but recharts still DROPS the ones it thinks
+                    collide — an explicit `ticks` array is a candidate list, not an instruction. Flat
+                    at 12px a `2025` needs 27px of pitch and half the horizon fell out; tilted it
+                    needs 17px. */}
                 <XAxis dataKey="year" type="number" domain={['dataMin', xMax]}
                   ticks={yearTicks} allowDecimals={false} interval="preserveStartEnd"
-                  tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+                  {...tiltedAxis()} />
                 {/* ⚠ LOG SCALE, WHICH IS THE POINT: the fit is log-linear, so a constant-growth
                     series is a STRAIGHT line here and the R² above it becomes something the reader
                     can check by eye rather than take on trust. On a linear axis a 0.4 and a 0.95
@@ -640,7 +646,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           <ComposedChart data={yields} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
             style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
             <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-            <XAxis dataKey="year" tick={{ fontSize: 12, fill: chartTheme.axisTick }} />
+            <XAxis dataKey="year" {...tiltedAxis()} />
             <YAxis domain={paddedDomain(yieldValues)} tick={{ fontSize: 12, fill: chartTheme.axisTick }}
               width={52} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
             <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}

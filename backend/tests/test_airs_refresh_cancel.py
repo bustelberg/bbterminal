@@ -34,7 +34,12 @@ def fleet(monkeypatch):
     """PARENT with three books behind it, and a record of every account actually downloaded."""
     scanned: list[str] = []
 
-    def _scan_one(name, _van, _tot):
+    def _scan_one(name, _van, _tot, on_report=None):
+        # ⚠ THE SAME SIGNATURE AS THE REAL `scan_one`, `on_report` INCLUDED. This double took three
+        # positional arguments only, so the day the caller started narrating each download
+        # (`on_report=_report`, airs_vermogen.py:1440) three tests here died on a TypeError raised
+        # inside the production call — reporting a signature change as a cancellation bug. A stub
+        # narrower than the thing it stands in for cannot fail for the reason it names.
         scanned.append(name)
         return _scan_result(name)
 

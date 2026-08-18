@@ -11,6 +11,7 @@ import { MC, type MetricRow } from './types';
 import { timeSeries, dropExtremeOutliers, tooltipStyle } from './utils';
 import { buildMemberSeries, weightedAverageSeries, MemberRanking, type MemberSeries, type PortfolioMemberMetrics } from './portfolioBreakdown';
 import { chartTheme } from '../../../lib/chartTheme';
+import { tiltedAxis } from '../../../lib/chartAxis';
 
 const FMT_PE = (v: number) => `${v.toFixed(1)}x`;
 
@@ -259,7 +260,9 @@ function ForwardPEChartInner({
             }
             : undefined}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-          <XAxis dataKey="date" tick={{ fontSize: 11, fill: chartTheme.axisTick }} tickFormatter={(v: string) => v.slice(0, 7)} />
+          {/* ⚠ THE WIDEST LABEL IN THE MODAL AND THEREFORE THE BIGGEST WIN — `2025-06` needs 44px of
+              pitch lying flat and 17px tilted, so a quarterly axis goes from ~6 labels to ~15. */}
+          <XAxis dataKey="date" tickFormatter={(v: string) => v.slice(0, 7)} {...tiltedAxis({ fontSize: 11 })} />
           <YAxis tick={{ fontSize: 12, fill: chartTheme.axisTick }} tickFormatter={(v: number) => `${v.toFixed(0)}x`} />
           {memberSeriesA || memberSeriesB ? (
             <Tooltip content={

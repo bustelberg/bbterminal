@@ -1032,6 +1032,7 @@ def has_fixed_model(fixed: str | None) -> bool:
 
 def count_model_portfolio_holdings_sync(
     portfolios: list[dict], send_event=None, on_positions=None, on_error=None,
+    should_stop=None,
 ) -> list[dict]:
     """Annotate every portfolio with `holdings` — the number of INSTRUMENTS in its model.
 
@@ -1051,17 +1052,31 @@ def count_model_portfolio_holdings_sync(
 
     Slow by nature: one edit-page GET + one XLS download per fixed portfolio. It streams a
     `count` event per row so the caller can fill a column in as it goes rather than block.
+
+    ⚠ `should_stop()` STOPS BETWEEN PORTFOLIOS, NEVER INSIDE ONE — the same boundary the fleet
+    account scan uses, for the same reason. A portfolio's XLS is downloaded, counted and persisted
+    as a unit; stopping midway would leave a row with positions stored and no count, or a count
+    against positions that were never written. Between rows every portfolio is either fully done or
+    untouched, so that is the only consistent place to stop. Optional and a no-op when absent, so
+    the scheduler's two callers and `scripts/add_portfolio_isins.py` are unchanged.
     """
     def emit(kind: str, **kw):
         if send_event:
             send_event(kind, **kw)
 
     todo = [p for p in portfolios if has_fixed_model(p.get("fixed"))]
-    emit("progress", step="holdings", status="in_progress",
+    emit("progress", step="holdings", status="in_progress", done=0, n=len(todo),
          message=f"counting holdings for {len(todo)} fixed portfolios "
                  f"({len(portfolios) - len(todo)} have no fixed model)")
 
     for i, p in enumerate(todo, 1):
+        if should_stop is not None and should_stop():
+            # ⚠ NAMED, AND IT NAMES WHAT IS LEFT. "Cancelled" with no count is indistinguishable
+            # from "cancelled before it started"; the rows already counted are real work that was
+            # really stored, and the ones after it still wear whatever count a previous scan left.
+            emit("cancelled", step="holdings", i=i - 1, n=len(todo), account=p["name"],
+                 message=f"cancelled before {p['name']} — {i - 1} of {len(todo)} counted")
+            return portfolios
         try:
             raw = fetch_portfolio_positions_sync(p["id"])
             rows = raw["rows"]
@@ -1085,7 +1100,10 @@ def count_model_portfolio_holdings_sync(
             p["holdings_error"] = f"{type(e).__name__}: {e}"
             if on_error:
                 on_error(p["id"], p["holdings_error"])
-        emit("count", id=p["id"], holdings=p.get("holdings"),
+        # ⚠ `i`/`n` RIDE ALONG AS FIELDS, not only inside the message. The job wrapper turns these
+        # into the toast's progress bar, and parsing "3/58 …" back out of a string we formatted one
+        # line earlier is the same mistake `summarise_errors` exists to avoid.
+        emit("count", id=p["id"], holdings=p.get("holdings"), i=i, n=len(todo),
              datum=p.get("holdings_datum"), error=p.get("holdings_error"),
              no_snapshot=bool(p.get("no_snapshot")),
              message=f"{i}/{len(todo)} {p['name']}")

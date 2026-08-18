@@ -971,9 +971,20 @@ async def grid():
     (symbol/exchange/currency), history + liquidity, Yahoo price coverage (span +
     bar count), and its resolution status. Offset-paginated to beat PostgREST's
     1000-row cap. Read-only."""
+    from common.pg import load_table_via_copy  # noqa: PLC0415
     from deps import supabase  # noqa: PLC0415
 
     def _q() -> dict:
+        # ⚠⚠ ONE STATEMENT FIRST, THE PAGER AS FALLBACK — and the reason is an outage, not a
+        # benchmark. Every page below re-materializes the whole view and then throws away the rows
+        # before its offset, so each page's cost grows with the offset while the budget stays at
+        # PostgREST's 8s role timeout: when `asset_grid` slowed down (migration `20260817010000`),
+        # page 1 returned in 1.3s and everything past offset ~8,000 returned 57014 — this endpoint
+        # raised, and `/asset-pipeline` has nothing to render without it. Measured on the same
+        # 16,613 rows after that fix: 17 pages 12.68s · one COPY 0.80s.
+        copied = load_table_via_copy("asset_grid", "*", order_by="execution_id")
+        if copied is not None:
+            return {"rows": copied}
         rows: list[dict] = []
         offset = 0
         while True:

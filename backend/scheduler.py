@@ -1107,24 +1107,36 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
             # `message` per portfolio; forwarding them is the difference between a toast that says
             # "starting…" for four minutes and one that names the book it is on.
             #
-            # ⚠ THE COUNT PHASE CARRIES `i/n` INSIDE ITS MESSAGE, NOT AS done/total — the scanner
-            # does not expose the pair. Parsing "12/95" back out of prose to drive a bar would be a
-            # format dependency between two modules; the line itself is the progress.
-            models_seen = {"n": 0}
+            # ⚠ THE PAIR IS READ AS DATA NOW (2026-08-17). It used to say the scanner did not expose
+            # `i`/`n`, so this counted `count` events itself and reported a total of 0 — an
+            # indeterminate bar for the four minutes this phase runs. `count_model_portfolio_
+            # holdings_sync` carries them as fields since the manual button became a job, and both
+            # callers read the same pair rather than each keeping a private tally. Still never
+            # parsed out of the message: the prose is for the reader, the numbers are for the bar.
+            models_at = {"done": 0, "total": 0}
 
             def _relay(kind: str, **kw) -> None:
                 msg = kw.get("message")
                 if not msg:
                     return
                 if kind == "count":
-                    models_seen["n"] += 1
-                step(models_seen["n"], 0, f"Models · {msg}")
+                    models_at["done"] = int(kw.get("i") or 0)
+                if kw.get("n"):
+                    models_at["total"] = int(kw["n"])
+                step(models_at["done"], models_at["total"], f"Models · {msg}")
                 # ⚠ CHECKED HERE TOO. The model scan is the long half (one edit page + one XLS per
                 # portfolio, minutes); without this a Cancel pressed during it would be honoured
                 # only after every remaining book had been downloaded.
+                #
+                # ⚠ TWO MECHANISMS REACH THE SAME BOUNDARY, AND THAT IS WORTH KNOWING. This raises
+                # out of the event hook; the manual job passes `should_stop=` and the scanner
+                # returns. Both stop BETWEEN portfolios — this one because `count` is emitted after
+                # the row is downloaded, counted and persisted — so neither can leave a row half
+                # written. Named rather than unified: rewriting the scheduler's cancellation is a
+                # separate change from making the button's own scan stoppable.
                 if stop is not None and stop():
                     raise _Cancelled(
-                        f"stopped after {models_seen['n']} model(s); everything stored is kept")
+                        f"stopped after {models_at['done']} model(s); everything stored is kept")
 
             rows = fetch_model_portfolios_sync(_relay)
             store.save_portfolios(rows)
