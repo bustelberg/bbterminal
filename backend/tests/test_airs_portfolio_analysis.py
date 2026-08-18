@@ -477,15 +477,25 @@ class TestTheBarsAreTheAttributionWeights:
         """⚠ THE MIXED RATIO. `total_w` and `excluded` were left un-filtered, so with Stocks
         selected the card divided stocks-with-a-sector by the WHOLE book and reported "87% of the
         book has a sector" — under a Stocks-only chart, where it reads as a claim that 13% of the
-        STOCKS are unclassified. They were five ETFs and a cash line. Every stock had a sector, and
-        the honest figure for that selection is 100%."""
+        STOCKS are unclassified. They were a bond tracker and a cash line. Every stock had a
+        sector, and the honest figure for that selection is 100%.
+
+        ⚠⚠ THE EXCLUDED FUND IS A **BOND** TRACKER, AND THAT CHANGED WITH THE BUCKET MERGE
+        (2026-08-18). It used to be an equity ETF, which sat in its own `Equity ETF` bucket and was
+        therefore outside an `Equity` selection. Equity ETFs are now Stocks, so an equity tracker no
+        longer discriminates here at all: it would be INSIDE the selection, and the class ratio
+        (87/99.9) and the book ratio (87/100) would agree to a tenth of a point — the test would
+        pass whichever denominator the code used, which is the one thing it exists to tell apart.
+
+        A bond ETF is still Bonds, because every bucket names what a holding INVESTS IN. So the
+        exclusion is by asset class rather than by wrapper, and the two ratios diverge again."""
         legs = [
             {"isin": "US1", "weight_pct": 60.0, "return_pct": 10.0, "airs_name": "Alpha",
              "is_cash": False, "asset_class": "Equity"},
             {"isin": "US2", "weight_pct": 27.0, "return_pct": 5.0, "airs_name": "Beta",
              "is_cash": False, "asset_class": "Equity"},
-            {"isin": "IE9", "weight_pct": 12.9, "return_pct": 3.0, "airs_name": "Tracker",
-             "is_cash": False, "asset_class": "Equity"},
+            {"isin": "IE9", "weight_pct": 12.9, "return_pct": 3.0, "airs_name": "Bond Tracker",
+             "is_cash": False, "asset_class": "Bonds"},
             {"isin": None, "weight_pct": 0.1, "return_pct": None, "airs_name": "Liquiditeiten",
              "is_cash": True, "asset_class": "Cash"},
         ]
@@ -493,11 +503,13 @@ class TestTheBarsAreTheAttributionWeights:
         stocks = pa._basis_axes(1, "book", None, "Equity")["sector"]
         assert stocks["attributable_pct"] == pytest.approx(100.0), \
             "every stock has a sector — the notice must disappear entirely"
-        assert stocks["excluded"] == [], "a fund is not excluded FROM THE STOCKS, it is not one"
+        assert stocks["excluded"] == [], "a bond fund is not excluded FROM THE STOCKS, it is not one"
         # Unfiltered, the same book legitimately reports the fund + cash as having no sector.
         whole = pa._basis_axes(1, "book", None, None)["sector"]
         assert whole["attributable_pct"] == pytest.approx(87.0)
         assert {e["isin"] for e in whole["excluded"]} == {"IE9", None}
+        # ⚠ THE TWO RATIOS MUST DIFFER, or this test proves nothing about which denominator ran.
+        assert stocks["attributable_pct"] != pytest.approx(whole["attributable_pct"])
 
     def test_a_class_filter_we_cannot_apply_refuses_rather_than_empties(self, monkeypatch):
         """Model legs carry no asset class. Ignoring the filter would chart every class's sectors

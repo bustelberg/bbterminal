@@ -161,12 +161,36 @@ describe('reverseDcfSource', () => {
     m(FCF, '2025-12-31', 10000),
   ];
 
-  it('⚠ reads the REPORTED free cash flow — no forecast, no adjustment', () => {
-    // It was consensus OCF less trailing capex, then that minus stock comp plus a growth-capex
-    // add-back. A plain DCF compounds the cash flow the company reported; every adjustment on top
-    // is an opinion the reader did not ask for.
-    expect(reverseDcfSource(rows))
-      .toEqual({ price: 100, sharesOutstanding: 1000, fcf: 10000, wacc: null });
+  it('⚠ `fcf` is the REPORTED free cash flow — no forecast, nothing folded in', () => {
+    // It was once consensus OCF less trailing capex, then that minus stock comp plus a
+    // growth-capex add-back, all BAKED INTO THIS FIGURE — which is why it was removed: the one
+    // number on screen silently disagreed with the company's filing and nothing said so.
+    //
+    // ⚠⚠ THE NORMALISATION CAME BACK 2026-08-18 AND THIS ASSERTION IS WHY IT IS STILL SAFE. The
+    // legs ride ALONGSIDE `fcf`, never inside it: `normalisedFcf` combines them and the panel
+    // shows reported, −SBC, +growth capex and the total as four separate rows. If this test ever
+    // has to change because `fcf` moved, the adjustment has been folded back in and the whole
+    // reason it was ripped out has been undone.
+    expect(reverseDcfSource(rows)).toEqual({
+      price: 100, sharesOutstanding: 1000, fcf: 10000, wacc: null,
+      sbc: null, capex: null, dep: null,
+    });
+  });
+
+  it('carries the three normalisation legs in the signs the vendor filed them in', () => {
+    // ⚠ CAPEX STAYS NEGATIVE. `growthCapex` takes the magnitude itself; normalising the sign here
+    // would leave the drill-down showing a positive number under "as filed".
+    const full = [...rows,
+      m('annuals__Cashflow Statement__Stock Based Compensation', '2025-12-31', 202.3),
+      m('annuals__Cashflow Statement__Capital Expenditure', '2025-12-31', -1631.2),
+      m('annuals__Cashflow Statement__Cash Flow Depreciation, Depletion and Amortization',
+        '2025-12-31', 1025.9)];
+    expect(reverseDcfSource(full)).toMatchObject({ sbc: 202.3, capex: -1631.2, dep: 1025.9 });
+    // ⚠ THE CASH-FLOW DEPRECIATION LINE, NOT THE INCOME STATEMENT'S — capex is a cash figure, so
+    // its maintenance proxy has to be one too.
+    const wrongDep = [...rows,
+      m('annuals__Income Statement__Depreciation, Depletion and Amortization', '2025-12-31', 999)];
+    expect(reverseDcfSource(wrongDep).dep).toBeNull();
   });
 
   it('⚠ converts the percent-unit WACC into the decimal the discount rate wants', () => {
@@ -191,7 +215,9 @@ describe('reverseDcfSource', () => {
   });
 
   it('leaves everything null on an empty payload', () => {
-    expect(reverseDcfSource([]))
-      .toEqual({ price: null, sharesOutstanding: null, fcf: null, wacc: null });
+    expect(reverseDcfSource([])).toEqual({
+      price: null, sharesOutstanding: null, fcf: null, wacc: null,
+      sbc: null, capex: null, dep: null,
+    });
   });
 });

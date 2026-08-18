@@ -39,11 +39,29 @@ class TestTheGridIsAlwaysComplete:
         assert c["min_pct"] == 50.0 and c["default_pct"] == 70.5
         assert all(isinstance(c[f], float) for f in ("min_pct", "default_pct", "max_pct"))
 
-    def test_cash_and_unclassified_are_not_policy_classes(self):
-        # Cash is the REMAINDER (which is why the defaults need not sum to 100) and Unclassified is
-        # our own inability to see inside a fund. Neither is something a target can be set for.
-        assert "Cash" not in ab.POLICY_BUCKETS
+    def test_cash_IS_a_policy_class_and_unclassified_is_not(self):
+        """⚠⚠ CASH WAS EXCLUDED UNTIL 2026-08-18, ON REASONING THAT ONLY HELD FOR THE DEFAULT.
+        Cash is the REMAINDER of the invested classes, so a target for it is redundant — true. Its
+        BOUNDS are not: "hold at most 10% cash" is a real mandate, it is the one most likely to be
+        breached by drift rather than by decision, and with no band there was no line for the
+        allocation bar to breach. A fully-liquidated book showed 100% cash against no policy at all.
+
+        ⚠ CONSEQUENCE, pinned below: the four classes now span the whole book, so a COMPLETE policy
+        totals 100 where 95 used to be ordinary.
+
+        ⚠ UNCLASSIFIED STAYS OUT, and for a different reason than cash ever was: it is not a
+        holding decision at all, it is our own inability to see inside an instrument. Nobody can set
+        a target for how much of a book we fail to classify.
+        """
+        assert "Cash" in ab.POLICY_BUCKETS
         assert "Unclassified" not in ab.POLICY_BUCKETS
+
+    def test_the_policy_classes_are_the_allocation_bar_ones_in_the_same_order(self):
+        """⚠ A band is DRAWN OVER the bar it governs. Two orders would put a class's policy over a
+        different class's bar in any code that zips them."""
+        from routers._airs_portfolio_analysis import _ALWAYS_SHOWN
+
+        assert ab.POLICY_BUCKETS == _ALWAYS_SHOWN
 
     def test_the_class_keys_are_STORED_keys_not_display_labels(self):
         # The reader sees "Stocks"; every join, colour and filter in the app keys off "Equity".
