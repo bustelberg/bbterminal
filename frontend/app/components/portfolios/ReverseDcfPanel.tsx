@@ -8,6 +8,7 @@ import {
   PERPETUITY_GROWTH,
 } from './reverseDcf';
 import { type ReverseDcfSource } from './egmInputs';
+import { normalisedFcf } from './normalisedFcf';
 import ReverseDcfInputsModal from './ReverseDcfInputsModal';
 import { type MetricRow } from './quickValuation';
 
@@ -87,9 +88,24 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   const [perpStr, setPerpStr] = useState<string | null>(null);
   const [yearsStr, setYearsStr] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
+  /**
+   * ⚠ DEFAULT ON, LIKE THE LONG EQUITY TAB'S SBC BOX AND FOR THE SAME REASON: the uncorrected
+   * figure is the flattering one on the SBC leg, and the reported one is the misleading one on the
+   * capex leg (it charges a decade of expansion against a single year). A reader who never touches
+   * this control should get the better number, not the raw one.
+   *
+   * ⚠ IT IS A MODE, NOT AN INPUT, and it still counts as `dirty` when switched OFF so `Reset`
+   * genuinely restores the panel's defaults rather than most of them.
+   */
+  const [normalise, setNormalise] = useState(true);
 
   // The defaults, derived here so the boxes and the model read the same numbers.
-  const defFcf = src.fcf;
+  const norm = useMemo(
+    () => normalisedFcf({ fcf: src.fcf, sbc: src.sbc, capex: src.capex, dep: src.dep }),
+    [src]);
+  /** ⚠ FALLS BACK TO THE REPORTED FIGURE WHEN NOTHING COULD BE CORRECTED — `normalisedFcf` returns
+   *  `used === reported` in that case, so this is belt and braces on a null FCF only. */
+  const defFcf = normalise ? (norm.used ?? src.fcf) : src.fcf;
   const defTarget = marketCapOf(src);
   const defPerp = PERPETUITY_GROWTH;
   const defRate = defaultDiscountRate(src.wacc, defPerp);
@@ -110,9 +126,11 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   const show = (s: string | null, def: number | null, dp = 0) =>
     (s != null ? s : def == null ? '' : def.toFixed(dp));
 
-  const dirty = [fcfStr, targetStr, rateStr, perpStr, yearsStr].some((s) => s != null);
+  const dirty = [fcfStr, targetStr, rateStr, perpStr, yearsStr].some((s) => s != null)
+    || !normalise;
   const reset = () => {
     setFcfStr(null); setTargetStr(null); setRateStr(null); setPerpStr(null); setYearsStr(null);
+    setNormalise(true);
   };
 
   const growth = useMemo(() => impliedGrowth(src, {
@@ -202,9 +220,22 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 beside it through the grid's stretch. The whole panel would jump because someone
                 typed a digit. `visibility: hidden` reserves the geometry and still takes it out of
                 the tab order and the accessibility tree, which `disabled` would not. */}
+            {/* ⚠ `ml-auto` MOVED HERE FROM `Reset`, so the group stays right-aligned as one. The
+                checkbox is always mounted — it is not conditional on anything — so it cannot make
+                the header row grow or shrink under the reader. */}
+            <label className="ml-auto flex items-center gap-1.5 text-[11px] text-fg-soft cursor-pointer whitespace-nowrap"
+              title={'Value free cash flow net of stock compensation and before growth capex.\n\n'
+                + 'SBC is subtracted: it is a real cost that never leaves the cash flow statement.\n'
+                + 'Growth capex (capex above depreciation) is ADDED BACK: reported FCF already '
+                + 'subtracted it, and it buys the very growth this model is solving for.'}>
+              <input type="checkbox" checked={normalise}
+                onChange={(e) => setNormalise(e.target.checked)}
+                className="accent-accent-600 w-3.5 h-3.5" />
+              Normalise
+            </label>
             <button type="button" onClick={reset} aria-hidden={!dirty} tabIndex={dirty ? 0 : -1}
               title="Put every input back to its default"
-              className={`ml-auto rounded border border-neutral-700 px-1.5 py-0.5 text-[11px] text-fg-soft hover:bg-overlay/5 ${
+              className={`rounded border border-neutral-700 px-1.5 py-0.5 text-[11px] text-fg-soft hover:bg-overlay/5 ${
                 dirty ? '' : 'invisible'}`}>
               Reset
             </button>
@@ -214,10 +245,36 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
             <Field label={`Free cash flow${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(fcfStr, defFcf)} onChange={setFcfStr}
               info={<InfoTip content={<AspectCard
-                what="Latest reported free cash flow."
+                what={normalise
+                  ? 'Free cash flow, net of stock compensation and before growth capex.'
+                  : 'Latest reported free cash flow.'}
                 where="GuruFocus — cashflow statement, as filed."
                 when="Most recent fiscal year."
-                how={`Raw data, no formula. The box holds MILLIONS${defFcf != null ? ` — ${mn(defFcf)} is ${scaled(defFcf)}` : ''}.`} />} />} />
+                how={(normalise && norm.reported != null
+                  // ⚠ THE WORKING, LINE BY LINE, AND ONLY THE LINES THAT ACTUALLY RAN. A card
+                  // reading "− SBC" on a company with no SBC line would claim a correction that
+                  // did not happen; `applied` is what distinguishes "no stock comp" from "no stock
+                  // comp REPORTED", and only one of those is a fact about the company.
+                  ? `${mn(norm.reported)} reported`
+                    + (norm.applied.sbc ? `\n− ${mn(norm.sbc as number)} stock comp` : '')
+                    + (norm.applied.growthCapex
+                      ? `\n+ ${mn(norm.growthCapex as number)} growth capex`
+                        + ` (capex ${mn(Math.abs(src.capex as number))} − depreciation`
+                        + ` ${mn(src.dep as number)}, floored at 0)`
+                      : '')
+                    + `\n= ${mn(norm.used as number)}`
+                    + (!norm.applied.sbc || !norm.applied.growthCapex
+                      ? `\n\n⚠ ${[!norm.applied.sbc ? 'Stock compensation' : null,
+                        !norm.applied.growthCapex ? 'Capex or depreciation' : null]
+                        .filter(Boolean).join(' and ')} not reported, so that correction did `
+                        + 'not run — an absent line is not a zero.'
+                      : '')
+                    + '\n\nSBC is subtracted (a real cost that never leaves the cash flow '
+                    + 'statement). Growth capex is ADDED BACK because reported FCF already '
+                    + 'subtracted it — it buys the growth this model solves for, so leaving it in '
+                    + 'charges the expansion once as a cost and again as the thing to explain.'
+                  : 'Raw data, no formula.')
+                  + ` The box holds MILLIONS${defFcf != null ? ` — ${mn(defFcf)} is ${scaled(defFcf)}` : ''}.`} />} />} />
             <Field label={`Target market cap${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(targetStr, defTarget)} onChange={setTargetStr}
               info={<InfoTip content={<AspectCard
