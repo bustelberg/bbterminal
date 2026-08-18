@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import {
-  defaultDiscountRate, FALLBACK_DISCOUNT_RATE, FORECAST_YEARS, impliedGrowth, marketCapOf,
+  defaultDiscountRate, FORECAST_YEARS, impliedGrowth, marketCapOf,
   PERPETUITY_GROWTH,
 } from './reverseDcf';
 import { type ReverseDcfSource } from './egmInputs';
@@ -45,20 +45,28 @@ export type GrowthEstimates = {
  * Clearing the box hands control back to the default; `null` (never typed) and `''` (cleared) both
  * fall through to it.
  */
-function Field({ label, value, onChange, suffix, info, width = 'w-32' }: {
+function Field({ label, value, onChange, suffix, info }: {
   label: string; value: string; onChange: (v: string) => void;
-  suffix?: string; info?: React.ReactNode; width?: string;
+  suffix?: string; info?: React.ReactNode;
 }) {
   return (
-    <label className="flex flex-col gap-1 min-w-0">
-      <span className="flex items-center gap-1 text-[12px] uppercase tracking-wide text-fg-muted">
-        {label}{info}
-      </span>
-      <span className="flex items-center gap-1">
-        <input type="number" value={value} onChange={(e) => onChange(e.target.value)}
-          className={`${width} bg-page border border-neutral-700 rounded-lg px-2 py-1 text-sm font-mono text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30`} />
-        {suffix && <span className="text-xs text-fg-muted">{suffix}</span>}
-      </span>
+    <label className="flex items-center gap-2 py-1">
+      <span className="min-w-0 flex-1 truncate text-[12px] text-fg-muted">{label}</span>
+      {/* ⚠ ONE WIDTH FOR EVERY BOX, whatever it holds. They were `w-32` / `w-36` / `w-20`, sized to
+          their content — five inputs at three widths, so the column they form was a staircase.
+          A market cap in millions is the widest thing here and it overflows INSIDE the box rather
+          than widening it, which is what keeps the rows aligned and the panel from resizing as the
+          reader types. */}
+      <input type="number" value={value} onChange={(e) => onChange(e.target.value)}
+        className="w-24 shrink-0 rounded border border-neutral-700 bg-page px-1.5 py-0.5 text-right font-mono text-[12px] text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />
+      <span className="w-2 shrink-0 text-[11px] text-fg-muted">{suffix}</span>
+      {/* ⚠⚠ THE ⓘ IS A TRAILING SLOT, NOT A SUFFIX ON THE LABEL — the same rule and the same width
+          as the EGM panel above. Beside the label its x landed wherever that label happened to end
+          (`Discount rate ⓘ` against `Target market cap (USD m) ⓘ` is most of the column apart), so
+          five explanations read as scattered punctuation. Last slot, fixed width: every ⓘ on BOTH
+          panels lands on one vertical line, because the boxes are equal-width grid cells and the
+          two panels are the same card. */}
+      <span className="flex w-9 shrink-0 items-center">{info}</span>
     </label>
   );
 }
@@ -126,6 +134,24 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
 
   const mn = (v: number | null) => (v == null ? 'n/a'
     : `${currency ? `${currency} ` : ''}${Math.round(v).toLocaleString('en-US')}M`);
+  /**
+   * The same figure in the unit a reader actually thinks in.
+   *
+   * ⚠⚠ THE BOXES HOLD MILLIONS AND NOTHING SAID SO EXCEPT `(m)` IN A LABEL. `312400` in an input
+   * is unreadable at a glance and is off by a factor of a thousand from what anyone means when
+   * they say "market cap" — so every ⓘ restates its default BOTH ways, and the one that is easy to
+   * misread is the one the box holds. GuruFocus files shares and free cash flow in millions, so
+   * price × shares comes out in millions too (`reverseDcf.ts`); this is a display, never a value
+   * anything computes from.
+   */
+  const scaled = (v: number | null) => {
+    if (v == null) return 'n/a';
+    const c = currency ? `${currency} ` : '';
+    const a = Math.abs(v);
+    if (a >= 1_000_000) return `${c}${(v / 1_000_000).toFixed(2)}tn`;
+    if (a >= 1_000) return `${c}${(v / 1_000).toFixed(2)}bn`;
+    return `${c}${v.toFixed(0)}M`;
+  };
 
   // ⚠ The comparison the whole panel is for: the model says the price implies X, and these are
   // what anyone actually forecasts. Rendered only when at least one arrived — an empty pair of
@@ -148,114 +174,185 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   const hasAnalysts = analysts.some(([, v]) => v != null);
 
   return (
-    <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-4 min-w-0">
+    <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
       <div className="flex items-baseline gap-2 flex-wrap">
         <h4 className="text-base font-semibold text-fg-strong">Reverse DCF</h4>
         <span className="text-[12px] text-fg-faint">
           what the price implies, not what the company is worth
         </span>
-        <span className="ml-auto flex items-center gap-1.5">
-          {dirty && (
-            <button type="button" onClick={reset}
-              className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
-              Reset to defaults
+      </div>
+
+      {/**
+        * ⚠⚠ INPUT LEFT, OUTPUT RIGHT — the same pair of rectangles the EGM panel above uses, and
+        * deliberately the same shape: these two answer one question from opposite ends ("what are
+        * these assumptions worth" / "what does the price already assume"), so a reader moving
+        * between them should not have to re-learn where anything is.
+        *
+        * ⚠ THE HEIGHTS MATCH FOR FREE — grid children stretch — and `justify-center` keeps each
+        * body optically centred in whichever box is the shorter.
+        */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-stretch">
+
+        {/* ── INPUT ────────────────────────────────────────────────────────────────────────── */}
+        <div className="flex flex-col rounded-lg border border-neutral-800/40 bg-inset p-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wide text-fg-faint">Input</span>
+            {/* ⚠ RENDERED ALWAYS, HIDDEN WITH `invisible` — mounting it on the first keystroke
+                makes the header row taller, which grows this box, which grows the OUTPUT box
+                beside it through the grid's stretch. The whole panel would jump because someone
+                typed a digit. `visibility: hidden` reserves the geometry and still takes it out of
+                the tab order and the accessibility tree, which `disabled` would not. */}
+            <button type="button" onClick={reset} aria-hidden={!dirty} tabIndex={dirty ? 0 : -1}
+              title="Put every input back to its default"
+              className={`ml-auto rounded border border-neutral-700 px-1.5 py-0.5 text-[11px] text-fg-soft hover:bg-overlay/5 ${
+                dirty ? '' : 'invisible'}`}>
+              Reset
             </button>
-          )}
+          </div>
+
+          <div className="flex flex-col divide-y divide-neutral-800/30">
+            <Field label={`Free cash flow${currency ? ` (${currency}m)` : ' (m)'}`}
+              value={show(fcfStr, defFcf)} onChange={setFcfStr}
+              info={<InfoTip content={<AspectCard
+                what="Latest reported free cash flow."
+                where="GuruFocus — cashflow statement, as filed."
+                when="Most recent fiscal year."
+                how={`Raw data, no formula. The box holds MILLIONS${defFcf != null ? ` — ${mn(defFcf)} is ${scaled(defFcf)}` : ''}.`} />} />} />
+            <Field label={`Target market cap${currency ? ` (${currency}m)` : ' (m)'}`}
+              value={show(targetStr, defTarget)} onChange={setTargetStr}
+              info={<InfoTip content={<AspectCard
+                what="The valuation solved against."
+                where="Computed from the price and the share count."
+                when="Latest close, latest reported share count."
+                how={`Price × diluted shares${src.price != null && src.sharesOutstanding != null
+                  ? ` = ${currency ? `${currency} ` : ''}${src.price.toFixed(2)} × ${src.sharesOutstanding.toLocaleString('en-US', { maximumFractionDigits: 0 })}M` : ''}. In MILLIONS, like the cash flow above.`} />} />} />
+            <Field label="Discount rate" value={show(rateStr, defRate * 100, 1)} onChange={setRateStr}
+              suffix="%"
+              info={<InfoTip content={<AspectCard
+                what="Rate the cash flows are discounted at."
+                where={src.wacc != null && defRate === src.wacc
+                  ? 'GuruFocus — this company\'s own WACC.'
+                  : src.wacc != null
+                    ? `House default. Its WACC of ${(src.wacc * 100).toFixed(1)}% is too close to the perpetuity growth to use.`
+                    : 'House default — no WACC is reported for this company.'}
+                when="Latest fiscal year."
+                how="Percent per year. Raw data; must exceed the perpetuity growth." />} />} />
+            <Field label="Perpetuity growth" value={show(perpStr, defPerp * 100, 1)} onChange={setPerpStr}
+              suffix="%"
+              info={<InfoTip content={<AspectCard
+                what="Growth after the forecast years."
+                where="House convention — no company version of it exists."
+                when={`Year ${defYears + 1} onwards, for ever.`}
+                how="Percent per year. Raw input, no formula." />} />} />
+            <Field label="Forecast years" value={show(yearsStr, defYears)} onChange={setYearsStr}
+              info={<InfoTip content={<AspectCard
+                what="Length of the explicit growth phase."
+                where="House convention — no company has its own horizon."
+                when={`Years 1 to ${years}.`}
+                how="A count of years. Raw input, no formula." />} />} />
+          </div>
+
           <button type="button" onClick={() => setShowRaw(true)}
             title="Show every company figure this reads, with its source"
-            className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
-            Raw data ↗
+            className="mt-1.5 self-start text-[11px] text-fg-faint underline decoration-dotted underline-offset-2 hover:text-fg-strong">
+            raw data ↗
           </button>
-        </span>
-      </div>
+        </div>
 
-      <div className="flex flex-wrap gap-x-6 gap-y-3 items-start">
-        <Field label={`Free cash flow${currency ? ` (${currency}m)` : ' (m)'}`}
-          value={show(fcfStr, defFcf)} onChange={setFcfStr}
-          info={<InfoTip content={<AspectCard
-            what="The cash flow the model compounds."
-            where="The latest reported Free Cash Flow, straight off the cashflow statement — nothing adjusted, nothing forecast."
-            when="The most recent fiscal year."
-            how="Override it when the last reported year is unrepresentative — a one-off settlement, a capex spike." />} />} />
-        <Field label={`Target market cap${currency ? ` (${currency}m)` : ' (m)'}`}
-          value={show(targetStr, defTarget)} onChange={setTargetStr} width="w-36"
-          info={<InfoTip content={<AspectCard
-            what="The valuation the growth rate is solved against."
-            where="Today's share price × diluted average shares outstanding."
-            when="Latest close, latest reported share count."
-            how="Change it to ask a different question — what growth would justify a price 30% lower?" />} />} />
-        <Field label="Discount rate" value={show(rateStr, defRate * 100, 1)} onChange={setRateStr}
-          suffix="%" width="w-20"
-          info={<InfoTip content={<AspectCard
-            what="The rate the projected cash flows are discounted at."
-            // ⚠ Named for its source. A reader seeing 8.2% needs to know whether that is this
-            // company's cost of capital or a house number — it changes what a 24% answer means.
-            where={src.wacc != null && defRate === src.wacc
-              ? `This company's own WACC, ${(src.wacc * 100).toFixed(1)}%, as published by GuruFocus.`
-              : src.wacc != null
-                ? `Its WACC reads ${(src.wacc * 100).toFixed(1)}%, too close to the perpetuity growth to use — the terminal value would be negative — so the ${(FALLBACK_DISCOUNT_RATE * 100).toFixed(0)}% house default stands in.`
-                : `No WACC is reported for this company, so the ${(FALLBACK_DISCOUNT_RATE * 100).toFixed(0)}% house default stands in.`}
-            when="The latest fiscal year."
-            how="Must exceed the perpetuity growth: the terminal value divides by the gap, so equal rates give an infinite value rather than a large one." />} />} />
-        <Field label="Perpetuity growth" value={show(perpStr, defPerp * 100, 1)} onChange={setPerpStr}
-          suffix="%" width="w-20"
-          info={<InfoTip content={<AspectCard
-            what="The rate the cash flows grow at for ever after the forecast period."
-            where="A convention, not a measurement — there is no company-specific version of it."
-            when="From year 11 onwards."
-            how="Long-run nominal economic growth. No business outgrows the economy for ever, so deriving this from the company's own history would encode its last decade as eternity." />} />} />
-        <Field label="Forecast years" value={show(yearsStr, defYears)} onChange={setYearsStr}
-          width="w-20"
-          info={<InfoTip content={<AspectCard
-            what="How long the explicit growth phase runs before the terminal value takes over."
-            where="A convention — no company has its own forecast horizon."
-            when="Years 1 to n."
-            how="Long enough for growth to matter, short enough to be arguable. Shorten it and more of the valuation sits in the terminal value." />} />} />
-      </div>
+        {/* ── OUTPUT ───────────────────────────────────────────────────────────────────────── */}
+        <div className="flex flex-col rounded-lg border border-neutral-800/40 bg-inset p-3">
+          <span className="text-[11px] uppercase tracking-wide text-fg-faint">Output</span>
 
-      {fcf != null && fcf > 0 && growth != null ? (
-        <p className="text-sm text-fg-soft break-words whitespace-normal max-w-[80ch]">
-          That market cap implies{' '}
-          {/* Uncoloured on purpose: whether 50% is absurd or reasonable is the reader's call, and
-              a threshold picked out of the air was making it for them. */}
-          <span className="font-mono text-2xl font-semibold text-fg-strong">
-            {`${(growth * 100).toFixed(1)}%`}
-          </span>{' '}
-          annual FCF growth for {years} years.
-        </p>
-      ) : fcf != null && fcf <= 0 ? (
-        // Not an error — a fact about the company. No growth rate makes a positive valuation work
-        // off a non-positive cash flow.
-        <p className="text-sm text-warn-300 break-words whitespace-normal max-w-[80ch]">
-          Free cash flow of {mn(fcf)} is at or below zero, so there is no growth rate that makes any
-          market cap work. Type one above to model a recovery.
-        </p>
-      ) : missing.length > 0 ? (
-        <p className="text-sm text-warn-300 break-words whitespace-normal max-w-[80ch]">
-          Not enough inputs to solve — no {missing.join(', ')} ingested for this company.
-        </p>
-      ) : !(rate > perpetuityGrowth) ? (
-        // ⚠ The terminal value divides by (r − gp). Equal or inverted is not a big number, it is a
-        // negative one — and without this the panel would just say "no solution".
-        <p className="text-sm text-warn-300 break-words whitespace-normal max-w-[80ch]">
-          The discount rate must exceed the perpetuity growth — otherwise the terminal value is
-          infinite rather than large.
-        </p>
-      ) : (
-        // With the bracket at the maths' own limits (−99% to 1000%/yr) this is now all but
-        // unreachable — a price below one year of discounted cash flow, which no decline rate can
-        // reach. No explanatory paragraph: there is no bound left to explain.
-        <p className="text-sm text-warn-300 break-words whitespace-normal max-w-[80ch]">
-          No growth rate reconciles that market cap with this cash flow.
-        </p>
-      )}
+          <div className="flex flex-1 flex-col justify-center">
+            {/**
+              * ⚠⚠ THE ANSWER IS A TABLE ROW, NOT A SENTENCE. It was a paragraph — "That market cap
+              * implies 24.3% annual FCF growth for 10 years" — with a 2xl number inside it, which
+              * reflowed on every keystroke and could not line up with anything. The refusals below
+              * were four more paragraphs of DIFFERENT lengths, so the panel changed height
+              * depending on which input was missing.
+              *
+              * ⚠ THE ROWS ARE CONSTANT AND ONLY THE VALUE GOES `n/a` — the same rule the EGM panel
+              * follows. The reason a solve failed is in the ⓘ, which is present either way, so the
+              * SHAPE of the panel stops being a signal and the numbers can be one.
+              */}
+            <table className="w-full table-fixed text-[12px]">
+              {/* The last column is the ⓘ slot — see `Field`. Empty on every row with no
+                  explanation, which is what holds the ones that have to a single line. */}
+              <colgroup>
+                <col />
+                <col className="w-[5rem]" />
+                <col className="w-9" />
+              </colgroup>
+              <tbody>
+                <tr>
+                  <td className="truncate py-0.5 font-medium text-fg-strong">Implied FCF growth</td>
+
+                  <td className="py-0.5 pl-2 text-right font-mono tabular-nums font-semibold text-fg-strong">
+                    {/* ⚠ UNCOLOURED ON PURPOSE. Whether 50% is absurd or reasonable is the reader's
+                        call, and a threshold picked out of the air was making it for them. */}
+                    {fcf != null && fcf > 0 && growth != null
+                      ? `${(growth * 100).toFixed(1)}%` : 'n/a'}
+                  </td>
+                  <td className="py-0.5">
+                    <InfoTip content={<AspectCard
+                      what="FCF growth the market cap already assumes."
+                      where="Computed — solved, not forecast."
+                      when={`Years 1 to ${years}, then the perpetuity growth.`}
+                      how={fcf != null && fcf > 0 && growth != null
+                        ? 'The rate at which the discounted cash flows equal the target market cap. Not a valuation — what you would have to believe.'
+                        : fcf != null && fcf <= 0
+                          ? `Free cash flow of ${mn(fcf)} is at or below zero, so no growth rate works. A fact about the company, not an error.`
+                          : missing.length > 0
+                            ? `Not enough inputs — no ${missing.join(', ')} ingested.`
+                            : !(rate > perpetuityGrowth)
+                              ? 'The discount rate must exceed the perpetuity growth — the terminal value divides by the gap.'
+                              : 'No rate between −99% and 1000% a year reconciles that market cap with this cash flow.'} />} />
+                  </td>
+                </tr>
+
+                {/**
+                  * ⚠⚠ THE COMPARISON THE WHOLE PANEL IS FOR, MOVED OUT OF THE SWEEP. These were
+                  * three extra columns bolted onto the discount-rate table and fenced off with
+                  * borders, because they are NOT a solve at anything — they are what people
+                  * actually forecast. The fencing existed to stop them reading as "the implied
+                  * rate at some other discount rate"; as rows under the answer they cannot, and
+                  * the sweep goes back to being one thing.
+                  *
+                  * ⚠ ONLY WHEN AT LEAST ONE ARRIVED. Three rows of `—` headed "analysts" reads as
+                  * "they expect nothing".
+                  */}
+                {hasAnalysts && analysts.map(([label, value, tip], i) => (
+                  <tr key={label} className={i === 0 ? 'border-t border-neutral-800/40' : ''}>
+                    <td className={`truncate py-0.5 text-fg-muted ${i === 0 ? 'pt-1.5' : ''}`}
+                      title={tip}>
+                      {i === 0 && <span className="text-fg-faint">analysts </span>}{label}
+                    </td>
+                    <td className={`py-0.5 pl-2 text-right font-mono tabular-nums ${
+                      i === analysts.length - 1 ? 'text-fg-strong' : 'text-fg-soft'
+                    } ${i === 0 ? 'pt-1.5' : ''}`}>
+                      {value == null ? '—' : `${value.toFixed(1)}%`}
+                    </td>
+                    <td />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
 
       {/* The sensitivity, which is the honest context for a single figure: the answer moves ~1.5pp
           per point of discount rate, so a reader who disagrees with the rate can read their own
           off the row instead of taking this one. Click a column to make it the headline. */}
       {fcf != null && fcf > 0 && target != null && (
         <div className="space-y-1">
-          <div className="text-[12px] uppercase tracking-wide text-fg-muted">
+          {/* ⚠ FULL WIDTH, UNDER BOTH BOXES, AND NOT INSIDE THE OUTPUT ONE. Eleven discount
+              rates do not fit in half a card without a horizontal scrollbar, and a sensitivity
+              grid is a different kind of object from a conclusion: it is the honest context for a
+              single figure (the answer moves ~1.5pp per point of discount rate), not part of the
+              input → output story the two rectangles tell. Clicking a column still sets the rate,
+              which is why it stays on the page at all. */}
+          <div className="text-[11px] uppercase tracking-wide text-fg-faint">
             Implied growth by discount rate
           </div>
           <div className="overflow-x-auto rounded-lg border border-neutral-800/40 max-w-full">
@@ -275,18 +372,11 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                       {(s.discountRate * 100).toFixed(0)}%
                     </td>
                   ))}
-                  {/* ⚠ CONTEXT, NOT PART OF THE SWEEP — a forecast, not a solve, so it is fenced
-                      off by a border and labelled with its own horizon. Sitting it in the same row
-                      unmarked would read as "the implied rate at some other discount rate". */}
-                  {hasAnalysts && analysts.map(([label], i) => (
-                    <td key={label}
-                      className={`px-2 py-1 text-right font-mono whitespace-nowrap text-fg-muted ${
-                        // One fence between the solve and the forecasts, one before the average —
-                        // a border on every column would read as three unrelated things.
-                        i === 0 || i === analysts.length - 1 ? 'border-l border-neutral-800/40' : ''}`}>
-                      {label}
-                    </td>
-                  ))}
+                  {/* ⚠⚠ THE ANALYST COLUMNS ARE GONE FROM HERE (2026-08-18) — they are ROWS in
+                      the Output box now. They were never part of this sweep: a forecast, not a
+                      solve at some other discount rate, which is why they needed two border rules
+                      and a caption to stop them being read as one. Under the answer they compare
+                      with, they need neither, and this table goes back to being one thing. */}
                 </tr>
                 <tr>
                   <th className="px-2 py-1 text-left font-medium text-fg-faint text-[11px] uppercase tracking-wide sticky left-0 bg-card">
@@ -301,15 +391,6 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                       {/* A rate at or below the perpetuity growth has no valid terminal value, so
                           the cell is empty rather than showing a negative one. */}
                       {s.impliedGrowth == null ? '—' : `${(s.impliedGrowth * 100).toFixed(1)}%`}
-                    </td>
-                  ))}
-                  {hasAnalysts && analysts.map(([label, value, tip], i) => (
-                    <td key={label}
-                      className={`px-2 py-1 text-right font-mono whitespace-nowrap ${
-                        i === analysts.length - 1 ? 'text-fg-strong font-semibold' : 'text-fg-soft'
-                      } ${i === 0 || i === analysts.length - 1 ? 'border-l border-neutral-800/40' : ''}`}
-                      title={tip}>
-                      {value == null ? '—' : `${value.toFixed(1)}%`}
                     </td>
                   ))}
                 </tr>

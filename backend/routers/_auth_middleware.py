@@ -190,6 +190,23 @@ def _is_earnings_refresh(path: str) -> bool:
     return "/refresh" in path[len("/api/earnings/"):]
 
 
+# ⚠ THE ONE WRITE UNDER `/api/asset-pipeline/` A NON-ADMIN MAY MAKE: bring ONE instrument's stored
+# closes up to date, from the Deep Valuation tab's share-price row. It is the same shape of
+# permission as `_is_earnings_refresh` — a user looking at a company may spend one vendor call to
+# make that company's own figures current — and the read it repairs
+# (`/api/asset-pipeline/latest-close/`) is already in `_USER_READ_PREFIXES`, so without this the
+# button is visible to every user and 403s for most of them.
+#
+# ⚠⚠ AN EXACT PATTERN, NEVER A PREFIX — the same rule `_USER_POST_READ_PATHS` states above and for
+# the same reason. `/api/asset-pipeline/` holds the ingest, the bulk resolve and the row refresh;
+# a prefix here would hand all of them to every authenticated user.
+_LATEST_CLOSE_REFRESH = re.compile(r"^/api/asset-pipeline/latest-close/isin/[^/]+/refresh$")
+
+
+def _is_latest_close_refresh(path: str) -> bool:
+    return _LATEST_CLOSE_REFRESH.match(path) is not None
+
+
 def _starts_with_any(path: str, prefixes: tuple[str, ...]) -> bool:
     return any(path.startswith(p) for p in prefixes)
 
@@ -263,6 +280,7 @@ async def enforce_api_auth(
         allowed = (
             _starts_with_any(path, _USER_WRITE_PREFIXES)
             or _is_earnings_refresh(path)
+            or _is_latest_close_refresh(path)
             or (request.method == "POST" and path in _USER_POST_READ_PATHS)
         )
     else:

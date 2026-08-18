@@ -238,3 +238,61 @@ class TestTheBulkPathIsTheSingleOne:
                             lambda **k: (kw.append(k), {"status": "ok"})[1])
         F.refresh_many(["A"], concurrency=1)
         assert kw[0]["cascade"] is False
+
+
+class TestOneHalfOnly:
+    """`halves` — the scope the 05:00 tick runs at.
+
+    ⚠⚠ IT IS WHAT MAKES THAT HOUR SAFE. Nothing that scrapes the AIRS accounts may run before AIRS
+    has valued the books: the fleet job forces and fires once, so an early pass stores YESTERDAY's
+    valuation and nothing re-reads it until tomorrow — holdings a full day behind that look
+    perfectly current. The MODEL half has no such hazard (a composition is a dated set of weights;
+    its other steps talk to OpenFIGI, the ECB and Yahoo), so it is the half that can run early.
+
+    ⚠ A SKIPPED HALF IS NOT AN ABSENT ONE. "We chose not to" and "there was none" are different
+    facts, and the verdict must not read either as a failure.
+    """
+
+    def test_model_only_never_touches_the_book(self, halves):
+        out = F.refresh_portfolio_fully(portefeuille=BOOK, halves=("model",))
+        assert [c[0] for c in halves] == ["model"]
+        assert out["book_status"] == "skipped"
+        assert out["model_status"] == "ok"
+        assert out["status"] == "ok", "a deliberate skip must not drag the verdict down"
+
+    def test_book_only_never_touches_the_model(self, halves):
+        out = F.refresh_portfolio_fully(portefeuille=BOOK, halves=("book",))
+        assert [c[0] for c in halves] == ["book"]
+        assert out["model_status"] == "skipped"
+        assert out["status"] == "ok"
+
+    def test_skipped_and_absent_are_told_apart(self, monkeypatch, halves):
+        # No model exists at all -> absent. A model exists and we chose not to -> skipped.
+        monkeypatch.setattr(F, "_pair", lambda pf, pid: (BOOK, None))
+        assert F.refresh_portfolio_fully(portefeuille=BOOK)["model_status"] == "absent"
+        monkeypatch.setattr(F, "_pair", lambda pf, pid: (BOOK, MODEL_ID))
+        assert F.refresh_portfolio_fully(
+            portefeuille=BOOK, halves=("book",))["model_status"] == "skipped"
+
+    def test_a_failure_in_the_half_that_RAN_still_fails_the_verdict(self, monkeypatch, halves):
+        # ⚠ The skip must not become a way for a real failure to read as ok.
+        def _boom(*_a, **_k):
+            raise RuntimeError("Yahoo returned nothing")
+        monkeypatch.setattr("routers._airs_portfolio_refresh.refresh_portfolio", _boom)
+        out = F.refresh_portfolio_fully(portefeuille=BOOK, halves=("model",))
+        assert out["book_status"] == "skipped"
+        assert out["model_status"] == "error"
+        assert out["status"] == "error"
+
+    def test_the_bar_counts_only_the_half_that_runs(self, halves):
+        steps: list[tuple[int, int]] = []
+        F.refresh_portfolio_fully(portefeuille=BOOK, halves=("model",),
+                                  on_step=lambda d, t, _m: steps.append((d, t)))
+        assert {t for _d, t in steps} == {5}, "the book's step is still in the denominator"
+
+    def test_the_fan_out_passes_the_scope_through(self, monkeypatch, halves):
+        kw: list[dict] = []
+        monkeypatch.setattr(F, "refresh_portfolio_fully",
+                            lambda **k: (kw.append(k), {"status": "ok"})[1])
+        F.refresh_many(["A", "B"], halves=("model",), concurrency=2)
+        assert all(k["halves"] == ("model",) for k in kw)

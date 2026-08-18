@@ -89,6 +89,7 @@ def refresh_portfolio_fully(
     portfolio_id: int | None = None,
     *,
     cascade: bool = True,
+    halves: tuple[str, ...] = ("book", "model"),
     on_step: Callable[[int, int, str], None] | None = None,
     on_event: Callable[..., None] | None = None,
     should_stop: Callable[[], bool] | None = None,
@@ -108,6 +109,19 @@ def refresh_portfolio_fully(
     ⚠ `should_stop` IS CHECKED BETWEEN HALVES, never inside one. Same rule the cascade follows: an
     account's reports are downloaded and stored as a unit, and so is a composition-and-reprice.
 
+    ⚠⚠ `halves` IS A SCOPE, NOT A SWITCH, AND IT EXISTS FOR ONE CALLER: the 05:00 tick, which
+    prices every model portfolio and must NOT scrape the accounts at that hour. Two ⚠⚠ notes on
+    `airs_vermogen_refresh` record why — a forcing account scrape that runs before AIRS has valued
+    the books stores YESTERDAY's valuation, and because it fires once nothing re-reads it until
+    tomorrow, so the holdings read a full day behind while looking perfectly current. The MODEL
+    half has no such hazard: a composition is a dated set of weights, and its other four steps talk
+    to OpenFIGI, the ECB and Yahoo rather than to AIRS.
+
+    ⚠ IT IS NOT A BOOLEAN. `book=False` at a call site says nothing about what it turns off; a
+    tuple naming the halves reads as the scope it is. A half left out is `skipped`, never `absent`
+    — "we chose not to" and "there was none" are different facts and the caller can tell them
+    apart.
+
     ⚠ TWO HOOKS, BECAUSE THE TWO CALLERS ASK DIFFERENT QUESTIONS. A JOB wants a BAR — one
     `(done, total, message)` across both halves, which is why the denominator is computed here
     rather than left to each half (each owned the bar before, so a full refresh ran 0->100% twice
@@ -126,8 +140,8 @@ def refresh_portfolio_fully(
     # ⚠ ONE DENOMINATOR ACROSS BOTH HALVES. Each half used to own the bar, so a full refresh went
     # 0->100% and then back to 0->100% — which reads as the job restarting, and is why the two
     # halves cannot simply be called one after the other and left to narrate themselves.
-    book_steps = 1 if portefeuille else 0
-    model_steps = 5 if portfolio_id is not None else 0
+    book_steps = 1 if (portefeuille and "book" in halves) else 0
+    model_steps = 5 if (portfolio_id is not None and "model" in halves) else 0
     total = book_steps + model_steps
     done = {"n": 0}
 
@@ -141,8 +155,13 @@ def refresh_portfolio_fully(
                  "book": None, "model": None,
                  "book_status": "absent", "model_status": "absent"}
 
+    if portefeuille and "book" not in halves:
+        out["book_status"] = "skipped"
+    if portfolio_id is not None and "model" not in halves:
+        out["model_status"] = "skipped"
+
     # ── HALF 1: the AIRS book (Rendement + Vermogensoverzicht, and the books behind it).
-    if portefeuille:
+    if portefeuille and "book" in halves:
         if should_stop is not None and should_stop():
             out["status"] = "cancelled"
             out["cancelled_at"] = label
@@ -170,7 +189,7 @@ def refresh_portfolio_fully(
         _say(f"{label} — book: {out['book_status']}")
 
     # ── HALF 2: the model portfolio (composition -> instruments -> FX -> prices -> recompute).
-    if portfolio_id is not None:
+    if portfolio_id is not None and "model" in halves:
         if should_stop is not None and should_stop():
             # ⚠ NOT "cancelled" OUTRIGHT — the book half above is downloaded and STORED, and a word
             # that throws that away is the same mistake the cascade's own cancel path avoids.
@@ -207,7 +226,11 @@ def refresh_portfolio_fully(
     # ⚠ THE WORST HALF DECIDES, and "ok" requires that every half that EXISTS succeeded. A verdict
     # that reads `ok` because the half that ran was fine — while the other errored — is precisely
     # the "we refreshed it" this module exists to stop being said about half a portfolio.
-    states = [s for s in (out["book_status"], out["model_status"]) if s != "absent"]
+    # ⚠ A SKIPPED HALF IS NOT A FAILED ONE, and neither is an absent one. `ok` still requires
+    # every half that actually RAN to have succeeded — the point of the verdict is that "we
+    # refreshed it" can never be said over a half that errored.
+    states = [s for s in (out["book_status"], out["model_status"])
+              if s not in ("absent", "skipped")]
     out["status"] = ("error" if "error" in states
                      else "busy" if "busy" in states
                      else "cancelled" if "cancelled" in states
@@ -220,6 +243,7 @@ def refresh_many(
     portefeuilles: list[str],
     *,
     cascade: bool = False,
+    halves: tuple[str, ...] = ("book", "model"),
     concurrency: int = DEFAULT_CONCURRENCY,
     on_result: Callable[[str, dict], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
@@ -247,7 +271,7 @@ def refresh_many(
             return {"portefeuille": name, "status": "cancelled", "book_status": "skipped",
                     "model_status": "skipped"}
         try:
-            return refresh_portfolio_fully(portefeuille=name, cascade=cascade,
+            return refresh_portfolio_fully(portefeuille=name, cascade=cascade, halves=halves,
                                            should_stop=should_stop)
         except Exception as e:  # noqa: BLE001 — see the docstring
             _log.warning("[full-refresh] %s threw — %s: %s", name, type(e).__name__, e)

@@ -18186,6 +18186,66 @@
         ]
       }
     },
+    "/api/asset-pipeline/latest-close/isin/{isin}/refresh": {
+      "post": {
+        "description": "Go to Yahoo for this ISIN's missing bars, then answer exactly as the GET above does.\n\n\u26a0 THE GET READS WHAT WE STORE; THIS ONE MAKES WHAT WE STORE CURRENT FIRST. Two endpoints\nrather than a `?refresh=true` flag on one, because they are not the same kind of thing: the GET\nis a cheap read every card can fire on mount, and this spends an external request and writes.\nA flag on a GET is how the cheap one ends up being called with it set.\n\n\u26a0 IT RETURNS THE SAME SHAPE, THROUGH THE SAME FUNCTION. The caller re-reads its own panel from\nthe response, so a second formatter here is a second place for the currency conversion \u2014 the\none with the `GBp`-is-pence trap in it \u2014 to be got subtly differently.\n\n429 when Yahoo throttles: a rate limit is a \"try again\", not a fault in the instrument, and it\nmust not be reported to the reader as one.",
+        "operationId": "refresh_latest_close_by_isin_api_asset_pipeline_latest_close_isin__isin__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "currency",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Currency"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LatestCloseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Latest Close By Isin",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
     "/api/asset-pipeline/leonteq/upload": {
       "post": {
         "description": "Upload a Leonteq (lynqs) CSV/Excel \u2014 columns id, ticker, name, productType,\nric, isin, currency. REPLACES the Leonteq-Verified set with the file's valid\nISINs + their name/currency/productType (so the grid badges + surfaces them),\nand (unless `enqueue=false`) queues those ISINs for the background ingest so\nunseen ones get resolved + priced. Returns row/member/queue counts.",

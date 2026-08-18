@@ -1024,6 +1024,66 @@ def _body_fx_sync(ctx=None) -> tuple[str, dict]:
             {"currencies": len(status), "synced": synced, "errors": errors})
 
 
+def _fire_airs_model_prices() -> None:
+    """The 05:00 tick: reprice every AIRS model portfolio. See `_body_airs_model_prices`."""
+    _spawn_body("airs_model_prices")
+
+
+def _body_airs_model_prices(ctx=None) -> tuple[str, dict]:
+    """Bring every paired model portfolio's VALUATION current — composition, instruments, FX,
+    prices, recompute — without touching the accounts.
+
+    ⚠⚠ IT RUNS THE MODEL HALF AND ONLY THE MODEL HALF. `halves=("model",)` is not a tuning knob;
+    it is what makes 05:00 a safe hour to run at. The account scrape may not run before AIRS has
+    valued the books — see the two ⚠⚠ notes on `_fire_airs_vermogen` — and this job exists
+    precisely because the half that CAN run early was the one nothing scheduled ever did.
+
+    ⚠ THIS IS THE GAP THE 09:30 JOB LEAVES. That one scrapes the accounts and SCANS the model
+    portfolios (their names and compositions); neither pass ever priced them. So a model's YTD
+    moved only when a human opened /portfolios and pressed Refresh on that row — which is why the
+    figures on the Analyse modal could sit weeks behind the book beside them.
+
+    ⚠ ONE FUNCTION, THE SAME ONE THE BUTTONS CALL. `refresh_many` fans out over
+    `refresh_portfolio_fully`; there is no scheduled copy of "refresh a portfolio" to drift from
+    the interactive one, which is the mistake `scan_one`'s own docstring records having already
+    been made one layer down.
+
+    ⚠ A FAILED PORTFOLIO IS COUNTED, NOT RAISED. One book that will not price must not abandon the
+    other forty-four, and the summary names how many fell over rather than reporting the whole
+    tick as either fine or broken.
+    """
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+    from routers._airs_full_refresh import refresh_many  # noqa: PLC0415
+
+    step = _reporter(ctx)
+    stop = (lambda: bool(getattr(ctx, "cancelled", False))) if ctx is not None else None
+
+    # ⚠ ONLY THE PAIRED ONES. A model with no account running it has no valuation to keep current,
+    # and an account with no model has no composition to price — `refresh_portfolio_fully` would
+    # report `absent` for every one of them and spend a request finding out.
+    paired = [a["portefeuille"] for a in list_account_links()["accounts"]
+              if a.get("model_portfolio_id") is not None and a.get("portefeuille")]
+    if not paired:
+        return "no paired model portfolios to price", {"portfolios": 0}
+
+    done = {"n": 0}
+
+    def _on_result(name: str, res: dict) -> None:
+        done["n"] += 1
+        step(done["n"], len(paired), f"{name} — {res.get('model_status') or res.get('status')}")
+
+    step(0, len(paired), f"pricing {len(paired)} model portfolio(s)")
+    results = refresh_many(paired, halves=("model",), on_result=_on_result, should_stop=stop)
+    ok = sum(1 for r in results if r.get("model_status") == "ok")
+    bad = [r.get("portefeuille") for r in results if r.get("model_status") not in ("ok", "skipped")]
+    summary = {"portfolios": len(paired), "priced": ok, "failed": len(bad),
+               "failed_names": bad[:10]}
+    msg = f"{ok}/{len(paired)} model portfolio(s) repriced"
+    if bad:
+        msg += f" — {len(bad)} FAILED: {', '.join(str(b) for b in bad[:5])}"
+    return msg, summary
+
+
 def _fire_airs_vermogen() -> None:
     """APScheduler callable for the daily AIRS Vermogensoverzicht refresh. Runs
     on its own daemon thread so the long Playwright scrape doesn't block the
@@ -1198,6 +1258,7 @@ def _register_bodies() -> None:
         "fx_sync": _body_fx_sync,
         "crm_relaties_refresh": _body_crm_relaties,
         "airs_vermogen_refresh": _body_airs_vermogen,
+        "airs_model_prices": _body_airs_model_prices,
         "history_drift_check": _body_history_drift,
         "asset_price_refresh": _body_asset_price_refresh,
         "table_size_sample": _body_table_size_sample,
@@ -1308,6 +1369,9 @@ def register_scheduler(app) -> None:
         # guessed from, so on a deployment where nobody pressed "Scan AIRS" by hand every book
         # was unpaired and Analyse fell back to a basket. See `_fire_airs_vermogen`.
         _register("airs_vermogen_refresh", _fire_airs_vermogen)
+        # ⚠ THE PRICING HALF, AT 05:00 — see `_body_airs_model_prices`. Registered beside the
+        # scrape it deliberately does NOT duplicate.
+        _register("airs_model_prices", _fire_airs_model_prices)
         # Daily CRM "Alle relaties" refresh — EVERY day at 11:00 Amsterdam time.
         # Downloads the export and OVERWRITES airs_crm_relatie with the latest
         # snapshot (full table replace, not a per-date accumulation). Dedicated

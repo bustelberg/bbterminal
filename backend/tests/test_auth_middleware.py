@@ -357,3 +357,52 @@ class TestUnreachableIdentityProviderIsNot401:
 
 def _raise_unavailable(_authz):
     raise _FakeAuthBackendUnavailable("ReadTimeout")
+
+
+class TestTheOneAssetPipelineWriteAUserMayMake:
+    """`/api/asset-pipeline/latest-close/isin/{isin}/refresh` — bring ONE instrument's stored
+    closes up to date, from the Deep Valuation tab's share-price row.
+
+    ⚠⚠ THE READ IT REPAIRS IS ALREADY A USER READ. `/api/asset-pipeline/latest-close/` sits in
+    `_USER_READ_PREFIXES` because the Management Dashboard needs it, so the refresh button beside
+    that figure is on screen for every authenticated user. Left in the write tier it 403s for all
+    of them — a visible control that fails for most of the people who can see it.
+
+    ⚠⚠ AND IT IS A PATTERN, NOT A PREFIX. `/api/asset-pipeline/` also holds the bulk ingest, the
+    OpenFIGI resolve and the row refresh. Widening this to a prefix hands every one of those to
+    any logged-in user, which is the trap `_USER_POST_READ_PATHS` states in its own note.
+    """
+
+    def test_a_user_may_refresh_one_instruments_close(self, monkeypatch):
+        assert _run(monkeypatch, "POST",
+                    "/api/asset-pipeline/latest-close/isin/US0378331005/refresh",
+                    "user") == (200, True)
+
+    def test_an_admin_may_too(self, monkeypatch):
+        assert _run(monkeypatch, "POST",
+                    "/api/asset-pipeline/latest-close/isin/US0378331005/refresh",
+                    "admin") == (200, True)
+
+    def test_anonymous_still_gets_401(self, monkeypatch):
+        assert _run(monkeypatch, "POST",
+                    "/api/asset-pipeline/latest-close/isin/US0378331005/refresh",
+                    None) == (401, False)
+
+    def test_it_does_NOT_open_the_rest_of_the_asset_pipeline(self, monkeypatch):
+        # The expensive neighbours: a bulk ingest, an identity resolve, a whole-row refresh.
+        assert _run(monkeypatch, "POST", "/api/asset-pipeline/rows/refresh", "user") == (403, False)
+        assert _run(monkeypatch, "POST", "/api/asset-pipeline/ingest", "user") == (403, False)
+        assert _run(monkeypatch, "POST", "/api/asset-pipeline/existing", "user") == (403, False)
+
+    def test_it_does_not_open_a_deeper_or_wider_path(self, monkeypatch):
+        # ⚠ ANCHORED AT BOTH ENDS. A trailing segment past `/refresh`, or a second ISIN segment,
+        # is a different endpoint — and `[^/]+` is what stops one being smuggled through.
+        assert _run(monkeypatch, "POST",
+                    "/api/asset-pipeline/latest-close/isin/US0378331005/refresh/all",
+                    "user") == (403, False)
+        assert _run(monkeypatch, "POST",
+                    "/api/asset-pipeline/latest-close/isin/A/B/refresh", "user") == (403, False)
+
+    def test_the_plain_GET_is_untouched(self, monkeypatch):
+        assert _run(monkeypatch, "GET",
+                    "/api/asset-pipeline/latest-close/isin/US0378331005", "user") == (200, True)
