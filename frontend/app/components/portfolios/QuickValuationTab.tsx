@@ -22,8 +22,8 @@ import {
   trailingMultiples, ttm,
 } from './multiplesSeries';
 import {
-  addYears, BASIS, cagrOf, latestDateOf, priceTarget, priceVsMetric, PRICE_CODES,
-  rebase, yearsBetween, yieldOf, type Basis, type MetricRow,
+  addYears, BASIS, cagrBetween, cagrOf, compoundFrom, latestDateOf, priceTarget, priceVsMetric,
+  PRICE_CODES, rebase, yearsBetween, yieldOf, type Basis, type MetricRow,
 } from './quickValuation';
 
 /**
@@ -165,51 +165,42 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
       .map((r) => ({ year: r.year, value: r.value }))),
     [idx]);
 
-  const indexData = useMemo(() => {
-    const trendByYear = new Map(fit.trend.map((t) => [t.year, t.value]));
-    const rows = idx.rows.map((r) => ({
-      year: r.year, price: r.price, value: r.value,
-      trend: trendByYear.get(r.year) ?? null,
-      // The projection starts AT the last fitted year so the two segments meet rather than leaving
-      // a gap; that shared point carries both keys.
-      future: null as number | null,
-    }));
-    const lastFitted = fit.trend.length ? fit.trend[fit.trend.length - 1].year : null;
-    if (lastFitted == null) return rows;
-    for (const r of rows) if (r.year === lastFitted) r.future = trendByYear.get(lastFitted) ?? null;
-    // ⚠ PRICE AND VALUE ARE NULL IN THESE ROWS. Extending them would draw observed data into years
-    // nobody has reported; only the trend continues.
-    for (let k = 1; k <= PROJECT_YEARS; k++) {
-      rows.push({
-        year: lastFitted + k, price: null, value: null, trend: null,
-        future: trendValueAt(fit, lastFitted + k),
-      });
-    }
-    return rows;
-  }, [idx, fit]);
-
   /**
-   * ⚠ A LOG AXIS CANNOT PLOT ZERO OR LESS, AND THE INDEX GOES NEGATIVE. A cash-burn or loss year is
-   * a real observation — `rebase` deliberately keeps it, and on a linear axis it drew below zero.
-   * Here it has nowhere to go, so it is nulled for the chart and COUNTED, because a year silently
-   * missing from an earnings line is the one a reader most needs to know about.
+   * ⚠⚠ THE FORECAST ASSUMPTION IS DERIVED **HERE**, ABOVE THE CHART DATA, AND THAT ORDER IS THE
+   * POINT. It used to sit beside the calculator three hundred lines down, which was fine while the
+   * only editable input was an end VALUE the chart does not draw. A growth RATE is different: it
+   * is precisely what the dotted projection already claims, so leaving it below would state one
+   * assumption in two places and let them disagree the moment anyone typed. `trendPsAt`'s own note
+   * names that failure — "a calculator quoting a forecast the chart does not draw is exactly the
+   * kind of drift the rest of this folder is built to prevent".
+   *
+   * ⚠ THE CALCULATOR'S INPUTS LIVE HERE, NOT IN IT. The chart needs the same answers, and a
+   * callback from a child during render is the cascading-update pattern React (and the lint rule)
+   * rightly refuses. State up, values down.
    */
-  const posOnly = (v: number | null) => (v != null && v > 0 ? v : null);
-  const chartRows = useMemo(() => indexData.map((r) => ({
-    year: r.year,
-    price: posOnly(r.price), value: posOnly(r.value),
-    trend: posOnly(r.trend), future: posOnly(r.future),
-  })), [indexData]);
-  const hiddenByLog = indexData.filter((r) => r.value != null && r.value <= 0).length;
+  const [fcfStr, setFcfStr] = useState<string | null>(null);
+  const [yieldStr, setYieldStr] = useState<string | null>(null);
+  /**
+   * The growth rate the forecast per-share figure is reached BY — the same assumption as `fcfStr`,
+   * entered the way people actually hold it.
+   *
+   * ⚠⚠ ONE OF THE TWO IS AUTHORITATIVE AT A TIME, AND SETTING EITHER CLEARS THE OTHER. They are two
+   * views of one number, so both being live at once has no meaning — something would have to pick,
+   * and whichever it picked the other box would sit on screen showing a figure the target was not
+   * computed from. Mutual clearing is also what keeps each box's TEXT the user's own: derive one
+   * from the other on every keystroke instead and typing "12.55" into the rate rounds through the
+   * end value and comes back as "12.6" under the caret.
+   *
+   * ⚠ THE DERIVED SIDE IS STILL SHOWN, LIVE. Type a rate and the forecast figure moves with it (and
+   * the reverse) — that is the whole point of the pair. Only the AUTHORITY moves, not the display.
+   */
+  const [cagrStr, setCagrStr] = useState<string | null>(null);
+  const asNum = (s: string | null) => {
+    if (s == null || s.trim() === '') return null;
+    const v = parseFloat(s);
+    return Number.isFinite(v) ? v : null;
+  };
 
-
-  const priceCagr = cagrOf(points, (p) => p.price);
-  const valueCagr = cagrOf(points, (p) => p.value);
-
-  // The latest ACTUALS, in per-share currency — the chart is indexed, the calculator is not.
-  const latestPs = [...points].reverse().find((p) => p.value != null)?.value ?? null;
-  const latestPrice = [...points].reverse().find((p) => p.price != null)?.price ?? null;
-  const lastPriceYear = [...points].reverse().find((p) => p.price != null)?.year ?? null;
   /**
    * The fitted trend at any year, converted back to per-share currency.
    *
@@ -230,6 +221,138 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     return projected == null ? null : projected / 100 * anchorValue;
   };
   const forecastPs = lastFitted == null ? null : trendPsAt(lastFitted + PROJECT_YEARS);
+
+  /**
+   * Where the growth rate compounds FROM: the fitted trend at the last reported year.
+   *
+   * ⚠⚠ THE FITTED VALUE, NOT THE LAST ACTUAL, AND THAT IS WHAT MAKES THE PAIR CONSISTENT. The
+   * default forecast is `trendPsAt(lastFitted + PROJECT_YEARS)`, so measuring the default rate from
+   * the fit's own starting point reproduces that forecast EXACTLY — the panel opens showing a rate
+   * and an end value that agree, and the rate it shows is literally the slope of the dotted line on
+   * the chart (a log-linear fit is a straight line on a log axis, which IS a constant CAGR).
+   *
+   * Measured from `latestPs` instead, the default rate would be "the rate from this company's last
+   * filed year to a point on a line fitted through ten of them" — a number that moves with one
+   * year's noise, does not describe the drawn projection, and disagrees with the end value beside
+   * it whenever the last actual sits off the trend, which is almost always.
+   */
+  const trendBasePs = lastFitted == null ? null : trendPsAt(lastFitted);
+  /** The trend's own annual growth — the default the rate box shows and reverts to. */
+  const defaultCagrPct = useMemo(() => {
+    const c = cagrBetween(trendBasePs, forecastPs, PROJECT_YEARS);
+    return c == null ? null : c * 100;
+  }, [trendBasePs, forecastPs]);
+
+  /**
+   * The forecast per-share figure everything downstream is built on, from whichever of the pair is
+   * live — and the rate that figure implies, which is what the projected line is drawn at.
+   *
+   * ⚠ THE RATE COMPOUNDS OVER `PROJECT_YEARS`, NEVER `horizonYears`. They are 10 and ~9.2 and both
+   * get called "the horizon" within a few lines of each other. `PROJECT_YEARS` is how far the
+   * FUNDAMENTAL is carried past the last REPORTED year — the axis the trend is drawn on and the
+   * only window this rate describes. `horizonYears` runs from the live PRICE's date, is shorter by
+   * the reporting lag, and exists solely to annualise the price return. Compounding the fundamental
+   * over it would quietly shrink the forecast as the price got fresher, a relationship that does
+   * not exist.
+   */
+  const cagrForecastPs = compoundFrom(trendBasePs, asNum(cagrStr), PROJECT_YEARS);
+  const effectiveForecastPs = asNum(fcfStr) ?? cagrForecastPs ?? forecastPs;
+  /**
+   * The rate the projection is ACTUALLY drawn at — the user's, or the one the live end value
+   * implies, or the fit's own. Falls back to the fit when there is no positive base to measure
+   * from, which is the case the chart must still draw: `logLinearFit` dropped the negative years,
+   * so a trend can exist where a growth RATE cannot be quoted.
+   */
+  const effectiveCagrPct = useMemo(() => {
+    const c = cagrBetween(trendBasePs, effectiveForecastPs, PROJECT_YEARS);
+    return c == null ? null : c * 100;
+  }, [trendBasePs, effectiveForecastPs]);
+  /** What the rate box reads — the user's own text, or the rate the live end value implies. */
+  const shownCagrPct = cagrStr != null ? null : effectiveCagrPct;
+
+  const indexData = useMemo(() => {
+    const trendByYear = new Map(fit.trend.map((t) => [t.year, t.value]));
+    const rows = idx.rows.map((r) => ({
+      year: r.year, price: r.price, value: r.value,
+      trend: trendByYear.get(r.year) ?? null,
+      // The projection starts AT the last fitted year so the two segments meet rather than leaving
+      // a gap; that shared point carries both keys.
+      future: null as number | null,
+    }));
+    const lastFitted = fit.trend.length ? fit.trend[fit.trend.length - 1].year : null;
+    if (lastFitted == null) return rows;
+    for (const r of rows) if (r.year === lastFitted) r.future = trendByYear.get(lastFitted) ?? null;
+    // ⚠ PRICE AND VALUE ARE NULL IN THESE ROWS. Extending them would draw observed data into years
+    // nobody has reported; only the trend continues.
+    // ⚠⚠ COMPOUNDED AT THE **EFFECTIVE** RATE, NOT RE-READ OFF THE FIT. With nothing typed the two
+    // are identical to floating point — extending a log-linear fit IS compounding at exp(slope)−1 —
+    // so this changes no pixel by default. What it buys is that a rate typed into the calculator
+    // MOVES THE DOTTED LINE: without it the panel would say "12%" beside a projection still drawn
+    // at the fitted 8%, and the price target would hang off a forecast the chart contradicts.
+    // ⚠ `future` IS AN INDEX, and a CAGR is scale-free, so the rate applies unconverted.
+    const base = trendByYear.get(lastFitted) ?? null;
+    const step = effectiveCagrPct == null ? null : 1 + effectiveCagrPct / 100;
+    for (let k = 1; k <= PROJECT_YEARS; k++) {
+      rows.push({
+        year: lastFitted + k, price: null, value: null, trend: null,
+        future: base != null && step != null && step > 0
+          ? base * Math.pow(step, k)
+          : trendValueAt(fit, lastFitted + k),
+      });
+    }
+    return rows;
+  }, [idx, fit, effectiveCagrPct]);
+
+  /**
+   * ⚠ A LOG AXIS CANNOT PLOT ZERO OR LESS, AND THE INDEX GOES NEGATIVE. A cash-burn or loss year is
+   * a real observation — `rebase` deliberately keeps it, and on a linear axis it drew below zero.
+   * Here it has nowhere to go, so it is nulled for the chart and COUNTED, because a year silently
+   * missing from an earnings line is the one a reader most needs to know about.
+   */
+  const posOnly = (v: number | null) => (v != null && v > 0 ? v : null);
+  /**
+   * ⚠⚠ THE AXIS IS INDEXED, THE HOVER IS ACTUAL — so every row carries BOTH.
+   *
+   * Indexing is what makes the comparison possible at all (€700 of price and €20 of FCF/share share
+   * no axis), and it is exactly what makes the tooltip useless: hovering FY2021 and reading
+   * "Price 214 / FCF/share 186" tells you the two are 100-based and nothing else. The numbers a
+   * reader wants at a point are the ones the company actually reported.
+   *
+   * ⚠ THE RAW PRICE AND VALUE ARE READ FROM `points`, NOT DIVIDED BACK OUT OF THE INDEX. The index
+   * is `100 × v / anchor`, so recovering `v` is exact in algebra and a round trip through two
+   * floating-point operations in practice — and it would print a figure that differs in the last
+   * digit from the same company's number everywhere else in the app. The source is still there;
+   * there is no reason to reconstruct it.
+   *
+   * ⚠ THE TREND AND ITS PROJECTION HAVE NO RAW SOURCE — they are fitted, so they only ever existed
+   * as an index and are converted through the ANCHOR VALUE (`index/100 × anchorValue`), the same
+   * conversion `trendPsAt` uses. Not `anchorPrice`: both are fitted through the per-share series.
+   */
+  const rawByYear = useMemo(() => new Map(points.map((p) => [p.year, p])), [points]);
+  const chartRows = useMemo(() => indexData.map((r) => {
+    const raw = rawByYear.get(r.year);
+    const toPs = (v: number | null) =>
+      (v == null || anchorValue == null ? null : v / 100 * anchorValue);
+    return {
+      year: r.year,
+      price: posOnly(r.price), value: posOnly(r.value),
+      trend: posOnly(r.trend), future: posOnly(r.future),
+      rawPrice: raw?.price ?? null,
+      rawValue: raw?.value ?? null,
+      rawTrend: toPs(r.trend),
+      rawFuture: toPs(r.future),
+    };
+  }), [indexData, rawByYear, anchorValue]);
+  const hiddenByLog = indexData.filter((r) => r.value != null && r.value <= 0).length;
+
+
+  const priceCagr = cagrOf(points, (p) => p.price);
+  const valueCagr = cagrOf(points, (p) => p.value);
+
+  // The latest ACTUALS, in per-share currency — the chart is indexed, the calculator is not.
+  const latestPs = [...points].reverse().find((p) => p.value != null)?.value ?? null;
+  const latestPrice = [...points].reverse().find((p) => p.price != null)?.price ?? null;
+  const lastPriceYear = [...points].reverse().find((p) => p.price != null)?.year ?? null;
 
   /**
    * The multiple THROUGH TIME — weekly, back to `MULTIPLE_FROM_YEAR`.
@@ -273,13 +396,6 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   const latestYield = [...yields].reverse().find((y) => y.yld != null)?.yld ?? null;
 
   /**
-   * ⚠ THE CALCULATOR'S TWO INPUTS LIVE HERE, NOT IN IT. The chart draws the price line out to the
-   * target, so both need the same answer — and a callback from a child during render is the
-   * cascading-update pattern React (and the lint rule) rightly refuses. State up, values down.
-   */
-  const [fcfStr, setFcfStr] = useState<string | null>(null);
-  const [yieldStr, setYieldStr] = useState<string | null>(null);
-  /**
    * ⚠ SWITCHING BASIS CLEARS BOTH OVERRIDES, and that is not tidiness. A hand-typed "forecast 12.40"
    * is 12.40 of FREE CASH FLOW per share; carried onto EPS it silently becomes a forecast of
    * earnings — a number the user never entered, feeding a price target and a CAGR that look
@@ -288,12 +404,10 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
    */
   const switchBasis = (next: Basis) => {
     if (next === basis) return;
-    setBasis(next); setFcfStr(null); setYieldStr(null);
-  };
-  const asNum = (s: string | null) => {
-    if (s == null || s.trim() === '') return null;
-    const v = parseFloat(s);
-    return Number.isFinite(v) ? v : null;
+    // ⚠ THE GROWTH RATE GOES WITH THEM. "12% a year" of FREE CASH FLOW carried onto EPS is a
+    // forecast of earnings the user never made — the same trap as the per-share figure, and harder
+    // to spot, because a plausible growth rate is plausible on either basis.
+    setBasis(next); setFcfStr(null); setYieldStr(null); setCagrStr(null);
   };
   /**
    * The price everything in the calculator is measured FROM, and the date it belongs to.
@@ -329,7 +443,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
 
   const target = priceTarget(
     latestPs, currentPrice,
-    asNum(fcfStr) ?? forecastPs, asNum(yieldStr) ?? avgYield, horizonYears);
+    effectiveForecastPs, asNum(yieldStr) ?? avgYield, horizonYears);
 
   /** The horizon the calculator's target is quoted over — still shown in the panel and named in
    *  the trend legend; nothing is plotted at it since the price-target line was removed. */
@@ -492,6 +606,58 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
             where={b.source}
             when={valueCagr ? `${valueCagr.from} → ${valueCagr.to} (${valueCagr.years} years).` : 'Not computable.'}
             how={`Per SHARE, so buybacks flatter it and issuance dilutes it — which is the point: it is what accrues to one share you own. A gap to the price CAGR is the rerating, and a rerating is not repeatable. ${b.caveat}`} />} />} />
+        {/* ⚠⚠ THE CONCLUSION, ON THE CHART THAT ARGUES FOR IT. The two CAGRs to the left are what
+            HAPPENED; these three are what the assumptions in the panel IMPLY, and the reader was
+            having to hold a number from one card in their head while looking at the other. They are
+            deliberately the LAST tiles in the row: history first, forecast after it.
+
+            ⚠⚠ READ OFF `target` — THE SAME OBJECT THE PANEL PRINTS AND THE CHART'S DOT IS PLACED
+            FROM. Not recomputed here from the same inputs, which is the version of this that goes
+            wrong: `priceTarget` is one computation with several readers precisely so a tile cannot
+            quote a figure the panel beside it disagrees with. They move together when the forecast
+            rate is edited because there is only one of them.
+
+            ⚠ NO DIVIDER RULE BETWEEN THE TWO GROUPS, AND IT WAS TRIED. Five tiles at `min-w-6.5rem`
+            overflow a half-width card, so the row wraps — and a `w-px self-stretch` separator wraps
+            with them, landing at the START of a line as a stray vertical rule pointing at nothing.
+            A separator that is in the right place only at some widths is worse than none. The
+            distinction it was drawing is carried by the LABELS instead, which travel with the tile
+            however the row breaks: "Price CAGR" is observed, "Est. CAGR to FY2035" is not, and the
+            word doing that work is `Est.` */}
+        <Stat label="Current share price" value={`${ccy}${fmtPrice(target.currentPrice)}`}
+          info={<InfoTip content={<AspectCard
+            what="The price the target is measured from."
+            where={priceLive
+              ? `yfinance (\`asset_price\`)${live?.symbol ? ` — ${live.symbol}` : ''}, converted into ${currency ?? 'the reporting currency'}.`
+              : 'GuruFocus `Month End Stock Price` — the close at the last fiscal year end.'}
+            when={priceLive
+              ? `Its close of ${priceDate ?? 'an unknown date'}.`
+              : '⚠ NOT TODAY’S QUOTE. This ISIN has no priced Yahoo listing we could convert, so the fiscal close stands in — it can be up to a year old.'}
+            how="⚠ THE ONE NON-FISCAL FIGURE ON THIS CARD when it is live: every plotted point is a fiscal year-end close, and this is today's. Same figure as the panel's row of the same name." />} />} />
+        {/* ⚠ THE SAME COLOUR AS THE DOT IT DESCRIBES (`chartTheme.accentStrong`, the price line's,
+            which is what the `ReferenceDot` below is stroked with) — the tile and the mark on the
+            plot are one fact, and a tile whose bar matches nothing on the chart is a tile the eye
+            has to look up. ⚠ Deliberately NOT `pos` green: on this tab green means nothing, and in
+            the Long Equity charts next door it means "the benchmark" on every single card.
+            ⚠ `Current share price` above stays UNCOLOURED on purpose — it is the live quote, and
+            every point plotted here is a fiscal year-end close, so tying it to the price line would
+            claim it is on a line it is not on. */}
+        <Stat label={targetYear == null ? 'Price target' : `Price target FY${targetYear}`}
+          value={`${ccy}${fmtPrice(target.forecastPrice)}`} color={chartTheme.accentStrong}
+          info={<InfoTip content={<AspectCard
+            what={`Where the share price lands if ${b.perShare} reaches the forecast and the market pays the forecast ${b.yieldInline} for it.`}
+            where={`Forecast ${b.perShare} ÷ forecast ${b.yieldInline} — ${ccy}${target.forecastPs?.toFixed(2) ?? '—'} ÷ ${target.forecastYield?.toFixed(1) ?? '—'}%, both editable in the Price target panel.`}
+            when={targetYear == null ? 'At the end of the forecast window.' : `FY${targetYear}, ${PROJECT_YEARS} years past the last reported year.`}
+            how="⚠ AN ASSUMPTION, NOT A FORECAST ANYBODY PUBLISHED. Change the growth rate or the demanded yield in the panel and this moves with the dot on the chart — that is what it is for." />} />} />
+        <Stat label={targetYear == null ? 'Est. CAGR' : `Est. CAGR to FY${targetYear}`}
+          value={pct(target.cagr == null ? null : target.cagr * 100)}
+          tone={target.cagr == null ? undefined
+            : target.cagr >= 0 ? 'text-pos-500' : 'text-neg-500'}
+          info={<InfoTip content={<AspectCard
+            what="The annual return the target implies, from today's price."
+            where="Price target ÷ current share price, annualised."
+            when={`Over ${horizonYears.toFixed(1)} years — ⚠ NOT ${PROJECT_YEARS}. The forecast sits ${PROJECT_YEARS} years past the last REPORTED year; from a live price that is up to a year nearer, and holding the divisor at the full horizon would understate the return by exactly the reporting lag.`}
+            how={`⚠ THE PRICE RETURN, WHICH IS NOT THE ${b.perShare} GROWTH RATE. It carries the rerating too: the gap between today’s ${b.yieldInline} and the forecast one. Excludes dividends.`} />} />} />
       </div>
 
       {/* ⚠ INDEXED, NOT DUAL-AXIS. €700 of price and €20 of earnings share no axis, and two
@@ -513,9 +679,14 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
               <ComposedChart data={chartData} margin={{ top: 22, right: 44, bottom: 5, left: 4 }}
                 style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-                {/* ⚠ NUMERIC, NOT CATEGORICAL — so today can sit at its real distance between two
-                    fiscal years (see `nowX`). Ticks are pinned to the reported years; the default
-                    numeric ticks would invent 2025.5 as though something were reported there. */}
+                {/* ⚠ NUMERIC, NOT CATEGORICAL — a fiscal year has to sit at its real distance from
+                    the next one, and the projected stretch runs a decade past the last of them.
+                    Ticks are pinned to the reported years; the default numeric ticks would invent
+                    2025.5 as though something were reported there.
+                    ⚠ The note here used to say "so today can sit between two fiscal years (see
+                    `nowX`)" — `nowX` was deleted with the dashed price-target line on 2026-08-04
+                    and no row has had a fractional x since. Every row in `chartData` is a reported
+                    year or a projected one, which is the invariant the removal was FOR. */}
                 {/* ⚠ THE TILT IS WHAT LETS `ticks` MEAN WHAT IT SAYS. `yearTicks` names every
                     reported year plus the horizon, but recharts still DROPS the ones it thinks
                     collide — an explicit `ticks` array is a candidate list, not an instruction. Flat
@@ -536,8 +707,35 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
                   // would read like a period the company reported.
                   labelFormatter={(v) => (typeof v === 'number' && !Number.isInteger(v)
                     ? 'Today' : `FY${v}`)}
-                  formatter={(v, n) => [typeof v === 'number' ? v.toFixed(0) : '—',
-                    n === 'price' ? 'Price (index)' : `${b.perShare} (index)`]} />
+                  /**
+                   * ⚠⚠ THE REPORTED FIGURES, NOT THE INDEX. See `chartRows`: the axis has to be
+                   * indexed for the two series to share it, and an indexed tooltip is the part of
+                   * that trade nobody has to accept — "Price 214" at FY2021 says only that the
+                   * base year is 100.
+                   *
+                   * ⚠ EACH SERIES IS FORMATTED THE WAY ITS QUANTITY IS FORMATTED ELSEWHERE ON THIS
+                   * CARD. A price goes through `fmtPrice` (precision by magnitude — the same rule
+                   * the target's label and the panel's price rows use); a PER-SHARE figure gets two
+                   * decimals like the panel's forecast row, because `fmtPrice` would round FCF/share
+                   * of 12.40 to "12" and that is the number this card is about.
+                   *
+                   * ⚠ FOUR SERIES, FOUR NAMES. `trend` and `future` used to fall through to the
+                   * `${b.perShare}` label with the observed line, so hovering a projected year
+                   * showed two identically-named rows and no way to tell the fit from the data.
+                   */
+                  formatter={(v, n, item) => {
+                    const row = item?.payload as {
+                      rawPrice?: number | null; rawValue?: number | null;
+                      rawTrend?: number | null; rawFuture?: number | null;
+                    } | undefined;
+                    const ps = (x: number | null | undefined) =>
+                      (x == null ? '—' : `${ccy}${x.toFixed(2)}`);
+                    if (n === 'price') return [`${ccy}${fmtPrice(row?.rawPrice ?? null)}`, 'Price'];
+                    if (n === 'value') return [ps(row?.rawValue), b.perShare];
+                    if (n === 'trend') return [ps(row?.rawTrend), `${b.perShare} · trend`];
+                    if (n === 'future') return [ps(row?.rawFuture), `${b.perShare} · projected`];
+                    return [typeof v === 'number' ? v.toFixed(0) : '—', String(n)];
+                  }} />
                 <ReferenceLine y={100} stroke={chartTheme.zeroLine} />
                 <Line dataKey="price" name="price" type="monotone" stroke={chartTheme.accentStrong}
                   strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
@@ -680,12 +878,25 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
       horizonYears={horizonYears} targetYear={targetYear}
       price={{ date: priceDate, live: priceLive, pending: livePending,
         symbol: live?.symbol ?? null, staleDays: live?.stale_days ?? null }}
-      fcfStr={fcfStr} onFcf={setFcfStr} defaultForecastFcfPs={forecastPs}
+      fcfStr={fcfStr}
+      // ⚠ THE **EFFECTIVE** FORECAST, NOT THE TREND'S. With the rate box live this row must show the
+      // figure that rate produces — it is what the target is actually built from, and a box still
+      // showing the fitted forecast would sit one line above a price target that does not divide
+      // from it.
+      defaultForecastFcfPs={cagrForecastPs ?? forecastPs}
+      // ⚠⚠ EACH SETTER CLEARS THE OTHER — the rate and the end value are two views of ONE
+      // assumption (see `cagrStr`), so only one can be the authority. Typing in either box makes it
+      // the authority and hands the other back its derived role.
+      onFcf={(v) => { setFcfStr(v); setCagrStr(null); }}
+      cagrStr={cagrStr} shownCagrPct={shownCagrPct} defaultCagrPct={defaultCagrPct}
+      onCagr={(v) => { setCagrStr(v); setFcfStr(null); }}
+      onResetCagr={() => setCagrStr(null)}
+      cagrDisabled={trendBasePs == null}
       yieldStr={yieldStr} onYield={setYieldStr} defaultForecastYield={avgYield}
-      onReset={() => { setFcfStr(null); setYieldStr(null); }}
+      onReset={() => { setFcfStr(null); setYieldStr(null); setCagrStr(null); }}
       // ⚠ `null`, NOT the default's current value — see the ⚠⚠ on `Input`'s `onRevert`. Null means
       // "never typed", which is what keeps the box TRACKING the computed figure as it moves.
-      onResetFcf={() => setFcfStr(null)} />
+      onResetFcf={() => { setFcfStr(null); setCagrStr(null); }} />
     </div>
   );
 }

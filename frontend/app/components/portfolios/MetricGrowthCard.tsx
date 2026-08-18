@@ -15,6 +15,7 @@ import HoldingsIngestPanel from './HoldingsIngestPanel';
 import { LegendItem } from './ChartLegend';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
 import { paddedLogDomain, periodTick, stepChanges, type Step } from './marginData';
+import { atSharedX, ltmWindowsDiffer, ltmYearX, sharedLtmX, type LtmPoint } from './ltmAxis';
 import { endpointCagr } from './lineCagr';
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, rebaseSeries, seriesCrossesZero } from './benchSeries';
@@ -97,31 +98,10 @@ function extractPoints(rows: MetricRow[], codes: string[], cadence: 'annual' | '
     .sort((a, b) => a.year - b.year);
 }
 
-/**
- * Where an LTM point belongs on an ANNUAL axis: a fraction of a year past the last reported one.
- *
- * ⚠⚠ THE QUARTER BUCKET PUTS IT ON TOP OF A FISCAL YEAR, AND WITH A FORECAST ON THE CHART THAT IS
- * NO LONGER INVISIBLE. A trailing year ending 2026-03-31 buckets to `2026 + (1−1)/4` = **2026.0** —
- * the same x as FY2026, which is where the analysts' first estimate sits. So the newest ACTUAL and
- * the first FORECAST landed on one tick, the LTM appeared to be a year further along than it is,
- * and the dotted leg started underneath it instead of after it.
- *
- * The fix cannot be "use the calendar fraction" either, because the annual axis is not a calendar:
- * `extractPoints` places a fiscal year at the YEAR IT ENDS IN, so an off-calendar filer's FY2026
- * (ending 2026-03-31) already sits at 2026 while occupying the same months this LTM does. Measuring
- * from the entity's OWN last fiscal year end sidesteps the whole question — three months past it is
- * three months past it, whatever calendar that year was labelled with.
- *
- * ⚠ CLAMPED INSIDE THE YEAR, never onto its neighbours. At 0 it would sit on the last actual and
- * hide it; at 1 it would sit on the first forecast, which is the bug this exists to fix.
- */
-const YEAR_MS = 365.25 * 24 * 3600 * 1000;
-function ltmYearX(ltmDate: string | undefined, last: { year: number; date?: string } | null) {
-  if (!last) return null;
-  if (!ltmDate || !last.date) return last.year + 0.25;   // no date to measure from: a quarter on
-  const gap = (Date.parse(`${ltmDate}T00:00:00Z`) - Date.parse(`${last.date}T00:00:00Z`)) / YEAR_MS;
-  return last.year + Math.min(0.95, Math.max(0.05, gap));
-}
+// ⚠ `ltmYearX` / `sharedLtmX` / `ltmWindowsDiffer` / `atSharedX` NOW LIVE IN `./ltmAxis`.
+// Both rules in there had already been got wrong once each in a way that rendered as a
+// plausible chart rather than an error — the stub landing on the first forecast, and then
+// TWO stubs on one axis — and neither had a test while it sat inside this component.
 
 /**
  * ⚠⚠ THE LTM POINT LIVES IN THE DRILL-DOWN TABLE, NOT HERE — AND THE ATTEMPT TO DERIVE IT ON THE
@@ -144,7 +124,6 @@ function ltmYearX(ltmDate: string | undefined, last: { year: number; date?: stri
  * twelve months per metric, at the newest quarter-end, present only when that reaches PAST the last
  * full fiscal year. This reads those; it does not compute one.
  */
-type LtmPoint = { year: number; value: number; date?: string };
 
 function ltmPoint(rows: MetricRow[], codes: string[],
                   last: { year: number; date?: string } | null): LtmPoint | null {
@@ -194,15 +173,51 @@ export function pctSince(step: Step | null | undefined, ltmXs?: ReadonlySet<numb
   return `${step.pct >= 0 ? '+' : ''}${step.pct.toFixed(1)}% vs ${periodTick(step.from, ltmXs)}`;
 }
 
+/**
+ * One stat tile. ⚠ EVERY TILE IN THE PORTFOLIOS CARD FAMILY IS THIS COMPONENT AND EVERY ONE IS THE
+ * SAME SIZE (2026-08-18) — thirteen cards import it.
+ *
+ * ⚠⚠ FIXED, NOT `min-w`. It was `min-w-[6.5rem]` with content-sized growth, so a row of tiles came
+ * out as a ragged set of different widths (`+18.4%` narrow, `EUR 1,240` wide) and different heights
+ * the moment one label wrapped to a second line and its neighbours did not. Five tiles of five
+ * shapes read as five unrelated readouts rather than one row of comparable figures — which on the
+ * Quick Valuation card is exactly wrong, since comparing them IS the card.
+ *
+ * ⚠⚠ THE LABEL GETS **TWO** LINES, ALWAYS RESERVED, AND THAT IS WHAT MAKES THE HEIGHT CONSTANT.
+ * One line was tried first and it is the obvious answer: truncate, hang the full text on `title`,
+ * done. But at this width a single 10px line holds ~13 characters, and FOUR of the Quick Valuation
+ * card's five labels are longer than that — `CURRENT SHARE PRICE`, `PRICE TARGET FY2035`,
+ * `EST. CAGR TO FY2035`, `FCF / SHARE CAGR`. A row of tiles reading `CURRENT SHARE P…` /
+ * `PRICE TARGET F…` / `EST. CAGR TO F…` is uniform and useless: the truncation lands exactly where
+ * the labels stop differing. Two clamped lines fit every label in the family, and reserving the
+ * space whether or not it is used is what keeps a one-line tile the same height as a two-line one.
+ *
+ * ⚠ THE VALUE STILL TRUNCATES, on purpose. `EUR 124,000` is hoverable rather than allowed to
+ * resize the tile it sits in — a figure that wide is rare, and one wide tile in a row of narrow
+ * ones is the raggedness this exists to remove.
+ *
+ * ⚠ THE ⓘ IS `shrink-0`. Without it a long label truncates by eating its own info icon first, which
+ * removes the explanation from precisely the tiles whose labels were too long to be self-evident.
+ *
+ * `color` (a chart hex) ties the tile to its line — a coloured left bar + matching value ink — and
+ * OVERRIDES `tone`, so a caller wanting sign-coloured ink (red/green) must not also pass a colour.
+ */
 export function Stat({ label, value, tone, color, info }: {
   label: string; value: string; tone?: string; color?: string; info?: React.ReactNode;
 }) {
-  // `color` (a chart hex) ties the tile to its line — a coloured left bar + matching value ink.
   return (
-    <div className="rounded-lg border border-neutral-800/40 bg-inset px-3 py-2 min-w-[6.5rem]"
+    <div className="rounded-lg border border-neutral-800/40 bg-inset px-2 py-1.5 w-[8rem] h-[3.6rem]
+                    flex flex-col justify-between overflow-hidden"
       style={color ? { borderLeft: `3px solid ${color}` } : undefined}>
-      <div className="flex items-center gap-1 text-[12px] uppercase tracking-wide text-fg-muted">{label}{info}</div>
-      <div className={`font-mono text-xl font-semibold leading-tight ${color ? '' : (tone ?? 'text-fg-strong')}`}
+      {/* ⚠ THE HEIGHT IS ON THE ROW, NOT LEFT TO THE TEXT — two lines' worth at 10px/leading-tight,
+          reserved whether the label uses them or not. `items-start` keeps the ⓘ beside the FIRST
+          line rather than floating to the middle of a two-line label. */}
+      <div className="flex items-start gap-1 h-[1.6rem] text-[10px] uppercase tracking-wide text-fg-muted leading-tight">
+        <span className="line-clamp-2" title={label}>{label}</span>
+        <span className="shrink-0 flex items-center leading-none">{info}</span>
+      </div>
+      <div title={value}
+        className={`font-mono text-base font-semibold leading-tight truncate ${color ? '' : (tone ?? 'text-fg-strong')}`}
         style={color ? { color } : undefined}>{value}</div>
     </div>
   );
@@ -327,14 +342,41 @@ export default function MetricGrowthCard({
   const benchLtm = useMemo(
     () => {
       if (cadence !== 'annual' || !benchMetrics) return null;
-      // ⚠ MEASURED FROM THE INDEX'S OWN LAST FISCAL YEAR. Placing it a fraction past OUR last
-      // year would put the two lines' LTM points at x positions that differ by whatever the
-      // two books' fiscal calendars differ by — a gap that is pure bookkeeping, drawn as if it
-      // were time.
+      // ⚠ MEASURED FROM THE INDEX'S OWN LAST FISCAL YEAR — this is the WINDOW, which is a fact
+      // about the index (its `date` is the quarter its trailing year ends in, and the tooltip
+      // reads it out). It is NOT where the point is drawn: see `ltmX`.
       const bench = extractPoints(benchMetrics, cfg.codes, cadence);
       return ltmPoint(benchMetrics, cfg.codes, bench.length ? bench[bench.length - 1] : null);
     },
     [benchMetrics, cfg, cadence]);
+
+  /**
+   * ⚠⚠ THE LTM STUB IS **ONE** POSITION ON THE AXIS, WHATEVER THE TWO WINDOWS ARE.
+   *
+   * `ltmYearX` measures each entity's stub from ITS OWN last fiscal year end, which is right for
+   * the length of that stub and wrong as a coordinate: two entities whose fiscal calendars differ
+   * land on two x, so the axis grew a SECOND "LTM" tick and the two trailing points sat side by
+   * side as if the index's twelve months happened later in time than the book's. Measured on the
+   * Revenue chart against AEX.
+   *
+   * ⚠ AND THE DIFFERENCE IT WAS DRAWING IS BOOKKEEPING, NOT TIME. Both points mean the same thing
+   * — "the latest twelve months we have" — and the axis has exactly one such slot, immediately
+   * after the last full year. Two slots encode a lag that nobody reported and that no reader can
+   * measure off the axis (the ticks both say "LTM"); the real difference between the two windows
+   * is a fact about END DATES, which the tooltip states in days and the footnote warns about.
+   * The same argument this file already makes about not placing the index's stub past OUR last
+   * year — a gap that is pure bookkeeping must not be drawn as if it were time — applied one step
+   * further out.
+   *
+   * ⚠ THE COMPANY'S OWN x WINS when it has one: this card is about that entity and the index is
+   * an overlay, so the stub's LENGTH should be the subject's. With no company LTM the index's
+   * position is the only one there is, and it becomes the single slot.
+   */
+  const ltmX = sharedLtmX(ltm, benchLtm);
+
+  /** The index's LTM as it is DRAWN — its own value, at the chart's single LTM x. `benchLtm` keeps
+   *  the real `date`, because that is what the tooltip and the footnote have to name. */
+  const benchLtmAt = useMemo(() => atSharedX(benchLtm, ltmX), [benchLtm, ltmX]);
 
   /** The index's own series, through the IDENTICAL extraction, and left RAW.
    *
@@ -347,9 +389,11 @@ export default function MetricGrowthCard({
     if (!benchMetrics) return null;
     const raw = new Map<number, number | null>(
       extractPoints(benchMetrics, cfg.codes, cadence).map((p) => [p.year, p.value]));
-    if (benchLtm) raw.set(benchLtm.year, benchLtm.value);
+    // ⚠ AT THE SHARED LTM x — see `ltmX`. Keyed on the index's own `benchLtm.year` this map grew a
+    // second trailing entry one fiscal-calendar's difference away from the book's.
+    if (benchLtmAt) raw.set(benchLtmAt.year, benchLtmAt.value);
     return raw.size ? raw : null;
-  }, [benchMetrics, cfg, cadence, benchLtm]);
+  }, [benchMetrics, cfg, cadence, benchLtmAt]);
 
   /**
    * Every x on this chart that carries a trailing-twelve-month point — OURS **AND** THE INDEX'S.
@@ -370,14 +414,16 @@ export default function MetricGrowthCard({
    */
   const ltmXs = useMemo(() => {
     const xs = new Set<number>();
-    if (ltm) xs.add(ltm.year);
-    if (benchLtm) xs.add(benchLtm.year);
+    if (ltmX != null) xs.add(ltmX);
     return xs;
-  }, [ltm, benchLtm]);
-  /** ⚠ SAID OUT LOUD, because two ticks both reading "LTM" otherwise looks like a rendering bug
-   *  rather than the fact it is: the two lines' trailing years end on different quarters, so they
-   *  are not measured over the same twelve months and the gap between them is partly calendar. */
-  const ltmSplit = ltmXs.size > 1;
+  }, [ltmX]);
+  /** ⚠ THE TWO WINDOWS STILL DIFFER — ONE TICK DOES NOT MAKE THEM THE SAME TWELVE MONTHS, and this
+   *  is now the ONLY place that says so. While the split was drawn on the axis the note merely
+   *  explained a visible oddity; with both points on one x the difference is invisible, which
+   *  makes stating it more important rather than less: the last stretch of the two lines is
+   *  measured over windows ending on different quarters, so part of the gap at the right-hand edge
+   *  is calendar and not performance. Compared on the DATES, never on the drawn positions. */
+  const ltmSplit = ltmWindowsDiffer(ltm, benchLtm);
 
   /**
    * ⚠⚠ THE AXIS IS INDEXED, THE HOVER IS ACTUAL. A level card plots BOTH lines rebased to 100 at
@@ -443,9 +489,15 @@ export default function MetricGrowthCard({
   const benchForecastByX = useMemo(
     // ⚠ THE BENCHMARK'S OWN ACTUALS ARE ITS SEED, not ours — a dotted index leaving OUR last point
     // would draw the two lines as continuous when they are two different series.
-    () => forecastOf(benchMetrics, extractPoints(benchMetrics ?? [], cfg.codes, cadence), benchLtm),
+    // ⚠ SEEDED AT THE **DRAWN** LTM x (`benchLtmAt`), not the index's own. The seed exists so the
+    // dotted leg leaves the solid line instead of floating, and it can only do that from the point
+    // the solid line actually ends on — seeded at `benchLtm.year` it started one fiscal-calendar's
+    // difference away from the index's own last drawn point, i.e. floating, which is the bug the
+    // seed exists to prevent.
+    () => forecastOf(benchMetrics, extractPoints(benchMetrics ?? [], cfg.codes, cadence),
+                     benchLtmAt),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [benchMetrics, benchLtm, cfg, cadence]);
+    [benchMetrics, benchLtmAt, cfg, cadence]);
 
   /**
    * Where each forecast leg is SEEDED — its lowest x, which is the newest actual drawn a second
@@ -824,8 +876,15 @@ export default function MetricGrowthCard({
                       // year past the last reported one, so its x is a position on the axis and no
                       // longer decodes to a date — `periodTick` would round 2025.24 to "2025 Q2",
                       // naming a quarter the window does not end in.
-                      : `LTM · 12 months to ${(x === ltm?.year ? ltm?.date : benchLtm?.date)
-                        ?? periodTick(x)}`)}
+                      // ⚠ BOTH WINDOWS, WHEN THEY DIFFER. The x no longer picks between them —
+                      // that is the point of the single stub — so a label that named one would
+                      // silently attribute the book's quarter-end to the index's line sitting
+                      // right beside it in the same tooltip. Naming both is what keeps the
+                      // collapsed x honest; it is the only place the reader can still see it.
+                      : `LTM · 12 months to ${ltmSplit
+                        ? `${ltm?.date} (${holdingsName ?? 'this book'}) / `
+                          + `${benchLtm?.date} (${benchLabel ?? 'the index'})`
+                        : (ltm?.date ?? benchLtm?.date ?? periodTick(x))}`)}
                   formatter={(v, name, item) => {
                     const row = item?.payload as {
                       year?: number;
@@ -981,20 +1040,15 @@ export default function MetricGrowthCard({
                   absolute — the series crosses zero
                 </span>
               )}
-              {/* ⚠ TWO "LTM" TICKS ARE A FINDING, NOT A GLITCH — and unexplained they read as one.
-                  Each blend stamps its trailing year with the newest filing behind it, so when the
-                  book and the index end on different quarters the last stretch of the two lines is
-                  measured over different twelve months. Silence there would let a reader take the
-                  gap for performance. */}
-              {ltmSplit && (
-                <span className="text-fg-faint"
-                  title={'The two lines’ trailing twelve months end on different quarters — '
-                    + 'each is stamped with the newest filing behind it. The last point of one '
-                    + 'therefore covers a slightly later year than the other, so part of the gap '
-                    + 'between them at the right-hand edge is calendar, not performance.'}>
-                  two LTM windows — different quarter-ends
-                </span>
-              )}
+              {/* ⚠ NO "LTM windows end on different quarters" CHIP HERE — REMOVED ON REQUEST
+                  2026-08-18, not overlooked. It existed to explain a SECOND "LTM" tick on the
+                  axis; with both stubs collapsed onto one x (`ltmX`) there is no longer an oddity
+                  on screen for it to account for, so it had become a permanent caption on a chart
+                  that looks correct — the kind of legend text a reader learns to stop reading.
+                  ⚠ THE FACT IT CARRIED IS NOT GONE, IT MOVED: `ltmSplit` still names BOTH windows
+                  in the LTM tooltip header, which is where someone asking "what twelve months is
+                  this?" already looks, and it appears only when they actually differ. Do not
+                  re-add it here without removing it there. */}
               {benchByX && (
                 <LegendItem color={chartTheme.pos} label={benchLabel}
                   title={isRatio ? undefined
