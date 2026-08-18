@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   addYears, BASIS, cagrBetween, cagrOf, EPS_EST_CODES, EPS_PS_CODES, FCF_PS_CODES, forwardEstimates,
-  latestDateOf, medianOf, priceAtYield, priceTarget, priceVsMetric,
+  compoundFrom, latestDateOf, medianOf, priceAtYield, priceTarget, priceVsMetric,
   rebase, yearsBetween, yieldOf, type MetricRow,
 } from './quickValuation';
 
@@ -356,5 +356,53 @@ describe('priceTarget — one computation, two readers', () => {
     const t = priceTarget(2.61, 200.77, 4.05, 0, 2);
     expect(t.forecastPrice).toBeNull();
     expect(t.cagr).toBeNull();
+  });
+});
+
+/**
+ * ⚠⚠ THE FEATURE THIS UNDERWRITES: the Quick Valuation panel shows the forecast per-share GROWTH
+ * RATE and the forecast per-share VALUE as two editable views of ONE assumption, and typing either
+ * moves the price target on the chart. That only works if the two directions are exact inverses —
+ * otherwise a typed rate produces an end value that implies a slightly different rate, the box
+ * rewrites itself under the caret, and the pair fights whoever is using it.
+ */
+describe('compoundFrom — cagrBetween run backwards', () => {
+  it('⚠⚠ ROUND-TRIPS EXACTLY, which is what lets both boxes be editable', () => {
+    const base = 12.4;
+    for (const years of [1, 5, 10]) {
+      for (const end of [3.1, 12.4, 41.2, 900]) {
+        const rate = cagrBetween(base, end, years) as number;
+        expect(compoundFrom(base, rate * 100, years) as number).toBeCloseTo(end, 9);
+      }
+    }
+  });
+
+  it('compounds the way a reader expects', () => {
+    expect(compoundFrom(10, 10, 1) as number).toBeCloseTo(11, 9);
+    expect(compoundFrom(10, 10, 10) as number).toBeCloseTo(25.937424601, 8);
+    expect(compoundFrom(10, 0, 10) as number).toBeCloseTo(10, 9);
+    expect(compoundFrom(10, -50, 2) as number).toBeCloseTo(2.5, 9);
+  });
+
+  it('⚠ REFUSES A NON-POSITIVE BASE — a cash burn does not "grow at 12%" to anywhere', () => {
+    // FCF/share and EPS both go negative; whole cards on this tab exist because they do. A base of
+    // -2.10 compounding to -6.52 would render as a forecast rather than as the nonsense it is.
+    expect(compoundFrom(-2.1, 12, 10)).toBeNull();
+    expect(compoundFrom(0, 12, 10)).toBeNull();
+  });
+
+  it('⚠ REFUSES -100% OR WORSE — it lands on zero, which divides into an infinite price target', () => {
+    expect(compoundFrom(10, -100, 5)).toBeNull();
+    expect(compoundFrom(10, -140, 5)).toBeNull();
+  });
+
+  it('carries nulls and a non-positive horizon through', () => {
+    expect(compoundFrom(null, 12, 10)).toBeNull();
+    expect(compoundFrom(10, null, 10)).toBeNull();
+    expect(compoundFrom(10, 12, 0)).toBeNull();
+  });
+
+  it('⚠ AN EXTREME RATE THAT OVERFLOWS IS null, NOT Infinity — a price target divides by it', () => {
+    expect(compoundFrom(1e300, 1e6, 10)).toBeNull();
   });
 });

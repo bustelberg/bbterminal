@@ -245,9 +245,49 @@ class TestOneImplementation:
         # Assert on the ACQUISITION, not the identifier — the docstring names `_LOCK` on purpose,
         # since it is the hazard being warned about.
         assert "_LOCK.acquire" not in inspect.getsource(V.scan_one)
+        assert "_acquire_session" not in inspect.getsource(V.scan_one)
         # ...and both callers genuinely do take it, or nothing serialises the AirSPMS session.
+        # ⚠ EITHER SPELLING COUNTS. `refresh_one_portfolio` now goes through `_acquire_session`
+        # (which is `_LOCK.acquire` with an optional wait, added so a full refresh can QUEUE for
+        # the session instead of abandoning a portfolio half-done). The property under test is
+        # "this caller takes the session", not which of the two names it typed.
         for fn in (V.run_airs_vermogen_refresh_sync, V.refresh_one_portfolio):
-            assert "_LOCK.acquire" in inspect.getsource(fn), fn.__name__
+            src = inspect.getsource(fn)
+            assert "_LOCK.acquire" in src or "_acquire_session(" in src, fn.__name__
+
+    def test_the_session_helper_is_the_only_way_in(self):
+        """⚠ EVERY AirSPMS SCRAPE PASSES THROUGH ONE GATE, because there is one session and two
+        threads driving it do not error — they interleave into each other's downloads.
+
+        `_composition` (the model half, in `routers/_airs_portfolio_refresh`) took NO lock until
+        2026-08-18 and said so in `routers/airs.py`: a documented, accepted gap, survivable only
+        while exactly one human pressed one button. `refresh_many` fans out over both halves, so
+        it stopped being survivable.
+        """
+        import inspect
+
+        import airs_vermogen as V
+        from routers import _airs_portfolio_refresh as R
+
+        assert V._acquire_session(None) is True, "the lock was already held by something"
+        V._LOCK.release()
+        src = inspect.getsource(R._composition)
+        assert "_acquire_session(" in src and "_LOCK.release()" in src
+
+    def test_waiting_and_refusing_are_both_available(self):
+        """`None` refuses at once — a BUTTON must answer, and "another refresh is running" is a
+        true answer a person can act on. A number queues, for a caller already mid-job whose only
+        other option is to leave half a portfolio refreshed."""
+        import airs_vermogen as V
+
+        assert V._acquire_session(None) is True
+        try:
+            # Held: the non-blocking form refuses rather than parking the caller.
+            assert V._acquire_session(None) is False
+            # ...and the waiting form gives up rather than hanging for ever.
+            assert V._acquire_session(0.01) is False
+        finally:
+            V._LOCK.release()
 
 
 class TestTheMarkerNamesTheGap:

@@ -103,6 +103,13 @@ export const dismissJob = (id: string) =>
  */
 export async function cancelJob(id: string): Promise<boolean> {
   upsert(id, { cancelRequested: true, message: 'cancelling…' });
+  // ⚠⚠ LOCAL JOBS FIRST, AND THIS IS WHY THERE IS STILL ONE CANCEL PATH. `JobToaster`'s Cancel
+  // button calls this function and nothing else; a second kind of job with a second kind of cancel
+  // would mean teaching that button which sort it is looking at, at which point every future
+  // control has to know too. A job that runs in this tab has no `/api/jobs/{id}` to POST to — the
+  // POST would 404 and the card would sit at "cancelling…" for ever — so it is aborted here.
+  const abort = localCancels.get(id);
+  if (abort) { abort(); return true; }
   try {
     const r = await apiFetch(`${API_URL}/api/jobs/${encodeURIComponent(id)}/cancel`,
       { method: 'POST' });
@@ -116,6 +123,66 @@ export async function cancelJob(id: string): Promise<boolean> {
 }
 
 const isTerminal = (s: JobStatus) => s !== 'running';
+
+/** Abort handles for jobs with no server side, keyed by toast id — see `startLocalJob`. */
+const localCancels = new Map<string, () => void>();
+
+/**
+ * Report a piece of work THIS TAB is doing on the shared toast stack.
+ *
+ * ⚠⚠ NOT EVERY CANCELLABLE THING IS A SERVER JOB. `startJob` needs an endpoint that owns the work
+ * and hands back a `job_id`; re-reading a cached GET has no such endpoint and does not deserve
+ * one. Without this, a control like the Deep Valuation tab's share-price refresh had two bad
+ * options: paint its own private spinner — a second progress vocabulary the reader has to learn,
+ * and the exact thing the job layer was built to delete — or invent a backend job for a fetch.
+ *
+ * ⚠ CANCELLATION IS AN `AbortController`, AND IT IS REAL. `cancelJob` finds this handle before it
+ * reaches for the network, so the toaster's own Cancel button works on these with no change to it.
+ *
+ * ⚠ IT DIES WITH THE TAB, AND THAT IS THE ONE THING A SERVER JOB DOES BETTER. A route change or a
+ * reload takes the work with it — there is nothing to re-attach to (`attachRunningJobs` lists the
+ * server's jobs, and this is not one). Use it only for work short enough that losing it costs
+ * nothing; anything that outlives a page view belongs on the server.
+ *
+ * `run` returns the card's summary line. Throwing marks the card failed with the message.
+ */
+export function startLocalJob(
+  title: string, kind: string, run: (signal: AbortSignal) => Promise<string | void>,
+): string {
+  const id = `local:${kind}:${
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${performance.now()}`}`;
+  const ctrl = new AbortController();
+  localCancels.set(id, () => ctrl.abort());
+  jobsStore.set((st) => ({
+    jobs: [...st.jobs, {
+      id, title, kind, label: title, status: 'running' as JobStatus, done: 0, total: 0,
+      message: '', summary: null, apiCalls: 0, cancelRequested: false, dismissed: false,
+    }],
+  }));
+  void (async () => {
+    try {
+      const summary = await run(ctrl.signal);
+      // ⚠ THE SIGNAL, NOT THE ERROR, DECIDES. A cancelled fetch can resolve rather than throw
+      // (a cacheable read is shared, so aborting one caller does not stop the request), and a card
+      // that went green on a run the reader stopped is worse than one that never reported.
+      upsert(id, ctrl.signal.aborted
+        ? { status: 'cancelled', summary: 'cancelled', message: '' }
+        : { status: 'done', summary: summary || null, message: '' });
+    } catch (e) {
+      upsert(id, ctrl.signal.aborted
+        ? { status: 'cancelled', summary: 'cancelled', message: '' }
+        : {
+          status: 'failed',
+          summary: e instanceof Error ? e.message : String(e),
+          message: 'see the console',
+        });
+      if (!ctrl.signal.aborted) traceError('jobs', `local job ${kind} failed`, e);
+    } finally {
+      localCancels.delete(id);
+    }
+  })();
+  return id;
+}
 
 /**
  * Follow one job's stream to its end.

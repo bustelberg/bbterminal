@@ -52,6 +52,15 @@ const FCF_CODES = [
 
 export type EgmSource = {
   price: number | null;
+  /**
+   * The close's OWN date — ⚠ THE PANEL CALLS THIS FIGURE "Share price now" AND HAD NO WAY TO KNOW
+   * WHETHER IT WAS. `price` is the newest `close_price` row in the metrics payload, which is as
+   * fresh as our stored price series happens to be; if ingest has not run, "now" is whenever it
+   * last did. A label making a claim about time, over a number carrying no time, is the same bug
+   * `QuickValuationTab` fixed on 2026-07-29 when it was printing a fiscal year-end close under the
+   * word "current".
+   */
+  priceDate: string | null;
   forwardPE: number | null;
   dividendYield: number | null;   // decimal
   epsNextFY: number | null;
@@ -263,6 +272,7 @@ export function egmSource(metrics: MetricRow[], today: string): EgmSource {
   const dy = latest(metrics, DIV_YIELD_CODES);
   return {
     price: latest(metrics, [PRICE_CODE])?.value ?? null,
+    priceDate: latest(metrics, [PRICE_CODE])?.date ?? null,
     forwardPE: latest(metrics, [FWD_PE_CODE])?.value ?? null,
     // ⚠ THE FIELD IS NAMED `… %` AND HOLDS PERCENT UNITS — GuruFocus files 0.3 for 0.3%, exactly
     // as it does for `ROE %`. The model wants a decimal, and passing the percent through unscaled

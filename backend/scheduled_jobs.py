@@ -111,6 +111,30 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              "European EOD closes are published by run time.",
     ),
     JobSpec(
+        id="job_watchdog",
+        label="Watchdog — re-run broken jobs",
+        fills="nothing directly; it re-runs the jobs the automatic-jobs page reports as broken",
+        cadence="Every day, 11:00 UTC",
+        # ⚠⚠ 11:00 UTC, WHICH IS SIX HOURS AFTER THE PIPELINE IT MOSTLY EXISTS FOR. Late enough
+        # that a 05:00 run has certainly either finished or died, and late enough that a re-run of
+        # it is still on the right side of the European EOD publication the 05:00 time was itself
+        # chosen for — a watchdog firing the pipeline at 01:00 would "heal" it into reading
+        # yesterday's closes.
+        #
+        # ⚠ ONCE A DAY, NOT HOURLY. Every job it can heal has a `max_age_hours` measured in days,
+        # so hourly buys a few hours of latency and costs a re-run attempt every hour on anything
+        # genuinely broken. The per-day cap (`_WATCHDOG_MAX_PER_DAY`) is the real bound; this is
+        # the cheap one.
+        trigger={"hour": 11, "minute": 0, "timezone": "UTC"},
+        options={"coalesce": True, "misfire_grace_time": 3600},
+        # ⚠ A DAY AND A HALF. It runs daily and must itself be visible when it stops — a watchdog
+        # nobody watches is the failure it was built to end, one level up.
+        max_age_hours=36,
+        note="Re-runs jobs reporting `overdue` or `interrupted`, at most twice per job per day. "
+             "⚠ It deliberately does NOT touch `missing` (the job is not registered — healing that "
+             "would hide a broken schedule), `error` (it has a reason; read it) or `unknown`.",
+    ),
+    JobSpec(
         id="month_end_price_refresh",
         label="Month-end full price refresh",
         fills="metric_data for EVERY company, most-stale first",
@@ -158,6 +182,36 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         max_age_hours=80,
         note="After the ~16:00 CET publication. The daily pipeline only syncs the HELD "
              "currencies, so without this the unused ones go stale.",
+    ),
+    JobSpec(
+        id="airs_model_prices",
+        label="AIRS model portfolios — reprice",
+        fills="airs_model_portfolio_position · asset_execution · fx_rate · asset_price",
+        cadence="Daily, 05:00 Amsterdam",
+        # ⚠⚠ THE PRICING HALF ONLY — `halves=("model",)`, NEVER the accounts scrape. Two ⚠⚠ notes
+        # on `airs_vermogen_refresh` below record why nothing that scrapes AIRS may run at this
+        # hour: a forcing account pass that lands before AIRS has valued the books stores
+        # YESTERDAY's valuation, and since it fires once nothing re-reads it until tomorrow — the
+        # symptom is holdings a full day behind that look perfectly current. The MODEL half has no
+        # such hazard. A composition is a dated set of weights rather than a daily valuation, and
+        # its other four steps talk to OpenFIGI, the ECB and Yahoo, none of which care what time
+        # AIRS runs its batch.
+        #
+        # ⚠ 05:00 AMSTERDAM, NOT UTC, and deliberately unlike the ingest pipeline's 05:00 UTC tick.
+        # This one is about a European working morning ("current when I open the page"), so it must
+        # hold its wall-clock hour across the DST shift; the pipeline's is anchored to market closes
+        # and must not. They are therefore an hour apart for half the year, which is a bonus rather
+        # than the reason.
+        #
+        # ⚠ EVERY PAIRED MODEL, PRICED CONCURRENTLY (`refresh_many`), which is safe because the one
+        # serial resource — the AirSPMS session the composition read needs — is a lock inside
+        # `refresh_portfolio_fully`. The Yahoo legs are what take the time and they overlap.
+        trigger={"hour": 5, "minute": 0, "timezone": "Europe/Amsterdam"},
+        options={"coalesce": True, "misfire_grace_time": 3600},
+        max_age_hours=30,
+        note="Prices every model portfolio: composition, instrument resolve, FX backfill, price "
+             "fetch, YTD recompute. ⚠ Does NOT scrape the accounts — that is the 09:30 job, and "
+             "05:00 is documented as too early for it.",
     ),
     JobSpec(
         id="airs_vermogen_refresh",

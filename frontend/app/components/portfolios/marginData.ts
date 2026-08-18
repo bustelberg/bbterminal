@@ -137,9 +137,16 @@ export const xToPeriod = (x: number): string => {
  * own to match against, and the INDEX's LTM was labelled "2026 Q2" while its line ran a quarter
  * past the book's. It reads as "the index has reported and we have not", which it was not.
  *
- * ⚠ `ltmXs` IS A SET, NOT ONE VALUE. Each blend stamps its trailing year with the newest filing
- * behind it, so a book and an index that end on different quarters genuinely have two LTM windows —
- * and both are LTMs. Naming only one puts the fake quarter straight back on the other.
+ * ⚠⚠ `ltmXs` IS A SET FOR ROBUSTNESS, BUT A CHART MUST PUT ITS LTM STUB ON **ONE** x (2026-08-18).
+ * It briefly held two: each blend stamps its trailing year with the newest filing behind it and
+ * `ltmYearX` measures the stub from that entity's OWN last fiscal year end, so a book and an index
+ * on different fiscal calendars produced two positions — a second "LTM" tick on the axis, and two
+ * trailing points side by side reading as though the index's twelve months happened later in time
+ * than the book's. They did not: both mean "the latest twelve months available", and the axis has
+ * exactly one such slot. The windows really do end on different quarters, and that is a fact about
+ * DATES — stated in the tooltip and the footnote, where a reader can act on it, not encoded as a
+ * horizontal offset nobody can measure off two ticks that both say "LTM". See `MetricGrowthCard`'s
+ * `ltmX`. The set stays a set so this helper cannot itself become the reason a second one appears.
  */
 export const periodTick = (x: number, ltmXs?: ReadonlySet<number>): string =>
   (ltmXs?.has(x) ? 'LTM' : xToPeriod(x));

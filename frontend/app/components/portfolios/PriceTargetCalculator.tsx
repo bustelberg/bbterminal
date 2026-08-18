@@ -68,7 +68,7 @@ function Row({ label, info, children }: {
   );
 }
 
-function Input({ value, onChange, suffix, onRevert, revertTitle }: {
+function Input({ value, onChange, suffix, onRevert, revertTitle, disabled, disabledTitle, step }: {
   value: string; onChange: (v: string) => void; suffix?: string;
   /**
    * Put this field back to the figure the panel computed — see the ⚠⚠ below. Absent means the
@@ -76,6 +76,13 @@ function Input({ value, onChange, suffix, onRevert, revertTitle }: {
    */
   onRevert?: () => void;
   revertTitle?: string;
+  /** ⚠ THE INPUT THAT CANNOT PRODUCE AN ANSWER IS CLOSED, NOT LEFT OPEN TO BE IGNORED. A growth
+   *  rate typed against a negative base yields nothing, and a box that silently changes no figure
+   *  on the panel reads as a broken control rather than as an inapplicable one. */
+  disabled?: boolean;
+  disabledTitle?: string;
+  /** The arrow-key increment. A rate steps in whole points; a currency figure in units. */
+  step?: number;
 }) {
   return (
     <span className="flex items-center gap-1 justify-end">
@@ -90,7 +97,7 @@ function Input({ value, onChange, suffix, onRevert, revertTitle }: {
           ⚠ IT SITS LEFT OF THE INPUT so the box does not move when it appears. A control that
           shifts the thing it belongs to, at the moment you start typing in it, is one you have to
           chase with the pointer. */}
-      {onRevert && (
+      {onRevert && !disabled && (
         <button type="button" onClick={onRevert} title={revertTitle}
           aria-label="Reset to the computed figure"
           className="cursor-pointer text-[11px] leading-none px-1 rounded text-fg-faint
@@ -98,8 +105,10 @@ function Input({ value, onChange, suffix, onRevert, revertTitle }: {
           ↺
         </button>
       )}
-      <input type="number" value={value} onChange={(e) => onChange(e.target.value)}
-        className="w-20 bg-page border border-neutral-700 rounded px-1.5 py-0.5 text-xs font-mono text-fg-strong text-right focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />
+      <input type="number" value={value} step={step} disabled={disabled}
+        title={disabled ? disabledTitle : undefined}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-20 bg-page border border-neutral-700 rounded px-1.5 py-0.5 text-xs font-mono text-fg-strong text-right focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 disabled:opacity-50 disabled:cursor-not-allowed" />
       {suffix && <span className="text-[11px] text-fg-muted">{suffix}</span>}
     </span>
   );
@@ -135,6 +144,7 @@ export default function PriceTargetCalculator({
   target, years, currency, className = '',
   horizonYears, targetYear, price, basis: b,
   fcfStr, onFcf, defaultForecastFcfPs,
+  cagrStr, onCagr, onResetCagr, shownCagrPct, defaultCagrPct, cagrDisabled,
   yieldStr, onYield, defaultForecastYield, onReset, onResetFcf,
 }: {
   /** ⚠ COMPUTED BY THE PARENT, because the chart draws the price line out to the same target. One
@@ -158,6 +168,28 @@ export default function PriceTargetCalculator({
   fcfStr: string | null;
   onFcf: (v: string) => void;
   defaultForecastFcfPs: number | null;
+  /**
+   * The GROWTH RATE the forecast per-share figure is reached by — the same assumption as `fcfStr`,
+   * entered the way people actually hold it. `null` = not the live one, so the box shows
+   * `shownCagrPct` (the rate the current end value implies) and keeps tracking it.
+   *
+   * ⚠⚠ THE TWO ARE ONE ASSUMPTION AND ONLY ONE IS AUTHORITATIVE. The parent's setters clear each
+   * other, so typing in either box makes it the authority and hands the other its derived role —
+   * which is why this component never has to decide which of two live values to believe.
+   */
+  cagrStr: string | null;
+  onCagr: (v: string) => void;
+  /** ⚠ BACK TO `null`, NOT TO THE DEFAULT'S CURRENT VALUE — same rule as `onResetFcf`. Null is
+   *  what keeps the box TRACKING the rate the forecast implies as that figure moves. */
+  onResetCagr: () => void;
+  /** The rate the CURRENT forecast per-share figure implies, when the rate box is not the live
+   *  one. `null` while it is (the box then shows the user's own text, unrounded). */
+  shownCagrPct: number | null;
+  /** The fitted trend's own annual growth — what ↺ returns to. */
+  defaultCagrPct: number | null;
+  /** No positive base to compound from, so no rate exists — see `compoundFrom`. The box is
+   *  disabled and says why rather than accepting a number that can produce nothing. */
+  cagrDisabled?: boolean;
   yieldStr: string | null;
   onYield: (v: string) => void;
   defaultForecastYield: number | null;
@@ -173,7 +205,7 @@ export default function PriceTargetCalculator({
    */
   onResetFcf: () => void;
 }) {
-  const dirty = fcfStr != null || yieldStr != null;
+  const dirty = fcfStr != null || cagrStr != null || yieldStr != null;
   const show = (s: string | null, def: number | null, dp: number) =>
     (s != null ? s : def == null ? '' : def.toFixed(dp));
 
@@ -203,6 +235,37 @@ export default function PriceTargetCalculator({
           when="The most recent fiscal year, so up to a year old."
           how={b.caveat} />} />}>
         {ccy}{n2(target.currentPs)}
+      </Row>
+      {/* ⚠⚠ ABOVE THE FIGURE IT PRODUCES, BECAUSE THAT IS THE ORDER THE ASSUMPTION IS MADE IN.
+          "It compounds at 12%" comes first and "so it reaches 41.20" follows; printed the other
+          way round the rate reads as a statistic ABOUT the forecast rather than as the lever that
+          sets it, which is the whole reason this row exists. Both are editable and each derives
+          the other live — see `cagrStr` in `QuickValuationTab`. */}
+      <Row label={`Forecast ${b.perShare} CAGR`}
+        info={<InfoTip content={<AspectCard
+          what={`The annual rate you expect ${b.perShare} to compound at.`}
+          where={`Defaults to the fitted trend's OWN slope — the dotted projection on the chart is `
+            + 'a straight line on a log axis, which IS a constant growth rate, so the default '
+            + 'rate and the default forecast below are the same assumption stated two ways.'}
+          when={`Compounded over ${years} years from the trend's value at the last reported year.`}
+          how={'⚠ TYPE YOUR OWN AND EVERYTHING BELOW MOVES — the forecast figure, the forecast '
+            + 'price and the target on the chart. Editing the figure below instead makes THAT the '
+            + 'assumption and this box goes back to reporting the rate it implies. ⚠ It compounds '
+            + `the FUNDAMENTAL over the fiscal horizon (${years} years past the last reported `
+            + 'year); the CAGR at the foot of this panel is a different number — the PRICE return, '
+            + "annualised from today's close."} />} />}>
+        <Input value={cagrStr ?? (shownCagrPct == null ? '' : shownCagrPct.toFixed(1))}
+          onChange={onCagr} suffix="%" step={1}
+          disabled={cagrDisabled}
+          disabledTitle={`No growth rate exists here: ${b.perShare} is not positive at the start `
+            + 'of the window, and a negative figure does not compound to anything. Type a forecast '
+            + 'figure below instead.'}
+          onRevert={cagrStr == null ? undefined : onResetCagr}
+          revertTitle={defaultCagrPct == null
+            ? 'Clear your rate.'
+            : `Back to ${defaultCagrPct.toFixed(1)}% — the fitted trend's own annual growth. The `
+              + 'box then keeps tracking whatever rate the forecast below implies, which typing '
+              + 'the number in would not.'} />
       </Row>
       <Row label={`Forecast ${b.perShare}`}
         info={<InfoTip content={<AspectCard

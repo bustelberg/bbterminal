@@ -8053,6 +8053,17 @@
             ],
             "title": "Holdings As Of"
           },
+          "holdings_fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings Fetched At"
+          },
           "looked_through": {
             "default": [],
             "items": {
@@ -16294,7 +16305,7 @@
     },
     "/api/airs/portfolios/{portefeuille}/refresh": {
       "post": {
-        "description": "Re-scan ONE portfolio's AIRS reports \u2014 and the books it is BUILT FROM.\n\n\u26a0 A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another\nstrategy, and everything shown through one \u2014 the looked-through holdings, their returns, the\nattribution \u2014 is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads\nthe twelve lines it stores and leaves the instruments behind them as stale as they were.\nMeasured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.\n\n\u26a0 SO THIS IS NOT ALWAYS \"a few seconds\" ANY MORE \u2014 it is FIVE downloads per account in the\nchain (Rendement, Vermogensoverzicht, Mutaties, Transacties, Model). Each one's outcome comes back in `cascaded` rather than being folded into a single\nstatus, because a parent refreshed against a child that failed is not fresh. `cascade=false`\nrefreshes only the named account.\n\nSerialized against the full scan via the module lock; returns `{status: busy}` if a fleet\nrefresh is in flight.",
+        "description": "Re-scan ONE portfolio's AIRS reports \u2014 and the books it is BUILT FROM.\n\n\u26a0 A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another\nstrategy, and everything shown through one \u2014 the looked-through holdings, their returns, the\nattribution \u2014 is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads\nthe twelve lines it stores and leaves the instruments behind them as stale as they were.\nMeasured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.\n\n\u26a0 SO THIS IS NOT ALWAYS \"a few seconds\" ANY MORE \u2014 it is FIVE downloads per account in the\nchain (Rendement, Vermogensoverzicht, Mutaties, Transacties, Model). Each one's outcome comes back in `cascaded` rather than being folded into a single\nstatus, because a parent refreshed against a child that failed is not fresh. `cascade=false`\nrefreshes only the named account.\n\n\u26a0 AND IT REFRESHES BOTH HALVES OF THE PORTFOLIO \u2014 the AIRS book AND the model it is paired\nwith \u2014 through `refresh_portfolio_fully`, like every other refresh button. It used to run the\nbook alone, which is why the same portfolio could read differently depending on which page's\nRefresh you had last pressed. The book half is still what the response's top level describes\n(that is what this route's callers read); `model` carries the other half.\n\nSerialized against the full scan via the module lock; returns `{status: busy}` if a fleet\nrefresh is in flight.",
         "operationId": "airs_portfolio_refresh_api_airs_portfolios__portefeuille__refresh_post",
         "parameters": [
           {
@@ -18169,6 +18180,66 @@
           }
         },
         "summary": "Latest Close By Isin",
+        "tags": [
+          "asset-pipeline",
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/latest-close/isin/{isin}/refresh": {
+      "post": {
+        "description": "Go to Yahoo for this ISIN's missing bars, then answer exactly as the GET above does.\n\n\u26a0 THE GET READS WHAT WE STORE; THIS ONE MAKES WHAT WE STORE CURRENT FIRST. Two endpoints\nrather than a `?refresh=true` flag on one, because they are not the same kind of thing: the GET\nis a cheap read every card can fire on mount, and this spends an external request and writes.\nA flag on a GET is how the cheap one ends up being called with it set.\n\n\u26a0 IT RETURNS THE SAME SHAPE, THROUGH THE SAME FUNCTION. The caller re-reads its own panel from\nthe response, so a second formatter here is a second place for the currency conversion \u2014 the\none with the `GBp`-is-pence trap in it \u2014 to be got subtly differently.\n\n429 when Yahoo throttles: a rate limit is a \"try again\", not a fault in the instrument, and it\nmust not be reported to the reader as one.",
+        "operationId": "refresh_latest_close_by_isin_api_asset_pipeline_latest_close_isin__isin__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "currency",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Currency"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LatestCloseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Latest Close By Isin",
         "tags": [
           "asset-pipeline",
           "asset-pipeline"

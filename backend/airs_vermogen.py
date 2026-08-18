@@ -27,6 +27,31 @@ from deps import supabase
 _log = logging.getLogger(__name__)
 _LOCK = threading.Lock()
 
+
+def _acquire_session(wait: float | None = None) -> bool:
+    """Take the ONE authenticated AirSPMS session, refusing (`None`) or queueing (`wait` seconds).
+
+    ⚠⚠ THERE IS EXACTLY ONE SESSION AND IT CANNOT BE DRIVEN BY TWO THREADS. That is not a
+    throughput choice to be tuned away: `airs_scanner._session` is a single logged-in cookie jar,
+    and two threads issuing report downloads through it interleave into each other's responses.
+    Everything that scrapes AirSPMS passes through here.
+
+    ⚠ WHICH IS THE HONEST ANSWER TO "REFRESH ALL COULD JUST RUN THESE CONCURRENTLY". It can, and
+    it is worth doing — but only the parts that do not touch AIRS. A full portfolio refresh is one
+    AIRS leg (the reports, the composition) and four that talk to Yahoo, OpenFIGI, the ECB and our
+    own database; the second group is where the minutes are and it parallelises freely. So this
+    lock is deliberately held across the AIRS legs ONLY, and released before the rest, which is
+    what makes N concurrent `refresh_portfolio_fully` calls safe AND faster than N sequential ones
+    rather than merely safe.
+
+    `wait=None` refuses at once — the right answer for a button, which must respond. A number
+    queues for up to that long, for a caller that is already mid-job and would otherwise leave a
+    portfolio half-refreshed. `False` means it was not taken and the caller must NOT release it.
+    """
+    if wait is None:
+        return _LOCK.acquire(blocking=False)
+    return _LOCK.acquire(timeout=wait)
+
 # Latest in-process run status. The persistent "last successful refresh" is the
 # freshest snapshot date in airs_holding (surfaced by get_status()), so the
 # status survives a restart even though this dict doesn't.
@@ -1339,7 +1364,8 @@ def dependent_accounts(portefeuille: str) -> list[str]:
 
 def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
                           on_step: Callable[[int, int, str], None] | None = None,
-                          should_stop: Callable[[], bool] | None = None) -> dict:
+                          should_stop: Callable[[], bool] | None = None,
+                          wait: float | None = None) -> dict:
     """Re-scan ONE portfolio's Rendement (ATT) + Vermogensoverzicht (VOLK) and store both — the
     per-row "Refresh" on the overview table.
 
@@ -1379,8 +1405,16 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
     `stale_books` names the ones left un-refreshed, so a half-cascade can never be mistaken for a
     clean one. Same hook, same shape and same `cancelled_at` key as `run_airs_vermogen_refresh_sync`
     — one vocabulary for cancellation, not two.
+
+    ⚠ `wait` IS FOR CALLERS THAT ARE PART OF A LARGER REFRESH, and `None` (refuse immediately) stays
+    the default because a BUTTON must answer. A person who pressed Refresh and gets "another AIRS
+    refresh is running" has learned something true and can press again; the same person watching a
+    disabled button for the four minutes of a fleet scan has not. But `refresh_portfolio_fully` is
+    a different caller: it is one leg of a job that has already started, and refusing it there
+    abandons a portfolio half-refreshed — the exact split state the whole function exists to close.
+    So it waits. See `_acquire_session`.
     """
-    if not _LOCK.acquire(blocking=False):
+    if not _acquire_session(wait):
         return {"status": "busy", "message": "An AIRS refresh is already running", "portefeuille": portefeuille}
 
     # ⚠⚠ THE SAME RELAY THE FLEET RUN USES — `_say` moves the bar, `_emit` narrates at the position

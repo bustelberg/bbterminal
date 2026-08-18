@@ -75,6 +75,12 @@ _WATCHED = (
     "airs_holding", "airs_holding_isin_override", "airs_mutatie", "airs_model_weight",
     "airs_allocation_band", "airs_account_model_link", "airs_account_display_name",
     "airs_transactie_snapshot", "airs_performance",
+    # ⚠ ADDED WITH `holdings_fetched_at` (2026-08-18) — the modal now reads `reports_at` from here
+    # to say WHOSE lag a stale date is. A refresh writes this table, and a fingerprint blind to it
+    # would serve the pre-refresh "we last read it ..." beside post-refresh figures, which is the
+    # exact confusion the field exists to remove. It would have been covered by accident today
+    # (the same scan writes `airs_performance`), and an accident is not the rule this list states.
+    "airs_account_roster",
     "asset_price", "asset_execution", "asset_analysis", "asset_bucket_override",
     "asset_isin_alias",
     "fx_rate", "universe", "universe_membership", "universe_asset_membership", "country",

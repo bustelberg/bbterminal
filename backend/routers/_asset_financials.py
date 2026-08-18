@@ -1286,6 +1286,84 @@ async def latest_close_by_isin(isin: str, currency: str | None = None):
     return await asyncio.to_thread(_latest_close_for_isin, isin, currency)
 
 
+def _pull_latest_close(isin: str) -> dict:
+    """Ask Yahoo for the bars we are MISSING for one ISIN, store them, and say what moved.
+
+    ⚠⚠ THE GAP, NEVER THE SERIES. `store.extend_series` opens its window five days before our
+    newest stored close (`yahoo.chart_window(symbol, start, now, "1d")`), so a refresh of a
+    two-day-old price downloads a handful of bars. The obvious alternative — `store_series`, the
+    function the ingest uses — re-downloads and re-upserts DECADES of history to add eight days,
+    which is the difference between a button and a page that hangs.
+
+    ⚠ AND IT REFUSES WHEN WE HOLD NOTHING. With no stored bar there is no gap to compute, and the
+    only remaining path IS the full history download this exists to avoid. That is an ingest, not
+    a price refresh, and it belongs on the asset-pipeline page where it can report itself — so
+    this 404s and says so rather than quietly pulling twenty years because a button was pressed.
+
+    ⚠ A `None` FROM `extend_series` IS NOT A FAILURE HERE. It means the COPY path was unavailable
+    so the denormalized `asset_analysis` coverage stats could not be recomputed exactly — but the
+    bars are already upserted by then, which is the entire point of this call. The grid's stats lag
+    until the next full pass; the close is current, which is what was asked for.
+    """
+    from asset_pipeline import store  # noqa: PLC0415
+    from deps import supabase  # noqa: PLC0415
+
+    from routers._airs_portfolio_perf import _executions  # noqa: PLC0415
+
+    ex = (_executions([isin]) or {}).get(isin)
+    if not ex or not ex.get("analysis_id") or not ex.get("yahoo_symbol"):
+        raise HTTPException(404, f"No priced Yahoo listing for {isin} — nothing to refresh.")
+    aid, sym = ex["analysis_id"], ex["yahoo_symbol"]
+
+    got = (supabase.table("asset_price").select("target_date")
+           .eq("analysis_id", aid).not_.is_("close", "null")
+           .order("target_date", desc=True).limit(1).execute().data or [])
+    if not got:
+        raise HTTPException(
+            404,
+            f"No stored price bars for {isin} ({sym}) — this instrument has never been ingested, "
+            "and fetching its whole history is an ingest rather than a price refresh. Use the "
+            "asset-pipeline page.",
+        )
+    was = got[0]["target_date"]
+    store.extend_series(aid, sym, was)
+    after = (supabase.table("asset_price").select("target_date")
+             .eq("analysis_id", aid).not_.is_("close", "null")
+             .order("target_date", desc=True).limit(1).execute().data or [])
+    now = after[0]["target_date"] if after else was
+    return {"symbol": sym, "was": was, "now": now, "moved": now > was}
+
+
+@router.post("/api/asset-pipeline/latest-close/isin/{isin}/refresh",
+             response_model=LatestCloseResponse)
+async def refresh_latest_close_by_isin(isin: str, currency: str | None = None):
+    """Go to Yahoo for this ISIN's missing bars, then answer exactly as the GET above does.
+
+    ⚠ THE GET READS WHAT WE STORE; THIS ONE MAKES WHAT WE STORE CURRENT FIRST. Two endpoints
+    rather than a `?refresh=true` flag on one, because they are not the same kind of thing: the GET
+    is a cheap read every card can fire on mount, and this spends an external request and writes.
+    A flag on a GET is how the cheap one ends up being called with it set.
+
+    ⚠ IT RETURNS THE SAME SHAPE, THROUGH THE SAME FUNCTION. The caller re-reads its own panel from
+    the response, so a second formatter here is a second place for the currency conversion — the
+    one with the `GBp`-is-pence trap in it — to be got subtly differently.
+
+    429 when Yahoo throttles: a rate limit is a "try again", not a fault in the instrument, and it
+    must not be reported to the reader as one.
+    """
+    from asset_pipeline.yahoo import YahooThrottled  # noqa: PLC0415
+
+    try:
+        await asyncio.to_thread(_pull_latest_close, isin)
+    except HTTPException:
+        raise
+    except YahooThrottled as e:
+        raise HTTPException(429, f"Yahoo rate-limited — try again shortly. {e}") from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"price refresh failed: {type(e).__name__}: {e}") from e
+    return await asyncio.to_thread(_latest_close_for_isin, isin, currency)
+
+
 # PERFORMANCE — returns AND risk, across several trailing windows, off the SAME daily EUR price
 # everything else on /portfolios uses. Computed in EUR (what a euro owner actually bears, FX vol
 # included), on daily returns. Each window carries a CAGR + the R² of its LOG-LINEAR price fit (how

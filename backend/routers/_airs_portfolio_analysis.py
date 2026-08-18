@@ -486,6 +486,25 @@ def _axis_holdings(items: list[tuple[float, tuple[str, str, str]]],
     return out
 
 
+def _book_fetched_at(portefeuille: str | None) -> str | None:
+    """When WE last successfully scanned this book — the same `airs_account_roster.reports_at` the
+    /management-dashboard row reads, through the same loader.
+
+    ⚠ THE SAME FUNCTION THE ROW USES, NOT A SECOND READ OF THE SAME COLUMN. The row and this modal
+    disagreeing about whether a book is current is the whole defect this exists to close; two
+    loaders for one fact is how they would drift apart again. `_fetched_at` keys on the lower-cased
+    portefeuille and is memoised for the request by `read_cache`, so this costs nothing.
+
+    `None` for an unpaired portfolio (no book, therefore no scan of one) — and `Provenance` treats
+    that exactly as it treats an absent prop: it declines to name a side rather than guessing one.
+    """
+    if not portefeuille:
+        return None
+    from routers._airs_accounts import _fetched_at  # noqa: PLC0415  (circular at module level)
+
+    return _fetched_at().get(portefeuille.strip().lower())
+
+
 def _apply_book_source(result: dict, benchmark_label: str) -> None:
     """Swap the PRIMARY portfolio return for AIRS's own book number (`cumulatief_rendement`), and
     re-price the benchmark over the book's window — the calendar year, 1 Jan -> today.
@@ -2084,6 +2103,15 @@ def compute_portfolio_analysis(portfolio_id: int,
         # every `own_return_source == "airs"` row. Null in model mode, where the holdings table is
         # priced from yfinance and each row carries its own `own_return_as_of` instead.
         "holdings_as_of": (book or {}).get("book_as_of"),
+        # ⚠⚠ THE OTHER HALF OF THE FRESHNESS VERDICT, AND WITHOUT IT THIS MODAL CANNOT AGREE WITH
+        # THE ROW THAT OPENED IT. `holdings_as_of` is the day AIRS VALUED the book; this is the
+        # moment WE last read it — and `Provenance` needs BOTH to say whose lag it is. Given only
+        # the first, `lagOwner` returns null, the badge cannot rule out that the gap is ours, and
+        # it goes amber: measured on AITopSelectie, the row (which passes `fetched_at`) called the
+        # book current while the modal, from the SAME two dates, warned on every ⓘ inside it — and
+        # no refresh could clear it, because the fact that would have cleared it was never sent.
+        # Same bug the row was fixed for on 2026-08-17; the modal never got the second date.
+        "holdings_fetched_at": _book_fetched_at((book or {}).get("portefeuille")),
         # The risk profile this model is offered at, and the allocation policy that goes with it —
         # so the chart can draw the band each class is SUPPOSED to sit in, over the bar showing
         # where it actually sits. See `_variant_bands`.

@@ -329,6 +329,31 @@ export function cagrBetween(from: number | null, to: number | null, years: numbe
   return Number.isFinite(v) ? v : null;
 }
 
+/**
+ * `base` compounded at `cagrPct` for `years` — `cagrBetween` run backwards.
+ *
+ * ⚠⚠ THE EXACT INVERSE, AND IT HAS TO BE, because the calculator shows the growth rate and the
+ * end value as two editable views of ONE assumption. If the round trip lost anything, typing a
+ * rate would move the end value, which would move the rate back, and the field would fight the
+ * person using it. `compoundFrom(b, cagrBetween(b, v, y) * 100, y) === v` to floating point.
+ *
+ * ⚠ A NON-POSITIVE BASE HAS NO GROWTH RATE — refused, not clamped. FCF/share and EPS both go
+ * negative (whole cards on this tab exist because they do), and a company whose cash flow is
+ * −2.10 does not "grow at 12%" to anywhere: every rate maps to a more negative number, and −2.10
+ * compounding to −6.52 would render as a forecast rather than as the nonsense it is.
+ *
+ * ⚠ A RATE OF −100% OR WORSE IS REFUSED for the same reason: it lands on zero or flips the sign,
+ * and a per-share figure of exactly 0 divides into a price target of infinity.
+ */
+export function compoundFrom(
+  base: number | null, cagrPct: number | null, years: number,
+): number | null {
+  if (base == null || cagrPct == null || !(base > 0) || !(years > 0)) return null;
+  if (!(cagrPct > -100)) return null;
+  const v = base * Math.pow(1 + cagrPct / 100, years);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
 export type PriceTarget = {
   /** Per share, on whichever `Basis` is switched on — FCF or EPS. */
   currentPs: number | null;

@@ -1958,6 +1958,12 @@ export interface paths {
          *     status, because a parent refreshed against a child that failed is not fresh. `cascade=false`
          *     refreshes only the named account.
          *
+         *     ⚠ AND IT REFRESHES BOTH HALVES OF THE PORTFOLIO — the AIRS book AND the model it is paired
+         *     with — through `refresh_portfolio_fully`, like every other refresh button. It used to run the
+         *     book alone, which is why the same portfolio could read differently depending on which page's
+         *     Refresh you had last pressed. The book half is still what the response's top level describes
+         *     (that is what this route's callers read); `model` carries the other half.
+         *
          *     Serialized against the full scan via the module lock; returns `{status: busy}` if a fleet
          *     refresh is in flight.
          */
@@ -2844,6 +2850,38 @@ export interface paths {
         get: operations["latest_close_by_isin_api_asset_pipeline_latest_close_isin__isin__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/latest-close/isin/{isin}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Latest Close By Isin
+         * @description Go to Yahoo for this ISIN's missing bars, then answer exactly as the GET above does.
+         *
+         *     ⚠ THE GET READS WHAT WE STORE; THIS ONE MAKES WHAT WE STORE CURRENT FIRST. Two endpoints
+         *     rather than a `?refresh=true` flag on one, because they are not the same kind of thing: the GET
+         *     is a cheap read every card can fire on mount, and this spends an external request and writes.
+         *     A flag on a GET is how the cheap one ends up being called with it set.
+         *
+         *     ⚠ IT RETURNS THE SAME SHAPE, THROUGH THE SAME FUNCTION. The caller re-reads its own panel from
+         *     the response, so a second formatter here is a second place for the currency conversion — the
+         *     one with the `GBp`-is-pence trap in it — to be got subtly differently.
+         *
+         *     429 when Yahoo throttles: a rate limit is a "try again", not a fault in the instrument, and it
+         *     must not be reported to the reader as one.
+         */
+        post: operations["refresh_latest_close_by_isin_api_asset_pipeline_latest_close_isin__isin__refresh_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10936,6 +10974,8 @@ export interface components {
             holdings?: number;
             /** Holdings As Of */
             holdings_as_of?: string | null;
+            /** Holdings Fetched At */
+            holdings_fetched_at?: string | null;
             /**
              * Looked Through
              * @default []
@@ -15932,6 +15972,39 @@ export interface operations {
         };
     };
     latest_close_by_isin_api_asset_pipeline_latest_close_isin__isin__get: {
+        parameters: {
+            query?: {
+                currency?: string | null;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LatestCloseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_latest_close_by_isin_api_asset_pipeline_latest_close_isin__isin__refresh_post: {
         parameters: {
             query?: {
                 currency?: string | null;
