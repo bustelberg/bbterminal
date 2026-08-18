@@ -62,7 +62,7 @@ def _emit_holdings(rows: list[dict], emit) -> None:
             f"{(f'{float(w):.4g}%' if w is not None else '—'):>9}"))
 
 
-def _composition(portfolio_id: int, emit) -> dict:
+def _composition(portfolio_id: int, emit, wait: float | None = None) -> dict:
     """Step 1 — the composition, live from AirSPMS, written to our DB as it lands.
 
     This is the ONLY input AIRS owns. It is also the one most likely to differ between two
@@ -70,7 +70,23 @@ def _composition(portfolio_id: int, emit) -> dict:
     the composition's effective date, so it decides where the YTD window opens
     (`max(1 Jan, inception)`). Two deployments holding compositions dated differently are not
     computing the same window, and their numbers were never comparable.
+
+    ⚠⚠ AND IT IS THE ONLY STEP THAT TOUCHES THE SHARED AirSPMS SESSION, SO IT TAKES THE LOCK —
+    steps 2-5 (Yahoo, OpenFIGI, the ECB, our own database) deliberately run outside it. That split
+    is what lets several `refresh_portfolio_fully` calls run at once: the AIRS legs queue on one
+    session, everything expensive overlaps.
+
+    ⚠ THIS CLOSES A GAP THAT WAS DOCUMENTED AS KNOWN AND LEFT OPEN (`routers/airs.py`: "the
+    scheduler's own model-scan ticks do not take it, and neither does the SSE endpoint above, so
+    those two can still overlap this"). It was survivable while exactly one human pressed one
+    button; a fan-out over this function would have made two threads drive one cookie jar, whose
+    failure mode is not an error but two interleaved report downloads.
+
+    `wait=None` keeps the old behaviour for the standalone SSE button — refuse rather than hang —
+    and the step reports the refusal instead of quietly returning a stale composition.
     """
+    from airs_vermogen import _LOCK, _acquire_session  # noqa: PLC0415
+
     from routers.airs import _live_positions  # noqa: PLC0415
 
     emit("phase", phase="composition", message="1/5 Composition — reading AirSPMS…")
@@ -83,7 +99,20 @@ def _composition(portfolio_id: int, emit) -> dict:
         f"{prev.get('positions_datum') or 'none'}, scanned "
         f"{str(prev.get('positions_scanned_at') or 'never')[:19]}"))
 
-    raw = _live_positions(portfolio_id, None)
+    # ⚠ THE LOCK SPANS THE AIRS READ AND NOTHING ELSE — the DB write inside `_live_positions` is
+    # part of that read (it persists what came back, so a live read cannot leave the stored copy
+    # disagreeing with it) and belongs inside; the parsing below does not.
+    if not _acquire_session(wait):
+        # ⚠ REPORTED, NOT SWALLOWED. Returning the stored composition here would be the worst
+        # outcome available: the step's own line would say "read AirSPMS" over a date nobody
+        # re-read, and steps 2-5 would then rebuild a YTD on it and call the result a refresh.
+        emit("progress", message="  ⚠ AIRS session busy — the composition was NOT re-read")
+        raise RuntimeError(
+            "the AirSPMS session is held by another scan; the composition was not re-read")
+    try:
+        raw = _live_positions(portfolio_id, None)
+    finally:
+        _LOCK.release()
     rows = raw.get("rows") or []
     # AIRS's own column names — `_live_positions` hands back the sheet, not our shape.
     norm = [{"isin": (str(r["ISINCode"]).strip() if r.get("ISINCode") else None),
@@ -334,17 +363,26 @@ def _recompute(portfolio_id: int, emit) -> dict:
     return t
 
 
-def refresh_portfolio(portfolio_id: int, emit) -> dict:
+def refresh_portfolio(portfolio_id: int, emit, wait: float | None = None) -> dict:
     """All five inputs, re-acquired in dependency order, then the number rebuilt.
 
     Order matters and is not cosmetic: the composition decides which ISINs and which window, the
     instruments decide which currencies, the currencies decide what FX must cover, and only then
     can the prices be fetched and converted. Running FX before the composition would sync the
     currencies of the composition we USED to hold.
+
+    ⚠⚠ THIS IS THE MODEL HALF OF A PORTFOLIO, NOT A PORTFOLIO. The other half is the AIRS BOOK
+    (`airs_vermogen.refresh_one_portfolio`) and for months WHICH HALF A PRESS REFRESHED DEPENDED
+    ON WHICH PAGE THE BUTTON WAS ON — /portfolios refreshed the model, /management-dashboard the
+    book, and the Analyse modal inherited whichever one opened it. `refresh_portfolio_fully` is
+    the single entry point that does both, and it is what every button now calls; nothing new
+    should reach this directly.
+
+    `wait` is passed to step 1 only — steps 2-5 take no lock. See `_composition`.
     """
     started = time.time()
     emit("progress", message=f"[portfolio {portfolio_id}] refresh started")
-    comp = _composition(portfolio_id, emit)
+    comp = _composition(portfolio_id, emit, wait)
     rows = comp["rows"]
     isins = sorted({r["isin"] for r in rows if r.get("isin")})
     if not isins:

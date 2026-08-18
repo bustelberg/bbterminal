@@ -127,6 +127,28 @@ describe('a subtree can supply the fetch time once, for all of its icons', () =>
     );
     expect(html).toContain(INFO_ICON_WARN);
   });
+
+  it('⚠ A NESTED PROVIDER RESETS IT — a different source object does NOT inherit', () => {
+    /**
+     * ⚠⚠ `PortfolioAnalysisModal` DEPENDS ON THIS. It wraps its whole subtree in the book's fetch
+     * time so every badge describing that book agrees with the row that opened it — but the
+     * Fundamental and Holding-timing modals render INSIDE that box (for event-propagation
+     * reasons, a layout fact and not a claim about their data) and describe a COMPANY, not the
+     * book. Inheriting the book's "we read it at ..." would de-amber a fundamental that really is
+     * ours to refresh, which is the hazard `ProvenanceFetchedAt`'s own note warns about: one
+     * object's fetch time silencing another object's staleness.
+     *
+     * `at={undefined}` is the reset, and it must behave exactly like no provider at all.
+     */
+    const html = renderToStaticMarkup(
+      <ProvenanceFetchedAt at={`${today}T13:15:00Z`}>
+        <ProvenanceFetchedAt at={undefined}>
+          <Provenance source="airs_volk" asOf={LONG_AGO} kind="formula" note="a value" />
+        </ProvenanceFetchedAt>
+      </ProvenanceFetchedAt>,
+    );
+    expect(html).toContain(INFO_ICON_WARN);
+  });
 });
 
 // NOT ASSERTED HERE: the card's When line ("per value — each cell carries its own date"). The

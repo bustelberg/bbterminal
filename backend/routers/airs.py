@@ -519,7 +519,7 @@ async def _portfolio_refresh_stream(portfolio_id: int):
     """The five refresh steps, one SSE line each — a worker thread pushes, the async side drains.
     Same shape as the model-portfolio scan, and for the same reason: an AIRS scrape plus a paced
     Yahoo call per holding is tens of seconds, which is not a request."""
-    from routers._airs_portfolio_refresh import refresh_portfolio  # noqa: PLC0415
+    from routers._airs_full_refresh import refresh_portfolio_fully  # noqa: PLC0415
 
     q: thread_queue.Queue = thread_queue.Queue()
 
@@ -528,7 +528,14 @@ async def _portfolio_refresh_stream(portfolio_id: int):
 
     def run():
         try:
-            emit("done", summary=refresh_portfolio(portfolio_id, emit))
+            # ⚠ BOTH HALVES, THROUGH THE ONE FUNCTION. This stream used to run the model half only
+            # (composition -> instruments -> FX -> prices -> recompute) while /management-dashboard's
+            # button ran the book half only, so "Refresh" meant different work on the two pages and
+            # the Analyse modal inherited whichever one opened it.
+            # ⚠ THE LINES ARE THE SAME LINES. `refresh_portfolio_fully` relays each half's own
+            # narration, so the five model phases still arrive one SSE frame each and the book's
+            # per-report lines join them — nothing here had to learn a second vocabulary.
+            emit("done", summary=refresh_portfolio_fully(None, portfolio_id, on_event=emit))
         except Exception as e:  # noqa: BLE001 — surface it, don't 500 a stream mid-flight
             q.put(sse_message("error", f"{type(e).__name__}: {e}"))
         finally:
@@ -1265,6 +1272,12 @@ class ModelPortfolioAnalysis(BaseModel):
     # `own_return_source == "airs"` row. Null in model mode, where each row carries its own
     # `own_return_as_of` instead.
     holdings_as_of: str | None = None
+    # ⚠⚠ WHEN *WE* LAST READ THAT BOOK — the second date, and the one that decides whether an old
+    # `holdings_as_of` is AIRS's lag or ours. The modal wraps its whole subtree in
+    # `ProvenanceFetchedAt` with it, so its ⓘ badges reach the same verdict as the row that opened
+    # it. Without it every badge in here went amber on a book the row called current, and no
+    # refresh could clear the warning because the fact that clears it was not in the payload.
+    holdings_fetched_at: str | None = None
     # ⚠ WHICH BOOK IS "THIS" BOOK. Needed the moment a holding's Return could come from ANOTHER
     # account: a leg held only inside a certificate is valued by the book behind that certificate,
     # which reports its own `own_return_book`. Without this to compare against, either every AIRS
@@ -2327,11 +2340,22 @@ async def airs_portfolio_refresh(portefeuille: str, cascade: bool = True):
     status, because a parent refreshed against a child that failed is not fresh. `cascade=false`
     refreshes only the named account.
 
+    ⚠ AND IT REFRESHES BOTH HALVES OF THE PORTFOLIO — the AIRS book AND the model it is paired
+    with — through `refresh_portfolio_fully`, like every other refresh button. It used to run the
+    book alone, which is why the same portfolio could read differently depending on which page's
+    Refresh you had last pressed. The book half is still what the response's top level describes
+    (that is what this route's callers read); `model` carries the other half.
+
     Serialized against the full scan via the module lock; returns `{status: busy}` if a fleet
     refresh is in flight."""
-    from airs_vermogen import refresh_one_portfolio  # noqa: PLC0415
+    from routers._airs_full_refresh import refresh_portfolio_fully  # noqa: PLC0415
 
-    return await asyncio.to_thread(refresh_one_portfolio, portefeuille, cascade)
+    full = await asyncio.to_thread(refresh_portfolio_fully, portefeuille, None, cascade=cascade)
+    # ⚠ THE BOOK HALF STAYS AT THE TOP LEVEL — this is a documented response shape that scripts and
+    # `AirsPortfolioUpload` read by key. Nesting it under `book` to make room for the model would
+    # be a silent breaking change to callers we do not control; the model rides alongside instead.
+    return {**(full.get("book") or {}), "model": full.get("model"),
+            "model_status": full.get("model_status"), "full_status": full.get("status")}
 
 
 @router.post("/api/airs/portfolios/{portefeuille}/refresh/job")
@@ -2365,16 +2389,24 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
     """
     import jobs as job_registry  # noqa: PLC0415
 
-    from airs_vermogen import refresh_one_portfolio  # noqa: PLC0415
+    from routers._airs_full_refresh import refresh_portfolio_fully  # noqa: PLC0415
 
     def _work(ctx) -> str:
-        res = refresh_one_portfolio(
-            portefeuille, cascade,
+        full = refresh_portfolio_fully(
+            portefeuille=portefeuille, cascade=cascade,
             on_step=lambda done, total, msg: ctx.progress(done, total, msg),
             # ⚠ THE FLAG, NOT `ctx.check()`. The scan has to reach its own `finally` to release
             # `_LOCK`; unwinding it with an exception from the inside would leave the AirSPMS
             # session locked against every later refresh. Same reason the fleet job gives.
             should_stop=lambda: ctx.cancelled)
+        # ⚠ THE BOOK HALF STILL DRIVES THIS SUMMARY, because that is what this endpoint's caller
+        # asked about and every branch below reads its keys. The MODEL half is reported as one
+        # extra clause rather than folded in — a reader who pressed "Refresh" on an account row
+        # should see that its model was rebuilt too, not have the two averaged into one word.
+        res = full.get("book") or {}
+        model_note = ("" if full.get("model_status") == "absent"
+                      else " · model portfolio rebuilt" if full.get("model_status") == "ok"
+                      else f" · ⚠ model portfolio NOT rebuilt ({full.get('model_status')})")
         if res.get("cancelled_at"):
             stale = res.get("stale_books") or []
             raise job_registry.JobCancelled(
@@ -2396,6 +2428,7 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
         return (f"{portefeuille} — {res.get('holdings_rows', 0)} holdings as of "
                 f"{res.get('as_of') or 'today'}"
                 + (f" · also refreshed {len(also)} book(s) it is built from" if also else '')
+                + model_note
                 + (f" — {len(bad)} FAILED, see the console" if bad else ''))
 
     job, reused = job_registry.start("airs.portfolio.refresh", portefeuille, _work)

@@ -1,7 +1,38 @@
 # Open follow-ups — resume here
 
 Running list of unfinished / offered-but-not-built work, newest context first.
-Last updated **2026-08-11**. Delete items as they're done.
+Last updated **2026-08-18**. Delete items as they're done.
+
+---
+
+## 🔁 "Refresh all from AIRS" is the LAST button not going through `refresh_portfolio_fully` (2026-08-18)
+
+**Done that day**: a portfolio is a PAIR (Fixed model + Dynamic book) and each refresh button used
+to refresh ONE half — /management-dashboard's row the book, /portfolios' row the model, the Analyse
+modal whichever panel opened it. `routers/_airs_full_refresh.py::refresh_portfolio_fully` now does
+both from either handle, and **both per-portfolio endpoints call it**
+(`POST /api/airs/portfolios/{portefeuille}/refresh[/job]`, `GET /api/airs/model-portfolios/{id}/refresh`).
+`refresh_many` is the tested concurrent fan-out over it — a thread pool and nothing else.
+
+**Not done**: `airs_vermogen.run_airs_vermogen_refresh_sync` (the "Refresh all" button + the
+scheduler tick) still calls `scan_one` directly, so a fleet pass refreshes **books only** — 64 of
+102 model compositions and every model's prices/FX are untouched by it.
+
+**⚠ THE BLOCKER IS ITS LOCK DISCIPLINE, NOT THE CALL SITE.** The fleet takes `_LOCK` **once for the
+whole run**; `refresh_portfolio_fully` takes it **per AIRS leg** (which is what lets the Yahoo/FX/
+price legs overlap). Calling the new function from inside the fleet's hold self-deadlocks on a
+non-reentrant lock. Converting it means the fleet stops holding the session globally, and that
+lands on three documented invariants at once:
+
+* **`_STATUS` / `_PROGRESS` are single-writer globals** (`_PROGRESS` is explicitly "one run at a
+  time, guarded by `_LOCK`"). A pool needs them thread-safe.
+* **"the counter runs over the ROSTER, not the worklist"** — a long, deliberate design (it reads
+  n/44 and names each skip) that assumes sequential progress. Under a fan-out it needs re-thinking,
+  not just re-wiring.
+* **Run duration changes shape.** Adding the model half for the ~28 paired accounts means
+  composition + OpenFIGI + FX backfill + a price fetch per holding, ×28. Concurrency wins some of
+  that back; it is still a different job from today's book-only sweep. **Decide whether "Refresh
+  all" should do this at all, or stay the fast book sweep with a separate "rebuild every model".**
 
 ---
 

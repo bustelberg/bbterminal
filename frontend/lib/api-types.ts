@@ -1958,6 +1958,12 @@ export interface paths {
          *     status, because a parent refreshed against a child that failed is not fresh. `cascade=false`
          *     refreshes only the named account.
          *
+         *     ⚠ AND IT REFRESHES BOTH HALVES OF THE PORTFOLIO — the AIRS book AND the model it is paired
+         *     with — through `refresh_portfolio_fully`, like every other refresh button. It used to run the
+         *     book alone, which is why the same portfolio could read differently depending on which page's
+         *     Refresh you had last pressed. The book half is still what the response's top level describes
+         *     (that is what this route's callers read); `model` carries the other half.
+         *
          *     Serialized against the full scan via the module lock; returns `{status: busy}` if a fleet
          *     refresh is in flight.
          */
@@ -10936,6 +10942,8 @@ export interface components {
             holdings?: number;
             /** Holdings As Of */
             holdings_as_of?: string | null;
+            /** Holdings Fetched At */
+            holdings_fetched_at?: string | null;
             /**
              * Looked Through
              * @default []

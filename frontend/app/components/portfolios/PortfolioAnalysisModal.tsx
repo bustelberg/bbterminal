@@ -7,7 +7,7 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { formatPct, visibleBuckets } from './composition';
 import { allocColor, bucketLabel, CASH_BUCKET, EQUITY_BUCKET } from './allocationColors';
 import { classWeightedReturn } from './classReturn';
-import { Provenance } from '../../../lib/provenance';
+import { Provenance, ProvenanceFetchedAt } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import { RefreshIcon } from './RefreshIcon';
@@ -18,7 +18,8 @@ import OwnerEarningsModal from './OwnerEarningsModal';
 import { type Basket } from './types';
 
 /**
- * A model portfolio's composition — sector / region / currency — beside the SP500 benchmark's.
+ * A model portfolio's composition — sector / region / currency — beside a benchmark index's
+ * (ACWI by default, switchable to SP500 / AEX in the header — see `DEFAULT_BENCHMARK`).
  *
  * TWO SERIES, TWO HUES, VALIDATED. The obvious pair (accent blue + `compare` violet, the app's
  * standard A/B) FAILS colourblind separation: ΔE 4.9 under deuteranopia, i.e. one colour to a
@@ -2278,7 +2279,20 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
  *  AEX is the one that CAPS: 25 names, and uncapped ASML is 37.5% of it (the real index caps a
  *  constituent at 15% at each review, for exactly that reason). The cap is applied server-side in
  *  `_benchmark_index.INDEX_CAP_PCT` — not here, and not per-caller. */
-const BENCHMARKS = ['SP500', 'ACWI', 'AEX'] as const;
+const BENCHMARKS = ['ACWI', 'SP500', 'AEX'] as const;
+
+/** The one the modal opens on.
+ *
+ *  ⚠ ACWI, NOT SP500. These are GLOBAL, multi-currency books — the AIRS models hold European,
+ *  US and Asian names — so an all-country index is the benchmark they are actually managed
+ *  against; SP500 measured a global book against one country's large caps and charged the
+ *  difference to the manager as alpha. It stays in the list because it is the reference everyone
+ *  knows, but it is no longer the one you get without asking.
+ *
+ *  ⚠ ACWI's coverage is the lower of the two (see `benchmark_coverage_pct` below) — the modal
+ *  says so on screen whenever it drops under 97%, which is why defaulting to it is safe: the
+ *  reader is told what fraction of the index we could price rather than left to assume 100%. */
+const DEFAULT_BENCHMARK: string = BENCHMARKS[0];
 
 /**
  * The one class every control in this modal's header wears — Refresh, the benchmark select and
@@ -2383,7 +2397,7 @@ export default function PortfolioAnalysisModal({
   // (no AIRS book) and no id-based drill-downs (attribution / bucket detail are portfolio-only).
   const isBasket = !!basket;
   const reqKey = isBasket ? basket!.holdings.map((h) => `${h.isin}:${h.weight}`).join(',') : `id:${id}`;
-  const [benchmark, setBenchmark] = useState<string>('SP500');
+  const [benchmark, setBenchmark] = useState<string>(DEFAULT_BENCHMARK);
   // Where the PORTFOLIO numbers come from — FIXED, no toggle. A model portfolio uses the paired
   // AIRS book (its ACTUAL holdings, EUR weights and returns); a basket has no book, so it uses the
   // yfinance reconstruction. AIRS is the primary source, yfinance the fallback where we can price.
@@ -2500,6 +2514,18 @@ export default function PortfolioAnalysisModal({
   const inert = stopping || (refreshing && !canStop);
 
   return (
+    /* ⚠⚠ THE BOOK'S FETCH TIME, FOR EVERY ⓘ IN HERE — this is what makes the modal and the row
+       that opened it reach the SAME freshness verdict. `Provenance` needs two dates to say whose
+       lag a stale one is: `asOf` (when AIRS valued the book) and this (when we last read it).
+       Given only the first it cannot rule out that the gap is ours, so it warns — and measured on
+       AITopSelectie the row called the book current while this modal warned on every badge inside
+       it, from the same two facts, one of which was simply never sent. It is a provider and not a
+       prop for the reason `ProvenanceFetchedAt` states: this subtree has dozens of badges, all
+       describing ONE book, and a forgotten one is an icon that stays amber alone — which reads as
+       "this particular number is stale" and is the most misleading outcome available.
+       ⚠ Deliberately NOT re-indenting the subtree below: a wrapper is one line, and re-flowing
+       ~230 lines of dense JSX would bury it in a diff nobody can read. */
+    <ProvenanceFetchedAt at={data?.holdings_fetched_at}>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/60"
       onClick={onClose} role="dialog" aria-modal="true">
       {/* Fixed at 80% of the viewport width AND height; the charts span the full width and the
@@ -2638,7 +2664,12 @@ export default function PortfolioAnalysisModal({
                     )}
                   </div>
                 )
-                : <Scorecard returns={data.returns} benchmark={data.benchmark ?? 'SP500'} />}
+                /* ⚠ THE FALLBACK IS THE SELECTED BENCHMARK, NOT A LITERAL. `data` is fetched for
+                   the current `benchmark` (it is in `viewKey`, and the picker clears `data`), so
+                   if the server ever omits the echo the label still names what was asked for. A
+                   hardcoded 'SP500' here would print one index's name over another's numbers —
+                   invisible, and it survived the default changing to ACWI at exactly four sites. */
+                : <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark} />}
             </div>
             {/* ⚠ How much of the INDEX we could price — shown whenever a benchmark number is on
                 screen (the whole-portfolio scorecard, or the Stocks charts). ACWI's missing names
@@ -2702,7 +2733,7 @@ export default function PortfolioAnalysisModal({
                   {(data.axes ?? []).map((a) => (
                     <Chart key={a.axis} axis={a.axis} rows={a.rows}
                       unpricedPct={a.unpriced_pct} excluded={a.excluded} stale={stale}
-                      benchmark={data.benchmark ?? 'SP500'}
+                      benchmark={data.benchmark ?? benchmark}
                       onBucket={(axis, b) => { if (isBasket) return; setWhy(null); setBucket(
                         (prev) => prev && prev.axis === axis && prev.bucket === b ? null : { axis, bucket: b }); }}
                       selected={bucket?.axis === a.axis ? bucket.bucket : null} />
@@ -2711,12 +2742,12 @@ export default function PortfolioAnalysisModal({
                 {(why || bucket) && (
                   <div className="mt-4">
                     {why ? (
-                      <AttributionPanel id={id ?? 0} benchmark={data.benchmark ?? 'SP500'} window={why}
+                      <AttributionPanel id={id ?? 0} benchmark={data.benchmark ?? benchmark} window={why}
                         source={source} portfolioAsOf={data.returns?.portfolio_as_of}
                         benchmarkAsOf={data.returns?.benchmark_as_of}
                         onClose={() => setWhy(null)} />
                     ) : bucket ? (
-                      <BucketDetailPanel id={id ?? 0} benchmark={data.benchmark ?? 'SP500'}
+                      <BucketDetailPanel id={id ?? 0} benchmark={data.benchmark ?? benchmark}
                         axis={bucket.axis} bucket={bucket.bucket} source={source}
                         onClose={() => setBucket(null)} />
                     ) : null}
@@ -2734,6 +2765,14 @@ export default function PortfolioAnalysisModal({
             backdrop is `fixed inset-0`, which escapes this box's layout but not its event tree. */}
         {/* ⚠ ABOVE this modal (z-[60] vs z-50) and stopping propagation, or a click inside it
           closes the analysis behind it. */}
+      {/* ⚠⚠ AND THE BOOK'S FETCH TIME STOPS HERE. These two are about a DIFFERENT source object —
+          one holding's trades, one company's fundamentals — and each carries its own dates. Left
+          inside the provider above they would inherit this book's "we read it at ...", which is
+          precisely the hazard `ProvenanceFetchedAt` warns about: handing one object's fetch time
+          to another's numbers quietly de-ambers a staleness that really is ours to fix. They sit
+          in this box only so their dismissal does not bubble up and close the modal behind them;
+          that is a layout reason, not a claim about where their data came from. */}
+      <ProvenanceFetchedAt at={undefined}>
       {timingFor && id && (
         <HoldingTimingModal portfolioId={id} name={timingFor} onClose={() => setTimingFor(null)} />
       )}
@@ -2755,7 +2794,9 @@ export default function PortfolioAnalysisModal({
                 : undefined}
             onClose={() => setFund(null)} />
         )}
+      </ProvenanceFetchedAt>
       </div>
     </div>
+    </ProvenanceFetchedAt>
   );
 }

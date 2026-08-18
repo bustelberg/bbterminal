@@ -8053,6 +8053,17 @@
             ],
             "title": "Holdings As Of"
           },
+          "holdings_fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings Fetched At"
+          },
           "looked_through": {
             "default": [],
             "items": {
@@ -16294,7 +16305,7 @@
     },
     "/api/airs/portfolios/{portefeuille}/refresh": {
       "post": {
-        "description": "Re-scan ONE portfolio's AIRS reports \u2014 and the books it is BUILT FROM.\n\n\u26a0 A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another\nstrategy, and everything shown through one \u2014 the looked-through holdings, their returns, the\nattribution \u2014 is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads\nthe twelve lines it stores and leaves the instruments behind them as stale as they were.\nMeasured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.\n\n\u26a0 SO THIS IS NOT ALWAYS \"a few seconds\" ANY MORE \u2014 it is FIVE downloads per account in the\nchain (Rendement, Vermogensoverzicht, Mutaties, Transacties, Model). Each one's outcome comes back in `cascaded` rather than being folded into a single\nstatus, because a parent refreshed against a child that failed is not fresh. `cascade=false`\nrefreshes only the named account.\n\nSerialized against the full scan via the module lock; returns `{status: busy}` if a fleet\nrefresh is in flight.",
+        "description": "Re-scan ONE portfolio's AIRS reports \u2014 and the books it is BUILT FROM.\n\n\u26a0 A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another\nstrategy, and everything shown through one \u2014 the looked-through holdings, their returns, the\nattribution \u2014 is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads\nthe twelve lines it stores and leaves the instruments behind them as stale as they were.\nMeasured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.\n\n\u26a0 SO THIS IS NOT ALWAYS \"a few seconds\" ANY MORE \u2014 it is FIVE downloads per account in the\nchain (Rendement, Vermogensoverzicht, Mutaties, Transacties, Model). Each one's outcome comes back in `cascaded` rather than being folded into a single\nstatus, because a parent refreshed against a child that failed is not fresh. `cascade=false`\nrefreshes only the named account.\n\n\u26a0 AND IT REFRESHES BOTH HALVES OF THE PORTFOLIO \u2014 the AIRS book AND the model it is paired\nwith \u2014 through `refresh_portfolio_fully`, like every other refresh button. It used to run the\nbook alone, which is why the same portfolio could read differently depending on which page's\nRefresh you had last pressed. The book half is still what the response's top level describes\n(that is what this route's callers read); `model` carries the other half.\n\nSerialized against the full scan via the module lock; returns `{status: busy}` if a fleet\nrefresh is in flight.",
         "operationId": "airs_portfolio_refresh_api_airs_portfolios__portefeuille__refresh_post",
         "parameters": [
           {
