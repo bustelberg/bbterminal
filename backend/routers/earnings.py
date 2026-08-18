@@ -193,6 +193,18 @@ _DASHBOARD_METRIC_CODES = [
     "annuals__Ratios__Net Margin %",
     # Financials — Cashflow / Income
     "annuals__Cashflow Statement__Free Cash Flow",
+    # ⚠⚠ THE THREE LINES THE REVERSE DCF NORMALISES FCF WITH — added 2026-08-18, and their absence
+    # is worth recording because NOTHING SAID THEY WERE MISSING. The rows are in `metric_data` for
+    # every company (ASML: SBC 202.3, capex -1631.2, D&A 1025.9); this list is an ALLOWLIST, so
+    # codes not on it are simply never sent. `latestObs` then found nothing, `normalisedFcf`
+    # correctly reported the correction as not-applicable, and the panel rendered an honest "—"
+    # for a company that files all three. Every layer behaved; the data stopped at the door.
+    #
+    # ⚠ THE CASH-FLOW DEPRECIATION LINE, NOT THE INCOME STATEMENT'S. Capex is a cash figure, so its
+    # maintenance proxy has to be one too — see `DEP_CODES` in `egmInputs.ts`.
+    "annuals__Cashflow Statement__Stock Based Compensation",
+    "annuals__Cashflow Statement__Capital Expenditure",
+    "annuals__Cashflow Statement__Cash Flow Depreciation, Depletion and Amortization",
     "annuals__Income Statement__Revenue",
     "annuals__Income Statement__Operating Income",
     "annuals__Income Statement__Interest Expense",
