@@ -11632,6 +11632,22 @@ export interface components {
             benchmark_as_of?: string | null;
             /** Benchmark Since Pct */
             benchmark_since_pct?: number | null;
+            /** Benchmark Source */
+            benchmark_source?: string | null;
+            /** Benchmark Ticker */
+            benchmark_ticker?: string | null;
+            /** Benchmark Ytd As Of */
+            benchmark_ytd_as_of?: string | null;
+            /** Benchmark Ytd Close Fx */
+            benchmark_ytd_close_fx?: number | null;
+            /** Benchmark Ytd Close Price */
+            benchmark_ytd_close_price?: number | null;
+            /** Benchmark Ytd From */
+            benchmark_ytd_from?: string | null;
+            /** Benchmark Ytd Open Fx */
+            benchmark_ytd_open_fx?: number | null;
+            /** Benchmark Ytd Open Price */
+            benchmark_ytd_open_price?: number | null;
             /** Benchmark Ytd Pct */
             benchmark_ytd_pct?: number | null;
             /** Book As Of */

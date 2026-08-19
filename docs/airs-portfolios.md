@@ -117,6 +117,125 @@ was ordered by nothing.
 
 ---
 
+## The benchmark tile: the index ETF, not our rebuild (2026-08-19)
+
+`Return (YTD) € − vs ACWI return € = Excess` in the Analyse modal. The middle figure used to be
+`_asset_benchmark.compute_index` — a cap-weighted index rebuilt from 1,514 constituents. It is now
+the iShares MSCI ACWI ETF's own closing price series, from GuruFocus, converted to EUR.
+
+### Why the rebuild was wrong, measured
+
+| | |
+|---|---|
+| our reconstruction | **+11.83%** EUR |
+| ACWI ETF, price return | +13.14% USD → **+14.67%** EUR |
+| ACWI ETF, total return | +13.85% USD → +15.39% EUR |
+
+The 2.8pp is structural, not noise, and none of it is fixable by arithmetic:
+
+* **Full market cap, not free float.** MSCI float-adjusts; we weighted on `market_cap_eur`, the
+  whole company. Saudi Aramco was **1.50%** of our index against a published **0.044%** — 34x,
+  because only a sliver of Aramco floats. Saudi Arabia read 2.07% against a published 0.333%.
+  NVIDIA was 3.76% against 4.95%, Tesla 2.00% against 1.14%. Re-weighting our own priced rows with
+  the published iShares weights, on identical prices and window, moved the total from 13.13% to
+  20.24% over the 84% that matched by name — indicative rather than exact (the bundled file is
+  dated 15-Apr, so it embeds a quarter of drift), but it says the weighting dominates.
+* **Coverage.** 1,678 priced of a 1,998-member universe, against ~2,270 lines in the real index. A
+  cap-weighted rebuild does not lose the missing weight, it redistributes it.
+* **No common as-of date and no staleness guard.** Every constituent ran to its OWN last close and
+  `as_of` reported the maximum — on the local dataset, 58.5% of the weight was priced more than 30
+  days before the date on the header.
+* **10% of weight priced on the wrong venue's currency** (Alphabet on a EUR line at 3.82%, Eli
+  Lilly on `LLY.SG`, IBM on `IBM.HM`), where `return_local == return_eur` and no FX leg applies.
+* Membership is a static snapshot; mid-year index reviews are never replayed.
+
+### ⚠ The canary, and why it was not optional
+
+This repo's standing rule is that the GuruFocus legacy API **never 404s** — `stock/{sym}/<anything>`
+returns 200 and a 46-point all-zero series — so "it returned data" proves nothing. It was probed
+before anything was built: `stock/ACWI/__canary__` genuinely 404s (`Stock not found, exchange
+[NAS], symbol [ACWI]`), and the inception dates confirm it independently, which a placebo cannot
+fake — ACWI's first bar is 2008-03-28 (fund launched 26 Mar 2008), VT 2008-06-26, URTH 2012-01-12,
+SPY 1993-01-29.
+
+### ⚠ The two-vendor objection does not carry over
+
+The panel was moved off GuruFocus in 2026-07 because RECONSTRUCTING an index from a vendor with
+coverage holes silently redistributes the weight it cannot price (~7.8% of ACWI, 31.96% of the
+AEX). That is an argument about summing 1,514 names, not about one US-listed line, which GuruFocus
+serves in full. On a single ETF close the vendors agree to the cent, and the benchmark is still the
+same KIND of number as the portfolio: an EUR price return over the same window. The comment in
+`_returns` that stated the old reasoning has been rewritten rather than deleted, so the next reader
+finds the argument and its refutation together.
+
+### What is where
+
+* `routers/_benchmark_etf.py` — `PROXY = {ACWI: ACWI, SP500: SPY}`. ⚠ **AEX has no entry**: every
+  European UCITS line 404s (`IAEX`, `IWDA`, `IUSA` on AMS/XAMS), so it keeps the rebuild — the
+  cheap one anyway (22 names, 2.3s) and the one whose 15% cap the rebuild already models.
+* `_index_returns` falls back **per window, not per label** — a since-inception anchor can predate
+  the fund — and runs the rebuild only for the windows still missing, so the normal ACWI case never
+  touches the 1,678-constituent COPY at all.
+* ⚠ **Two prices, not a series.** `_latest` / `_at_or_before` use `.limit(1)`; the first cut paged
+  4,627 rows (258 ms, five round trips) to use the first and last of them, on the critical path of
+  a modal that paints nothing until it is done. Three windows now cost 61 ms.
+* Freshness: the `price_update` benchmarks phase calls `refresh_index_proxies()` daily;
+  `ensure_fresh` repairs lazily, ⚠ at most one vendor call per ticker per process per day — a 1.35s
+  GuruFocus round trip inside this modal is the whole of somebody's wait.
+* It is a **price return**. Distributions are excluded, exactly as the rebuild's were, so the switch
+  changed where the number comes from and not what kind of number it is. GF serves them
+  (`stock/ACWI/dividend`, $1.0097 ex-15 Jun 2026, +0.71pp YTD) if a TR line is ever wanted.
+
+### ⚠⚠ Two benchmark numbers now sit one click apart
+
+The **Attribution panel still reconciles to the rebuild**, because it decomposes the index name by
+name and an ETF price has no names in it. That is survivable only because both surfaces SAY which
+one they are showing: the tile through `benchmarkSourceNote.ts` (fed by `benchmark_source` /
+`benchmark_ticker` / `benchmark_ytd_as_of`), the panel through its existing `account_excess_pct` vs
+sleeve `excess_pct` gap. The Scorecard's code used to assert that the Excess **equals** the
+attribution Total; that claim is now false and is marked as such. Nothing may quietly restore it.
+
+⚠ `benchmark_as_of` still describes the ATTRIBUTION's legs (yfinance rebuild) and was deliberately
+not repointed — the tile's own as-of is `benchmark_ytd_as_of`.
+
+### The two ⓘ badges on the Scorecard
+
+Both return chips carry the standard `<Provenance>` badge (`benchmarkSourceNote.ts` builds the
+benchmark card's four fields; pinned by its test). Three things there are load-bearing:
+
+* ⚠⚠ **`benchmark_etf` is a source key of its own**, rendering "GuruFocus daily close (index ETF)"
+  where `benchmark` renders "yfinance close (benchmark constituents)". Reusing `benchmark` would
+  print one vendor's name over the other's number — the single mislabel the provenance badge exists
+  to make impossible, on the one figure that can now come from either place.
+* ⚠ **`how` is the rule, then the rule with this window's own numbers under it**, separated by a
+  blank line — the shape `ProvenanceCard` already renders `whitespace-pre-wrap` for, and whose own
+  comment asks for it:
+
+  ```
+  A formula on the data: (close ÷ FX_close) ÷ (open ÷ FX_open) − 1  —  close/open are
+  ACWI's USD prices, FX is USD per EUR on that same day
+
+  2025-12-31 → 2026-08-18
+  (160.08 ÷ 1.1593) ÷ (141.49 ÷ 1.1750) − 1 = +14.67%
+  ```
+
+  The four marks ride on the payload (`benchmark_ytd_open_price` / `_close_price` / `_open_fx` /
+  `_close_fx`). ⚠ **`*_fx` is the ETF currency PER EUR** (1.1750 USD/EUR) — the direction the
+  formula divides by; quoting it the other way up would make the worked line wrong while the result
+  stayed right, the hardest kind of error to notice. ⚠ It states the mark it OPENED on
+  (2025-12-31), not the 1 January anchor: they differ by a trading day and a reader checking by
+  hand against 1 January would pull the wrong bar. ⚠ It degrades to the rule ALONE when any mark is
+  missing (an older payload, or the rebuild path) rather than printing `NaN ÷ undefined` — a worked
+  example the reader cannot reproduce is worse than none, because it looks like proof. That is what
+  the test asserts: it re-evaluates the printed line and checks it lands on the printed answer.
+* ⚠ **The benchmark chip is wrapped in `ProvenanceFetchedAt at={undefined}`.** The subtree sits
+  inside `at={holdings_fetched_at}` — when we last scanned THIS PORTFOLIO from AIRS, which says
+  nothing about when we last read an index ETF price. `fetchedAt={null}` cannot express "do not
+  inherit", because `??` treats null as absent by design.
+
+⚠ `Chip` takes `prov` OR `hint`, never both: a native `title` waits ~1–2s and then paints its own
+box over the popover the ⓘ just opened.
+
 ## Asset-class buckets (2026-08-18: `Equity ETF` retired)
 
 Five buckets, each naming what a holding **invests in**: `Equity` (shown as **Stocks**) · `Bonds` · `Alternatives` · `Cash` · `Unclassified`. Declared once in `routers/_airs_holding_isin.py::BUCKET_ORDER`; the display label lives only in `frontend/.../allocationColors.ts::bucketLabel`.

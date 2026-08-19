@@ -148,9 +148,69 @@ def _bench_members(label: str) -> tuple[list[dict], dict]:
 
 
 def _index_returns(label: str, starts: list[str]) -> dict[str, dict]:
-    """`index_returns`, memoized across portfolios — see the note above."""
+    """The benchmark's EUR return per window — the index ETF's own price series where there is
+    one, the constituent reconstruction where there is not. Memoized across portfolios.
+
+    ⚠⚠ THE ETF IS THE BASIS FOR THE HEADLINE NOW (2026-08-19), AND THE REBUILD IS THE FALLBACK.
+    Measured on ACWI YTD: the rebuild says +11.83% EUR against the iShares ACWI ETF's +14.67%.
+    That 2.8pp is structural — full market cap where MSCI float-adjusts (Aramco 1.50% vs a
+    published 0.044%), 1,678 of 1,998 members priced with the missing weight redistributed, a
+    static membership snapshot, and every constituent running to its own last close. See
+    `_benchmark_etf` for the numbers and the canary that proves the vendor answer is real.
+
+    ⚠ PER WINDOW, NOT PER LABEL. A since-inception anchor can predate the fund (ACWI's first bar
+    is 2008-03-28) and the AEX has no reachable proxy at all, so the rebuild answers whatever the
+    ETF cannot. Falling back per LABEL would put a whole portfolio's YTD back on the rebuild
+    because its inception was in 2005.
+
+    ⚠ AND THE REBUILD IS ONLY RUN FOR THE WINDOWS STILL MISSING. It is the expensive half — a
+    1,678-constituent COPY plus the cap join — so when the ETF answers every window (the normal
+    case for ACWI and SP500) it is not called at all.
+
+    ⚠ THE ATTRIBUTION PANEL IS DELIBERATELY NOT ROUTED THROUGH HERE. It decomposes the index name
+    by name (`index_rows`) and an ETF price has no names in it, so it still reconciles to the
+    reconstruction. Two benchmark numbers one click apart is survivable ONLY because that panel
+    already carries both and the gap between them — see `_airs_portfolio_attribution`.
+    """
     key = ("index_returns", label, tuple(sorted(set(starts))), _today())
-    return _leg(key, lambda: index_returns(label, starts))
+    return _leg(key, lambda: _index_returns_now(label, starts))
+
+
+def _index_returns_now(label: str, starts: list[str]) -> dict[str, dict]:
+    from routers._benchmark_etf import etf_returns  # noqa: PLC0415
+
+    out = etf_returns(label, starts)
+    missing = [s for s in sorted(set(starts)) if s not in out]
+    if not missing:
+        return out
+    # `out` last: an explicit statement that the ETF wins any overlap, rather than relying on
+    # `missing` never containing a key the ETF answered.
+    return {**index_returns(label, missing), **out}
+
+
+def _bench_prov(win: dict | None) -> dict:
+    """Where the HEADLINE benchmark figure came from, for the tile's provenance ⓘ.
+
+    ⚠ IT IS NOT `benchmark_as_of`. That field describes the legs the ATTRIBUTION panel draws, which
+    are still the reconstruction's and still yfinance — so overwriting it would relabel a number
+    that did not move. These three fields describe the tile only, and are None on the rebuild path
+    (which carries no `as_of` of its own; see `_asset_benchmark.index_returns`).
+    """
+    w = win or {}
+    return {"benchmark_source": w.get("source") or "rebuild",
+            "benchmark_ticker": w.get("ticker"),
+            # ⚠ THE MARK IT ACTUALLY OPENED ON, which is NOT `ytd_from`. The anchor is 1 January;
+            # the opening price is the last close on or before it (2025-12-31 for ACWI). The ⓘ
+            # states the window it priced, not the window it was asked for — those differ by a
+            # trading day and a reader checking the figure by hand would find the wrong bar.
+            "benchmark_ytd_from": w.get("start_date"),
+            "benchmark_ytd_as_of": w.get("as_of"),
+            # The marks behind the figure, so the ⓘ can show the formula filled in. Absent on the
+            # rebuild path, which has 1,678 of them and no two to quote.
+            "benchmark_ytd_open_price": w.get("start_price"),
+            "benchmark_ytd_close_price": w.get("end_price"),
+            "benchmark_ytd_open_fx": w.get("fx_start"),
+            "benchmark_ytd_close_fx": w.get("fx_end")}
 
 
 def _bench_start_caps(label: str, start: str | None) -> dict[str, float]:
@@ -589,6 +649,7 @@ def _apply_book_source(result: dict, benchmark_label: str) -> None:
     bench = _index_returns(benchmark_label, [jan1]) if p_ytd is not None else {}
     b_ytd = (bench.get(jan1) or {}).get("eur_pct")
     result.update({
+        **_bench_prov(bench.get(jan1)),
         "source": "book",
         "ytd_from": jan1 if p_ytd is not None else None,
         "portfolio_ytd_pct": p_ytd,
@@ -644,13 +705,25 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
 
     ytd_from = perf.get("ytd_from") or ytd_anchor_for(effective)
     windows = [w for w in (ytd_from, effective) if w]
-    # ⚠ THE BENCHMARK IS PRICED IN THE SAME WORLD AS THE PORTFOLIO — yfinance (`asset_price`),
-    # not GuruFocus (`metric_data`). The portfolio's return comes from `asset_price`; pricing the
-    # index off a different vendor would compare two price universes with different adjustment
-    # conventions and different FX, and call the difference alpha. (It is also the only source
-    # that can price ACWI at all: GuruFocus does not sell us the UK or India.) Since 2026-07-16
-    # the /portfolios Benchmarks panel is on this path too — `_benchmark_index.compute_index` is
-    # no longer any route's basis and survives only as the SPY cross-check of the METHOD.
+    # ⚠⚠ THIS USED TO READ "THE BENCHMARK IS PRICED IN THE SAME WORLD AS THE PORTFOLIO — yfinance,
+    # not GuruFocus", on the grounds that two price universes with different adjustment conventions
+    # and different FX would make the difference between them read as alpha, and that GuruFocus is
+    # "the only source that CANNOT price ACWI at all: it does not sell us the UK or India".
+    #
+    # Both halves were about RECONSTRUCTING AN INDEX FROM ITS CONSTITUENTS, and neither survives
+    # the move to the index ETF (2026-08-19). A vendor's coverage holes matter when you are
+    # summing 1,514 names and silently redistributing the weight of the ones you cannot price;
+    # they do not exist for ONE US-listed line, which GuruFocus serves in full (4,627 bars from
+    # 2008-03-28, the fund's actual inception). And the two-vendor objection was about
+    # *adjustment conventions across a universe* — on a single ETF close, GuruFocus and yfinance
+    # agree to the cent. What was really being defended is that the benchmark must not be a
+    # different KIND of number from the portfolio: both are still EUR price returns over the same
+    # window, converted at each mark's own rate.
+    #
+    # What the reconstruction cost us instead was accuracy: +11.83% against the ETF's +14.67% on
+    # ACWI YTD, from full-cap weighting, 84% pricing coverage and a static membership snapshot.
+    # `_index_returns` now prefers the ETF and falls back to the rebuild per window; see
+    # `_benchmark_etf` for the numbers and the canary run before any of it was built.
     bench = _index_returns(benchmark_label, windows) if windows else {}
 
     b_ytd = (bench.get(ytd_from) or {}).get("eur_pct") if ytd_from else None
@@ -659,6 +732,7 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
     yf_asof = (perf.get("sources") or {}).get("yf_close")
 
     result = {
+        **_bench_prov(bench.get(ytd_from) if ytd_from else None),
         "source": "model",
         "ytd_from": ytd_from,
         "since_from": effective,
@@ -2774,6 +2848,7 @@ def _basket_returns(holdings, benchmark_label: str) -> dict:
     bench = _index_returns(benchmark_label, [jan1]) if p_ytd is not None else {}
     b_ytd = (bench.get(jan1) or {}).get("eur_pct")
     return {
+        **_bench_prov(bench.get(jan1)),
         "source": "model", "ytd_from": jan1, "since_from": None,
         "portfolio_ytd_pct": p_ytd, "portfolio_as_of": p_asof, "benchmark_as_of": p_asof,
         "strategy_ytd_pct": p_ytd, "benchmark_ytd_pct": b_ytd,

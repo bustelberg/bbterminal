@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '../../lib/supabase/client'
 
 const ALLOWED_DOMAIN = 'bustelberg.nl'
@@ -15,14 +15,42 @@ function isAllowed(email: string): boolean {
   return lower.endsWith(`@${ALLOWED_DOMAIN}`) || ALLOWED_EMAILS.includes(lower)
 }
 
+/**
+ * ⚠ `useSearchParams` FORCES A SUSPENSE BOUNDARY, and without one the whole route opts out of
+ * static rendering. One wrapper here is cheaper than a build-time error nobody expects on a page
+ * this simple.
+ */
 export default function LoginPage() {
-  const router = useRouter()
-  const supabase = createClient()
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  )
+}
 
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+function LoginForm() {
+  const router = useRouter()
+  const params = useSearchParams()
+  const [supabase] = useState(() => createClient())
+
+  /**
+   * ⚠⚠ THE SENTENCE `/auth/confirm` SENDS WHEN A LINK FAILS. Before this it sent nothing and the
+   * failure was invisible: the route redirected to `/set-password` whatever had happened, and the
+   * person met "Auth session missing" after choosing a password. The message is composed there
+   * (`describeAuthError`), so this page only has to show it — and it opens in signup mode, because
+   * every one of those failures is somebody trying to get IN, and what they need is another link.
+   *
+   * ⚠ SEEDED INTO `useState`, NOT SET FROM AN EFFECT. It is derived from the URL, which is known at
+   * first render; assigning it in an effect renders once with no message and again with it, and is
+   * what `react-hooks/set-state-in-effect` is pointing at. The user can still dismiss it by
+   * submitting — that is why it is state at all and not a plain constant.
+   */
+  const linkError = params.get('error')
+
+  const [mode, setMode] = useState<'signin' | 'signup'>(linkError ? 'signup' : 'signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(linkError)
   const [info, setInfo] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 

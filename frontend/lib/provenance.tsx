@@ -25,7 +25,8 @@ export type SourceKey =
   | 'airs_model'     // AIRS Model-portefeuille scan — composition (ISIN, fund, weight, sector)
   | 'yfinance'       // our yfinance daily closes (asset_price)
   | 'fx'             // ECB/Yahoo FX rate (fx_rate)
-  | 'benchmark'      // yfinance close, benchmark constituents
+  | 'benchmark'      // yfinance close, benchmark constituents (the reconstructed index)
+  | 'benchmark_etf'  // GuruFocus close for the index ETF itself (ACWI, SPY)
   | 'derived';       // computed from the above (no single source of its own)
 
 /**
@@ -42,7 +43,13 @@ const SOURCE: Record<SourceKey, { label: string }> = {
   airs_model: { label: 'AIRS Model-portefeuille' },
   yfinance: { label: 'yfinance daily close' },
   fx: { label: 'ECB / Yahoo FX rate' },
-  benchmark: { label: 'yfinance close (benchmark)' },
+  benchmark: { label: 'yfinance close (benchmark constituents)' },
+  // ⚠ A KEY OF ITS OWN, NOT `benchmark`. Since 2026-08-19 a benchmark figure can come from either
+  // of two places — the index ETF's own price series (GuruFocus) or the constituent rebuild
+  // (yfinance) — and they differ by ~2.8pp on ACWI YTD. Reusing `benchmark` would print
+  // "yfinance close" over a GuruFocus number, which is precisely the mislabel this whole component
+  // exists to make impossible.
+  benchmark_etf: { label: 'GuruFocus daily close (index ETF)' },
   derived: { label: 'Computed on our side' },
 };
 

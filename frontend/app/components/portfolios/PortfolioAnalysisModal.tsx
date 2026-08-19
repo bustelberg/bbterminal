@@ -9,7 +9,8 @@ import {
   allocColor, ALWAYS_SHOWN_BUCKETS, bucketLabel, CASH_BUCKET, EQUITY_BUCKET,
 } from './allocationColors';
 import { classWeightedReturn } from './classReturn';
-import { Provenance, ProvenanceFetchedAt } from '../../../lib/provenance';
+import { benchmarkProvenance } from './benchmarkSourceNote';
+import { Provenance, ProvenanceFetchedAt, type SourceKey } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import { RefreshIcon } from './RefreshIcon';
@@ -80,8 +81,11 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive }: {
 }) {
   const r = returns;
   const sp = (v: number | null | undefined) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
-  // The excess is a DIFFERENCE of two returns, so it is in percentage POINTS (pp), not percent —
-  // and it equals the attribution "Total", which is also pp.
+  // The excess is a DIFFERENCE of two returns, so it is in percentage POINTS (pp), not percent.
+  // ⚠ IT NO LONGER EQUALS THE ATTRIBUTION "TOTAL", and that used to be written here as an
+  // identity. Since 2026-08-19 this tile's benchmark is the index ETF's price series while the
+  // attribution decomposes the constituent rebuild — ~2.8pp apart on ACWI YTD. Both panels now
+  // say which one they are showing; nothing may quietly re-assert the equality.
   const spp = (v: number | null | undefined) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}pp`);
   const tone = (v: number | null | undefined) => (v == null ? 'text-fg-faint' : v >= 0 ? 'text-pos-400' : 'text-neg-400');
 
@@ -96,17 +100,58 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive }: {
   const p = r2(r?.portfolio_ytd_pct);
   const b = r2(r?.benchmark_ytd_pct);
   const excess = p == null || b == null ? r?.ytd_excess_pct : p - b;
+  // ⚠ WHICH BENCHMARK THIS IS. The tile reads the index ETF's own price series where one exists;
+  // the Attribution panel below still decomposes the constituent reconstruction, because an ETF
+  // price has no constituents in it. The two differ by ~2.8pp on ACWI YTD, so the ⓘ card names
+  // the source — and the vendor behind it — rather than leaving the reader to discover the gap by
+  // clicking through to a different number.
+  const bp = benchmarkProvenance({
+    source: r?.benchmark_source, ticker: r?.benchmark_ticker,
+    from: r?.benchmark_ytd_from, asOf: r?.benchmark_ytd_as_of, label: benchmark,
+    // ⚠ THE UNROUNDED SERVER VALUE, not `b`. `b` is rounded to 2dp to keep the on-screen equation
+    // true as displayed; the worked line is a DERIVATION and must divide the numbers it names.
+    openPrice: r?.benchmark_ytd_open_price, closePrice: r?.benchmark_ytd_close_price,
+    openFx: r?.benchmark_ytd_open_fx, closeFx: r?.benchmark_ytd_close_fx,
+    eurPct: r?.benchmark_ytd_pct,
+  });
+  // The portfolio leg's own source follows the Book/Strategy toggle — AIRS's flow-aware account
+  // return, or our yfinance reconstruction of the model.
+  const pSrc: SourceKey = r?.source === 'book' ? 'airs_att' : 'yfinance';
   // Centred on the chips (the row is `items-center`), so the operators hold the middle of the band
   // rather than hanging off one edge of it.
   const op = 'text-base font-mono text-fg-faint shrink-0';
   return (
     <div className="flex items-center gap-2 self-center flex-wrap">
-      <Chip label="Return (YTD)" value={sp(r?.portfolio_ytd_pct)} valueClass={tone(r?.portfolio_ytd_pct)} />
+      {/* ⚠ THE € IS ON BOTH RETURN CHIPS, NOT JUST THE BENCHMARK'S. Marking one side of a
+          subtraction with a currency implies the other side is in something else; the row is an
+          equation and both legs are EUR (which is the return basis everywhere in this app —
+          including the FX leg, and including AIRS's book number in `source=book`). The Excess
+          carries no € because it is percentage POINTS, not a return. */}
+      <Chip label="Return (YTD) €" value={sp(r?.portfolio_ytd_pct)} valueClass={tone(r?.portfolio_ytd_pct)}
+        prov={<Provenance source={pSrc} asOf={r?.portfolio_as_of} kind="formula"
+          what="What this portfolio returned year to date, in EUR."
+          note="the portfolio's return, year to date"
+          how={r?.source === 'book'
+            ? "AIRS's own cumulatief_rendement for the paired account — flow-aware and including "
+              + 'income, over the calendar year.'
+            : 'Σ(weightᵢ × returnᵢ) over the model’s holdings, each priced from its yfinance '
+              + 'closes and converted to EUR at each date’s own rate, so the currency leg is '
+              + 'included. Price return: dividends are not.'} />} />
       <span className={op} aria-hidden>−</span>
-      <Chip label={`vs ${benchmark} return`} value={sp(r?.benchmark_ytd_pct)} valueClass={tone(r?.benchmark_ytd_pct)} />
+      {/* ⚠ `at={undefined}` SO THIS BADGE DOES NOT INHERIT THE HOLDINGS' SCAN TIME. The subtree is
+          wrapped in `ProvenanceFetchedAt at={holdings_fetched_at}` — which is when we last read
+          this portfolio from AIRS, and says nothing whatever about when we last read an index ETF
+          price. Handing one object's fetch time to another is the exact hazard that provider
+          documents; `fetchedAt={null}` cannot express it, because `??` treats null as "inherit". */}
+      <ProvenanceFetchedAt at={undefined}>
+        <Chip label={`vs ${benchmark} return €`} value={sp(r?.benchmark_ytd_pct)}
+          valueClass={tone(r?.benchmark_ytd_pct)}
+          prov={<Provenance source={bp.sourceKey} asOf={r?.benchmark_ytd_as_of} kind="formula"
+            what={bp.what} note={bp.note} how={bp.how} />} />
+      </ProvenanceFetchedAt>
       <span className={op} aria-hidden>=</span>
       <Chip label="Excess" value={spp(excess)} valueClass={tone(excess)}
-        hint="The portfolio's return minus the benchmark's, in percentage POINTS — the two figures to the left, subtracted." />
+        hint="The portfolio's return minus the benchmark's, in percentage POINTS — the two figures to the left, subtracted. ⚠ It does NOT equal the Attribution table's total: that decomposes the index constituent by constituent, so it reconciles to the rebuilt index rather than to the ETF figure shown here." />
       {onAttribution && (
         <button type="button" onClick={onAttribution}
           title="Why? — break the excess into allocation vs selection (Brinson-Fachler attribution)."
@@ -415,13 +460,23 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
   );
 }
 
-function Chip({ label, value, valueClass, hint }: {
+function Chip({ label, value, valueClass, hint, prov }: {
   label: string; value: string; valueClass: string; hint?: string;
+  /** A `<Provenance>` badge, rendered after the value.
+   *
+   *  ⚠ `prov` AND `hint` ARE ALTERNATIVES, NOT A PAIR. A native `title` waits ~1-2s and then paints
+   *  its own box over the popover the ⓘ just opened — two explanations of one number, in two
+   *  styles, fighting for the same corner. A chip that has real provenance uses the badge; a chip
+   *  with only a sentence to offer keeps the tooltip. */
+  prov?: React.ReactNode;
 }) {
   return (
-    <div className="bg-elevated border border-neutral-800/40 rounded-lg px-3 py-1.5 min-w-[6rem]" title={hint}>
+    <div className="bg-elevated border border-neutral-800/40 rounded-lg px-3 py-1.5 min-w-[6rem]"
+      title={prov ? undefined : hint}>
       <div className="text-[10px] uppercase tracking-wide text-fg-faint">{label}</div>
-      <div className={`text-sm font-mono font-semibold ${valueClass}`}>{value}</div>
+      <div className={`text-sm font-mono font-semibold ${valueClass} flex items-center gap-1`}>
+        {value}{prov}
+      </div>
     </div>
   );
 }

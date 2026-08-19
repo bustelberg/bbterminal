@@ -53,6 +53,77 @@ first reader now finds it warm instead of waiting ~20s.
 
 ---
 
+## 🔑 "Auth session missing" on a new account — code fixed, PROD DASHBOARD STILL TO DO (2026-08-19)
+
+Someone creating an account in production reached `/set-password`, chose a password, pressed Save
+and got **"Auth session missing"**. Cause: `/auth/confirm` threw away the result of
+`exchangeCodeForSession`/`verifyOtp` and redirected to the password form whatever happened.
+
+**Shipped** (see the ⚠⚠ in [`CLAUDE.md`](CLAUDE.md) and the route's own docstring):
+
+* `/auth/confirm` checks `error`/`error_code`/`error_description` FIRST, checks every result,
+  confirms with `getUser()`, and sends failures to `/login?error=…` with an actionable sentence.
+* `lib/authError.ts` maps the causes to sentences (+ `authError.test.ts`). It tells the
+  wrong-browser case apart from the expired case, because their fixes differ.
+* `/set-password` refuses to render a password form with no session.
+* `/login` shows the message and opens in signup mode.
+* `supabase/templates/{confirmation,magic_link,recovery}.html` + `config.toml` — the token_hash URL.
+
+**⚠ NOT DONE — needs the hosted project's dashboard, which is yours to change:**
+
+1. **Authentication → Emails**: set *Confirm signup*, *Magic Link* and *Reset Password* to link to
+   `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type={{ .Email_Action_Type }}`
+   (copy the bodies from `supabase/templates/`). ⚠ *Confirm signup* is the one the signup flow
+   actually sends; fixing only Magic Link leaves the broken case broken.
+2. **Authentication → URL Configuration**: Site URL = the Vercel production origin, and
+   `https://<prod-origin>/auth/confirm` present in **Redirect URLs**. If `emailRedirectTo` is not
+   allow-listed Supabase silently falls back to the Site URL and the token never reaches the route.
+3. Locally: `npx supabase stop && npx supabase start` to pick up the new templates.
+
+Until step 1 is done the links still go through `/auth/v1/verify`, so the mail-scanner and
+cross-device failures can still happen — they will now say so on the login page instead of dying at
+the password form.
+
+**Not built:** no rate-limit or resend-throttle feedback on the signup form; `[auth.rate_limit]
+email_sent = 2` per hour means a person who requests three links gets a bare Supabase error.
+
+---
+
+## 📊 ACWI benchmark: the tile now reads the ETF — the /benchmarks panel does NOT (2026-08-19)
+
+The Analyse modal's `vs ACWI return €` is the iShares ACWI ETF's own price series from GuruFocus,
+EUR-converted at each mark's own rate (+14.67% YTD against the rebuild's +11.83%). Full write-up,
+numbers and the canary in [`docs/airs-portfolios.md`](docs/airs-portfolios.md).
+
+**Deliberately NOT changed, and each for a reason:**
+
+* **`/benchmarks` panel still shows the rebuild.** Its product is the constituent table — that is
+  what it exists for. The right move is to show the ETF figure *beside* it, so the gap becomes a
+  visible coverage diagnostic instead of a silent error. Not built.
+* **Attribution still reconciles to the rebuild** (an ETF price has no constituents). Two benchmark
+  numbers one click apart; both surfaces name their source. If that proves confusing in use, the
+  options are to show the rebuild figure in the tile's tooltip, or to state the gap explicitly in
+  the attribution header.
+* **Price return, not total return.** GF's `dividend` endpoint has the distributions
+  ($1.0097 ex-15 Jun 2026 = +0.71pp YTD, i.e. ACWI TR is +15.39% EUR). A TR line is one small
+  function away and would match what most external sources quote — but it changes what the tile
+  MEANS, so it is a deliberate decision, not a follow-on.
+* **AEX has no proxy.** Every European UCITS line 404s on GuruFocus. Worth one probe of the
+  documented `isin/{ISIN}` bridge (NL0000249100) before concluding it is unreachable.
+
+**Loose ends noticed while measuring, not fixed:**
+
+* The rebuild has **no staleness guard and no common as-of date** — each constituent runs to its own
+  last close and `as_of` reports the max. On local data 58.5% of ACWI's weight was >30 days behind
+  the header date. It still backs the AEX, every pre-inception window, and all attribution.
+* **~10% of ACWI's weight is priced on a venue whose currency ≠ the company's** (Alphabet 3.82% on
+  a EUR line, `LLY.SG`, `IBM.HM`, `CHV.DU`) — `return_local == return_eur` there, so no FX leg is
+  applied at all. That is the documented wrong-listing family, biting the benchmark rebuild.
+* A pre-inception rebuild window returns nonsense (`2005-03-01` → −97.99% over 850 members). Not
+  reachable from the UI today, but nothing refuses it.
+
+---
+
 ## ⏱ Analyse modal: the FIRST open is still the full load (2026-08-19)
 
 **Done that day**: the cross-portfolio leg cache (`_analysis_cache.leg`) + routing

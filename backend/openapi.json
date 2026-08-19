@@ -9583,6 +9583,94 @@
             ],
             "title": "Benchmark Since Pct"
           },
+          "benchmark_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Source"
+          },
+          "benchmark_ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Ticker"
+          },
+          "benchmark_ytd_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Ytd As Of"
+          },
+          "benchmark_ytd_close_fx": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Ytd Close Fx"
+          },
+          "benchmark_ytd_close_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Ytd Close Price"
+          },
+          "benchmark_ytd_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Ytd From"
+          },
+          "benchmark_ytd_open_fx": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Ytd Open Fx"
+          },
+          "benchmark_ytd_open_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Ytd Open Price"
+          },
           "benchmark_ytd_pct": {
             "anyOf": [
               {
