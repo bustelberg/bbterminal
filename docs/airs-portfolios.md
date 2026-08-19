@@ -28,6 +28,214 @@
 
 **Continues in** [`gurufocus-data.md`](gurufocus-data.md): the two GuruFocus bridges behind the Instruments grid (Exchange · Ticker · Div/share), `pick_listing`, the US exchange-code minefield, the dividend/financials states, and the rebuilt benchmark index.
 
+## What the Analyse modal costs, and where it goes (2026-08-19)
+
+The modal is **one** request (`GET /api/airs/model-portfolios/{id}/analysis`, or
+`POST /api/airs/basket/analysis` for a book with no paired model). It has no partial paint: nothing
+is on screen until the whole payload lands, so its wall clock *is* the user's wait.
+
+**Measure before touching it — `backend/scripts/profile_analysis_modal.py`.** It wraps both
+transports (PostgREST over HTTP, and direct-Postgres `COPY`) plus the loaders the endpoint
+composes, and prints per-phase ms, per-table round trips, byte-identical repeats, the tables read
+through several query shapes, and the leg-cache hit rate. `--id a,b,c` runs several books in one
+process, which is the realistic measurement; `--cold` drops the cross-portfolio cache before every
+run, so a before/after is one flag apart.
+
+⚠⚠ **REQUEST COUNT IS THE PRODUCTION COST; LOCAL WALL TIME IS NOT.** Local Postgres answers in
+single-digit ms, production is eu-west-3 with the backend elsewhere at ~60ms a round trip. A phase
+that is 200ms locally over 30 requests is ~2s there. A laptop profile understates the real number by
+an order of magnitude, which is why the script prints both and why the fixes below are counted in
+requests and COPYs rather than in a local stopwatch.
+
+Cold, on `BUS_Bep_offensief_FX` (61 holdings, wrapped certificates), of ~2.9s local:
+
+| loader | local | round trips | what it is |
+|---|---|---|---|
+| `_holding_risk` | 950 ms | 0 (3 COPY) | per-ISIN 5y vol / beta / 12-1 momentum |
+| `_book_port_items` | 460 ms | **21** | the AIRS book: holdings, ledger, wrapped books |
+| `index_returns` (×2) | 490 ms | 0 (3 COPY) | the benchmark over the two windows |
+| `compute_portfolio_performance` | 400 ms | 2 | this model's own yfinance return |
+| `_bench_start_caps` · `_grid` · `members` | 390 ms | 8 | the benchmark's constituents and caps |
+
+### ⚠⚠ MOST OF THAT IS NOT ABOUT THE PORTFOLIO ON SCREEN — the cross-portfolio leg cache
+
+`members`, `index_returns` and `_bench_start_caps` take a **label and a window**; they do not take a
+portfolio, and every book on this page defaults to the same benchmark. A holding's vol/beta/momentum
+is a property of the **instrument** — and the risk variants of a strategy (Defensief / Neutraal /
+Beperkt Offensief / Offensief) hold nearly the same names, sitting next to each other in the table.
+So opening books in turn recomputed answers already in memory.
+
+`routers/_analysis_cache.py` grew a **second store** for these sub-results (`leg` / `leg_get_many` /
+`leg_put_many`), on the **same data fingerprint** as the payload store — so a leg can never outlive
+the payload cache's notion of "current", and the staleness argument in that module applies to both
+unchanged. It is a separate store because the entry budgets differ by three orders of magnitude
+(4,096 legs is a few MB; 4,096 payloads would be ~560MB).
+
+Measured, same sequence, `--cold` vs warm:
+
+| | round trips | COPY |
+|---|---|---|
+| first book opened | 42 | 28 |
+| a **dissimilar** book after it | 34 → 34 | 24 → 20 |
+| a **sibling variant** after it | 35 → **27** | 24 → **12** |
+
+Locally that sibling case is ~2.0s → ~0.9s. The basket path (an unpaired book) has **no** payload
+cache at all, so it gains on every single open: 396ms → 113ms.
+
+⚠ **The win is in the SECOND book, not the first.** A cold server still pays the full load once.
+See [`TODO.md`](../TODO.md) for the two ways to remove that too, with the numbers each would need.
+
+⚠ **`date.today()` is in the key explicitly.** `index_returns` prices to "today", an input it takes
+from the clock rather than the database — the one input the fingerprint cannot see.
+
+⚠ **A hit is an answer, including an empty one.** A holding with too little history yields `{}`, and
+that is a result: treating "no row" as "not computed" would make a book of young listings re-run the
+whole five-year load on every open. `_holding_risk` stores the empty rows and drops them on the way
+out, where callers have always expected "present ⇒ has at least one figure".
+
+⚠⚠ **The miss path stays batched.** `_daily_eur` loads five years of closes for every holding in ONE
+`COPY`; memoizing per ISIN with a plain `leg()` loop would serve the hits and then run that COPY
+once per miss — ~60 round trips, making a "faster" modal slower on exactly the cold path. Hence
+`leg_get_many` → compute the misses together → `leg_put_many`.
+
+**Proof, not assertion**: `backend/scripts/verify_analysis_cache.py` recomputes every paired book
+with the memo forced to always-miss and with it warm, and compares the payloads field for field
+(`timings_ms` excluded — it is a stopwatch). 17 of 17 identical, plus the basket path.
+
+### ⚠⚠ And one of those reads was silently truncating in production
+
+`_airs_portfolio_perf.compute_portfolio_performance` read the WHOLE
+`airs_model_portfolio_position` table with no `.range()` — **1,001 rows against PostgREST's
+1,000-row cap on Supabase cloud** (10,000 locally). Complete on a laptop, one row short in
+production, with no `ORDER BY` to make *which* row predictable: a model would quietly lose a
+position from its priced basket and renormalise the return over the rest. Both its reads now go
+through `routers/_airs_ref.py`'s canonical loaders, which page properly — which also makes them the
+byte-identical request the modal already issues, so the per-request memo collapses them (−2 round
+trips on every open). Output verified equal across all 61 portfolios to 13 significant figures; the
+residual is float accumulation order, because the canonical read is `ORDER BY id` and the old one
+was ordered by nothing.
+
+---
+
+## The benchmark tile: the index ETF, not our rebuild (2026-08-19)
+
+`Return (YTD) € − vs ACWI return € = Excess` in the Analyse modal. The middle figure used to be
+`_asset_benchmark.compute_index` — a cap-weighted index rebuilt from 1,514 constituents. It is now
+the iShares MSCI ACWI ETF's own closing price series, from GuruFocus, converted to EUR.
+
+### Why the rebuild was wrong, measured
+
+| | |
+|---|---|
+| our reconstruction | **+11.83%** EUR |
+| ACWI ETF, price return | +13.14% USD → **+14.67%** EUR |
+| ACWI ETF, total return | +13.85% USD → +15.39% EUR |
+
+The 2.8pp is structural, not noise, and none of it is fixable by arithmetic:
+
+* **Full market cap, not free float.** MSCI float-adjusts; we weighted on `market_cap_eur`, the
+  whole company. Saudi Aramco was **1.50%** of our index against a published **0.044%** — 34x,
+  because only a sliver of Aramco floats. Saudi Arabia read 2.07% against a published 0.333%.
+  NVIDIA was 3.76% against 4.95%, Tesla 2.00% against 1.14%. Re-weighting our own priced rows with
+  the published iShares weights, on identical prices and window, moved the total from 13.13% to
+  20.24% over the 84% that matched by name — indicative rather than exact (the bundled file is
+  dated 15-Apr, so it embeds a quarter of drift), but it says the weighting dominates.
+* **Coverage.** 1,678 priced of a 1,998-member universe, against ~2,270 lines in the real index. A
+  cap-weighted rebuild does not lose the missing weight, it redistributes it.
+* **No common as-of date and no staleness guard.** Every constituent ran to its OWN last close and
+  `as_of` reported the maximum — on the local dataset, 58.5% of the weight was priced more than 30
+  days before the date on the header.
+* **10% of weight priced on the wrong venue's currency** (Alphabet on a EUR line at 3.82%, Eli
+  Lilly on `LLY.SG`, IBM on `IBM.HM`), where `return_local == return_eur` and no FX leg applies.
+* Membership is a static snapshot; mid-year index reviews are never replayed.
+
+### ⚠ The canary, and why it was not optional
+
+This repo's standing rule is that the GuruFocus legacy API **never 404s** — `stock/{sym}/<anything>`
+returns 200 and a 46-point all-zero series — so "it returned data" proves nothing. It was probed
+before anything was built: `stock/ACWI/__canary__` genuinely 404s (`Stock not found, exchange
+[NAS], symbol [ACWI]`), and the inception dates confirm it independently, which a placebo cannot
+fake — ACWI's first bar is 2008-03-28 (fund launched 26 Mar 2008), VT 2008-06-26, URTH 2012-01-12,
+SPY 1993-01-29.
+
+### ⚠ The two-vendor objection does not carry over
+
+The panel was moved off GuruFocus in 2026-07 because RECONSTRUCTING an index from a vendor with
+coverage holes silently redistributes the weight it cannot price (~7.8% of ACWI, 31.96% of the
+AEX). That is an argument about summing 1,514 names, not about one US-listed line, which GuruFocus
+serves in full. On a single ETF close the vendors agree to the cent, and the benchmark is still the
+same KIND of number as the portfolio: an EUR price return over the same window. The comment in
+`_returns` that stated the old reasoning has been rewritten rather than deleted, so the next reader
+finds the argument and its refutation together.
+
+### What is where
+
+* `routers/_benchmark_etf.py` — `PROXY = {ACWI: ACWI, SP500: SPY}`. ⚠ **AEX has no entry**: every
+  European UCITS line 404s (`IAEX`, `IWDA`, `IUSA` on AMS/XAMS), so it keeps the rebuild — the
+  cheap one anyway (22 names, 2.3s) and the one whose 15% cap the rebuild already models.
+* `_index_returns` falls back **per window, not per label** — a since-inception anchor can predate
+  the fund — and runs the rebuild only for the windows still missing, so the normal ACWI case never
+  touches the 1,678-constituent COPY at all.
+* ⚠ **Two prices, not a series.** `_latest` / `_at_or_before` use `.limit(1)`; the first cut paged
+  4,627 rows (258 ms, five round trips) to use the first and last of them, on the critical path of
+  a modal that paints nothing until it is done. Three windows now cost 61 ms.
+* Freshness: the `price_update` benchmarks phase calls `refresh_index_proxies()` daily;
+  `ensure_fresh` repairs lazily, ⚠ at most one vendor call per ticker per process per day — a 1.35s
+  GuruFocus round trip inside this modal is the whole of somebody's wait.
+* It is a **price return**. Distributions are excluded, exactly as the rebuild's were, so the switch
+  changed where the number comes from and not what kind of number it is. GF serves them
+  (`stock/ACWI/dividend`, $1.0097 ex-15 Jun 2026, +0.71pp YTD) if a TR line is ever wanted.
+
+### ⚠⚠ Two benchmark numbers now sit one click apart
+
+The **Attribution panel still reconciles to the rebuild**, because it decomposes the index name by
+name and an ETF price has no names in it. That is survivable only because both surfaces SAY which
+one they are showing: the tile through `benchmarkSourceNote.ts` (fed by `benchmark_source` /
+`benchmark_ticker` / `benchmark_ytd_as_of`), the panel through its existing `account_excess_pct` vs
+sleeve `excess_pct` gap. The Scorecard's code used to assert that the Excess **equals** the
+attribution Total; that claim is now false and is marked as such. Nothing may quietly restore it.
+
+⚠ `benchmark_as_of` still describes the ATTRIBUTION's legs (yfinance rebuild) and was deliberately
+not repointed — the tile's own as-of is `benchmark_ytd_as_of`.
+
+### The two ⓘ badges on the Scorecard
+
+Both return chips carry the standard `<Provenance>` badge (`benchmarkSourceNote.ts` builds the
+benchmark card's four fields; pinned by its test). Three things there are load-bearing:
+
+* ⚠⚠ **`benchmark_etf` is a source key of its own**, rendering "GuruFocus daily close (index ETF)"
+  where `benchmark` renders "yfinance close (benchmark constituents)". Reusing `benchmark` would
+  print one vendor's name over the other's number — the single mislabel the provenance badge exists
+  to make impossible, on the one figure that can now come from either place.
+* ⚠ **`how` is the rule, then the rule with this window's own numbers under it**, separated by a
+  blank line — the shape `ProvenanceCard` already renders `whitespace-pre-wrap` for, and whose own
+  comment asks for it:
+
+  ```
+  A formula on the data: (close ÷ FX_close) ÷ (open ÷ FX_open) − 1  —  close/open are
+  ACWI's USD prices, FX is USD per EUR on that same day
+
+  2025-12-31 → 2026-08-18
+  (160.08 ÷ 1.1593) ÷ (141.49 ÷ 1.1750) − 1 = +14.67%
+  ```
+
+  The four marks ride on the payload (`benchmark_ytd_open_price` / `_close_price` / `_open_fx` /
+  `_close_fx`). ⚠ **`*_fx` is the ETF currency PER EUR** (1.1750 USD/EUR) — the direction the
+  formula divides by; quoting it the other way up would make the worked line wrong while the result
+  stayed right, the hardest kind of error to notice. ⚠ It states the mark it OPENED on
+  (2025-12-31), not the 1 January anchor: they differ by a trading day and a reader checking by
+  hand against 1 January would pull the wrong bar. ⚠ It degrades to the rule ALONE when any mark is
+  missing (an older payload, or the rebuild path) rather than printing `NaN ÷ undefined` — a worked
+  example the reader cannot reproduce is worse than none, because it looks like proof. That is what
+  the test asserts: it re-evaluates the printed line and checks it lands on the printed answer.
+* ⚠ **The benchmark chip is wrapped in `ProvenanceFetchedAt at={undefined}`.** The subtree sits
+  inside `at={holdings_fetched_at}` — when we last scanned THIS PORTFOLIO from AIRS, which says
+  nothing about when we last read an index ETF price. `fetchedAt={null}` cannot express "do not
+  inherit", because `??` treats null as absent by design.
+
+⚠ `Chip` takes `prov` OR `hint`, never both: a native `title` waits ~1–2s and then paints its own
+box over the popover the ⓘ just opened.
+
 ## Asset-class buckets (2026-08-18: `Equity ETF` retired)
 
 Five buckets, each naming what a holding **invests in**: `Equity` (shown as **Stocks**) · `Bonds` · `Alternatives` · `Cash` · `Unclassified`. Declared once in `routers/_airs_holding_isin.py::BUCKET_ORDER`; the display label lives only in `frontend/.../allocationColors.ts::bucketLabel`.

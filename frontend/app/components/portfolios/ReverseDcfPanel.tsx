@@ -103,6 +103,26 @@ function DerivedRow({ label, value, info, tone = 'step' }: {
   );
 }
 
+/**
+ * ⚠⚠ THE THREE WAYS THE IMPLIED RATE AND THE ANALYST ROWS ARE NOT LIKE FOR LIKE. Two were already
+ * stated on the individual rows (metric, horizon); the THIRD was not stated anywhere, and it is
+ * the one a reader cannot infer from the labels.
+ *
+ * PER SHARE vs TOTAL. The model grows TOTAL free cash flow and solves it against the TOTAL market
+ * cap. Both consensus rows are PER SHARE. A company retiring 2% of its shares a year grows per
+ * share about 2pp faster than in total, for ever, with no change in the business — so the analyst
+ * rows sit systematically above the implied rate on any buyback-heavy company and the price looks
+ * more conservative than it is. Nothing on the row says so, because "EPS" and "OCF/sh" read as
+ * metric names rather than as a different denominator.
+ *
+ * Declared once and appended to all three rows, so the three cards cannot drift apart.
+ */
+const NOT_LIKE_FOR_LIKE = `
+
+⚠ NOT LIKE FOR LIKE with the implied rate, in three ways. METRIC: the model compounds free cash flow, these forecast earnings and operating cash flow. HORIZON: the model compounds for the full forecast period and then for ever at the perpetuity rate; these are 3-5 year rates. BASIS: the model grows TOTAL cash flow against the TOTAL market cap, while both consensus rows are PER SHARE — buybacks alone lift a per-share rate above a total one, by roughly the share-retirement rate, with no change in the business.
+
+Read them as a sanity check on the order of magnitude, not as an equality.`;
+
 /** Appended to both correction cards — one sentence, one place. */
 const NORM_OFF = `
 
@@ -231,11 +251,15 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   const avg35 = eps35 != null && ocf35 != null ? (eps35 + ocf35) / 2 : null;
   const analysts: [string, number | null, string][] = [
     ['EPS 3-5y', eps35,
-      'Analysts’ 3–5 year EPS growth consensus (GuruFocus “Future 3-5Y EPS Growth Rate Estimate”). A forecast, not a solve — and over 3–5 years, not the 10 the model compounds.'],
+      'Analysts’ 3–5 year EPS growth consensus (GuruFocus “Future 3-5Y EPS Growth Rate Estimate”). A forecast, not a solve.'
+      + NOT_LIKE_FOR_LIKE],
     ['OCF/sh 3-5y', ocf35,
-      'Analysts’ 3–5 year operating-cash-flow-per-share growth consensus. ⚠ OCF, not free cash flow — it runs ahead of FCF by whatever capex the company spends, and the model compounds FCF.'],
+      'Analysts’ 3–5 year operating-cash-flow-per-share growth consensus. ⚠ OCF, not free cash flow — it runs ahead of FCF by whatever capex the company spends, and the model compounds FCF.'
+      + NOT_LIKE_FOR_LIKE],
     ['Avg', avg35,
-      'The plain mean of the two consensus rates to the left. ⚠ Blank unless BOTH are present — an average of one number is that number, and labelling it an average would hide which.'],
+      'The plain mean of the two consensus rates to the left. ⚠ Blank unless BOTH are present — an average of one number is that number, and labelling it an average would hide which.'
+      + '\n\n⚠ IT AVERAGES TWO DIFFERENT METRICS — an earnings rate and a cash-flow-per-share rate. It is a rough centre of what analysts expect, not a consensus for any one line.'
+      + NOT_LIKE_FOR_LIKE],
   ];
   const hasAnalysts = analysts.some(([, v]) => v != null);
 
@@ -428,7 +452,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                       where="Computed — solved, not forecast."
                       when={`Years 1 to ${years}, then the perpetuity growth.`}
                       how={fcf != null && fcf > 0 && growth != null
-                        ? 'The rate at which the discounted cash flows equal the target market cap. Not a valuation — what you would have to believe.'
+                        ? `The rate at which the discounted cash flows equal the target market cap. Not a valuation — what you would have to believe.${NOT_LIKE_FOR_LIKE}`
                         : fcf != null && fcf <= 0
                           ? `Free cash flow of ${mn(fcf)} is at or below zero, so no growth rate works. A fact about the company, not an error.`
                           : missing.length > 0

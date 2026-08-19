@@ -226,6 +226,35 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
+# ⚠⚠ THESE TEMPLATES ARE THE FIX FOR "Auth session missing" ON A NEW ACCOUNT, and they must be
+# mirrored in the hosted project's dashboard (Authentication -> Emails) — this file configures the
+# LOCAL stack only. Supabase's default `{{ .ConfirmationURL }}` points at `/auth/v1/verify`, which
+# (a) consumes the one-time token the moment a mail scanner fetches it, and (b) comes back as
+# `?code=`, which only the browser that REQUESTED the link can exchange. Neither shows up locally:
+# Mailpit has no scanner and there is only ever one browser. See `supabase/templates/*.html` and
+# `frontend/app/auth/confirm/route.ts`.
+#
+# ⚠ `confirmation` IS THE ONE THE SIGNUP FLOW USES. `signInWithOtp({ shouldCreateUser: true })`
+# sends "Confirm signup" to a NEW address and "Magic Link" to an existing one — so fixing only the
+# magic-link template would leave the exact case that was broken still broken.
+#
+# ⚠ `type` IS PINNED PER TEMPLATE (signup / magiclink / recovery) rather than `{{ .Email_Action_Type }}`.
+# Each template already knows what it is, and a variable that fails to render leaves `type=` empty,
+# which the route can only refuse. Verified 2026-08-19 against the local stack: `verify_otp` returns
+# a session for all three types with NO code verifier involved — which is the whole point, since
+# that is the state a phone opening a laptop's email cannot have.
+[auth.email.template.confirmation]
+subject = "Confirm your BBTerminal account"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.magic_link]
+subject = "Sign in to BBTerminal"
+content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.recovery]
+subject = "Reset your BBTerminal password"
+content_path = "./supabase/templates/recovery.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"

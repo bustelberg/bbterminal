@@ -836,7 +836,9 @@ class PortfolioAnalysisReturns(BaseModel):
     """
 
     # Where the PRIMARY portfolio numbers come from: "model" (yfinance reconstruction) or "book"
-    # (AIRS's own cumulatief_rendement). The benchmark is yfinance either way.
+    # (AIRS's own cumulatief_rendement). ⚠ The BENCHMARK no longer follows it: since 2026-08-19 the
+    # headline benchmark is the index ETF's own price series from GuruFocus where one exists —
+    # see `benchmark_source` below.
     source: str = "model"
     # True when a paired AIRS book exists — so the UI can explain a blank 'book' return as "no
     # paired book" rather than a computation failure.
@@ -845,10 +847,28 @@ class PortfolioAnalysisReturns(BaseModel):
     since_from: str | None = None
     portfolio_ytd_pct: float | None = None
     # As-of dates behind the numbers, for the per-value provenance ⓘ. `portfolio_as_of` is the
-    # yfinance close date (model source) or the AIRS book snapshot date (book source); the benchmark
-    # is always yfinance.
+    # yfinance close date (model source) or the AIRS book snapshot date (book source).
+    # ⚠ `benchmark_as_of` describes the ATTRIBUTION panel's benchmark legs (still the yfinance
+    # reconstruction), NOT the headline tile — that one is `benchmark_ytd_as_of`.
     portfolio_as_of: str | None = None
     benchmark_as_of: str | None = None
+    # ⚠ WHERE THE HEADLINE BENCHMARK FIGURE COMES FROM, which is no longer the same place as the
+    # attribution's legs. `benchmark_source` is "etf" (the index ETF's own price series, converted
+    # to EUR at each mark's own rate — see `_benchmark_etf`) or "rebuild" (the constituent
+    # reconstruction, which is all the AEX and any pre-inception window can have). The tile has to
+    # be able to say which, because the two disagree by ~2.8pp on ACWI YTD and the reader can see
+    # the other one in the attribution panel.
+    benchmark_source: str | None = None
+    benchmark_ticker: str | None = None
+    benchmark_ytd_from: str | None = None       # the close it OPENED on, not the 1-Jan anchor
+    benchmark_ytd_as_of: str | None = None      # the ETF's last bar; None on the rebuild path
+    # The four numbers the ETF return is made of, so the tile's ⓘ can print the formula and then
+    # the same formula with these filled in. ⚠ `*_fx` is the ETF currency PER EUR (1.1750 USD/EUR)
+    # — the direction the formula divides by. All None on the rebuild path.
+    benchmark_ytd_open_price: float | None = None
+    benchmark_ytd_close_price: float | None = None
+    benchmark_ytd_open_fx: float | None = None
+    benchmark_ytd_close_fx: float | None = None
     # The yfinance model YTD, ALWAYS carried (even when `source=book` makes the primary the book),
     # so the Book-vs-strategy drift tile reads the strategy number regardless of the toggle.
     strategy_ytd_pct: float | None = None

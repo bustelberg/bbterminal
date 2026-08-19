@@ -372,22 +372,24 @@ export default function BenchmarksPanel() {
             Benchmarks
           </h3>
         </div>
-        {/* Ingesting constituents is admin work — hidden rather than left to 403. The index itself
-            reads the same for everyone. */}
-        {isAdmin && (runOwner === ALL ? (
-            <button type="button" onClick={() => void cancelRun()}
-              title="Stop the whole run — the step in flight stops at its next safe point (between constituents, or between companies in a fill) and nothing further is started. Everything already fetched is kept."
-              className="ml-auto text-[12px] px-2.5 py-1 rounded-lg border border-warn-500/40 bg-warn-500/10 text-warn-500 hover:bg-warn-500/20">
-              Cancel
-            </button>
-          ) : (
-            <button type="button" onClick={() => void refresh(INDICES.map((i) => i.label), ALL)}
-              disabled={runOwner !== null}
-              title="For each index, in order: gather its constituents, get every one's market cap from Yahoo, then each one's start-of-year price and current price — then refetch every constituent's fundamentals from GuruFocus, which is what the expanded row's grid reads. Both halves fetch EVERY constituent, holes or not, so figures that are present but stale are replaced. One GuruFocus call each (~490 for the S&P) against a monthly quota, read out before the run starts. Minutes per index; progress and Cancel are in the pop-ups bottom-right. Runs one index at a time — concurrent callers are how a constituent lands on the wrong listing."
-              className="ml-auto text-[12px] px-2.5 py-1 rounded-lg bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-50">
-              Refresh all
-            </button>
-          ))}
+        {/* ⚠ OPEN TO EVERY USER SINCE 2026-08-19. The rebuild spends a GuruFocus quota, which is
+            why it was admin work — but the index it rebuilds is what every portfolio on this page
+            is measured against, so a reader who can see it is stale can now make it current.
+            Deleting a universe, one row down, still cannot. */}
+        {runOwner === ALL ? (
+          <button type="button" onClick={() => void cancelRun()}
+            title="Stop the whole run — the step in flight stops at its next safe point (between constituents, or between companies in a fill) and nothing further is started. Everything already fetched is kept."
+            className="ml-auto text-[12px] px-2.5 py-1 rounded-lg border border-warn-500/40 bg-warn-500/10 text-warn-500 hover:bg-warn-500/20">
+            Cancel
+          </button>
+        ) : (
+          <button type="button" onClick={() => void refresh(INDICES.map((i) => i.label), ALL)}
+            disabled={runOwner !== null}
+            title="For each index, in order: gather its constituents, get every one's market cap from Yahoo, then each one's start-of-year price and current price — then refetch every constituent's fundamentals from GuruFocus, which is what the expanded row's grid reads. Both halves fetch EVERY constituent, holes or not, so figures that are present but stale are replaced. One GuruFocus call each (~490 for the S&P) against a monthly quota, read out before the run starts. Minutes per index; progress and Cancel are in the pop-ups bottom-right. Runs one index at a time — concurrent callers are how a constituent lands on the wrong listing."
+            className="ml-auto text-[12px] px-2.5 py-1 rounded-lg bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-50">
+            Refresh all
+          </button>
+        )}
       </div>
 
 
@@ -449,40 +451,41 @@ export default function BenchmarksPanel() {
                       <td className="px-3 py-1.5 text-right">
                         {/* ⚠ `stopPropagation` — the whole row is the expand toggle, and a Refresh
                             that also opened the detail would look like it had rendered a result. */}
-                        {isAdmin && (
-                          <div className="inline-flex items-center gap-1">
-                            {/* ⚠ ONLY THE PRESSED BUTTON BECOMES CANCEL. During "Refresh all" all
-                                three rows are being worked on, but none of them owns the run, so
-                                all three stay disabled — a Cancel on a row would otherwise have to
-                                answer "cancel what, this index or the run?" and either answer is
-                                a surprise. */}
-                            {runOwner === ix.label ? (
-                              <button type="button"
-                                onClick={(e) => { e.stopPropagation(); void cancelRun(); }}
-                                title={`Stop refreshing ${ix.name}. The step in flight stops at its next safe point and the fundamentals fill is not started; everything already fetched is kept.`}
-                                className="text-[12px] px-2 py-0.5 rounded-lg border border-warn-500/40 bg-warn-500/10 text-warn-500 hover:bg-warn-500/20">
-                                Cancel
-                              </button>
-                            ) : (
-                              <button type="button" disabled={runOwner !== null || deleting != null}
-                                onClick={(e) => { e.stopPropagation(); void refresh([ix.label], ix.label); }}
-                                title={`Refresh ${ix.name}: everything this row and its expanded grid read, for every constituent — not only the ones with gaps. Constituents, market caps and the two prices from Yahoo, then a refetch of every constituent's fundamentals from GuruFocus (one call each, against a monthly quota). Present-but-stale figures are replaced. Takes minutes — progress and Cancel are in the pop-ups bottom-right.`}
-                                className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
-                                Refresh
-                              </button>
-                            )}
-                            {/* Only where Refresh can put it back — see `rebuildable`. */}
-                            {ix.rebuildable && (
-                              <button type="button" disabled={runOwner !== null || deleting != null}
-                                onClick={(e) => { e.stopPropagation(); void del(ix.label, d?.member_count); }}
-                                title={`Delete the ${ix.name} universe so Refresh can be watched rebuilding it. Membership only — prices and market caps are untouched.`}
-                                aria-label={`Delete the ${ix.name} universe`}
-                                className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-800/40 text-fg-faint hover:text-neg-400 hover:border-neg-500/40 disabled:opacity-50">
-                                {deleting === ix.label ? '…' : 'Delete'}
-                              </button>
-                            )}
-                          </div>
-                        )}
+                        <div className="inline-flex items-center gap-1">
+                          {/* ⚠ ONLY THE PRESSED BUTTON BECOMES CANCEL. During "Refresh all" all
+                              three rows are being worked on, but none of them owns the run, so
+                              all three stay disabled — a Cancel on a row would otherwise have to
+                              answer "cancel what, this index or the run?" and either answer is
+                              a surprise. */}
+                          {runOwner === ix.label ? (
+                            <button type="button"
+                              onClick={(e) => { e.stopPropagation(); void cancelRun(); }}
+                              title={`Stop refreshing ${ix.name}. The step in flight stops at its next safe point and the fundamentals fill is not started; everything already fetched is kept.`}
+                              className="text-[12px] px-2 py-0.5 rounded-lg border border-warn-500/40 bg-warn-500/10 text-warn-500 hover:bg-warn-500/20">
+                              Cancel
+                            </button>
+                          ) : (
+                            <button type="button" disabled={runOwner !== null || deleting != null}
+                              onClick={(e) => { e.stopPropagation(); void refresh([ix.label], ix.label); }}
+                              title={`Refresh ${ix.name}: everything this row and its expanded grid read, for every constituent — not only the ones with gaps. Constituents, market caps and the two prices from Yahoo, then a refetch of every constituent's fundamentals from GuruFocus (one call each, against a monthly quota). Present-but-stale figures are replaced. Takes minutes — progress and Cancel are in the pop-ups bottom-right.`}
+                              className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
+                              Refresh
+                            </button>
+                          )}
+                          {/* ⚠ STILL ADMIN-ONLY, BESIDE A REFRESH THAT IS NOT — and that pairing
+                              IS the rule this page draws. Refresh makes the row current; Delete
+                              throws the membership away and is a change to what the row SAYS.
+                              Only where Refresh can put it back — see `rebuildable`. */}
+                          {isAdmin && ix.rebuildable && (
+                            <button type="button" disabled={runOwner !== null || deleting != null}
+                              onClick={(e) => { e.stopPropagation(); void del(ix.label, d?.member_count); }}
+                              title={`Delete the ${ix.name} universe so Refresh can be watched rebuilding it. Membership only — prices and market caps are untouched.`}
+                              aria-label={`Delete the ${ix.name} universe`}
+                              className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-800/40 text-fg-faint hover:text-neg-400 hover:border-neg-500/40 disabled:opacity-50">
+                              {deleting === ix.label ? '…' : 'Delete'}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                     {isOpen && (

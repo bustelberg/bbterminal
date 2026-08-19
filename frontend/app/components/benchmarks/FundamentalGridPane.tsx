@@ -6,7 +6,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { traceError } from '../../../lib/debugTrace';
-import { useIsAdmin } from '../../../lib/hooks/useEffectiveRole';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { startJob } from '../../../lib/stores/jobs';
 import type { FundamentalGrid, FundamentalGridRow } from '../../../lib/types/api';
@@ -102,7 +101,6 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   /** Guards the Total row's button only. ⚠ The run's progress belongs to the toast — a second
    *  rendering of one job is a second thing to keep in step. */
   const [filling, setFilling] = useState(false);
-  const isAdmin = useIsAdmin();
 
   const data = byCadence[cadence] ?? null;
 
@@ -458,7 +456,10 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
    */
   // ⚠ DERIVED FROM THE HEADINGS AND THE CAPPED FLAG ONLY — never from the rows. See `gridWidths`:
   // the moment a width depends on the data, the table's shape depends on the slider.
-  const { widths, total } = gridWidths(measures.map((c) => c.label), isAdmin);
+  // ⚠ `true` — THE FETCH COLUMN IS ALWAYS RENDERED NOW (2026-08-19). It used to be admin-only and
+  // this flag had to agree with the three `isAdmin` guards below, or every column after them took
+  // its neighbour's width. One less thing that can disagree.
+  const { widths, total } = gridWidths(measures.map((c) => c.label), true);
 
   return (
     <div className="space-y-3">
@@ -617,10 +618,11 @@ sliders never change it, because the running order is anchored to a fixed period
               <th className="text-left px-3 py-2 font-medium sticky left-[3rem] bg-card z-30 whitespace-nowrap">
                 Company
               </th>
-              {/* ⚠ ADMIN ONLY, AND HIDDEN RATHER THAN DISABLED. The ingest spends GuruFocus quota,
-                  so the API gate holds it to admins; showing a user a button that 403s is the
-                  thing `useIsAdmin` exists to prevent. `gridWidths` is passed the same flag, or
-                  every column after these takes its neighbour's width.
+              {/* ⚠ NO LONGER ADMIN-ONLY (2026-08-19). The ingest still spends GuruFocus quota —
+                  that is why it was gated — but this grid is the one place that shows WHICH
+                  constituents are missing a figure, so the reader who can see the hole is now the
+                  one who can fill it. The API gate agrees
+                  (`_auth_middleware.py::_USER_REFRESH_PATTERNS`); nothing here 403s.
 
                   ⚠⚠ ONE BUTTON, AND IT FETCHES ONLY WHAT THIS TABLE SHOWS. All nineteen columns
                   here come from ONE GuruFocus feed (`fetch_financials`) — market cap included. It
@@ -629,14 +631,12 @@ sliders never change it, because the running order is anchored to a fixed period
                   feeds are reachable where they ARE rendered (`/api/earnings/{cid}/refresh` takes
                   a `source`), so nothing was lost by dropping them from here — and a per-row
                   button that fetches what its own table shows is the rule worth keeping. */}
-              {isAdmin && (
-                <th className="px-2 py-2 font-medium text-left whitespace-nowrap
-                               text-[11px] text-fg-faint"
-                  title="ONE GuruFocus call. Loads the statements blob — every column in this
+              <th className="px-2 py-2 font-medium text-left whitespace-nowrap
+                             text-[11px] text-fg-faint"
+                title="ONE GuruFocus call. Loads the statements blob — every column in this
 table, market cap included, for every year and both the annual and trailing-twelve-month views.">
-                  Fetch
-                </th>
-              )}
+                Fetch
+              </th>
               <th className="text-left px-2 py-2 font-medium whitespace-nowrap" title="GuruFocus exchange code.
 The other half of the identifier — GuruFocus addresses a stock as EXCHANGE:TICKER, and a bare ticker is
 ambiguous across venues. US listings are the exception: GuruFocus addresses those by ticker alone.">Exch</th>
@@ -721,23 +721,21 @@ reported in. Every value column is converted to EUR; this is what the native too
                   has no work: the job ran to completion having spent **zero** API calls. The
                   tooltip says so, so the zero state reads as "confirm" rather than as a dead
                   button. */}
-              {isAdmin && (
-                <td className="px-2 py-2">
-                  <button type="button" onClick={() => void fillAll()} disabled={filling}
-                    title={(data?.fillable ?? 0) > 0
-                      ? `Fetch the statements feed for the ${data?.fillable} constituents missing `
-                        + 'it — one API call each, eight at a time. Progress, the running quota '
-                        + 'spend and a Cancel appear bottom-right.'
-                      : 'Nothing is missing as of this table’s last load. Pressing re-checks '
-                        + 'against the database and costs no API calls if that is still true.'}
-                    className="cursor-pointer text-[11px] px-1.5 py-0.5 rounded border
-                               border-neutral-700 text-fg-subtle hover:text-accent-300
-                               hover:border-accent-500/50 transition-colors whitespace-nowrap
-                               disabled:opacity-40 disabled:cursor-wait">
-                    {filling ? '…' : `All ${data?.fillable ?? 0}`}
-                  </button>
-                </td>
-              )}
+              <td className="px-2 py-2">
+                <button type="button" onClick={() => void fillAll()} disabled={filling}
+                  title={(data?.fillable ?? 0) > 0
+                    ? `Fetch the statements feed for the ${data?.fillable} constituents missing `
+                      + 'it — one API call each, eight at a time. Progress, the running quota '
+                      + 'spend and a Cancel appear bottom-right.'
+                    : 'Nothing is missing as of this table’s last load. Pressing re-checks '
+                      + 'against the database and costs no API calls if that is still true.'}
+                  className="cursor-pointer text-[11px] px-1.5 py-0.5 rounded border
+                             border-neutral-700 text-fg-subtle hover:text-accent-300
+                             hover:border-accent-500/50 transition-colors whitespace-nowrap
+                             disabled:opacity-40 disabled:cursor-wait">
+                  {filling ? '…' : `All ${data?.fillable ?? 0}`}
+                </button>
+              </td>
               {/* Exch · Ticker · Ccy — the identity columns, which a total has no value for. The
                   count here must track `fixedWidthsRem`: one short and every figure after it
                   shifts a column left, silently, still rendering as a plausible number. */}
@@ -835,25 +833,23 @@ reported in. Every value column is converted to EUR; this is what the native too
                       )}
                     </span>
                   </td>
-                  {isAdmin && (
-                    <td className="px-2 py-1.5">
-                      {/* ⚠ NO BUTTON ON A ROW THAT CANNOT BE FETCHED. The backend refuses these
-                          before spending a call, so pressing it was always free — but it returned
-                          a refusal that read like a failure, and offering an action that never
-                          works is how a real gap and a permanent answer come to look alike. The
-                          badge in the name cell says why. */}
-                      {ident.unavailable_label
-                        ? <span className="text-fg-faint text-[11px]">—</span>
-                        : (
-                          <FetchButton
-                            busy={fetching.has(id)}
-                            title={`ONE GuruFocus call. Loads every column of this table for ${
-                              ident.name ?? `company ${id}`} — market cap included — for every year, `
-                              + 'annual and trailing-twelve-month.'}
-                            onClick={() => void fetchOne(id, ident.name ?? null)} />
-                        )}
-                    </td>
-                  )}
+                  <td className="px-2 py-1.5">
+                    {/* ⚠ NO BUTTON ON A ROW THAT CANNOT BE FETCHED. The backend refuses these
+                        before spending a call, so pressing it was always free — but it returned
+                        a refusal that read like a failure, and offering an action that never
+                        works is how a real gap and a permanent answer come to look alike. The
+                        badge in the name cell says why. */}
+                    {ident.unavailable_label
+                      ? <span className="text-fg-faint text-[11px]">—</span>
+                      : (
+                        <FetchButton
+                          busy={fetching.has(id)}
+                          title={`ONE GuruFocus call. Loads every column of this table for ${
+                            ident.name ?? `company ${id}`} — market cap included — for every year, `
+                            + 'annual and trailing-twelve-month.'}
+                          onClick={() => void fetchOne(id, ident.name ?? null)} />
+                      )}
+                  </td>
                   <td className="px-2 py-1.5 font-mono text-fg-faint truncate"
                     title={ident.exchange ?? undefined}>
                     {ident.exchange ?? '—'}

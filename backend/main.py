@@ -190,6 +190,16 @@ def _reset_stale_backfills() -> None:
 # clients) those workers stay stuck on in-flight DB calls and new read
 # requests QUEUE behind them, hanging until the client times out (~300s).
 # Give blocking I/O ample headroom so a slow dependency degrades gracefully.
+# The benchmark blends behind the Fundamental modal's Long Equity tab cost ~20s to build for ACWI
+# and are dropped by every fundamentals write. They have no per-user dimension, so rebuilding them
+# once in the background spares every viewer of every portfolio the wait. ARMED HERE AND NOWHERE
+# ELSE — a process that is not serving pages (a unit test calling `invalidate()`, a script) must
+# never start the thread. `BLEND_PREWARM=` in the env disables it. See `routers/_blend_prewarm.py`.
+@app.on_event("startup")
+def _arm_blend_prewarm() -> None:
+    from routers import _blend_prewarm  # noqa: PLC0415
+    _blend_prewarm.arm()
+
 @app.on_event("startup")
 async def _size_io_thread_pool() -> None:
     import asyncio  # noqa: PLC0415

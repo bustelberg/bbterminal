@@ -151,10 +151,13 @@ const REPORT_LABELS: Record<string, string> = {
 
 
 export default function PortfolioOverviewPanel() {
-  // ⚠ THE TABLE IS FOR EVERYONE; CHANGING IT IS NOT. Scraping AIRS, deleting an account and
-  // pinning a Class / ISIN / Link are all admin-only at the API gate, so the controls are hidden
-  // rather than left to 403 — a button that only fails is worse than no button. Every FIGURE stays
-  // visible: a non-admin reads the same portfolios, holdings and returns an admin does.
+  // ⚠ READING AND REFRESHING ARE FOR EVERYONE; CHANGING WHAT THE TABLE SAYS IS NOT. The line moved
+  // (2026-08-19): re-scanning AIRS — the fleet button, a row's, and the Analyse modal's — is now
+  // open to every authenticated user, because a reader who can see a stale figure and cannot act
+  // on it is worse off than one who can. Deleting an account, renaming a book and pinning a Class
+  // / ISIN / Link stay admin-only at the API gate, so THOSE controls are hidden rather than left
+  // to 403 — a button that only fails is worse than no button. The split is refresh vs. mutate,
+  // and `_auth_middleware.py::_USER_REFRESH_PATHS` is the same split on the server.
   const isAdmin = useIsAdmin();
   const [rows, setRows] = useState<AirsPortfolioOverview[] | null>(null);
   // Sort. Name ascending by default: the list is read to FIND a portfolio far more often than to
@@ -820,32 +823,30 @@ export default function PortfolioOverviewPanel() {
           {/* Scan every portfolio that NEEDS it — the backend skips an account whose last pass got
               all four reports within the last few hours, so a press after a full run is seconds
               rather than minutes. Shift-click forces a full re-scan. */}
-          {isAdmin && (
-            <button type="button"
-              onClick={(e) => { if (allJob) { void cancelRefreshAll(); } else { void refreshAll(e.shiftKey); } }}
-              // Inert only in the gap between the press and the job id arriving — see the row button.
-              disabled={refreshingAll && !allJob}
-              title={allJob
-                ? (modelsJob
-                  ? 'Stop the model-portfolio scan. The portfolio being counted finishes first (seconds), then it stops — every count already stored is kept.'
-                  : 'Stop the scan. The account being read finishes first (seconds), then it stops — everything already downloaded is kept.')
-                : 'Everything AIRS has: Rapportage → Front-Office (Actieve · Interne · zonder consolidatie), then Rendement, Vermogensoverzicht, Mutaties and Model for each book — plus the model portfolios if they have never been scanned. An account fully scanned in the last few hours is skipped. Shift-click forces a full re-scan of everything (minutes).'}
-              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-wait ${
-                allJob
-                  ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
-                  : 'border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50'}`}>
-              {allJob ? <span className="text-[11px] leading-none">✕</span>
-                      : <RefreshIcon spinning={refreshingAll} size={12} />}
-              {/* ⚠ BOTH PHASES NOW OFFER CANCEL. Phase two used to run after the fleet job had
-                  resolved, so `fleetJob` was already null and the label was the only thing left
-                  saying the button was busy — a control that reads "Scanning models…" for minutes
-                  with no way to stop it. It is a job of its own now, so `allJob` is whichever half
-                  is live and the ✕ means the same thing throughout. */}
-              {allJob ? (modelsJob ? 'Cancel model scan' : 'Cancel scan')
-                : refreshingAll ? (scanningModels ? 'Scanning models…' : 'Refreshing…')
-                : 'Refresh all'}
-            </button>
-          )}
+          <button type="button"
+            onClick={(e) => { if (allJob) { void cancelRefreshAll(); } else { void refreshAll(e.shiftKey); } }}
+            // Inert only in the gap between the press and the job id arriving — see the row button.
+            disabled={refreshingAll && !allJob}
+            title={allJob
+              ? (modelsJob
+                ? 'Stop the model-portfolio scan. The portfolio being counted finishes first (seconds), then it stops — every count already stored is kept.'
+                : 'Stop the scan. The account being read finishes first (seconds), then it stops — everything already downloaded is kept.')
+              : 'Everything AIRS has: Rapportage → Front-Office (Actieve · Interne · zonder consolidatie), then Rendement, Vermogensoverzicht, Mutaties and Model for each book — plus the model portfolios if they have never been scanned. An account fully scanned in the last few hours is skipped. Shift-click forces a full re-scan of everything (minutes).'}
+            className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-wait ${
+              allJob
+                ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
+                : 'border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50'}`}>
+            {allJob ? <span className="text-[11px] leading-none">✕</span>
+                    : <RefreshIcon spinning={refreshingAll} size={12} />}
+            {/* ⚠ BOTH PHASES NOW OFFER CANCEL. Phase two used to run after the fleet job had
+                resolved, so `fleetJob` was already null and the label was the only thing left
+                saying the button was busy — a control that reads "Scanning models…" for minutes
+                with no way to stop it. It is a job of its own now, so `allJob` is whichever half
+                is live and the ✕ means the same thing throughout. */}
+            {allJob ? (modelsJob ? 'Cancel model scan' : 'Cancel scan')
+              : refreshingAll ? (scanningModels ? 'Scanning models…' : 'Refreshing…')
+              : 'Refresh all'}
+          </button>
           {/* The POLICY, beside the thing that measures against it. Shown to everyone and editable
               by admins only — a non-admin reading what the bands are supposed to be is exactly the
               use this has for them, and hiding it would leave the numbers on this page with no
@@ -973,7 +974,7 @@ export default function PortfolioOverviewPanel() {
                           {/* Re-scan just this portfolio (a few seconds). stopPropagation so it does
                               not also toggle the row's holdings. `items-stretch` on the wrapper keeps
                               this exactly the height of the Analyse button beside it. */}
-                          {isAdmin && (() => {
+                          {(() => {
                             const pf = r.dynamic_portefeuille;
                             const busy = refreshingRows.has(pf);
                             const stopping = cancelWanted.has(pf);
@@ -1055,10 +1056,7 @@ export default function PortfolioOverviewPanel() {
                         {(r.missing_reports?.length ?? 0) > 0 && (
                           <span className="ml-1.5 text-[11px] text-warn-300"
                             title={`This account's last scan did not retrieve: ${r.missing_reports!
-                              .map((c) => REPORT_LABELS[c] ?? c).join(', ')}. Its other figures are from the newer scan, so the row mixes dates — ${
-                              // Don't send a reader to a button their role does not render.
-                              isAdmin ? 'retry with the Refresh button on the left.'
-                                : 'the daily scan retries it automatically.'}`}>
+                              .map((c) => REPORT_LABELS[c] ?? c).join(', ')}. Its other figures are from the newer scan, so the row mixes dates — retry with the Refresh button on the left, or leave it to the daily scan.`}>
                             ⚠ {r.missing_reports!.map((c) => REPORT_LABELS[c] ?? c).join(', ')}
                           </span>
                         )}
@@ -1155,12 +1153,13 @@ export default function PortfolioOverviewPanel() {
         // paint the PREVIOUS portfolio's composition for the ~4s the next one takes to load —
         // a complete, plausible, wrong answer with no loading state to warn the reader. The key
         // forces a fresh mount, so an unloaded modal can only ever show "Loading composition…".
-        // ⚠ THE ROW'S OWN `refreshOne`, PASSED THROUGH — not a second implementation. Admin-gated
-        // exactly as the row's button is (the scan writes, and the API gate holds it to admins),
-        // and `refreshSeq` bumps when it finishes so the modal re-reads what the scan rebuilt.
+        // ⚠ THE ROW'S OWN `refreshOne`, PASSED THROUGH — not a second implementation. Offered on
+        // exactly the same terms as the row's button (open to every user since 2026-08-19; absent
+        // only when there is no AIRS book behind the modal to re-scan), and `refreshSeq` bumps
+        // when it finishes so the modal re-reads what the scan rebuilt.
         <PortfolioAnalysisModal key={analyse.id ?? analyse.name} id={analyse.id} basket={analyse.basket}
           name={analyse.name}
-          onRefresh={isAdmin && analyse.pf ? () => void refreshOne(analyse.pf!) : undefined}
+          onRefresh={analyse.pf ? () => void refreshOne(analyse.pf!) : undefined}
           refreshing={!!analyse.pf && refreshingRows.has(analyse.pf)}
           refreshTitle="Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."
           // ⚠ THE ROW'S OWN CANCEL, NOT A SECOND ONE — and passed unconditionally while the modal

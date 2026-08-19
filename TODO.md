@@ -1,7 +1,173 @@
 # Open follow-ups — resume here
 
 Running list of unfinished / offered-but-not-built work, newest context first.
-Last updated **2026-08-18**. Delete items as they're done.
+Last updated **2026-08-19**. Delete items as they're done.
+
+---
+
+## ⏱ Fundamental modal → Long Equity: the ACWI benchmark line — DONE (2026-08-19)
+
+**The complaint**: picking ACWI makes every chart's index line take a while; AEX is instant.
+
+**Measured** with the new `backend/scripts/profile_longequity_bench.py` (fires the same requests
+the tab does, concurrently). The size ratio, not the query time, was the whole thing:
+
+| | AEX | ACWI |
+|---|---|---|
+| constituents | 22 | 1,514 |
+| cold wall | 2.3s | 20.5s |
+| decoded JSON, whole selection | 0.18 MB | **13.21 MB** |
+
+`_blend_cache` already cached the responses, but it cached the **payload** — so 13 MB shipped on
+every load, warm included, and each hit re-ran `jsonable_encoder`+`json.dumps` (137 ms × 12) to
+rebuild identical bytes.
+
+**Shipped**, in order (full write-up in [`docs/conventions.md`](docs/conventions.md)):
+
+1. `cached_blend` caches the **gzipped body** + honours `Accept-Encoding`. 13.21 → **4.85 MB**
+   wire; a hit is a memcpy.
+2. `market_cap_by_period` (29.9% of every payload, the same table ten times) lifted into
+   `POST /api/earnings/universe-period-caps`, spliced back client-side by `useBenchInputs`.
+   → 9.34 MB decoded, **3.16 MB** wire. ⚠ `{}` vs *absent* is a real distinction — pinned by
+   `spliceCaps` in `benchSeries.test.ts`.
+3. `_MAX_ENTRIES` 24 → 84, the grid to its own `_grid_cache` (cap 6), TTL 30 min → 6 h.
+4. `routers/_blend_prewarm.py` — background rebuild off `invalidate()`, debounced 90s, serial
+   (21.8s for ACWI), stands off `_PIPELINE_LOCK`, armed only by `main.py`. `BLEND_PREWARM=`
+   disables; default `ACWI,SP500,AEX` annual.
+
+**Net**: 13.21 MB uncompressed → 3.16 MB on the wire (4.2x), and after a fundamentals write the
+first reader now finds it warm instead of waiting ~20s.
+
+**Left deliberately:**
+
+* **Quarterly is not prewarmed** — it doubles the budget for a view most readers never open, and
+  the cache still fills it lazily on the first press. Add `ACWI:quarterly` to `BLEND_PREWARM` if
+  that turns out to be wrong.
+* **`portfolio-revenue-matrix` still inlines its caps** (it renders them in its own cells). Its two
+  benchmark calls from the Tables tab are therefore ~30% bigger than they need to be; not worth a
+  second splice path for two requests.
+* **The remaining 9.34 MB is real data** — 1,514 constituents × 2-3 metric series each, which the
+  client reduces to one line. Blending server-side would remove it, and would also destroy the
+  invariant the whole design rests on (both lines computed by the same client helper, so there is
+  no "benchmark margin" anywhere to drift). Do not do it casually.
+
+---
+
+## 🔑 "Auth session missing" on a new account — code fixed, PROD DASHBOARD STILL TO DO (2026-08-19)
+
+Someone creating an account in production reached `/set-password`, chose a password, pressed Save
+and got **"Auth session missing"**. Cause: `/auth/confirm` threw away the result of
+`exchangeCodeForSession`/`verifyOtp` and redirected to the password form whatever happened.
+
+**Shipped** (see the ⚠⚠ in [`CLAUDE.md`](CLAUDE.md) and the route's own docstring):
+
+* `/auth/confirm` checks `error`/`error_code`/`error_description` FIRST, checks every result,
+  confirms with `getUser()`, and sends failures to `/login?error=…` with an actionable sentence.
+* `lib/authError.ts` maps the causes to sentences (+ `authError.test.ts`). It tells the
+  wrong-browser case apart from the expired case, because their fixes differ.
+* `/set-password` refuses to render a password form with no session.
+* `/login` shows the message and opens in signup mode.
+* `supabase/templates/{confirmation,magic_link,recovery}.html` + `config.toml` — the token_hash URL.
+
+**⚠ NOT DONE — needs the hosted project's dashboard, which is yours to change:**
+
+1. **Authentication → Emails** — the current *Confirm signup* is still Supabase's default
+   (`<a href="{{ .ConfirmationURL }}">`, confirmed 2026-08-19). Change the href only:
+
+   | template | href |
+   |---|---|
+   | Confirm signup | `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup` |
+   | Magic Link | `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink` |
+   | Reset Password | `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery` |
+
+   ⚠ *Confirm signup* is the one the signup flow actually sends; fixing only Magic Link leaves the
+   broken case broken. ⚠ `type` is pinned per template rather than `{{ .Email_Action_Type }}` — a
+   variable that fails to render leaves `type=` empty, which the route can only refuse.
+2. **Authentication → URL Configuration**: Site URL = the Vercel production origin, and
+   `https://<prod-origin>/auth/confirm` present in **Redirect URLs**. If `emailRedirectTo` is not
+   allow-listed Supabase silently falls back to the Site URL and the token never reaches the route.
+3. Locally: `npx supabase stop && npx supabase start` to pick up the new templates.
+
+Until step 1 is done the links still go through `/auth/v1/verify`, so the mail-scanner and
+cross-device failures can still happen — they will now say so on the login page instead of dying at
+the password form.
+
+**Not built:** no rate-limit or resend-throttle feedback on the signup form; `[auth.rate_limit]
+email_sent = 2` per hour means a person who requests three links gets a bare Supabase error.
+
+---
+
+## 📊 ACWI benchmark: the tile now reads the ETF — the /benchmarks panel does NOT (2026-08-19)
+
+The Analyse modal's `vs ACWI return €` is the iShares ACWI ETF's own price series from GuruFocus,
+EUR-converted at each mark's own rate (+14.67% YTD against the rebuild's +11.83%). Full write-up,
+numbers and the canary in [`docs/airs-portfolios.md`](docs/airs-portfolios.md).
+
+**Deliberately NOT changed, and each for a reason:**
+
+* **`/benchmarks` panel still shows the rebuild.** Its product is the constituent table — that is
+  what it exists for. The right move is to show the ETF figure *beside* it, so the gap becomes a
+  visible coverage diagnostic instead of a silent error. Not built.
+* **Attribution still reconciles to the rebuild** (an ETF price has no constituents). Two benchmark
+  numbers one click apart; both surfaces name their source. If that proves confusing in use, the
+  options are to show the rebuild figure in the tile's tooltip, or to state the gap explicitly in
+  the attribution header.
+* **Price return, not total return.** GF's `dividend` endpoint has the distributions
+  ($1.0097 ex-15 Jun 2026 = +0.71pp YTD, i.e. ACWI TR is +15.39% EUR). A TR line is one small
+  function away and would match what most external sources quote — but it changes what the tile
+  MEANS, so it is a deliberate decision, not a follow-on.
+* **AEX has no proxy.** Every European UCITS line 404s on GuruFocus. Worth one probe of the
+  documented `isin/{ISIN}` bridge (NL0000249100) before concluding it is unreachable.
+
+**Loose ends noticed while measuring, not fixed:**
+
+* The rebuild has **no staleness guard and no common as-of date** — each constituent runs to its own
+  last close and `as_of` reports the max. On local data 58.5% of ACWI's weight was >30 days behind
+  the header date. It still backs the AEX, every pre-inception window, and all attribution.
+* **~10% of ACWI's weight is priced on a venue whose currency ≠ the company's** (Alphabet 3.82% on
+  a EUR line, `LLY.SG`, `IBM.HM`, `CHV.DU`) — `return_local == return_eur` there, so no FX leg is
+  applied at all. That is the documented wrong-listing family, biting the benchmark rebuild.
+* A pre-inception rebuild window returns nonsense (`2005-03-01` → −97.99% over 850 members). Not
+  reachable from the UI today, but nothing refuses it.
+
+---
+
+## ⏱ Analyse modal: the FIRST open is still the full load (2026-08-19)
+
+**Done that day**: the cross-portfolio leg cache (`_analysis_cache.leg`) + routing
+`compute_portfolio_performance` through `_airs_ref`. A *second* book now costs 27 round trips and
+12 COPYs where it cost 35 and 24; the basket path went 396ms → 113ms. Full write-up, numbers and
+the two scripts (`profile_analysis_modal.py`, `verify_analysis_cache.py`) in
+[`docs/airs-portfolios.md`](docs/airs-portfolios.md).
+
+**Not done**: a cold server still pays the whole ~7s (production) on the first open, and the
+fingerprint moves whenever any watched table is written — so the first open after each daily price
+refresh is cold again for everybody. Two ways to remove that, neither built:
+
+* **Warm the cache after the AIRS refresh.** `airs_vermogen_refresh` (09:30 Amsterdam) and the
+  05:00/06:00 price ticks are what move the fingerprint. Recomputing the 26 paired books afterwards
+  (~26 × 2s with the legs warming each other) would make the first human open of the day a HIT.
+  ⚠ Must run AFTER the price writes settle, or it warms against a fingerprint that is about to
+  change; ⚠ and must not overlap a pipeline — this is a free-tier box and the modal computes in a
+  worker thread, so background warming competes with real requests for the GIL.
+* **Prefetch on hover of the Analyse button.** Cheapest perceived win — the request is in flight
+  before the click. ⚠ **Needs single-flight in `_analysis_cache` first**: hover-then-click within
+  the compute window would otherwise run the same ~7s computation twice, and a fast mouse down the
+  table would fire several. Bound it (one outstanding prefetch, ~150ms dwell) or it makes the real
+  click slower rather than faster.
+
+**Also measured and NOT taken** — overlapping the benchmark side with the portfolio side in a
+thread. It is the only lever left that attacks the *first* open (~2.6s of the production load is
+serialized network wait), but `common/pg.py` states in capitals that a psycopg connection is not
+thread-safe and each worker needs its OWN `copy_connection_scope`, while `read_cache`'s ContextVar
+does not propagate to a bare `threading.Thread`. Getting either wrong shares a live connection
+across threads. Worth doing deliberately, not as a footnote to a caching change.
+
+**Remaining round trips, if someone wants the cold path**: `airs_holding` is read through **6
+distinct query shapes** (3 per portefeuille × the wrapped book) inside `resolve_account_isins` /
+`_wrapped_book_marks` — the exact fragmentation `_airs_ref` exists to fix, worth ~4 round trips
+(~0.24s production). The paged tables each spend one extra request proving the page was the last
+one, which is the load-bearing "break on an empty page" rule and must stay.
 
 ---
 

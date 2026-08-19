@@ -6,8 +6,13 @@
 run, what to validate, and what it costs. A generic starter would need a registry of kinds mapping
 strings to callables, which is an open door to running arbitrary work by name.
 
-Admin-only by default: none of these paths are in `_USER_READ_PREFIXES`, and every job that exists
-today spends GuruFocus quota, so only an admin can start one and only an admin can watch one.
+⚠ THE TRANSPORT IS NOT ADMIN-ONLY ANY MORE (2026-08-19). `/api/jobs` is in `_USER_READ_PREFIXES`
+and `/api/jobs/{id}/cancel` in `_USER_REFRESH_PATTERNS`, because every /management-dashboard
+refresh reports through here — a user who may START a run must be able to see it move and stop it,
+or the run has no progress and no way out. STARTING is still owned by the endpoint that knows the
+work, and each of those decides its own tier: the Dashboard's refreshes are open, every other job
+starter is admin-only. Listing is global, so a user sees admin-started jobs too; the rows carry a
+label and a count, nothing about their subject that is not already on a page they can open.
 """
 from __future__ import annotations
 

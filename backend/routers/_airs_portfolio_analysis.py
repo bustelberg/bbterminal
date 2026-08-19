@@ -114,6 +114,105 @@ _ALLOC_ORDER = ["Equity", "Bonds", "Alternatives", "Cash", UNKNOWN_BUCKET]
 _ALWAYS_SHOWN = ("Equity", "Bonds", "Alternatives", "Cash")
 
 
+# ⚠⚠ THE BENCHMARK LEGS ARE NOT ABOUT THE PORTFOLIO ON SCREEN, AND UNTIL 2026-08-19 EVERY BOOK
+# PAID FOR THEM AGAIN. `members`, `index_returns` and `_bench_start_caps` take a LABEL and a
+# WINDOW; they do not take a portfolio. There are 26 paired books on /management-dashboard, every
+# one of them defaults to the same benchmark, and opening them in turn recomputed the identical
+# S&P constituents, caps and returns 26 times — measured at 757ms and 8 round trips per open, i.e.
+# ~1.3s of a production load, spent on an answer already in memory.
+#
+# ⚠ MEMOIZED ON THE DATA FINGERPRINT, NOT A TTL — `_analysis_cache.leg`. This page's discipline is
+# that a figure is current or absent, and the whole argument for that mechanism is in that module:
+# if any watched table has been written the key simply does not match, so a stale benchmark is not
+# unlikely here, it is unreachable.
+#
+# ⚠ `date.today()` IS IN THE KEY EXPLICITLY. `index_returns` prices to "today", which is an input
+# it takes from the clock rather than from the database — so a fingerprint that did not move
+# overnight (nothing written) would otherwise serve yesterday's window under today's question.
+# It is the one input here the fingerprint cannot see.
+def _leg(key: tuple, compute):
+    from routers import _analysis_cache as ac  # noqa: PLC0415
+
+    return ac.leg(key, compute)
+
+
+def _today() -> str:
+    from datetime import date  # noqa: PLC0415
+
+    return date.today().isoformat()
+
+
+def _bench_members(label: str) -> tuple[list[dict], dict]:
+    """`_members`, memoized across portfolios — see the note above."""
+    return _leg(("bench_members", label), lambda: _members(label))
+
+
+def _index_returns(label: str, starts: list[str]) -> dict[str, dict]:
+    """The benchmark's EUR return per window — the index ETF's own price series where there is
+    one, the constituent reconstruction where there is not. Memoized across portfolios.
+
+    ⚠⚠ THE ETF IS THE BASIS FOR THE HEADLINE NOW (2026-08-19), AND THE REBUILD IS THE FALLBACK.
+    Measured on ACWI YTD: the rebuild says +11.83% EUR against the iShares ACWI ETF's +14.67%.
+    That 2.8pp is structural — full market cap where MSCI float-adjusts (Aramco 1.50% vs a
+    published 0.044%), 1,678 of 1,998 members priced with the missing weight redistributed, a
+    static membership snapshot, and every constituent running to its own last close. See
+    `_benchmark_etf` for the numbers and the canary that proves the vendor answer is real.
+
+    ⚠ PER WINDOW, NOT PER LABEL. A since-inception anchor can predate the fund (ACWI's first bar
+    is 2008-03-28) and the AEX has no reachable proxy at all, so the rebuild answers whatever the
+    ETF cannot. Falling back per LABEL would put a whole portfolio's YTD back on the rebuild
+    because its inception was in 2005.
+
+    ⚠ AND THE REBUILD IS ONLY RUN FOR THE WINDOWS STILL MISSING. It is the expensive half — a
+    1,678-constituent COPY plus the cap join — so when the ETF answers every window (the normal
+    case for ACWI and SP500) it is not called at all.
+
+    ⚠ THE ATTRIBUTION PANEL IS DELIBERATELY NOT ROUTED THROUGH HERE. It decomposes the index name
+    by name (`index_rows`) and an ETF price has no names in it, so it still reconciles to the
+    reconstruction. Two benchmark numbers one click apart is survivable ONLY because that panel
+    already carries both and the gap between them — see `_airs_portfolio_attribution`.
+    """
+    key = ("index_returns", label, tuple(sorted(set(starts))), _today())
+    return _leg(key, lambda: _index_returns_now(label, starts))
+
+
+def _index_returns_now(label: str, starts: list[str]) -> dict[str, dict]:
+    from routers._benchmark_etf import etf_returns  # noqa: PLC0415
+
+    out = etf_returns(label, starts)
+    missing = [s for s in sorted(set(starts)) if s not in out]
+    if not missing:
+        return out
+    # `out` last: an explicit statement that the ETF wins any overlap, rather than relying on
+    # `missing` never containing a key the ETF answered.
+    return {**index_returns(label, missing), **out}
+
+
+def _bench_prov(win: dict | None) -> dict:
+    """Where the HEADLINE benchmark figure came from, for the tile's provenance ⓘ.
+
+    ⚠ IT IS NOT `benchmark_as_of`. That field describes the legs the ATTRIBUTION panel draws, which
+    are still the reconstruction's and still yfinance — so overwriting it would relabel a number
+    that did not move. These three fields describe the tile only, and are None on the rebuild path
+    (which carries no `as_of` of its own; see `_asset_benchmark.index_returns`).
+    """
+    w = win or {}
+    return {"benchmark_source": w.get("source") or "rebuild",
+            "benchmark_ticker": w.get("ticker"),
+            # ⚠ THE MARK IT ACTUALLY OPENED ON, which is NOT `ytd_from`. The anchor is 1 January;
+            # the opening price is the last close on or before it (2025-12-31 for ACWI). The ⓘ
+            # states the window it priced, not the window it was asked for — those differ by a
+            # trading day and a reader checking the figure by hand would find the wrong bar.
+            "benchmark_ytd_from": w.get("start_date"),
+            "benchmark_ytd_as_of": w.get("as_of"),
+            # The marks behind the figure, so the ⓘ can show the formula filled in. Absent on the
+            # rebuild path, which has 1,678 of them and no two to quote.
+            "benchmark_ytd_open_price": w.get("start_price"),
+            "benchmark_ytd_close_price": w.get("end_price"),
+            "benchmark_ytd_open_fx": w.get("fx_start"),
+            "benchmark_ytd_close_fx": w.get("fx_end")}
+
+
 def _bench_start_caps(label: str, start: str | None) -> dict[str, float]:
     """`{isin: market cap at `start`}` for an index — or `{}` when there is no window to open at.
 
@@ -138,7 +237,11 @@ def _bench_start_caps(label: str, start: str | None) -> dict[str, float]:
     try:
         from ._asset_benchmark import index_rows  # noqa: PLC0415
 
-        rows, _coverage = index_rows(label, start)
+        # ⚠ THE MEMO IS INSIDE THE `try`, so a failure is still handled by the policy below rather
+        # than being cached as an empty map — an outage during one open must not pin "today's caps"
+        # on the chart for everybody afterwards.
+        rows, _coverage = _leg(("index_rows", label, start, _today()),
+                               lambda: index_rows(label, start))
     except Exception as e:  # noqa: BLE001 — the chart must not fail over a weighting refinement
         _log.warning("[analysis] start-of-window caps for %s unavailable (%s: %s); "
                      "the index bar stays on today's caps", label, type(e).__name__, e)
@@ -184,6 +287,13 @@ _GRID_COLS = ("isin,name,sector,country,msci_region,domicile_country,currency,"
 
 
 def _grid(isins: list[str]) -> dict[str, dict]:
+    """{isin: asset_grid row} for the ISINs asked for. Memoized on the SET (see `_leg`): the
+    benchmark leg alone is ~500 constituents and is identical for every book on the page, and the
+    variants of a strategy ask for near-identical portfolio sets."""
+    return _leg(("grid", tuple(sorted(set(isins)))), lambda: _grid_uncached(isins))
+
+
+def _grid_uncached(isins: list[str]) -> dict[str, dict]:
     # ONE COPY instead of ceil(len/200) round trips — see `load_rows_via_copy`. The chunked
     # PostgREST loop below is the fallback and is what runs when the direct connection is
     # unavailable; both return the same rows (verified field for field, types included).
@@ -536,9 +646,10 @@ def _apply_book_source(result: dict, benchmark_label: str) -> None:
     """
     jan1 = f"{date.today().year}-01-01"
     p_ytd = result.get("book_ytd_pct")             # already computed by `_book_return`
-    bench = index_returns(benchmark_label, [jan1]) if p_ytd is not None else {}
+    bench = _index_returns(benchmark_label, [jan1]) if p_ytd is not None else {}
     b_ytd = (bench.get(jan1) or {}).get("eur_pct")
     result.update({
+        **_bench_prov(bench.get(jan1)),
         "source": "book",
         "ytd_from": jan1 if p_ytd is not None else None,
         "portfolio_ytd_pct": p_ytd,
@@ -594,14 +705,26 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
 
     ytd_from = perf.get("ytd_from") or ytd_anchor_for(effective)
     windows = [w for w in (ytd_from, effective) if w]
-    # ⚠ THE BENCHMARK IS PRICED IN THE SAME WORLD AS THE PORTFOLIO — yfinance (`asset_price`),
-    # not GuruFocus (`metric_data`). The portfolio's return comes from `asset_price`; pricing the
-    # index off a different vendor would compare two price universes with different adjustment
-    # conventions and different FX, and call the difference alpha. (It is also the only source
-    # that can price ACWI at all: GuruFocus does not sell us the UK or India.) Since 2026-07-16
-    # the /portfolios Benchmarks panel is on this path too — `_benchmark_index.compute_index` is
-    # no longer any route's basis and survives only as the SPY cross-check of the METHOD.
-    bench = index_returns(benchmark_label, windows) if windows else {}
+    # ⚠⚠ THIS USED TO READ "THE BENCHMARK IS PRICED IN THE SAME WORLD AS THE PORTFOLIO — yfinance,
+    # not GuruFocus", on the grounds that two price universes with different adjustment conventions
+    # and different FX would make the difference between them read as alpha, and that GuruFocus is
+    # "the only source that CANNOT price ACWI at all: it does not sell us the UK or India".
+    #
+    # Both halves were about RECONSTRUCTING AN INDEX FROM ITS CONSTITUENTS, and neither survives
+    # the move to the index ETF (2026-08-19). A vendor's coverage holes matter when you are
+    # summing 1,514 names and silently redistributing the weight of the ones you cannot price;
+    # they do not exist for ONE US-listed line, which GuruFocus serves in full (4,627 bars from
+    # 2008-03-28, the fund's actual inception). And the two-vendor objection was about
+    # *adjustment conventions across a universe* — on a single ETF close, GuruFocus and yfinance
+    # agree to the cent. What was really being defended is that the benchmark must not be a
+    # different KIND of number from the portfolio: both are still EUR price returns over the same
+    # window, converted at each mark's own rate.
+    #
+    # What the reconstruction cost us instead was accuracy: +11.83% against the ETF's +14.67% on
+    # ACWI YTD, from full-cap weighting, 84% pricing coverage and a static membership snapshot.
+    # `_index_returns` now prefers the ETF and falls back to the rebuild per window; see
+    # `_benchmark_etf` for the numbers and the canary run before any of it was built.
+    bench = _index_returns(benchmark_label, windows) if windows else {}
 
     b_ytd = (bench.get(ytd_from) or {}).get("eur_pct") if ytd_from else None
     b_since = (bench.get(effective) or {}).get("eur_pct") if effective else None
@@ -609,6 +732,7 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
     yf_asof = (perf.get("sources") or {}).get("yf_close")
 
     result = {
+        **_bench_prov(bench.get(ytd_from) if ytd_from else None),
         "source": "model",
         "ytd_from": ytd_from,
         "since_from": effective,
@@ -1865,7 +1989,7 @@ def compute_portfolio_analysis(portfolio_id: int,
     # --- the benchmark side -------------------------------------------------------------
     # Deduped, one row per company (the GOOGL/GOOG double-count is 11.3% of the index), and drawn
     # from the ASSET world so it is classified and priced exactly like the portfolio is.
-    bench, bench_coverage = _members(benchmark_label)
+    bench, bench_coverage = _bench_members(benchmark_label)
     bench_isins = sorted({m["isin"] for m in bench if m.get("isin")})
     bgrid = _grid(bench_isins)
     bench_items: list[tuple[float, tuple[str, str, str]]] = []
@@ -2440,6 +2564,25 @@ def _holding_risk(isins: list[str], benchmark_label: str,
                   years: int = VOL_YEARS) -> dict[str, dict]:
     """{isin: {"vol_5y_pct", "beta_5y", "mom_12_1_pct"}} from the daily EUR close.
 
+    ⚠⚠ THE ANSWER IS A PROPERTY OF THE INSTRUMENT, NOT OF THE BOOK IT IS IN — which is why it is
+    memoized per ISIN (`_analysis_cache.leg`) and not per request. This is the single most
+    expensive thing the modal does (950ms of a 2.9s local load: five years of daily closes for
+    every holding, then the signal engine, the vol and the beta per name), and the variants of a
+    strategy hold largely the same names, so the second book to be opened was recomputing figures
+    the first one had already produced. Measured on /management-dashboard: 26 paired books over
+    ~1,600 distinct ISINs.
+
+    ⚠ THE BENCHMARK IS IN THE KEY, because `beta_5y` is measured against it. Vol and momentum are
+    not — but splitting the row into two cache entries to save recomputing two thirds of it on a
+    benchmark switch would mean the three numbers on one line could come from two different
+    fingerprints. One row, one key.
+
+    ⚠⚠ AND THE MISS PATH STAYS BATCHED, WHICH IS WHY THIS USES `leg_get_many` RATHER THAN A LOOP
+    OVER `leg()`. The load below is ONE `COPY` for every holding at once (see `_daily_eur`);
+    memoizing per ISIN the naive way would serve the hits and then run that COPY once per miss —
+    turning the cheapest part of this function into ~60 round trips and making a "faster" modal
+    slower on exactly the cold path it was meant to fix.
+
     ⚠⚠ ONE LOAD FOR BOTH FIGURES. Volatility and beta read the same series over the same window, so
     computing them apart would be two panels of the same data and two chances for the two columns
     beside each other to disagree about how much history a row has.
@@ -2473,11 +2616,35 @@ def _holding_risk(isins: list[str], benchmark_label: str,
     bench_isin = _BENCHMARK_RISK_ETF.get((benchmark_label or "").upper())
     floor = _min_bars(years)
 
+    from routers import _analysis_cache as ac  # noqa: PLC0415
+
+    # ⚠ A HIT IS AN ANSWER, INCLUDING AN EMPTY ONE. A name with too little history yields `{}` and
+    # that is a real result — storing it (rather than treating "no row" as "not computed") is what
+    # stops a book of young listings from re-running the whole load on every open. `_LruTtlCache`
+    # returns None for a miss, so the empty answer is filed as a sentinel dict and read back out.
+    keys = [("holding_risk", i, benchmark_label, years) for i in want]
+    hits, misses = ac.leg_get_many(keys)
+
+    def _served(extra: dict[str, dict] | None = None) -> dict[str, dict]:
+        """Hits + whatever was just computed, EMPTY ROWS DROPPED. Callers have always read this
+        as "an ISIN present here has at least one figure"; the cache needs the opposite (an empty
+        answer is still an answer), so the two meanings are separated here rather than by changing
+        either side."""
+        rows = {k[1]: v for k, v in hits.items()}
+        rows.update(extra or {})
+        return {i: dict(r) for i, r in rows.items() if r}
+
+    if not misses:
+        return _served()
+
+    todo = [k[1] for k in misses]
     try:
-        series = _daily_eur(want + ([bench_isin] if bench_isin else []), years)
+        series = _daily_eur(todo + ([bench_isin] if bench_isin else []), years)
     except Exception as e:  # noqa: BLE001 — one missing column must never cost the whole modal
+        # ⚠ NOTHING IS FILED ON A FAILURE. An outage during one open must not pin a book's risk
+        # columns to empty for everybody who opens it afterwards.
         _log.warning("[analysis] per-holding risk failed (%s: %s)", type(e).__name__, e)
-        return {}
+        return _served()
 
     bench_w = _by_week(series.get(bench_isin or "", []))
     # ⚠ FOUR YEARS OF WEEKS, mirroring the daily floor — the two columns must not disagree about
@@ -2485,9 +2652,10 @@ def _holding_risk(isins: list[str], benchmark_label: str,
     floor_w = int(52 * (years - 1))
 
     out: dict[str, dict] = {}
-    for isin in want:
+    for isin in todo:
         eur = [(d, v) for d, v in series.get(isin, []) if v > 0]
         if len(eur) < 2:
+            out[isin] = {}
             continue
         row: dict = {}
 
@@ -2516,8 +2684,7 @@ def _holding_risk(isins: list[str], benchmark_label: str,
             _log.warning("[analysis] momentum failed for %s (%s: %s)", isin, type(e).__name__, e)
 
         if len(eur) < floor:
-            if row:
-                out[isin] = row
+            out[isin] = row
             continue
         vals = np.asarray([v for _d, v in eur], dtype=float)
         # ⚠ THROUGH `annualized_stats` — THE ONE DEFINITION OF VOL IN THIS CODEBASE, shared with the
@@ -2553,9 +2720,10 @@ def _holding_risk(isins: list[str], benchmark_label: str,
                 if var_b > 0:
                     cov = float(np.cov(ra, rb, ddof=1)[0][1])
                     row["beta_5y"] = round(cov / var_b, 2)
-        if row:
-            out[isin] = row
-    return out
+        out[isin] = row
+
+    ac.leg_put_many({("holding_risk", i, benchmark_label, years): out.get(i, {}) for i in todo})
+    return _served(out)
 
 
 async def compute_portfolio_analysis_async(portfolio_id: int,
@@ -2677,9 +2845,10 @@ def _basket_returns(holdings, benchmark_label: str) -> dict:
         if base_i is not None and float(values[base_i]) > 0:
             p_ytd = (float(values[-1]) / float(values[base_i]) - 1.0) * 100.0
             p_asof = dates[-1]
-    bench = index_returns(benchmark_label, [jan1]) if p_ytd is not None else {}
+    bench = _index_returns(benchmark_label, [jan1]) if p_ytd is not None else {}
     b_ytd = (bench.get(jan1) or {}).get("eur_pct")
     return {
+        **_bench_prov(bench.get(jan1)),
         "source": "model", "ytd_from": jan1, "since_from": None,
         "portfolio_ytd_pct": p_ytd, "portfolio_as_of": p_asof, "benchmark_as_of": p_asof,
         "strategy_ytd_pct": p_ytd, "benchmark_ytd_pct": b_ytd,
@@ -2728,7 +2897,7 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
     (port_items, port_labels, classified_w, total_w,
      port_foreign, port_holdings) = _classify_items(holdings, codes)
 
-    bench, bench_coverage = _members(benchmark_label)
+    bench, bench_coverage = _bench_members(benchmark_label)
     bench_isins = sorted({m["isin"] for m in bench if m.get("isin")})
     bgrid = _grid(bench_isins)
     bench_items: list[tuple[float, tuple[str, str, str]]] = []

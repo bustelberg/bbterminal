@@ -67,6 +67,12 @@ const CACHEABLE: RegExp[] = [
   /^\/api\/earnings\/by-isin\/[^/]+\/growth-estimates$/,
   // The eleven derived Long Equity cards + their drill-down modals, which POST the identical body.
   /^\/api\/earnings\/[a-z0-9-]+-inputs$/,
+  // ⚠ THE CAP TABLE THE TEN BENCHMARK CARDS NOW SHARE, and it does NOT match the `-inputs` line
+  // above — it needs its own entry. Ten cards ask for it in the same instant, so what actually
+  // saves the nine extra requests is `apiFetch` storing the in-flight PROMISE; being here is what
+  // keeps re-opening the modal free. A miss here is not a wrong answer, it is ten identical
+  // requests for 0.19 MB each.
+  /^\/api\/earnings\/universe-period-caps$/,
   /^\/api\/earnings\/fundamental-coverage$/,
   /^\/api\/earnings\/fundamental-blend(-metrics|-breakdown|-matrix)?$/,
   /^\/api\/earnings\/relative-growth-breakdown$/,

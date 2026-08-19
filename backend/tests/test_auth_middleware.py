@@ -161,7 +161,9 @@ class TestScheduleDetailResourceReads:
 
 class TestManagementDashboardForUsers:
     """The Management Dashboard is user-visible, so the API behind it must be readable — and
-    ONLY readable. Every mutation on that page stays admin-only."""
+    REFRESHABLE (2026-08-19). The line is refresh vs. mutate: a user may make the page's own
+    figures current, and may not change what it says. See TestManagementDashboardRefreshesAreOpen
+    for the first half; the deny tests in this class are the second."""
 
     def test_the_page_s_reads_are_allowed(self, monkeypatch):
         for path in ("/api/airs/portfolios/overview",
@@ -186,14 +188,24 @@ class TestManagementDashboardForUsers:
                      "/api/earnings/fundamental-coverage"):
             assert _run(monkeypatch, "POST", path, "user") == (200, True), path
 
-    def test_the_ingest_sibling_one_segment_down_is_still_admin_only(self, monkeypatch):
-        """⚠ WHY THE POST-READ LIST IS EXACT-MATCH, NEVER PREFIX. `fundamental-coverage` reports
-        what we hold; `fundamental-coverage/ingest` spends GuruFocus quota to go and fetch it."""
+    def test_the_ingest_sibling_one_segment_down_is_named_in_full(self, monkeypatch):
+        """⚠ WHY BOTH LISTS ARE EXACT-MATCH, NEVER PREFIX. `fundamental-coverage` reports what we
+        hold; `fundamental-coverage/ingest` spends GuruFocus quota to go and fetch it. A user may
+        now fire both — but only because each is written out by name, and this test is the
+        difference between that and a prefix that would also hand over whatever lands under
+        `/api/earnings/` next."""
         assert _run(monkeypatch, "POST", "/api/earnings/fundamental-coverage/ingest",
+                    "user") == (200, True)
+        assert _run(monkeypatch, "POST", "/api/earnings/fundamental-coverage/anything-else",
                     "user") == (403, False)
 
-    def test_scraping_airs_is_admin_only_by_every_route(self, monkeypatch):
-        """The two SSE scrapes are GETs; the refreshes are POSTs. Neither is a user's to fire."""
+    def test_the_request_held_sse_scrapes_stay_admin_only(self, monkeypatch):
+        """⚠ THE JOB FORM IS OPEN, THE SSE FORM IS NOT — see
+        TestManagementDashboardRefreshesAreOpen. These GETs hold a request open for the whole
+        Playwright scrape and belong to the admin-only /airs-portfolio page; the Dashboard starts
+        the same work as a cancellable background job. The blocking POST twins are likewise not the
+        Dashboard's — it fires `/job` for both."""
+        assert _run(monkeypatch, "GET", "/api/airs/scan", "user") == (403, False)
         assert _run(monkeypatch, "GET", "/api/airs/model-portfolios/scan", "user") == (403, False)
         assert _run(monkeypatch, "POST", "/api/airs/vermogen/refresh", "user") == (403, False)
         assert _run(monkeypatch, "POST", "/api/airs/portfolios/BUS_X/refresh", "user") == (403, False)
@@ -222,6 +234,79 @@ class TestManagementDashboardForUsers:
     def test_these_reads_still_need_a_token(self, monkeypatch):
         assert _run(monkeypatch, "GET", "/api/airs/portfolios/overview", None) == (401, False)
         assert _run(monkeypatch, "POST", "/api/airs/basket/analysis", None) == (401, False)
+
+
+class TestManagementDashboardRefreshesAreOpen:
+    """Every refresh on /management-dashboard is a non-admin's to fire (2026-08-19, on request).
+
+    ⚠ THE PAGE WAS READABLE BUT FROZEN. A user could see that the AIRS scrape was days old, that an
+    index had not been rebuilt, that a constituent had no fundamentals — and could do nothing about
+    any of it. The judgement recorded in `_USER_REFRESH_PATHS` is that a stale dashboard nobody can
+    refresh costs more than the GuruFocus quota and AirSPMS sessions these spend.
+
+    ⚠ THESE ARE THE RULE, NOT THE VISIBLE BUTTONS. The panels no longer gate the controls on
+    `isAdmin`, which is presentation. If this class goes red the buttons 403 whatever they look
+    like; if only the panels change, the permission is a suggestion."""
+
+    # Exactly what the three tabs fire, by the button that fires it.
+    REFRESHES = (
+        # Overview → "Refresh all from AIRS", both halves.
+        ("POST", "/api/airs/vermogen/refresh/job"),
+        ("POST", "/api/airs/model-portfolios/scan/job"),
+        # Overview → one row's Refresh, and the identical one in the Analyse modal's header.
+        ("POST", "/api/airs/portfolios/BUS_WTS_StMerken_Dyn/refresh/job"),
+        # Analyse modal → the fundamentals fill, over a paired model or a bare basket of ISINs.
+        ("POST", "/api/airs/model-portfolios/7/fundamentals/ingest/job"),
+        ("POST", "/api/airs/basket/fundamentals/ingest/job"),
+        # Analyse modal input tables → one `no_data` holding's financials.
+        ("POST", "/api/earnings/fundamental-coverage/ingest"),
+        # Benchmarks → per-index Refresh and "Refresh all" (both halves of each).
+        ("POST", "/api/benchmarks/index/S%26P%20500/refresh/job"),
+        ("POST", "/api/benchmarks/index/S%26P%20500/fundamentals/ingest/job"),
+        # Benchmarks grid → one constituent's Fetch cell.
+        ("POST", "/api/benchmarks/company/1234/fundamentals/ingest/job"),
+    )
+
+    def test_a_user_may_start_every_one_of_them(self, monkeypatch):
+        for method, path in self.REFRESHES:
+            assert _run(monkeypatch, method, path, "user") == (200, True), path
+
+    def test_they_all_still_need_a_token(self, monkeypatch):
+        for method, path in self.REFRESHES:
+            assert _run(monkeypatch, method, path, None) == (401, False), path
+
+    def test_a_user_can_watch_and_stop_what_they_started(self, monkeypatch):
+        """⚠ THE TRANSPORT COMES WITH THE PERMISSION. Every path above returns a job handle and
+        reports through `/api/jobs`; without the list, the stream and the Cancel a user would start
+        minutes of work with no progress and no way out — the state this panel kept being reported
+        as "stuck"."""
+        assert _run(monkeypatch, "GET", "/api/jobs", "user") == (200, True)
+        assert _run(monkeypatch, "GET", "/api/jobs/abc123/stream", "user") == (200, True)
+        assert _run(monkeypatch, "POST", "/api/jobs/abc123/cancel", "user") == (200, True)
+
+    def test_starting_a_job_is_still_owned_by_the_endpoint(self, monkeypatch):
+        """There is no generic `POST /api/jobs` — a generic starter is a registry of kinds mapped
+        to callables, i.e. arbitrary work by name — and opening the read tier must not invent one."""
+        assert _run(monkeypatch, "POST", "/api/jobs", "user") == (403, False)
+
+    def test_the_job_suffix_is_not_a_skeleton_key(self, monkeypatch):
+        """⚠ ANCHORED PATTERNS, NOT "anything ending in /job". Every allowed path is written out; a
+        job starter that is not the Dashboard's stays admin-only."""
+        assert _run(monkeypatch, "POST", "/api/asset-pipeline/ingest/job", "user") == (403, False)
+        assert _run(monkeypatch, "POST", "/api/airs/portfolios/BUS_X/delete/job",
+                    "user") == (403, False)
+
+    def test_the_refresh_tier_did_not_open_the_mutations_beside_it(self, monkeypatch):
+        """⚠ THE WHOLE REASON THIS IS A LIST OF PATHS AND NOT AN `/api/airs/` WRITE PREFIX. These
+        sit one segment from a refresh a user may now fire, and each CHANGES what the page says
+        rather than making it current."""
+        for method, path in (("DELETE", "/api/airs/portfolios/BUS_X"),
+                             ("DELETE", "/api/benchmarks/index/S%26P%20500"),
+                             ("POST", "/api/airs/asset-bucket-override"),
+                             ("POST", "/api/airs/holding-isin-override"),
+                             ("PUT", "/api/airs/accounts/BUS_X/display-name"),
+                             ("PUT", "/api/airs/accounts/BUS_X/link")):
+            assert _run(monkeypatch, method, path, "user") == (403, False), path
 
 
 class TestExpandingAnAccountIsAdminOnly:

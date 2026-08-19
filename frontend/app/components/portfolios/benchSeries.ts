@@ -69,6 +69,44 @@ export type BenchTarget = { universe: string; cadence: 'annual' | 'quarterly' };
 export const benchmarkFirst = (item: { name?: unknown }): number =>
   (item.name === 'bench' ? 0 : 1);
 
+/** `{canonical ISIN: {period: market cap in EUR}}` — the index's weighting basis, fetched once. */
+export type CapTable = Record<string, Record<string, number>>;
+
+/**
+ * Which endpoints have had `market_cap_by_period` LIFTED OUT of their rows.
+ *
+ * ⚠ THE `*-inputs` FAMILY, AND NOT `portfolio-revenue-matrix`. That one is a drill-down that
+ * renders the cap and the weight in its own cells, so it still ships them inline and must not have
+ * a second copy spliced over the top. Naming the rule here rather than at eleven call sites is
+ * what keeps a new card from silently drawing a flat-weighted index line — see `spliceCaps` for
+ * why that failure is invisible.
+ */
+const CAPS_LIFTED_OUT = /-inputs$/;
+
+/**
+ * Put the shared cap table back on the rows, exactly as the server used to.
+ *
+ * ⚠⚠ `{}` AND ABSENT ARE DIFFERENT ANSWERS AND THIS IS WHERE THAT IS PRESERVED. `weightAt` reads
+ * an EMPTY `market_cap_by_period` as "this constituent is out of every period's average" and a
+ * MISSING one as "fall back to `weight_pct`, flat, for all of them". So every row of an index
+ * response gets the key — `{}` when we hold no cap for it (4 of ACWI's 1,514) — and none of them
+ * gets it when the whole table is empty, which is the shape the server produced with
+ * `if caps else {}`. Get this wrong and the benchmark line still draws, still looks plausible, and
+ * is weighted by the wrong thing; there is no blank cell anywhere to notice.
+ *
+ * Pure and exported for the test beside it: this is the half of the split payload that can be
+ * wrong without anything failing.
+ */
+export function spliceCaps<T>(data: T, caps: CapTable): T {
+  if (!caps || Object.keys(caps).length === 0) return data;
+  const d = data as { rows?: { isin?: string }[] };
+  if (!Array.isArray(d?.rows)) return data;
+  return {
+    ...d,
+    rows: d.rows.map((r) => ({ ...r, market_cap_by_period: caps[r.isin ?? ''] ?? {} })),
+  } as T;
+}
+
 /**
  * Fetch one `*-inputs` endpoint for a benchmark, or nothing when no benchmark is selected.
  *
@@ -77,6 +115,18 @@ export const benchmarkFirst = (item: { name?: unknown }): number =>
  * short line in the legend. An overlay that just doesn't appear is indistinguishable from an index
  * that matches the portfolio exactly, and there is no way for the reader to tell which they got.
  * The full detail goes to the console, as everywhere else here.
+ *
+ * ⚠⚠ TWO REQUESTS, AND THE SECOND IS NOT OPTIONAL. `market_cap_by_period` used to ride on every
+ * row of all ten card responses — the same table ten times, measured at 29.9% of each ACWI payload
+ * (~4.8 MB of the tab's 13.21 MB), which gzip cannot dedupe because it cannot see across
+ * responses. It now comes from `/universe-period-caps` once. The ten cards ask for it in the same
+ * instant and `apiFetch` stores the in-flight promise, so that is ONE request, not ten.
+ *
+ * ⚠⚠ AND THE CARD WAITS FOR BOTH. Handing over rows the moment they land, with the caps still in
+ * flight, would draw a line weighted by `weight_pct` — today's cap, flat across every year — which
+ * is precisely the look-ahead bias `weightAt` exists to avoid, and it would then silently redraw.
+ * For the same reason a FAILED cap fetch is an ERROR here, not a fallback: an index line that
+ * quietly changes what it is weighted by is worse than no index line.
  */
 export function useBenchInputs<T>(
   path: string, target: BenchTarget | null | undefined,
@@ -88,20 +138,33 @@ export function useBenchInputs<T>(
     void (async () => {
       setState([null, null]);
       if (!target) return;
-      try {
-        const r = await apiFetch(`${API_URL}/api/earnings/${path}`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(target),
-        });
+      const post = (p: string) => apiFetch(`${API_URL}/api/earnings/${p}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(target),
+      });
+      /** The body, or a thrown reason — one shape for both requests.
+       *  ⚠ THE RESPONSE TRAVELS WITH THE ERROR (`cause`) so the console keeps the full diagnostic
+       *  — including WHICH of the two requests failed — while the UI gets `message`, one short
+       *  line. Same rule as everywhere else here. */
+      const read = async (p: string): Promise<unknown> => {
+        const r = await post(p);
         const b = await r.json().catch(() => null);
-        if (!alive) return;
         if (!r.ok) {
-          const detail = (b?.detail as string) ?? `HTTP ${r.status}`;
-          console.warn(`[bb:bench] ${path} ${target.universe}: ${detail}`, b);
-          setState([null, detail]);
-          return;
+          throw new Error((b?.detail as string) ?? `HTTP ${r.status}`,
+            { cause: { path: p, status: r.status, body: b } });
         }
-        setState([b as T, null]);
+        return b;
+      };
+      try {
+        const wantCaps = CAPS_LIFTED_OUT.test(path);
+        // In parallel: the wait is the slower of the two, not their sum. The caps request is
+        // shared with the other nine cards and is ~0.19 MB against a card's ~0.34 MB.
+        const [rows, caps] = await Promise.all([
+          read(path),
+          wantCaps ? read('universe-period-caps') as Promise<{ caps?: CapTable }> : null,
+        ]);
+        if (!alive) return;
+        setState([spliceCaps(rows as T, caps?.caps ?? {}), null]);
       } catch (e) {
         const detail = e instanceof Error ? e.message : String(e);
         console.warn(`[bb:bench] ${path} ${target?.universe}: ${detail}`, e);

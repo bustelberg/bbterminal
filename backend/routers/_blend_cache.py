@@ -11,6 +11,15 @@ WHY
     (3.41s vs 3.08s — the difference is noise), so narrowing what each card asks for wins nothing.
     Caching the whole response is the lever.
 
+    ⚠ AND ONCE IT IS CACHED, THE REMAINING COST IS THE PAYLOAD, WHICH THE CACHE DOES NOT TOUCH.
+    Re-measured 2026-08-19 with `scripts/profile_longequity_bench.py`: ACWI's responses were
+    **13.21 MB** of JSON (AEX's 0.18 MB — that ratio, not the query time, is what the reader
+    reports as "ACWI takes a while"), and a warm hit still re-serialised every byte of it. Two
+    changes, in the order they landed: `cached_blend` now stores the GZIPPED body (13.21 -> 4.85 MB
+    on the wire, and a hit is a memcpy), and `market_cap_by_period` — the same cap table repeated
+    on every row of all ten card responses, 29.9% of each — moved to its own
+    `/universe-period-caps` (9.34 MB decoded, **3.16 MB** on the wire).
+
 ⚠⚠ AND COLLAPSING THE FAN-OUT IS **NOT** THE OTHER LEVER — MEASURE BEFORE YOU BELIEVE IT. The
     obvious next move is one endpoint returning every card's line, on the theory that the cards
     repeat a lot of shared setup. They do not. The only thing all thirteen share is
@@ -39,10 +48,16 @@ WHY
     someone else's book. `cache_key` returns None for those and the decorator degrades to a plain
     call.
 
-⚠ THE CACHED VALUE IS SHARED AND MUST BE TREATED AS IMMUTABLE. It is handed to every subsequent
-    caller by reference; a deep copy would cost more than it saves (an ACWI response carries a
-    `coverage.rows` entry per constituent). Nothing downstream mutates a response after returning
-    it, and nothing should start.
+⚠ THE CACHED VALUE IS THE FINISHED, GZIPPED RESPONSE BODY — `bytes`, therefore immutable, and
+    handed to every subsequent caller by reference with nothing to copy. (It used to be the payload
+    dict, which was shared by reference and had to be treated as immutable by convention.) See
+    `cached_blend` for the measured reason: the transfer, not the query, is what a warm ACWI
+    selection costs — 9.34 MB of JSON across twelve requests, 3.16 MB on the wire.
+
+AND THEN REBUILT — see `_blend_prewarm`. Dropping the cache puts every viewer back on the ~20s
+    cold path for ACWI; the entries have no user dimension, so rebuilding them once in the
+    background serves everybody. `invalidate()` notifies it; the rebuild itself is debounced,
+    serial, and stands off the scheduled pipeline.
 
 INVALIDATION — TWO MECHANISMS, ON PURPOSE
     * EXPLICIT, from the writer. The fundamentals ingest jobs call `invalidate()` when they
@@ -54,10 +69,17 @@ INVALIDATION — TWO MECHANISMS, ON PURPOSE
 """
 from __future__ import annotations
 
+import asyncio
 import functools
+import gzip
+import inspect
+import json
 import logging
 import threading
 from typing import Any, Callable
+
+from fastapi import Request, Response
+from fastapi.encoders import jsonable_encoder
 
 # Reused, not reimplemented: one LRU+TTL with one set of eviction semantics. It is generic
 # (`_LruTtlCache[T]`) and already carries the thread-safety the concurrent card loads need.
@@ -67,13 +89,31 @@ _log = logging.getLogger(__name__)
 
 # Generous because `invalidate()` is the real mechanism — fundamentals change only on a deliberate
 # ingest, and that path clears this directly. The TTL only has to catch out-of-process writes.
-_TTL_SECONDS = 30 * 60
-# ⚠ BOUNDED BECAUSE THE ENTRIES ARE BIG. Each response carries one `coverage.rows` entry per
-# constituent — ~1,500 for ACWI — so an unbounded cache is a slow leak on a small dyno. The real
-# key space is ~3 labels x 2 cadences x 13 endpoints; this caps the resident set well under that.
-_MAX_ENTRIES = 24
+#
+# ⚠ SIX HOURS, NOT THIRTY MINUTES (2026-08-19). Half an hour was short enough that a reader who
+# picked ACWI, worked through a few portfolios and came back paid the FULL cold cost again —
+# measured at 15.8s wall / 94.9s of work for ACWI's eleven requests, against 1.6s for AEX. Nothing
+# about a fiscal figure changes on that timescale, and the only thing the TTL protects against is
+# a write this process cannot see; `DISABLE_SCHEDULER=1` on every replica but one means there is
+# barely such a thing here. Both fundamentals ingest jobs still call `invalidate()`.
+_TTL_SECONDS = 6 * 60 * 60
+# The blends. ⚠ THIS CAP WAS 24 AND THAT WAS SMALLER THAN ONE SCREEN'S WORKING SET: fourteen
+# endpoints are cached per (label, cadence), so picking ACWI filled 14 slots and flipping to
+# Quarterly — or to a second index for comparison — evicted the set the reader had just paid ~20s
+# for. Coming back re-paid it in full. 84 is the whole real key space (14 endpoints x 3 labels x 2
+# cadences), which is affordable ONLY because the entries are now the GZIPPED BYTES rather than
+# the Python payload: ACWI's biggest is 479 KB compressed where the dict behind it is 1.34 MB of
+# JSON across tens of thousands of sub-dicts. See `cached_blend`.
+_MAX_ENTRIES = 84
+# The fundamentals GRID, in its own cache — ⚠ NOT because it needs different semantics (it is
+# cleared by the same `invalidate()`), but because its entries are TEN TIMES the size of a blend's
+# (ACWI is ~5.3 MB compressed). Sharing one LRU meant a single grid read could evict a third of the
+# blend set, and raising the shared cap to fit the blends would have licensed six grids —
+# ~32 MB — at the same time. Two caps state the two budgets separately.
+_GRID_MAX_ENTRIES = 6
 
 _cache: _LruTtlCache[Any] = _LruTtlCache(max_size=_MAX_ENTRIES, ttl_seconds=_TTL_SECONDS)
+_grid_cache: _LruTtlCache[Any] = _LruTtlCache(max_size=_GRID_MAX_ENTRIES, ttl_seconds=_TTL_SECONDS)
 
 
 def cache_key(endpoint: str, body: Any) -> tuple | None:
@@ -104,11 +144,20 @@ def invalidate() -> int:
     would rebuild "fresh" responses on top of stale fundamentals — the one outcome worse than not
     caching at all, because it looks like it worked.
     """
-    n = _cache.size() + _metrics_cache.size()
+    n = _cache.size() + _grid_cache.size() + _metrics_cache.size()
     _cache.clear()
+    _grid_cache.clear()
     _metrics_cache.clear()
     if n:
         _log.info("[blend-cache] invalidated %d entr%s", n, "y" if n == 1 else "ies")
+    # ⚠ THE REBUILD IS HUNG OFF THE CLEAR, NOT OFF THE INGEST JOB. Two writers drop this cache —
+    # the bulk fill and the per-company Fetch in the modal — and the second is pressed while a
+    # reader is looking at the very chart it invalidates. Notifying from here covers both and
+    # cannot be forgotten by a third. It is non-blocking, needs no event loop, and is a no-op
+    # until `arm()` runs, so unit tests that call `invalidate()` start no thread. Imported
+    # lazily: `_blend_prewarm` reaches back into `routers.earnings`, which imports this module.
+    from routers import _blend_prewarm  # noqa: PLC0415
+    _blend_prewarm.notify()
     return n
 
 
@@ -229,12 +278,12 @@ def cached_metric_reads(company_ids: list[int], metrics: list[str], cadence: str
 def cached_grid(label: str, cadence: str, compute: Callable[[], Any]) -> Any:
     """The fundamentals GRID for one (label, cadence), computed once and shared.
 
-    ⚠ IT LIVES IN `_cache`, NOT IN A CACHE OF ITS OWN, SO `invalidate()` DROPS IT. That is the
-    whole reason this is here rather than a `functools.lru_cache` next to the endpoint: pressing
-    Fetch or Fill ingests fundamentals and the grid legitimately changes, and both ingest jobs
-    already call `invalidate()`. A second cache would be a second thing to remember to clear, and
-    the failure mode is a table that silently keeps showing dashes for a row that just filled in —
-    which reads as the button not working.
+    ⚠ IT LIVES IN A CACHE `invalidate()` CLEARS, NOT IN A `functools.lru_cache` NEXT TO THE
+    ENDPOINT. Pressing Fetch or Fill ingests fundamentals and the grid legitimately changes, and
+    both ingest jobs already call `invalidate()`; the failure mode of forgetting is a table that
+    silently keeps showing dashes for a row that just filled in, which reads as the button not
+    working. `_grid_cache` is a second STORE but not a second thing to remember — `invalidate()`
+    clears it in the same breath as the blends, which is the property that mattered.
 
     ⚠ SINGLE-FLIGHT, FOR THE SAME REASON THE METRIC READ HAS IT. The pane fetches on mount and the
     period control fetches the other cadence; a reader who opens an index, presses Q3 and goes back
@@ -249,12 +298,13 @@ def cached_grid(label: str, cadence: str, compute: Callable[[], Any]) -> Any:
     responses are. The endpoint stores the FINISHED gzipped bytes, which are immutable anyway and
     are smaller than the payload object they came from — see `_encoded` in `benchmarks.py`.
 
-    ⚠ IT SHARES `_MAX_ENTRIES` WITH THE BLENDS, and its entries are the biggest here (ACWI is
-    ~5 MB compressed). The real grid key space is small — 3 labels x 2 cadences — so the two
-    together stay inside the cap; what an eviction costs is a rebuild, never a wrong answer.
+    ⚠ ITS OWN CAP (`_GRID_MAX_ENTRIES`) BECAUSE ITS ENTRIES ARE THE BIGGEST HERE — ACWI is ~5.3 MB
+    compressed, ten times a blend's. Sharing the blends' LRU meant one grid read could evict a
+    third of the blend set; six is the real grid key space (3 labels x 2 cadences). What an
+    eviction costs is a rebuild, never a wrong answer.
     """
     key = ("fundamental-grid", label, cadence)
-    hit = _cache.get(key)
+    hit = _grid_cache.get(key)
     if hit is not None:
         return hit
 
@@ -267,14 +317,14 @@ def cached_grid(label: str, cadence: str, compute: Callable[[], Any]) -> Any:
 
     if not owner:
         event.wait(timeout=_INFLIGHT_TIMEOUT)          # type: ignore[union-attr]
-        hit = _cache.get(key)
+        hit = _grid_cache.get(key)
         # ⚠ A WAITER WHOSE OWNER FAILED RECOMPUTES rather than inheriting the failure — same
         # judgement as `cached_metric_read`. A transient fault should cost the caller that hit it.
         return hit if hit is not None else compute()
 
     try:
         result = compute()
-        _cache.put(key, result)
+        _grid_cache.put(key, result)
         return result
     finally:
         with _metrics_lock:
@@ -282,24 +332,92 @@ def cached_grid(label: str, cadence: str, compute: Callable[[], Any]) -> Any:
         event.set()                                    # type: ignore[union-attr]
 
 
+def _encode(payload: Any) -> bytes:
+    """The finished response body, gzipped — byte-for-byte what FastAPI would have sent.
+
+    ⚠ `jsonable_encoder` + these exact `json.dumps` arguments ARE FastAPI's own `JSONResponse`
+    rendering, copied rather than approximated. `allow_nan=False` is the load-bearing one: a NaN
+    that leaks into a blend is a 500 today, and a hand-rolled serialiser that quietly emitted
+    `NaN` would turn that into a chart with an unparseable point and no error anywhere.
+    """
+    return gzip.compress(
+        json.dumps(jsonable_encoder(payload), ensure_ascii=False, allow_nan=False,
+                   separators=(",", ":")).encode("utf-8"), 1)
+
+
 def cached_blend(endpoint: str) -> Callable:
-    """Decorate a `(body: FundamentalCoverageRequest)` endpoint so benchmark requests are cached.
+    """Decorate a `(body, request)` endpoint so benchmark requests are cached AND compressed.
 
     ⚠ APPLY IT BELOW `@router.post(...)`, so the router registers the wrapper rather than the bare
     function. `functools.wraps` sets `__wrapped__`, which `inspect.signature` follows — that is
     what keeps FastAPI's request-model introspection seeing the real signature through this.
+
+    ⚠⚠ THE CACHE HOLDS THE GZIPPED BYTES, NOT THE PAYLOAD OBJECT — and that is TWO wins, not one.
+    Measured 2026-08-19 on ACWI (1,514 constituents, annual), for the eleven requests one benchmark
+    selection fires:
+
+        the whole selection, decoded  9.34 MB          on the wire   3.16 MB   (3.0x)
+        `margin-inputs` alone         982 KB           on the wire    336 KB
+        AEX, the same requests        137 KB    <-- why ACWI feels slow and AEX does not
+
+    1. TRANSFER. Those megabytes are shipped on EVERY load, warm cache included, and by the time
+       the server work is a dict lookup the transfer IS the load time. 2.7x is the whole win on a
+       warm process and no query tuning touches it.
+    2. CPU ON A CACHE HIT, WHICH WAS NOT FREE AND LOOKED IT. Returning the dict meant FastAPI
+       re-ran `jsonable_encoder` (111 ms) + `json.dumps` (27 ms) on every hit — ~1.5s of Python
+       across the eleven, on a single-worker dyno, to reproduce bytes identical to last time's.
+       Encoding once and storing the result makes a hit a memcpy.
+
+    A third follows: an entry is a few hundred KB of bytes instead of a payload spread over tens
+    of thousands of dicts, which is what makes `_MAX_ENTRIES` = 84 affordable — see there for why
+    24 was too few. Measured end to end after the change: AEX 2.3s cold -> 0.01s warm, ACWI 20.5s
+    cold -> 0.28s warm, with AEX STILL warm after ACWI's entries landed (exactly what 24 broke).
+
+    ⚠ GZIPPED HERE RATHER THAN BY A `GZipMiddleware`, for the reason `/api/benchmarks/…/grid`
+    records at length: this app is SSE-heavy and compression sits between a stream and its client
+    and buffers. And the `Accept-Encoding` header is HONOURED, not assumed — a plain `curl` does
+    not send it, and shipping gzip to a client that did not ask hands it binary.
+
+    ⚠ ONLY THE `universe` PATH IS ENCODED. A portfolio request returns the dict exactly as before:
+    it is not cached (see `cache_key`), so compressing it would be pure CPU on the request that
+    can least spare it, and the payload is a book's ~40 holdings rather than an index's 1,514.
+
+    ⚠ `request: Request` IS REQUIRED ON THE ENDPOINT, and the decorator refuses at import time
+    rather than at 3am. A missing one is not a crash — the wrapper would simply never see an
+    `Accept-Encoding` and would fall back to sending uncompressed — i.e. a new card would silently
+    opt out of the only optimisation this file exists for, and nothing would look wrong.
     """
     def deco(fn: Callable) -> Callable:
+        if "request" not in inspect.signature(fn).parameters:
+            raise TypeError(
+                f"@cached_blend({endpoint!r}): {fn.__name__} needs a `request: Request` parameter "
+                "so the response can honour Accept-Encoding. Add it and pass nothing — the "
+                "decorator reads the header itself.")
+
+        # ⚠ `(body, request, ...)` POSITIONALLY, MIRRORING WHAT IT DEMANDS OF `fn`. FastAPI always
+        # calls a route by keyword, so a keyword-only `request` would have worked in production and
+        # raised "multiple values for argument 'request'" the moment anything called the endpoint
+        # function directly — which the profiler and the ingest paths do.
         @functools.wraps(fn)
-        async def wrapper(body, *args, **kwargs):
+        async def wrapper(body, request: Request | None = None, *args, **kwargs):
             key = cache_key(endpoint, body)
             if key is None:                       # a portfolio / explicit holdings — never cached
-                return await fn(body, *args, **kwargs)
-            hit = _cache.get(key)
-            if hit is not None:
-                return hit
-            out = await fn(body, *args, **kwargs)
-            _cache.put(key, out)
-            return out
+                return await fn(body, request, *args, **kwargs)
+            blob = _cache.get(key)
+            if blob is None:
+                # ⚠ ENCODED OFF THE EVENT LOOP. `jsonable_encoder` over ~60,000 dicts is 111 ms of
+                # pure Python and gzip another 18 ms; run inline they would block every other card
+                # request in this process for the duration, eleven times over on a cold selection.
+                out = await fn(body, request, *args, **kwargs)
+                blob = await asyncio.to_thread(_encode, out)
+                _cache.put(key, blob)
+            accepts = "gzip" in (
+                (request.headers.get("accept-encoding") if request else "") or "").lower()
+            if accepts:
+                return Response(content=blob, media_type="application/json",
+                                headers={"Content-Encoding": "gzip"})
+            # ⚠ DECOMPRESSED ON THE WAY OUT, never stored twice — the same trade `/grid` makes.
+            # This branch is a curl session, not the app.
+            return Response(content=gzip.decompress(blob), media_type="application/json")
         return wrapper
     return deco

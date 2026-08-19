@@ -565,6 +565,36 @@ def _run_price_update_pipeline_sync(run_id: int) -> None:
             log_step(run_id, msg, level="error", phase="benchmarks")
             accumulated_errors.append(msg)
 
+        # ── Phase: benchmarks — the INDEX PROXY ETFs ───────────────
+        # ACWI and SPY, whose price series ARE the benchmark figure the Analyse
+        # modal's Return tile shows (see `routers/_benchmark_etf`). They are not
+        # "held" by any strategy, so the loop above never reaches them.
+        #
+        # ⚠ IT IS HERE SO THE VENDOR CALL DOES NOT LAND ON A READER. `ensure_fresh`
+        # repairs a stale series lazily, but lazily means inside the Analyse modal —
+        # ONE request with no partial paint, where a 1.35s GuruFocus round trip is
+        # the whole of somebody's wait. Two calls a day here, and the lazy path goes
+        # back to being the repair it was meant to be.
+        try:
+            from routers._benchmark_etf import refresh_index_proxies  # noqa: PLC0415
+
+            n_px = refresh_index_proxies()
+            log_step(
+                run_id,
+                f"Phase: benchmarks — refreshed {n_px} index proxy ETF series "
+                "(ACWI/SPY: the Analyse modal's benchmark return is read off these)",
+                phase="benchmarks",
+            )
+        except Exception as e:
+            # ⚠ NOT AN `accumulated_errors` ENTRY. A stale proxy costs the modal one
+            # lazy fetch, not a wrong number and not a broken pipeline run; failing
+            # the price update over it would be out of all proportion.
+            msg = f"Index-proxy refresh failed: {type(e).__name__}: {e}"
+            log.warning("[price_update] run_id=%s %s", run_id, msg)
+            # ⚠ "warn", not "warning" — `log_step` matches ("warn", "error") exactly, so the
+            # longer spelling silently logs at INFO and the line loses its colour.
+            log_step(run_id, msg, level="warn", phase="benchmarks")
+
         # ── Phase: momentum — price-update only (no rebalances) ────
         _update_run(run_id, current_phase="momentum", current_message="Re-pricing open positions…")
         log_step(run_id, "Phase: momentum — re-pricing each strategy's open positions (no "
