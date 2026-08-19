@@ -23,8 +23,23 @@ class TestOneVocabulary:
     """
 
     def test_both_sides_read_the_same_table(self):
-        # Both the portfolio and the benchmark classify off `asset_grid` — one vocabulary.
-        assert 'table("asset_grid")' in inspect.getsource(pa._grid)
+        """Both the portfolio and the benchmark classify off `asset_grid` — one vocabulary.
+
+        ⚠ IT ASKS THE WHOLE `_grid*` FAMILY, NOT `_grid` ITSELF, AND THAT IS THE FIX FOR HOW THIS
+        BROKE. The assertion used to read `inspect.getsource(pa._grid)`; when the cross-portfolio
+        leg cache split that function into a memoized wrapper plus `_grid_uncached`, the read moved
+        out from under it and the test went red while the behaviour it guards was untouched. A
+        source assertion pinned to ONE function name fails on any refactor that wraps it — which is
+        the refactor most likely to happen to a hot reader.
+
+        What it still catches is the thing worth catching: the classification moving to a SECOND
+        table, which is how "Technology" and "Information Technology" end up in one chart.
+        """
+        grid_fns = [v for k, v in vars(pa).items()
+                    if k.startswith("_grid") and inspect.isfunction(v)]
+        assert grid_fns, "no _grid* reader found — did it get renamed?"
+        src = "\n".join(inspect.getsource(f) for f in grid_fns)
+        assert 'table("asset_grid")' in src
 
 
 class TestFundsAreNotLookedThrough:
