@@ -159,9 +159,17 @@ def _instruments(isins: list[str], emit) -> dict[str, dict]:
                if e and e.get("analysis_id")
                else f"NOT RESOLVED ({(e or {}).get('status') or 'not in the grid'})")))
     if missing:
-        emit("progress", message=f"  resolving {len(missing)} unmapped ISIN(s)…")
+        # ⚠ THE COUNT AND THE PACE, BOTH. Each ISIN is a paced Yahoo resolve — search, quote and
+        # profile, with 10-30s timeouts — run a few wide, so sixteen of them legitimately take
+        # minutes. Emitting only this line and then going quiet until all sixteen finish is what
+        # made a working refresh read as "stuck at 50%"; `on_each` relays one line per ISIN, so the
+        # reader can see it moving and, if it ever does stall, see WHICH one it stalled on.
+        emit("progress", message=f"  resolving {len(missing)} unmapped ISIN(s) — one Yahoo lookup "
+                                 "each, so this is the slow step")
         _queue.enqueue(missing)
-        d = _drain_now(missing)
+        d = _drain_now(missing,
+                       on_each=lambda isin, outcome: emit("progress",
+                                                          message=f"    {isin:<14} {outcome}"))
         if d.get("worker_live"):
             emit("progress", message="  the ingest worker is already draining — left to it")
         else:

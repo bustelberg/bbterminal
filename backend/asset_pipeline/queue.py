@@ -12,6 +12,8 @@ only after its resolve+store completes, so a restart resumes cleanly from
 `pending`."""
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import logging
 import os
 import threading
@@ -148,7 +150,8 @@ def _reapply_aliases() -> None:
 
 
 def process_slice(limit: int = SLICE, verbose: bool = False,
-                  isins: list[str] | None = None) -> dict:
+                  isins: list[str] | None = None,
+                  on_each: Callable[[str, str], None] | None = None) -> dict:
     """Process up to `limit` pending ISINs through the throttled resolve+store,
     marking each done/failed. THE worker step (one Yahoo consumer). On a Yahoo
     ban (`YahooThrottled`) it leaves the current ISIN pending and stops — the
@@ -197,6 +200,27 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
             with plock:
                 print(msg, flush=True)
 
+    def _report(isin: str, outcome: str, detail: str = "") -> None:
+        """Tell the CALLER, per ISIN, as it happens.
+
+        ⚠⚠ WITHOUT THIS A SLICE IS SILENT FOR MINUTES. The refresh emitted one line — "resolving 16
+        unmapped ISIN(s)…" — and then nothing until all sixteen were done. Each ISIN is a paced
+        Yahoo resolve (search + quote + profile, 10-30s of timeouts each in the worst case) run
+        `YAHOO_CONCURRENCY`-wide, so a slice legitimately takes minutes; with no line in between it
+        is indistinguishable from a hang, and the operator's only move is to give up on a job that
+        was working. Reported as "this one seems to be just stuck".
+
+        ⚠ IT MUST NOT THROW. It runs inside a worker thread mid-slice; an exception here would fail
+        an ISIN that actually resolved. Swallowed, like every other reporting hook in this repo.
+        """
+        if not on_each:
+            return
+        try:
+            with plock:
+                on_each(isin, f"{outcome}{f' — {detail}' if detail else ''}")
+        except Exception:  # noqa: BLE001 — narration must never fail the work it narrates
+            pass
+
     def _one(isin: str) -> str:
         if banned.is_set():
             return "throttled"  # leave pending — Yahoo is banned
@@ -211,6 +235,7 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
                 store.upsert_unmapped(isin, db_status, res.get("reason"), ac, res.get("sector"), figi=fig)
                 _mark(isin, "done", res.get("reason"))
                 _vp(f"  skip {isin}  [{of}]  ->  {db_status}: {(res.get('reason') or '')[:70]}")
+                _report(isin, db_status, (res.get("reason") or "")[:60])
                 return "unmapped"
             ids_ = store.upsert_asset(res, figi=fig)
             rows = store.store_series(ids_["analysis_id"], an["symbol"], an.get("first_ts"))
@@ -218,10 +243,12 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
             _vp(f"  ok   {isin}  [{of}]  ->  yfinance {an['symbol']} "
                 f"({an.get('exchange') or '—'}, {an.get('currency') or '—'}) · "
                 f"{rows:,} bars since {an.get('first_date') or '?'}")
+            _report(isin, "ok", f"{an['symbol']} · {rows:,} bars")
             return "ok"
         except YahooThrottled:
             banned.set()  # stop the rest of the slice; this ISIN stays pending
             _vp(f"  ... {isin}  Yahoo rate-limited — pausing the slice, will resume")
+            _report(isin, "Yahoo rate-limited", "the rest of the slice stays pending")
             return "throttled"
         except Exception as e:  # noqa: BLE001
             try:
@@ -230,6 +257,7 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
                 pass
             _mark(isin, "failed", f"{type(e).__name__}: {e}")
             _vp(f"  ERR  {isin}  [{of}]  ->  {type(e).__name__}: {e}")
+            _report(isin, "failed", f"{type(e).__name__}: {e}"[:60])
             return "failed"
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
