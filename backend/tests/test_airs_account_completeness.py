@@ -330,14 +330,24 @@ class TestTheMarkerNamesTheGap:
         _wire(monkeypatch, RuntimeError("column reports_ok does not exist"))
         assert A._missing_reports() == {}
 
-    def test_a_stale_verdict_is_ignored(self, monkeypatch):
-        """Only the newest batch counts, exactly as for `_complete_accounts` — an account the last
-        scan never reached must not carry last week's badge."""
+    def test_an_older_scan_still_reports_what_it_found(self, monkeypatch):
+        """⚠⚠ THIS ASSERTION WAS REVERSED (2026-08-19), so both sides are on the record.
+
+        It used to demand `== {}` — "only the newest batch counts; an account the last scan never
+        reached must not carry last week's badge". The intent was sound: a verdict from a stale
+        scan might not describe the account now.
+
+        What it cost was the badge itself. `airs_account_roster` is ONE ROW PER ACCOUNT with a
+        per-account timestamp, so "the newest batch" is ONE account — measured on live data, 1 of
+        45 rows matched, leaving 44 unbadgeable, and refreshing any single account silently cleared
+        every other row's warning. The badge says "this account's LAST SCAN did not retrieve X",
+        which is true whenever that scan happened; suppressing it makes a short row look whole,
+        which is the more expensive mistake."""
         _wire(monkeypatch, [
             {"portefeuille": "BUS_A", "reports_ok": ALL, "reports_at": self.NOW},
             {"portefeuille": "BUS_OLD", "reports_ok": ["att"], "reports_at": "2026-07-22T11:00:00Z"},
         ])
-        assert A._missing_reports() == {}
+        assert A._missing_reports() == {"bus_old": [c for c in ALL if c != "att"]}
 
 
 @pytest.mark.parametrize("missing", ALL)
@@ -347,3 +357,61 @@ def test_every_single_missing_report_disqualifies(monkeypatch, missing):
                          "reports_ok": [r for r in ALL if r != missing],
                          "reports_at": "2026-07-29T11:00:00Z"}])
     assert A._complete_accounts() == set()
+
+
+class TestEachAccountIsJudgedOnItsOwnScan:
+    """⚠⚠ THE BUG THIS PINS, AS REPORTED: "⚠ Vermogensoverzicht is behind almost every portfolio,
+    and when I refresh a single one nothing really gets fetched but all those warnings disappear."
+
+    `_missing_reports` took the newest `reports_at` in the WHOLE table and skipped every row that
+    did not match it exactly. `airs_account_roster` holds ONE ROW PER ACCOUNT, each stamped when
+    that account was scanned — measured on the live data: 46 accounts, 7 distinct timestamps, and
+    exactly 1 of 45 rows matched the newest. So 44 accounts could never be flagged, and refreshing
+    any one account made ITS stamp the newest, which silently un-flagged everyone else.
+
+    A global maximum cannot answer a per-row question.
+    """
+
+    OLD = "2026-08-17T13:15:11+00:00"
+    NEW = "2026-08-18T07:30:19+00:00"
+
+    def test_an_account_scanned_earlier_still_reports_its_gap(self, monkeypatch):
+        # B was scanned later and is complete; A's gap must survive that.
+        _wire(monkeypatch, [
+            {"portefeuille": "BUS_B", "reports_ok": ALL, "reports_at": self.NEW},
+            {"portefeuille": "BUS_A", "reports_ok": [c for c in ALL if c != "volk"],
+             "reports_at": self.OLD},
+        ])
+        assert A._missing_reports() == {"bus_a": ["volk"]}
+
+    def test_refreshing_ONE_account_does_not_clear_everyone_else(self, monkeypatch):
+        """The exact reported symptom, as a before/after on the same data."""
+        short = [c for c in ALL if c != "volk"]
+        before = [
+            {"portefeuille": "BUS_A", "reports_ok": short, "reports_at": self.OLD},
+            {"portefeuille": "BUS_B", "reports_ok": short, "reports_at": self.OLD},
+        ]
+        _wire(monkeypatch, before)
+        assert set(A._missing_reports()) == {"bus_a", "bus_b"}
+
+        # Now BUS_C is refreshed on its own — a newer stamp, and it retrieved everything.
+        after = [{"portefeuille": "BUS_C", "reports_ok": ALL, "reports_at": self.NEW}, *before]
+        _wire(monkeypatch, after)
+        # ⚠ A and B are untouched by C's refresh, so their badges must be untouched too.
+        assert set(A._missing_reports()) == {"bus_a", "bus_b"}
+
+    def test_a_complete_account_gets_no_entry_at_all(self, monkeypatch):
+        # ⚠ Absent, not an empty list: the UI renders on truthiness, and `[]` would badge a row
+        # with an empty gap list.
+        _wire(monkeypatch, [{"portefeuille": "BUS_A", "reports_ok": ALL, "reports_at": self.NEW}])
+        assert "bus_a" not in A._missing_reports()
+
+    def test_the_newest_row_wins_if_an_account_ever_has_two(self, monkeypatch):
+        # One row per account today. If that becomes a history, the OLD scan's gaps must not
+        # resurface — the query orders `reports_at desc`, and the first row per account is kept.
+        _wire(monkeypatch, [
+            {"portefeuille": "BUS_A", "reports_ok": ALL, "reports_at": self.NEW},
+            {"portefeuille": "BUS_A", "reports_ok": [c for c in ALL if c != "volk"],
+             "reports_at": self.OLD},
+        ])
+        assert "bus_a" not in A._missing_reports()
