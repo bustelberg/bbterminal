@@ -28,6 +28,8 @@ WHY A BENCHMARK READS 0 MEMBERS WITH A FULL UNIVERSE BEHIND IT
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import logging
 
 from deps import IN_CHUNK_SIZE, supabase
@@ -310,7 +312,8 @@ _RESOLVE_PER_PRESS = 25
 _LAST_SELF_DRAIN: str | None = None
 
 
-def _drain_now(isins: list[str], limit: int = _RESOLVE_PER_PRESS) -> dict:
+def _drain_now(isins: list[str], limit: int = _RESOLVE_PER_PRESS,
+               on_each: Callable[[str, str], None] | None = None) -> dict:
     """Resolve a bounded slice of the ingest queue RIGHT NOW, rather than leaving it for a worker.
 
     ⚠ "QUEUED FOR INGEST" IS A PROMISE ABOUT A PROCESS THAT MAY NOT EXIST. The in-process worker is
@@ -355,7 +358,10 @@ def _drain_now(isins: list[str], limit: int = _RESOLVE_PER_PRESS) -> dict:
                   seen)
         return {"processed": 0, "ok": 0, "failed": 0, "unmapped": 0,
                 "remaining": len(isins), "worker_live": True}
-    done = _queue.process_slice(limit, isins=isins)
+    # ⚠ `on_each` FORWARDED, so a caller with a progress channel can narrate PER ISIN. A
+    # slice is minutes of paced Yahoo work; one line before it and nothing until it ends
+    # is indistinguishable from a hang. See `process_slice._report`.
+    done = _queue.process_slice(limit, isins=isins, on_each=on_each)
     _LAST_SELF_DRAIN = _queue.last_activity()
     # `remaining` from the queue is the WHOLE backlog; what this caller wants to know is how many
     # of ITS OWN are still pending, which is what the next press will work on.

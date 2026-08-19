@@ -213,7 +213,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
                     const plotted = typeof v === 'number' ? v : null;
                     // ⚠ WHOSE LINE, NOT WHICH METRIC — the card heading already says "Invested
                     // capital", and the benchmark row was always named for its index.
-                    const label = name === 'bench' ? (benchTarget?.universe ?? 'Benchmark')
+                    const label = name === 'bench' ? (benchTarget?.label ?? 'Benchmark')
                       : (holdingsName ?? 'Invested capital');
                     const since = pctSince(name === 'bench' ? row?.benchStep : row?.step);
                     const tail = since ? `  ·  ${since}` : '';
@@ -249,7 +249,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
               <LegendItem color={chartTheme.warn} stroke="dashed"
                 label={`Trend (R² ${fit.r2 == null ? '—' : fit.r2.toFixed(2)})`} />
               {benchByYr && (
-                <LegendItem color={chartTheme.pos} label={benchTarget?.universe}
+                <LegendItem color={chartTheme.pos} label={benchTarget?.label}
                   title={indexed
                     ? `Both lines are indexed to 100 at ${indexed.anchor}, the first year they share. Only the growth is being compared — hover any point for the actual amount.`
                     : 'Absolute amounts: the two series share no year with a positive value, so there is no honest base to index them on.'} />
@@ -266,7 +266,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
 
       {showInputs && (
         <InvestedCapitalInputsModal target={holdingsTarget} portfolioName={holdingsName}
-          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          benchTarget={benchTarget} benchLabel={benchTarget?.label ?? null}
           onClose={() => setShowInputs(false)} />
       )}
     </div>

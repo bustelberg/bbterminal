@@ -3116,6 +3116,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Assets
+         * @description Type-ahead over the asset grid: a handful of PICKABLE instruments matching `q`.
+         *
+         *     ⚠⚠ IT EXISTS BECAUSE `/grid` IS 27.56 MB. That endpoint returns all 16,613 rows with every
+         *     column — the right answer for a page whose whole job is that table, and an absurd one for a
+         *     two-field picker that needs a name and an ISIN. Filtering 27 MB in the browser to show ten
+         *     rows is the kind of thing that works on a laptop and not on a phone, and it would be paid on
+         *     every visit to `/research-dashboard`.
+         *
+         *     ⚠ PICKABLE MEANS DRAWABLE. Only `status='ok'` rows with an `analysis_id` and at least one bar
+         *     are offered: those are the ones a fundamentals view can actually render. Half the grid is
+         *     bonds, unresolved ISINs and zero-bar rows — offering them would let someone pick a company and
+         *     get an empty panel, which reads as a broken page rather than as an unpriceable instrument.
+         *
+         *     ⚠ THE LIMIT IS REPORTED, NOT SILENT. `truncated` tells the caller there are more matches than
+         *     it is seeing, so a picker can say "keep typing" instead of implying the list is the answer.
+         */
+        get: operations["search_assets_api_asset_pipeline_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/signal-lab": {
         parameters: {
             query?: never;
@@ -8959,6 +8993,38 @@ export interface components {
             years?: number | null;
             /** Zero Vol Frac */
             zero_vol_frac?: number | null;
+        };
+        /** AssetSearchResponse */
+        AssetSearchResponse: {
+            /** Rows */
+            rows: components["schemas"]["AssetSearchRow"][];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated?: boolean;
+        };
+        /**
+         * AssetSearchRow
+         * @description One pickable instrument — identity only, nothing a chart would draw.
+         */
+        AssetSearchRow: {
+            /** Analysis Id */
+            analysis_id?: number | null;
+            /** Bars */
+            bars?: number | null;
+            /** Currency */
+            currency?: string | null;
+            /** Exchange */
+            exchange?: string | null;
+            /** Isin */
+            isin: string;
+            /** Name */
+            name?: string | null;
+            /** Sector */
+            sector?: string | null;
+            /** Yahoo Symbol */
+            yahoo_symbol?: string | null;
         };
         /** AssetWeight */
         AssetWeight: {
@@ -16398,6 +16464,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_assets_api_asset_pipeline_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetSearchResponse"];
                 };
             };
             /** @description Validation Error */

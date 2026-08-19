@@ -47,7 +47,56 @@ import { MIN_YEAR_COVERAGE_PCT } from './marginData';
  * simply take forever and nothing would say why. If a daily benchmark is ever wanted, blend it
  * SERVER-SIDE first — do not ship 490 daily series so the browser can average them.
  */
-export type BenchTarget = { universe: string; cadence: 'annual' | 'quarterly' };
+type BenchBase = {
+  /**
+   * The display name of the second line. ⚠⚠ EVERY CARD LABELS WITH THIS, never with `universe`.
+   * It used to read `benchTarget.universe` in 47 places, which was fine while the second line could
+   * only ever be an index — and became a blank legend the moment it could be a company. The union
+   * below is deliberately shaped so `.universe` does not typecheck: a half-finished migration here
+   * is an unlabelled line on fourteen charts, which looks like a rendering bug rather than a
+   * missing string.
+   */
+  label: string;
+  cadence: 'annual' | 'quarterly';
+};
+
+/**
+ * What to draw beside the book: a cap-weighted INDEX, or one other COMPANY.
+ *
+ * ⚠⚠ A COMPANY IS A ONE-HOLDING BOOK, AND THAT IS WHY THIS COSTS ALMOST NOTHING. Every `*-inputs`
+ * endpoint already takes `{holdings:[…]}` — it is how a portfolio is charted — so a comparison
+ * against another company needs no new endpoint, no new blend rule and no new chart code. Measured
+ * 2026-08-19: `{holdings:[{isin, weight:1}]}` returns one row at `weight_pct = 100` in 100-565 ms.
+ * The alternative, a bespoke "compare" pipeline, would be a second definition of every ratio on
+ * this tab.
+ *
+ * ⚠ `market_cap_by_period` IS ABSENT FOR A COMPANY, AND THAT IS CORRECT. `weightAt` reads its
+ * absence as "the single weight applies to every period" — which for one company at 100% is
+ * exactly right. An index gets per-period cap weights because it has constituents; a company has
+ * nothing to weight.
+ */
+export type BenchTarget =
+  | (BenchBase & { universe: string; isin?: never })
+  | (BenchBase & { isin: string; universe?: never });
+
+/** True when this second line is an index rather than a company. The ONE discriminator; every
+ *  branch that needs to tell them apart reads it, so there is one answer and not five. */
+export const isUniverseTarget = (t: BenchTarget): t is BenchBase & { universe: string } =>
+  'universe' in t && typeof t.universe === 'string';
+
+/** The request body these endpoints take. An index sends `universe`; a company sends itself as a
+ *  one-holding book, which is the shape `/`-inputs` already serves for a portfolio. */
+export function benchBody(t: BenchTarget): string {
+  return JSON.stringify(isUniverseTarget(t)
+    ? { universe: t.universe, cadence: t.cadence }
+    : { holdings: [{ isin: t.isin, name: t.label, weight: 1 }], cadence: t.cadence });
+}
+
+/** Identity for the fetch effect. ⚠ THE ISIN/LABEL AND THE CADENCE, not the label alone — two
+ *  companies can share a name (dual listings) and a stale line under a new name is the failure
+ *  this key exists to prevent. */
+export const benchKey = (t: BenchTarget | null | undefined): string =>
+  t ? `${isUniverseTarget(t) ? `u:${t.universe}` : `c:${t.isin}`}|${t.cadence}` : '';
 
 /**
  * Row order in every Long Equity hover: the BENCHMARK first, then the book. Pass as `itemSorter`.
@@ -132,15 +181,15 @@ export function useBenchInputs<T>(
   path: string, target: BenchTarget | null | undefined,
 ): [T | null, string | null] {
   const [state, setState] = useState<[T | null, string | null]>([null, null]);
-  const key = target ? `${target.universe}|${target.cadence}` : '';
+  const key = benchKey(target);
   useEffect(() => {
     let alive = true;
     void (async () => {
       setState([null, null]);
       if (!target) return;
+      const body = benchBody(target);
       const post = (p: string) => apiFetch(`${API_URL}/api/earnings/${p}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(target),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
       });
       /** The body, or a thrown reason — one shape for both requests.
        *  ⚠ THE RESPONSE TRAVELS WITH THE ERROR (`cause`) so the console keeps the full diagnostic
@@ -156,7 +205,10 @@ export function useBenchInputs<T>(
         return b;
       };
       try {
-        const wantCaps = CAPS_LIFTED_OUT.test(path);
+        // ⚠ ONLY FOR AN INDEX. `/universe-period-caps` 422s for a company by design — a holding
+        // weight is not a market cap and has no history — and asking anyway would turn every
+        // company comparison into an error on all ten cards.
+        const wantCaps = CAPS_LIFTED_OUT.test(path) && isUniverseTarget(target);
         // In parallel: the wait is the slower of the two, not their sum. The caps request is
         // shared with the other nine cards and is ~0.19 MB against a card's ~0.34 MB.
         const [rows, caps] = await Promise.all([
@@ -167,7 +219,7 @@ export function useBenchInputs<T>(
         setState([spliceCaps(rows as T, caps?.caps ?? {}), null]);
       } catch (e) {
         const detail = e instanceof Error ? e.message : String(e);
-        console.warn(`[bb:bench] ${path} ${target?.universe}: ${detail}`, e);
+        console.warn(`[bb:bench] ${path} ${target?.label}: ${detail}`, e);
         if (alive) setState([null, detail]);
       }
     })();
@@ -218,25 +270,25 @@ export function benchNote(
   flooredHere = true,
 ): string | null {
   if (!target) return null;
-  if (error) return `${target.universe}: ${error}`;
-  if (!data) return `${target.universe}: loading…`;
+  if (error) return `${target.label}: ${error}`;
+  if (!data) return `${target.label}: loading…`;
   if (!flooredHere) {
     // What is observable from here, and nothing more. The reason lives on the server's
     // `blend_notes` for this code.
     if (!series || series.size === 0) {
-      return `${target.universe}: the blended series came back empty — see the console`;
+      return `${target.label}: the blended series came back empty — see the console`;
     }
     return series.size === 1
-      ? `${target.universe}: one period only — a single dot, not a line` : null;
+      ? `${target.label}: one period only — a single dot, not a line` : null;
   }
   // ⚠ THE NUMBER IS READ, NEVER SPELT. It used to be "80%" in both strings, so the day the floor
   // moved the legend would have gone on quoting a floor that no longer existed — a caption that
   // contradicts the chart it explains, and nothing would have failed.
   if (!series || series.size === 0) {
-    return `${target.universe}: no period clears the ${MIN_YEAR_COVERAGE_PCT}% coverage floor`;
+    return `${target.label}: no period clears the ${MIN_YEAR_COVERAGE_PCT}% coverage floor`;
   }
   if (series.size === 1) {
-    return `${target.universe}: one period only — the rest fall under the `
+    return `${target.label}: one period only — the rest fall under the `
       + `${MIN_YEAR_COVERAGE_PCT}% coverage floor`;
   }
   return null;

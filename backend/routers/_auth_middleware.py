@@ -241,16 +241,27 @@ def _is_user_refresh(path: str) -> bool:
     return path in _USER_REFRESH_PATHS or any(p.match(path) for p in _USER_REFRESH_PATTERNS)
 
 
-# Specific GET-by-id resources a non-admin may read so the read-only /schedule
-# strategy-detail panel loads its current portfolio + source backtest. These
-# live under the otherwise admin-only `/api/momentum/*` namespace, so they're
-# allow-listed by EXACT pattern (not prefix — that would also expose the
-# list-all + sibling routes). The endpoints themselves then authorize the
-# specific id, returning the resource only when it belongs to a `user_visible`
-# scheduled strategy (see `get_current_picks` / `load_backtest`).
+# Specific GETs a non-admin may read, allow-listed by EXACT pattern because each sits inside an
+# otherwise admin-only namespace where a PREFIX would hand over the siblings too.
+#
+#   * The two `/api/momentum/*` resources back the read-only /schedule strategy-detail panel (its
+#     current portfolio + source backtest). The endpoints then authorize the specific id, returning
+#     the resource only when it belongs to a `user_visible` scheduled strategy (see
+#     `get_current_picks` / `load_backtest`).
+#   * `/api/asset-pipeline/search` is the /research-dashboard company picker (2026-08-19). ⚠⚠ AN
+#     EXACT PATTERN, AND THE ALTERNATIVE IS NOT SUBTLE: the `/api/asset-pipeline/` namespace holds
+#     `/grid` (27.56 MB of every ISIN with every column), `/ingest`, `/store`, the bulk resolve and
+#     the row refresh. A prefix would hand all of them to every authenticated user in exchange for
+#     one type-ahead. The two reads the page's PANELS need are already covered
+#     (`/api/asset-pipeline/fundamentals/` and everything under `/api/earnings`), so this is the
+#     only line the page adds.
+#   ⚠ The search endpoint returns identity only — name, ISIN, symbol, exchange, currency, sector,
+#     bar count — and never prices or positions. It is the same catalogue a user can already reach
+#     one company at a time through the fundamentals read.
 _USER_GET_RESOURCE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/api/momentum/current-picks/\d+$"),
     re.compile(r"^/api/momentum/backtests/\d+$"),
+    re.compile(r"^/api/asset-pipeline/search$"),
 )
 
 

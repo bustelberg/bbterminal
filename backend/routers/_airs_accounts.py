@@ -436,15 +436,42 @@ def _missing_reports() -> dict[str, list[str]]:
     dated = [r for r in rows if r.get("reports_at")]
     if not dated:
         return {}
-    newest = dated[0]["reports_at"]
+    # ⚠⚠ EACH ACCOUNT'S OWN LAST SCAN — NOT THE NEWEST TIMESTAMP IN THE TABLE. This used to take
+    # `dated[0]["reports_at"]` as "the last refresh" and skip every row that did not match it
+    # EXACTLY, which is wrong twice over:
+    #
+    #   * `airs_account_roster` is ONE ROW PER ACCOUNT, each stamped when THAT account was scanned.
+    #     Measured 2026-08-19: 46 accounts, 7 distinct `reports_at`, and exactly **1 of 45** rows
+    #     matched the single newest one. Forty-four accounts could not show a badge at all.
+    #   * Refreshing ONE account made its stamp the newest, so every other account instantly
+    #     stopped matching and EVERY badge on the page vanished — while nothing about their reports
+    #     had changed. Reported as "I refresh one and nothing gets fetched, but all the warnings
+    #     disappear", which is precisely what it did.
+    #
+    # The question is per account — "did THIS account's last refresh retrieve everything?" — so it
+    # is answered from that account's own row. A global maximum cannot answer a per-row question.
+    #
+    # ⚠ FIRST ROW WINS, and the query is ordered `reports_at desc`. The table holds one row per
+    # account today; keeping the newest explicitly means a second row per account (a history) would
+    # not silently start reporting an old scan's gaps.
     out: dict[str, list[str]] = {}
+    # ⚠ A SEPARATE `seen`, NOT `key in out`. A COMPLETE account never enters `out` — it has no gap
+    # to record — so using `out` as the dedupe let its OLDER row through and resurface last week's
+    # gaps on a row that is currently fine. Caught by
+    # `test_the_newest_row_wins_if_an_account_ever_has_two`.
+    seen: set[str] = set()
     for r in dated:
-        if r.get("reports_at") != newest or not r.get("portefeuille"):
+        key = (r.get("portefeuille") or "").strip().lower()
+        if not key or key in seen:
             continue
+        seen.add(key)
         got = set(r.get("reports_ok") or [])
         gap = [code for code in REPORTS if code not in got]
+        # ⚠ An account with nothing missing gets NO ENTRY, not an empty list — `missing_reports`
+        # is rendered on truthiness at the other end, and `[]` there would badge a whole row with
+        # an empty gap list.
         if gap:
-            out[(r["portefeuille"] or "").strip().lower()] = gap
+            out[key] = gap
     return out
 
 

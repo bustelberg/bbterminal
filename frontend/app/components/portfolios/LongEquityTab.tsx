@@ -17,6 +17,7 @@ import CashConversionCard from './CashConversionCard';
 import FcfSbcYieldCard from './FcfSbcYieldCard';
 import DividendYieldCard from './DividendYieldCard';
 import { type BlendNote } from './blendNotes';
+import { benchBody, type BenchTarget } from './benchSeries';
 
 /**
  * The "Long Equity" tab: a grid of growth cards (Revenue, FCF/share, …), each a
@@ -39,6 +40,11 @@ type MetricsResponse = {
  *  ⚠ Their coverage differs a lot (SP500 is the best-ingested), and a thinly-covered index makes a
  *  confident-looking line over a fraction of itself; each card states the coverage it drew. */
 const BENCHMARKS = ['SP500', 'ACWI', 'AEX'];
+
+/** The select value that means "the company the caller handed me", not an index.
+ *  ⚠ A SENTINEL, NOT AN ISIN. An ISIN in the option value would collide the day an index is ever
+ *  labelled with one, and it would put an identifier in a control whose other values are names. */
+const COMPARE_VALUE = '__compare__';
 
 const CARDS: MetricCfg[] = [
   {
@@ -108,11 +114,30 @@ const CARDS: MetricCfg[] = [
   // the portfolio card read "No dividend/share ingested" while every holding carried the line.
 ];
 
-export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorrection = true }: {
+export default function LongEquityTab({
+  isin, name, basket, portfolioId, sbcCorrection = true, compare = null,
+}: {
   isin?: string;
   name?: string | null;
   basket?: { holdings: { isin: string; weight: number; name?: string }[] };
   portfolioId?: number;
+  /**
+   * A SECOND COMPANY to draw beside this one, on every chart, instead of an index.
+   *
+   * ⚠⚠ IT REUSES THE BENCHMARK SLOT RATHER THAN ADDING A THIRD SERIES, AND THAT IS THE WHOLE
+   * TRICK. Every card here already draws a second line on a shared y-domain, with a legend, a
+   * hover order and a coverage floor — all of it computed by running the card's OWN helper
+   * (`marginByYear`, `debtRatioByYear`, …) over a second row set. A company is a one-holding book
+   * to those same endpoints, so company-vs-company needs no new chart code, no new blend rule and
+   * no new endpoint: fourteen charts become comparisons at once, and they cannot disagree with the
+   * single-company view because they ARE it.
+   *
+   * ⚠ THE COST IS THAT YOU GET ONE OR THE OTHER. A chart carries the book and one comparison line;
+   * choosing a company means not showing the index on that chart. Making it three lines would be a
+   * third colour on fourteen charts, two of which already carry an amber trend line — see the
+   * palette note in `benchSeries`.
+   */
+  compare?: { isin: string; name: string } | null;
   /** ⚠ OWNED BY THE MODAL, NOT HERE — its checkbox lives in the tab row, which is in the fixed
    *  head and therefore always visible. Governs the four charts whose numerator is FCF. */
   sbcCorrection?: boolean;
@@ -153,10 +178,25 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
   // ⚠ AEX, NOT `BENCHMARKS[0]`. The default is a choice about what this book is measured against —
   // a Dutch book against the Dutch index — not "whichever we happen to list first", and pinning it
   // to the array's order means reordering the list silently re-benchmarks every chart in the tab.
-  const [benchmark, setBenchmark] = useState<string | null>('AEX');
+  const [benchmark, setBenchmark] = useState<string | null>(compare ? COMPARE_VALUE : 'AEX');
+
+  /**
+   * ⚠ A COMPANY PICKED ELSEWHERE WINS, AND THE SELECT FOLLOWS IT. On /research-dashboard the second
+   * company is chosen by the PAGE, not by this control; leaving the select on 'AEX' would draw an
+   * index while the page above it named a company. Derived at render from `compare` — an effect
+   * that assigned it would render once with the wrong line and again with the right one.
+   */
+  const selected = compare && benchmark === COMPARE_VALUE ? COMPARE_VALUE : benchmark;
+
   /** ⚠ Memoised for the same reason `holdingsTarget` is — it is an effect dep in twelve cards. */
-  const benchTarget = useMemo(
-    () => (benchmark ? { universe: benchmark, cadence } : null), [benchmark, cadence]);
+  const benchTarget = useMemo<BenchTarget | null>(() => {
+    if (compare && selected === COMPARE_VALUE) {
+      return { isin: compare.isin, label: compare.name, cadence };
+    }
+    return selected && selected !== COMPARE_VALUE
+      ? { universe: selected, label: selected, cadence }
+      : null;
+  }, [compare, selected, cadence]);
 
   // ⚠ Memoised — it's a card/modal effect dep, so a fresh object each render would refetch forever.
   // ⚠ `cadence` RIDES IN THE BODY, which is what makes one toggle move nine cards: every derived
@@ -246,7 +286,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
     const ctrl = new AbortController();
     void (async () => {
       setBenchMetrics(null); setBenchErr(null); setBenchNotes(undefined);
-      if (!benchmark) return;
+      if (!benchTarget) return;
       try {
         const r = await apiFetch(`${API_URL}/api/earnings/fundamental-blend-metrics`, {
           signal: ctrl.signal,
@@ -259,8 +299,12 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
           // a benchmark is a narrowed read and gets exactly what this list asks for. Omitting them
           // draws a dotted consensus on the book and none on the index — which reads as "the index
           // has no expectations" rather than "we did not ask for them".
+          // ⚠ THE SAME BODY BUILDER THE CARDS USE (`benchBody`), then the metric list merged in.
+          // Hand-writing `{universe: …}` here is what made this the ONE fetch that could not
+          // compare against a company: the ten cards went through `useBenchInputs` and switched,
+          // and the three growth cards silently kept drawing the index. One builder, one shape.
           body: JSON.stringify({
-            universe: benchmark, cadence,
+            ...JSON.parse(benchBody(benchTarget)),
             metrics: [...new Set(CARDS.flatMap(
               (c) => [c.benchmarkMetric, ...(c.forecastMetric ? [c.forecastMetric] : [])]))],
           }),
@@ -269,7 +313,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
         if (!alive) return;
         if (!r.ok) {
           const detail = (b?.detail as string) ?? `HTTP ${r.status}`;
-          console.warn(`[bb:bench] blend ${benchmark}: ${detail}`, b);
+          console.warn(`[bb:bench] blend ${benchTarget.label}: ${detail}`, b);
           setBenchErr(detail);
           return;
         }
@@ -278,12 +322,12 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
       } catch (e) {
         if (!alive) return;                     // aborted by the switch — not a failure to report
         const detail = e instanceof Error ? e.message : String(e);
-        console.warn(`[bb:bench] blend ${benchmark}: ${detail}`, e);
+        console.warn(`[bb:bench] blend ${benchTarget.label}: ${detail}`, e);
         setBenchErr(detail);
       }
     })();
     return () => { alive = false; ctrl.abort(); };
-  }, [benchmark, cadence]);
+  }, [benchTarget, cadence]);
 
   /**
    * ⚠⚠ NEITHER AN ERROR NOR A LOAD MAY TAKE THE CONTROL ROW WITH IT — these used to be early
@@ -319,7 +363,7 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
     metrics: data?.metrics ?? null, isAgg, currency: data?.currency,
     blendNotes: data?.blend_notes, holdingsTarget, holdingsName: gName,
     ingestIsin, onIngested, onReloadMetrics, cadence,
-    benchMetrics, benchLabel: benchmark, benchErr, benchNotes,
+    benchMetrics, benchLabel: benchTarget?.label ?? null, benchTarget, benchErr, benchNotes,
   };
   // ⚠ ONE KEY SUFFIX FOR EVERY DERIVED CARD. They each own their fetch, so without the cadence in
   // the key a switch would leave twelve charts showing the previous basis until something else
@@ -361,15 +405,19 @@ export default function LongEquityTab({ isin, name, basket, portfolioId, sbcCorr
           while it states the question, and `None` is an option rather than a second widget. */}
       <label className="flex items-center gap-1.5 ml-4 text-fg-faint">
         Benchmark
-        <select value={benchmark ?? ''}
+        <select value={selected ?? ''}
           onChange={(e) => setBenchmark(e.target.value || null)}
-          aria-label="Benchmark"
+          aria-label="Compare against"
           title={'The index each chart is measured against. Its constituents are cap-weighted and '
             + 'run through the SAME formula as the portfolio, so the two lines are comparable. '
             + 'Only constituents whose fundamentals are ingested contribute — the coverage floor '
             + 'applies to the index exactly as it does to the book.'}
           className="cursor-pointer bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-[11px] font-mono text-fg focus:border-accent-500">
           <option value="">None</option>
+          {/* ⚠ FIRST, AND ONLY WHEN THERE IS ONE. The comparison company is what the reader came
+              for on /research-dashboard; the indices stay available underneath so a company can
+              still be measured against its market without leaving the page. */}
+          {compare && <option value={COMPARE_VALUE}>{compare.name}</option>}
           {BENCHMARKS.map((b) => <option key={b} value={b}>{b}</option>)}
         </select>
       </label>

@@ -58,18 +58,23 @@ describe('lagOwner', () => {
     expect(lagOwner('2026-08-11', '2026-08-17')?.side).toBe('source');
   });
 
-  it('⚠ YESTERDAY STILL COUNTS AS US BEING CURRENT. The fleet scan runs on a daily tick, so "we '
-     + 'read it yesterday" is the normal healthy state, not a gap to send someone chasing', () => {
+  it('⚠⚠ YESTERDAY IS NOW OURS — THIS ASSERTION WAS REVERSED (2026-08-19), so both sides are on '
+     + 'the record. It used to demand `source` for a read one trading day old, on the grounds that '
+     + 'the fleet scan runs daily and "read yesterday" is the healthy state. The rule is now: not '
+     + 'read TODAY is outdated. A figure read on Monday and still on screen on Wednesday looked as '
+     + 'current as one read an hour ago, which is what that threshold cost', () => {
     const got = lagOwner('2026-07-16', '2026-08-14T06:00:00+00:00');   // Friday, read on Monday
-    expect(got?.side).toBe('source');
+    expect(got?.side).toBe('ours');
     expect(got?.days).toBe(1);
   });
 
-  it('⚠ THE TWO SIDES USE ONE THRESHOLD. Both "stale" and "ours" mean two or more trading days; a '
-     + 'second constant would eventually disagree with the badge it explains', () => {
-    // Read two trading days ago → ours. One → theirs. The badge itself flips at the same place.
+  it('⚠ THE TWO SIDES STILL USE ONE THRESHOLD, and it is now "today". A second constant would '
+     + 'eventually disagree with the badge it explains — which is the whole reason this function '
+     + 'and `provenanceFreshness` share a definition', () => {
     expect(lagOwner('2026-07-16', '2026-08-13T06:00:00+00:00')?.side).toBe('ours');
-    expect(lagOwner('2026-07-16', '2026-08-14T06:00:00+00:00')?.side).toBe('source');
+    expect(lagOwner('2026-07-16', '2026-08-14T06:00:00+00:00')?.side).toBe('ours');
+    // Read TODAY is the only thing that is not our lag.
+    expect(lagOwner('2026-07-16', '2026-08-17T06:00:00+00:00')?.side).toBe('source');
   });
 
   it('a month-old valuation read today is STILL the source — old is not the same as our fault', () => {

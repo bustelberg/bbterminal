@@ -75,6 +75,31 @@ export function snapshotFreshness(asOf: string | null | undefined):
  * uses, because "we have not read it since the day before yesterday" is the same claim about a
  * different clock, and two thresholds would eventually disagree about one row.
  */
+/**
+ * Was this read from the source TODAY?
+ *
+ * ⚠⚠ THE RULE FOR THE PROVENANCE BADGE (2026-08-19): a copy that is not from today is outdated,
+ * and outdated is amber. Not "≥2 trading days", which is what it was — a figure read on Monday and
+ * still on screen on Wednesday looked as current as one read an hour ago.
+ *
+ * ⚠ CALENDAR DAYS, NOT TRADING DAYS, and that is the literal rule rather than a softened one. It
+ * means a Saturday lights up everything read on Friday. That is not a false alarm: nothing HAS been
+ * read today, the scheduled scans are Mon-Fri, and a manual Refresh does clear it — so the badge
+ * stays actionable, which is the one property amber must keep.
+ *
+ * ⚠ COMPARED IN LOCAL TIME, on the date portion only. `fetched_at` is an ISO timestamp in UTC;
+ * slicing to `YYYY-MM-DD` and comparing to the browser's own local date is what makes "today" mean
+ * the reader's today. Parsing it as a Date and diffing hours would make a 23:30 CET fetch read as
+ * yesterday's for the first hour of the morning.
+ */
+export function fetchedToday(fetchedAt: string | null | undefined): boolean {
+  if (!fetchedAt) return false;
+  const d = new Date();
+  const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-`
+    + `${String(d.getDate()).padStart(2, '0')}`;
+  return fetchedAt.slice(0, 10) === local;
+}
+
 export type LagOwner = { side: 'source' | 'ours'; days: number; text: string };
 
 export function lagOwner(
@@ -83,11 +108,14 @@ export function lagOwner(
   if (snapshotFreshness(asOf)?.tone !== 'stale') return null;
   if (!fetchedAt) return null;
   const days = businessDaysBehind(fetchedAt.slice(0, 10));
-  if (days <= 1) {
+  // ⚠ TODAY ONLY, NOT `days <= 1`. The badge and this line must agree — see `provenanceFreshness`,
+  // which is the one place the verdict is computed — and the badge now goes amber on anything not
+  // read today. Leaving "yesterday" on the source side here would put a blue icon over a card
+  // whose own text said our copy was a day behind.
+  if (fetchedToday(fetchedAt)) {
     return { side: 'source', days,
-      text: `We read this account from AIRS ${days === 0 ? 'today' : 'yesterday'}, so this is `
-        + 'simply the newest valuation AIRS has for it — refreshing again cannot produce one it '
-        + 'has not published.' };
+      text: 'We read this account from AIRS today, so this is simply the newest valuation AIRS has '
+        + 'for it — refreshing again cannot produce one it has not published.' };
   }
   return { side: 'ours', days,
     text: `We last read this account ${days} trading days ago, so our copy is behind — a Refresh `

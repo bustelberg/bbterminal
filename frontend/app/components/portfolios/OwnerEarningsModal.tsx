@@ -29,7 +29,8 @@ type Tab = 'fundamentals' | 'longequity' | 'quickval' | 'deepval' | 'tables';
  * "Fundamental" button opens exactly this case.
  */
 export default function OwnerEarningsModal({
-  isin, name, bookName, sharePct, basket, portfolioId, refreshScope, onClose,
+  isin, name, bookName, sharePct, basket, portfolioId, refreshScope, onClose, embedded = false,
+  compare = null,
 }: {
   isin?: string;
   name?: string | null;
@@ -77,6 +78,23 @@ export default function OwnerEarningsModal({
    */
   refreshScope?: RefreshScope;
   onClose: () => void;
+  /**
+   * Render the card WITHOUT the dialog frame — no scrim, no fixed positioning, width from the
+   * parent column. For `/research-dashboard`, which mounts two of these side by side.
+   *
+   * ⚠ IT CHANGES THE FRAME AND NOTHING ELSE. Every tab, every control and every fetch below is
+   * identical, which is the only reason two of them can be called a comparison — see the ⚠⚠ on
+   * `card` in the body. If this prop ever starts gating CONTENT, the two surfaces have become two
+   * components wearing one name.
+   *
+   * ⚠ `aria-modal` GOES WITH THE FRAME. Embedded it is not a modal, and saying it is tells a
+   * screen reader the rest of the page is inert when it is not.
+   */
+  embedded?: boolean;
+  /** A second COMPANY to draw beside this one on every Long Equity chart, instead of an index.
+   *  Passed straight through — see `LongEquityTab`'s own note for why it reuses the benchmark
+   *  slot rather than adding a third series. */
+  compare?: { isin: string; name: string } | null;
 }) {
   const isAgg = !!basket || portfolioId != null;
   const title = basket?.label ?? name ?? isin ?? '';
@@ -200,16 +218,27 @@ export default function OwnerEarningsModal({
    *  survive closing the dialog. See `lib/i18n.ts` for why it cannot be seeded synchronously. */
   const [lang, setLang] = useLang();
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/60"
-      onClick={onClose} role="dialog" aria-modal="true">
-      {/* ⚠ A FIXED HEAD OVER A SCROLLING BODY, NOT ONE `overflow-auto` BOX. Everything used to
-          scroll together, so on a tab twelve charts long the title, the tab bar and a tab's own
-          controls all left the screen — and a control you cannot see is a setting you forget is
-          set. `min-h-0` on the body is what actually lets it scroll: a flex child defaults to
-          min-height:auto and would grow to its content instead, pushing the head off-screen and
-          reproducing the original behaviour. Same shape as QuickValuationInputsModal. */}
-      <div className="bg-card border border-neutral-800/40 rounded-xl shadow-xl w-[80vw] h-[80vh] flex flex-col p-4"
+  /**
+   * ⚠⚠ THE CARD IS THE COMPONENT; THE SCRIM IS A FRAME AROUND IT. `/research-dashboard` mounts two
+   * of these side by side to compare two companies, and it must be THIS component — the same tabs,
+   * the same state, the same benchmark picker — not a second rendering of "the fundamentals". A
+   * copy would drift from the dialog on the first change to either, and two panels drawn under
+   * different rules put two pictures side by side and invite them to be read as one.
+   *
+   * So `embedded` swaps ONLY the outermost wrapper: no fixed positioning, no scrim, no
+   * `aria-modal` (it is not a modal there, and claiming otherwise tells a screen reader the rest
+   * of the page is inert when it is not), and the width comes from the column instead of the
+   * viewport. Everything from the head down is untouched and unaware.
+   */
+  /* ⚠ A FIXED HEAD OVER A SCROLLING BODY, NOT ONE `overflow-auto` BOX. Everything used to scroll
+     together, so on a tab twelve charts long the title, the tab bar and a tab's own controls all
+     left the screen — and a control you cannot see is a setting you forget is set. `min-h-0` on
+     the body is what actually lets it scroll: a flex child defaults to min-height:auto and would
+     grow to its content instead, pushing the head off-screen and reproducing the original
+     behaviour. Same shape as QuickValuationInputsModal. */
+  const card = (
+      <div className={`bg-card border border-neutral-800/40 rounded-xl shadow-xl flex flex-col p-4 ${
+        embedded ? 'w-full h-[82vh] min-w-0' : 'w-[80vw] h-[80vh]'}`}
         onClick={(e) => e.stopPropagation()}>
 
         <div className="flex items-start justify-between gap-3 mb-2 shrink-0">
@@ -351,6 +380,7 @@ export default function OwnerEarningsModal({
             {/* ⚠ `subject`, NOT `title` — this name reaches the chart hovers, the per-holding
                 drill-down and the ingest, and on a group it was the bare "Stocks". See `subject`. */}
             <LongEquityTab isin={isin} name={subject} basket={basket} portfolioId={portfolioId}
+              compare={compare}
               sbcCorrection={sbcCorrection} />
           </div>
         )}
@@ -401,6 +431,13 @@ export default function OwnerEarningsModal({
         )}
         </div>
       </div>
+  );
+
+  if (embedded) return card;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/60"
+      onClick={onClose} role="dialog" aria-modal="true">
+      {card}
     </div>
   );
 }

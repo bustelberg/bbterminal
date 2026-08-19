@@ -185,21 +185,49 @@ describe('the icon and its card carry ONE verdict', () => {
 
   /** The card is rendered only while the tip is open, so the pill is asserted through
    *  `provenanceFreshness` directly — the same function the icon reads. */
-  it('⚠ THE REPORTED CASE — read yesterday, valued days ago: BLUE, and the pill is not amber', () => {
+  it('⚠⚠ REVERSED (2026-08-19) — READ YESTERDAY IS NOW AMBER. This asserted BLUE for "read '
+     + 'yesterday, valued days ago", on the old ≥2-trading-day threshold. The rule is now: not '
+     + 'read TODAY is outdated. Amber stays actionable either way — a Refresh sets `fetched_at` to '
+     + 'now and clears it — which is the property the 2026-08-17 incident was about', () => {
     const html = renderToStaticMarkup(
       <Provenance source="airs_att" asOf={LONG_AGO} fetchedAt={`${yesterday}T13:00:00Z`}
         kind="copied" note="a value" />,
     );
-    expect(html).toContain(INFO_ICON);
-    expect(html).not.toContain(INFO_ICON_WARN);
+    expect(html).toContain(INFO_ICON_WARN);
     // ...and the card agrees, because it is the same call.
-    expect(provenanceFreshness(LONG_AGO, `${yesterday}T13:00:00Z`).stale).toBe(false);
+    expect(provenanceFreshness(LONG_AGO, `${yesterday}T13:00:00Z`).stale).toBe(true);
   });
 
-  it('the date is still SHOWN when it is the source that is behind — just not as a fault', () => {
-    const f = provenanceFreshness(LONG_AGO, `${yesterday}T13:00:00Z`);
+  it('⚠⚠ THE SOURCE’S OWN AGE IS NO LONGER REPORTED AT ALL (2026-08-19). This asserted the '
+     + 'label said "the source’s latest" for a book read today but valued long ago. Where we '
+     + 'know when WE read it, that is the whole answer — the valuation age answers a question '
+     + 'nobody on this page is asking, and printing both put two clocks in one row with the '
+     + 'actionable one hidden', () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const f = provenanceFreshness(LONG_AGO, `${today}T13:00:00Z`);
     expect(f.stale).toBe(false);
-    expect(f.label).toContain("the source's latest");
+    expect(f.label).toBe('read today');
+    expect(f.label).not.toContain('source');
+    // ⚠ And nothing about trading-day ages either — that phrasing was the source's clock.
+    expect(f.label).not.toMatch(/old|trading day/);
+  });
+
+  it('⚠ WHEN SHOWS OUR READ DATE, not the valuation date, wherever we know it', () => {
+    const html = renderToStaticMarkup(
+      <Provenance source="airs_volk" asOf={LONG_AGO} fetchedAt={`${yesterday}T13:00:00Z`}
+        kind="copied" note="a value" />,
+    );
+    // The card only renders inside the open tip, so assert the verdict the row is built from.
+    expect(provenanceFreshness(LONG_AGO, `${yesterday}T13:00:00Z`).label)
+      .toMatch(/not read today|read \d+ trading day/);
+    expect(html).toContain(INFO_ICON_WARN);
+  });
+
+  it('⚠ UNCHANGED WHERE THE FETCH TIME IS UNKNOWN. Most call sites pass no `fetchedAt`; treating '
+     + '"cannot tell" as "not today" would turn the whole app amber at once', () => {
+    expect(provenanceFreshness(LONG_AGO, undefined).stale).toBe(true);    // stale source, as before
+    const today = new Date().toISOString().slice(0, 10);
+    expect(provenanceFreshness(today, undefined).stale).toBe(false);      // fresh source, as before
   });
 
   it('OUR lag is amber in both places', () => {

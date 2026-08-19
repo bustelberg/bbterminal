@@ -190,8 +190,22 @@ export function startLocalJob(
  * `after` lets a re-attach ask for the events it missed, so a page reload shows the run's history
  * rather than joining mid-sentence.
  */
+/**
+ * `onProgress` — called for every progress line, so a caller can refresh what it shows AS the job
+ * runs rather than only when it ends.
+ *
+ * ⚠ IT IS NOT THE TOAST'S JOB. The toast already narrates; this exists for callers whose SCREEN is
+ * the thing the job changes — "Refresh all" rewrites 44 account rows over several minutes, and
+ * repainting them only at the end means staring at figures you have already replaced. Optional, so
+ * every existing caller is untouched.
+ *
+ * ⚠ IT MUST NOT THROW. It runs inside the stream handler; an exception here would kill the
+ * progress stream and the toast with it, turning a cosmetic nicety into a lost job. Wrapped below.
+ */
 export function watchJob(id: string, title: string, after = 0,
-                         seed?: { kind?: string; label?: string }): Promise<JobToast> {
+                         seed?: { kind?: string; label?: string },
+                         onProgress?: (e: { done?: number; total?: number; message?: string })
+                           => void): Promise<JobToast> {
   jobsStore.set((s) => (s.jobs.some((j) => j.id === id) ? {} : {
     jobs: [...s.jobs, {
       id, title, kind: seed?.kind ?? '', label: seed?.label ?? '',
@@ -245,6 +259,15 @@ export function watchJob(id: string, title: string, after = 0,
           ...(typeof e.done === 'number' ? { done: e.done } : {}),
           ...(typeof e.total === 'number' ? { total: e.total } : {}),
         });
+        // ⚠ AFTER the toast, and swallowed. The toast is the job's own record and must land even
+        // if a listener misbehaves; see the note on `onProgress`.
+        if (onProgress) {
+          try {
+            onProgress({ done: e.done, total: e.total, message: e.message });
+          } catch (err) {
+            traceError('jobs', `an onProgress listener for ${id} threw`, err);
+          }
+        }
       },
     ).then(finish).catch((err) => {
       traceError('jobs', `the stream for job ${id} failed`, err);
@@ -265,6 +288,8 @@ export function watchJob(id: string, title: string, after = 0,
  */
 export async function startJob(
   startUrl: string, title: string, init?: RequestInit,
+  /** Per-progress-line callback — see `watchJob`. For callers whose screen the job rewrites. */
+  onProgress?: (e: { done?: number; total?: number; message?: string }) => void,
 ): Promise<{ id: string; done: Promise<JobToast>; body: Record<string, unknown> }> {
   // ⚠ `init` IS OPTIONAL AND MERGED AFTER `method`, so a caller can add a JSON body (the basket
   // fill posts its holdings) without being able to turn this into a GET by accident.
@@ -276,7 +301,8 @@ export async function startJob(
   // it could reach and why the rest it could not, which the caller has to render BEFORE the first
   // progress line arrives. Discarding it forced a second request for data we already had.
   // Additive: every existing caller destructures `{ id, done }` and is untouched.
-  return { id: b.job_id, done: watchJob(b.job_id, title), body: b as Record<string, unknown> };
+  return { id: b.job_id, done: watchJob(b.job_id, title, 0, undefined, onProgress),
+    body: b as Record<string, unknown> };
 }
 
 /**

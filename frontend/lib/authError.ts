@@ -69,6 +69,35 @@ export function describeAuthError(
 }
 
 /**
+ * Why the sign-in email could not be SENT — a different question from why a link failed.
+ *
+ * ⚠⚠ THE RATE LIMIT IS THE ONE THAT MATTERS, AND IT READS AS A BUG. Supabase's built-in email
+ * service is capped at **2 messages per hour per project** and the cap cannot be raised without
+ * custom SMTP — it is a testing service, not a production one. The raw message is "email rate limit
+ * exceeded", which tells someone trying to create an account nothing about waiting, and nothing
+ * about it being a project-wide cap rather than something they did.
+ *
+ * ⚠ IT BITES HARDEST EXACTLY WHEN A LINK HAS JUST FAILED. Every failure path in this flow ends by
+ * telling the person to request a new link — and after two of those, the third silently cannot be
+ * sent. Saying "wait an hour" is the difference between a delay and an app that looks broken.
+ */
+export function describeSendError(message?: string | null): string {
+  const hay = (message ?? '').toLowerCase();
+  if (hay.includes('rate limit') || hay.includes('over_email_send_rate_limit')
+    || hay.includes('too many requests')) {
+    return 'Too many sign-in emails have been sent from this app in the last hour '
+      + '(the mail service is capped project-wide, not per person). Wait an hour and try again, '
+      + 'or ask the admin to create the account directly.';
+  }
+  if (hay.includes('for security purposes') || hay.includes('only request this after')) {
+    // Supabase's own throttle between two sends to the SAME address — seconds, not an hour.
+    return 'A link was just sent to that address. Give it a minute before asking for another, '
+      + 'and check the spam folder in the meantime.';
+  }
+  return message || 'The sign-in email could not be sent. Try again in a moment.';
+}
+
+/**
  * Was this redirect back from Supabase already an error, before we tried anything?
  *
  * ⚠ IT HAS TO BE CHECKED BEFORE THE EXCHANGE, NOT AFTER. When `/auth/v1/verify` rejects a token it

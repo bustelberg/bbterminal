@@ -102,7 +102,16 @@ def _targets() -> list[tuple[str, str]]:
 
 
 def arm() -> None:
-    """Start the background rebuilder. Idempotent; safe to call before anything is cached."""
+    """Start the background rebuilder AND queue the first pass. Idempotent.
+
+    ⚠⚠ THE FIRST PASS IS THE WHOLE POINT AND IT WAS MISSING. This started a thread whose first act
+    is `_wake.wait()`, and only `notify()` — i.e. only `invalidate()`, i.e. only a fundamentals
+    WRITE — ever set that event. So on a fresh process nothing was warmed: the thread sat idle and
+    the first reader paid the full cold path. Which is every Railway deploy, every restart, and
+    every scale-up — precisely the case this file exists to remove, and the one where an empty
+    cache is guaranteed rather than merely possible. Measured cold on ACWI: 4.35s for the growth
+    blend alone, ~20s for the tab's whole fan-out.
+    """
     global _armed
     with _lock:
         if _armed:
@@ -114,8 +123,14 @@ def arm() -> None:
             return
         _armed = True
         threading.Thread(target=_run, name="bb-blend-prewarm", daemon=True).start()
-    _log.warning("[blend-prewarm] armed for %s, %.0fs after the last invalidation",
+    _log.warning("[blend-prewarm] armed for %s, first pass in %.0fs",
                  ", ".join(f"{a}/{b}" for a, b in targets), _QUIET_SECONDS)
+    # ⚠ THROUGH `notify()`, NOT BY SETTING THE EVENT HERE. It is the one place that bumps the
+    # generation and stamps the clock, and the worker's debounce reads both; poking `_wake`
+    # directly would start a pass the abandon-check cannot reason about. It also means boot gets
+    # the same `_QUIET_SECONDS` grace as a write — the app is serving by then, and the warm
+    # trickles serially behind it rather than competing with startup.
+    notify()
 
 
 def notify() -> None:

@@ -179,7 +179,19 @@ password_requirements = ""
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
-email_sent = 2
+#
+# ⚠⚠ 2/HOUR IS ALSO WHAT THE HOSTED PROJECT IS STUCK ON, and there it is PROJECT-WIDE and cannot be
+# raised: Supabase's built-in mail service is a testing service, and the dashboard refuses the
+# setting with "Custom SMTP or Send Email hook is required to update this configuration". It bites
+# hardest exactly when a link has just failed, because every failure path in this flow ends by
+# telling the person to request another one — so the third request silently sends nothing.
+# `describeSendError` says so on screen; the real fix is custom SMTP. See
+# `supabase/templates/README.md`.
+#
+# ⚠ RAISED LOCALLY ON PURPOSE. Testing this flow end to end takes more than two emails, and Mailpit
+# is not a mail service anyone can abuse. Local and prod differ here by design — which is worth
+# knowing, because it means the rate-limit path CANNOT be reproduced locally at this value.
+email_sent = 30
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.

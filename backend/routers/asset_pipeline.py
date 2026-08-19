@@ -1121,6 +1121,91 @@ def _universe_members(supabase, p: UniverseParams) -> list[dict]:
     } for x in members]
 
 
+def ilike_pattern(term: str) -> str | None:
+    """A safe PostgREST `ilike` pattern for a user's search term, or None if nothing is left.
+
+    ⚠⚠ IT IS A FILTER-INJECTION GUARD, NOT TIDYING. PostgREST's `or=` takes a COMMA-SEPARATED list
+    of filters wrapped in parentheses — `or=(isin.ilike.*x*,name.ilike.*x*)` — so a comma or a
+    parenthesis inside the term does not search for that character, it ends one filter and starts
+    another. A term like `a,bars.gt.0` would be read as a second condition. The characters are
+    DROPPED rather than escaped: PostgREST has no escape for them inside `or=`, and a search box is
+    not the place to invent one.
+
+    ⚠ `*` GOES TOO, for a different reason: it is PostgREST's own wildcard, so a term containing one
+    would quietly widen the search rather than look for an asterisk. Nobody searches for `*`.
+
+    Pure, and tested — this is the one part of the endpoint where being wrong is a security
+    question rather than a slow query.
+    """
+    safe = "".join(c for c in (term or "").strip() if c not in ",()*")
+    return f"*{safe}*" if safe else None
+
+
+class AssetSearchRow(BaseModel):
+    """One pickable instrument — identity only, nothing a chart would draw."""
+
+    isin: str
+    analysis_id: int | None = None
+    name: str | None = None
+    yahoo_symbol: str | None = None
+    exchange: str | None = None
+    currency: str | None = None
+    sector: str | None = None
+    bars: int | None = None
+
+
+class AssetSearchResponse(BaseModel):
+    rows: list[AssetSearchRow]
+    truncated: bool = False
+
+
+@router.get("/api/asset-pipeline/search", response_model=AssetSearchResponse)
+async def search_assets(
+    q: str = Query(..., min_length=1, max_length=120),
+    limit: int = Query(25, ge=1, le=100),
+):
+    """Type-ahead over the asset grid: a handful of PICKABLE instruments matching `q`.
+
+    ⚠⚠ IT EXISTS BECAUSE `/grid` IS 27.56 MB. That endpoint returns all 16,613 rows with every
+    column — the right answer for a page whose whole job is that table, and an absurd one for a
+    two-field picker that needs a name and an ISIN. Filtering 27 MB in the browser to show ten
+    rows is the kind of thing that works on a laptop and not on a phone, and it would be paid on
+    every visit to `/research-dashboard`.
+
+    ⚠ PICKABLE MEANS DRAWABLE. Only `status='ok'` rows with an `analysis_id` and at least one bar
+    are offered: those are the ones a fundamentals view can actually render. Half the grid is
+    bonds, unresolved ISINs and zero-bar rows — offering them would let someone pick a company and
+    get an empty panel, which reads as a broken page rather than as an unpriceable instrument.
+
+    ⚠ THE LIMIT IS REPORTED, NOT SILENT. `truncated` tells the caller there are more matches than
+    it is seeing, so a picker can say "keep typing" instead of implying the list is the answer.
+    """
+    from deps import supabase  # noqa: PLC0415
+
+    pattern = ilike_pattern(q)
+    if pattern is None:
+        return {"rows": [], "truncated": False}
+
+    def _q() -> dict:
+        rows = (
+            supabase.table("asset_grid")
+            .select("isin,analysis_id,name,yahoo_symbol,exchange,currency,sector,bars")
+            .eq("status", "ok")
+            .not_.is_("analysis_id", "null")
+            .gt("bars", 0)
+            .or_(f"isin.ilike.{pattern},name.ilike.{pattern},yahoo_symbol.ilike.{pattern}")
+            # ⚠ ORDERED BY BAR COUNT, NOT BY NAME. Searching "apple" should offer the Nasdaq line
+            # before a thin foreign one, and history length is the same proxy the resolver already
+            # ranks listings by — a name sort would put an obscure venue first as often as not.
+            .order("bars", desc=True)
+            .limit(limit + 1)
+            .execute().data or []
+        )
+        return {"rows": rows[:limit], "truncated": len(rows) > limit}
+
+    return await asyncio.to_thread(_q)
+
+
 @router.get("/api/asset-pipeline/universe", response_model=UniverseResponse)
 async def universe(
     min_adv_eur: float = Query(1_000_000.0, ge=0, description="HYBRID fallback: min ADV (EUR) for tickers with NO market cap (ETFs/crypto)"),

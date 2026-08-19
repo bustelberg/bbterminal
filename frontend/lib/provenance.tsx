@@ -17,7 +17,7 @@ import InfoTip from '../app/components/InfoTip';
 import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
 import { Field, TipCard } from './tipCard';
 import { trimStop } from './provenanceText';
-import { lagOwner, snapshotFreshness } from './snapshotAge';
+import { businessDaysBehind, fetchedToday, lagOwner, snapshotFreshness } from './snapshotAge';
 
 export type SourceKey =
   | 'airs_volk'      // AIRS Vermogensoverzicht — the book's own EUR position values
@@ -83,10 +83,43 @@ export function provenanceFreshness(
 ): { stale: boolean; label: string } {
   if (column || !asOf) return { stale: false, label: '' };
   const f = snapshotFreshness(asOf);
+
+  /**
+   * ⚠⚠ NOT FETCHED TODAY IS OUTDATED (2026-08-19). Where we KNOW when we last read the source,
+   * that is the whole verdict: today is current, anything older is amber.
+   *
+   * This tightens the old threshold (≥2 trading days) rather than replacing the principle. Amber
+   * still means "you can fix this": a Refresh sets `fetched_at` to now and clears it, which is
+   * exactly the property the 2026-08-17 incident was about — firing amber on AIRS's own valuation
+   * lag produced 27 alarms of which 23 could not be cleared by anything on the page, and an alarm
+   * you cannot clear is one readers learn to scroll past. Our own read age is always ours to fix,
+   * so tightening it does not reintroduce that.
+   *
+   * ⚠ THE SOURCE'S OWN LAG STILL IS NOT A FAULT. Read today, the row is current even if AIRS last
+   * valued the book a week ago — the card says so in `Whose lag`, and the pill keeps the date.
+   */
+  /**
+   * ⚠⚠ WHERE WE KNOW WHEN WE READ IT, THAT IS THE WHOLE ANSWER — the source's own valuation age is
+   * not reported at all (2026-08-19). It used to read "6 trading days old — the source's latest",
+   * which answers a question nobody on this page is asking: what matters is whether OUR copy is
+   * current, and the only thing that makes it current is having read it today.
+   *
+   * That also removes the last place the two lags could be confused. `stale` is now exactly
+   * "not read today", and the pill says so in the same words.
+   */
+  if (fetchedAt) {
+    if (fetchedToday(fetchedAt)) return { stale: false, label: 'read today' };
+    const days = businessDaysBehind(fetchedAt.slice(0, 10));
+    return { stale: true,
+      label: days <= 0 ? 'not read today'
+        : `read ${days} trading day${days === 1 ? '' : 's'} ago` };
+  }
+
+  // ⚠ UNCHANGED WHERE THE FETCH TIME IS UNKNOWN, and that is deliberate rather than an omission.
+  // Most call sites pass no `fetchedAt`; treating "cannot tell" as "not today" would turn the
+  // whole app amber at once, which is the furniture failure above in its purest form. Silence
+  // there still falls back to the source date, exactly as before.
   if (f?.tone !== 'stale') return { stale: false, label: f?.label ?? '' };
-  const lag = lagOwner(asOf, fetchedAt);
-  // The source is behind, not us — see the ⚠⚠ above. The date still shows; it just is not a fault.
-  if (lag?.side === 'source') return { stale: false, label: `${f.label} — the source's latest` };
   return { stale: true, label: f.label };
 }
 
@@ -149,7 +182,12 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
    * Silent when `fetchedAt` is absent — most Provenance call sites have no such fact, and inventing
    * a verdict for them would be worse than the omission this fixes.
    */
-  const whoseLag = lagOwner(asOf, fetchedAt);
+  // ⚠ SUPPRESSED WHEN WE READ IT TODAY. `lagOwner` still answers "source" there, and its text is
+  // the "this is simply the newest valuation AIRS has" prose — which is exactly the source-lag
+  // explanation this card no longer trades in. A row read today is current; there is nothing to
+  // explain and nothing to act on.
+  const lag = lagOwner(asOf, fetchedAt);
+  const whoseLag = lag?.side === 'ours' ? lag : null;
   return (
     // The shared shell — identical chrome to every other tooltip; only the FIELDS differ.
     <TipCard label={what ? 'What' : 'Where'} title={what ?? s.label}
@@ -164,16 +202,28 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
           </Field>
         )}
         <Field label="When">
+          {/* ⚠⚠ WHEN IS WHEN **WE** READ IT, wherever we know that. It used to be the source's
+              valuation date with a freshness pill about the source — two different clocks in one
+              row, and the one the reader can act on was the one not shown. `asOf` remains the
+              answer only where no fetch time exists (yfinance closes, FX rates, computed values),
+              which is most call sites and is unchanged. */}
           {column
             ? <span className="text-fg-muted">per value — each cell carries its own date</span>
-            : asOf
+            : fetchedAt
               ? (
                 <span className="flex items-center gap-1.5 flex-wrap">
-                  <span className="font-mono text-fg">{asOf}</span>
+                  <span className="font-mono text-fg">{fetchedAt.slice(0, 10)}</span>
                   <FreshnessPill stale={f.stale} label={f.label} />
                 </span>
               )
-              : <span className="text-fg-muted">no dated source (a structural / computed value)</span>}
+              : asOf
+                ? (
+                  <span className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-mono text-fg">{asOf}</span>
+                    <FreshnessPill stale={f.stale} label={f.label} />
+                  </span>
+                )
+                : <span className="text-fg-muted">no dated source (a structural / computed value)</span>}
         </Field>
         {/* ⚠ ONLY WHEN THE BADGE IS AMBER AND WE KNOW BOTH DATES. A "we read this today" line under
             a fresh row is noise; under an amber one it is the difference between an action and a

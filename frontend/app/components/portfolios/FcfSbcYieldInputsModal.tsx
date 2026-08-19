@@ -73,7 +73,7 @@ export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTar
   /** The index's constituents. Silent on failure: it is an addition to a modal that works. */
   const [bench, setBench] = useState<FcfSbcYieldInputs | null>(null);
   const [benchErr, setBenchErr] = useState<string | null>(null);
-  const benchKey = benchTarget ? `${benchTarget.universe}|${benchTarget.cadence}` : '';
+  const benchKey = benchTarget ? `${benchTarget.label}|${benchTarget.cadence}` : '';
   useEffect(() => {
     let alive = true;
     void (async () => {

@@ -521,13 +521,18 @@ function IndexDetail({ d, fundKey = 0 }: { d: ReconstructedIndex; fundKey?: numb
           count came from a THIRD endpoint with a third denominator, so it could offer to fetch
           constituents the fill would then refuse. In the Total row's Fetch cell it is the
           all-companies form of the per-company button directly above it, and the grid counts what
-          the fill will actually do. This line is now just the index's own provenance. */}
-      <div className="flex items-center gap-3 flex-wrap text-[12px]">
-        <span className="text-fg-soft">
-          <span className="font-mono text-fg">{d.priced_of_universe}</span> priced ·{' '}
-          weights as of <span className="font-mono">{d.start_date}</span>
-        </span>
-      </div>
+          the fill will actually do. */}
+      {/* ⚠ THE PROVENANCE LINE AND THE FOOTNOTE PARAGRAPH WERE REMOVED HERE (2026-08-19), at the
+          owner's request — it was a wall of prose under every index. What it said is NOT wrong and
+          is not obsolete: the rebuild is cap-weighted on FULL market cap where the real index
+          float-adjusts, it is a PRICE return with no dividends, membership is a snapshot, and ACWI
+          is only partially covered so the missing weight is renormalised across the rest rather
+          than lost. Those facts still hold; they are recorded in `docs/airs-portfolios.md` and in
+          `_asset_benchmark`'s own docstring, and the server still ships `note` +
+          `priced_of_universe` on the payload for anything that wants to show them again. This
+          comment exists so the next reader knows the caveats were retired from the SCREEN, not
+          from the reasoning — a rebuilt index that says nothing about its own coverage is easy to
+          over-trust. */}
 
       {/* A corrected price is a CLAIM. Show it — never adjust silently. */}
       {(d.split_adjusted?.length ?? 0) > 0 && (
@@ -540,36 +545,6 @@ function IndexDetail({ d, fundKey = 0 }: { d: ReconstructedIndex; fundKey?: numb
         </div>
       )}
 
-      <p className="text-[11px] text-fg-faint leading-relaxed">
-        {d.note} Weights are as of the <strong>start of the year</strong>: weighting by
-        today&apos;s market cap is look-ahead bias — it retroactively overweights whatever
-        went up.{' '}
-        {d.label === 'SP500' && (
-          <>
-            It would print <span className="font-mono">+21.70%</span> instead of{' '}
-            <span className="font-mono">{pct(d.ytd_local_pct)}</span>. Checked against SPY (the
-            real index), which is <span className="font-mono">+9.02%</span>{' '}USD.
-          </>
-        )}
-        {d.label === 'ACWI' && (
-          <>
-            Coverage is <strong>partial</strong> (<span className="font-mono">{d.priced_of_universe}</span>{' '}
-            priced): we hold no price series for some published constituents, and a cap-weighted
-            rebuild does not lose that weight — it renormalises it across the rest. Treat this as
-            indicative, not exact.
-          </>
-        )}
-        {d.label === 'AEX' && (
-          <>
-            Fully covered (<span className="font-mono">{d.priced_of_universe}</span> priced) and{' '}
-            <strong>capped at 15%</strong>{' '}per constituent, as the real index is — uncapped, ASML
-            alone would be <span className="font-mono">37.5%</span>{' '}of it. Composition is
-            Wikipedia&apos;s, as of the date above; the cap is applied at the start of the window
-            rather than at Euronext&apos;s review date, and full market cap is not the index&apos;s
-            free float.
-          </>
-        )}
-      </p>
     </div>
   );
 }

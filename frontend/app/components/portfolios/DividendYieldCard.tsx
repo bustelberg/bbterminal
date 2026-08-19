@@ -148,7 +148,7 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
                 <YAxis domain={paddedDomain(withBench(yieldByYr.values(), benchByYr))} tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }} itemSorter={benchmarkFirst}
-                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(2) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : own]} />
+                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(2) : '—'}%`, n === 'bench' ? (benchTarget?.label ?? 'Benchmark') : own]} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 {/* ⚠ NO DOTS ON A DAILY SERIES — 2,700 markers is a solid band, not a line. */}
@@ -160,7 +160,7 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
               <LegendItem color={chartTheme.accent} label={own} />
               {avg != null && <LegendItem color={chartTheme.accent} stroke="dashed"
                 label={`${own} average`} />}
-              {benchByYr && <LegendItem color={chartTheme.pos} label={benchTarget?.universe} />}
+              {benchByYr && <LegendItem color={chartTheme.pos} label={benchTarget?.label} />}
               {note && (
                 <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">
                   {note}
@@ -173,7 +173,7 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
 
       {showInputs && (
         <DividendYieldInputsModal target={target} portfolioName={holdingsName}
-          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          benchTarget={benchTarget} benchLabel={benchTarget?.label ?? null}
           onClose={() => setShowInputs(false)} />
       )}
     </div>
