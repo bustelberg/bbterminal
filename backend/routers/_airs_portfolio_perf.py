@@ -51,6 +51,8 @@ from common.fx_load import load_fx_to_eur
 from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase
 from momentum.diversification import annualized_stats
+from routers._airs_ref import models as ref_models
+from routers._airs_ref import positions as ref_positions
 from routers._benchmark_index import _at_or_before, _rate, _split_adjust
 from timeseries import DATE_COL, ENTITY_COL, SeriesUnavailable, load_series
 
@@ -640,9 +642,11 @@ def compute_portfolio_performance(year: int | None = None, *,
     jan1 = f"{year}-01-01"
     today = date.today().isoformat()
 
-    ports = (supabase.table("airs_model_portfolio")
-             .select("id,name,positions_datum,positions_scanned_at")
-             .not_.is_("positions_datum", "null").execute().data or [])
+    # ⚠ THROUGH `_airs_ref`, NOT A QUERY OF ITS OWN — the module's whole point. A `select` of four
+    # columns with a `not.is.null` filter is a DIFFERENT request from the canonical one, so the
+    # per-request memo cannot collapse it and the Analyse modal paid for a second read of a 102-row
+    # table. The filter moves to Python, which is the rule that module states.
+    ports = [p for p in ref_models() if p.get("positions_datum")]
     # ⚠ ONE PORTFOLIO'S NUMBERS SHOULD NOT COST FIFTY-SIX PORTFOLIOS' PRICES. The Analyse modal
     # reads exactly one row out of this function's output, and paid for the whole fleet to get it
     # — every model's holdings resolved, priced and FX-converted, then 55/56 of that thrown away.
@@ -663,8 +667,15 @@ def compute_portfolio_performance(year: int | None = None, *,
     if not ports:
         return []
 
-    pos = (supabase.table("airs_model_portfolio_position")
-           .select("portfolio_id,isin,percentage,fonds").execute().data or [])
+    # ⚠⚠ AND THIS ONE WAS A LATENT TRUNCATION, NOT ONLY A DUPLICATE REQUEST. It read the WHOLE
+    # `airs_model_portfolio_position` table with no `.range()` — 1,001 rows against PostgREST's
+    # **1,000-row cap on Supabase cloud** (10,000 locally). So it came back complete on a laptop
+    # and one row short in production, silently, with no ORDER BY to even make WHICH row
+    # predictable: a model would quietly lose a position from its priced basket and its return
+    # would renormalise over the rest. Exactly the failure `common/fx_load.py` recorded.
+    # `_airs_ref.positions` pages properly and is the canonical read the modal already makes, so
+    # this is both the fix and one round trip fewer.
+    pos = ref_positions()
     by_pf: dict[int, list[dict]] = {}
     for r in pos:
         by_pf.setdefault(r["portfolio_id"], []).append(r)

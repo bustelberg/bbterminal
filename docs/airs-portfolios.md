@@ -28,6 +28,95 @@
 
 **Continues in** [`gurufocus-data.md`](gurufocus-data.md): the two GuruFocus bridges behind the Instruments grid (Exchange · Ticker · Div/share), `pick_listing`, the US exchange-code minefield, the dividend/financials states, and the rebuilt benchmark index.
 
+## What the Analyse modal costs, and where it goes (2026-08-19)
+
+The modal is **one** request (`GET /api/airs/model-portfolios/{id}/analysis`, or
+`POST /api/airs/basket/analysis` for a book with no paired model). It has no partial paint: nothing
+is on screen until the whole payload lands, so its wall clock *is* the user's wait.
+
+**Measure before touching it — `backend/scripts/profile_analysis_modal.py`.** It wraps both
+transports (PostgREST over HTTP, and direct-Postgres `COPY`) plus the loaders the endpoint
+composes, and prints per-phase ms, per-table round trips, byte-identical repeats, the tables read
+through several query shapes, and the leg-cache hit rate. `--id a,b,c` runs several books in one
+process, which is the realistic measurement; `--cold` drops the cross-portfolio cache before every
+run, so a before/after is one flag apart.
+
+⚠⚠ **REQUEST COUNT IS THE PRODUCTION COST; LOCAL WALL TIME IS NOT.** Local Postgres answers in
+single-digit ms, production is eu-west-3 with the backend elsewhere at ~60ms a round trip. A phase
+that is 200ms locally over 30 requests is ~2s there. A laptop profile understates the real number by
+an order of magnitude, which is why the script prints both and why the fixes below are counted in
+requests and COPYs rather than in a local stopwatch.
+
+Cold, on `BUS_Bep_offensief_FX` (61 holdings, wrapped certificates), of ~2.9s local:
+
+| loader | local | round trips | what it is |
+|---|---|---|---|
+| `_holding_risk` | 950 ms | 0 (3 COPY) | per-ISIN 5y vol / beta / 12-1 momentum |
+| `_book_port_items` | 460 ms | **21** | the AIRS book: holdings, ledger, wrapped books |
+| `index_returns` (×2) | 490 ms | 0 (3 COPY) | the benchmark over the two windows |
+| `compute_portfolio_performance` | 400 ms | 2 | this model's own yfinance return |
+| `_bench_start_caps` · `_grid` · `members` | 390 ms | 8 | the benchmark's constituents and caps |
+
+### ⚠⚠ MOST OF THAT IS NOT ABOUT THE PORTFOLIO ON SCREEN — the cross-portfolio leg cache
+
+`members`, `index_returns` and `_bench_start_caps` take a **label and a window**; they do not take a
+portfolio, and every book on this page defaults to the same benchmark. A holding's vol/beta/momentum
+is a property of the **instrument** — and the risk variants of a strategy (Defensief / Neutraal /
+Beperkt Offensief / Offensief) hold nearly the same names, sitting next to each other in the table.
+So opening books in turn recomputed answers already in memory.
+
+`routers/_analysis_cache.py` grew a **second store** for these sub-results (`leg` / `leg_get_many` /
+`leg_put_many`), on the **same data fingerprint** as the payload store — so a leg can never outlive
+the payload cache's notion of "current", and the staleness argument in that module applies to both
+unchanged. It is a separate store because the entry budgets differ by three orders of magnitude
+(4,096 legs is a few MB; 4,096 payloads would be ~560MB).
+
+Measured, same sequence, `--cold` vs warm:
+
+| | round trips | COPY |
+|---|---|---|
+| first book opened | 42 | 28 |
+| a **dissimilar** book after it | 34 → 34 | 24 → 20 |
+| a **sibling variant** after it | 35 → **27** | 24 → **12** |
+
+Locally that sibling case is ~2.0s → ~0.9s. The basket path (an unpaired book) has **no** payload
+cache at all, so it gains on every single open: 396ms → 113ms.
+
+⚠ **The win is in the SECOND book, not the first.** A cold server still pays the full load once.
+See [`TODO.md`](../TODO.md) for the two ways to remove that too, with the numbers each would need.
+
+⚠ **`date.today()` is in the key explicitly.** `index_returns` prices to "today", an input it takes
+from the clock rather than the database — the one input the fingerprint cannot see.
+
+⚠ **A hit is an answer, including an empty one.** A holding with too little history yields `{}`, and
+that is a result: treating "no row" as "not computed" would make a book of young listings re-run the
+whole five-year load on every open. `_holding_risk` stores the empty rows and drops them on the way
+out, where callers have always expected "present ⇒ has at least one figure".
+
+⚠⚠ **The miss path stays batched.** `_daily_eur` loads five years of closes for every holding in ONE
+`COPY`; memoizing per ISIN with a plain `leg()` loop would serve the hits and then run that COPY
+once per miss — ~60 round trips, making a "faster" modal slower on exactly the cold path. Hence
+`leg_get_many` → compute the misses together → `leg_put_many`.
+
+**Proof, not assertion**: `backend/scripts/verify_analysis_cache.py` recomputes every paired book
+with the memo forced to always-miss and with it warm, and compares the payloads field for field
+(`timings_ms` excluded — it is a stopwatch). 17 of 17 identical, plus the basket path.
+
+### ⚠⚠ And one of those reads was silently truncating in production
+
+`_airs_portfolio_perf.compute_portfolio_performance` read the WHOLE
+`airs_model_portfolio_position` table with no `.range()` — **1,001 rows against PostgREST's
+1,000-row cap on Supabase cloud** (10,000 locally). Complete on a laptop, one row short in
+production, with no `ORDER BY` to make *which* row predictable: a model would quietly lose a
+position from its priced basket and renormalise the return over the rest. Both its reads now go
+through `routers/_airs_ref.py`'s canonical loaders, which page properly — which also makes them the
+byte-identical request the modal already issues, so the per-request memo collapses them (−2 round
+trips on every open). Output verified equal across all 61 portfolios to 13 significant figures; the
+residual is float accumulation order, because the canonical read is `ORDER BY id` and the old one
+was ordered by nothing.
+
+---
+
 ## Asset-class buckets (2026-08-18: `Equity ETF` retired)
 
 Five buckets, each naming what a holding **invests in**: `Equity` (shown as **Stocks**) · `Bonds` · `Alternatives` · `Cash` · `Unclassified`. Declared once in `routers/_airs_holding_isin.py::BUCKET_ORDER`; the display label lives only in `frontend/.../allocationColors.ts::bucketLabel`.

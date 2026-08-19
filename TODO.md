@@ -1,7 +1,46 @@
 # Open follow-ups — resume here
 
 Running list of unfinished / offered-but-not-built work, newest context first.
-Last updated **2026-08-18**. Delete items as they're done.
+Last updated **2026-08-19**. Delete items as they're done.
+
+---
+
+## ⏱ Analyse modal: the FIRST open is still the full load (2026-08-19)
+
+**Done that day**: the cross-portfolio leg cache (`_analysis_cache.leg`) + routing
+`compute_portfolio_performance` through `_airs_ref`. A *second* book now costs 27 round trips and
+12 COPYs where it cost 35 and 24; the basket path went 396ms → 113ms. Full write-up, numbers and
+the two scripts (`profile_analysis_modal.py`, `verify_analysis_cache.py`) in
+[`docs/airs-portfolios.md`](docs/airs-portfolios.md).
+
+**Not done**: a cold server still pays the whole ~7s (production) on the first open, and the
+fingerprint moves whenever any watched table is written — so the first open after each daily price
+refresh is cold again for everybody. Two ways to remove that, neither built:
+
+* **Warm the cache after the AIRS refresh.** `airs_vermogen_refresh` (09:30 Amsterdam) and the
+  05:00/06:00 price ticks are what move the fingerprint. Recomputing the 26 paired books afterwards
+  (~26 × 2s with the legs warming each other) would make the first human open of the day a HIT.
+  ⚠ Must run AFTER the price writes settle, or it warms against a fingerprint that is about to
+  change; ⚠ and must not overlap a pipeline — this is a free-tier box and the modal computes in a
+  worker thread, so background warming competes with real requests for the GIL.
+* **Prefetch on hover of the Analyse button.** Cheapest perceived win — the request is in flight
+  before the click. ⚠ **Needs single-flight in `_analysis_cache` first**: hover-then-click within
+  the compute window would otherwise run the same ~7s computation twice, and a fast mouse down the
+  table would fire several. Bound it (one outstanding prefetch, ~150ms dwell) or it makes the real
+  click slower rather than faster.
+
+**Also measured and NOT taken** — overlapping the benchmark side with the portfolio side in a
+thread. It is the only lever left that attacks the *first* open (~2.6s of the production load is
+serialized network wait), but `common/pg.py` states in capitals that a psycopg connection is not
+thread-safe and each worker needs its OWN `copy_connection_scope`, while `read_cache`'s ContextVar
+does not propagate to a bare `threading.Thread`. Getting either wrong shares a live connection
+across threads. Worth doing deliberately, not as a footnote to a caching change.
+
+**Remaining round trips, if someone wants the cold path**: `airs_holding` is read through **6
+distinct query shapes** (3 per portefeuille × the wrapped book) inside `resolve_account_isins` /
+`_wrapped_book_marks` — the exact fragmentation `_airs_ref` exists to fix, worth ~4 round trips
+(~0.24s production). The paged tables each spend one extra request proving the page was the last
+one, which is the load-bearing "break on an empty page" rule and must stay.
 
 ---
 

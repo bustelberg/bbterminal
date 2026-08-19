@@ -6,6 +6,35 @@ WHY
     else — so every re-open pays all of it: toggling the benchmark and back, switching
     `weight_by`, closing and reopening the same portfolio. None of that changes any input.
 
+TWO STORES, AND THE SECOND IS WHY OPENING A *DIFFERENT* PORTFOLIO GOT FASTER
+
+    `_cache` holds whole PAYLOADS, keyed by (portfolio, benchmark, weight_by, source, bucket). It
+    can only ever help a re-open of the SAME portfolio on the SAME settings — and measured, the
+    complaint was never that: it was that every one of the 26 paired books costs the full load the
+    first time it is opened, one after another.
+
+    ⚠ MOST OF THAT LOAD IS NOT ABOUT THE PORTFOLIO. Profiled on BUS_Bep_offensief_FX
+    (`scripts/profile_analysis_modal.py`), of 2.9s local:
+
+        _holding_risk        950 ms   per-ISIN 5y vol / beta / 12-1 momentum
+        index_returns        493 ms   the benchmark's return over the two windows
+        _bench_start_caps    151 ms   the benchmark's constituent caps at the window's open
+        members              113 ms   the benchmark's constituents          (8 round trips)
+
+    Not one of those four asks anything about the portfolio on screen. The benchmark legs depend
+    only on (label, window) — and every book on this page defaults to the SAME benchmark — while a
+    holding's vol/beta/momentum is a property of the INSTRUMENT, and the variants of a strategy
+    (Defensief / Neutraal / Offensief) hold largely the same names.
+
+    `_leg_cache` holds those sub-results. It needs a much larger entry budget than `_cache` and a
+    much smaller entry SIZE (one benchmark window, or one ISIN's three numbers, against a 137KB
+    payload), which is why it is a second store rather than a bigger first one — 4,096 payloads
+    would be half a gigabyte.
+
+⚠ ONE FINGERPRINT GOVERNS BOTH, and that is the point: a leg cannot outlive the payload cache's
+    notion of "current", so there is no window in which a fresh payload is assembled out of stale
+    legs. Everything below about staleness applies unchanged to both stores.
+
 ⚠⚠ A TTL WOULD BE THE WRONG MECHANISM HERE, AND IT IS THE OBVIOUS ONE. This page's entire
     discipline is that a figure is either current or ABSENT — `n/a` when unpriceable, `—` when the
     window is too short, a refusal under `MIN_COVERAGE_PCT` rather than a renormalised guess. A
@@ -56,6 +85,14 @@ HOW THE FINGERPRINT IS CHEAP ENOUGH TO PAY ON EVERY HIT
 ⚠ THE CACHED VALUE IS SHARED BY REFERENCE AND MUST BE TREATED AS IMMUTABLE. Nothing downstream
     mutates the payload after it is returned, and nothing should start; a deep copy of a 137KB
     dict on every hit would give back a slice of the win for a hazard that does not exist today.
+
+⚠⚠ AND THAT RULE GOT SHARPER WITH THE LEG STORE, BECAUSE A LEG IS THE KIND OF THING SOMEBODY
+    ENRICHES. A payload is assembled and shipped; a leg is an `asset_grid` row, a constituent list,
+    a risk dict — objects a future caller could plausibly stamp a field onto, which would then be
+    on that row for every book opened afterwards. Audited at the time of writing: `_buckets`,
+    `_foreign_listing` and the benchmark loop only READ. `_holding_risk` is the one that hands its
+    rows out per ISIN, and it copies them on the way out for exactly this reason. If you add a
+    caller, read — do not decorate.
 """
 from __future__ import annotations
 
@@ -100,7 +137,14 @@ _TTL_SECONDS = 60 * 60
 # call), never a user action and a later one.
 _STAMP_TTL_SECONDS = 2.0
 
+# ⚠ MANY MORE, AND MUCH SMALLER. A leg is one benchmark window or one ISIN's three risk numbers,
+# so 4,096 of them is a few megabytes — where 4,096 PAYLOADS would be ~560MB. The budget is sized
+# for the working set this page actually has: ~26 books x ~60 holdings is ~1,600 distinct ISINs
+# (heavily overlapping between the variants of a strategy) plus a handful of benchmark windows.
+_LEG_MAX_ENTRIES = 4096
+
 _cache: _LruTtlCache[Any] = _LruTtlCache(max_size=_MAX_ENTRIES, ttl_seconds=_TTL_SECONDS)
+_leg_cache: _LruTtlCache[Any] = _LruTtlCache(max_size=_LEG_MAX_ENTRIES, ttl_seconds=_TTL_SECONDS)
 _stamp_lock = threading.Lock()
 _stamp: tuple[float, str] | None = None   # (expires_monotonic, fingerprint)
 
@@ -204,11 +248,67 @@ def cached(key: tuple, compute: Callable[[], Any]) -> Any:
     return out
 
 
+def leg(key: tuple, compute: Callable[[], Any]) -> Any:
+    """`compute()`, memoized in the LEG store against the current data fingerprint.
+
+    For a sub-result that does NOT depend on which portfolio is open — a benchmark window, one
+    instrument's risk numbers. Same fingerprint, same staleness guarantee, different entry budget;
+    see the module note for why it is a second store and not a bigger first one.
+
+    ⚠ WITH NO FINGERPRINT THIS IS A PLAIN CALL, exactly as `cached` is.
+    """
+    fp = fingerprint()
+    if fp is None:
+        return compute()
+    full = (fp, *key)
+    hit = _leg_cache.get(full)
+    if hit is not None:
+        return hit
+    out = compute()
+    _leg_cache.put(full, out)
+    return out
+
+
+def leg_get_many(keys: list[tuple]) -> tuple[dict[tuple, Any], list[tuple]]:
+    """Split `keys` into what the leg store already has and what is still missing.
+
+    ⚠ THE BATCHED FORM EXISTS BECAUSE THE MISS PATH IS BATCHED. `_holding_risk` loads five years of
+    daily closes for EVERY holding in ONE `COPY`; asking `leg()` per ISIN would serve the hits and
+    then run that COPY once per miss. The caller wants "which of these do I still have to compute",
+    computes exactly those together, and files them with `leg_put_many`.
+
+    Returns ({key: value} for the hits, [key] for the misses). With no fingerprint everything is a
+    miss — a fingerprint we could not read is not evidence that nothing changed.
+    """
+    fp = fingerprint()
+    if fp is None:
+        return {}, list(keys)
+    hits: dict[tuple, Any] = {}
+    misses: list[tuple] = []
+    for k in keys:
+        v = _leg_cache.get((fp, *k))
+        if v is None:
+            misses.append(k)
+        else:
+            hits[k] = v
+    return hits, misses
+
+
+def leg_put_many(values: dict[tuple, Any]) -> None:
+    """File a batch of computed legs. No-op without a fingerprint."""
+    fp = fingerprint()
+    if fp is None:
+        return
+    for k, v in values.items():
+        _leg_cache.put((fp, *k), v)
+
+
 def invalidate() -> int:
-    """Drop everything. Not needed for correctness (the fingerprint handles it) — here for an
-    operator who wants a cold read, and for tests."""
-    n = _cache.size()
+    """Drop everything, both stores. Not needed for correctness (the fingerprint handles it) —
+    here for an operator who wants a cold read, and for tests."""
+    n = _cache.size() + _leg_cache.size()
     _cache.clear()
+    _leg_cache.clear()
     with _stamp_lock:
         globals()["_stamp"] = None
     return n
@@ -216,4 +316,5 @@ def invalidate() -> int:
 
 def stats() -> dict:
     return {"entries": _cache.size(), "max_entries": _MAX_ENTRIES,
+            "leg_entries": _leg_cache.size(), "leg_max_entries": _LEG_MAX_ENTRIES,
             "watched_tables": len(_WATCHED)}
