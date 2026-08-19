@@ -26,7 +26,7 @@ from routers._earnings_pg import rows_by_company_via_copy
 from routers._sse import sse_message as event
 import queue as _queue
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 
@@ -556,7 +556,7 @@ async def ingest_fundamental_coverage(body: FundamentalIngestRequest):
 
 @router.post("/api/earnings/fundamental-coverage")
 @cached_blend("fundamental-coverage")
-async def fundamental_coverage(body: FundamentalCoverageRequest):
+async def fundamental_coverage(body: FundamentalCoverageRequest, request: Request):
     """Which of a portfolio's holdings a fundamentals view can reach, BY WEIGHT, and why not.
 
     ⚠ COVERAGE IS THE FIRST ANSWER, NOT A FOOTNOTE. Every holding that cannot be reached is weight
@@ -598,7 +598,7 @@ BLEND_LABELS = {
 
 @router.post("/api/earnings/fundamental-blend")
 @cached_blend("fundamental-blend")
-async def fundamental_blend(body: FundamentalCoverageRequest):
+async def fundamental_blend(body: FundamentalCoverageRequest, request: Request):
     """A portfolio's fundamentals, blended — with the rule that each metric actually requires.
 
     ⚠ THREE RULES, NOT ONE. A multiple aggregates HARMONICALLY (a portfolio's P/E is aggregate
@@ -1170,7 +1170,7 @@ async def _blend_inputs(body: FundamentalCoverageRequest) -> tuple[list[dict], d
 
 @router.post("/api/earnings/fundamental-blend-metrics")
 @cached_blend("fundamental-blend-metrics")
-async def fundamental_blend_metrics(body: FundamentalCoverageRequest):
+async def fundamental_blend_metrics(body: FundamentalCoverageRequest, request: Request):
     """The portfolio as ONE pseudo-company, in the exact shape `/by-isin/{isin}/metrics` returns.
 
     Same payload, so the whole /earnings chart suite renders for a portfolio with no changes —
@@ -2281,11 +2281,15 @@ def period_caps_by_isin(comp: dict[str, dict], universe: str | None,
     weight is a share of a book, not a market cap; there is no cap history to weight its periods
     by, and `_weight_at` reads the absence as "one basis for every period".
 
-    ⚠ THE READ IS SHARED ACROSS THE ELEVEN CARDS. The Long Equity tab fires them concurrently and
-    every one of them wants the same caps for the same constituents — `cached_metric_reads` keyed
-    on (company set, cadence) collapses that to ONE read plus ten waits, exactly as it does for the
-    metric lines. Without it, adding caps here would have put eleven more Postgres connections on
-    the tab and given back most of what batching `_prefetch` won.
+    ⚠ THE READ IS SHARED, AND `cached_metric_reads` IS STILL WHY. Two callers now want the same
+    caps for the same constituents — `/universe-period-caps` (once, for all ten benchmark cards)
+    and `portfolio-revenue-matrix` (the drill-down, which renders the caps in its own cells and so
+    keeps them inline). Keyed on (company set, cadence) that is ONE query plus one wait, exactly as
+    it is for the metric lines.
+
+    ⚠ IT USED TO HAVE ELEVEN CALLERS, one per card, and the sharing was doing MORE work than it
+    looked: the read collapsed, but each card then serialised and shipped its own copy of the
+    result — 29.9% of every ACWI payload, ten times over. See `/universe-period-caps`.
     """
     if not universe:
         return {}
@@ -2760,9 +2764,72 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
     return await asyncio.to_thread(_run)
 
 
+@router.post("/api/earnings/universe-period-caps")
+@cached_blend("universe-period-caps")
+async def universe_period_caps(body: FundamentalCoverageRequest, request: Request):
+    """`{canonical ISIN: {period: market cap in EUR}}` for one index — ONCE, for all ten cards.
+
+    The weighting basis behind every benchmark line on the Long Equity tab: an index is weighted by
+    the cap it HAD in that period, never today's (see `weightAt` / `_weight_at` for why — on the
+    S&P, today's cap carries NVIDIA at 7.46% of a year it was 0.63% of).
+
+    ⚠⚠ IT USED TO RIDE ALONG ON EVERY ROW OF ALL TEN `*-inputs` RESPONSES, WHICH IS THE SAME TABLE
+    TEN TIMES. Measured 2026-08-19 on ACWI (1,514 constituents, annual): `market_cap_by_period` was
+    **29.9%** of each payload — 0.485 MB of `margin-inputs`' 1.62 MB — so ~4.8 MB of the tab's
+    13.21 MB was one cap table repeated. Gzip cannot see across separate responses, so compression
+    did not touch it; only fetching it once does. The client splices it back onto the rows in
+    `useBenchInputs`, so every card still computes both its lines with the identical helper over
+    identically shaped rows — the invariant that whole design rests on is untouched.
+
+    ⚠ THE SHAPE IS EXACTLY WHAT THE ROWS CARRIED, INCLUDING THE EMPTY ONES. A constituent we hold
+    no cap for gets `{}`, not a missing key, because the client reads those two differently and it
+    is not a subtlety it can recover: `{}` means "this company is out of every period's average"
+    while ABSENT means "fall back to `weight_pct` for all of them". Ten rows silently switching
+    from the first to the second is a benchmark line that still draws, still looks plausible, and
+    is weighted wrongly.
+
+    ⚠ INDEX ONLY — 422 for a portfolio rather than an empty answer. A holding weight is a share of
+    a book, not a market cap, and there is no cap history to weight its periods by; the `*-inputs`
+    endpoints send no `market_cap_by_period` at all for a book, which is what the client's fallback
+    to `weight_pct` is for. An empty `{}` here would be indistinguishable from "the index has no
+    caps stored", which is a real and different condition.
+
+    ⚠ THE READ ITSELF IS NOT NEW WORK. `period_caps_by_isin` goes through `cached_metric_reads`, so
+    the ten cards were already collapsing to ONE query plus nine waits — what they each paid for
+    was SERIALISING and SHIPPING the result. This endpoint just gives that one read one caller.
+    """
+    from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+
+    if not body.universe:
+        raise HTTPException(
+            status_code=422,
+            detail="universe-period-caps is for an index only — a portfolio has no cap history to "
+                   "weight its periods by, and its rows carry no market_cap_by_period at all.")
+    members = await _load_and_expand_members(body)
+    if not members:
+        raise HTTPException(status_code=404, detail="no holdings")
+
+    def _run() -> dict:
+        # ⚠ THE SAME CANONICALISATION THE CARDS DO, and it has to stay the same: the client looks a
+        # row's cap up by `row.isin`, which is the canonical ISIN each card emits. Resolving the
+        # alias differently here would return caps under keys no row carries — every constituent
+        # would fall to a null weight and the line would simply not draw.
+        raw = sorted({(m.get("isin") or "").strip() for m in members if m.get("isin")})
+        alias = canonical_map(raw)
+        canon = sorted({alias.get(i, i) for i in raw})
+        comp: dict[str, dict] = {}
+        for i in range(0, len(canon), IN_CHUNK_SIZE):
+            for c in (supabase.table("company").select("company_id,isin")
+                      .in_("isin", canon[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                comp[c["isin"]] = c
+        return {"caps": period_caps_by_isin(comp, body.universe, body.cadence)}
+
+    return await asyncio.to_thread(_run)
+
+
 @router.post("/api/earnings/margin-inputs")
 @cached_blend("margin-inputs")
-async def margin_inputs(body: FundamentalCoverageRequest):
+async def margin_inputs(body: FundamentalCoverageRequest, request: Request):
     """The base inputs behind the FCF-SBC margin, per holding: Revenue, Free Cash Flow and Stock
     Based Compensation per fiscal year, in the company's own reporting currency (millions).
 
@@ -2802,10 +2869,6 @@ async def margin_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
-        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
-        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
-        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
-        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -2830,11 +2893,6 @@ async def margin_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
-                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
-                # actually computed from. Sparse: a period with no filed cap is ABSENT,
-                # and that company is left out of that period's average entirely rather
-                # than weighted on a different basis from its neighbours.
-                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status, "revenue": rev, "fcf": fcf, "sbc": sbc,
@@ -2848,7 +2906,7 @@ async def margin_inputs(body: FundamentalCoverageRequest):
 
 @router.post("/api/earnings/debt-ratio-inputs")
 @cached_blend("debt-ratio-inputs")
-async def debt_ratio_inputs(body: FundamentalCoverageRequest):
+async def debt_ratio_inputs(body: FundamentalCoverageRequest, request: Request):
     """The base inputs behind the LTD / (Total Assets − Goodwill) ratio, per holding: Long-Term
     Debt, Total Assets and Goodwill per fiscal year, in the company's own reporting currency
     (millions).
@@ -2891,10 +2949,6 @@ async def debt_ratio_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
-        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
-        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
-        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
-        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -2916,11 +2970,6 @@ async def debt_ratio_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
-                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
-                # actually computed from. Sparse: a period with no filed cap is ABSENT,
-                # and that company is left out of that period's average entirely rather
-                # than weighted on a different basis from its neighbours.
-                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -2934,7 +2983,7 @@ async def debt_ratio_inputs(body: FundamentalCoverageRequest):
 
 @router.post("/api/earnings/cash-return-inputs")
 @cached_blend("cash-return-inputs")
-async def cash_return_inputs(body: FundamentalCoverageRequest):
+async def cash_return_inputs(body: FundamentalCoverageRequest, request: Request):
     """The base inputs behind Cash return on capital, per holding: Free Cash Flow, non-current
     (long-term) liabilities and total equity per fiscal year, in the company's own reporting
     currency (millions).
@@ -2978,10 +3027,6 @@ async def cash_return_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
-        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
-        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
-        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
-        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -3013,11 +3058,6 @@ async def cash_return_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
-                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
-                # actually computed from. Sparse: a period with no filed cap is ABSENT,
-                # and that company is left out of that period's average entirely rather
-                # than weighted on a different basis from its neighbours.
-                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -3032,7 +3072,7 @@ async def cash_return_inputs(body: FundamentalCoverageRequest):
 
 @router.post("/api/earnings/interest-burden-inputs")
 @cached_blend("interest-burden-inputs")
-async def interest_burden_inputs(body: FundamentalCoverageRequest):
+async def interest_burden_inputs(body: FundamentalCoverageRequest, request: Request):
     """The base inputs behind the interest-burden ratio, per holding: Interest expense and
     Operating income per fiscal year, in the company's own reporting currency (millions).
 
@@ -3075,10 +3115,6 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
-        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
-        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
-        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
-        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -3103,11 +3139,6 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
-                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
-                # actually computed from. Sparse: a period with no filed cap is ABSENT,
-                # and that company is left out of that period's average entirely rather
-                # than weighted on a different basis from its neighbours.
-                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -3122,7 +3153,7 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest):
 
 @router.post("/api/earnings/sbc-ocf-inputs")
 @cached_blend("sbc-ocf-inputs")
-async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
+async def sbc_ocf_inputs(body: FundamentalCoverageRequest, request: Request):
     """The base inputs behind the SBC/OCF ratio, per holding: Stock-Based Compensation and
     Operating Cash Flow per fiscal year, in the company's own reporting currency (millions).
 
@@ -3165,10 +3196,6 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
-        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
-        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
-        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
-        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -3193,11 +3220,6 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
-                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
-                # actually computed from. Sparse: a period with no filed cap is ABSENT,
-                # and that company is left out of that period's average entirely rather
-                # than weighted on a different basis from its neighbours.
-                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -3212,7 +3234,7 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest):
 
 @router.post("/api/earnings/capex-margin-inputs")
 @cached_blend("capex-margin-inputs")
-async def capex_margin_inputs(body: FundamentalCoverageRequest):
+async def capex_margin_inputs(body: FundamentalCoverageRequest, request: Request):
     """The base inputs behind the Capex margin, per holding: Capex and Revenue per fiscal year, in
     the company's own reporting currency (millions).
 
@@ -3254,10 +3276,6 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
-        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
-        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
-        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
-        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -3282,11 +3300,6 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
-                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
-                # actually computed from. Sparse: a period with no filed cap is ABSENT,
-                # and that company is left out of that period's average entirely rather
-                # than weighted on a different basis from its neighbours.
-                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -3301,7 +3314,7 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest):
 
 @router.post("/api/earnings/gross-margin-inputs")
 @cached_blend("gross-margin-inputs")
-async def gross_margin_inputs(body: FundamentalCoverageRequest):
+async def gross_margin_inputs(body: FundamentalCoverageRequest, request: Request):
     """The base inputs behind the Gross margin, per holding: Gross Profit and Revenue per fiscal
     year, in the company's own reporting currency (millions).
 
@@ -3351,10 +3364,6 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
-        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
-        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
-        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
-        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -3384,11 +3393,6 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
-                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
-                # actually computed from. Sparse: a period with no filed cap is ABSENT,
-                # and that company is left out of that period's average entirely rather
-                # than weighted on a different basis from its neighbours.
-                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -3403,7 +3407,7 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest):
 
 @router.post("/api/earnings/cash-conversion-inputs")
 @cached_blend("cash-conversion-inputs")
-async def cash_conversion_inputs(body: FundamentalCoverageRequest):
+async def cash_conversion_inputs(body: FundamentalCoverageRequest, request: Request):
     """The base inputs behind Cash conversion, per holding: Free Cash Flow and Net Income per
     fiscal year, in the company's own reporting currency (millions).
 
@@ -3454,10 +3458,6 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
-        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
-        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
-        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
-        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
         _prefetch([comp[ci]["company_id"] for ci in canon if ci in comp],
@@ -3483,11 +3483,6 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
-                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
-                # actually computed from. Sparse: a period with no filed cap is ABSENT,
-                # and that company is left out of that period's average entirely rather
-                # than weighted on a different basis from its neighbours.
-                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -3502,7 +3497,7 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest):
 
 @router.post("/api/earnings/fcf-sbc-yield-inputs")
 @cached_blend("fcf-sbc-yield-inputs")
-async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
+async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest, request: Request):
     """The base inputs behind the FCF-SBC yield, per holding: Free Cash Flow, Stock-Based
     Compensation and Market Cap per fiscal year, in the company's own reporting currency (millions).
 
@@ -3544,10 +3539,6 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
-        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
-        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
-        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
-        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         cids = [comp[ci]["company_id"] for ci in canon if ci in comp]
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
@@ -3593,11 +3584,6 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
-                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
-                # actually computed from. Sparse: a period with no filed cap is ABSENT,
-                # and that company is left out of that period's average entirely rather
-                # than weighted on a different basis from its neighbours.
-                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
@@ -3646,7 +3632,7 @@ async def growth_estimates_by_isin(isin: str, force: bool = False):
 
 @router.post("/api/earnings/dividend-yield-inputs")
 @cached_blend("dividend-yield-inputs")
-async def dividend_yield_inputs(body: FundamentalCoverageRequest):
+async def dividend_yield_inputs(body: FundamentalCoverageRequest, request: Request):
     """The two base lines behind the dividend yield, per holding: Dividends per Share and the
     fiscal year-end share price, per fiscal year, in the company's own reporting currency.
 
@@ -3697,10 +3683,6 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest):
 
         rows: list[dict] = []
         years: set[str] = set()
-        # The cap as at each period, keyed by canonical ISIN — the weighting basis for the
-        # card's benchmark line. Empty for a portfolio; shared across the eleven cards by
-        # `cached_metric_reads`, so the tab pays for it once. See `period_caps_by_isin`.
-        caps = period_caps_by_isin(comp, body.universe, body.cadence)
         cids = [comp[ci]["company_id"] for ci in canon if ci in comp]
         # ⚠ ONE BULK READ PER METRIC, NOT ONE PER COMPANY — see `_prefetch`. A benchmark
         # request carries an index's 489 constituents, where the per-company path is 72s.
@@ -3741,11 +3723,6 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest):
             rows.append({
                 "isin": ci, "name": c.get("company_name") or name_by.get(ci) or ci,
                 "weight_pct": round(100.0 * weight_by[ci] / total_w, 2),
-                # ⚠ THE CAP THAT PERIOD, NOT TODAY'S — what each period's weight is
-                # actually computed from. Sparse: a period with no filed cap is ABSENT,
-                # and that company is left out of that period's average entirely rather
-                # than weighted on a different basis from its neighbours.
-                **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,

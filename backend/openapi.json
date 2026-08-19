@@ -22503,6 +22503,46 @@
         ]
       }
     },
+    "/api/earnings/universe-period-caps": {
+      "post": {
+        "description": "`{canonical ISIN: {period: market cap in EUR}}` for one index \u2014 ONCE, for all ten cards.\n\nThe weighting basis behind every benchmark line on the Long Equity tab: an index is weighted by\nthe cap it HAD in that period, never today's (see `weightAt` / `_weight_at` for why \u2014 on the\nS&P, today's cap carries NVIDIA at 7.46% of a year it was 0.63% of).\n\n\u26a0\u26a0 IT USED TO RIDE ALONG ON EVERY ROW OF ALL TEN `*-inputs` RESPONSES, WHICH IS THE SAME TABLE\nTEN TIMES. Measured 2026-08-19 on ACWI (1,514 constituents, annual): `market_cap_by_period` was\n**29.9%** of each payload \u2014 0.485 MB of `margin-inputs`' 1.62 MB \u2014 so ~4.8 MB of the tab's\n13.21 MB was one cap table repeated. Gzip cannot see across separate responses, so compression\ndid not touch it; only fetching it once does. The client splices it back onto the rows in\n`useBenchInputs`, so every card still computes both its lines with the identical helper over\nidentically shaped rows \u2014 the invariant that whole design rests on is untouched.\n\n\u26a0 THE SHAPE IS EXACTLY WHAT THE ROWS CARRIED, INCLUDING THE EMPTY ONES. A constituent we hold\nno cap for gets `{}`, not a missing key, because the client reads those two differently and it\nis not a subtlety it can recover: `{}` means \"this company is out of every period's average\"\nwhile ABSENT means \"fall back to `weight_pct` for all of them\". Ten rows silently switching\nfrom the first to the second is a benchmark line that still draws, still looks plausible, and\nis weighted wrongly.\n\n\u26a0 INDEX ONLY \u2014 422 for a portfolio rather than an empty answer. A holding weight is a share of\na book, not a market cap, and there is no cap history to weight its periods by; the `*-inputs`\nendpoints send no `market_cap_by_period` at all for a book, which is what the client's fallback\nto `weight_pct` is for. An empty `{}` here would be indistinguishable from \"the index has no\ncaps stored\", which is a real and different condition.\n\n\u26a0 THE READ ITSELF IS NOT NEW WORK. `period_caps_by_isin` goes through `cached_metric_reads`, so\nthe ten cards were already collapsing to ONE query plus nine waits \u2014 what they each paid for\nwas SERIALISING and SHIPPING the result. This endpoint just gives that one read one caller.",
+        "operationId": "universe_period_caps_api_earnings_universe_period_caps_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Universe Period Caps",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
     "/api/earnings/universes": {
       "get": {
         "description": "Frozen universe snapshots selectable as equal-weighted baskets in the\nearnings Portfolio dropdown. `[{universe_id, label, count}]`, newest first.",

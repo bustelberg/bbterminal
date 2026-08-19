@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  benchNote, mergeSeries, rebaseSeries, seriesCrossesZero, withBench, type BenchTarget,
+  benchNote, mergeSeries, rebaseSeries, seriesCrossesZero, spliceCaps, withBench,
+  type BenchTarget,
 } from './benchSeries';
+import { weightAt } from './marginData';
 
 /**
  * The pure halves of the Long Equity benchmark overlay.
@@ -196,5 +198,41 @@ describe('seriesCrossesZero', () => {
     const vals = [-2, -1, -0.5];
     expect(seriesCrossesZero(vals)).toBe(true);
     expect(rebaseSeries(m({ 2020: -2, 2021: -1, 2022: -0.5 }), null)).toBeNull();
+  });
+});
+
+describe('spliceCaps', () => {
+  /**
+   * The index's per-period caps are fetched ONCE and put back on the rows here, because shipping
+   * them on every row of all ten card responses was 29.9% of each ACWI payload — the same table
+   * ten times. What can go wrong is not "the caps are missing" (visible) but "the caps are missing
+   * for THIS row" (invisible): `weightAt` reads `{}` and `undefined` as two different answers, and
+   * both draw a line.
+   */
+  const rows = {
+    years: ['2019'],
+    rows: [{ isin: 'A', weight_pct: 4 }, { isin: 'B', weight_pct: 6 }],
+  };
+
+  it('gives a row we hold no cap for an EMPTY table, not a missing one', () => {
+    const out = spliceCaps(rows, { A: { 2019: 100 }, B: {} }) as typeof rows &
+      { rows: { market_cap_by_period?: Record<string, number> }[] };
+    expect(out.rows[0].market_cap_by_period).toEqual({ 2019: 100 });
+    expect(out.rows[1].market_cap_by_period).toEqual({});
+    // ⚠ THE POINT OF THE DISTINCTION, asserted through the consumer rather than the shape:
+    // `{}` puts B out of that period's average; `weight_pct` would have kept it in at 6.
+    expect(weightAt(out.rows[0] as never, '2019')).toBe(100);
+    expect(weightAt(out.rows[1] as never, '2019')).toBe(null);
+  });
+
+  it('leaves rows untouched when the whole table is empty — the portfolio shape', () => {
+    const out = spliceCaps(rows, {});
+    expect(out).toBe(rows);
+    // No key at all => `weightAt` falls back to the holding weight, flat across every period.
+    expect(weightAt(rows.rows[0] as never, '2019')).toBe(4);
+  });
+
+  it('does not invent a row shape it was not given', () => {
+    expect(spliceCaps({ metrics: [] }, { A: { 2019: 1 } })).toEqual({ metrics: [] });
   });
 });

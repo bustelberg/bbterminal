@@ -5377,6 +5377,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/universe-period-caps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Universe Period Caps
+         * @description `{canonical ISIN: {period: market cap in EUR}}` for one index — ONCE, for all ten cards.
+         *
+         *     The weighting basis behind every benchmark line on the Long Equity tab: an index is weighted by
+         *     the cap it HAD in that period, never today's (see `weightAt` / `_weight_at` for why — on the
+         *     S&P, today's cap carries NVIDIA at 7.46% of a year it was 0.63% of).
+         *
+         *     ⚠⚠ IT USED TO RIDE ALONG ON EVERY ROW OF ALL TEN `*-inputs` RESPONSES, WHICH IS THE SAME TABLE
+         *     TEN TIMES. Measured 2026-08-19 on ACWI (1,514 constituents, annual): `market_cap_by_period` was
+         *     **29.9%** of each payload — 0.485 MB of `margin-inputs`' 1.62 MB — so ~4.8 MB of the tab's
+         *     13.21 MB was one cap table repeated. Gzip cannot see across separate responses, so compression
+         *     did not touch it; only fetching it once does. The client splices it back onto the rows in
+         *     `useBenchInputs`, so every card still computes both its lines with the identical helper over
+         *     identically shaped rows — the invariant that whole design rests on is untouched.
+         *
+         *     ⚠ THE SHAPE IS EXACTLY WHAT THE ROWS CARRIED, INCLUDING THE EMPTY ONES. A constituent we hold
+         *     no cap for gets `{}`, not a missing key, because the client reads those two differently and it
+         *     is not a subtlety it can recover: `{}` means "this company is out of every period's average"
+         *     while ABSENT means "fall back to `weight_pct` for all of them". Ten rows silently switching
+         *     from the first to the second is a benchmark line that still draws, still looks plausible, and
+         *     is weighted wrongly.
+         *
+         *     ⚠ INDEX ONLY — 422 for a portfolio rather than an empty answer. A holding weight is a share of
+         *     a book, not a market cap, and there is no cap history to weight its periods by; the `*-inputs`
+         *     endpoints send no `market_cap_by_period` at all for a book, which is what the client's fallback
+         *     to `weight_pct` is for. An empty `{}` here would be indistinguishable from "the index has no
+         *     caps stored", which is a real and different condition.
+         *
+         *     ⚠ THE READ ITSELF IS NOT NEW WORK. `period_caps_by_isin` goes through `cached_metric_reads`, so
+         *     the ten cards were already collapsing to ONE query plus nine waits — what they each paid for
+         *     was SERIALISING and SHIPPING the result. This endpoint just gives that one read one caller.
+         */
+        post: operations["universe_period_caps_api_earnings_universe_period_caps_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/universes": {
         parameters: {
             query?: never;
@@ -18998,6 +19047,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    universe_period_caps_api_earnings_universe_period_caps_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

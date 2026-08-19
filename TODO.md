@@ -5,6 +5,54 @@ Last updated **2026-08-19**. Delete items as they're done.
 
 ---
 
+## ⏱ Fundamental modal → Long Equity: the ACWI benchmark line — DONE (2026-08-19)
+
+**The complaint**: picking ACWI makes every chart's index line take a while; AEX is instant.
+
+**Measured** with the new `backend/scripts/profile_longequity_bench.py` (fires the same requests
+the tab does, concurrently). The size ratio, not the query time, was the whole thing:
+
+| | AEX | ACWI |
+|---|---|---|
+| constituents | 22 | 1,514 |
+| cold wall | 2.3s | 20.5s |
+| decoded JSON, whole selection | 0.18 MB | **13.21 MB** |
+
+`_blend_cache` already cached the responses, but it cached the **payload** — so 13 MB shipped on
+every load, warm included, and each hit re-ran `jsonable_encoder`+`json.dumps` (137 ms × 12) to
+rebuild identical bytes.
+
+**Shipped**, in order (full write-up in [`docs/conventions.md`](docs/conventions.md)):
+
+1. `cached_blend` caches the **gzipped body** + honours `Accept-Encoding`. 13.21 → **4.85 MB**
+   wire; a hit is a memcpy.
+2. `market_cap_by_period` (29.9% of every payload, the same table ten times) lifted into
+   `POST /api/earnings/universe-period-caps`, spliced back client-side by `useBenchInputs`.
+   → 9.34 MB decoded, **3.16 MB** wire. ⚠ `{}` vs *absent* is a real distinction — pinned by
+   `spliceCaps` in `benchSeries.test.ts`.
+3. `_MAX_ENTRIES` 24 → 84, the grid to its own `_grid_cache` (cap 6), TTL 30 min → 6 h.
+4. `routers/_blend_prewarm.py` — background rebuild off `invalidate()`, debounced 90s, serial
+   (21.8s for ACWI), stands off `_PIPELINE_LOCK`, armed only by `main.py`. `BLEND_PREWARM=`
+   disables; default `ACWI,SP500,AEX` annual.
+
+**Net**: 13.21 MB uncompressed → 3.16 MB on the wire (4.2x), and after a fundamentals write the
+first reader now finds it warm instead of waiting ~20s.
+
+**Left deliberately:**
+
+* **Quarterly is not prewarmed** — it doubles the budget for a view most readers never open, and
+  the cache still fills it lazily on the first press. Add `ACWI:quarterly` to `BLEND_PREWARM` if
+  that turns out to be wrong.
+* **`portfolio-revenue-matrix` still inlines its caps** (it renders them in its own cells). Its two
+  benchmark calls from the Tables tab are therefore ~30% bigger than they need to be; not worth a
+  second splice path for two requests.
+* **The remaining 9.34 MB is real data** — 1,514 constituents × 2-3 metric series each, which the
+  client reduces to one line. Blending server-side would remove it, and would also destroy the
+  invariant the whole design rests on (both lines computed by the same client helper, so there is
+  no "benchmark margin" anywhere to drift). Do not do it casually.
+
+---
+
 ## ⏱ Analyse modal: the FIRST open is still the full load (2026-08-19)
 
 **Done that day**: the cross-portfolio leg cache (`_analysis_cache.leg`) + routing
