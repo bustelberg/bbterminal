@@ -72,7 +72,7 @@ export default function InterestBurdenInputsModal({ target, portfolioName, bench
   /** The index's constituents. Silent on failure: it is an addition to a modal that works. */
   const [bench, setBench] = useState<InterestBurdenInputs | null>(null);
   const [benchErr, setBenchErr] = useState<string | null>(null);
-  const benchKey = benchTarget ? `${benchTarget.universe}|${benchTarget.cadence}` : '';
+  const benchKey = benchTarget ? `${benchTarget.label}|${benchTarget.cadence}` : '';
   useEffect(() => {
     let alive = true;
     void (async () => {

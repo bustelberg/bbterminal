@@ -14,13 +14,20 @@
 // places — the API gate refuses them, and the components hide the controls via `useIsAdmin` so a
 // user is never shown a button that 403s.
 //
+// ⚠ `/research-dashboard` NEEDED ONE LINE IN THE API GATE TOO, and the page being here is not what
+// makes it work. Its picker calls `/api/asset-pipeline/search`, which sits in a namespace that is
+// otherwise admin-only — `/grid` alone is 27.56 MB of every ISIN, and `/ingest` and `/store` live
+// there as well. So the search path is allow-listed by EXACT pattern in `_auth_middleware.py`, not
+// by prefix. Adding a page to this list without checking what it FETCHES gives a user a page of
+// 403s, which reads as a broken app rather than as a permission.
+//
 // ⚠ AND SINCE 2026-08-06, ONE READ IS RESTRICTED TOO: expanding a row in the Overview table. The
 // summary a user sees is the whole page for them; the book behind a row — positions and their EUR
 // values, mutations, reconciliation — is admin's. Same two places (`PortfolioOverviewPanel`'s
 // `expand` + `_ADMIN_ONLY_PATTERNS` in `_auth_middleware.py`), so the page staying in this list is
 // not a statement that everything on it is readable.
 export const USER_ALLOWED_PATHS: readonly string[] = [
-  '/', '/earnings', '/schedule', '/management-dashboard', '/forbidden',
+  '/', '/earnings', '/schedule', '/management-dashboard', '/research-dashboard', '/forbidden',
 ];
 
 /**

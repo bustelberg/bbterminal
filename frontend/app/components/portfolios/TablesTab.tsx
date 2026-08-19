@@ -224,7 +224,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   const benchTarget: BenchTarget = useMemo(
     // ⚠ ANNUAL, WHATEVER THE TAB IS ON. A 5-year window of QUARTERS is fifteen months, and a
     // "5y CAGR" off it would be off by a factor of four — plausible and wrong on every row.
-    () => ({ universe: bench, cadence: 'annual' }), [bench]);
+    () => ({ universe: bench, label: bench, cadence: 'annual' as const }), [bench]);
 
   // ── the book ──────────────────────────────────────────────────────────────────────────────
   const [marginData, setMarginData] = useState<MarginInputs | null>(null);

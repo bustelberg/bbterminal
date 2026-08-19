@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '../../lib/supabase/client'
+import { describeSendError } from '../../lib/authError'
 
 const ALLOWED_DOMAIN = 'bustelberg.nl'
 const ALLOWED_EMAILS = (process.env.NEXT_PUBLIC_ALLOWED_EMAILS ?? '')
@@ -80,9 +81,15 @@ function LoginForm() {
         },
       })
       if (error) {
-        setError(error.message)
+        // ⚠ THE RAW MESSAGE IS "email rate limit exceeded", WHICH READS AS A BUG. The built-in mail
+        // service is capped at 2/hour PROJECT-WIDE and cannot be raised without custom SMTP — and
+        // every failure path in this flow ends by telling someone to request another link, so the
+        // third one silently cannot be sent. See `describeSendError`.
+        console.warn('[login] send failed:', error)
+        setError(describeSendError(error.message))
       } else {
-        setInfo('Check your email for a confirmation link. After clicking it you\'ll set your password.')
+        setInfo('Check your email for a confirmation link — including the spam folder. '
+          + 'You will be asked to press a button to confirm, then choose a password.')
       }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password })

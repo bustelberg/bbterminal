@@ -13,6 +13,7 @@ import InfoTip from '../InfoTip';
 import { BADGE_TONE, StateBadge } from '../StateBadge';
 import { MIN_YEAR_COVERAGE_PCT } from './marginData';
 import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
+import { type BenchTarget } from './benchSeries';
 
 /**
  * Everything behind one growth chart: the per-company figures its line was built from, and — when
@@ -1402,7 +1403,7 @@ export default function HoldingsRevenueModal({
   seriesLabel?: string;
   benchLabel?: string | null;
   /** Set when a benchmark is active — lets the modal load the INDEX's constituents on demand. */
-  benchTarget?: { universe: string; cadence: 'annual' | 'quarterly' } | null;
+  benchTarget?: BenchTarget | null;
 }) {
   /** Is this metric MONEY? ⚠ Declared once, from the unit, and read by both tables — the rule that
    *  `shares` is a plain count and `percent` is already a ratio is easy to state and easy to get
@@ -1545,7 +1546,7 @@ export default function HoldingsRevenueModal({
    *  book moves the one above. One key would make each button re-read both tables — twice the wait
    *  for half a reason, and on ACWI the constituent read is the expensive one. */
   const [benchReload, setBenchReload] = useState(0);
-  const benchKey = benchTarget ? `${benchTarget.universe}|${benchTarget.cadence}` : '';
+  const benchKey = benchTarget ? `${benchTarget.label}|${benchTarget.cadence}` : '';
   useEffect(() => {
     let alive = true;
     void (async () => {
@@ -1825,8 +1826,8 @@ export default function HoldingsRevenueModal({
                        everything has something new, so smart ≈ all until the index is current. The
                        saving is on the second press, not the first. `feeds: 'estimates'` is the
                        cheaper, narrower fill (~1,597) if only the forecast columns are wanted. */
-                    scope={{ kind: 'universe', label: benchTarget.universe,
-                      name: benchLabel || benchTarget.universe, feeds: 'smart' }}
+                    scope={{ kind: 'universe', label: benchTarget.label,
+                      name: benchLabel || benchTarget.label, feeds: 'smart' }}
                     label="Refresh benchmark"
                     onDone={() => setBenchReload((k) => k + 1)} />
                 </span>

@@ -59,10 +59,22 @@ Someone creating an account in production reached `/set-password`, chose a passw
 and got **"Auth session missing"**. Cause: `/auth/confirm` threw away the result of
 `exchangeCodeForSession`/`verifyOtp` and redirected to the password form whatever happened.
 
-**Shipped** (see the ⚠⚠ in [`CLAUDE.md`](CLAUDE.md) and the route's own docstring):
+**⚠ CORRECTION (same day).** The first round said the template change fixed the mail-scanner
+case. It does not. A single-use token is spent by ANYTHING that fetches its URL, and
+`/auth/v1/verify` and our own `/auth/confirm` are both plain GETs — so the template moved *who*
+spends the token, not *whether* a scanner can. A client then hit exactly that: signup mail arrives,
+click says "link already used". The real fix is that a GET must spend nothing.
 
-* `/auth/confirm` checks `error`/`error_code`/`error_description` FIRST, checks every result,
-  confirms with `getUser()`, and sends failures to `/login?error=…` with an actionable sentence.
+**Shipped** (see the ⚠⚠ in [`CLAUDE.md`](CLAUDE.md) and `supabase/templates/README.md`):
+
+* `/auth/confirm` is now a **page with a button** (`page.tsx`, the `route.ts` is gone). It reads
+  the token from the URL and does nothing with it; `verifyOtp` runs on the press. A scanner issues
+  the GET, renders no JS, presses nothing, and the token survives. ⚠ `detectSessionInUrl: false`
+  on that page's client is load-bearing — the default processes `?code=` on load and hands the
+  protection straight back. It also fixes the quieter twin: a back button or refresh re-verifying
+  and reporting a link that worked as already used.
+* It checks `error`/`error_code`/`error_description` FIRST, checks every result,
+  confirms with `getUser()`, and shows an actionable sentence rather than navigating on.
 * `lib/authError.ts` maps the causes to sentences (+ `authError.test.ts`). It tells the
   wrong-browser case apart from the expired case, because their fixes differ.
 * `/set-password` refuses to render a password form with no session.

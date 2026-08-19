@@ -20,7 +20,7 @@ import { paddedLogDomain, periodTick, stepChanges, type Step } from './marginDat
 import { atSharedX, ltmWindowsDiffer, ltmYearX, sharedLtmX, type LtmPoint } from './ltmAxis';
 import { endpointCagr } from './lineCagr';
 import { periodAxis } from '../../../lib/chartAxis';
-import { benchNote, benchmarkFirst, rebaseSeries, seriesCrossesZero } from './benchSeries';
+import { benchNote, benchmarkFirst, rebaseSeries, seriesCrossesZero, type BenchTarget } from './benchSeries';
 
 /**
  * One "Long Equity" growth card: a metric per fiscal year on a LOG axis with an exponential-trend
@@ -240,7 +240,7 @@ export function Stat({ label, value, tone, color, info }: {
 
 export default function MetricGrowthCard({
   cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin, onIngested,
-  blendNotes, onReloadMetrics, cadence = 'annual', benchMetrics, benchLabel, benchErr,
+  blendNotes, onReloadMetrics, cadence = 'annual', benchMetrics, benchLabel, benchTarget, benchErr,
   benchNotes,
 }: {
   cfg: MetricCfg;
@@ -272,6 +272,16 @@ export default function MetricGrowthCard({
    */
   benchMetrics?: MetricRow[] | null;
   benchLabel?: string | null;
+  /**
+   * The second line's REAL target, passed down rather than rebuilt from `benchLabel`.
+   *
+   * ⚠⚠ IT USED TO BE RECONSTRUCTED HERE as `{ universe: benchLabel }`, which was harmless only
+   * while the second line could only ever be an index whose label IS its universe. The moment it
+   * can be a COMPANY, that line asks the server for a universe named "NVIDIA Corporation" — and
+   * the drill-down it feeds comes back empty with nothing to say why. A label is for reading; it
+   * is not an identifier.
+   */
+  benchTarget?: BenchTarget | null;
   /** The INDEX's `blend_notes` — why a code its constituents carry drew no line. Distinct
    *  from `blendNotes`, which is the book's: the two answer the same question about two
    *  different sets of companies and must not be read for each other. */
@@ -556,7 +566,7 @@ export default function MetricGrowthCard({
     // ⚠ `false` — THIS CARD APPLIES NO FLOOR. `benchByX` is the blended rows as they arrived; the
     // coverage decision was made on the server. Claiming the floor here is a diagnosis this
     // component cannot make — see `benchNote`.
-    ? benchNote({ universe: benchLabel, cadence }, benchMetrics, benchErr ?? null, benchByX, false)
+    ? benchNote(benchTarget ?? null, benchMetrics, benchErr ?? null, benchByX, false)
       ?? (benchByX && !isRatio && !indexed
         ? `${benchLabel}: no year in common with a positive value — showing absolute, not indexed`
         : null)
@@ -1091,7 +1101,7 @@ export default function MetricGrowthCard({
           noun={cfg.noun} portfolioName={holdingsName} onClose={() => setShowHoldings(false)}
           seriesLabel={cfg.title}
           benchLabel={benchByX ? benchLabel : null}
-          benchTarget={benchLabel ? { universe: benchLabel, cadence } : null} />
+          benchTarget={benchTarget ?? null} />
       )}
     </div>
   );

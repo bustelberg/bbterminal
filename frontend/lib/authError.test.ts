@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeAuthError, hasAuthError } from './authError';
+import { describeAuthError, describeSendError, hasAuthError } from './authError';
 
 /**
  * The one thing a person creating an account ever saw when a link failed was "Auth session
@@ -72,5 +72,36 @@ describe('hasAuthError', () => {
     expect(hasAuthError(new URLSearchParams('error=access_denied'))).toBe(true);
     expect(hasAuthError(new URLSearchParams('error_code=otp_expired'))).toBe(true);
     expect(hasAuthError(new URLSearchParams('error_description=nope'))).toBe(true);
+  });
+});
+
+describe('describeSendError', () => {
+  /**
+   * The built-in Supabase mail service is capped at 2 messages per hour PROJECT-WIDE and the cap
+   * cannot be raised without custom SMTP. It bites hardest right after a link has failed, because
+   * every failure path in this flow ends by telling the person to request another one.
+   */
+  it('explains the project-wide hourly cap instead of repeating "rate limit exceeded"', () => {
+    for (const m of ['email rate limit exceeded', 'over_email_send_rate_limit', 'Too Many Requests']) {
+      const s = describeSendError(m);
+      expect(s).toMatch(/hour/i);
+      // ⚠ "not per person" is the part that stops someone retrying with another address.
+      expect(s).toMatch(/project-wide|not per person/i);
+      expect(s).not.toMatch(/rate limit exceeded/i);
+    }
+  });
+
+  it('keeps the per-address throttle separate — that one is seconds, not an hour', () => {
+    const s = describeSendError('For security purposes, you can only request this after 51 seconds.');
+    expect(s).toMatch(/a minute/i);
+    // ⚠ Telling someone to wait an hour for a 51-second throttle is how a working app gets
+    // abandoned; the two limits must not collapse into one sentence.
+    expect(s).not.toMatch(/hour/i);
+  });
+
+  it('passes an unrecognised message through rather than inventing a cause', () => {
+    expect(describeSendError('Signups not allowed for this instance'))
+      .toBe('Signups not allowed for this instance');
+    expect(describeSendError(null)).toMatch(/could not be sent/i);
   });
 });

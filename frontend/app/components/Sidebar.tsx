@@ -26,7 +26,13 @@ const navItems: NavEntry[] = [
   { href: '/', label: 'Welcome' },
   // The AIRS books, their models and the analysis built on them.
   { href: '/management-dashboard', label: 'Management Dashboard' },
-  // ⚠ SECOND, DIRECTLY UNDER THE DASHBOARD (moved up from near the bottom, 2026-08-13). It is the
+  // ⚠ BESIDE THE DASHBOARD, AND USER-VISIBLE. It is a reading tool rather than a pipeline tool:
+  // two companies' fundamentals side by side, off the same view the Fundamental button opens.
+  // Filed with the one-off admin tools near the bottom it would read as one of them — and the
+  // people it is for are exactly the ones whose nav stops after a handful of entries.
+  { href: '/research-dashboard', label: 'Research Dashboard' },
+  // ⚠ NEAR THE TOP, NOT NEAR THE BOTTOM (moved up 2026-08-13; Research Dashboard came in above it
+  // on 2026-08-19, so it is no longer literally second). It is the
   // page that answers "is the data behind everything else current" — the scheduled strategies, the
   // pipeline, and now every automatic job — so it is checked FIRST when a number looks wrong.
   // Fifteen entries down, beside the one-off tools, it read as one of them.

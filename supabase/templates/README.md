@@ -28,18 +28,32 @@ That is Supabase's default, and it is what account creation was still using in p
 {SUPABASE_URL}/auth/v1/verify?token=…&type=…&redirect_to=…
 ```
 
-Two things follow, and **neither can happen in development**, which is why this survived:
+It comes back as `?code=`, which is **PKCE**: `createBrowserClient` stored a code verifier in a
+cookie when the link was *requested*, and only that browser can complete the exchange. Ask on a
+laptop, open the mail on a phone, and it cannot work — and locally there is only ever one browser,
+which is why this survived. `token_hash` + `verifyOtp` carries no such per-browser state, so the
+link works from any device.
 
-1. **That URL consumes the one-time token when it is fetched.** Corporate mail security (Outlook
-   Safe Links and friends) fetches every link in a message before the human sees it, so the token
-   is spent and the real click gets `?error=access_denied&error_code=otp_expired`. A local Mailpit
-   inbox has no scanner.
-2. **It comes back as `?code=`, which is PKCE.** `createBrowserClient` stored a code verifier in a
-   cookie when the link was *requested*, and only that browser can complete the exchange. Ask on a
-   laptop, open the mail on a phone, and it cannot work. Locally there is only ever one browser.
+### ⚠⚠ What this change does NOT fix: mail scanners
 
-`token_hash` + `verifyOtp` — what `frontend/app/auth/confirm/route.ts` does — has neither problem:
-nothing is consumed until our own route runs, and there is no per-browser state to carry.
+**A single-use token is spent by anything that fetches its URL**, and corporate mail security
+(Microsoft Defender Safe Links, Proofpoint, Mimecast) fetches every link in every message before
+the recipient sees it. `/auth/v1/verify` and our own `/auth/confirm` are both plain GETs, so
+changing the template moves **who** spends the token, not **whether** a scanner can. Production,
+2026-08-19: a client got the signup mail and was told the link had already been used.
+
+That is fixed in the app, not in this template: `frontend/app/auth/confirm/page.tsx` is a **page
+with a button**, not a route handler. It reads the token out of the URL and does nothing with it;
+`verifyOtp` runs on the press. A scanner issues the GET, renders no JS, presses nothing, and the
+token is still there when the person arrives. ⚠ `detectSessionInUrl: false` on that page's Supabase
+client is part of it — the default processes `?code=` on load and would hand the protection back.
+
+So the two changes fix two different failures, and both are needed:
+
+| failure | fixed by |
+|---|---|
+| link opened on a different device from the one that requested it | this template (`token_hash`, no PKCE verifier) |
+| "link already used" — a mail scanner got there first | the confirm **page** (nothing is spent on GET) |
 
 Verified against the local stack rather than taken from the docs: `generate_link` returns
 `action_link = …/auth/v1/verify?token=…` (the URL scanners eat), and `verify_otp({token_hash, type})`

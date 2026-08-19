@@ -2968,6 +2968,118 @@
         "title": "AssetGridRow",
         "type": "object"
       },
+      "AssetSearchResponse": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/AssetSearchRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "title": "AssetSearchResponse",
+        "type": "object"
+      },
+      "AssetSearchRow": {
+        "description": "One pickable instrument \u2014 identity only, nothing a chart would draw.",
+        "properties": {
+          "analysis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Id"
+          },
+          "bars": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bars"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "yahoo_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yahoo Symbol"
+          }
+        },
+        "required": [
+          "isin"
+        ],
+        "title": "AssetSearchRow",
+        "type": "object"
+      },
       "AssetWeight": {
         "properties": {
           "benchmark_id": {
@@ -18797,6 +18909,63 @@
           }
         },
         "summary": "Refresh Row",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/search": {
+      "get": {
+        "description": "Type-ahead over the asset grid: a handful of PICKABLE instruments matching `q`.\n\n\u26a0\u26a0 IT EXISTS BECAUSE `/grid` IS 27.56 MB. That endpoint returns all 16,613 rows with every\ncolumn \u2014 the right answer for a page whose whole job is that table, and an absurd one for a\ntwo-field picker that needs a name and an ISIN. Filtering 27 MB in the browser to show ten\nrows is the kind of thing that works on a laptop and not on a phone, and it would be paid on\nevery visit to `/research-dashboard`.\n\n\u26a0 PICKABLE MEANS DRAWABLE. Only `status='ok'` rows with an `analysis_id` and at least one bar\nare offered: those are the ones a fundamentals view can actually render. Half the grid is\nbonds, unresolved ISINs and zero-bar rows \u2014 offering them would let someone pick a company and\nget an empty panel, which reads as a broken page rather than as an unpriceable instrument.\n\n\u26a0 THE LIMIT IS REPORTED, NOT SILENT. `truncated` tells the caller there are more matches than\nit is seeing, so a picker can say \"keep typing\" instead of implying the list is the answer.",
+        "operationId": "search_assets_api_asset_pipeline_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 120,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Assets",
         "tags": [
           "asset-pipeline"
         ]

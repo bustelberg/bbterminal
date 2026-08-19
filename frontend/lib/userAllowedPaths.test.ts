@@ -12,7 +12,19 @@ describe('isUserAllowedPath', () => {
     expect(isUserAllowedPath('/earnings')).toBe(true)
     expect(isUserAllowedPath('/schedule')).toBe(true)
     expect(isUserAllowedPath('/management-dashboard')).toBe(true)
+    expect(isUserAllowedPath('/research-dashboard')).toBe(true)
     expect(isUserAllowedPath('/forbidden')).toBe(true)
+  })
+
+  it('is the WHOLE list — a page added here without a nav/gate review fails this', () => {
+    // ⚠ PINNED AS A SET, NOT SPOT-CHECKED. Every entry hands a page to non-admins, and the page is
+    // only half of it: `/research-dashboard` also needed its picker's API path allow-listed by
+    // EXACT pattern in `_auth_middleware.py`, because `/api/asset-pipeline/` holds `/grid` (27 MB
+    // of every ISIN), `/ingest` and `/store`. A page added to this list without that review gives
+    // a user a screen of 403s, which reads as a broken app rather than as a permission.
+    expect([...USER_ALLOWED_PATHS].sort()).toEqual([
+      '/', '/earnings', '/forbidden', '/management-dashboard', '/research-dashboard', '/schedule',
+    ])
   })
 
   it('blocks admin-only pages', () => {

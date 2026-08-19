@@ -1193,8 +1193,23 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest, request: R
         # Only a universe has a market cap history to weight by — and only for a universe is
         # `weight_pct` a cap share in the first place (see `_load_and_expand_members`), so this is
         # the same branch that decides what the weight MEANS, not a new one.
-        caps = (period_caps_eur([r["company_id"] for r in covered], body.cadence)
-                if body.universe else None)
+        # ⚠ THROUGH `cached_metric_reads`, NOT A BARE CALL. It is the same derived series
+        # `period_caps_by_isin` reads under the same key, so the two blend endpoints and the
+        # `/universe-period-caps` read collapse to one computation instead of three — measured at
+        # 0.95s each on ACWI. It also means `invalidate()` drops it with everything else; a bare
+        # call cached nothing and survived nothing.
+        #
+        # ⚠ THE ID SET IS THE KEY, AND THIS ONE IS `covered` (1,509) WHERE THE CARDS' IS THE
+        # CANONICAL-ISIN SET (1,514). Those are legitimately different questions, so they are
+        # different entries — the sharing this buys is between callers asking about the SAME
+        # companies, which is the honest kind.
+        caps = None
+        if body.universe:
+            ids = [r["company_id"] for r in covered]
+            key = "__period_caps_eur"
+            caps = cached_metric_reads(
+                ids, [key], body.cadence,
+                lambda _ms: {key: period_caps_eur(ids, body.cadence)})[key]
         if body.metrics:
             # ⚠ SAME BLEND, DIFFERENT READ. Only the fetch changes — `_blend_rows` is untouched, so
             # a narrowed request cannot blend by a different rule than a full one.

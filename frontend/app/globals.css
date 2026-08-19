@@ -90,7 +90,12 @@
   --color-neutral-900: #aab3bf;
   --color-neutral-950: #ced4dc;
 
-  /* Hover/active wash (charcoal ink at low alpha → darkens on white) + modal scrim. */
+  /* Hover/active wash (charcoal ink at low alpha → darkens on white) + modal scrim.
+     ⚠⚠ ALWAYS WITH AN ALPHA — `bg-overlay/5`, `/[0.02]`, `/[0.04]`. Bare, this is very nearly
+     black, and the text on top of it does not change colour, so a hover turns dark ink on a dark
+     fill: invisible. Shipped once that way on the /research-dashboard picker (2026-08-19) past
+     tsc, eslint and the whole suite, because nothing about a class name is checkable. It is now:
+     `lib/overlayToken.test.ts` reads the source and fails on a bare one. */
   --color-overlay: #131922;
   --color-scrim:   #0c1118;
 }

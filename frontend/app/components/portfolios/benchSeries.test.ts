@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  benchNote, mergeSeries, rebaseSeries, seriesCrossesZero, spliceCaps, withBench,
-  type BenchTarget,
+  benchBody, benchKey, benchNote, isUniverseTarget, mergeSeries, rebaseSeries, seriesCrossesZero,
+  spliceCaps, withBench, type BenchTarget,
 } from './benchSeries';
 import { weightAt } from './marginData';
 
@@ -39,7 +39,7 @@ describe('mergeSeries', () => {
 });
 
 describe('benchNote', () => {
-  const aex: BenchTarget = { universe: 'AEX', cadence: 'annual' };
+  const aex: BenchTarget = { universe: 'AEX', label: 'AEX', cadence: 'annual' };
   // ⚠ TWO PERIODS, NOT ONE — A ONE-POINT SERIES IS NO LONGER "DREW". This fixture was
   // `m({ 2020: 5 })`, which `benchNote` now reports as "one period only", so the test below broke
   // on a source change that was correct: a single surviving point is not a line you can read a
@@ -234,5 +234,48 @@ describe('spliceCaps', () => {
 
   it('does not invent a row shape it was not given', () => {
     expect(spliceCaps({ metrics: [] }, { A: { 2019: 1 } })).toEqual({ metrics: [] });
+  });
+});
+
+describe('the second line can be an index or a company', () => {
+  const idx: BenchTarget = { universe: 'ACWI', label: 'ACWI', cadence: 'annual' };
+  const co: BenchTarget = { isin: 'US67066G1040', label: 'NVIDIA Corporation', cadence: 'annual' };
+
+  it('sends a company as a ONE-HOLDING BOOK, which is the shape the endpoints already serve', () => {
+    // ⚠ This is the whole reason company-vs-company needed no backend work. Verified against the
+    // real endpoints: `{holdings:[{isin, weight:1}]}` returns one row at weight_pct = 100.
+    expect(JSON.parse(benchBody(co))).toEqual({
+      holdings: [{ isin: 'US67066G1040', name: 'NVIDIA Corporation', weight: 1 }],
+      cadence: 'annual',
+    });
+    // ⚠⚠ AND IT MUST NOT CARRY `universe`. A company body with a stray universe key is answered by
+    // the INDEX branch server-side — a chart that draws ACWI under a company's name.
+    expect(JSON.parse(benchBody(co))).not.toHaveProperty('universe');
+  });
+
+  it('sends an index as before, with no holdings', () => {
+    expect(JSON.parse(benchBody(idx))).toEqual({ universe: 'ACWI', cadence: 'annual' });
+    expect(JSON.parse(benchBody(idx))).not.toHaveProperty('holdings');
+  });
+
+  it('keys on the identifier, never on the label alone', () => {
+    // ⚠ Two companies can share a name (dual listings, share classes). Keyed on the label, the
+    // fetch effect would not re-run and the chart would keep the previous company's line under the
+    // new name — the failure that looks most like a correct answer.
+    const twin: BenchTarget = { isin: 'US67066G1041', label: 'NVIDIA Corporation', cadence: 'annual' };
+    expect(benchKey(co)).not.toEqual(benchKey(twin));
+    expect(benchKey(co)).not.toEqual(benchKey({ ...co, cadence: 'quarterly' }));
+    expect(benchKey(null)).toBe('');
+    // An index and a company that happen to share a label are still different targets.
+    expect(benchKey(idx)).not.toEqual(benchKey({ isin: 'X', label: 'ACWI', cadence: 'annual' }));
+  });
+
+  it('discriminates the two, since the caps fetch and the label both depend on it', () => {
+    expect(isUniverseTarget(idx)).toBe(true);
+    expect(isUniverseTarget(co)).toBe(false);
+  });
+
+  it('labels a company by its NAME in the note, not by an identifier', () => {
+    expect(benchNote(co, null, 'boom', null)).toBe('NVIDIA Corporation: boom');
   });
 });

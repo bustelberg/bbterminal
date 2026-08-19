@@ -127,7 +127,7 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
                 <YAxis domain={paddedDomain(withBench(marginByYr.values(), benchByYr))} tick={{ fontSize: 12, fill: chartTheme.axisTick }} width={48}
                   tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }} itemSorter={benchmarkFirst}
-                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.universe ?? 'Benchmark') : own]} />
+                  formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.label ?? 'Benchmark') : own]} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {/* ⚠ 100 IS THE MEANINGFUL LINE ON THIS CHART, NOT 0. Crossing it is the event —
                     profit converting to cash or not — whereas 0 only matters in the rare year FCF
@@ -148,7 +148,7 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
                   "100% dotted", beside a solid blue swatch, it named a mark that appears nowhere. */}
               <LegendItem color={chartTheme.axisTick} stroke="dotted" label="100% — full conversion"
                 title="Profit converting fully into cash. Above this line is better, not an error." />
-              {benchByYr && <LegendItem color={chartTheme.pos} label={benchTarget?.universe} />}
+              {benchByYr && <LegendItem color={chartTheme.pos} label={benchTarget?.label} />}
               {note && (
                 <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">
                   {note}
@@ -161,7 +161,7 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
 
       {showInputs && (
         <CashConversionInputsModal target={holdingsTarget} portfolioName={holdingsName}
-          benchTarget={benchTarget} benchLabel={benchTarget?.universe ?? null}
+          benchTarget={benchTarget} benchLabel={benchTarget?.label ?? null}
           onClose={() => setShowInputs(false)} />
       )}
     </div>
