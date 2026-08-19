@@ -1,35 +1,9 @@
-<!--
-  ⚠⚠ THE URL IS THE FIX, NOT THE WORDING.
-
-  Supabase's DEFAULT template is `{{ .ConfirmationURL }}`, which points at
-  `{SUPABASE_URL}/auth/v1/verify?token=…&type=…&redirect_to=…`. Two things follow from that, and
-  both of them broke account creation in production while working perfectly in development:
-
-    1. THAT URL CONSUMES THE ONE-TIME TOKEN WHEN IT IS FETCHED. Corporate mail security (Outlook
-       Safe Links and friends) fetches every link in a message before the human sees it — so the
-       token is spent, and the person's click gets `?error=access_denied&error_code=otp_expired`.
-       A local Mailpit inbox has no scanner, so this never shows up in development.
-    2. IT COMES BACK AS `?code=`, WHICH IS PKCE. Only the browser that REQUESTED the link holds the
-       code verifier, so opening the mail on a phone after asking on a laptop cannot work. In
-       development there is only ever one browser.
-
-  `token_hash` + `verifyOtp` (see `frontend/app/auth/confirm/route.ts`) has neither problem: nothing
-  is consumed until our own route runs, and there is no per-browser state to carry.
-
-  ⚠ `type` IS PINNED TO `recovery` RATHER THAN `{{ .Email_Action_Type }}`. The variable is the
-  documented way and it does work, but each template already knows what it is, and a variable that
-  fails to render leaves `type=` empty — which the route can only refuse. One fewer thing between a
-  person and their account. Verified against the local stack: `verify_otp` with this type returns a
-  session, with no code verifier involved anywhere.
-
-  ⚠ `{{ .SiteURL }}` must be the deployed origin. Keep the same URL in the Supabase dashboard for
-  the hosted project — this file only configures the LOCAL stack.
--->
 <h2>Reset your BBTerminal password</h2>
-<p>Click the link below to choose a new password. It works once and expires in an hour.</p>
-<p>
-  <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery">
-    Choose a new password
-  </a>
-</p>
-<p>If you did not request this, you can ignore this email.</p>
+
+<p>Follow this link to choose a new password:</p>
+
+<p><a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery">Choose a new password</a></p>
+
+<p>The link works once and expires in an hour. Open it in the same browser you requested it from.</p>
+
+<p>If you did not request this, you can ignore this email — your password will not change.</p>
