@@ -1162,6 +1162,207 @@ def _body_history_drift(ctx=None) -> tuple[str, dict]:
              "names": [str(d) for d in drifted][:20]})
 
 
+# Which rebuilt indices the daily job refreshes.
+#
+# ⚠⚠ ONLY THE ONES WITHOUT A REACHABLE ETF. ACWI and SP500 take their headline from the index ETF's
+# own price series (`routers/_benchmark_etf`), refreshed inside the 05:00 price_update in two calls.
+# Rebuilding their 1,684 and 491 constituents daily would be thousands of paced Yahoo calls to
+# re-derive a number we already hold — and the rebuild is the LESS accurate of the two (full market
+# cap where MSCI float-adjusts, 84% coverage renormalised across the rest). AEX has no reachable
+# UCITS line on GuruFocus, so it IS the rebuild, and its 25 constituents are the entire cost.
+#
+# ⚠ Adding a label here is a real daily Yahoo budget, not a config tweak. Check the constituent
+# count first.
+_REBUILT_INDICES: tuple[str, ...] = ("AEX",)
+
+
+def _fire_benchmark_index_refresh() -> None:
+    """Daily constituent refresh for the indices we REBUILD rather than read off an ETF.
+
+    ⚠⚠ NOTHING ELSE COVERS THESE. `asset_price_refresh` is scoped to instruments HELD IN A MODEL
+    PORTFOLIO, so an index constituent no book holds was refreshed by nothing at all — which is why
+    a rebuilt index could sit on months-old closes while every dashboard around it was current, and
+    say nothing about it. Own daemon thread; never raises into the scheduler."""
+    _spawn_body("benchmark_index_refresh")
+
+
+def _body_benchmark_index_refresh(ctx=None) -> tuple[str, dict]:
+    """Constituents → market caps → two prices each, per label. Returns a one-line summary.
+
+    ⚠ ONE LABEL'S FAILURE IS NOT THE JOB'S. Each is independent — a Yahoo wobble on one index must
+    not cost the others their refresh, and the summary names whichever fell over.
+    """
+    from routers._benchmark_refresh import refresh_benchmark  # noqa: PLC0415
+
+    done: list[str] = []
+    failed: list[str] = []
+    for label in _REBUILT_INDICES:
+        try:
+            # ⚠ THE SAME FUNCTION THE BUTTON RUNS. A second "scheduled" path would be a second
+            # definition of what refreshing an index means, and the two would drift.
+            summary = refresh_benchmark(
+                label,
+                # `emit` is the SSE sender for the interactive path; here the steps go to the log.
+                lambda _t, **kw: _log.info("[benchmark_index_refresh] %s", kw.get("message", "")),
+                should_stop=(lambda: bool(ctx and ctx.cancelled())) if ctx else None,
+            )
+            done.append(f"{label} ({(summary or {}).get('priced', '?')} priced)")
+        except Exception as e:  # noqa: BLE001 — one label must not take the others down
+            _log.warning("[benchmark_index_refresh] %s failed: %s: %s", label, type(e).__name__, e)
+            failed.append(f"{label}: {type(e).__name__}")
+    msg = f"refreshed {', '.join(done) or 'nothing'}"
+    if failed:
+        msg += f" · failed {', '.join(failed)}"
+    return msg, {"refreshed": len(done), "failed": len(failed)}
+
+
+# The indices whose constituents get a quarterly fundamentals pass.
+#
+# ⚠ ALL THREE, unlike `_REBUILT_INDICES`. Fundamentals are not prices: the ETF's own series answers
+# "what did ACWI return", and answers nothing at all about its constituents' margins — which is the
+# whole of the Long Equity tab and the fundamentals grid. Those exist only per company.
+_FUNDAMENTAL_INDICES: tuple[str, ...] = ("ACWI", "SP500", "AEX")
+
+# ⚠ THE FLOOR IS NOT ZERO. Stopping at 0 spends a region's last call and leaves the month-end
+# `full_price_refresh` — the job that keeps every price series alive — with nothing. A reserve is
+# the cheap way to make this job the one that yields.
+_FUNDAMENTALS_REGION_FLOOR = 2000
+
+
+class _LogCtx:
+    """The `ctx` `fill_company_ids` expects, for a run with nobody watching.
+
+    ⚠ THE TICK HAS NO JOB CONTEXT. Bodies are handed `ctx=None` on a schedule (see `_reporter`) and
+    `fill_company_ids` calls `ctx.emit(...)` throughout — so a tick would die on its first narration
+    line having done nothing, and the failure would read as a fundamentals problem rather than a
+    plumbing one. This turns those lines into log lines.
+    """
+
+    def __init__(self, cancelled=None):
+        self._cancelled = cancelled or (lambda: False)
+        self.counts: dict[str, int] = {}
+
+    def emit(self, kind: str, message: str = "", **_kw) -> None:
+        self.counts[kind] = self.counts.get(kind, 0) + 1
+        # ⚠ WARNING for the milestones, not INFO. uvicorn leaves the root logger at WARNING in
+        # production, so an info line from a QUARTERLY job is invisible exactly where someone asks
+        # "did it run?" — and the next chance to find out is three months away.
+        if kind in ("start", "error", "done"):
+            _log.warning("[benchmark_fundamentals] %s: %s", kind, message)
+        else:
+            _log.info("[benchmark_fundamentals] %s: %s", kind, message)
+
+    def cancelled(self) -> bool:
+        return bool(self._cancelled())
+
+
+def _fire_benchmark_fundamentals() -> None:
+    """Quarterly fundamentals pass over every benchmark constituent. Own daemon thread."""
+    _spawn_body("benchmark_fundamentals_fill")
+
+
+def _fundamental_company_ids(label: str) -> list[tuple[int, str]]:
+    """`[(company_id, gurufocus exchange_code)]` for one index — the GuruFocus side of it.
+
+    ⚠⚠ NOT `_asset_benchmark.members()`. That returns the ASSET world, whose `company_id` slot
+    actually carries an `analysis_id` (its own docstring says so) — handing those to a fundamentals
+    fill would look up entirely unrelated companies and quietly fill the wrong ones. Fundamentals
+    are keyed on the GuruFocus company.
+
+    ⚠ THE EXCHANGE RIDES ALONG because the quota is PER REGION, and the region is a property of the
+    listing. Without it the budget gate could only be all-or-nothing.
+    """
+    from deps import IN_CHUNK_SIZE, supabase  # noqa: PLC0415
+
+    uni = (supabase.table("universe").select("universe_id")
+           .eq("label", label).limit(1).execute().data or [])
+    if not uni:
+        return []
+    ids: set[int] = set()
+    off = 0
+    while True:  # ⚠ PAGED — 1,998 members for ACWI against PostgREST's 1,000-row cloud cap.
+        rows = (supabase.table("universe_membership").select("company_id")
+                .eq("universe_id", uni[0]["universe_id"]).order("company_id")
+                .range(off, off + 999).execute().data or [])
+        if not rows:
+            break
+        ids.update(r["company_id"] for r in rows)
+        off += len(rows)
+    out: list[tuple[int, str]] = []
+    ordered = sorted(ids)
+    for i in range(0, len(ordered), IN_CHUNK_SIZE):
+        for c in (supabase.table("company")
+                  .select("company_id,gurufocus_exchange:gurufocus_exchange(exchange_code)")
+                  .in_("company_id", ordered[i:i + IN_CHUNK_SIZE]).execute().data or []):
+            out.append((c["company_id"],
+                        ((c.get("gurufocus_exchange") or {}) or {}).get("exchange_code") or ""))
+    return out
+
+
+def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
+    """Fill statements for every benchmark constituent, bounded by the monthly GuruFocus quota.
+
+    ⚠⚠ THE BUDGET GATE IS THE POINT, and it is the shape `full_price_refresh` already uses: read
+    the per-region remaining and DROP the companies whose region is at the floor, rather than
+    calling and failing. An exhausted region does not refuse politely — it returns errors that read
+    as data problems, and a job that discovers its quota by exhausting it takes the month-end price
+    refresh down with it.
+
+    ⚠ DECIDED BEFORE ANY CALL, PER REGION. A pass that started and stopped halfway would leave an
+    index part-filled with no record of where it got to; budgeting up front lets the summary say
+    what was deferred, and `only_due=True` means next quarter picks up exactly those.
+
+    ⚠ ONE INDEX'S FAILURE IS NOT THE JOB'S — they are independent, and the summary names whichever
+    fell over.
+    """
+    from deps import supabase  # noqa: PLC0415
+    from ingest.api_usage import _region_for_exchange, remaining_budget  # noqa: PLC0415, PLC2701
+    from routers._fundamental_fill import fill_company_ids  # noqa: PLC0415
+
+    budget = remaining_budget(supabase)
+    room = {r: max(0, n - _FUNDAMENTALS_REGION_FLOOR) for r, n in budget.items()}
+    _log.warning("[benchmark_fundamentals] quota left %s — usable above the %s floor: %s",
+                 budget, _FUNDAMENTALS_REGION_FLOOR, room)
+
+    log_ctx = _LogCtx(lambda: bool(ctx and ctx.cancelled()))
+    filled = 0
+    deferred = 0
+    failed: list[str] = []
+    for label in _FUNDAMENTAL_INDICES:
+        try:
+            pairs = _fundamental_company_ids(label)
+        except Exception as e:  # noqa: BLE001
+            _log.warning("[benchmark_fundamentals] %s: could not read membership: %s: %s",
+                         label, type(e).__name__, e)
+            failed.append(f"{label}: {type(e).__name__}")
+            continue
+        keep: list[int] = []
+        for cid, exch in pairs:
+            region = _region_for_exchange(exch)
+            if room.get(region, 0) <= 0:
+                deferred += 1
+                continue
+            room[region] -= 1
+            keep.append(cid)
+        if not keep:
+            _log.warning("[benchmark_fundamentals] %s: no quota left for any of its regions", label)
+            continue
+        try:
+            fill_company_ids(log_ctx, label, keep, feeds="statements", only_due=True)
+            filled += len(keep)
+        except Exception as e:  # noqa: BLE001
+            _log.warning("[benchmark_fundamentals] %s failed: %s: %s", label, type(e).__name__, e)
+            failed.append(f"{label}: {type(e).__name__}")
+
+    msg = f"{filled} constituents filled"
+    if deferred:
+        msg += (f" · {deferred} deferred to next quarter "
+                f"(region at the {_FUNDAMENTALS_REGION_FLOOR}-call floor)")
+    if failed:
+        msg += f" · failed {', '.join(failed)}"
+    return msg, {"filled": filled, "deferred": deferred, "failed": len(failed)}
+
+
 def _fire_fx_sync() -> None:
     """Daily ECB FX sync — keeps EVERY fetchable currency's `fx_rate` current.
     The daily pipeline only syncs the currencies the held strategies actually
@@ -1435,6 +1636,8 @@ def _register_bodies() -> None:
         "job_watchdog": _body_job_watchdog,
         "history_drift_check": _body_history_drift,
         "asset_price_refresh": _body_asset_price_refresh,
+        "benchmark_index_refresh": _body_benchmark_index_refresh,
+        "benchmark_fundamentals_fill": _body_benchmark_fundamentals,
         "table_size_sample": _body_table_size_sample,
     })
 
@@ -1576,6 +1779,12 @@ def register_scheduler(app) -> None:
         # Daily history-drift probe — the early warning between monthly full
         # refetches. 07:00 UTC: after the 05:00 pipeline sequence and the 06:00
         # asset-price refresh, so it never competes with them for GuruFocus.
+        # Daily constituent refresh for the REBUILT indices (AEX). 06:30 UTC: after the
+        # 05:00 pipeline and before the 07:00 drift probe, so the three never compete.
+        _register("benchmark_index_refresh", _fire_benchmark_index_refresh)
+        # Quarterly fundamentals over every benchmark constituent. The 10th, far from
+        # month-end, so it can never drain a region the full price refresh needs.
+        _register("benchmark_fundamentals_fill", _fire_benchmark_fundamentals)
         _register("history_drift_check", _fire_history_drift_check)
         # Asset-pipeline ingest-queue worker — OPT-IN (ASSET_QUEUE_INPROCESS=1).
         # By default the worker is the STANDALONE `scripts/asset_queue_worker.py`

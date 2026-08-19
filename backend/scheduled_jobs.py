@@ -162,6 +162,40 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              "caller with an EMPTY result rather than a 429.",
     ),
     JobSpec(
+        id="benchmark_index_refresh",
+        label="Benchmark index refresh (constituent prices + caps)",
+        fills="asset_price + market caps for the REBUILT indices (AEX today)",
+        cadence="Every day, 06:30 UTC",
+        trigger={"day_of_week": "mon-fri", "hour": 6, "minute": 30, "timezone": "UTC"},
+        options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
+        max_age_hours=30,
+        note="⚠ NOT the ETF-priced indices. ACWI and SP500 read their headline from the index "
+             "ETF's own series (`_benchmark_etf`), refreshed inside the 05:00 price_update — "
+             "rebuilding 1,684 and 491 constituents daily would be thousands of paced Yahoo calls "
+             "for a number already had in one. AEX has no reachable ETF and IS the rebuild, so its "
+             "25 constituents are the whole cost here. ⚠ `asset_price_refresh` does NOT cover "
+             "this: it is scoped to instruments HELD IN A MODEL PORTFOLIO, so an index "
+             "constituent nothing holds was never refreshed by anything.",
+    ),
+    JobSpec(
+        id="benchmark_fundamentals_fill",
+        label="Benchmark fundamentals (quarterly)",
+        fills="metric_data statements for every constituent of ACWI · SP500 · AEX",
+        cadence="Quarterly — the 10th of Jan/Apr/Jul/Oct, 08:00 UTC",
+        trigger={"month": "1,4,7,10", "day": 10, "hour": 8, "minute": 0, "timezone": "UTC"},
+        options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 21600},
+        # ⚠ A QUARTER PLUS A WEEK. `max_age_hours` is what the /schedule page calls overdue, and a
+        # quarterly job that reads "overdue" for 89 days of every 92 is a red row nobody believes.
+        max_age_hours=24 * 99,
+        note="⚠ QUARTERLY BECAUSE COMPANIES FILE QUARTERLY — a monthly pass would spend quota "
+             "re-reading unchanged figures. ~2,200 GuruFocus calls per pass (ACWI ~1,700 + SP500 "
+             "~490 + AEX 25) against 20,000/month per region. ⚠ BOUNDED BY THE PER-REGION BUDGET, "
+             "the same guard `full_price_refresh` uses: a region at or below its floor is skipped "
+             "for the rest of the pass rather than erroring against an exhausted quota. ⚠ The 10th, "
+             "not month-end, so it can never land in the same window as `full_price_refresh` and "
+             "drain a region out from under it.",
+    ),
+    JobSpec(
         id="history_drift_check",
         label="History-drift probe",
         fills="re-fetches metric_data bars a vendor rewrote (splits, free-share attributions)",
