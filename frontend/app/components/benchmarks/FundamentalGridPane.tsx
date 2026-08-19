@@ -10,7 +10,7 @@ import { invalidateReadCache } from '../../../lib/readCache';
 import { startJob } from '../../../lib/stores/jobs';
 import type { FundamentalGrid, FundamentalGridRow } from '../../../lib/types/api';
 import {
-  aggregateRow, capOf, fmtCell, fmtMillions, gridWidths, orderedIds, periodAxes, periodKey,
+  aggregateRow, capOf, cellState, fmtCell, fmtMillions, gridWidths, orderedIds, periodAxes, periodKey,
   periodTitle, valueOf, weightPct,
 } from './fundamentalGrid';
 
@@ -26,7 +26,9 @@ import {
  * index row and the two notice lines are all present and in the same place at every slider
  * position — so scrubbing reads as one table being re-valued rather than as a new table each time.
  * Four separate things had to be fixed to make that true, and each is marked ⚠ STABLE below:
- *   1. the sort is anchored to a FIXED period, never the selected one;
+ *   1. (WITHDRAWN 2026-08-19) the sort was anchored to a FIXED period. It made the column you
+ *      clicked non-monotonic — see the ⚠⚠ on `rows`. The order now follows the period on screen,
+ *      so rows DO move with the slider; the other three still hold.
  *   2. the index row is always rendered, showing dashes when its coverage floor withholds it;
  *   3. the notice lines occupy reserved height whether or not they have anything to say;
  *   4. both cadences are cached, so the year/quarter control never blanks the table to refetch.
@@ -49,6 +51,38 @@ function FetchButton({ busy, title, onClick }: {
                  disabled:opacity-40 disabled:cursor-not-allowed">
       {busy ? '…' : 'Fetch'}
     </button>
+  );
+}
+
+/**
+ * What an empty cell says instead of a dash — see `cellState` for the three states and why they
+ * must not collapse.
+ *
+ * ⚠ ONE COMPONENT, EVERY COLUMN. Cap, Weight and the nineteen metric columns all read from the
+ * SAME GuruFocus blob (`market_cap` is `annuals__Valuation and Quality__Market Cap`), so an
+ * unsubscribed exchange is as true of the Cap cell as of the Revenue cell. Rendering the badge
+ * inline three times is three places for the tone or the wording to drift apart, on a table whose
+ * whole job is that its columns are comparable.
+ *
+ * ⚠ QUIET ON PURPOSE. Nineteen columns x ~1,700 rows means most cells can be a badge; at the row
+ * badge's weight the table would read as one solid warning and the FIGURES would become the
+ * exception. UNSUB keeps the warn tone it has in the name cell (same fact, same colour); NO DATA is
+ * faint, because it is the common, temporary one.
+ */
+function EmptyCell({ kind, text }: { kind: 'unavailable' | 'missing'; text?: string }) {
+  return (
+    <span
+      title={kind === 'unavailable'
+        ? 'This figure can never be filled — that is an answer, not a gap. No fetch is attempted '
+          + 'for this row.'
+        : 'Not ingested yet. Fetch this row (or the whole index) to fill it — unlike UNSUB, this '
+          + 'one is a gap rather than a fact.'}
+      className={`inline-block text-[9px] leading-none px-1 py-0.5 rounded border tracking-wide
+        cursor-help ${kind === 'unavailable'
+        ? 'border-warn-500/30 bg-warn-500/[0.07] text-warn-400'
+        : 'border-neutral-800/30 text-fg-faint'}`}>
+      {kind === 'unavailable' ? text : 'NO DATA'}
+    </span>
   );
 }
 
@@ -319,13 +353,6 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
    * Clicking a column still re-sorts, but on that column's value AT THE ANCHOR, so the order is a
    * property of the table rather than of the control positions.
    */
-  const orderSource = byCadence.annual ?? byCadence.quarterly ?? null;
-  const anchor = orderSource?.periods?.[orderSource.periods.length - 1] ?? '';
-  const orderRows = useMemo(() => {
-    const m = new Map<number, FundamentalGridRow>();
-    for (const r of orderSource?.rows ?? []) m.set(r.company_id, r);
-    return m;
-  }, [orderSource]);
   /** The CURRENT basis' rows — where every displayed number comes from. */
   const current = useMemo(() => {
     const m = new Map<number, FundamentalGridRow>();
@@ -334,10 +361,27 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   }, [data?.rows]);
 
   const needle = q.trim().toLowerCase();
+  /**
+   * ⚠⚠ SORTED ON THE PERIOD ON SCREEN — AND THIS REVERSES A DELIBERATE EARLIER DECISION, so the
+   * reasoning on both sides belongs here.
+   *
+   * It used to rank on a FIXED anchor (the newest period), so the running order did not move as the
+   * slider moved and the eye could track one company across periods. That is a real property and it
+   * is what was lost. What it cost was worse: the column you SORTED BY was not sorted. Reported
+   * 2026-08-19 on ACWI's Weight column, viewing an early year — NVIDIA 0.18%, then Microsoft 2.11%,
+   * then Walmart 0.57%. Those three are in descending order of TODAY's cap, which is what the sort
+   * was ranking on, while the cells showed the selected year. Nothing about that reads as a design
+   * choice; it reads as a broken table.
+   *
+   * The stability argument protects the DEFAULT order, which the reader did not ask for. It cannot
+   * justify a wrong answer to an explicit request: clicking a header is a question, and the answer
+   * has to be monotonic in the column that was clicked. So the order now follows `period`, and rows
+   * do move when the slider does.
+   */
   const rows = useMemo(
-    () => orderedIds(identity, orderRows, { anchor, sortKey, dir, needle })
+    () => orderedIds(identity, current, { anchor: period, sortKey, dir, needle })
       .map((id) => ({ id, ident: identity.get(id)!, cur: current.get(id) ?? null })),
-    [identity, orderRows, current, needle, anchor, sortKey, dir],
+    [identity, current, needle, period, sortKey, dir],
   );
 
   /**
@@ -612,11 +656,12 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
                   `fixedWidthsRem`. */}
               <th className="text-right px-2 py-2 font-medium sticky left-0 bg-card z-30"
                 title="Position in the current sort. It renumbers when you re-sort or filter; the
-sliders never change it, because the running order is anchored to a fixed period.">
+it renumbers whenever the order changes — including when the period slider moves, since the order follows the period on screen.">
                 #
               </th>
-              <th className="text-left px-3 py-2 font-medium sticky left-[3rem] bg-card z-30 whitespace-nowrap">
-                Company
+              <th className={`text-left px-3 sticky left-[3rem] bg-card z-30 whitespace-nowrap ${th}`}
+                onClick={() => click('name')}>
+                Company{caret('name')}
               </th>
               {/* ⚠ NO LONGER ADMIN-ONLY (2026-08-19). The ingest still spends GuruFocus quota —
                   that is why it was gated — but this grid is the one place that shows WHICH
@@ -637,24 +682,31 @@ sliders never change it, because the running order is anchored to a fixed period
 table, market cap included, for every year and both the annual and trailing-twelve-month views.">
                 Fetch
               </th>
-              <th className="text-left px-2 py-2 font-medium whitespace-nowrap" title="GuruFocus exchange code.
+              <th className={`text-left px-2 whitespace-nowrap ${th}`} onClick={() => click('exchange')}
+                title="GuruFocus exchange code.
 The other half of the identifier — GuruFocus addresses a stock as EXCHANGE:TICKER, and a bare ticker is
-ambiguous across venues. US listings are the exception: GuruFocus addresses those by ticker alone.">Exch</th>
-              <th className="text-left px-2 py-2 font-medium whitespace-nowrap" title="GuruFocus ticker — click to
+ambiguous across venues. US listings are the exception: GuruFocus addresses those by ticker alone.">Exch{caret('exchange')}</th>
+              <th className={`text-left px-2 whitespace-nowrap ${th}`} onClick={() => click('ticker')}
+                title="GuruFocus ticker — click to
 open the company's GuruFocus summary page. The link is built server-side because the symbol is not simply
 EXCHANGE:TICKER: US venues drop the prefix, HKSE codes are zero-padded to five digits, and a class share like
-BRK/B becomes BRK.B.">Ticker</th>
-              <th className="text-left px-2 py-2 font-medium whitespace-nowrap" title="The currency the figures are
-reported in. Every value column is converted to EUR; this is what the native tooltip is in.">Ccy</th>
+BRK/B becomes BRK.B.">Ticker{caret('ticker')}</th>
+              <th className={`text-left px-2 whitespace-nowrap ${th}`} onClick={() => click('currency')}
+                title="The currency the figures are
+reported in. Every value column is converted to EUR; this is what the native tooltip is in.">Ccy{caret('currency')}</th>
               <th className={`text-right px-2 whitespace-nowrap ${th}`} onClick={() => click('market_cap')}
-                title={`Market cap in the selected period. Sorted on ${anchor}, so the running order does not move when the period does.`}>
+                title="Market cap in the selected period — and the sort ranks on that same period, so this column always reads in order.">
                 Cap (€){caret('market_cap')}
               </th>
               {/* ⚠ UNCONDITIONAL, INCLUDING ON A CAPPED INDEX (2026-08-06, on request) — see
                   `weightPct`. Defined as cap ÷ Σ available caps it is arithmetic over the numbers
                   on screen, so it is shown everywhere; what it is NOT is the index's weighting,
                   and the tooltip has to say so because for the AEX the gap is 37.53% vs 15.00%. */}
-              <th className="text-right px-2 py-2 font-medium whitespace-nowrap"
+              {/* ⚠ SORTS ON THE CAP, and that is not a shortcut: a weight IS `cap ÷ Σcap`, so the
+                  two orders are identical by construction. Ranking this column separately would be
+                  a second definition of one ranking, and the day one changed they would disagree
+                  by a rounding step with nothing to say which was right. */}
+              <th className={`text-right px-2 whitespace-nowrap ${th}`} onClick={() => click('weight')}
                 title={'Share of the summed market caps in this period: this company’s cap ÷ the '
                   + 'Total row.\n\n⚠ NOT the index’s weight. The denominator is only the caps we '
                   + 'hold, so a constituent showing a dash does not dilute anyone — it inflates '
@@ -664,7 +716,7 @@ reported in. Every value column is converted to EUR; this is what the native too
                       + 'and this column does not — ASML reads ~37% here against the real index’s '
                       + '15.00%.'
                     : '')}>
-                Weight
+                Weight{caret('weight')}
               </th>
               {measures.map((c) => (
                 <th key={c.key} className={`text-right px-2 whitespace-nowrap ${th}`}
@@ -873,11 +925,30 @@ reported in. Every value column is converted to EUR; this is what the native too
                   <td className="px-2 py-1.5 font-mono text-fg-faint truncate">
                     {ident.currency ?? '—'}
                   </td>
+                  {/* ⚠ CAP AND WEIGHT GET THE SAME THREE STATES AS THE METRIC COLUMNS, because
+                      they come from the same place: `market_cap` is a GuruFocus line
+                      (`annuals__Valuation and Quality__Market Cap`), so an unsubscribed exchange
+                      explains a missing cap exactly as it explains a missing revenue. A dash here
+                      was the last place the three causes still looked alike — and it is the column
+                      the sort and the weights are built on, so "why is this empty?" matters more
+                      here than anywhere. */}
                   <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fg whitespace-nowrap">
-                    {fmtMillions(cur ? capOf(cur, period) : null)}
+                    {(() => {
+                      const st = cellState(cur ? capOf(cur, period) : null, 'millions',
+                        ident.unavailable_label);
+                      return st.kind === 'value' ? st.text
+                        : <EmptyCell kind={st.kind} text={st.kind === 'unavailable' ? st.text : undefined} />;
+                    })()}
                   </td>
                   <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fg-muted">
-                    {w == null ? '—' : `${w.toFixed(2)}%`}
+                    {/* ⚠ FORMATTED HERE AT 2dp, NOT THROUGH `fmtCell`'s 1dp percent. A weight of
+                        0.04% and one of 0.00% are different constituents; `cellState` is asked only
+                        for the KIND, and the text stays this column's own. */}
+                    {(() => {
+                      const st = cellState(w, 'percent', ident.unavailable_label);
+                      return st.kind === 'value' ? `${w!.toFixed(2)}%`
+                        : <EmptyCell kind={st.kind} text={st.kind === 'unavailable' ? st.text : undefined} />;
+                    })()}
                   </td>
                   {measures.map((c) => {
                     const v = cur ? valueOf(cur, period, c.key) : null;
@@ -889,14 +960,20 @@ reported in. Every value column is converted to EUR; this is what the native too
                     // count and a percent are not currency and were never converted, so offering
                     // "native" for them would imply a second reading that does not exist.
                     const converted = c.unit === 'millions' || c.unit === 'per_share';
+                    // ⚠ NEVER A BARE DASH — see `cellState`. An empty cell has two different
+                    // causes with two different fixes ("this can never be filled" vs "nobody has
+                    // fetched it"), and a dash renders them identically.
+                    const st = cellState(v, c.unit, ident.unavailable_label);
                     return (
                       <td key={c.key}
                         className="px-2 py-1.5 text-right font-mono tabular-nums text-fg-soft whitespace-nowrap"
-                        title={v != null && converted && native != null && rate
+                        title={st.kind === 'value' && converted && native != null && rate
                           ? `${native.toLocaleString('en-US')} ${ident.currency ?? ''} ÷ ${rate} = `
-                            + `${fmtCell(v, c.unit)}`
+                            + `${st.text}`
                           : undefined}>
-                        {fmtCell(v, c.unit)}
+                        {st.kind === 'value' ? st.text
+                          : <EmptyCell kind={st.kind}
+                              text={st.kind === 'unavailable' ? st.text : undefined} />}
                       </td>
                     );
                   })}

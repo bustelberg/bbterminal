@@ -150,6 +150,44 @@ export function fmtMillions(v: number | null | undefined): string {
 }
 
 /** A cell, formatted per its declared unit. The unit decides the shape, never a guess at the key. */
+/**
+ * What ONE grid cell should say. Three answers, never a bare dash.
+ *
+ * ⚠⚠ A DASH IS NOT AN ANSWER, IT IS THE ABSENCE OF ONE — and this grid has three different reasons
+ * for an empty cell that a dash renders identically:
+ *
+ *   value        we hold the figure.
+ *   unavailable  we never will. The venue is outside the GuruFocus subscription (`UNSUB`), or the
+ *                company has no GuruFocus ticker at all (`NO GF`). No fetch is attempted, and
+ *                pressing anything changes nothing. This is a FACT, not a gap.
+ *   missing      we could hold it and do not. A fetch would fill it.
+ *
+ * Collapsing the last two is what makes a reader press Fetch on a row that can never be filled,
+ * and — worse — read a permanently unavailable figure as a temporary gap that someone will get
+ * around to. The row already carries a badge in its name cell, but this table scrolls sideways
+ * through nineteen metric columns: by the time you are asking "why is this empty?", the name cell
+ * is off screen. The answer has to travel with the cell.
+ *
+ * ⚠ `unavailable` IS A PROPERTY OF THE ROW, `missing` OF THE CELL. A company on a subscribed
+ * exchange can still lack one line — a bank reports no gross margin — so a row being fetchable
+ * does not make every one of its cells fillable. The two are combined here rather than guessed at
+ * either end.
+ */
+export type CellState =
+  | { kind: 'value'; text: string }
+  | { kind: 'unavailable'; text: string }
+  | { kind: 'missing' };
+
+export function cellState(
+  v: number | null | undefined, unit: string, unavailableLabel?: string | null,
+): CellState {
+  // ⚠ THE VALUE WINS. A row can be flagged unavailable and still carry figures fetched before the
+  // exchange fell out of coverage; badging over a number we actually hold would hide real data.
+  if (v != null && Number.isFinite(v)) return { kind: 'value', text: fmtCell(v, unit) };
+  if (unavailableLabel) return { kind: 'unavailable', text: unavailableLabel };
+  return { kind: 'missing' };
+}
+
 export function fmtCell(v: number | null | undefined, unit: string): string {
   if (v == null || !Number.isFinite(v)) return '—';
   if (unit === 'percent') return `${v.toFixed(1)}%`;
@@ -178,15 +216,59 @@ export function orderedIds(
   opts: { anchor: Period; sortKey: string; dir: 'asc' | 'desc'; needle?: string },
 ): number[] {
   const { anchor, sortKey, dir, needle = '' } = opts;
+  /**
+   * The IDENTITY columns, sorted as text.
+   *
+   * ⚠⚠ THEY READ FROM `identity`, NOT `order`. `order` is the anchor period's payload and exists so
+   * the running order does not move when the slider does; a name and a ticker are not properties of
+   * a PERIOD at all. Reading them from `order` would drop every company absent from the anchor
+   * period to the bottom of an alphabetical sort — a company with a name, sorted as though it had
+   * none.
+   *
+   * ⚠ `weight` IS DELIBERATELY THE CAP. A weight IS `cap ÷ Σcap`, so the two orders are identical
+   * by construction; computing it separately would be a second definition of the same ranking, and
+   * the day one changed they would silently disagree by a rounding step.
+   */
+  // ⚠ `Partial<Record<…>>` SO THE LOOKUP IS `T | undefined`. A bare `Record<string, T>`
+  // types every key as present, so `if (textOf)` narrows to always-true and the numeric
+  // branch below becomes unreachable — silently, for every metric column.
+  const TEXT: Partial<Record<string, (r: FundamentalGridRow) => string | null>> = {
+    name: (r) => r.name ?? null,
+    exchange: (r) => r.exchange ?? null,
+    ticker: (r) => r.ticker ?? null,
+    currency: (r) => r.currency ?? null,
+  };
+
+  const textOf = TEXT[sortKey];
   const val = (id: number): number | null => {
     const r = order.get(id);
     if (!r) return null;
-    return sortKey === 'market_cap' ? capOf(r, anchor) : valueOf(r, anchor, sortKey);
+    if (sortKey === 'market_cap' || sortKey === 'weight') return capOf(r, anchor);
+    return valueOf(r, anchor, sortKey);
+  };
+  const str = (id: number): string | null => {
+    const r = identity.get(id);
+    const v = r && textOf ? textOf(r) : null;
+    return v && v.trim() ? v.trim() : null;      // '' is an absence, not a value that sorts first
   };
   return [...identity.entries()]
     .filter(([, r]) =>
       !needle || `${r.name ?? ''} ${r.ticker ?? ''}`.toLowerCase().includes(needle))
     .sort(([ia], [ib]) => {
+      if (textOf) {
+        const a = str(ia);
+        const b = str(ib);
+        // ⚠ THE SAME ABSENT-LAST RULE AS THE NUMBERS, and for the same reason: a company with no
+        // ticker on file is not alphabetically first, and letting it head the list says it is.
+        if (a === null && b === null) return ia - ib;
+        if (a === null) return 1;
+        if (b === null) return -1;
+        // ⚠ `localeCompare`, NOT `<`. Raw comparison is by code point, which files every lower-case
+        // name after every upper-case one ("ASML", "Aegon", "adidas") and puts accented names in a
+        // block of their own — an alphabet nobody reading a European index would recognise.
+        return (dir === 'desc' ? -1 : 1) * a.localeCompare(b, undefined, { sensitivity: 'base' })
+          || ia - ib;
+      }
       const x = val(ia);
       const y = val(ib);
       // ⚠ ABSENT SORTS LAST IN BOTH DIRECTIONS. A company we could not price is not the smallest

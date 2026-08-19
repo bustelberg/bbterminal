@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  aggregateRow, capOf, COL_CHAR_REM, COL_MIN_CHARS, COL_PAD_REM, fixedWidthsRem, fmtCell,
+import { cellState,aggregateRow, capOf, COL_CHAR_REM, COL_MIN_CHARS, COL_PAD_REM, fixedWidthsRem, fmtCell,
   fmtMillions, gridWidths, measureWidthRem, orderedIds, periodAxes, periodKey, periodTitle,
-  weightPct,
-} from './fundamentalGrid';
+  weightPct, } from './fundamentalGrid';
 import type { FundamentalGridColumn, FundamentalGridRow } from '../../../lib/types/api';
 
 const row = (name: string, v: Record<string, Record<string, number>>): FundamentalGridRow =>
@@ -323,5 +321,149 @@ describe('fmtMillions / fmtCell', () => {
     expect(fmtCell(null, 'millions')).toBe('—');
     expect(fmtCell(undefined, 'percent')).toBe('—');
     expect(fmtMillions(Number.NaN)).toBe('—');
+  });
+});
+
+describe('cellState', () => {
+  /**
+   * A dash is not an answer. This grid has three reasons for an empty cell and a dash renders
+   * them identically — which is how a reader presses Fetch on a row that can never be filled, and
+   * how a permanently unavailable figure gets read as a gap someone will get round to.
+   */
+  it('shows the figure when there is one', () => {
+    expect(cellState(12.5, 'percent', null)).toEqual({ kind: 'value', text: '12.5%' });
+  });
+
+  it('says UNSUB / NO GF when the row can never be filled', () => {
+    expect(cellState(null, 'percent', 'UNSUB')).toEqual({ kind: 'unavailable', text: 'UNSUB' });
+    expect(cellState(undefined, 'millions', 'NO GF')).toEqual({ kind: 'unavailable', text: 'NO GF' });
+  });
+
+  it('says NO DATA when the row IS fetchable and simply has not been', () => {
+    // ⚠ The distinction that matters: this one a Fetch fixes, the one above it never will.
+    expect(cellState(null, 'percent', null)).toEqual({ kind: 'missing' });
+    expect(cellState(undefined, 'percent', undefined)).toEqual({ kind: 'missing' });
+  });
+
+  it('⚠ lets a REAL FIGURE win over the unavailable flag', () => {
+    // A row can be flagged unavailable and still carry figures fetched before its exchange fell
+    // out of coverage. Badging over a number we actually hold would hide real data behind a label
+    // that is true of the row's FUTURE, not of this cell's contents.
+    expect(cellState(3.25, 'per_share', 'UNSUB')).toEqual({ kind: 'value', text: '€3.25' });
+  });
+
+  it('treats a non-finite number as absent, not as a value', () => {
+    // NaN/Infinity reaching a cell would render "NaN%" — worse than either badge, because it
+    // looks like a measurement.
+    expect(cellState(NaN, 'percent', null).kind).toBe('missing');
+    expect(cellState(Infinity, 'percent', 'UNSUB').kind).toBe('unavailable');
+  });
+});
+
+describe('orderedIds — sorting the identity columns as text', () => {
+  const row = (company_id: number, name: string | null, ticker: string | null = 'X',
+    exchange: string | null = 'NAS', currency: string | null = 'USD',
+    v: Record<string, Record<string, number>> = {}) =>
+    ({ company_id, name, ticker, exchange, currency, v, n: {}, fx: {} });
+
+  const identity = new Map<number, never>([
+    [1, row(1, 'adidas AG', 'ADS', 'XTER', 'EUR') as never],
+    [2, row(2, 'ASML Holding N.V.', 'ASML', 'AMS', 'EUR') as never],
+    [3, row(3, 'Aegon Ltd.', 'AGN', 'AMS', 'EUR') as never],
+    [4, row(4, null, null, null, null) as never],
+  ]);
+  const order = identity;
+  const opts = { anchor: '2025' as never, dir: 'asc' as const };
+
+  it('sorts case-insensitively, not by code point', () => {
+    // ⚠ A raw `<` files every lower-case name after every upper-case one, so "adidas" would land
+    // last — an alphabet nobody reading a European index would recognise.
+    const ids = orderedIds(identity, order, { ...opts, sortKey: 'name' });
+    expect(ids.slice(0, 3)).toEqual([1, 3, 2]);   // adidas, Aegon, ASML
+  });
+
+  it('⚠ puts a MISSING name last in BOTH directions', () => {
+    // Same rule the numeric sort already had: a company with no ticker on file is not
+    // alphabetically first, and heading the list says it is.
+    expect(orderedIds(identity, order, { ...opts, sortKey: 'name' }).at(-1)).toBe(4);
+    expect(orderedIds(identity, order, { ...opts, sortKey: 'name', dir: 'desc' }).at(-1)).toBe(4);
+  });
+
+  it('reverses on desc, keeping the absent row pinned', () => {
+    const ids = orderedIds(identity, order, { ...opts, sortKey: 'name', dir: 'desc' });
+    expect(ids.slice(0, 3)).toEqual([2, 3, 1]);   // ASML, Aegon, adidas
+  });
+
+  it('sorts the other identity columns too', () => {
+    expect(orderedIds(identity, order, { ...opts, sortKey: 'ticker' }).slice(0, 3))
+      .toEqual([1, 3, 2]);                        // ADS, AGN, ASML
+    // Exchange: AMS before XTER; the two AMS rows tie and fall back to company_id.
+    expect(orderedIds(identity, order, { ...opts, sortKey: 'exchange' }).slice(0, 3))
+      .toEqual([2, 3, 1]);
+  });
+
+  it('⚠ reads names from IDENTITY, not from the anchor period', () => {
+    // `order` is the anchor period's payload; a name is not a property of a period. Reading it
+    // there would drop every company absent from that period to the bottom of an alphabetical
+    // sort — a company with a name, sorted as though it had none.
+    const ids = orderedIds(identity, new Map(), { ...opts, sortKey: 'name' });
+    expect(ids.slice(0, 3)).toEqual([1, 3, 2]);
+  });
+
+  it('sorts Weight by the cap, since a weight IS cap ÷ Σcap', () => {
+    // Not a shortcut: computing the weight separately would be a second definition of one
+    // ranking, and the day one changed they would disagree by a rounding step.
+    const withCaps = new Map<number, never>([
+      [1, row(1, 'A', 'A', 'NAS', 'USD', { 2025: { market_cap: 10 } }) as never],
+      [2, row(2, 'B', 'B', 'NAS', 'USD', { 2025: { market_cap: 30 } }) as never],
+      [3, row(3, 'C', 'C', 'NAS', 'USD', { 2025: { market_cap: 20 } }) as never],
+    ]);
+    const byCap = orderedIds(withCaps, withCaps, { ...opts, sortKey: 'market_cap', dir: 'desc' });
+    const byWeight = orderedIds(withCaps, withCaps, { ...opts, sortKey: 'weight', dir: 'desc' });
+    expect(byWeight).toEqual(byCap);
+  });
+});
+
+describe('the sorted column is monotonic in the period on screen', () => {
+  /**
+   * ⚠⚠ THE BUG THIS PINS, AS REPORTED: sorting ACWI by Weight on an early year gave NVIDIA 0.18%,
+   * then Microsoft 2.11%, then Walmart 0.57%. Those three ARE in descending order — of TODAY's cap,
+   * which is what the sort ranked on, while the cells showed the selected year. A sort that ranks
+   * on a period the reader is not looking at is indistinguishable from no sort at all.
+   */
+  const co = (id: number, name: string, caps: Record<string, number>) => ({
+    company_id: id, name, ticker: name.slice(0, 4).toUpperCase(), exchange: 'NAS', currency: 'USD',
+    v: Object.fromEntries(Object.entries(caps).map(([p, c]) => [p, { market_cap: c }])),
+    n: {}, fx: {},
+  }) as never;
+
+  // 2015 order by cap: Walmart > Microsoft > NVIDIA.  2025: NVIDIA > Microsoft > Walmart.
+  const rows = new Map<number, never>([
+    [1, co(1, 'NVIDIA Corp', { 2015: 10, 2025: 400 })],
+    [2, co(2, 'Microsoft Corp', { 2015: 120, 2025: 300 })],
+    [3, co(3, 'Walmart Inc', { 2015: 200, 2025: 60 })],
+  ]);
+
+  it('ranks on the period being viewed, not on the newest one', () => {
+    const on2015 = orderedIds(rows, rows, { anchor: '2015' as never, sortKey: 'market_cap', dir: 'desc' });
+    expect(on2015).toEqual([3, 2, 1]);            // Walmart, Microsoft, NVIDIA — 2015's order
+    const on2025 = orderedIds(rows, rows, { anchor: '2025' as never, sortKey: 'market_cap', dir: 'desc' });
+    expect(on2025).toEqual([1, 2, 3]);            // NVIDIA, Microsoft, Walmart — 2025's order
+  });
+
+  it('⚠ the values in the sorted column come out monotonic — the property that was broken', () => {
+    for (const period of ['2015', '2025'] as const) {
+      const ids = orderedIds(rows, rows, { anchor: period as never, sortKey: 'market_cap', dir: 'desc' });
+      const caps = ids.map((id) => capOf(rows.get(id)!, period as never)!);
+      expect(caps).toEqual([...caps].sort((x, y) => y - x));
+    }
+  });
+
+  it('weight and cap agree once both read the SAME period', () => {
+    // The earlier claim ("a weight IS cap ÷ Σcap") was true within a period; the defect was that
+    // the sort and the cells were reading two different ones.
+    const byCap = orderedIds(rows, rows, { anchor: '2015' as never, sortKey: 'market_cap', dir: 'desc' });
+    const byWeight = orderedIds(rows, rows, { anchor: '2015' as never, sortKey: 'weight', dir: 'desc' });
+    expect(byWeight).toEqual(byCap);
   });
 });
