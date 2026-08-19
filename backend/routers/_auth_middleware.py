@@ -5,8 +5,9 @@ tier (public health/cron endpoints). Authorization is role-based:
 
   * admin  → any endpoint.
   * user   → only the API behind the non-admin-visible pages (/companies,
-             /earnings, /schedule and the Management Dashboard), plus the few
-             mutations those pages need (earnings refresh).
+             /earnings, /schedule and the Management Dashboard), plus the
+             mutations those pages need: the earnings refresh, and every
+             refresh on the Management Dashboard.
   * anon   → nothing but the public tier → 401.
 
 Tiers (matched as `path.startswith(prefix)` unless stated):
@@ -24,6 +25,10 @@ Tiers (matched as `path.startswith(prefix)` unless stated):
   _USER_WRITE_PREFIXES writes allowed for any authenticated user.
   _USER_POST_READ_PATHS  EXACT paths that compute-and-return over a POSTed
                        basket — reads that cannot be GETs.
+  _USER_REFRESH_PATHS / _USER_REFRESH_PATTERNS
+                       the /management-dashboard refreshes (and the Cancel
+                       that stops one) — writes that only make the page's own
+                       figures current, never change what it says.
   everything else      admin only.
 
 ⚠ THE METHOD IS NOT THE AUTHORITY ON WHETHER SOMETHING IS A READ. Both
@@ -75,8 +80,12 @@ _SELF_AUTH_PREFIXES: tuple[str, ...] = ("/api/auth/",)
 # benchmark identity) — low-sensitivity reads, mutations stay admin-only.
 # `/api/airs` + the three `/api/asset-pipeline` by-ISIN reads are the Management Dashboard (the
 # portfolios table, the correlation matrix, the Analyse/Fundamental modals). The PAGE is
-# user-visible; every mutation on it stays admin-only, which is why none of these appear in the
-# write tier — see `_ADMIN_ONLY_PREFIXES` for the GETs that are really writes.
+# user-visible; its REFRESHES are too (`_USER_REFRESH_PATHS`), but nothing else that writes —
+# see `_ADMIN_ONLY_PREFIXES` for the GETs that are really writes.
+# `/api/jobs` is the job TRANSPORT (list / stream), which every refresh reports through: without it
+# a user could start a run and see no progress. Starting a job is not generic (there is no
+# `POST /api/jobs`) — the owning endpoint starts it — and the one job write, Cancel, is in
+# `_USER_REFRESH_PATTERNS`.
 _USER_READ_PREFIXES: tuple[str, ...] = (
     "/api/companies",
     "/api/earnings",
@@ -88,17 +97,24 @@ _USER_READ_PREFIXES: tuple[str, ...] = (
     "/api/asset-pipeline/fundamentals/",
     "/api/asset-pipeline/latest-close/",
     "/api/asset-pipeline/risk/",
+    "/api/jobs",
 )
 
 # ⚠ A GET IS NOT ALWAYS A READ, AND THIS IS CHECKED BEFORE THE READ TIER SO WIDENING ONE ABOVE
-# CANNOT QUIETLY RE-EXPOSE THEM. The two `scan` endpoints are GETs only because they stream (SSE);
-# each drives a live Playwright scrape of AirSPMS — minutes of work against a third-party system
-# that rate-limits and can lock the shared login out. Method is the wrong test for them.
+# CANNOT QUIETLY RE-EXPOSE THEM. `/api/airs/scan` is a GET only because it streams (SSE); it drives
+# a live Playwright scrape of AirSPMS — minutes of work against a third-party system that
+# rate-limits and can lock the shared login out. Method is the wrong test for it.
 # `/api/airs/crm-relaties` IS a genuine read, of CLIENT RELATIONSHIP records — a different subject
 # from the portfolios this page is about, and it belongs to the admin-only /airs-portfolio page.
+#
+# ⚠ THE SSE SCANS ARE STILL DENIED, BUT THEIR *JOB* TWINS ARE NOT — see `_USER_REFRESH_PATTERNS`.
+# The scrape a non-admin may start is the one the Management Dashboard starts: a background job
+# with a handle, a progress toast and a Cancel. The raw SSE forms belong to the admin-only
+# /airs-portfolio page and hold a request open for the whole scrape, which is a different thing to
+# hand out. That is why `/api/airs/model-portfolios/scan` moved to an EXACT pattern below: as a
+# PREFIX it also swallowed `/api/airs/model-portfolios/scan/job`, which is the Dashboard's.
 _ADMIN_ONLY_PREFIXES: tuple[str, ...] = (
     "/api/airs/scan",
-    "/api/airs/model-portfolios/scan",
     "/api/airs/crm-relaties",
 )
 
@@ -120,6 +136,10 @@ _ADMIN_ONLY_PREFIXES: tuple[str, ...] = (
 # basket to analyse (`openModal`). Folding these into the `/api/airs/accounts/` prefix would take
 # Analyse away as collateral, silently, for the rows that need it most.
 _ADMIN_ONLY_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # ⚠ EXACT, NOT A PREFIX — `/api/airs/model-portfolios/scan/job` is the same work as a
+    # cancellable background job and every authenticated user may start it (see
+    # `_USER_REFRESH_PATTERNS`). Only the request-held SSE form is admin-only.
+    re.compile(r"^/api/airs/model-portfolios/scan$"),
     re.compile(r"^/api/airs/accounts/[^/]+/holdings$"),
     re.compile(r"^/api/airs/accounts/[^/]+/transactions$"),
     re.compile(r"^/api/airs/accounts/[^/]+/return-reconciliation$"),
@@ -164,6 +184,62 @@ _USER_POST_READ_PATHS: frozenset[str] = frozenset({
     "/api/earnings/relative-growth-breakdown",
     "/api/earnings/sbc-ocf-inputs",
 })
+
+# ⚠⚠ THE /management-dashboard REFRESHES, OPEN TO EVERY AUTHENTICATED USER (2026-08-19, on
+# request). The page was readable but frozen: every button that makes what it shows CURRENT — the
+# AIRS scrape behind the Overview table, the index rebuild behind Benchmarks, the fundamentals
+# fills behind the Analyse and grid panels — sat behind the admin tier, so a user could see a stale
+# figure and had no way to act on it. They may now start all of them.
+#
+# ⚠ THIS IS A DELIBERATE COST DECISION, NOT AN OVERSIGHT BEING CORRECTED. Every path here spends
+# something real: a GuruFocus call against a MONTHLY quota, or a Playwright session against AirSPMS
+# under one shared login that rate-limits. The judgement is that a stale dashboard nobody can
+# refresh costs more than the quota does. If that stops being true, narrow THIS tier — do not
+# re-hide the buttons in the frontend and leave the endpoints open.
+#
+# ⚠ EXACT PATHS AND ANCHORED PATTERNS, NEVER PREFIXES — the same rule, and the same reason, as
+# `_USER_POST_READ_PATHS` states above. `/api/airs/` and `/api/benchmarks` are read prefixes for
+# this page; a write PREFIX under either would hand over the deletes, the overrides and the link
+# picker along with the refreshes, which is exactly what the Overview row still hides.
+#
+# ⚠ WHAT IS DELIBERATELY ABSENT: DELETE on an account or a universe, the class / ISIN / link
+# overrides, and renaming a book. Those CHANGE what the page says; a refresh only makes it current.
+# That is the line, and it is the one the frontend's remaining `isAdmin` guards draw too.
+_USER_REFRESH_PATHS: frozenset[str] = frozenset({
+    # Overview → "Refresh all from AIRS", both halves (accounts, then model portfolios).
+    "/api/airs/vermogen/refresh/job",
+    "/api/airs/model-portfolios/scan/job",
+    # Analyse modal → the fundamentals fill over a basket of ISINs (an unpaired book).
+    "/api/airs/basket/fundamentals/ingest/job",
+    # The Analyse modal's input tables → fetch ONE `no_data` holding's financials.
+    # ⚠ `/ingest`, one segment below the read `/api/earnings/fundamental-coverage` that is already
+    # in `_USER_POST_READ_PATHS`. Both are named in full, on purpose.
+    "/api/earnings/fundamental-coverage/ingest",
+})
+
+_USER_REFRESH_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # Overview → one row's Refresh (re-scan this book's AIRS reports).
+    re.compile(r"^/api/airs/portfolios/[^/]+/refresh/job$"),
+    # Analyse modal → the fundamentals fill over a PAIRED model portfolio's holdings.
+    re.compile(r"^/api/airs/model-portfolios/\d+/fundamentals/ingest/job$"),
+    # Benchmarks → per-index Refresh and "Refresh all" (constituents, caps, prices).
+    re.compile(r"^/api/benchmarks/index/[^/]+/refresh/job$"),
+    # Benchmarks → the fundamentals half of the same button, and the grid's "All N" fill.
+    re.compile(r"^/api/benchmarks/index/[^/]+/fundamentals/ingest/job$"),
+    # Benchmarks grid → one constituent's Fetch cell.
+    re.compile(r"^/api/benchmarks/company/\d+/fundamentals/ingest/job$"),
+    # ⚠ AND THE STOP. Every path above starts work that runs for minutes and reports through the
+    # job toast; a Cancel the starter cannot press is how a run with no way out gets reported as
+    # "stuck". `GET /api/jobs` + `/stream` ride the read tier (`/api/jobs` is in
+    # `_USER_READ_PREFIXES`) — this is the one job-transport WRITE.
+    re.compile(r"^/api/jobs/[^/]+/cancel$"),
+)
+
+
+def _is_user_refresh(path: str) -> bool:
+    """A /management-dashboard refresh (or the Cancel that stops one)."""
+    return path in _USER_REFRESH_PATHS or any(p.match(path) for p in _USER_REFRESH_PATTERNS)
+
 
 # Specific GET-by-id resources a non-admin may read so the read-only /schedule
 # strategy-detail panel loads its current portfolio + source backtest. These
@@ -281,6 +357,7 @@ async def enforce_api_auth(
             _starts_with_any(path, _USER_WRITE_PREFIXES)
             or _is_earnings_refresh(path)
             or _is_latest_close_refresh(path)
+            or (request.method == "POST" and _is_user_refresh(path))
             or (request.method == "POST" and path in _USER_POST_READ_PATHS)
         )
     else:
