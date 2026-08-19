@@ -12,6 +12,7 @@ import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 import { RefreshIcon } from './portfolios/RefreshIcon';
 import { cancelJob, startJob } from '../../lib/stores/jobs';
+import { createLiveReload } from '../../lib/liveReload';
 import AllocationBandsModal from './portfolios/AllocationBandsModal';
 import AccountTransactions from './portfolios/AccountTransactions';
 import AccountTotalReturn from './portfolios/AccountTotalReturn';
@@ -619,13 +620,49 @@ export default function PortfolioOverviewPanel() {
    * real loss of diagnosability disguised as cleanup. The toast carries `i/n: name` live, which is
    * what answers "is it moving"; this answers "what did it actually do".
    */
+  /**
+   * Reload the table WHILE a fleet scan is running, so rows land as they are written.
+   *
+   * ⚠⚠ THE SCAN STORES EACH ACCOUNT AS IT GOES, and the panel used to repaint only when the whole
+   * job resolved — several minutes of watching figures that had already been replaced in the
+   * database. This is driven by the job's own progress lines (`startJob`'s `onProgress`), so there
+   * is no second source of truth about how far along it is.
+   *
+   * ⚠ THROTTLED, AND SINGLE-FLIGHTED. `loadOverview` reads every account; firing it on all 44
+   * progress lines would be 44 whole-table reads racing each other, and the LAST one to return
+   * would win regardless of which was newest — a scan could visibly go backwards. One in flight at
+   * a time, at most one every `RELOAD_EVERY_MS`, and a request that arrives while one is running
+   * sets a flag instead of queueing a second.
+   *
+   * ⚠ IT DOES NOT TOUCH `detail` / `isins`. Those are the EXPANDED row's contents; clearing them
+   * mid-scan would collapse or blank an open book under the reader every few seconds. The end of
+   * the run still clears them once, which is where a full re-read belongs.
+   */
+  /**
+   * ⚠ THE THROTTLE AND THE SINGLE-FLIGHT LIVE IN `lib/liveReload.ts`, WHICH IS TESTED. Two bugs
+   * were found there by its own tests and neither would have been visible here: the FIRST advance
+   * was swallowed by the throttle window, and a throttled advance set a flag that only a RUNNING
+   * reload ever consumed — so a scan reporting its remaining progress inside one window never
+   * repainted again. Concurrency written inline in a component is concurrency nobody can test.
+   *
+   * ⚠ IT DOES NOT TOUCH `detail` / `isins`. Those are the EXPANDED row's contents; clearing them
+   * mid-scan would collapse or blank an open book under the reader every few seconds. The end of
+   * the run still clears them once, which is where a full re-read belongs.
+   */
+  const live = useRef<ReturnType<typeof createLiveReload> | null>(null);
+
   const refreshAll = async (force = false) => {
     if (refreshingAll) return;
     setRefreshingAll(true);
     try {
+      // ⚠ A FRESH ONE PER RUN. Its `seen` high-water mark is per-scan; reusing it would make the
+      // second "Refresh all" of a session ignore every progress line below the first run's count.
+      live.current = createLiveReload(() => loadOverview(), 4000);
       const { id, done } = await startJob(
         `${API_URL}/api/airs/vermogen/refresh/job${force ? '?force=true' : ''}`,
-        force ? 'Refresh all (full re-scan)' : 'Refresh all portfolios');
+        force ? 'Refresh all (full re-scan)' : 'Refresh all portfolios',
+        undefined,
+        (e) => live.current?.onProgress(e.done));
       setFleetJob(id);
       const job = await done;
       // ⚠ CLEARED THE MOMENT PHASE ONE RESOLVES, not in the `finally`. Phase two is a job of its
