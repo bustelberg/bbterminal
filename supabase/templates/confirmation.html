@@ -16,13 +16,19 @@
   `token_hash` + `verifyOtp` (see `frontend/app/auth/confirm/route.ts`) has neither problem: nothing
   is consumed until our own route runs, and there is no per-browser state to carry.
 
+  ⚠ `type` IS PINNED TO `signup` RATHER THAN `{{ .Email_Action_Type }}`. The variable is the
+  documented way and it does work, but each template already knows what it is, and a variable that
+  fails to render leaves `type=` empty — which the route can only refuse. One fewer thing between a
+  person and their account. Verified against the local stack: `verify_otp` with this type returns a
+  session, with no code verifier involved anywhere.
+
   ⚠ `{{ .SiteURL }}` must be the deployed origin. Keep the same URL in the Supabase dashboard for
   the hosted project — this file only configures the LOCAL stack.
 -->
 <h2>Confirm your BBTerminal account</h2>
 <p>Click the link below to confirm this address and choose a password. It works once and expires in an hour.</p>
 <p>
-  <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type={{ .Email_Action_Type }}">
+  <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup">
     Confirm and choose a password
   </a>
 </p>

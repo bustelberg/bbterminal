@@ -71,10 +71,18 @@ and got **"Auth session missing"**. Cause: `/auth/confirm` threw away the result
 
 **⚠ NOT DONE — needs the hosted project's dashboard, which is yours to change:**
 
-1. **Authentication → Emails**: set *Confirm signup*, *Magic Link* and *Reset Password* to link to
-   `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type={{ .Email_Action_Type }}`
-   (copy the bodies from `supabase/templates/`). ⚠ *Confirm signup* is the one the signup flow
-   actually sends; fixing only Magic Link leaves the broken case broken.
+1. **Authentication → Emails** — the current *Confirm signup* is still Supabase's default
+   (`<a href="{{ .ConfirmationURL }}">`, confirmed 2026-08-19). Change the href only:
+
+   | template | href |
+   |---|---|
+   | Confirm signup | `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup` |
+   | Magic Link | `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=magiclink` |
+   | Reset Password | `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery` |
+
+   ⚠ *Confirm signup* is the one the signup flow actually sends; fixing only Magic Link leaves the
+   broken case broken. ⚠ `type` is pinned per template rather than `{{ .Email_Action_Type }}` — a
+   variable that fails to render leaves `type=` empty, which the route can only refuse.
 2. **Authentication → URL Configuration**: Site URL = the Vercel production origin, and
    `https://<prod-origin>/auth/confirm` present in **Redirect URLs**. If `emailRedirectTo` is not
    allow-listed Supabase silently falls back to the Site URL and the token never reaches the route.
