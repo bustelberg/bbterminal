@@ -231,6 +231,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   const [roicData, setRoicData] = useState<CashReturnInputs | null>(null);
   const [fcfPs, setFcfPs] = useState<Resp | null>(null);
   const [epsNri, setEpsNri] = useState<Resp | null>(null);
+  const [pricePs, setPricePs] = useState<Resp | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -249,7 +250,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
       try {
         // ⚠ THE SAME ENDPOINTS THE CARDS USE, so `apiFetch`'s read cache serves them when the Long
         // Equity tab has already loaded them — this tab is usually free to open.
-        const [m, c, f, e] = await Promise.all([
+        const [m, c, f, e, p] = await Promise.all([
           post<MarginInputs>('margin-inputs', holdingsTarget),
           post<CashReturnInputs>('cash-return-inputs', holdingsTarget),
           post<Resp>('portfolio-revenue-matrix?metric=fcf_ps', holdingsTarget),
@@ -260,9 +261,16 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
           // impairment on the wrong side of the join and nothing on screen would say so. The
           // metric key carries the pairing — see the EPS card's own ⚠⚠ in `LongEquityTab`.
           post<Resp>('portfolio-revenue-matrix?metric=eps_nri', holdingsTarget),
+          // ⚠⚠ `price_ps` IS GURUFOCUS'S "Month End Stock Price" — the share price at each fiscal
+          // YEAR END, filed alongside the fundamentals, not our daily `metric_data` closes. That is
+          // deliberate and it is the only thing that makes this row comparable to the ones above
+          // it: every other series on this table is indexed on the same fiscal-period axis, so a
+          // price read on a calendar date would be measured over a window the neighbouring rows
+          // are not. The cost is that the row is as fresh as the last filing, exactly like them.
+          post<Resp>('portfolio-revenue-matrix?metric=price_ps', holdingsTarget),
         ]);
         if (!alive) return;
-        setMarginData(m); setRoicData(c); setFcfPs(f); setEpsNri(e);
+        setMarginData(m); setRoicData(c); setFcfPs(f); setEpsNri(e); setPricePs(p);
       } catch (e) {
         if (alive) setErr(e instanceof Error ? e.message : String(e));
       }
@@ -277,6 +285,8 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
     'portfolio-revenue-matrix?metric=fcf_ps', benchTarget);
   const [bEpsNri, bEpsNriErr] = useBenchInputs<Resp>(
     'portfolio-revenue-matrix?metric=eps_nri', benchTarget);
+  const [bPricePs, bPricePsErr] = useBenchInputs<Resp>(
+    'portfolio-revenue-matrix?metric=price_ps', benchTarget);
 
   const book: Side = useMemo(() => ({
     margin: marginByYear(marginData?.rows ?? [], sbcCorrection),
@@ -289,8 +299,9 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
     margin: bMargin ? marginByYear(bMargin.rows, sbcCorrection) : new Map(),
     roic: bRoic ? roicByYear(bRoic.rows) : new Map(),
     fcfPs: bFcfPs,
-    err: bMarginErr ?? bRoicErr ?? bFcfPsErr ?? bEpsNriErr,
-  }), [bMargin, bRoic, bFcfPs, sbcCorrection, bMarginErr, bRoicErr, bFcfPsErr, bEpsNriErr]);
+    err: bMarginErr ?? bRoicErr ?? bFcfPsErr ?? bEpsNriErr ?? bPricePsErr,
+  }), [bMargin, bRoic, bFcfPs, sbcCorrection, bMarginErr, bRoicErr, bFcfPsErr, bEpsNriErr,
+    bPricePsErr]);
 
   /**
    * ⚠⚠ ONE WINDOW PER ROW, SHARED BY BOTH SIDES. Each series ends at its own latest year, and a
@@ -303,6 +314,13 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   const bookBlend = useMemo(() => (book.fcfPs ? buildBlend(book.fcfPs) : null), [book.fcfPs]);
   const idxBlend = useMemo(() => (index.fcfPs ? buildBlend(index.fcfPs) : null), [index.fcfPs]);
   const fcfEnd = bookBlend && idxBlend ? commonEndPeriod(bookBlend.level, idxBlend.level) : null;
+  /** ⚠ THE SAME `buildBlend` AS EVERY OTHER ROW, ON A DIFFERENT PAYLOAD — which is the whole of
+   *  "weighted like the others". A price line assembled any other way (summing values, averaging
+   *  levels) would be a second definition of the basket sitting one row from the first. */
+  const bookPrice = useMemo(() => (pricePs ? buildBlend(pricePs) : null), [pricePs]);
+  const idxPrice = useMemo(() => (bPricePs ? buildBlend(bPricePs) : null), [bPricePs]);
+  const priceEnd = bookPrice && idxPrice
+    ? commonEndPeriod(bookPrice.level, idxPrice.level) : null;
   const bookEps = useMemo(() => (epsNri ? buildBlend(epsNri) : null), [epsNri]);
   const idxEps = useMemo(() => (bEpsNri ? buildBlend(bEpsNri) : null), [bEpsNri]);
   /** ⚠ THE SHARED BASE IS AN **ACTUAL** — `commonEndPeriod` only ever returns a reported period, so
@@ -500,6 +518,14 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
                   They are different questions and the labels are the only thing saying so. */}
               {on('fcfCagr') && rateRow('fcfCagr', bookBlend, idxBlend,
                 (lvl, y) => lineCagr(lvl, y, fcfEnd ?? undefined))}
+              {/* ⚠ ITS OWN `priceEnd`, NOT `fcfEnd`. Every row on this table pins both sides to the
+                  latest period THEY share, and the price line does not end where the FCF line does:
+                  a company files a fiscal-year-end price with the same statements, but the coverage
+                  floor is crossed by a different set of constituents (a price exists where a per-
+                  share FCF may not). Borrowing the neighbouring row's window would silently measure
+                  one row over a span its own line does not reach — see `lineCagr`'s ⚠. */}
+              {on('priceCagr') && rateRow('priceCagr', bookPrice, idxPrice,
+                (lvl, y) => lineCagr(lvl, y, priceEnd ?? undefined))}
               {on('fcfMargin') && meanRow('fcfMargin', book.margin, index.margin, marginEnd)}
               {on('roic') && meanRow('roic', book.roic, index.roic, roicEnd)}
               {/* ⚠⚠ LAST, AND VISUALLY SEPARATED, BECAUSE IT IS THE ONLY ROW THAT IS NOT A
@@ -535,6 +561,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
           windows: shown,
           showEps: on('epsFwd'),
           showFcf: on('fcfCagr'),
+          showPrice: on('priceCagr'),
           whyLink: <InfoTip text={copy.whyDiffer}>{copy.whyDifferLabel}</InfoTip>,
         })}
       </div>

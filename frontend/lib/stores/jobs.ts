@@ -306,6 +306,29 @@ export async function startJob(
 }
 
 /**
+ * ⚠ THE ONE CALL THAT MAKES RUNNING WORK VISIBLE MUST NOT BE A SINGLE SHOT.
+ *
+ * `attachRunningJobs` fires once, from a `useEffect` in the root layout, the moment the role
+ * resolves — so a backend that is unreachable for that one second costs the reader every toast
+ * until they reload the whole tab, while the server carries on working. And "unreachable for one
+ * second" is the normal case, not the exotic one: a `uvicorn --reload` restart on a file save, a
+ * Railway redeploy, a laptop waking up. All of them surface as `TypeError: Failed to fetch` — the
+ * request left, the connection died, no status was ever returned.
+ *
+ * Bounded and backing off, because a backend that is genuinely down must not be polled forever:
+ * ~13s of trying, then it gives up and says so in the console.
+ */
+const ATTACH_RETRY_MS = [1_000, 3_000, 9_000];
+
+const _sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** ⚠ THE RETRY MADE `attachRunningJobs` RE-ENTRANT. It used to be over in one round trip, so a
+ *  second call could not overlap the first; now one can still be sleeping when the effect refires
+ *  (the admin flag resolving, a "view as user" toggle), and two loops would each adopt the same
+ *  jobs in the window before `watchJob` puts them in the store. */
+let _attaching = false;
+
+/**
  * Re-attach to whatever is already running on the server.
  *
  * ⚠ THIS IS THE PAYOFF OF PUTTING A JOB IN THE MIDDLE. Without it a reload leaves the work running
@@ -313,19 +336,40 @@ export async function startJob(
  * in, except now it is recoverable.
  */
 export async function attachRunningJobs() {
+  if (_attaching) return;                     // one attach at a time — see `_attaching`
+  _attaching = true;
   try {
-    const r = await apiFetch(`${API_URL}/api/jobs`);
-    if (!r.ok) return;                        // 403 for a non-admin is an answer, not an error
-    const rows = (await r.json()) as {
-      id: string; kind: string; label: string; status: JobStatus;
-    }[];
-    for (const j of rows) {
-      if (j.status !== 'running') continue;   // finished ones are history, not a toast
-      if (jobsStore.get().jobs.some((x) => x.id === j.id)) continue;
-      void watchJob(j.id, j.label, 0, { kind: j.kind, label: j.label });
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const r = await apiFetch(`${API_URL}/api/jobs`);
+        if (!r.ok) {
+          // ⚠ 403 FOR A NON-ADMIN IS AN ANSWER, NOT AN ERROR — and so is a 404. A 5xx is not: it
+          // is the server still coming up, which is the one non-answer worth asking again for.
+          if (r.status >= 500 && attempt < ATTACH_RETRY_MS.length) {
+            await _sleep(ATTACH_RETRY_MS[attempt]);
+            continue;
+          }
+          return;
+        }
+        const rows = (await r.json()) as {
+          id: string; kind: string; label: string; status: JobStatus;
+        }[];
+        for (const j of rows) {
+          if (j.status !== 'running') continue;   // finished ones are history, not a toast
+          if (jobsStore.get().jobs.some((x) => x.id === j.id)) continue;
+          void watchJob(j.id, j.label, 0, { kind: j.kind, label: j.label });
+        }
+        return;
+      } catch (e) {
+        if (attempt >= ATTACH_RETRY_MS.length) {
+          traceError('jobs', 'could not list running jobs', e);
+          return;
+        }
+        await _sleep(ATTACH_RETRY_MS[attempt]);
+      }
     }
-  } catch (e) {
-    traceError('jobs', 'could not list running jobs', e);
+  } finally {
+    _attaching = false;
   }
 }
 
