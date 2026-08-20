@@ -26,7 +26,7 @@ const SHARED = new Set<string>([]);
 
 const foot = (c: TablesCopy, o: Partial<Parameters<TablesCopy['footnote']>[0]> = {}) =>
   renderToStaticMarkup(<>{c.footnote({
-    windows: [5, 10], showEps: true, showFcf: true, whyLink: 'WHYLINK', ...o,
+    windows: [5, 10], showEps: true, showFcf: true, showPrice: true, whyLink: 'WHYLINK', ...o,
   })}</>);
 
 describe('both languages are complete', () => {
@@ -144,6 +144,18 @@ describe('the footnote follows the chips', () => {
     const c = COPY[lang];
     expect(foot(c, { showFcf: false })).not.toContain('WHYLINK');
     expect(foot(c, { showFcf: true })).toContain('WHYLINK');
+  });
+
+  /**
+   * ⚠ ASSERTED ON LENGTH, NOT ON A TOKEN. The other two clauses happen to contain something
+   * language-neutral to look for (`2031e`, the injected `WHYLINK`); this one is prose in both
+   * languages with no shared word, and picking an English phrase to grep for would pass a Dutch
+   * footnote that had quietly lost the clause.
+   */
+  it.each(LANGS)('%s drops the price clause when that row is off', (lang: Lang) => {
+    const c = COPY[lang];
+    expect(foot(c, { showPrice: false }).length)
+      .toBeLessThan(foot(c, { showPrice: true }).length);
   });
 
   it.each(LANGS)('%s only claims the figure is centred when two columns are shown', (lang: Lang) => {

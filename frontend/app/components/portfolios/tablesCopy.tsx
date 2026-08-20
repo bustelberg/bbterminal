@@ -29,7 +29,7 @@ import type { Lang } from '../../../lib/i18n';
  */
 
 /** The rows, declared once and language-free — the labels for these live in `COPY`. */
-export const MEASURE_KEYS = ['fcfCagr', 'fcfMargin', 'roic', 'epsFwd'] as const;
+export const MEASURE_KEYS = ['fcfCagr', 'priceCagr', 'fcfMargin', 'roic', 'epsFwd'] as const;
 export type MeasureKey = (typeof MEASURE_KEYS)[number];
 
 export type TablesCopy = {
@@ -64,7 +64,8 @@ export type TablesCopy = {
   whyDiffer: string;
   whyDifferLabel: string;
   footnote: (o: {
-    windows: readonly number[]; showEps: boolean; showFcf: boolean; whyLink: ReactNode;
+    windows: readonly number[]; showEps: boolean; showFcf: boolean; showPrice: boolean;
+    whyLink: ReactNode;
   }) => ReactNode;
 };
 
@@ -83,12 +84,14 @@ const en: TablesCopy = {
   showRow: (chip) => `Show ${chip}`,
   chip: {
     fcfCagr: 'FCF / share CAGR',
+    priceCagr: 'Share price CAGR',
     fcfMargin: 'FCF margin',
     roic: 'ROIC',
     epsFwd: 'EPS expected',
   },
   rowLabel: {
     fcfCagr: 'FCF / share CAGR',
+    priceCagr: 'Share price CAGR',
     fcfMargin: 'FCF margin (avg)',
     roic: 'ROIC (avg)',
     epsFwd: 'EPS (excl. NRI) expected, 3y',
@@ -99,6 +102,15 @@ const en: TablesCopy = {
       + '⚠ The Long Equity growth card fits a log-linear TREND through every year instead '
       + '(that is what its R² is about), so the two will differ — most where one endpoint '
       + 'year is unrepresentative, which is when the gap is worth seeing.',
+    priceCagr: () =>
+      'Compound annual growth of the weighted SHARE-PRICE line, point to point — the same '
+      + 'weighting, chaining and coverage floor as the rows around it, run over each holding’s '
+      + 'fiscal-year-end share price. What the market did with the same basket. '
+      + '⚠ PRICE ONLY: dividends are not in it, on either side, so a high-yielding book reads '
+      + 'lower here than its total return. '
+      + '⚠ AND IT CARRIES NO FX LEG. Each holding’s price is in its own currency and the line '
+      + 'chains per-holding growth, so this is a local-currency price return — NOT the book’s EUR '
+      + 'return, which is what the Analyse modal reports.',
     fcfMargin: (sbc) =>
       `Free cash flow ${sbc ? 'net of stock comp ' : ''}÷ revenue, averaged over `
       + 'the window. A ratio does not compound, so this is a mean and not a rate — it is '
@@ -125,11 +137,20 @@ const en: TablesCopy = {
     + 'well they line up. Neither is wrong; a wide gap between them means the endpoints are '
     + 'unrepresentative.',
   whyDifferLabel: 'why they differ',
-  footnote: ({ windows, showEps, showFcf, whyLink }) => (
+  footnote: ({ windows, showEps, showFcf, showPrice, whyLink }) => (
     <>
       Both sides are measured over the <strong>same</strong> window per row — the latest year they
       share — so the Excess column subtracts like from like. A dash means one side has nothing
       there; hover it.
+      {/* ⚠ IN THE PROSE, NOT ONLY IN THE ROW'S TOOLTIP. Every other row on this table is a
+          fundamental, where "no dividends" and "no FX" are not questions anyone thinks to ask. A
+          price row invites both, and a reader who assumes either is reading a different number
+          from the one on screen — a return they could check against a statement. */}
+      {showPrice && <>
+        {' '}The share-price row is <strong>price only</strong> — no dividends, on either side —
+        and it chains each holding’s growth in its own currency, so no FX leg is in it. It is the
+        market’s view of this basket, not the book’s EUR return.
+      </>}
       {showEps && <>
         {' '}The last row is the <strong>only</strong> one the{' '}
         {windows.map((w) => `${w}y`).join('/')} heading{windows.length > 1 ? 's do' : ' does'} not
@@ -170,12 +191,14 @@ const nl: TablesCopy = {
   // and that is the correct trade: this language reads them, it does not decode them.
   chip: {
     fcfCagr: 'Vrije kasstroom / aandeel',
+    priceCagr: 'Aandelenkoers',
     fcfMargin: 'Vrije kasstroom-marge',
     roic: 'Rendement op geïnvesteerd vermogen',
     epsFwd: 'Winst per aandeel verwacht',
   },
   rowLabel: {
     fcfCagr: 'Vrije kasstroom / aandeel CAGR',
+    priceCagr: 'Aandelenkoers CAGR',
     fcfMargin: 'Vrije kasstroom-marge (gem.)',
     roic: 'Rendement op geïnvesteerd vermogen (gem.)',
     epsFwd: 'Winst per aandeel (excl. bijzondere posten) verwacht, 3j',
@@ -187,6 +210,15 @@ const nl: TablesCopy = {
       + 'log-lineaire TREND '
       + 'door alle jaren (dáár gaat de R² over), dus de twee zullen verschillen — het meest '
       + 'wanneer één eindjaar niet representatief is, en juist dan is het verschil de moeite waard.',
+    priceCagr: () =>
+      'Samengestelde jaarlijkse groei van de gewogen KOERSLIJN, van eindpunt tot eindpunt — '
+      + 'dezelfde weging, kettingberekening en dekkingsdrempel als de rijen eromheen, toegepast op '
+      + 'de slotkoers per aandeel aan het einde van elk boekjaar. Wat de markt met dezelfde mand '
+      + 'heeft gedaan. ⚠ ALLEEN KOERS: dividenden zitten er niet in, aan geen van beide zijden, '
+      + 'dus een boek met veel dividend leest hier lager dan zijn totaalrendement. '
+      + '⚠ EN ER ZIT GEEN VALUTA-EFFECT IN. Elke positie noteert in haar eigen valuta en de lijn '
+      + 'ketent de groei per positie, dus dit is een koersrendement in lokale valuta — NIET het '
+      + 'eurorendement van het boek, dat de Analyse-modal rapporteert.',
     fcfMargin: (sbc) =>
       `Vrije kasstroom ${sbc ? 'na aandelenbeloning ' : ''}÷ omzet, gemiddeld over het venster. `
       + 'Een verhouding groeit niet samengesteld, dus dit is een gemiddelde en geen groeivoet — '
@@ -214,11 +246,17 @@ const nl: TablesCopy = {
     + 'gebruikt ze allemaal en rapporteert R² voor hoe goed ze op één lijn liggen. Geen van beide '
     + 'is fout; een groot verschil betekent dat de eindpunten niet representatief zijn.',
   whyDifferLabel: 'waarom ze verschillen',
-  footnote: ({ windows, showEps, showFcf, whyLink }) => (
+  footnote: ({ windows, showEps, showFcf, showPrice, whyLink }) => (
     <>
       Beide zijden worden per rij over <strong>hetzelfde</strong> venster gemeten — het laatste jaar
       dat ze delen — zodat de kolom Verschil gelijk van gelijk aftrekt. Een streepje betekent dat
       één zijde daar niets heeft; beweeg erover.
+      {showPrice && <>
+        {' '}De koersrij is <strong>alleen koers</strong> — zonder dividend, aan geen van beide
+        zijden — en ketent de groei van elke positie in haar eigen valuta, dus er zit geen
+        valuta-effect in. Het is de blik van de markt op deze mand, niet het eurorendement van het
+        boek.
+      </>}
       {showEps && <>
         {' '}De laatste rij is de <strong>enige</strong> waarop de kop{' '}
         {windows.map((w) => `${w}j`).join('/')} niet van toepassing is: de consensus dunt snel uit
