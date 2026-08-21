@@ -7,10 +7,11 @@ import { runSSE } from '../../../lib/stream';
 /**
  * Loading the blended metric suite for a PORTFOLIO, with per-company progress.
  *
- * ⚠ ONE LOADER, TWO CALLERS. `FundamentalCharts` and `LongEquityTab` both open on the same blend
- * and each had its own copy of the fetch. Two implementations of "load the portfolio's metrics" is
- * one more than the number of ways to load them, and they had already begun to differ (one mapped
- * 404 to an empty suite, the other to a friendly note).
+ * ⚠ ONE LOADER. It had TWO callers — the Old-charts tab's `FundamentalCharts` and `LongEquityTab`
+ * — each with its own copy of the fetch, which had already begun to differ (one mapped 404 to an
+ * empty suite, the other to a friendly note). The Old-charts tab was removed 2026-08-21, so only
+ * `LongEquityTab` calls this now; it stays a module because the reason it exists is that
+ * "load the portfolio's metrics" must have exactly one definition, not because it had two users.
  *
  * ⚠ THE STREAM IS AN IMPROVEMENT, NEVER A DEPENDENCY. Any failure of the SSE path — an old backend
  * with no `/stream` route, a proxy that buffers, a malformed frame — falls back to the plain POST,
@@ -122,7 +123,7 @@ export async function loadBlendMetrics<T>(
  * twelve cards and leave the blend they sit under showing the pre-ingest book.
  *
  * ⚠ ONLY A RESOLVED ANSWER IS KEPT, never the in-flight promise. A blend is a read per holding and
- * a caller can abort it half way (`FundamentalCharts` does, on unmount); sharing the promise would
+ * a caller can abort it half way (`LongEquityTab` does, on unmount); sharing the promise would
  * hand the next caller a request that a component it never heard of had already cancelled.
  *
  * ⚠ AND NEVER AN ERROR. `none` — nothing in this book has fundamentals — is a stable fact about the

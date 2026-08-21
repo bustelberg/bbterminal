@@ -1842,6 +1842,188 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/portfolio/active-share": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Portfolio Active Share
+         * @description How much of the book's stock sleeve is NOT the benchmark.
+         *
+         *     ⚠ ON DEMAND, NOT PART OF THE ANALYSE PAYLOAD. Answering it needs the index's constituents
+         *     (`_asset_benchmark.members` — 1,700 rows and their caps for ACWI), and the Analyse modal is ONE
+         *     request with no partial paint, so folding this in would put that read on the critical path of
+         *     every open for a panel most opens never look at. Same bargain Attribution already strikes.
+         *
+         *     ⚠ THE INDIVIDUAL STOCKS ARE TREATED AS 100% OF THE PORTFOLIO. Funds, cash and bonds are
+         *     dropped and the rest renormalised — otherwise liquidity counts as an active bet against every
+         *     index name at once, which is a different (and much less comparable) measure. `stocks_pct` says
+         *     what fraction of the book that sleeve actually is.
+         */
+        post: operations["airs_portfolio_active_share_api_airs_portfolio_active_share_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/portfolio/concentration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Portfolio Concentration
+         * @description How much of the book sits in how few issuers, beside the index's own concentration.
+         *
+         *     ⚠ SAME ISSUER FOLDING AS ACTIVE SHARE (`build_issuer_weights`), so the two views cannot
+         *     disagree about how many positions the book has.
+         *
+         *     ⚠ NO PRICE SERIES AT ALL — this is a weights-only measure, so it is much cheaper than the
+         *     other risk views and needs no cadence.
+         */
+        post: operations["airs_portfolio_concentration_api_airs_portfolio_concentration_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/portfolio/drawdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Portfolio Drawdown
+         * @description Peak-to-trough falls of the reconstructed stock sleeve, with their dates.
+         *
+         *     ⚠ ONE PRICE LOAD SERVES ALL THREE CADENCES — the load is the expensive part and re-bucketing
+         *     is free, so the frequency comparison costs no extra round trips.
+         */
+        post: operations["airs_portfolio_drawdown_api_airs_portfolio_drawdown_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/portfolio/exposure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Portfolio Exposure
+         * @description The euros behind the weights, per issuer, and the currency split of the sleeve.
+         *
+         *     ⚠ SAME ISSUER FOLDING AS ACTIVE SHARE AND CONCENTRATION (`build_issuer_weights`) — built once
+         *     and read by all three, which is what stops three panels showing three sets of weights for one
+         *     portfolio.
+         */
+        post: operations["airs_portfolio_exposure_api_airs_portfolio_exposure_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/portfolio/risk-correlation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Portfolio Risk Correlation
+         * @description Correlation to the benchmark, and between the positions — the Risk panel's third view.
+         *
+         *     ⚠ THE SAME BODY AND THE SAME SERIES AS `tracking-error`, so `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ` holds
+         *     between the two views rather than approximately holding. See `build_paired_series`.
+         *
+         *     ⚠ SEPARATE FROM ATTRIBUTION BY DESIGN. That lives in its own dialog and decomposes the active
+         *     return; this one measures dispersion. Merging them would imply a reconciliation that does not
+         *     exist.
+         */
+        post: operations["airs_portfolio_risk_correlation_api_airs_portfolio_risk_correlation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/portfolio/tracking-error": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Portfolio Tracking Error
+         * @description Volatility of the active return, annualised — the Risk panel's second view.
+         *
+         *     ⚠ THE SAME BODY AS `active-share`, DELIBERATELY. The two views describe ONE portfolio (the
+         *     individual stocks, renormalised to 100%), and sharing the request model is what stops them
+         *     drifting into describing two — an active share over the stock sleeve beside a tracking error
+         *     over the whole book would be two answers to two questions under one heading.
+         *
+         *     ⚠ SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for
+         *     every holding plus the tracker, and most opens of the Risk panel never switch to it.
+         */
+        post: operations["airs_portfolio_tracking_error_api_airs_portfolio_tracking_error_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/portfolio/volatility": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Portfolio Volatility
+         * @description Standard deviation of the sleeve's own returns, and its downside half.
+         *
+         *     ⚠ `benchmark` IS NOT WHAT IS MEASURED HERE — volatility is a single-series statistic. It is
+         *     carried so the index's own σ can sit beside the book's for scale, and so this view uses the
+         *     identical series the other three do.
+         */
+        post: operations["airs_portfolio_volatility_api_airs_portfolio_volatility_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/portfolio/{portfolio_name}": {
         parameters: {
             query?: never;
@@ -8118,6 +8300,149 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * ActiveShare
+         * @description `AS = ½ Σ|wᵖ − wᵇ|` over the union of both name sets — see `routers/_active_share.py`.
+         */
+        ActiveShare: {
+            /** Active Share Pct */
+            active_share_pct?: number | null;
+            /**
+             * Available
+             * @default true
+             */
+            available?: boolean;
+            /** Benchmark */
+            benchmark: string;
+            /** Benchmark Covered Pct */
+            benchmark_covered_pct?: number | null;
+            /**
+             * Benchmark Members
+             * @default 0
+             */
+            benchmark_members?: number;
+            /**
+             * N Holdings
+             * @default 0
+             */
+            n_holdings?: number;
+            /**
+             * N In Benchmark
+             * @default 0
+             */
+            n_in_benchmark?: number;
+            /** Off Benchmark Pct */
+            off_benchmark_pct?: number | null;
+            /** Overlap Pct */
+            overlap_pct?: number | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Rows
+             * @default []
+             */
+            rows?: components["schemas"]["ActiveShareRow"][];
+            /** Stocks Pct */
+            stocks_pct?: number | null;
+            /**
+             * Unresolved
+             * @default []
+             */
+            unresolved?: components["schemas"]["ActiveShareUnmatched"][];
+        };
+        /** ActiveShareHolding */
+        ActiveShareHolding: {
+            /** Currency */
+            currency?: string | null;
+            /**
+             * Is Fund
+             * @default false
+             */
+            is_fund?: boolean;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Value Eur */
+            value_eur?: number | null;
+            /**
+             * Weight Pct
+             * @default 0
+             */
+            weight_pct?: number;
+        };
+        /**
+         * ActiveShareRequest
+         * @description The holdings the Analyse modal is ALREADY showing.
+         *
+         *     ⚠⚠ THE WEIGHTS COME FROM THE CLIENT ON PURPOSE, WHICH IS THE OPPOSITE OF THIS FILE'S USUAL
+         *     RULE. Everywhere else a weight is computed server-side precisely so two surfaces cannot
+         *     disagree — but this panel sits one click from the Holdings table, and its whole job is to
+         *     describe THAT book. Re-deriving the weights here would give the risk figure a second
+         *     denominator (start weights? design percentages? looked-through or not?) and the first question
+         *     anybody asks of a 71% active share is which rows produced it. So it consumes the displayed
+         *     numbers, and cannot disagree with the table by construction.
+         *
+         *     ⚠ IT ALSO REMOVES THE SECOND HOLDINGS PIPELINE. A model portfolio and an ad-hoc basket reach
+         *     this with the same body, so unlike Attribution there is no `portfolio_id` variant to keep in
+         *     step — one route serves both, the same way `basket/analysis` does for the composition.
+         */
+        ActiveShareRequest: {
+            /**
+             * Holdings
+             * @default []
+             */
+            holdings?: components["schemas"]["ActiveShareHolding"][];
+        };
+        /**
+         * ActiveShareRow
+         * @description One ISSUER, on both sides. ⚠ NOT one holding and not one listing — a book holding two share
+         *     classes of the same company contributes ONE of these, with the weights summed. See
+         *     `_active_share._issuer_key`.
+         */
+        ActiveShareRow: {
+            /**
+             * Active Pct
+             * @default 0
+             */
+            active_pct?: number;
+            /**
+             * Benchmark Pct
+             * @default 0
+             */
+            benchmark_pct?: number;
+            /**
+             * Held
+             * @default false
+             */
+            held?: boolean;
+            /** Name */
+            name: string;
+            /**
+             * Portfolio Pct
+             * @default 0
+             */
+            portfolio_pct?: number;
+        };
+        /**
+         * ActiveShareUnmatched
+         * @description A stock we hold that could not be resolved to an issuer name, so it can only be ACTIVE.
+         *
+         *     ⚠ IT IS IN THE FIGURE, AND IT IS LISTED BECAUSE IT IS. Dropping it would renormalise the rest
+         *     upward and quietly LOWER active share — the flattering direction — so the honest choice is to
+         *     count it and show what could not be matched.
+         */
+        ActiveShareUnmatched: {
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /**
+             * Weight Pct
+             * @default 0
+             */
+            weight_pct?: number;
+        };
+        /**
          * AirsAccount
          * @description One AIRS account's YEAR, on AIRS's own numbers.
          *
@@ -9489,8 +9814,12 @@ export interface components {
             is_fund?: boolean | null;
             /** Isin */
             isin?: string | null;
+            /** Mom 12 1 From */
+            mom_12_1_from?: number | null;
             /** Mom 12 1 Pct */
             mom_12_1_pct?: number | null;
+            /** Mom 12 1 To */
+            mom_12_1_to?: number | null;
             /** Money Weighted Return Pct */
             money_weighted_return_pct?: number | null;
             /** Name */
@@ -9659,6 +9988,25 @@ export interface components {
             weight_pct?: number;
         };
         /**
+         * ConcentrationRow
+         * @description One ISSUER in the top of the book — not one line. See `_active_share._issuer_key`.
+         */
+        ConcentrationRow: {
+            /**
+             * Benchmark Pct
+             * @default 0
+             */
+            benchmark_pct?: number;
+            /** Cumulative Pct */
+            cumulative_pct: number;
+            /** Name */
+            name: string;
+            /** Rank */
+            rank: number;
+            /** Weight Pct */
+            weight_pct: number;
+        };
+        /**
          * ConstituentFundamentalColumn
          * @description One RAW GuruFocus line the Long Equity charts consume. Shipped with the data so the table
          *     renders the set the SERVER knows about — add a line backend-side and its columns appear
@@ -9766,6 +10114,15 @@ export interface components {
              */
             weight_pct_sum?: number;
         };
+        /** CorrelationPair */
+        CorrelationPair: {
+            /** A */
+            a: string;
+            /** B */
+            b: string;
+            /** Rho */
+            rho: number;
+        };
         /** CorrelationRequest */
         CorrelationRequest: {
             /** Backtest Run Id */
@@ -9857,6 +10214,20 @@ export interface components {
              * @default user
              */
             role?: string;
+        };
+        /** CurrencyExposure */
+        CurrencyExposure: {
+            /** Currency */
+            currency: string;
+            /**
+             * Issuers
+             * @default 0
+             */
+            issuers?: number;
+            /** Value Eur */
+            value_eur?: number | null;
+            /** Weight Pct */
+            weight_pct: number;
         };
         /** CurvePoint */
         CurvePoint: {
@@ -10074,6 +10445,38 @@ export interface components {
             /** Quarterly */
             quarterly: components["schemas"]["DividendPoint"][];
         };
+        /**
+         * DrawdownEpisode
+         * @description One peak → trough → recovery.
+         *
+         *     ⚠ AN EPISODE ENDS WHEN THE OLD PEAK IS REGAINED, not when the series turns up. A 40% fall that
+         *     bounces 5% and then falls further is ONE drawdown; splitting on direction would report a set of
+         *     shallow dips and no crash.
+         */
+        DrawdownEpisode: {
+            /**
+             * Decline Periods
+             * @default 0
+             */
+            decline_periods?: number;
+            /** Depth Pct */
+            depth_pct: number;
+            /** Peak Date */
+            peak_date?: string | null;
+            /**
+             * Recovered
+             * @default false
+             */
+            recovered?: boolean;
+            /** Recovery Date */
+            recovery_date?: string | null;
+            /** Recovery Periods */
+            recovery_periods?: number | null;
+            /** Total Periods */
+            total_periods?: number | null;
+            /** Trough Date */
+            trough_date?: string | null;
+        };
         /** DrawdownInfo */
         DrawdownInfo: {
             /** Depth Pct */
@@ -10116,6 +10519,28 @@ export interface components {
              * @default true
              */
             is_broker_supported?: boolean;
+        };
+        /**
+         * ExposurePosition
+         * @description One ISSUER's effective position. `lines` > 1 means several holdings folded into it.
+         */
+        ExposurePosition: {
+            /**
+             * Currencies
+             * @default []
+             */
+            currencies?: string[];
+            /**
+             * Lines
+             * @default 1
+             */
+            lines?: number;
+            /** Name */
+            name: string;
+            /** Value Eur */
+            value_eur?: number | null;
+            /** Weight Pct */
+            weight_pct: number;
         };
         /** FeeConfigIn */
         FeeConfigIn: {
@@ -10902,6 +11327,8 @@ export interface components {
         LedgerPosition: {
             /** Avg Capital Eur */
             avg_capital_eur?: number | null;
+            /** Beta 5Y */
+            beta_5y?: number | null;
             /**
              * Capital Unknown
              * @default false
@@ -10931,8 +11358,16 @@ export interface components {
              * @default 0
              */
             income_eur?: number;
+            /** Isin */
+            isin?: string | null;
             /** Last Sale */
             last_sale?: string | null;
+            /** Mom 12 1 From */
+            mom_12_1_from?: number | null;
+            /** Mom 12 1 Pct */
+            mom_12_1_pct?: number | null;
+            /** Mom 12 1 To */
+            mom_12_1_to?: number | null;
             /** Name */
             name: string;
             /** Opening Eur */
@@ -10959,6 +11394,8 @@ export interface components {
              * @default 0
              */
             sales?: number;
+            /** Vol 5Y Pct */
+            vol_5y_pct?: number | null;
             /** Weight Pct */
             weight_pct?: number | null;
         };
@@ -11783,6 +12220,75 @@ export interface components {
             portfolio_pct?: number;
         };
         /**
+         * PortfolioConcentration
+         * @description `C₁₀ = Σ w₍ᵢ₎` and `HHI = Σ wᵢ²` — see `routers/_portfolio_concentration.py`.
+         *
+         *     ⚠⚠ ON ISSUERS, NOT LINES. Alphabet A + Alphabet C is ONE position; counting two would
+         *     understate concentration exactly at the top, where the ten largest are decided.
+         *
+         *     ⚠⚠ BOTH DENOMINATORS ARE RETURNED because the choice changes the number: `top10_pct` is of the
+         *     stock sleeve (comparable across books, the panel's convention) and `top10_of_book_pct` is of
+         *     everything including cash and funds (true in absolute terms). Choosing one silently would be
+         *     picking a side of a real question.
+         */
+        PortfolioConcentration: {
+            /**
+             * Available
+             * @default true
+             */
+            available?: boolean;
+            /** Benchmark */
+            benchmark: string;
+            /** Benchmark Covered Pct */
+            benchmark_covered_pct?: number | null;
+            /** Benchmark Effective Positions */
+            benchmark_effective_positions?: number | null;
+            /** Benchmark Hhi */
+            benchmark_hhi?: number | null;
+            /**
+             * Benchmark Issuers
+             * @default 0
+             */
+            benchmark_issuers?: number;
+            /** Benchmark Top10 Pct */
+            benchmark_top10_pct?: number | null;
+            /** Effective Positions */
+            effective_positions?: number | null;
+            /** Hhi */
+            hhi?: number | null;
+            /**
+             * Issuers
+             * @default 0
+             */
+            issuers?: number;
+            /** Reason */
+            reason?: string | null;
+            /** Stocks Pct */
+            stocks_pct?: number | null;
+            /**
+             * Top
+             * @default []
+             */
+            top?: components["schemas"]["ConcentrationRow"][];
+            /** Top10 Of Book Pct */
+            top10_of_book_pct?: number | null;
+            /** Top10 Pct */
+            top10_pct?: number | null;
+            /** Top1 Pct */
+            top1_pct?: number | null;
+            /** Top20 Pct */
+            top20_pct?: number | null;
+            /** Top3 Pct */
+            top3_pct?: number | null;
+            /** Top5 Pct */
+            top5_pct?: number | null;
+            /**
+             * Unresolved
+             * @default 0
+             */
+            unresolved?: number;
+        };
+        /**
          * PortfolioCorrelationMatrix
          * @description Pairwise Pearson correlation of the LISTED model portfolios' daily EUR returns, for two
          *     windows. Same return series the /portfolios YTD column is read off, correlated pairwise-
@@ -11843,6 +12349,154 @@ export interface components {
             members?: components["schemas"]["PortfolioMemberIn"][];
             /** Name */
             name: string;
+        };
+        /**
+         * PortfolioDrawdown
+         * @description Max drawdown of the RECONSTRUCTED sleeve — see `routers/_portfolio_drawdown.py`.
+         *
+         *     ⚠⚠ NOT THE CLIENT'S REALISED DRAWDOWN, and the two are not interchangeable. This rebuilds a
+         *     series from the holdings as they stand TODAY: look-ahead bias (those weights were chosen with
+         *     hindsight) and survivorship bias (names since sold are absent, and the sold ones skew towards
+         *     the fallers). The client's own figure comes from the AIRS returns, with real trades, real costs
+         *     and real timing. Every label here says which one it is.
+         */
+        PortfolioDrawdown: {
+            /**
+             * Available
+             * @default true
+             */
+            available?: boolean;
+            /** Benchmark */
+            benchmark: string;
+            /** Benchmark Max Drawdown Pct */
+            benchmark_max_drawdown_pct?: number | null;
+            /**
+             * By Frequency
+             * @default {}
+             */
+            by_frequency?: {
+                [key: string]: number | null;
+            };
+            /** Current Drawdown Pct */
+            current_drawdown_pct?: number | null;
+            /**
+             * Episodes
+             * @default []
+             */
+            episodes?: components["schemas"]["DrawdownEpisode"][];
+            /**
+             * Episodes Total
+             * @default 0
+             */
+            episodes_total?: number;
+            /**
+             * Frequency
+             * @default daily
+             */
+            frequency?: string;
+            /**
+             * In Drawdown
+             * @default false
+             */
+            in_drawdown?: boolean;
+            /** Max Drawdown Pct */
+            max_drawdown_pct?: number | null;
+            /**
+             * Observations
+             * @default 0
+             */
+            observations?: number;
+            /** Periods Per Year */
+            periods_per_year?: number | null;
+            /**
+             * Priced Holdings
+             * @default 0
+             */
+            priced_holdings?: number;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Total Holdings
+             * @default 0
+             */
+            total_holdings?: number;
+            worst?: components["schemas"]["DrawdownEpisode"] | null;
+            /** Years */
+            years?: number | null;
+        };
+        /**
+         * PortfolioExposure
+         * @description Effective positions — `Eᵢ = qᵢ·Pᵢ·Xᵢ` — see `routers/_portfolio_exposure.py`.
+         *
+         *     ⚠⚠ WE DO NOT COMPUTE THAT PRODUCT. `airs_holding` carries a quantity, but it also carries
+         *     `current_value_eur`: AIRS's OWN valuation, already in euros, already struck on its own date.
+         *     That is the number on the client's statement. Re-deriving it from our close and our FX rate
+         *     would produce a second figure disagreeing with the statement on most rows, with nothing on
+         *     screen able to say which was right. `Eᵢ` here IS that valuation, folded per issuer.
+         *
+         *     ⚠ TRADE DATE vs SETTLEMENT DATE IS AIRS'S CONVENTION AND WE CANNOT VERIFY IT FROM HERE. The
+         *     Vermogensoverzicht exposes no flag saying which basis it used, so a book with a very recent
+         *     trade may differ from a trade-date view by that trade's value with nothing in our data showing
+         *     it. Stated rather than assumed away.
+         */
+        PortfolioExposure: {
+            /**
+             * Available
+             * @default true
+             */
+            available?: boolean;
+            /** Benchmark */
+            benchmark: string;
+            /** Book Eur */
+            book_eur?: number | null;
+            /**
+             * Currencies
+             * @default []
+             */
+            currencies?: components["schemas"]["CurrencyExposure"][];
+            /**
+             * Currency Unknown Pct
+             * @default 0
+             */
+            currency_unknown_pct?: number;
+            /**
+             * Folded Lines
+             * @default 0
+             */
+            folded_lines?: number;
+            /**
+             * Has Values
+             * @default false
+             */
+            has_values?: boolean;
+            /**
+             * Issuers
+             * @default 0
+             */
+            issuers?: number;
+            /**
+             * Lines
+             * @default 0
+             */
+            lines?: number;
+            /** Other Eur */
+            other_eur?: number | null;
+            /**
+             * Positions
+             * @default []
+             */
+            positions?: components["schemas"]["ExposurePosition"][];
+            /** Reason */
+            reason?: string | null;
+            /** Sleeve Eur */
+            sleeve_eur?: number | null;
+            /** Stocks Pct */
+            stocks_pct?: number | null;
+            /**
+             * Unresolved
+             * @default 0
+             */
+            unresolved?: number;
         };
         /**
          * PortfolioFundamentalsJob
@@ -11954,6 +12608,83 @@ export interface components {
             members?: components["schemas"]["PortfolioMemberIn"][] | null;
             /** Name */
             name?: string | null;
+        };
+        /**
+         * PortfolioVolatility
+         * @description σ of the stock sleeve's OWN returns — see `routers/_portfolio_volatility.py`.
+         *
+         *     ⚠ SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the
+         *     correlation view puts inside `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ`. Two σₚ one click apart that
+         *     disagreed would tell the reader one of them is wrong and nothing about which.
+         *
+         *     ⚠⚠ NO CASH-FLOW CONTAMINATION, BY CONSTRUCTION RATHER THAN BY CHAIN-LINKING. This is not an
+         *     account-value series — it is a weighted basket of instrument price returns — so a deposit or a
+         *     withdrawal is simply not in it. That is what a time-weighted return exists to achieve. The cost
+         *     is the other caveat: the weights are TODAY'S, carried backwards.
+         */
+        PortfolioVolatility: {
+            /**
+             * Available
+             * @default true
+             */
+            available?: boolean;
+            /** Benchmark */
+            benchmark: string;
+            /** Benchmark Downside Dev Pct */
+            benchmark_downside_dev_pct?: number | null;
+            /** Benchmark Return Ann Pct */
+            benchmark_return_ann_pct?: number | null;
+            /** Benchmark Volatility Pct */
+            benchmark_volatility_pct?: number | null;
+            /** Best Period Pct */
+            best_period_pct?: number | null;
+            /** Cadence Note */
+            cadence_note?: string | null;
+            /** Downside Dev Pct */
+            downside_dev_pct?: number | null;
+            /**
+             * Frequency
+             * @default weekly
+             */
+            frequency?: string;
+            /** Negative Periods Pct */
+            negative_periods_pct?: number | null;
+            /**
+             * Observations
+             * @default 0
+             */
+            observations?: number;
+            /** Periods Per Year */
+            periods_per_year?: number | null;
+            /**
+             * Priced Holdings
+             * @default 0
+             */
+            priced_holdings?: number;
+            /** Reason */
+            reason?: string | null;
+            /** Return Ann Pct */
+            return_ann_pct?: number | null;
+            /**
+             * Risk Free Pct
+             * @default 0
+             */
+            risk_free_pct?: number;
+            /** Sharpe */
+            sharpe?: number | null;
+            /** Sortino */
+            sortino?: number | null;
+            /**
+             * Total Holdings
+             * @default 0
+             */
+            total_holdings?: number;
+            /** Volatility Pct */
+            volatility_pct?: number | null;
+            /** Worst Period Pct */
+            worst_period_pct?: number | null;
+            /** Years */
+            years?: number | null;
         };
         /** PricePoint */
         PricePoint: {
@@ -12282,6 +13013,104 @@ export interface components {
             /** Ticker */
             ticker: string;
         };
+        /**
+         * RiskCorrelation
+         * @description ρ as a RISK measure — see `routers/_portfolio_correlation_risk.py`.
+         *
+         *     ⚠⚠ NOT ATTRIBUTION, AND THE TWO MUST STAY SEPARATE PANELS. Attribution decomposes the active
+         *     return into allocation + selection + interaction, terms that SUM to it exactly. Correlation
+         *     appears nowhere in that decomposition and sums to nothing: it says how far the book CAN diverge,
+         *     where attribution says where the divergence came from. A combined view would imply they
+         *     reconcile, and they are not that kind of number.
+         */
+        RiskCorrelation: {
+            /** Active Vol Pct */
+            active_vol_pct?: number | null;
+            /**
+             * Available
+             * @default true
+             */
+            available?: boolean;
+            /** Benchmark */
+            benchmark: string;
+            /** Benchmark Corr */
+            benchmark_corr?: number | null;
+            /** Benchmark Vol Pct */
+            benchmark_vol_pct?: number | null;
+            /** Cadence Note */
+            cadence_note?: string | null;
+            /**
+             * Frequency
+             * @default weekly
+             */
+            frequency?: string;
+            /** Identity Gap Pp */
+            identity_gap_pp?: number | null;
+            /** Implied Active Vol Pct */
+            implied_active_vol_pct?: number | null;
+            /**
+             * Labels
+             * @default []
+             */
+            labels?: string[];
+            /**
+             * Least Correlated
+             * @default []
+             */
+            least_correlated?: components["schemas"]["CorrelationPair"][];
+            /**
+             * Matrix
+             * @default []
+             */
+            matrix?: (number | null)[][];
+            /** Mean Pair Corr */
+            mean_pair_corr?: number | null;
+            /**
+             * Min Observations
+             * @default 0
+             */
+            min_observations?: number;
+            /**
+             * Min Pair Observations
+             * @default 0
+             */
+            min_pair_observations?: number;
+            /**
+             * Most Correlated
+             * @default []
+             */
+            most_correlated?: components["schemas"]["CorrelationPair"][];
+            /**
+             * Observations
+             * @default 0
+             */
+            observations?: number;
+            /**
+             * Pairs Measured
+             * @default 0
+             */
+            pairs_measured?: number;
+            /** Periods Per Year */
+            periods_per_year?: number | null;
+            /** Portfolio Vol Pct */
+            portfolio_vol_pct?: number | null;
+            /**
+             * Priced Holdings
+             * @default 0
+             */
+            priced_holdings?: number;
+            /** R Squared */
+            r_squared?: number | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Total Holdings
+             * @default 0
+             */
+            total_holdings?: number;
+            /** Years */
+            years?: number | null;
+        };
         /** SaveBacktestRequest */
         SaveBacktestRequest: {
             /** Config */
@@ -12597,6 +13426,67 @@ export interface components {
             sortino?: number | null;
             /** Variant Key */
             variant_key?: string | null;
+        };
+        /**
+         * TrackingError
+         * @description Realised (ex-post) tracking error of the stock sleeve — see `routers/_tracking_error.py`.
+         *
+         *     ⚠⚠ `TE = √(1/(T−1) Σ (aₜ − ā)²) · √f`, WITH ā SUBTRACTED and Bessel applied. The other
+         *     convention (√(Σaₜ²/T)) is also called tracking error and is a different number; this codebase
+         *     picks one and routes it through `annualized_stats`, the same function every other volatility on
+         *     the screen goes through.
+         *
+         *     ⚠ EX-POST, NOT EX-ANTE. There is no covariance-matrix forecast here, and the two routinely
+         *     disagree — so every label says "realised" rather than leaving the reader to assume.
+         */
+        TrackingError: {
+            /** Active Return Ann Pct */
+            active_return_ann_pct?: number | null;
+            /**
+             * Available
+             * @default true
+             */
+            available?: boolean;
+            /** Avg Weight Covered Pct */
+            avg_weight_covered_pct?: number | null;
+            /** Benchmark */
+            benchmark: string;
+            /** Benchmark Isin */
+            benchmark_isin?: string | null;
+            /** Cadence Note */
+            cadence_note?: string | null;
+            /**
+             * Frequency
+             * @default weekly
+             */
+            frequency?: string;
+            /** Information Ratio */
+            information_ratio?: number | null;
+            /** Mean Active Per Period Pct */
+            mean_active_per_period_pct?: number | null;
+            /**
+             * Observations
+             * @default 0
+             */
+            observations?: number;
+            /** Periods Per Year */
+            periods_per_year?: number | null;
+            /**
+             * Priced Holdings
+             * @default 0
+             */
+            priced_holdings?: number;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Total Holdings
+             * @default 0
+             */
+            total_holdings?: number;
+            /** Tracking Error Pct */
+            tracking_error_pct?: number | null;
+            /** Years */
+            years?: number | null;
         };
         /** UniverseRenameRequest */
         UniverseRenameRequest: {
@@ -14264,6 +15154,7 @@ export interface operations {
                 only_due?: boolean;
                 feeds?: string;
                 limit?: number;
+                prices?: boolean;
             };
             header?: never;
             path?: never;
@@ -14584,6 +15475,7 @@ export interface operations {
                 only_due?: boolean;
                 feeds?: string;
                 limit?: number;
+                prices?: boolean;
             };
             header?: never;
             path: {
@@ -14925,6 +15817,259 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_active_share_api_airs_portfolio_active_share_post: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveShareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActiveShare"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_concentration_api_airs_portfolio_concentration_post: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveShareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioConcentration"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_drawdown_api_airs_portfolio_drawdown_post: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                frequency?: string;
+                years?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveShareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioDrawdown"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_exposure_api_airs_portfolio_exposure_post: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveShareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioExposure"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_risk_correlation_api_airs_portfolio_risk_correlation_post: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                frequency?: string;
+                years?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveShareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskCorrelation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_tracking_error_api_airs_portfolio_tracking_error_post: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                frequency?: string;
+                years?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveShareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrackingError"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_volatility_api_airs_portfolio_volatility_post: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                frequency?: string;
+                years?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveShareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioVolatility"];
                 };
             };
             /** @description Validation Error */

@@ -48,7 +48,33 @@ export function Field({ label, children }: { label: string; children: React.Reac
 }
 
 /**
- * THE default explanatory template: WHAT (headline) · WHERE · WHEN · HOW.
+ * THE ARITHMETIC, WORKED, WITH THIS SCREEN'S OWN NUMBERS IN IT — see `portfolios/workedFormula`.
+ *
+ * ⚠⚠ IT IS A BLOCK, NOT A `Field`, BECAUSE IT IS NOT PROSE. `Field`'s value column is about 14rem
+ * wide next to its label, and `(55.4 + 54.1 + 53.3 + 56.6 + 57.5) ÷ 5 = 55.4%` reflowed through
+ * that is a wall of digits with the operators landing wherever the wrap puts them — which is
+ * unreadable in exactly the way that makes a reader stop checking. Full width and monospaced, so
+ * the operands line up and the expression survives being wrapped at all.
+ *
+ * ⚠ AND IT SITS DIRECTLY UNDER `where`, which is where the symbolic formula lives. Formula, then
+ * the same formula with numbers: the two have to be adjacent or the reader is comparing a shape at
+ * the top of a card with an answer at the bottom.
+ *
+ * ⚠ `select-text` IS LOAD-BEARING. The tooltip is `pointer-events-none` on hover and interactive
+ * only when PINNED (a click), which is the state this block exists for — pasting the expression
+ * into whatever the reader checks numbers in. See `InfoTip`.
+ */
+function Worked({ text }: { text: string }) {
+  return (
+    <span className="block font-mono text-[11px] text-fg-soft leading-relaxed whitespace-pre-line
+      select-text rounded bg-overlay/[0.04] px-2 py-1.5">
+      {text}
+    </span>
+  );
+}
+
+/**
+ * THE default explanatory template: WHAT (headline) · WHERE · [worked] · WHEN · HOW.
  *
  * ⚠ WHAT LEADS, THE REST ARE ABOUT IT. Where/When/How all answer questions about a thing the
  * reader has already identified, so they are useless — worse, they look like an answer — to someone
@@ -57,16 +83,24 @@ export function Field({ label, children }: { label: string; children: React.Reac
  * it (a definition with no origin renders WHAT alone rather than "WHERE: —", which would fabricate
  * provenance). This is the same shell + field grid the per-value provenance card uses; only the
  * source-specific machinery (freshness pill, copied/formula) is left to that one.
+ *
+ * ⚠ `worked` IS OMITTED WHEN EMPTY, and that is the common path rather than an edge case: every
+ * builder in `workedFormula` returns '' when an operand is missing, so a thin series renders the
+ * card exactly as it did before worked lines existed. A blank framed block would read as a
+ * rendering failure — which is the opposite of what a verification aid is for.
  */
-export function AspectCard({ what, where, when, how }: {
+export function AspectCard({ what, where, when, how, worked }: {
   what: React.ReactNode;
   where?: React.ReactNode;
   when?: React.ReactNode;
   how?: React.ReactNode;
+  /** The same formula as `where`, with real numbers substituted. See {@link Worked}. */
+  worked?: string;
 }) {
   return (
     <TipCard label="What" title={what}>
       {where != null && where !== '' && <Field label="Where">{where}</Field>}
+      {worked ? <Worked text={worked} /> : null}
       {when != null && when !== '' && <Field label="When">{when}</Field>}
       {how != null && how !== '' && <Field label="How">{how}</Field>}
     </TipCard>

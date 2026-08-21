@@ -49,10 +49,97 @@ const COMPARE_VALUE = '__compare__';
 const CARDS: MetricCfg[] = [
   {
     /**
-     * ⚠ FIRST ON THE TAB, DELIBERATELY — it is the line the whole page is about. Revenue says how
-     * much a business sold; this says what reached a share. The card indexes it to 100 at the
-     * first year it shares with the benchmark, so what is compared is the GROWTH — the same idea
-     * as /earnings' Share-Price-vs-Owner-Earnings chart, minus the price leg.
+     * ⚠ FIRST ON THE TAB — THE WEIGHTED SHARE-PRICE INCREASE OF THE BOOK AND OF THE INDEX. Every
+     * other card on this grid explains a return; this one IS it, so it leads and the explanation
+     * follows.
+     *
+     * ⚠⚠ IT NEEDED NO NEW ENDPOINT, NO NEW BLEND RULE AND NO NEW CHART, AND THAT IS NOT A
+     * COINCIDENCE — it is the tab's design paying out. A price is a LEVEL in each company's own
+     * units, exactly like Revenue or FCF/share, so `_fundamental_blend` already aggregates it by
+     * the rule this card wants: the line is CHAINED from weighted growth,
+     *
+     *     index[p] = index[anchor] x (1 + Σ w_i·g_i / Σ w_i),   g_i = P_i(p)/P_i(anchor) − 1
+     *
+     * which is the definition of "the weighted increase on the stocks in it". The benchmark line
+     * is the identical computation over the index's cap-weighted constituents (`benchBody` swaps
+     * `holdings` for `universe`), so the two lines on this chart cannot mean different things.
+     *
+     * ⚠⚠ IT IS A PRICE RETURN IN EACH COMPANY'S REPORTING CURRENCY — NOT A EUR TOTAL RETURN, AND
+     * IT WILL NOT RECONCILE WITH THE ANALYSE MODAL. Three deliberate differences, every one of
+     * which moves the number: dividends are excluded (a price index, not total return); the FX leg
+     * is excluded (each g_i divides out its own currency, so a US holding's euro move is not in
+     * it — see the EUR-basis rule in CLAUDE.md, which governs the RETURN surfaces, not this tab);
+     * and the weights are the book's current weights held flat across history rather than a
+     * traded position. So this answers "how did these businesses' shares do" on the same axis as
+     * their revenue and earnings — it is deliberately NOT the portfolio's performance, which
+     * `period_return_pct` owns and nothing here may restate.
+     *
+     * ⚠⚠ THE BENCHMARK LINE HERE IS THE CONSTITUENT REBUILD, AND IT STILL READS HIGH. Measured
+     * 2026-08-21 after the anchor-weighting fix (`blend_series`, which took a decade of ACWI from a
+     * fabricated +20.21%/yr to +11.14%/yr): ACWI +11.14, SP500 +14.09, AEX +10.29 per year over
+     * 2015→2025, each roughly 1–2pp above what the index itself did. That residual is NOT a further
+     * bug — it is the rebuild's three documented properties, all of which push the same way:
+     * membership is a snapshot of TODAY's constituents projected backwards (survivorship — the
+     * names that fell out are not in it), weights are FULL market cap where MSCI float-adjusts, and
+     * the basis is each company's own reporting currency rather than one index currency. It is
+     * exactly why the Analyse modal's benchmark tile reads the index ETF's own price series instead
+     * (`routers/_benchmark_etf.py`, and the ⚠⚠ on it in CLAUDE.md). There is no ETF series on this
+     * tab, because every other card here is a FUNDAMENTAL the ETF cannot supply — so this line is
+     * the same constituents as the fourteen charts around it, which is the property that makes the
+     * comparison internally coherent, at the cost of a point or two against the published index.
+     *
+     * ⚠ THE SAME `price_ps` LINE THE DIVIDEND-YIELD CARD DIVIDES BY. There is one "share price" on
+     * this tab: GuruFocus's `Month End Stock Price` at each fiscal period end, in the reporting
+     * currency, which is also `_RG_PRICE_CODE` — the price leg of /earnings'
+     * Share-Price-vs-Owner-Earnings chart. Measured on ASML it IS a sample of the daily close
+     * (681.7 / 678.7 / 921.4 at the last three year-ends, ratio 1.0000), so this changes the
+     * frequency of that series and nothing else.
+     *
+     * ⚠ AND IT IS THE ONE PRICE SERIES HERE THAT SELF-HEALS THROUGH A SPLIT. CLAUDE.md records
+     * that our stored `close_price` cannot: ingest only fetches dates NEWER than the stored max,
+     * so a vendor's retroactive split rewrite is never re-read (KLA 1929→211). This line arrives
+     * in the financials blob, which `ingest/earnings/financials.py` re-parses IN FULL on every
+     * fetch and upserts by diff — a rewritten history therefore lands. That is a reason to prefer
+     * the fiscal-period price here over the daily close, not a claim that the daily one is fixed.
+     *
+     * ⚠ THE `LTM` POINT ON THIS CARD IS THE LATEST QUARTER-END PRICE, not a trailing twelve months
+     * of anything: `price_ps`'s `_TTM_RULE` is `last`, because a price is a level at an instant
+     * (summing four of them would report a share at 4x its price). Same reading `market_cap` and
+     * every balance-sheet line already carry under that label.
+     *
+     * ⚠ NO FORECAST LEG. `forecastCodes` is for a published analyst consensus of THIS line, and
+     * nobody publishes one for a share price that we ingest — a dotted continuation here would be
+     * an extrapolation wearing a forecast's clothes. See the EPS card's note.
+     *
+     * ⚠⚠ THE `Tables` TAB'S `priceCagr` ROW IS THIS SAME LINE, ONE TAB AWAY IN THE SAME MODAL, AND
+     * THEY MUST NOT DRIFT. That row runs `buildBlend` over `portfolio-revenue-matrix?metric=
+     * price_ps` — the client twin of `_fundamental_blend.blend_series`, same chained weighted
+     * growth, same coverage floor, same carry-forward — so the two are one series computed on two
+     * sides of the wire, not two definitions of "the basket's price". They differ only as every
+     * card/row pair on this tab does: the card's CAGR is a log-linear FIT (hence the R² beside it)
+     * and the row's is point-to-point. ⚠ At a high R² that gap is worth ~0.5pp; a large one means
+     * the two sides are reading DIFFERENT SERIES, not that the fit disagrees — the trap that hid
+     * the `fcf_per_share`/`fcf_ps` key bug for weeks. See `TablesTab`'s header.
+     */
+    title: 'Share price', titleKey: 'sharePrice',
+    noun: 'share price', unit: 'per_share', kind: 'growth',
+    benchmarkMetric: 'price_ps',
+    // ⚠ THREE PER-SHARE SECTION SPELLINGS, same as `div_ps` — the capitalized cohort's
+    // `Per Share Data`, and the lowercase cohort's `per_share_data` AND `per_share_data_array`.
+    // These must stay identical to the backend's `_METRIC_CODES['price_ps']`, or a whole cohort's
+    // holdings read as "no share price ingested" while carrying the line.
+    codes: ['annuals__Per Share Data__Month End Stock Price',
+      'annuals__per_share_data__Month End Stock Price',
+      'annuals__per_share_data_array__Month End Stock Price'],
+  },
+  {
+    /**
+     * ⚠ FIRST OF THE FUNDAMENTAL CARDS, DELIBERATELY — it is the line the rest of the page is
+     * about, and it sits directly under the share price because it is the half of that move
+     * anybody can underwrite. Revenue says how much a business sold; this says what reached a
+     * share. The card indexes it to 100 at the first year it shares with the benchmark, so what
+     * is compared is the GROWTH — the same idea as /earnings' Share-Price-vs-Owner-Earnings
+     * chart, whose price leg is now the card above this one.
      *
      * ⚠⚠ "EXCLUDING NON-RECURRING ITEMS" IS THE WHOLE POINT AND IT IS ONE OF THREE NEAR-IDENTICAL
      * LINES. GuruFocus also publishes `EPS (Diluted)` and `Earnings per Share (Diluted)`, both of
@@ -94,8 +181,8 @@ const CARDS: MetricCfg[] = [
     codes: ['annuals__Income Statement__Revenue', 'annuals__income_statement__Revenue'],
   },
   {
-    title: 'FCF / share', titleKey: 'fcfPs',
-    noun: 'FCF/share', unit: 'per_share', kind: 'growth', benchmarkMetric: 'fcf_ps',
+    title: 'FCF per share', titleKey: 'fcfPs',
+    noun: 'FCF per share', unit: 'per_share', kind: 'growth', benchmarkMetric: 'fcf_ps',
     codes: ['annuals__Per Share Data__Free Cash Flow per Share',
       'annuals__per_share_data__Free Cash Flow per Share'],
   },
@@ -225,8 +312,9 @@ export default function LongEquityTab({
       try {
         // A single company is keyed by ISIN; a portfolio is the blended pseudo-company (each metric
         // blends as a LEVEL → a growth index). Both return every metric code. The portfolio path
-        // streams per-company progress — it is a read per holding — via the SAME loader
-        // `FundamentalCharts` uses, so the two tabs cannot come to load the blend differently.
+        // streams per-company progress — it is a read per holding — via `blendMetrics`, which is
+        // the one definition of "load this book's metrics" (it had a second caller until the
+        // Old-charts tab was removed; the point of the module is the single definition).
         if (isAgg) {
           const out = await loadBlendMetrics<MetricsResponse>(
             { basket, portfolioId, cadence }, (p) => { if (alive) setProgress(p); },
@@ -350,10 +438,10 @@ export default function LongEquityTab({
       ? <p className="text-xs text-fg-subtle py-16 text-center">{blendLoadingLabel(progress)}</p>
       : null;
 
-  // Fixed order across the grid: EPS (excl. non-recurring), Revenue, FCF/share, FCF-SBC margin,
-  // Cash return on capital, Debt / assets ex-GW, Interest / op. profit, Shares outstanding,
-  // SBC / OCF, Invested capital, Capex margin, Dividend yield, FCF-SBC yield.
-  const [epsNri, revenue, fcfPs, shares] = CARDS;
+  // Fixed order across the grid: Share price, EPS (excl. non-recurring), Revenue, FCF/share,
+  // FCF-SBC margin, Cash return on capital, Debt / assets ex-GW, Interest / op. profit, Shares
+  // outstanding, SBC / OCF, Invested capital, Capex margin, Dividend yield, FCF-SBC yield.
+  const [sharePrice, epsNri, revenue, fcfPs, shares] = CARDS;
   // Single-company only: an empty growth card can fetch this company's financials, then reload.
   const ingestIsin = isAgg ? undefined : isin;
   const onIngested = () => setReloadKey((k) => k + 1);
@@ -429,7 +517,12 @@ export default function LongEquityTab({
           that wraps, and stat tiles above it — at four columns the plot area was narrow enough that
           a twelve-year axis crowded its ticks and the legend took three lines. Only the grid
           changes; the card order below is fixed and reflows unaltered. */}
-      {/* ⚠ FIRST IN THE GRID — the line the tab is about. See its entry in `CARDS`. */}
+      {/* ⚠ FIRST IN THE GRID — the weighted share-price increase of the book and of the index, i.e.
+          the move every card after it exists to explain. See its entry in `CARDS`, and in
+          particular why it is NOT the portfolio's return. */}
+      <MetricGrowthCard key={sharePrice.title} cfg={sharePrice}
+        {...growth} />
+      {/* ⚠ SECOND — the line the tab is about. See its entry in `CARDS`. */}
       <MetricGrowthCard key={epsNri.title} cfg={epsNri}
         {...growth} />
       <MetricGrowthCard key={revenue.title} cfg={revenue}

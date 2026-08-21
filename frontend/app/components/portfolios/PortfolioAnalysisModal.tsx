@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
@@ -9,12 +9,15 @@ import {
   allocColor, ALWAYS_SHOWN_BUCKETS, bucketLabel, CASH_BUCKET, EQUITY_BUCKET,
 } from './allocationColors';
 import { classWeightedReturn } from './classReturn';
+import { equityParts } from './equityParts';
 import { benchmarkProvenance } from './benchmarkSourceNote';
 import { Provenance, ProvenanceFetchedAt, type SourceKey } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import { RefreshIcon } from './RefreshIcon';
 import AttributionPanel from './AttributionPanel';
+import ActiveSharePanel, { type ActiveShareHolding } from './ActiveSharePanel';
+import PanelDialog from './PanelDialog';
 import HoldingTimingModal from './HoldingTimingModal';
 import BucketDetailPanel from './BucketDetailPanel';
 import OwnerEarningsModal from './OwnerEarningsModal';
@@ -793,6 +796,17 @@ function readSavedGroups(): Set<ColumnGroup> {
   }
 }
 
+/**
+ * The ungated columns either side of the money block, named once.
+ *
+ * ⚠ THEY EXIST FOR THE `colSpan` ON THE SUB-HEADER INSIDE `Stocks`, which has to span the whole
+ * table however many money columns the picker has switched on. Hard-coding a number there is the
+ * same hand-counting hazard `portfolioAnalysisColumns.test.ts` was written for, one row further
+ * along — and a `colSpan` that is too small leaves a ragged gap rather than erroring.
+ */
+const LEADING_COLS = 8;      // # · Name · Via · Sector · Momentum · 5y vol · Beta · Weight (now)
+const TRAILING_COLS = 3;     // Money-weighted · Instrument return · Contribution
+
 /** Which groups are shown, and the columns that follow from them. */
 function useColumnGroups() {
   const [groups, setGroups] = useState<Set<ColumnGroup>>(readSavedGroups);
@@ -1111,6 +1125,64 @@ function soleVia(h: BookHolding): string | null {
 const SYNTHETIC_ROWS = new WeakSet<object>();
 const isSynthetic = (h: BookHolding) => SYNTHETIC_ROWS.has(h);
 
+/** `
+
+1.23 ÷ 4.56 − 1 = +7.9%` — the substituted line under a momentum formula, or '' when the
+ *  two prices are not on the payload.
+ *
+ *  ⚠ EMPTY, NOT AN APPROXIMATION. A tooltip that shows a formula it cannot fill in is honest; one
+ *  that fills it in with rounded stand-ins invites the reader to check the arithmetic and find it
+ *  does not tie. The legs come from `mom_12_1_legs` — the same helper the signal itself divides. */
+const momSub = (to?: number | null, from?: number | null, pct?: number | null): string => (
+  to != null && from != null && pct != null
+    ? `
+
+${to.toFixed(2)} ÷ ${from.toFixed(2)} − 1 = ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
+    : '');
+
+/** The column header's worked example: the first row that carries both legs.
+ *  ⚠ A REAL ROW FROM THIS TABLE, never an invented illustration — the reader can find it below. */
+const momExample = (rows: BookHolding[]): string => {
+  const h = rows.find((r) => r.mom_12_1_from != null && r.mom_12_1_to != null
+    && r.mom_12_1_pct != null);
+  return h ? `${momSub(h.mom_12_1_to, h.mom_12_1_from, h.mom_12_1_pct)}   (${h.name ?? ''})` : '';
+};
+
+/**
+ * The same, for the three OTHER columns whose header stated a formula and never worked it.
+ *
+ * ⚠⚠ A HEADER AND ITS ROWS MUST EXPLAIN THEMSELVES THE SAME WAY. Vol, Beta and Instrument return
+ * each had a substituted line on the ROW tip and only symbols on the COLUMN card — so the same
+ * formula was worked or not depending on which ⓘ you happened to open, which reads as two
+ * different degrees of confidence in one number. Instrument return was the worst of the three: it
+ * is one of the table's three always-on answer columns, and the only one of them whose header
+ * carried no numbers at all.
+ *
+ * ⚠ THE EXAMPLE IS A REAL ROW AND IS NAMED, so the reader can scroll to it and check that the
+ * header's arithmetic is the row's. An unnamed example is indistinguishable from an invented one.
+ *
+ * ⚠ VOL AND BETA SHOW ONLY THE ANSWER, and that is the honest limit rather than an oversight: the
+ * operands are 1,260 daily returns and a covariance over 260 weekly pairs. There is no expression
+ * to write out, so these two say what came out and where it came from, and the drill-down is the
+ * price series itself. Padding them with invented intermediate figures would be worse than symbols.
+ */
+const volExample = (rows: BookHolding[]): string => {
+  const h = rows.find((r) => r.vol_5y_pct != null);
+  return h ? `\n\n= ${h.vol_5y_pct!.toFixed(1)}%   (${h.name ?? ''})` : '';
+};
+
+const betaExample = (rows: BookHolding[]): string => {
+  const h = rows.find((r) => r.beta_5y != null);
+  return h ? `\n\n= ${h.beta_5y!.toFixed(2)}   (${h.name ?? ''})` : '';
+};
+
+/** ⚠ `bookMath` IS THE ROW'S OWN BUILDER — the header does not re-derive the expression, it uses
+ *  the one the row below it will print, so the two cannot disagree. */
+const bookReturnExample = (rows: BookHolding[]): string => {
+  const h = rows.find((r) => bookMath(r) != null && r.own_return_pct != null);
+  return h ? `\n\n${bookMath(h)} = ${fmtRet(h.own_return_pct)}   (${h.name ?? ''})` : '';
+};
+
 function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
   const groups = new Map<string, { label: string; rows: BookHolding[] }>();
   const kept: BookHolding[] = [];
@@ -1167,6 +1239,16 @@ function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
   }
   return [...kept, ...folded];
 }
+
+/** Why a sold row's three instrument columns are blank — and the two cases are different work.
+ *
+ *  ⚠ "WE COULD NOT TELL WHAT THIS IS" vs "WE HAVE NO PRICES FOR IT". The first is fixed by pinning
+ *  the name to an ISIN (`airs_holding_isin_override`); the second by ingesting the instrument. A
+ *  single "no data" would send an operator to the wrong one half the time. */
+const soldRiskWhy = (p: { isin?: string | null; name?: string | null }): string => (p.isin
+  ? `No price series stored for ${p.isin}, so this instrument's risk figures cannot be computed.`
+  : `Could not resolve "${p.name}" to an ISIN — it is no longer held by any book we have a `
+    + 'snapshot for, and it has no hand-pinned identity, so there is no instrument to measure.');
 
 function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised,
   onTiming, onFundamental }: {
@@ -1442,7 +1524,56 @@ ${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).le
           modal body, dragging every other section sideways with it. So the table gets its own
           viewport instead — one box that scrolls both ways, with the header pinned inside it. */}
       <div className="overflow-auto max-h-[55vh]">
-        <table className="w-full text-xs">
+        {/* ⚠⚠ A RULE BETWEEN EVERY COLUMN, AND IT IS APPLIED ON THE TABLE RATHER THAN PER CELL.
+            This table is eighteen columns and ~81rem wide — wider than the modal on any ordinary
+            screen, which is why it has its own scrollport — so following one holding's row across
+            it, or one column down it, is the thing the reader is actually doing and had nothing to
+            guide them: rows carried a hairline, columns carried nothing at all.
+
+            ⚠ ON `<table>` WITH `[&_td]` / `[&_th]`, NOT ON EACH CELL. There are six hand-written
+            row shapes here (thead, the class group row, the held row, the sold group row, the sold
+            detail row, the grand total) plus a colSpan sub-header, and the money block is gated by
+            the column picker — so a per-cell class is ~90 places to keep in step and one of them
+            will be missed. It is the same hand-counting hazard `portfolioAnalysisColumns.test.ts`
+            exists for, and the descendant selector sidesteps it entirely.
+
+            ⚠ LIGHTER THAN THE ROW LINES ON PURPOSE. A financial table is read ACROSS — you follow a
+            holding to its Result — so the horizontal structure has to stay primary. At `/20` against
+            the rows' `/[0.15]` these are near-equal, which reads as an even grid; anything stronger
+            makes the eye track columns first and turns the table into a cage.
+
+            ⚠ `last-child` IS EXEMPT or the final column draws a rule against the table edge, which
+            reads as a border the table does not have. The equity sub-header spans the full width as
+            a single cell and is therefore exempt automatically — it wants no internal rule.
+
+            ⚠⚠ AND THE GUTTERS ARE PART OF THE RULE, NOT A SEPARATE POLISH — without them the lines
+            are unusable. Measured: **84 of this table's 101 cells had NO horizontal padding at
+            all**. The columns were built to sit flush, separated only by right-alignment and their
+            natural width, so a `border-r` lands against the last digit of every number; and the
+            seventeen cells that DID carry padding used four different values (`pr-2`, `pr-3`,
+            `pl-4`, `pr-4`), so those rules stood at four different distances. Shipped that way it
+            read as lines clamped onto the numbers with ragged spacing — which is exactly what it
+            was. A rule between two columns only means anything if both sides breathe equally.
+
+            ⚠ SET HERE TOO, FOR THE SAME REASON THE BORDERS ARE: 84 cells is not a place to add a
+            class by hand. The descendant selector also OUTRANKS the per-cell utilities (`.x td` is
+            more specific than `.pr-3`), which is what makes one declaration able to regularise
+            cells that already disagree — the same mechanism `[&_th]:bg-card` above relies on.
+
+            ⚠ THE EDGES KEEP THEIR WIDER GUTTER. `first-child`/`last-child` are more specific again,
+            so `pl-4`/`pr-4` survive: the table still sits off the panel edge rather than starting
+            hard against it.
+
+            ⚠ THE TABLE GETS WIDER, and that is the accepted cost. Most columns carry a fixed `w-*`
+            with slack, so they absorb the 1rem; the tight ones grow. It already has its own
+            scrollport (see the note above), so the extra width is scroll, not overflow. */}
+        <table className="w-full text-xs
+                          [&_th]:px-2 [&_td]:px-2
+                          [&_th:first-child]:pl-4 [&_td:first-child]:pl-4
+                          [&_th:last-child]:pr-4 [&_td:last-child]:pr-4
+                          [&_th]:border-r [&_th]:border-neutral-800/20
+                          [&_td]:border-r [&_td]:border-neutral-800/20
+                          [&_th:last-child]:border-r-0 [&_td:last-child]:border-r-0">
           {/* ⚠ `[&_th]:bg-card` IS LOAD-BEARING, not belt-and-braces. A background on `<thead>`
               alone does not paint reliably under `border-collapse`, so the group rows (`bg-inset`)
               scroll THROUGH the header and the two sets of text overlap. The cells carry it. */}
@@ -1498,16 +1629,19 @@ ${new Set(holdings.map((h) => h.sector).filter((s) => s && s !== 'Unclassified')
                   only one of the three that is SIGNED, so it is the only one that carries colour. */}
               <th className={`text-right w-24 ${th}`} onClick={() => click('mom')}>
                 Momentum{caret('mom')}
+{/* ⚠ FORMULA, BLANK LINE, THE SAME FORMULA SUBSTITUTED — the shape the Money-weighted column
+                    uses, and the reason it is worth copying: a reader can CHECK the arithmetic instead
+                    of being told the answer. The three ⚠ paragraphs that used to live here (why the
+                    last month is skipped, that this is not the strategy's min-maxed score, that it
+                    needs only ~13 months) were true and are not lost — they are on the per-row ⓘ and
+                    on the dash's own explanation, where a reader meets them at the point of doubt.
+                    ⚠ THE EXAMPLE IS A REAL ROW, the first one that has the two legs, so the numbers
+                    substituted are one this table is actually showing. No row with legs → the formula
+                    alone, never a made-up illustration. */}
                 <Provenance source="benchmark" asOf={null} kind="formula" column
                   what="12-1 momentum: the last 12 months' EUR return, excluding the most recent month."
                   note="signal_engine mom_12_1 — the same one /signal-lab charts"
-                  how={`Price one month ago ÷ price twelve months ago − 1.
-
-⚠ SKIPPING THE LAST MONTH IS THE DEFINITION, not a refinement. The most recent month mean-REVERTS, which is what makes a raw 12-month return a poor momentum signal — this is the standard measure and the one the backtester trades on.
-
-⚠ IT IS NOT THE STRATEGY'S momentum SCORE. That one is min-maxed across the universe it was scored over, so the same stock scores differently against the S&P than against ACWI, and a holding in no universe has none — a ranking within a run rather than a property of the stock. This is absolute, so a column of them compares.
-
-⚠ NEEDS ONLY ~13 MONTHS, unlike the two risk columns beside it, so a young listing can show momentum and a dash for volatility.`} />
+                  how={`Price one month ago ÷ price twelve months ago − 1${momExample(holdings)}`} />
               </th>
               <th className={`text-right w-24 ${th}`} onClick={() => click('vol')}>
                 5y vol{caret('vol')}
@@ -1519,7 +1653,8 @@ ${new Set(holdings.map((h) => h.sector).filter((s) => s && s !== 'Unclassified')
                   what="How much this instrument's price moves, annualised, over the last 5 years."
                   note="annualised standard deviation of daily EUR returns"
                   how={'std(daily return, ddof=1) × √252, over the trailing 5 years of our own '
-                    + 'yfinance closes converted to EUR at each date\'s rate.\n\n'
+                    + 'yfinance closes converted to EUR at each date\'s rate.'
+                    + `${volExample(holdings)}\n\n`
                     + '⚠ IN EUR, like every figure on this screen — a euro holder bears the '
                     + 'currency move, so a dollar stock\'s volatility to them includes it.\n\n'
                     + '⚠ A DASH IS NOT A ZERO. An instrument with under four years of history has '
@@ -1530,7 +1665,7 @@ ${new Set(holdings.map((h) => h.sector).filter((s) => s && s !== 'Unclassified')
                 <Provenance source="benchmark" asOf={null} kind="formula" column
                   what={`How much this instrument moves for each 1% of ${benchmark}, over 5 years.`}
                   note={`weekly EUR returns, regressed on ${benchmark}`}
-                  how={`cov(instrument, ${benchmark}) ÷ var(${benchmark}), on WEEKLY EUR returns over the trailing 5 years — against ${benchmark}'s investable tracker, priced the same way as the holdings.
+                  how={`cov(instrument, ${benchmark}) ÷ var(${benchmark}), on WEEKLY EUR returns over the trailing 5 years — against ${benchmark}'s investable tracker, priced the same way as the holdings.${betaExample(holdings)}
 
 ⚠ WEEKLY, WHILE THE VOL COLUMN IS DAILY, AND THAT IS DELIBERATE. The trackers are London-listed and close at 16:30 London; a US holding closes at 21:00, so half its day lands in the next benchmark bar and the daily correlation is mechanically halved — every beta biased downward. Measured on this book: Microsoft vs ACWI read 0.72 daily against a true ~1.05, and 1.04 weekly. Volatility is a single-series statistic with nothing to be out of sync with, so it stays daily.
 
@@ -1551,10 +1686,15 @@ the ${holdings.length} rows below sum to ${eur0n(grand.valuenow)} = 100.00%`} />
               {/* ⚠ THE THREE COMPONENTS, THEN THEIR SUM — the whole point of merging the ledger
                   into this table. A reader who wants to know what a position MADE should not have
                   to reconcile a return against a weight; these add up on screen.
-                  ⚠ COLUMN COUNT IS ELEVEN and is counted by hand in FOUR places (this thead,
-                  the group row, the body row, the total row). Add one here and forget another and
-                  every figure below shifts a cell right, silently — a contribution renders
-                  perfectly well under "Return". */}
+                  ⚠⚠ THE LEADING BLOCK IS **EIGHT** CELLS (# · Name · Via · Sector · Momentum ·
+                  5y vol · Beta · Weight) AND IS COUNTED BY HAND IN SIX ROWS: this thead, the class
+                  group row, the held row, the `No longer held` group row, the sold detail row and
+                  the grand total. Add one here and forget another and every figure below shifts a
+                  cell, silently — a contribution renders perfectly well under "Return".
+                  ⚠ IT HAPPENED, AND THIS WARNING DID NOT STOP IT (2026-08-21): the sold DETAIL rows
+                  carried five, so their money block sat three columns left of its own titles. Now
+                  enforced by `portfolioAnalysisColumns.test.ts`, which reads this file and counts
+                  them — the only way to check it without a DOM, which this repo does not test. */}
 {show('opening') && (
               <th className="text-right w-[9.6rem] py-2 font-medium">
                 Beginwaarde (1 Jan)
@@ -1655,7 +1795,7 @@ ${eur0n(grand.result)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`} />
                   what={'What this instrument itself returned in euros since '
                     + `${anchor ?? 'the year opened'} — independent of how much of it the book `
                     + 'holds, and independent of when you traded it.'}
-                  how={`(Huidige waarde + net income) ÷ Beginwaarde − 1, per row
+                  how={`(Huidige waarde + net income) ÷ Beginwaarde − 1, per row${bookReturnExample(holdings)}
 
 Beginwaarde prices TODAY’s share count at its 1 January price, which is what erases your timing — so this is NOT a chained time-weighted return: a share bought in June is still measured from January. Money-weighted, beside it, is the same Result over the capital actually tied up.
 
@@ -1821,7 +1961,54 @@ ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%
                   would have made, which needs a position the book can trade; on a strategy it
                   answered "This instrument is not in the book's current holdings" — true of the
                   strategy, and reading as a broken row. See `SYNTHETIC_ROWS`. */}
-              {[...g.rows].sort(cmp).map((h, i) => (
+              {/* ⚠⚠ THE STOCKS CLASS IS TWO KINDS OF THING AND THE TABLE SAID SO NOWHERE. Folding the
+                  equity ETFs into `Stocks` (2026-08-18) was right for the ALLOCATION — a stock ETF
+                  is stock exposure — but it left one list mixing "ASML, 4.2%" with "iShares Core
+                  MSCI World, 11.8%", rows that are not comparable: the second is already a thousand
+                  of the first. `equityParts` divides them, and ONLY when the division is real (a
+                  book with no ETFs gets no sub-header at all) and only in this class.
+                  ⚠ THE NUMBERING RUNS ACROSS THE WHOLE CLASS, not per part — `n` is carried over the
+                  parts rather than reset. The `#` column counts holdings in a class; restarting it
+                  at the ETF sub-header would put two rows numbered 1 under one heading. */}
+              {(() => { let n = 0; return equityParts(g.bucket, EQUITY_BUCKET, [...g.rows].sort(cmp))
+                .map((part, pi) => (
+                <Fragment key={part.key}>
+                {part.label && (
+                  /* ⚠ ONE `colSpan` CELL, NOT A LEADING BLOCK PLUS GATED MONEY CELLS. This row
+                     carries no figures — it is a rule with a name on it — so spanning the table is
+                     both simpler and safer than hand-counting cells that must track the column
+                     picker (the hazard `portfolioAnalysisColumns.test.ts` exists for; a row with no
+                     money block is deliberately outside what that check inspects).
+                     ⚠ LIGHTER THAN THE CLASS HEADER ABOVE IT, deliberately: no colour swatch, no
+                     background fill, one hairline. It divides a section; it does not open one, and
+                     drawn at the same weight the two would compete to be read as the heading.
+                     ⚠ `bg-overlay` WOULD NEED AN ALPHA and is simply absent here — see the token's
+                     note in CLAUDE.md; a hairline is enough and cannot be invisible on hover.
+                     ⚠ NO RULE ON THE FIRST ONE. The class header directly above it already ends in
+                     `border-y`, so a `border-t` here draws a second line against it — two hairlines
+                     a pixel apart, which reads as a rendering fault rather than as emphasis. The
+                     first sub-header is separated by the class header; only the SECOND needs a rule
+                     of its own, and it is the one that matters (it is where the kind changes). */
+                  <tr className={pi > 0 ? 'border-t border-neutral-800/40' : undefined}>
+                    <td colSpan={LEADING_COLS + cols.size + TRAILING_COLS}
+                      className={`pl-4 pb-1 text-[11px] uppercase tracking-wide text-fg-faint ${
+                        pi > 0 ? 'pt-3' : 'pt-2'}`}>
+                      {part.label}
+                      <span className="ml-2 normal-case tracking-normal text-fg-muted">
+                        {part.rows.length}
+                      </span>
+                      {/* ⚠ A SHARE OF THE CLASS, NOT OF THE BOOK — see `equityParts`. "38% of
+                          Stocks" is the question a division inside Stocks raises; "8% of
+                          everything" is a different one the Weight column already answers. */}
+                      {part.classPct != null && (
+                        <span className="ml-2 normal-case tracking-normal text-fg-faint">
+                          {part.classPct.toFixed(1)}% of {bucketLabel(g.bucket)}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                {part.rows.map((h) => { const i = n++; return (
                 <tr key={[h.isin ?? h.name ?? `${g.bucket}-${i}`,
                   (h.via_names ?? []).join(',')].join('|')}
                   onClick={onTiming && h.name && !isSynthetic(h) ? () => onTiming(h.name!) : undefined}
@@ -1888,8 +2075,11 @@ ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%
                         : `What ${h.name ?? 'this position'} returned over the 12 months ending one month ago.`}
                       note={h.mom_12_1_pct == null ? undefined : 'signal_engine mom_12_1, EUR'}
                       how={h.mom_12_1_pct == null
-                        ? 'A dash is not a zero — 0% would claim it went nowhere.'
-                        : `Price one month ago ÷ price twelve months ago − 1 = ${h.mom_12_1_pct.toFixed(1)}%
+                        ? 'A dash is not a zero — 0% would claim it went nowhere. Needs ~13 months of '
+                          + 'price history; the two risk columns beside it need four years, which is '
+                          + 'why a young listing can show momentum and a dash for volatility.'
+                        : `Price one month ago ÷ price twelve months ago − 1${
+                          momSub(h.mom_12_1_to, h.mom_12_1_from, h.mom_12_1_pct)}
 
 The most recent month is excluded on purpose: it mean-reverts, and including it is what makes a raw 12-month return a poor momentum signal.`} />
                   </td>
@@ -2096,7 +2286,9 @@ ${eur0n(h.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(h.contribution_p
 no result — this position could not be valued at both ends of the window, so there is nothing to divide`} />
                   </td>
                 </tr>
-              ))}
+                ); })}
+                </Fragment>
+              )); })()}
             </tbody>
             );
           })}
@@ -2176,6 +2368,48 @@ ${eur0n(soldSum.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(soldSum.contri
                       </span>
                     )}
                   </td>
+                  {/* ⚠⚠ MOMENTUM, 5Y VOL AND BETA — REAL FIGURES ON A ROW THE BOOK NO LONGER HOLDS,
+                      and they are meaningful for exactly the reason the held rows' are: all three
+                      are properties of the INSTRUMENT, computed from our own daily EUR close
+                      series, which does not stop when a book sells. So the column reads straight
+                      down the table and a sold name can be compared with a held one.
+                      ⚠ THEY WERE BLANK BECAUSE A CLOSED-OUT POSITION CARRIES NO ISIN, not because
+                      the numbers do not exist — the backend now recovers the identity from the name
+                      (`_sold_position_isins`: any book, any snapshot, then the hand pins) and looks
+                      the three up in the SAME `_holding_risk` the held rows use. Measured on the
+                      live fleet: 51 of 52 names that have left a book resolve, and 39 of 40 of
+                      those have a price series behind them.
+                      ⚠ A DASH IS STILL THE ANSWER WHERE IT CANNOT BE RESOLVED, and it now means what
+                      a dash should: we looked. `title` says which of the two it was, because
+                      "no ISIN for this name" and "no price series for that ISIN" send an operator
+                      to two different places.
+                      ⚠ THE COUNT IS HAND-MAINTAINED IN FIVE ROWS — see the thead's own warning. It is
+                      pinned by `portfolioAnalysisColumns.test.ts`, which reads this file and counts
+                      them, because nothing else can: the table needs a DOM to render and this repo
+                      tests no DOM. Filling these three must not change it — still three cells. */}
+                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${
+                    retTone(p.mom_12_1_pct)}`}
+                    title={p.mom_12_1_pct != null
+                      ? `12-1 momentum for ${p.name}, as of TODAY — not as of the sale. The same `
+                        + 'basis as every held row above, which is what makes the column comparable.'
+                      : soldRiskWhy(p)}>
+                    {p.mom_12_1_pct != null ? fmtRet(p.mom_12_1_pct) : '—'}
+                  </td>
+                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft"
+                    title={p.vol_5y_pct != null
+                      ? `5-year annualised volatility of ${p.name} in EUR, as of today.`
+                      : soldRiskWhy(p)}>
+                    {p.vol_5y_pct != null ? `${p.vol_5y_pct.toFixed(1)}%` : '—'}
+                  </td>
+                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft"
+                    title={p.beta_5y != null
+                      ? `5-year beta of ${p.name} against ${benchmark}, on weekly EUR returns.`
+                      : soldRiskWhy(p)}>
+                    {p.beta_5y != null ? p.beta_5y.toFixed(2) : '—'}
+                  </td>
+                  {/* Weight (now) — a dash, exactly as the group row above shows it: the position is
+                      gone, so there IS no current weight, and a 0% would say the book holds none of
+                      something it still holds none of for a different reason. */}
                   <td className="py-1.5 text-right font-mono text-fg-faint">—</td>
                   {/* Same placeholder, same gate — see the class header above. */}
                   {show('opening') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(p.opening_eur)}</td>}
@@ -2626,6 +2860,17 @@ export default function PortfolioAnalysisModal({
   const source: 'model' | 'book' = isBasket ? 'model' : 'book';
   // Which window's excess the reader asked "why" about. Null = not asked.
   const [why, setWhy] = useState<'ytd' | 'since' | null>(null);
+  /**
+   * The Risk panel (active share). Its own flag rather than a third value on `why`, because it is
+   * not a window: `why` selects WHICH PERIOD to attribute, and active share has no period at all
+   * — it is today's weights against today's index. Folding it in would give
+   * `window={why}` a value `AttributionPanel` cannot mean anything by.
+   *
+   * ⚠ THE THREE PANELS ARE MUTUALLY EXCLUSIVE and each opener closes the others. They render in
+   * the same slot under the charts; two at once would push the second off the fold with no hint
+   * that it had opened.
+   */
+  const [risk, setRisk] = useState(false);
   // Which composition bar the reader clicked, to drill into its holdings. {axis, bucket}.
   const [bucket, setBucket] = useState<{ axis: string; bucket: string } | null>(null);
   // Which allocation class the reader picked, to break down. Null = NOTHING selected — the whole
@@ -2848,7 +3093,8 @@ export default function PortfolioAnalysisModal({
                       .filter((p) => p.closed_out)
                       .reduce((a, p) => a + (p.contribution_pct ?? 0), 0)
                     : null}
-                  onSelect={isBasket ? undefined : (b) => { setWhy(null); setBucket(null); setAssetFilter(b); }} />
+                  onSelect={isBasket ? undefined : (b) => {
+                    setWhy(null); setRisk(false); setBucket(null); setAssetFilter(b); }} />
               )}
               {selected
                 ? (
@@ -2873,13 +3119,33 @@ export default function PortfolioAnalysisModal({
                         two lines of content that tile has and a one-word button does not. */}
                     {selected === EQUITY_BUCKET && (
                       <button type="button"
-                        onClick={() => { setBucket(null); setWhy(why === 'ytd' ? null : 'ytd'); }}
+                        onClick={() => { setBucket(null); setRisk(false); setWhy(why === 'ytd' ? null : 'ytd'); }}
                         title="Why? — break the excess into allocation vs selection (Brinson-Fachler attribution)."
                         className={`cursor-pointer rounded-lg border px-4 py-3 min-w-[10rem] min-h-[4.25rem] flex items-center justify-center text-xs font-medium transition-colors ${
                           why === 'ytd'
                             ? 'bg-accent-600 text-white border-transparent'
                             : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300 hover:border-accent-500/50'}`}>
                         Attribution
+                      </button>
+                    )}
+                    {/* ⚠⚠ A STRUCTURAL MEASURE BESIDE A RETURN ONE, AND THE LABEL HAS TO CARRY
+                        THAT. Attribution decomposes what the book EARNED; this describes what it
+                        IS — how far its stock sleeve sits from the index, today, regardless of
+                        performance. Same sleeve rule as the button beside it: an active share is
+                        an EQUITY statement, so it is offered only on Stocks.
+
+                        ⚠ AND IT IS NOT GATED ON `id`. Unlike Attribution it takes the holdings in
+                        its request body, so an ad-hoc basket answers it too — see
+                        `ActiveShareRequest`. */}
+                    {selected === EQUITY_BUCKET && (
+                      <button type="button"
+                        onClick={() => { setBucket(null); setWhy(null); setRisk(!risk); }}
+                        title="Risk — how far the stock sleeve sits from the benchmark (active share), and how much that difference has actually moved (realised tracking error)."
+                        className={`cursor-pointer rounded-lg border px-4 py-3 min-w-[10rem] min-h-[4.25rem] flex items-center justify-center text-xs font-medium transition-colors ${
+                          risk
+                            ? 'bg-accent-600 text-white border-transparent'
+                            : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300 hover:border-accent-500/50'}`}>
+                        Risk
                       </button>
                     )}
                   </div>
@@ -2955,23 +3221,21 @@ export default function PortfolioAnalysisModal({
                     <Chart key={a.axis} axis={a.axis} rows={a.rows}
                       unpricedPct={a.unpriced_pct} excluded={a.excluded} stale={stale}
                       benchmark={data.benchmark ?? benchmark}
-                      onBucket={(axis, b) => { if (isBasket) return; setWhy(null); setBucket(
+                      onBucket={(axis, b) => { if (isBasket) return; setWhy(null); setRisk(false); setBucket(
                         (prev) => prev && prev.axis === axis && prev.bucket === b ? null : { axis, bucket: b }); }}
                       selected={bucket?.axis === a.axis ? bucket.bucket : null} />
                   ))}
                 </div>
-                {(why || bucket) && (
+                {/* ⚠⚠ THE BUCKET PANEL STAYS IN FLOW; RISK AND ATTRIBUTION DO NOT. This one is
+                    opened by clicking a BAR in the chart directly above it, so appearing beneath
+                    that bar is the right answer — it is already beside what opened it. The other
+                    two are opened from buttons at the TOP of the modal and used to render here,
+                    a screen further down, which is why they are dialogs now. See `PanelDialog`. */}
+                {bucket && (
                   <div className="mt-4">
-                    {why ? (
-                      <AttributionPanel id={id ?? 0} benchmark={data.benchmark ?? benchmark} window={why}
-                        source={source} portfolioAsOf={data.returns?.portfolio_as_of}
-                        benchmarkAsOf={data.returns?.benchmark_as_of}
-                        onClose={() => setWhy(null)} />
-                    ) : bucket ? (
-                      <BucketDetailPanel id={id ?? 0} benchmark={data.benchmark ?? benchmark}
-                        axis={bucket.axis} bucket={bucket.bucket} source={source}
-                        onClose={() => setBucket(null)} />
-                    ) : null}
+                    <BucketDetailPanel id={id ?? 0} benchmark={data.benchmark ?? benchmark}
+                      axis={bucket.axis} bucket={bucket.bucket} source={source}
+                      onClose={() => setBucket(null)} />
                   </div>
                 )}
               </>
@@ -2993,6 +3257,48 @@ export default function PortfolioAnalysisModal({
           to another's numbers quietly de-ambers a staleness that really is ours to fix. They sit
           in this box only so their dismissal does not bubble up and close the modal behind them;
           that is a layout reason, not a claim about where their data came from. */}
+      {/* ⚠ RAISED OUT OF THE PAGE FLOW, STILL INSIDE THE CONTENT BOX — the same placement rule the
+          Fundamental and Owner-earnings dialogs below follow, and for the same reason: mounted
+          beside the backdrop instead, dismissing one of these would close the analysis behind it.
+
+          ⚠⚠ BUT ABOVE THE `at={undefined}` PROVIDER, NOT BELOW IT, AND THAT IS THE OPPOSITE CHOICE
+          FROM THE TWO DIALOGS UNDER IT. Those describe a DIFFERENT source object — one holding's
+          trades, one company's fundamentals — so inheriting this book's "we read it at …" would
+          de-amber a staleness that is not theirs. Risk and Attribution describe THIS book's own
+          holdings and returns, from the payload above, so the book's fetch time is exactly the
+          right provenance for them to inherit.
+
+          ⚠ Each re-checks `data`: they sit outside the `data && (…)` subtree that renders the
+          charts, so it is genuinely nullable here. */}
+      {risk && data && (
+        <PanelDialog onClose={() => setRisk(false)}>
+          {/* ⚠ THE HOLDINGS THE TABLE IS SHOWING, PASSED STRAIGHT THROUGH. The panel does not
+              re-derive a weight or re-decide what is a fund — both were settled server-side when
+              this payload was built, and a risk figure the Holdings table cannot reproduce is
+              worse than none.
+              ⚠ `book_holdings`, NOT `holdings`: the latter is a COUNT on this payload
+              (`holdings: int`), so the obvious name silently types as a number. */}
+          <ActiveSharePanel benchmark={data.benchmark ?? benchmark}
+            holdings={(data.book_holdings ?? []).map((h): ActiveShareHolding => ({
+              isin: h.isin, name: h.name,
+              weight_pct: h.weight_now_pct ?? 0, is_fund: !!h.is_fund,
+              // ⚠ THE EUROS AND THE CURRENCY THIS PAYLOAD ALREADY CARRIES. Only the
+              // Effective-positions view reads them — the other six are scale-free — but they
+              // ride on the ONE body so the seven views cannot end up describing seven
+              // slightly different portfolios.
+              value_eur: h.current_value_eur, currency: h.currency,
+            }))}
+            onClose={() => setRisk(false)} />
+        </PanelDialog>
+      )}
+      {why && data && (
+        <PanelDialog onClose={() => setWhy(null)}>
+          <AttributionPanel id={id ?? 0} benchmark={data.benchmark ?? benchmark} window={why}
+            source={source} portfolioAsOf={data.returns?.portfolio_as_of}
+            benchmarkAsOf={data.returns?.benchmark_as_of}
+            onClose={() => setWhy(null)} />
+        </PanelDialog>
+      )}
       <ProvenanceFetchedAt at={undefined}>
       {timingFor && id && (
         <HoldingTimingModal portfolioId={id} name={timingFor} onClose={() => setTimingFor(null)} />

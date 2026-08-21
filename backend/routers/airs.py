@@ -1135,6 +1135,11 @@ class BookHoldingDetail(BaseModel):
     # ⚠ IT NEEDS ONLY ~13 MONTHS, unlike the risk columns' four years, so a young listing can have
     # momentum and a dash for vol.
     mom_12_1_pct: float | None = None
+    # ⚠ THE TWO PRICES BEHIND IT (EUR), so the ⓘ can show `from ÷ to − 1 = result` instead of
+    # asserting the result. Null together with the figure, and null when the legs could not be
+    # read even though it could — the tooltip then states the formula without substituting it.
+    mom_12_1_from: float | None = None
+    mom_12_1_to: float | None = None
     own_return_source: str | None = None      # "airs" | "yfinance" | None
     # ⚠ WHICH AIRS BOOK THE FIGURE CAME FROM, because it is no longer always this one. A leg held
     # only inside a certificate is valued by the account behind that certificate — the book that
@@ -1246,6 +1251,29 @@ class LedgerPosition(BaseModel):
     first_sale: str | None = None
     last_sale: str | None = None
     prior_year_eur: float = 0.0
+    # ⚠⚠ THE INSTRUMENT'S OWN RISK FIGURES, ON A ROW THE BOOK NO LONGER HOLDS — and they are
+    # meaningful precisely because they are properties of the INSTRUMENT, not of the position.
+    # Momentum, volatility and beta are computed from our own daily EUR close series, which does
+    # not stop when a book sells; the same three columns therefore say the same thing on a sold row
+    # as on a held one, which is what makes the table readable straight down.
+    #
+    # ⚠ AS OF TODAY, NOT AS OF THE SALE. That is the same basis as every held row above — which is
+    # the point, since a column comparable down its own length is worth more here than one that
+    # answers "what was its beta the day I sold it". The UI says so on the cells.
+    #
+    # ⚠ `isin` IS RESOLVED, NOT CARRIED. A closed-out position has no holdings row and therefore no
+    # ISIN of its own; this is what `_sold_position_isins` recovered, and it is on the wire so the
+    # reader can see WHICH instrument the three numbers describe. Null when it could not be
+    # resolved, and then the three are null too — never a figure for an instrument we cannot name.
+    isin: str | None = None
+    vol_5y_pct: float | None = None
+    beta_5y: float | None = None
+    mom_12_1_pct: float | None = None
+    # ⚠ THE TWO PRICES BEHIND IT (EUR), so the ⓘ can show `from ÷ to − 1 = result` instead of
+    # asserting the result. Null together with the figure, and null when the legs could not be
+    # read even though it could — the tooltip then states the formula without substituting it.
+    mom_12_1_from: float | None = None
+    mom_12_1_to: float | None = None
 
 
 class RealisedBlock(BaseModel):
@@ -1578,6 +1606,553 @@ async def airs_basket_analysis(req: BasketRequest, benchmark: str = "SP500"):
     )
 
     return await compute_basket_analysis_async(req.holdings, benchmark, req.label)
+
+
+class ActiveShareRow(BaseModel):
+    """One ISSUER, on both sides. ⚠ NOT one holding and not one listing — a book holding two share
+    classes of the same company contributes ONE of these, with the weights summed. See
+    `_active_share._issuer_key`."""
+
+    name: str
+    portfolio_pct: float = 0.0
+    benchmark_pct: float = 0.0
+    #: `portfolio_pct - benchmark_pct`. Positive = overweight; a name we do not hold is negative.
+    active_pct: float = 0.0
+    held: bool = False
+
+
+class ActiveShareUnmatched(BaseModel):
+    """A stock we hold that could not be resolved to an issuer name, so it can only be ACTIVE.
+
+    ⚠ IT IS IN THE FIGURE, AND IT IS LISTED BECAUSE IT IS. Dropping it would renormalise the rest
+    upward and quietly LOWER active share — the flattering direction — so the honest choice is to
+    count it and show what could not be matched.
+    """
+
+    name: str | None = None
+    isin: str | None = None
+    weight_pct: float = 0.0
+
+
+class ActiveShare(BaseModel):
+    """`AS = ½ Σ|wᵖ − wᵇ|` over the union of both name sets — see `routers/_active_share.py`."""
+
+    available: bool = True
+    #: Why not, when `available` is false. A real answer, never an empty panel.
+    reason: str | None = None
+    benchmark: str
+
+    active_share_pct: float | None = None
+    #: `Σ min(wᵖ, wᵇ)`, and it is `100 − active_share_pct` by construction. Returned rather than
+    #: derived on the client so the identity a reader checks holds to the digit.
+    overlap_pct: float | None = None
+
+    #: How much of the WHOLE book the compared sleeve is. ⚠ The comparison assumes the individual
+    #: stocks are 100%; this is the number that stops that assumption being silent.
+    stocks_pct: float | None = None
+    n_holdings: int = 0
+    n_in_benchmark: int = 0
+    #: The book's weight in names the index does not hold at all — the SELECTION half of the bet,
+    #: as opposed to sizing a name the index also has.
+    off_benchmark_pct: float | None = None
+
+    benchmark_members: int = 0
+    #: ⚠ How much of the index we could price. A missing constituent does not lose its weight, it
+    #: redistributes it — so an unpriceable name we do not hold makes active share read LOW.
+    benchmark_covered_pct: float | None = None
+
+    unresolved: list[ActiveShareUnmatched] = []
+    rows: list[ActiveShareRow] = []
+
+
+class ActiveShareHolding(BaseModel):
+    isin: str | None = None
+    name: str | None = None
+    weight_pct: float = 0.0
+    #: ⚠ THE SERVER'S OWN CLASSIFICATION, ROUND-TRIPPED. It was set by `_is_fund` when the payload
+    #: was built; sending it back is what keeps ONE definition of "this is a fund, not a stock"
+    #: rather than a second one here that could drift from the Stocks bucket on screen.
+    is_fund: bool = False
+    #: The position's EUR value — AIRS's own `current_value_eur`, not a `q·P·X` of ours.
+    #:
+    #: ⚠ OPTIONAL, because an ad-hoc basket has weights and no euros. Every euro figure in the
+    #: exposure view is then absent rather than zero: zero would claim the position is worthless.
+    #: ⚠ IGNORED BY THE OTHER SIX VIEWS, which are all scale-free — sent once on one body so the
+    #: seven views cannot end up describing seven slightly different portfolios.
+    value_eur: float | None = None
+    #: ⚠ THE LISTING'S currency, which is the FX exposure actually borne. NOT the company's
+    #: reporting currency — a different and softer claim. See `_portfolio_exposure`.
+    currency: str | None = None
+
+
+class ActiveShareRequest(BaseModel):
+    """The holdings the Analyse modal is ALREADY showing.
+
+    ⚠⚠ THE WEIGHTS COME FROM THE CLIENT ON PURPOSE, WHICH IS THE OPPOSITE OF THIS FILE'S USUAL
+    RULE. Everywhere else a weight is computed server-side precisely so two surfaces cannot
+    disagree — but this panel sits one click from the Holdings table, and its whole job is to
+    describe THAT book. Re-deriving the weights here would give the risk figure a second
+    denominator (start weights? design percentages? looked-through or not?) and the first question
+    anybody asks of a 71% active share is which rows produced it. So it consumes the displayed
+    numbers, and cannot disagree with the table by construction.
+
+    ⚠ IT ALSO REMOVES THE SECOND HOLDINGS PIPELINE. A model portfolio and an ad-hoc basket reach
+    this with the same body, so unlike Attribution there is no `portfolio_id` variant to keep in
+    step — one route serves both, the same way `basket/analysis` does for the composition.
+    """
+
+    holdings: list[ActiveShareHolding] = []
+
+
+@router.post("/api/airs/portfolio/active-share", response_model=ActiveShare)
+async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = "ACWI"):
+    """How much of the book's stock sleeve is NOT the benchmark.
+
+    ⚠ ON DEMAND, NOT PART OF THE ANALYSE PAYLOAD. Answering it needs the index's constituents
+    (`_asset_benchmark.members` — 1,700 rows and their caps for ACWI), and the Analyse modal is ONE
+    request with no partial paint, so folding this in would put that read on the critical path of
+    every open for a panel most opens never look at. Same bargain Attribution already strikes.
+
+    ⚠ THE INDIVIDUAL STOCKS ARE TREATED AS 100% OF THE PORTFOLIO. Funds, cash and bonds are
+    dropped and the rest renormalised — otherwise liquidity counts as an active bet against every
+    index name at once, which is a different (and much less comparable) measure. `stocks_pct` says
+    what fraction of the book that sleeve actually is.
+    """
+    from routers._active_share import compute_active_share  # noqa: PLC0415
+
+    return await asyncio.to_thread(
+        compute_active_share, [h.model_dump() for h in req.holdings], benchmark)
+
+
+class TrackingError(BaseModel):
+    """Realised (ex-post) tracking error of the stock sleeve — see `routers/_tracking_error.py`.
+
+    ⚠⚠ `TE = √(1/(T−1) Σ (aₜ − ā)²) · √f`, WITH ā SUBTRACTED and Bessel applied. The other
+    convention (√(Σaₜ²/T)) is also called tracking error and is a different number; this codebase
+    picks one and routes it through `annualized_stats`, the same function every other volatility on
+    the screen goes through.
+
+    ⚠ EX-POST, NOT EX-ANTE. There is no covariance-matrix forecast here, and the two routinely
+    disagree — so every label says "realised" rather than leaving the reader to assume.
+    """
+
+    available: bool = True
+    reason: str | None = None
+    benchmark: str
+    #: daily | weekly | monthly. ⚠ Weekly is the DEFAULT and the honest one — see `cadence_note`.
+    frequency: str = "weekly"
+    #: The `f` in the formula: 252 / 52 / 12.
+    periods_per_year: float | None = None
+    #: `T` — how many active returns the spread was taken over.
+    observations: int = 0
+    years: int | None = None
+
+    tracking_error_pct: float | None = None
+    #: ⚠ THE QUANTITY TE IS THE SPREAD **OF**, returned beside it because the two are constantly
+    #: confused. A book can have a large tracking error and no active return whatsoever.
+    mean_active_per_period_pct: float | None = None
+    active_return_ann_pct: float | None = None
+    #: Active return per unit of the risk taken to earn it. Null when TE is ~0 (the denominator).
+    information_ratio: float | None = None
+
+    #: How much of the sleeve the average observation covered. Below 100% some holding had no price
+    #: at one end of that step and the rest were renormalised over — never carried at zero return,
+    #: which would damp the measured volatility in the flattering direction.
+    avg_weight_covered_pct: float | None = None
+    priced_holdings: int = 0
+    total_holdings: int = 0
+    #: The investable tracker the difference was taken against — a real fund with a real series,
+    #: never the reconstructed index (which has no tradeable price to difference).
+    benchmark_isin: str | None = None
+    #: Present only on `daily`: non-synchronous closes lower the measured covariance and therefore
+    #: INFLATE the spread of a difference. Carried with the number rather than left in a doc.
+    cadence_note: str | None = None
+
+
+@router.post("/api/airs/portfolio/tracking-error", response_model=TrackingError)
+async def airs_portfolio_tracking_error(req: ActiveShareRequest, benchmark: str = "ACWI",
+                                        frequency: str = "weekly", years: int = 5):
+    """Volatility of the active return, annualised — the Risk panel's second view.
+
+    ⚠ THE SAME BODY AS `active-share`, DELIBERATELY. The two views describe ONE portfolio (the
+    individual stocks, renormalised to 100%), and sharing the request model is what stops them
+    drifting into describing two — an active share over the stock sleeve beside a tracking error
+    over the whole book would be two answers to two questions under one heading.
+
+    ⚠ SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for
+    every holding plus the tracker, and most opens of the Risk panel never switch to it.
+    """
+    from routers._tracking_error import compute_tracking_error  # noqa: PLC0415
+
+    return await asyncio.to_thread(
+        compute_tracking_error, [h.model_dump() for h in req.holdings], benchmark,
+        frequency, years)
+
+
+class CorrelationPair(BaseModel):
+    a: str
+    b: str
+    rho: float
+
+
+class RiskCorrelation(BaseModel):
+    """ρ as a RISK measure — see `routers/_portfolio_correlation_risk.py`.
+
+    ⚠⚠ NOT ATTRIBUTION, AND THE TWO MUST STAY SEPARATE PANELS. Attribution decomposes the active
+    return into allocation + selection + interaction, terms that SUM to it exactly. Correlation
+    appears nowhere in that decomposition and sums to nothing: it says how far the book CAN diverge,
+    where attribution says where the divergence came from. A combined view would imply they
+    reconcile, and they are not that kind of number.
+    """
+
+    available: bool = True
+    reason: str | None = None
+    benchmark: str
+    frequency: str = "weekly"
+    periods_per_year: float | None = None
+    observations: int = 0
+    years: int | None = None
+
+    #: ρ between the book's return series and the benchmark's. Full precision — `r_squared` is its
+    #: square, and a rounded ρ beside an unrounded R² would not reconcile on screen.
+    benchmark_corr: float | None = None
+    #: ρ² — the share of the book's movement the index explains.
+    r_squared: float | None = None
+    portfolio_vol_pct: float | None = None
+    benchmark_vol_pct: float | None = None
+    #: The SAME figure the tracking-error view reports, from the same series.
+    active_vol_pct: float | None = None
+    #: ⚠ THE OTHER SIDE OF `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ`, recomputed from ρ so the identity can be
+    #: SEEN to hold rather than asserted. It is what links this view to the tracking-error one.
+    implied_active_vol_pct: float | None = None
+    #: How far the two sides miss, in pp. Floating-point noise when all is well; anything visible
+    #: means the two series stopped being the same two series.
+    identity_gap_pp: float | None = None
+
+    #: Position labels, ordered by weight descending — `matrix[i][j]` is ρ(labels[i], labels[j]).
+    labels: list[str] = []
+    #: ⚠ `null` FOR A PAIR WITH TOO LITTLE OVERLAP, never a faint colour. See `MIN_PAIR_OBS`.
+    matrix: list[list[float | None]] = []
+    #: Mean off-diagonal ρ — the one number that summarises a matrix. Unweighted on purpose: it is
+    #: a question about the NAMES, not about the sizing.
+    mean_pair_corr: float | None = None
+    pairs_measured: int = 0
+    min_pair_observations: int = 0
+    least_correlated: list[CorrelationPair] = []
+    most_correlated: list[CorrelationPair] = []
+
+    priced_holdings: int = 0
+    total_holdings: int = 0
+    min_observations: int = 0
+    cadence_note: str | None = None
+
+
+@router.post("/api/airs/portfolio/risk-correlation", response_model=RiskCorrelation)
+async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: str = "ACWI",
+                                          frequency: str = "weekly", years: int = 5):
+    """Correlation to the benchmark, and between the positions — the Risk panel's third view.
+
+    ⚠ THE SAME BODY AND THE SAME SERIES AS `tracking-error`, so `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ` holds
+    between the two views rather than approximately holding. See `build_paired_series`.
+
+    ⚠ SEPARATE FROM ATTRIBUTION BY DESIGN. That lives in its own dialog and decomposes the active
+    return; this one measures dispersion. Merging them would imply a reconciliation that does not
+    exist.
+    """
+    from routers._portfolio_correlation_risk import compute_risk_correlation  # noqa: PLC0415
+
+    return await asyncio.to_thread(
+        compute_risk_correlation, [h.model_dump() for h in req.holdings], benchmark,
+        frequency, years)
+
+
+class PortfolioVolatility(BaseModel):
+    """σ of the stock sleeve's OWN returns — see `routers/_portfolio_volatility.py`.
+
+    ⚠ SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the
+    correlation view puts inside `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ`. Two σₚ one click apart that
+    disagreed would tell the reader one of them is wrong and nothing about which.
+
+    ⚠⚠ NO CASH-FLOW CONTAMINATION, BY CONSTRUCTION RATHER THAN BY CHAIN-LINKING. This is not an
+    account-value series — it is a weighted basket of instrument price returns — so a deposit or a
+    withdrawal is simply not in it. That is what a time-weighted return exists to achieve. The cost
+    is the other caveat: the weights are TODAY'S, carried backwards.
+    """
+
+    available: bool = True
+    reason: str | None = None
+    benchmark: str
+    frequency: str = "weekly"
+    periods_per_year: float | None = None
+    observations: int = 0
+    years: int | None = None
+
+    volatility_pct: float | None = None
+    benchmark_volatility_pct: float | None = None
+    #: ⚠ SORTINO'S CONVENTION: `√(mean(min(R,0)²))·√f` — divided by ALL n, against a target of 0.
+    #: The semi-deviation (below-MEAN observations only, divided by how many there are) is also
+    #: called downside deviation and reads higher. This one is what `sortino` below is built on.
+    downside_dev_pct: float | None = None
+    benchmark_downside_dev_pct: float | None = None
+
+    return_ann_pct: float | None = None
+    benchmark_return_ann_pct: float | None = None
+    sharpe: float | None = None
+    sortino: float | None = None
+    #: ⚠ STATED, because a Sharpe without its risk-free rate is not comparable with anybody else's.
+    risk_free_pct: float = 0.0
+
+    #: ⚠ WHAT A CLIENT ACTUALLY FELT. Nobody has experienced "18% annualised volatility"; they
+    #: have experienced the worst week. For a fat-tailed book the two are far apart, which is
+    #: precisely when σ alone misleads.
+    worst_period_pct: float | None = None
+    best_period_pct: float | None = None
+    negative_periods_pct: float | None = None
+
+    priced_holdings: int = 0
+    total_holdings: int = 0
+    cadence_note: str | None = None
+
+
+@router.post("/api/airs/portfolio/volatility", response_model=PortfolioVolatility)
+async def airs_portfolio_volatility(req: ActiveShareRequest, benchmark: str = "ACWI",
+                                    frequency: str = "weekly", years: int = 5):
+    """Standard deviation of the sleeve's own returns, and its downside half.
+
+    ⚠ `benchmark` IS NOT WHAT IS MEASURED HERE — volatility is a single-series statistic. It is
+    carried so the index's own σ can sit beside the book's for scale, and so this view uses the
+    identical series the other three do.
+    """
+    from routers._portfolio_volatility import compute_volatility  # noqa: PLC0415
+
+    return await asyncio.to_thread(
+        compute_volatility, [h.model_dump() for h in req.holdings], benchmark, frequency, years)
+
+
+class DrawdownEpisode(BaseModel):
+    """One peak → trough → recovery.
+
+    ⚠ AN EPISODE ENDS WHEN THE OLD PEAK IS REGAINED, not when the series turns up. A 40% fall that
+    bounces 5% and then falls further is ONE drawdown; splitting on direction would report a set of
+    shallow dips and no crash.
+    """
+
+    depth_pct: float
+    peak_date: str | None = None
+    trough_date: str | None = None
+    #: ⚠ NULL WHILE STILL UNDERWATER. Inventing today's date here would report a recovery that has
+    #: not happened — which is the one thing a drawdown panel must never do.
+    recovery_date: str | None = None
+    recovered: bool = False
+    #: In PERIODS of the stated cadence, never "days" — the view names the cadence beside them.
+    decline_periods: int = 0
+    recovery_periods: int | None = None
+    total_periods: int | None = None
+
+
+class PortfolioDrawdown(BaseModel):
+    """Max drawdown of the RECONSTRUCTED sleeve — see `routers/_portfolio_drawdown.py`.
+
+    ⚠⚠ NOT THE CLIENT'S REALISED DRAWDOWN, and the two are not interchangeable. This rebuilds a
+    series from the holdings as they stand TODAY: look-ahead bias (those weights were chosen with
+    hindsight) and survivorship bias (names since sold are absent, and the sold ones skew towards
+    the fallers). The client's own figure comes from the AIRS returns, with real trades, real costs
+    and real timing. Every label here says which one it is.
+    """
+
+    available: bool = True
+    reason: str | None = None
+    benchmark: str
+    #: ⚠ DEFAULTS TO **DAILY**, unlike the other risk views. They compare two series whose closes
+    #: are hours apart and default to weekly to remove that bias; a drawdown compares a series with
+    #: itself, so the bias does not exist — and coarsening hides any dip that recovers inside the
+    #: period. Monthly MDD is structurally shallower by percentage points.
+    frequency: str = "daily"
+    periods_per_year: float | None = None
+    observations: int = 0
+    years: int | None = None
+
+    max_drawdown_pct: float | None = None
+    benchmark_max_drawdown_pct: float | None = None
+    #: How far below its own high water mark the series ends. "Worst ever −31%" and "down 28% right
+    #: now" are very different conversations, and the second is the one being had.
+    current_drawdown_pct: float | None = None
+    in_drawdown: bool = False
+
+    worst: DrawdownEpisode | None = None
+    #: The deepest few, because one number hides whether it was a pattern or an event: one −30%
+    #: and four −25%s have the same maximum and are not the same risk.
+    episodes: list[DrawdownEpisode] = []
+    episodes_total: int = 0
+
+    #: ⚠⚠ THE SAME MDD AT ALL THREE CADENCES, MEASURED IN THE SAME REQUEST. The gap between them
+    #: is the thing this view has to be honest about, and a reader cannot compare figures they must
+    #: re-request one at a time. `null` for a cadence with too little overlap to measure.
+    by_frequency: dict[str, float | None] = {}
+
+    priced_holdings: int = 0
+    total_holdings: int = 0
+
+
+@router.post("/api/airs/portfolio/drawdown", response_model=PortfolioDrawdown)
+async def airs_portfolio_drawdown(req: ActiveShareRequest, benchmark: str = "ACWI",
+                                  frequency: str = "daily", years: int = 5):
+    """Peak-to-trough falls of the reconstructed stock sleeve, with their dates.
+
+    ⚠ ONE PRICE LOAD SERVES ALL THREE CADENCES — the load is the expensive part and re-bucketing
+    is free, so the frequency comparison costs no extra round trips.
+    """
+    from routers._portfolio_drawdown import compute_drawdown  # noqa: PLC0415
+
+    return await asyncio.to_thread(
+        compute_drawdown, [h.model_dump() for h in req.holdings], benchmark, frequency, years)
+
+
+class ConcentrationRow(BaseModel):
+    """One ISSUER in the top of the book — not one line. See `_active_share._issuer_key`."""
+
+    rank: int
+    name: str
+    weight_pct: float
+    cumulative_pct: float
+    #: ⚠ THE INDEX'S WEIGHT IN THE SAME ISSUER, so a large position reads as a large BET or merely
+    #: as a large company. Apple at 6% is not concentration when the index holds 5%.
+    benchmark_pct: float = 0.0
+
+
+class PortfolioConcentration(BaseModel):
+    """`C₁₀ = Σ w₍ᵢ₎` and `HHI = Σ wᵢ²` — see `routers/_portfolio_concentration.py`.
+
+    ⚠⚠ ON ISSUERS, NOT LINES. Alphabet A + Alphabet C is ONE position; counting two would
+    understate concentration exactly at the top, where the ten largest are decided.
+
+    ⚠⚠ BOTH DENOMINATORS ARE RETURNED because the choice changes the number: `top10_pct` is of the
+    stock sleeve (comparable across books, the panel's convention) and `top10_of_book_pct` is of
+    everything including cash and funds (true in absolute terms). Choosing one silently would be
+    picking a side of a real question.
+    """
+
+    available: bool = True
+    reason: str | None = None
+    benchmark: str
+
+    issuers: int = 0
+    benchmark_issuers: int = 0
+
+    top1_pct: float | None = None
+    top3_pct: float | None = None
+    top5_pct: float | None = None
+    top10_pct: float | None = None
+    top20_pct: float | None = None
+    top10_of_book_pct: float | None = None
+    #: What fraction of the whole book the measured sleeve is — the scale between the two above.
+    stocks_pct: float | None = None
+
+    #: ⚠ ON FRACTIONS, NOT PERCENTAGES. `Σw²` over percentages is 10,000× larger (the antitrust
+    #: convention) and `N_eff = 1/HHI` only inverts cleanly on fractions.
+    hhi: float | None = None
+    #: `1/HHI` — the "effective number of positions". An equal-weight book of N names returns
+    #: exactly N; forty names dominated by five returns far fewer. ⚠ A better measure than C₁₀,
+    #: which cuts at an arbitrary ten: two books with the same C₁₀ can be an even ten-name
+    #: portfolio and one dominated by its top three.
+    effective_positions: float | None = None
+
+    benchmark_top10_pct: float | None = None
+    benchmark_hhi: float | None = None
+    benchmark_effective_positions: float | None = None
+
+    top: list[ConcentrationRow] = []
+    benchmark_covered_pct: float | None = None
+    unresolved: int = 0
+
+
+@router.post("/api/airs/portfolio/concentration", response_model=PortfolioConcentration)
+async def airs_portfolio_concentration(req: ActiveShareRequest, benchmark: str = "ACWI"):
+    """How much of the book sits in how few issuers, beside the index's own concentration.
+
+    ⚠ SAME ISSUER FOLDING AS ACTIVE SHARE (`build_issuer_weights`), so the two views cannot
+    disagree about how many positions the book has.
+
+    ⚠ NO PRICE SERIES AT ALL — this is a weights-only measure, so it is much cheaper than the
+    other risk views and needs no cadence.
+    """
+    from routers._portfolio_concentration import compute_concentration  # noqa: PLC0415
+
+    return await asyncio.to_thread(
+        compute_concentration, [h.model_dump() for h in req.holdings], benchmark)
+
+
+class ExposurePosition(BaseModel):
+    """One ISSUER's effective position. `lines` > 1 means several holdings folded into it."""
+
+    name: str
+    weight_pct: float
+    value_eur: float | None = None
+    lines: int = 1
+    #: ⚠ NAMED WHEN ONE ISSUER SPANS SEVERAL CURRENCIES — two listings of one company is a single
+    #: position and two FX exposures, which the issuer fold would otherwise hide by design.
+    currencies: list[str] = []
+
+
+class CurrencyExposure(BaseModel):
+    currency: str
+    weight_pct: float
+    value_eur: float | None = None
+    issuers: int = 0
+
+
+class PortfolioExposure(BaseModel):
+    """Effective positions — `Eᵢ = qᵢ·Pᵢ·Xᵢ` — see `routers/_portfolio_exposure.py`.
+
+    ⚠⚠ WE DO NOT COMPUTE THAT PRODUCT. `airs_holding` carries a quantity, but it also carries
+    `current_value_eur`: AIRS's OWN valuation, already in euros, already struck on its own date.
+    That is the number on the client's statement. Re-deriving it from our close and our FX rate
+    would produce a second figure disagreeing with the statement on most rows, with nothing on
+    screen able to say which was right. `Eᵢ` here IS that valuation, folded per issuer.
+
+    ⚠ TRADE DATE vs SETTLEMENT DATE IS AIRS'S CONVENTION AND WE CANNOT VERIFY IT FROM HERE. The
+    Vermogensoverzicht exposes no flag saying which basis it used, so a book with a very recent
+    trade may differ from a trade-date view by that trade's value with nothing in our data showing
+    it. Stated rather than assumed away.
+    """
+
+    available: bool = True
+    reason: str | None = None
+    benchmark: str
+
+    #: False for an ad-hoc basket — weights only, no euros anywhere.
+    has_values: bool = False
+    issuers: int = 0
+    lines: int = 0
+    #: ⚠ `lines − issuers`, the fold made visible. It is the one-line answer to "why does this
+    #: panel count differently from the Holdings table".
+    folded_lines: int = 0
+
+    sleeve_eur: float | None = None
+    book_eur: float | None = None
+    other_eur: float | None = None
+    stocks_pct: float | None = None
+
+    positions: list[ExposurePosition] = []
+    currencies: list[CurrencyExposure] = []
+    #: ⚠ WEIGHT WITH NO CURRENCY WE COULD ASSIGN. Folding it into EUR is the flattering default —
+    #: it makes a book look more domestic than it is — so it is reported separately.
+    currency_unknown_pct: float = 0.0
+    unresolved: int = 0
+
+
+@router.post("/api/airs/portfolio/exposure", response_model=PortfolioExposure)
+async def airs_portfolio_exposure(req: ActiveShareRequest, benchmark: str = "ACWI"):
+    """The euros behind the weights, per issuer, and the currency split of the sleeve.
+
+    ⚠ SAME ISSUER FOLDING AS ACTIVE SHARE AND CONCENTRATION (`build_issuer_weights`) — built once
+    and read by all three, which is what stops three panels showing three sets of weights for one
+    portfolio.
+    """
+    from routers._portfolio_exposure import compute_exposure  # noqa: PLC0415
+
+    return await asyncio.to_thread(
+        compute_exposure, [h.model_dump() for h in req.holdings], benchmark)
 
 
 class AttributionName(BaseModel):
@@ -3483,7 +4058,7 @@ class PortfolioFundamentalsJob(BaseModel):
              response_model=PortfolioFundamentalsJob)
 async def ingest_portfolio_fundamentals_job(portfolio_id: int, force: bool = True,
                                             only_due: bool = True, feeds: str = "statements",
-                                            limit: int = 0):
+                                            limit: int = 0, prices: bool = False):
     """Refresh GuruFocus fundamentals for every company this model portfolio holds.
 
     The portfolio-scoped twin of the benchmark fill. ⚠ IT IS THE SAME FILL, not a copy — see
@@ -3528,8 +4103,12 @@ async def ingest_portfolio_fundamentals_job(portfolio_id: int, force: bool = Tru
     ids, holdings, no_fundamentals, no_company = _fundamentals_scope(isins)
 
     def _work(ctx) -> str:
+        # ⚠ `prices` IS OFF BY DEFAULT so every existing caller is unchanged. The Fundamental modal
+        # asks for it because its own tabs price things — Quick Valuation shows today's share price
+        # and charts the multiple off the daily closes, neither of which is one of the three
+        # GuruFocus fundamentals feeds. See `_refresh_prices`.
         return fill_company_ids(ctx, name, ids, feeds=feeds, force=force, limit=limit,
-                                only_due=only_due)
+                                only_due=only_due, prices=prices)
 
     job, reused = job_registry.start("fundamentals.portfolio", name, _work)
     return {"job_id": job.id, "label": name, "holdings": holdings, "reachable": len(ids),
@@ -3541,7 +4120,7 @@ async def ingest_portfolio_fundamentals_job(portfolio_id: int, force: bool = Tru
              response_model=PortfolioFundamentalsJob)
 async def ingest_basket_fundamentals_job(req: BasketRequest, force: bool = True,
                                          only_due: bool = True, feeds: str = "statements",
-                                         limit: int = 0):
+                                         limit: int = 0, prices: bool = False):
     """The same fill, for a basket of holdings rather than a stored model portfolio.
 
     ⚠⚠ IT EXISTS BECAUSE MOST BOOKS ON /management-dashboard HAVE NO FIXED MODEL. `openModal` in
@@ -3563,8 +4142,15 @@ async def ingest_basket_fundamentals_job(req: BasketRequest, force: bool = True,
     ids, holdings, no_fundamentals, no_company = _fundamentals_scope(isins)
 
     def _work(ctx) -> str:
+        # ⚠ `prices` FORWARDED, and it was not. This route DECLARED the parameter and then dropped
+        # it on the floor, so the Quick Valuation refresh silently skipped the price leg on every
+        # un-paired book — which, per the ⚠⚠ above, is most books on /management-dashboard. The
+        # model-portfolio twin had the opposite half of the same mistake: it passed `prices=prices`
+        # without declaring it, so that path raised `NameError` instead. One feature, two routes,
+        # neither working, and in opposite directions — a loud 500 on the rarer path and a silent
+        # no-op on the common one.
         return fill_company_ids(ctx, name, ids, feeds=feeds, force=force, limit=limit,
-                                only_due=only_due)
+                                only_due=only_due, prices=prices)
 
     job, reused = job_registry.start("fundamentals.basket", name, _work)
     return {"job_id": job.id, "label": name, "holdings": holdings, "reachable": len(ids),

@@ -1,3 +1,4 @@
+import logging
 import os
 import queue
 import re
@@ -7,6 +8,8 @@ from urllib.parse import urlencode
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
+
+_log = logging.getLogger(__name__)
 
 BASE_URL = "https://bustelberg.airspms.cloud"
 
@@ -625,6 +628,65 @@ FRONT_OFFICE_FILTERS = "actief=actief&portefeuilleIntern=1&metConsolidatie=0"
 _SELECTIE_RE = re.compile(r"(\d[\d.]*)\s*Items?\s+in\s+selectie", re.I)
 
 
+def _open_front_office(page, send_event) -> None:
+    """Drive Rapportage → Front-office, and DO NOT FAIL THE SCAN IF IT CANNOT.
+
+    ⚠⚠ THE CLICK IS CEREMONY, AND IT TOOK THE WHOLE FLEET RUN DOWN (2026-08-22). Its only effect is
+    to load `rapportFrontofficeClientSelectie.php` into the `content` frame — which the caller does
+    itself on the very next statement, explicitly, and with `FRONT_OFFICE_FILTERS` attached. The
+    menu route cannot even express those filters. So the click contributed nothing but a 30-second
+    Playwright timeout that raised out of `_discover_portfolios`, failed the whole
+    `airs.vermogen.refresh` job, and left 46 accounts unscanned:
+
+        <a class="mainMenuLinkItem" data-field="Front-Office" …>Front-office</a>
+        from <div class="top_menu">…</div> subtree intercepts pointer events
+
+    ⚠ READ THAT MESSAGE CAREFULLY — THE INTERCEPTOR MATCHES OUR OWN SELECTOR. Playwright names the
+    element that would actually receive the click, and it is `a[data-field="Front-Office"]`, which
+    is what we asked for. An element cannot intercept itself, so there are TWO of them: the visible
+    bar item, and the one `page.click` resolved (first in DOM order) sitting under it. Whether the
+    dropdown reopens, or is repainted between the hover and the click, is AIRS's business and
+    changes month to month — this is a menu in somebody else's web app.
+
+    ⚠ EVERY OTHER PAGE IN THIS FILE IS REACHED BY `goto`, never by driving the UI. `_login`,
+    `download_via_form` and the report downloads all address the PHP page directly. This was the
+    one exception, and the exception is what broke.
+
+    So: best effort, short timeout, and swallow. A failure here is not even worth an `error` event —
+    the caller's `goto` is what does the work, and reporting a fault the scan then recovers from
+    teaches the reader to ignore the step.
+    """
+    try:
+        page.hover('a[data-field="Rapportage"]', timeout=5000)
+        page.wait_for_timeout(500)
+        # ⚠ `.last`, NOT the selector's first match. The interceptor in the log IS the bar item;
+        # taking the last of the matches is what puts the click on the one painted on top.
+        page.locator('a[data-field="Front-Office"]').last.click(timeout=5000)
+        page.wait_for_timeout(1000)
+    except Exception as e:  # noqa: BLE001 — see the docstring: the caller's `goto` is the real step
+        send_event("progress", step="navigate", status="in_progress",
+                   message=f"Front-office menu not clickable ({type(e).__name__}) — "
+                           "navigating straight to the selection page instead")
+        _log.info("[airs_scanner] Front-office menu click skipped: %s: %s", type(e).__name__, e)
+
+
+def _wait_for_content_frame(page, timeout_ms: int = 15000):
+    """The `content` frame, once it exists — or None.
+
+    ⚠ A FIXED `wait_for_timeout(3000)` WAS DOING THIS JOB AND COULD ONLY GET IT WRONG IN BOTH
+    DIRECTIONS: three seconds wasted on every healthy run, and a hard "Could not find content
+    iframe" on a slow one. The frame belongs to the frameset AIRS serves after login, so it does
+    not depend on the menu click above — which is the other half of why that click is expendable.
+    """
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        frame = page.frame("content")
+        if frame:
+            return frame
+        page.wait_for_timeout(250)
+    return page.frame("content")
+
+
 def _selectie_count(frame) -> int | None:
     """AIRS's OWN count of the current selection, or None if the page does not state one.
 
@@ -661,16 +723,12 @@ def scan_portfolios_sync(send_event):
             _login(page)
             send_event("progress", step="login", status="done", message="Logged in successfully")
 
-            # Navigate via Rapportage > Front-Office menu
+            # Rapportage > Front-Office. ⚠ BEST EFFORT — see `_open_front_office` for why a menu
+            # click must never be able to fail a 46-account scan.
             send_event("progress", step="navigate", status="in_progress", message="Opening Rapportage menu...")
-            page.hover('a[data-field="Rapportage"]')
-            page.wait_for_timeout(500)
+            _open_front_office(page, send_event)
 
-            send_event("progress", step="navigate", status="in_progress", message="Clicking Front-office...")
-            page.click('a[data-field="Front-Office"]')
-            page.wait_for_timeout(3000)
-
-            content = page.frame("content")
+            content = _wait_for_content_frame(page)
             if not content:
                 send_event("error", message="Could not find content iframe")
                 return

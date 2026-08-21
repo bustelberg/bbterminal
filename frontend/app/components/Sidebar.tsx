@@ -10,6 +10,8 @@ import { useClickOutside } from '../../lib/hooks/useClickOutside';
 import { API_URL } from '../../lib/apiUrl';
 import { apiFetch } from '../../lib/apiFetch';
 import { isUserAllowedPath } from '../../lib/userAllowedPaths';
+import LangSwitch from './LangSwitch';
+import { useLang } from '../../lib/i18n';
 
 type NavItem = { href: string; label: string };
 // A collapsible group: its `href` (if set) makes the header itself a link;
@@ -150,6 +152,9 @@ type Props = {
 };
 
 export default function Sidebar({ initialUser }: Props) {
+  // ⚠ THE SHARED PREFERENCE, NOT A LOCAL ONE — `useLang` is an external store, so this switch
+  // and any open modal read the same value and move together. See `lib/i18n`.
+  const [lang, setLang] = useLang();
   const pathname = usePathname();
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(initialUser?.email ?? null);
@@ -736,6 +741,20 @@ export default function Sidebar({ initialUser }: Props) {
             </div>
           );
         })()}
+        {/* ⚠⚠ GLOBAL, AND THAT IS A DELIBERATE TRADE (2026-08-21, on request). It sets ONE
+            stored preference (`lib/i18n`), so flipping it here also changes the Fundamental modal
+            opened from anywhere — which is the point: a language is a property of the reader, not
+            of a screen. The cost is that it sits above pages that are NOT translated yet, where
+            pressing it moves nothing; `i18n.ts` used to argue against exactly that and now records
+            it as accepted. `managementCopy`'s `UNTRANSLATED_SURFACES` is the list of what still
+            does not answer, so the gap is written down rather than discovered by pressing it. */}
+        <div className="px-3 py-2 flex items-center justify-between gap-2">
+          <span className="text-[11px] uppercase tracking-wider text-fg-subtle">Language</span>
+          <LangSwitch lang={lang} onChange={setLang}
+            title={'The interface language. Stored per browser and shared by every screen. '
+              + 'Not every page is translated yet — the Management Dashboard and the Fundamental '
+              + 'modal are the ones that answer today.'} />
+        </div>
         <button
           onClick={handleSignOut}
           className="w-full px-3 py-2.5 rounded-lg text-sm font-medium text-fg-subtle hover:text-fg-strong hover:bg-overlay/5 transition-colors text-left"

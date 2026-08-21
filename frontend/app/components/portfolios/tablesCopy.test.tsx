@@ -38,6 +38,31 @@ describe('both languages are complete', () => {
       // Both SBC states, because the margin note branches on it.
       expect(c.rowNote[k](true).trim(), `rowNote.${k}(sbc)`).not.toBe('');
       expect(c.rowNote[k](false).trim(), `rowNote.${k}`).not.toBe('');
+      expect(c.rowFormula[k](true).trim(), `rowFormula.${k}(sbc)`).not.toBe('');
+      expect(c.rowFormula[k](false).trim(), `rowFormula.${k}`).not.toBe('');
+    }
+  });
+
+  /**
+   * ⚠⚠ NO FORMULA MAY BE SPLIT INTO A BOLD TITLE MID-EXPRESSION. `AboutCard` promotes whatever
+   * precedes the first ' — ' to the card's heading when that fragment is at most 48 characters and
+   * carries no sentence punctuation — and the formula is the FIRST thing in every row tooltip, so
+   * it is the fragment that would be promoted. Half of `Σ(w × ROIC) ÷ Σw` in bold, with the rest
+   * starting mid-expression, is a designed-looking tooltip that reads as nonsense.
+   *
+   * The guard in `splitTipTitle` is real, but it is a length coincidence away from not holding, and
+   * a formula is exactly the kind of string somebody shortens later. So: no em dash, ever, and
+   * comfortably past the threshold in both languages and both SBC states.
+   */
+  it.each(LANGS)('%s formulas cannot be mistaken for a title + body', (lang: Lang) => {
+    const c = COPY[lang];
+    for (const k of MEASURE_KEYS) {
+      for (const sbc of [false, true]) {
+        const f = c.rowFormula[k](sbc);
+        expect(f, `rowFormula.${k}(${sbc}) must not contain ' — '`).not.toContain(' — ');
+        expect(f.length, `rowFormula.${k}(${sbc}) is short enough to be promoted`)
+          .toBeGreaterThan(48);
+      }
     }
   });
 
@@ -68,6 +93,9 @@ describe('both languages are complete', () => {
       check(`chip.${k}`, en.chip[k], nl.chip[k]);
       check(`rowLabel.${k}`, en.rowLabel[k], nl.rowLabel[k]);
       check(`rowNote.${k}`, en.rowNote[k](true), nl.rowNote[k](true));
+      // ⚠ A FORMULA IS MOSTLY SYMBOLS, which makes it the easiest thing in this file to leave in
+      // English by accident — the ÷ and the Σ look translated. The words around them are not.
+      check(`rowFormula.${k}`, en.rowFormula[k](true), nl.rowFormula[k](true));
     }
 
     expect(same, 'untranslated (add to SHARED if deliberate)').toEqual([]);

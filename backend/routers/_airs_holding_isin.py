@@ -95,24 +95,64 @@ _CASH_NAMES = {"effectenrekening", "liquiditeiten"}
 # and files it as a fund. Measured: of the model's ISINs, that test flags exactly one EQUITY, and
 # it is Netflix.
 _ETF_WORD = re.compile(r"\bETF\b", re.I)
+#: A fund wrapper that is NOT an ETF — a SICAV, an ICAV, a plain mutual fund.
+#:
+#: ⚠ WORD-BOUNDED, WHICH IS WHAT MAKES IT SAFE. `Fundsmith` and `Fundamental` are companies and
+#: neither matches `\bFUND\b`; the boundary is doing real work here, not decoration.
+_FUND_WORD = re.compile(r"\b(FUND|FONDS|SICAV|ICAV)\b", re.I)
 
 
-def _is_etf(grid_row: dict | None) -> bool:
-    """Is this instrument a fund wrapper?
+def _is_etf(grid_row: dict | None, holding_name: str = "") -> bool:
+    """Is this instrument a fund wrapper? Four signals, any of which is sufficient.
 
     `leonteq_product_type` is authoritative but INCOMPLETE — it types 19 of the model's ISINs as
     ETF and leaves 40 with no type at all, among which 11 are plainly ETFs (iShares, Vanguard,
-    VanEck…). So the type is trusted first and the name only fills its gaps.
+    VanEck…). So the type is trusted first and the rest fill its gaps.
 
     ⚠ 'UCITS' alone does not cover the gap either: `iShares J.P. Morgan EM Corporate Bond ETF`
     carries no UCITS in its name. Both tests are needed, and the ETF one must be word-bounded.
+
+    ⚠⚠ IT READ ONLY THE GRID'S NAME, AND THE GRID'S NAME IS THE VENDOR'S ABBREVIATION. That is why
+    two funds sat in `Individual stocks` on /management-dashboard (reported 2026-08-21):
+
+        AIRS: Invesco World Equal Weight ETF Acc    grid: INVESCO MARKETS II PLC IVZ MSCI
+        AIRS: Letko Bross Global EM Equity Fund     grid: LETKO BROS GBL EMR MKT-CLEUR
+
+    The first says ETF in the name the BOOK uses and nowhere in the one this function was reading.
+    So `holding_name` is now a name source too — the reader's name for a thing is evidence about
+    what it is, and the grid's truncation is not evidence against.
+
+    ⚠⚠ AND `sector == 'etf'` IS OUR OWN CLASSIFICATION, WHICH IT WAS IGNORING. The asset-pipeline's
+    sector tool files ETFs under that literal sector; a row we have already decided is an ETF must
+    not be re-decided as a company by a name test. That signal alone catches the Invesco line.
+
+    ⚠ AND A FUND IS NOT ONLY AN ETF. `Letko Bross … Fund` is a mutual fund: no earnings of its own,
+    which is the ONLY thing the flag's consumers care about (the owner-earnings gate, and the
+    `Individual stocks` / `Stock ETFs` division). `_FUND_WORD` covers SICAV/ICAV/mutual too.
+
+    Measured over the 235 distinct ISINs the fleet holds: the grid-name-only rule flagged 11;
+    `sector` adds 2 (both Invesco ETFs), the book's name adds 0 more today (it is a robustness
+    signal, not a fix), and the fund words add 4 — `High Income Quality fund`, `Letko Bross …
+    Fund`, `Mint Tower Arbitrage Fund I`, `Fresh Fixed Income Fund`. Every one of the six is
+    genuinely a fund; there were no false positives at any step.
+
+    ⚠ A BOND FUND CAUGHT HERE STILL LANDS IN **Bonds** — this flag says "wrapper", never "asset
+    class". `classify_bucket` decides the class, so `Fresh Fixed Income Fund` does not appear under
+    `Stock ETFs`; only the funds inside the Equity bucket do.
     """
-    if not grid_row:
-        return False
-    if (grid_row.get("leonteq_product_type") or "").strip().upper() == "ETF":
-        return True
-    name = grid_row.get("name") or ""
-    return bool(_ETF_WORD.search(name)) or "UCITS" in name.upper()
+    name = (grid_row or {}).get("name") or ""
+    if grid_row:
+        if (grid_row.get("leonteq_product_type") or "").strip().upper() == "ETF":
+            return True
+        # ⚠ OUR OWN CLASSIFICATION OUTRANKS ANY NAME TEST — see the ⚠⚠ above.
+        if (grid_row.get("sector") or "").strip().lower() == "etf":
+            return True
+    for candidate in (name, holding_name or ""):
+        if _ETF_WORD.search(candidate) or "UCITS" in candidate.upper():
+            return True
+        if _FUND_WORD.search(candidate):
+            return True
+    return False
 
 
 # ── The asset-class label a reader sees (and the allocation bar sums to) ──────────────────────
@@ -689,7 +729,9 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
             verdict = "cross_listed"
 
         g = grid.get(isin or "") or {}
-        is_etf = _is_etf(g)
+        # ⚠ THE BOOK'S OWN NAME TOO — the grid carries the vendor's abbreviation, which drops the
+        # word "ETF" often enough to matter. See `_is_etf`.
+        is_etf = _is_etf(g, h["holding_name"])
         # ⚠ `asset_class=None` ALWAYS now: AIRS's `categorie` came from the paired model position
         # and there is no pairing. The grid and the name carry it (see `classify_bucket`).
         override = overrides.get(isin or "")

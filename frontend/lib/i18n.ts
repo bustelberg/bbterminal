@@ -6,10 +6,21 @@ import { useCallback, useSyncExternalStore } from 'react';
  * The app's language choice. English is the default and the source language; Dutch is the
  * translation.
  *
- * ⚠ THE SCOPE IS DELIBERATELY ONE TAB. Only the Fundamental modal's `Tables` tab is translated
- * today, so the switch is rendered only there — see `OwnerEarningsModal`. A language control that
- * appears above a screen it does not translate is worse than none: the reader flips it, nothing
- * moves, and they conclude the feature is broken rather than unfinished.
+ * ⚠⚠ THE SWITCH IS GLOBAL SINCE 2026-08-21, AND THAT REVERSED THE RULE THIS NOTE USED TO STATE.
+ * It argued that a language control above a screen it does not translate is worse than none — the
+ * reader flips it, nothing moves, and they conclude the feature is broken rather than unfinished —
+ * so the switch lived inside the Fundamental modal, the only place translated at the time.
+ *
+ * It now sits in the sidebar, on every page, on request. The argument above was not wrong and the
+ * cost is real: pages that are not translated yet do not answer it. What makes it the better trade
+ * is that a language is a property of the READER, not of a screen, so a per-screen control is a
+ * control the reader has to find again on each one — and this preference is already shared, so a
+ * modal opened from anywhere follows it. The mitigation is that the gap is WRITTEN DOWN rather than
+ * discovered by pressing: `management/managementCopy.ts` ends with `UNTRANSLATED_SURFACES`, and the
+ * switch's own tooltip says not every page answers yet.
+ *
+ * Translated today: /management-dashboard's page chrome, Benchmarks, Cross-portfolio and the
+ * Overview holdings table; the Fundamental modal's `Long Equity` headings and `Tables`.
  *
  * ⚠ ENGLISH IS THE SOURCE, NOT A PEER. Every string is authored in English and translated from
  * there. When copy changes, the English changes first and the Dutch follows — `TablesCopy`'s type

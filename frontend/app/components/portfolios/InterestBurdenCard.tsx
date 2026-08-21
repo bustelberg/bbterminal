@@ -11,12 +11,13 @@ import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
-import { Stat } from './MetricGrowthCard';
+import { pairedSpan, RatioStats } from './CardStats';
+import { workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import InterestBurdenInputsModal from './InterestBurdenInputsModal';
 import { interestBurdenByYear, type InterestBurdenInputs } from './interestBurdenData';
-import { meanOf, paddedDomain , xToPeriod } from './marginData';
+import { paddedDomain , xToPeriod } from './marginData';
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
@@ -88,9 +89,13 @@ export default function InterestBurdenCard({ holdingsTarget, holdingsName, bench
     () => mergeSeries(ratioByYr, benchByYr, 'ratio'), [ratioByYr, benchByYr]);
 
   const own = holdingsName ?? 'Interest / op. profit';
-  const avg = meanOf([...ratioByYr.values()]);
-  const latestYear = Math.max(-Infinity, ...ratioByYr.keys());
-  const latest = Number.isFinite(latestYear) ? ratioByYr.get(latestYear) ?? null : null;
+  /**
+   * The book's figures and the benchmark's, over the ONE window both lines cover — see
+   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * line on the chart below, so the card cannot plot a mean it does not print.
+   */
+  const stats = useMemo(() => pairedSpan(ratioByYr, benchByYr), [ratioByYr, benchByYr]);
+  const avg = stats.own.avg;
   const pct = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)}%`);
 
   return (
@@ -105,15 +110,13 @@ export default function InterestBurdenCard({ holdingsTarget, holdingsName, bench
         <p className="text-[12px] text-fg-faint py-16 text-center">No interest / operating-income figures ingested to compute a ratio.</p>
       ) : (
         <>
-          <div className="flex flex-wrap gap-2">
-            <Stat label="Avg" value={pct(avg)} color={chartTheme.accent}
-              info={<InfoTip content={<AspectCard
-                what="Average share of operating profit spent on interest, over the years shown."
-                where="Computed here — |Interest expense| ÷ Operating income per year, weight-averaged across holdings."
-                when="The years on the chart."
-                how="Operating profit is GuruFocus's Operating Income line. Lower = less of profit going to service debt; a heavily-levered company reads high." />} />} />
-            <Stat label="Latest" value={pct(latest)} color={chartTheme.accent} />
-          </div>
+          <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
+            avgInfo={<InfoTip content={<AspectCard
+              what="Average share of operating profit spent on interest, over the years shown."
+              where="Computed here — |Interest expense| ÷ Operating income per year, weight-averaged across holdings."
+              when="The years on the chart."
+              worked={workedMean(stats.own.values)}
+              how="Operating profit is GuruFocus's Operating Income line. Lower = less of profit going to service debt; a heavily-levered company reads high." />} />} />
 
           <div>
             <ResponsiveContainer width="100%" height={320}>

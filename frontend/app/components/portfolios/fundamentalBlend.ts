@@ -321,11 +321,12 @@ export function buildBlend(data: Resp) {
      * ⚠⚠ BOTH FACTORS, NOT JUST THE PRODUCT — `pp === sharePct × growthPct ÷ 100`, exactly, so the
      * cell can show a reader the multiplication it is looking at instead of asserting a number.
      *
-     * ⚠ `sharePct` IS NOT THE WEIGHT THE CELL PRINTS UNDER IT. That one divides by `denom[y]` (the
-     * whole period's line weight); this one divides by `den` (the weight that spans the interval),
-     * because that is the denominator the contribution was actually taken over. They are equal
-     * whenever every member spans the interval — i.e. `spanPct === 100` — and where they are not,
-     * quoting the printed weight as the factor gives a multiplication that does not reach the pp.
+     * ⚠ `sharePct` IS NOT THE WEIGHT THE CELL PRINTS UNDER IT, and since 2026-08-21 it is not even
+     * measured at the same period. The printed weight divides this period's cap by `denom[y]` — the
+     * composition of the index NOW, which is what a weight column should say. This one is the
+     * member's share of the weight AT THE ANCHOR, because that is the denominator the contribution
+     * was actually taken over (see the ⚠⚠ on `w` above). Quoting the printed weight as the factor
+     * gives a multiplication that does not reach the pp.
      */
     const contrib = new Map<Row,
       Record<string, { pp: number; growthPct: number; sharePct: number }>>();
@@ -336,6 +337,7 @@ export function buildBlend(data: Resp) {
       if (anchor != null) {
         let num = 0;
         let den = 0;
+        let spanAtY = 0;
         /**
          * ⚠ HELD, NOT WRITTEN STRAIGHT INTO `contrib`. Each term's share is over the FINAL `den`,
          * which is not known until every part has been asked — and both guards below can still
@@ -344,7 +346,19 @@ export function buildBlend(data: Resp) {
          */
         const terms: { r: Row; w: number; g: number }[] = [];
         for (const p of parts) {
-          const w = wAt(p.r, y);
+          /**
+           * ⚠⚠ THE WEIGHT IS THE **ANCHOR'S**, NOT THIS PERIOD'S — the client twin of the ⚠⚠ in
+           * `_fundamental_blend.blend_series`, and it was worth 9 percentage points a year
+           * (2026-08-21). `g` spans anchor -> y, so weighting it by the cap at `y` weights each
+           * constituent's growth by a number that already contains that growth (cap = price x
+           * shares). Measured on ACWI's share price 2015->2025: +20.21%/yr end-weighted against
+           * +11.14%/yr anchor-weighted, where the index really did ~10-11%.
+           *
+           * ⚠ IT MUST MATCH THE SERVER EXACTLY. This function exists to reproduce the plotted line
+           * in the drill-down's footer; weighted differently it would print a `Rebased` total that
+           * disagrees with the chart it was opened from, and both would look reasonable.
+           */
+          const w = wAt(p.r, anchor);
           // ⚠ THE SHARED RULE, NOT AN INLINE `prev > 0`. That guard caught zero and missed the
           // near-zero base — which is what let one holding drive an index through zero and take
           // most of the line off a log axis with it. See `stepGrowth`.
@@ -352,6 +366,13 @@ export function buildBlend(data: Resp) {
           if (!w || g == null) continue;
           num += w * g;
           den += w;
+          // ⚠⚠ THE SPANNING MEMBERS' WEIGHT **AT THIS PERIOD**, kept alongside the anchor-weighted
+          // `den` and used for `spanPct` alone. Those are two different questions and they need
+          // two different bases: the MOVE is weighted at the anchor (see above — it was worth 9pp
+          // a year), while COVERAGE asks what share of the line drawn at `y` the decomposition
+          // speaks for, and the line at `y` is composed of this period's weights. Dividing the
+          // anchor-weighted `den` by either period's total mixes the two and can exceed 100%.
+          spanAtY += wAt(p.r, y) ?? 0;
           terms.push({ r: p.r, w, g });
         }
         if (den <= 0) continue;               // nothing spans this interval — no honest move
@@ -362,7 +383,19 @@ export function buildBlend(data: Resp) {
         chained *= 1 + num / den;
         step[y] = { from: anchor,
                     growthPct: 100 * num / den,
-                    spanPct: 100 * den / (denom[y] || 1) };
+                    // ⚠⚠ COVERAGE OF **THIS PERIOD'S** LINE, and it is `spanAtY`, not `den`. The
+                    // move is anchor-weighted (rightly); coverage asks a different question — what
+                    // share of the line drawn at `y` this decomposition speaks for — and the line
+                    // at `y` is made of this period's weights. So both sides of this ratio are
+                    // period-`y` weights and it is a genuine subset share: it cannot exceed 100%,
+                    // and it matches what the tooltip beside it claims ("of this period's weight
+                    // that spans the interval").
+                    //
+                    // ⚠ I SHIPPED `den / denom[anchor]` HERE while fixing the anchor weighting and
+                    // it was wrong twice: it answers "how much of the ANCHOR's weight survived",
+                    // which is not the sentence next to it, and on the pinned case it read 100%
+                    // where half the period's weight could not be measured over the interval.
+                    spanPct: 100 * spanAtY / (denom[y] || 1) };
         for (const t of terms) {
           const byPeriod = contrib.get(t.r) ?? {};
           // ⚠ A ZERO HERE IS A MEASUREMENT, NOT AN ABSENCE — the opposite of the weight line's rule,

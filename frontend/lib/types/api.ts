@@ -94,6 +94,45 @@ export type ModelPortfolioAnalysis = components['schemas']['ModelPortfolioAnalys
 // selection (the right names inside them?) — different mistakes with different fixes. The three
 // effects SUM to the excess; `reconciles` carries the proof.
 export type ModelPortfolioAttribution = components['schemas']['ModelPortfolioAttribution'];
+/** Active share: `½ Σ|wᵖ − wᵇ|` over the book's INDIVIDUAL STOCKS, taken as 100% of the portfolio.
+ *  ⚠ A STRUCTURAL measure, not a return one — the size of the bet, not whether it paid. Its
+ *  companion `ModelPortfolioAttribution` answers the other question. */
+export type ActiveShare = components['schemas']['ActiveShare'];
+/** ⚠ ONE ISSUER, not one holding — two share classes fold into one row with their weights summed,
+ *  so this list is legitimately shorter than the Holdings table. See `_active_share._issuer_key`. */
+export type ActiveShareRow = components['schemas']['ActiveShareRow'];
+/** REALISED (ex-post) tracking error: the annualised volatility of the active return.
+ *  ⚠ NOT ex-ante — there is no covariance forecast here, and the two routinely disagree, so every
+ *  label says "realised". ⚠ And it is the spread of the active return, never the active return
+ *  itself: a book can have a large tracking error and no excess at all. */
+export type TrackingError = components['schemas']['TrackingError'];
+/** Correlation as a RISK measure: ρ to the benchmark (the other side of the tracking error, via
+ *  `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ`) and ρ between the positions (the diversification check).
+ *  ⚠ NOT attribution — that DECOMPOSES the active return into terms that sum to it, and
+ *  correlation appears in none of them. They are separate panels on purpose. */
+export type RiskCorrelation = components['schemas']['RiskCorrelation'];
+/** σ of the stock sleeve's OWN returns, plus its downside half.
+ *  ⚠ THE SAME `σₚ` the correlation view puts inside `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ` — one series,
+ *  one function. ⚠ No cash-flow contamination BY CONSTRUCTION: it is a weighted basket of
+ *  instrument returns, not an account value, so there are no flows in it to chain-link out. */
+export type PortfolioVolatility = components['schemas']['PortfolioVolatility'];
+/** Max drawdown of the RECONSTRUCTED sleeve — `MDD = min(Wₜ/Mₜ − 1)` over today's holdings.
+ *  ⚠⚠ NOT the client's realised drawdown: look-ahead bias (today's weights, chosen with
+ *  hindsight) and survivorship bias (names since sold are absent). The client's own figure comes
+ *  from the AIRS returns. ⚠ Defaults to DAILY — unlike the other risk views, which default to
+ *  weekly to dodge a two-series closing-time bias that a drawdown cannot have. */
+export type PortfolioDrawdown = components['schemas']['PortfolioDrawdown'];
+/** `C₁₀ = Σ w₍ᵢ₎` and `HHI = Σ wᵢ²`, with `N_eff = 1/HHI`.
+ *  ⚠ ON ISSUERS, not lines — the same folding `ActiveShare` uses, so the two views cannot
+ *  disagree about how many positions the book holds. ⚠ BOTH denominators are returned (of the
+ *  stock sleeve, and of the whole book including cash) because the choice changes the number. */
+export type PortfolioConcentration = components['schemas']['PortfolioConcentration'];
+/** Effective positions — `Eᵢ = qᵢ·Pᵢ·Xᵢ` — per issuer, plus the currency split.
+ *  ⚠⚠ WE DO NOT COMPUTE THAT PRODUCT: `Eᵢ` is AIRS's own `current_value_eur`, the figure on the
+ *  client's statement. A second derivation from our close and our FX would disagree with it on most
+ *  rows with nothing able to say which was right. ⚠ Currency is the LISTING's — the exposure borne,
+ *  not the one the company earns in. */
+export type PortfolioExposure = components['schemas']['PortfolioExposure'];
 export type ReconstructedIndex = components['schemas']['ReconstructedIndex'];
 /** Per-constituent Long Equity measures for a benchmark — a second, slower call than the index
  *  itself, so the price table renders first and these fill in. */
