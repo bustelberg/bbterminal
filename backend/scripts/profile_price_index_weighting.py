@@ -29,12 +29,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import deps  # noqa: E402,F401  (loads .env / .env.local before anything reads a key)
 from routers._fundamental_blend import (  # noqa: E402
-    _prepare, _weight_at, _weighted_arithmetic, carry_forward, member_scale, step_growth,
-    year_bucket, MIN_BLEND_COVERAGE_NAMES_PCT, MIN_BLEND_COVERAGE_PCT,
+    _latest_per_bucket, _prepare, _weight_at, _weighted_arithmetic, carry_forward,
+    member_scale, step_growth, year_bucket,
+    MIN_BLEND_COVERAGE_NAMES_PCT, MIN_BLEND_COVERAGE_PCT,
 )
 
 
-def _members(label: str, cadence: str) -> list[dict]:
+def _members(label: str, cadence: str, metric: str = "price_ps") -> list[dict]:
     """The index's constituents in `blend_series`' member shape, carrying `price_ps` + period caps.
 
     ⚠ THE SAME TWO READS THE ENDPOINT MAKES, through the same helpers -- a bespoke query here would
@@ -59,13 +60,31 @@ def _members(label: str, cadence: str) -> list[dict]:
     # ⚠ RAW-DATED POINTS, NOT PERIOD-KEYED ONES. `blend_series` takes `{target_date: value}` and
     # buckets them itself (`carry_forward` measures staleness in DAYS, so a key of "2025" raises).
     # This is the same read `_bulk_blend_rows` makes, in the same shape.
-    codes = list(E._metric_codes("price_ps"))
+    # ⚠ `invested_capital` IS SYNTHETIC — the Invested-capital card has no single GuruFocus code;
+    # it is non-current liabilities + total equity, summed per company per period, which is what
+    # `investedCapitalData.investedCapitalSeries` does on the client.
+    parts = (("noncurrent_liabilities", "total_equity") if metric == "invested_capital"
+             else (metric,))
+    codes = [c for m in parts for c in E._metric_codes(m)]
     raw = E._rows_by_company(cids, codes)
     prices: dict[int, dict[str, float]] = {}
+    want = {c: m for m in parts for c in E._metric_codes(m)}
     for cid, mrows in raw.items():          # ⚠ NOT `rows` — that is the member list, still needed
+        legs: dict[str, dict[str, float]] = {}
         for r in mrows:
-            if r.get("numeric_value") is not None:
-                prices.setdefault(cid, {})[str(r["target_date"])[:10]] = float(r["numeric_value"])
+            if r.get("numeric_value") is None:
+                continue
+            leg = want.get(r["metric_code"])
+            if leg is None:
+                continue
+            legs.setdefault(leg, {})[str(r["target_date"])[:10]] = float(r["numeric_value"])
+        if len(parts) == 1:
+            prices[cid] = legs.get(parts[0], {})
+            continue
+        # ⚠ BOTH LEGS OR NEITHER, PER DATE. A period with only one of them is not a capital base;
+        # summing what is there would report a company with no liabilities as smaller than it is.
+        a, b = (legs.get(p, {}) for p in parts)
+        prices[cid] = {d: a[d] + b[d] for d in a if d in b}
 
     out: list[dict] = []
     for r in rows:
@@ -81,7 +100,7 @@ def _members(label: str, cadence: str) -> list[dict]:
             "weights": caps.get(c["company_id"]) or {},
             "points": pts,
         })
-    print(f"  {len(out)} carry a Month End Stock Price series")
+    print(f"  {len(out)} carry a {metric} series")
     return out
 
 
@@ -141,6 +160,58 @@ def chain(members: list[dict], *, weight_at_anchor: bool) -> list[tuple[str, flo
     return out
 
 
+def rebased_average(members: list[dict]) -> list[tuple[str, float]]:
+    """`investedCapitalIndexByYear`'s construction, FAITHFULLY: rebase each member to 100 at the
+    first period it can be WEIGHTED in, then take the period-cap-weighted average of those levels.
+
+    ⚠⚠ THE "FIRST WEIGHTABLE PERIOD" BASE IS NOT AN OPTIONAL DETAIL AND MODELLING IT WRONG COSTS AN
+    ORDER OF MAGNITUDE. Rebasing to the first period with a POSITIVE figure instead (what
+    `_prepare` does) reads +73%/yr on ACWI against ~+13% with the real rule — because Vertiv's 2017
+    blank-cheque shell (invested capital 0.024M) is positive and becomes a base of 100 for a series
+    that reaches 3,332M. That guard is the whole subject of the ⚠⚠ on the client function; a
+    reproduction without it measures a bug that was already fixed and blames the wrong thing.
+
+    What this DOES still carry, and what is being sized here:
+      1. the level `v(y)/v(base)` is a growth ratio, weighted by the cap at `y`, which already
+         contains that growth — the same circularity `blend_series` carried until 2026-08-21;
+      2. averaging REBASED LEVELS makes the line an artefact of WHEN each member's history starts:
+         everyone is 100 at their own base, so a constituent entering the panel drags the average
+         toward 100 and the index moves on composition alone;
+      3. no `_MAX_STEP_GROWTH` / `_MIN_STEP_BASE_FRACTION` — those live in `step_growth`, which this
+         construction never calls.
+    """
+    total_w = sum(abs(float(m.get("weight") or 0)) for m in members)
+    total_n = len(members)
+
+    at_by_period: dict[str, list[tuple[float, float]]] = {}
+    cover_w: dict[str, float] = {}
+    cover_n: dict[str, int] = {}
+    for m in members:
+        bucketed = _latest_per_bucket(m["points"], year_bucket)
+        # ⚠ THE CLIENT'S `.filter(p => weightAt(r, p.label) != null)`, before the base is chosen.
+        pts = [(p, v) for p, (_d, v) in sorted(bucketed.items()) if _weight_at(m, p) is not None]
+        if not pts:
+            continue
+        base = pts[0][1]
+        if not (base > 0):                      # the client's only other guard
+            continue
+        for period, v in pts:
+            w = _weight_at(m, period)
+            at_by_period.setdefault(period, []).append((abs(float(w)), 100.0 * v / base))
+            cover_w[period] = cover_w.get(period, 0.0) + abs(float(m.get("weight") or 0))
+            cover_n[period] = cover_n.get(period, 0) + 1
+
+    out: list[tuple[str, float]] = []
+    for d in sorted(at_by_period):
+        if (100.0 * cover_w.get(d, 0.0) / total_w < MIN_BLEND_COVERAGE_PCT
+                or 100.0 * cover_n.get(d, 0) / total_n < MIN_BLEND_COVERAGE_NAMES_PCT):
+            continue
+        v = _weighted_arithmetic(at_by_period[d])
+        if v is not None:
+            out.append((d, v))
+    return out
+
+
 def cagr(series: list[tuple[str, float]], years: int | None) -> tuple[float | None, str, str, int]:
     """Point-to-point rate over the last `years` periods of the drawn line, or its whole span."""
     if len(series) < 2:
@@ -165,15 +236,22 @@ def main() -> None:
     ap.add_argument("--label", default="ACWI")
     ap.add_argument("--cadence", default="annual")
     ap.add_argument("--years", type=int, default=10)
+    ap.add_argument("--metric", default="price_ps")
+    ap.add_argument("--rebased-avg", action="store_true",
+                    help="also run the client's average-of-rebased-levels construction")
     a = ap.parse_args()
 
-    members = _members(a.label, a.cadence)
+    members = _members(a.label, a.cadence, a.metric)
     if not members:
-        raise SystemExit(f"no members with a price series for {a.label}")
+        raise SystemExit(f"no members with a {a.metric} series for {a.label}")
 
-    for tag, at_anchor in (("END weight   (production today)", False),
-                           ("ANCHOR weight (a cap-weighted index)", True)):
-        s = chain(members, weight_at_anchor=at_anchor)
+    runs = [("END weight    (the bug)", lambda: chain(members, weight_at_anchor=False)),
+            ("ANCHOR weight (a cap-weighted index)", lambda: chain(members, weight_at_anchor=True))]
+    if a.rebased_avg:
+        runs.append(("REBASED-LEVEL AVERAGE (investedCapitalIndexByYear)",
+                     lambda: rebased_average(members)))
+    for tag, run in runs:
+        s = run()
         full = cagr(s, None)
         win = cagr(s, a.years)
         print(f"\n{tag}")
