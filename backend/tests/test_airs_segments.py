@@ -48,6 +48,38 @@ class TestTheWrapperIsNotAnAssetClass:
     def test_the_declared_type_wins_over_the_name(self):
         assert _is_etf({"name": "Amundi Index Solutions", "leonteq_product_type": "ETF"}) is True
 
+    def test_it_reads_the_BOOK_s_name_too_not_only_the_grid_s(self):
+        """⚠⚠ THE GRID CARRIES THE VENDOR'S ABBREVIATION AND IT DROPS THE WORD. Reported 2026-08-21:
+        two funds sat in `Individual stocks` on /management-dashboard because this only ever read
+        `grid_row["name"]`, and the readable name is the one the BOOK uses."""
+        assert _is_etf({"name": "INVESCO MARKETS II PLC IVZ MSCI", "sector": "etf"},
+                       "Invesco World Equal Weight ETF Acc") is True
+        assert _is_etf({"name": "LETKO BROS GBL EMR MKT-CLEUR"},
+                       "Letko Bross Global EM Equity Fund") is True
+
+    def test_our_own_etf_sector_outranks_any_name_test(self):
+        """⚠ A row the asset-pipeline has already filed under the literal sector `etf` must not be
+        re-decided as a company because the vendor's name says nothing. This signal alone is what
+        catches the Invesco line — its grid name mentions neither ETF nor UCITS."""
+        assert _is_etf({"name": "INVESCO MARKETS II PLC IVZ MSCI", "sector": "etf"}) is True
+
+    def test_a_fund_need_not_be_an_ETF(self):
+        """⚠ THE FLAG MEANS 'WRAPPER', and a SICAV or a mutual fund has no earnings of its own
+        either — which is the only property its consumers (the owner-earnings gate, the
+        Individual-stocks / Stock-ETFs division) actually depend on."""
+        for n in ("Letko Bross Global EM Equity Fund", "Mint Tower Arbitrage Fund I - EUR",
+                  "Fresh Fixed Income Fund", "High Income Quality fund",
+                  "Some Luxembourg SICAV", "An Irish ICAV"):
+            assert _is_etf(None, n) is True, n
+
+    def test_the_word_boundary_is_load_bearing(self):
+        """⚠ `Fundsmith` AND `Fundamental` ARE COMPANIES. Widening to a fund word is only safe
+        because the pattern is word-bounded; without it this rule would reclassify operating
+        companies as wrappers and quietly drop them out of the fundamentals blend."""
+        assert _is_etf({"name": "Fundsmith Equity"}, "Fundsmith Equity") is False
+        assert _is_etf({"name": "Fundamental Global Inc"}, "Fundamental Global Inc") is False
+        assert _is_etf(None, "ASML Holding") is False
+
 
 class TestReturnAndWeightDoNotCoverTheSameHoldings:
     """⚠ A holding with no opening value has an UNDEFINED return and REAL exposure."""

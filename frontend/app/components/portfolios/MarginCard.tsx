@@ -12,6 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
+import { workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import { fcfLabel } from './sbcCorrection';
@@ -105,7 +106,9 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
             avgInfo={<InfoTip content={<AspectCard
               what={`Average ${fcfLabel(sbcCorrection)} margin over the years shown.`}
               where="Computed here — (FCF − SBC) ÷ Revenue per year, weight-averaged across holdings."
-              when="The years on the chart." how="SBC is a non-cash add-back to FCF, so subtracting it gives a truer cash margin." />} />} />
+              when="The years on the chart."
+              worked={workedMean(stats.own.values)}
+              how="SBC is a non-cash add-back to FCF, so subtracting it gives a truer cash margin." />} />} />
 
           <div>
             <ResponsiveContainer width="100%" height={320}>

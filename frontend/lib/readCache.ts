@@ -4,7 +4,7 @@ import { trace } from './debugTrace';
 
 /**
  * An in-memory cache for the FUNDAMENTAL READS — the requests behind the Fundamental modal's tabs
- * (Long Equity · Quick Valuation · Deep Valuation · Old charts) and their drill-downs.
+ * (Long Equity · Tables · Quick Valuation · Deep Valuation) and their drill-downs.
  *
  * WHY IT EXISTS. Switching tabs inside one open modal was already free (`OwnerEarningsModal` keeps
  * a visited tab MOUNTED), but everything else about those screens re-paid full price: closing the

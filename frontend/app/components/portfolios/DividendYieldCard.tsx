@@ -13,6 +13,7 @@ import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { Stat } from './MetricGrowthCard';
 import { pairedSpan, RatioStats } from './CardStats';
+import { workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import DividendYieldInputsModal from './DividendYieldInputsModal';
@@ -133,6 +134,7 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
               what="Average dividend yield over the years shown."
               where="Computed here — dividends per share ÷ that fiscal year's end price, per holding, then weight-averaged."
               when="The years on the chart."
+              worked={workedMean(stats.own.values)}
               how="A yield is currency-free, so the weighted average IS the book's yield (the weights are value weights). A company that pays nothing counts as 0%; one we have no dividend line for is left out and the year renormalises over the rest." />} />}>
             {/* ⚠ THE BOOK'S COVERAGE, AND ONLY THE BOOK'S — passed as a child so it lands after
                 both pairs. The index has its own (very different) coverage; showing one figure

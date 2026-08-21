@@ -181,8 +181,8 @@ const CARDS: MetricCfg[] = [
     codes: ['annuals__Income Statement__Revenue', 'annuals__income_statement__Revenue'],
   },
   {
-    title: 'FCF / share', titleKey: 'fcfPs',
-    noun: 'FCF/share', unit: 'per_share', kind: 'growth', benchmarkMetric: 'fcf_ps',
+    title: 'FCF per share', titleKey: 'fcfPs',
+    noun: 'FCF per share', unit: 'per_share', kind: 'growth', benchmarkMetric: 'fcf_ps',
     codes: ['annuals__Per Share Data__Free Cash Flow per Share',
       'annuals__per_share_data__Free Cash Flow per Share'],
   },
@@ -312,8 +312,9 @@ export default function LongEquityTab({
       try {
         // A single company is keyed by ISIN; a portfolio is the blended pseudo-company (each metric
         // blends as a LEVEL → a growth index). Both return every metric code. The portfolio path
-        // streams per-company progress — it is a read per holding — via the SAME loader
-        // `FundamentalCharts` uses, so the two tabs cannot come to load the blend differently.
+        // streams per-company progress — it is a read per holding — via `blendMetrics`, which is
+        // the one definition of "load this book's metrics" (it had a second caller until the
+        // Old-charts tab was removed; the point of the module is the single definition).
         if (isAgg) {
           const out = await loadBlendMetrics<MetricsResponse>(
             { basket, portfolioId, cadence }, (p) => { if (alive) setProgress(p); },

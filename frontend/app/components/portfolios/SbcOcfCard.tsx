@@ -12,6 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
+import { workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import SbcOcfInputsModal from './SbcOcfInputsModal';
@@ -102,6 +103,7 @@ export default function SbcOcfCard({ holdingsTarget, holdingsName, benchTarget }
               what="Average Stock-Based Compensation ÷ Operating Cash Flow over the years shown."
               where="Computed here — the ratio per year, weight-averaged across holdings."
               when="The years on the chart."
+              worked={workedMean(stats.own.values)}
               how="SBC is a non-cash expense added back into operating cash flow. A high share means much of the reported cash generation is really stock dilution. Lower = better." />} />} />
 
           <div>

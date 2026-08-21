@@ -66,7 +66,7 @@ export default function CagrTable({
   benchmark: Blend | null;
   portfolioName: string;
   benchLabel: string;
-  /** The chart's own name for the series — 'FCF / share', 'Revenue'. Names what is compounding. */
+  /** The chart's own name for the series — 'FCF per share', 'Revenue'. Names what is compounding. */
   metricLabel: string;
   benchChoice: CagrBenchmark;
   onBenchChoice: (b: CagrBenchmark) => void;

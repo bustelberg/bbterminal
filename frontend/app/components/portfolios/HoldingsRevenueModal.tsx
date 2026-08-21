@@ -243,7 +243,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
   data: Resp;
   fmt: (v: number | null | undefined) => string;
   noun: string;
-  /** The chart's own name — 'Revenue', 'FCF / share', 'ROIC'. Names the FIRST line of every period
+  /** The chart's own name — 'Revenue', 'FCF per share', 'ROIC'. Names the FIRST line of every period
    *  cell, so the three stacked numbers are all identified rather than only the two derived ones.
    *  Display-cased by the caller (`seriesLabel`); `noun` is the lowercase prose form and reads
    *  wrong as a column label. */

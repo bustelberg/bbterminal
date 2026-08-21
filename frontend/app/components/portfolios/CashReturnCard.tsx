@@ -12,6 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
+import { workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import CashReturnInputsModal from './CashReturnInputsModal';
@@ -133,6 +134,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
               what={`Average ${M.inline} over the years shown — ${M.what}.`}
               where={M.where}
               when="The years on the chart. Weight-averaged across holdings — a per-company percentage, averaged, never summed (mixed currencies cannot be added)."
+              worked={workedMean(stats.own.values)}
               how={M.caveat} />} />} />
 
           <div>

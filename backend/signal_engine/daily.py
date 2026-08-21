@@ -156,6 +156,37 @@ def compute_volume_signals(vol_series: pd.Series) -> dict:
     }
 
 
+def mom_12_1_legs(series: pd.Series) -> tuple[float, float] | None:
+    """The TWO PRICES 12-1 momentum is the ratio of: `(twelve months ago, one month ago)`.
+
+    ⚠⚠ A HELPER THE SIGNAL ITSELF CALLS, NOT A SECOND COPY OF THE CUTOFF RULE. "Twelve months,
+    skipping the last" is four lines, and a caller that wants to SHOW its arithmetic re-deriving
+    those four lines is how a tooltip comes to explain a number with inputs the number was not
+    computed from — checked once and believed thereafter. `compute_single_company_signals` reads its
+    momentum straight off this, so the displayed legs and the traded signal cannot diverge.
+
+    ⚠⚠ AND IT RETURNS NO KEYS INTO THE SIGNALS DICT, DELIBERATELY. `momentum/signals.py` builds its
+    panel from that dict's keys, so two price columns added there would become two fabricated
+    SIGNALS — undeclared in `registry.py`, unscored, and carried into every consumer of the panel.
+    A separate function is what keeps "the value" and "how it was arrived at" in one definition
+    without making the second one look like a third signal.
+
+    None when the series does not span the window (~13 months) or the older leg is zero — the same
+    conditions under which the signal itself is None.
+    """
+    if series.empty:
+        return None
+    skip_last_month_cutoff = series.index[-1] - pd.DateOffset(months=1)
+    series_skip_last = series[series.index <= skip_last_month_cutoff]
+    cutoff_12m = series.index[-1] - pd.DateOffset(months=12)
+    past_12m = series[series.index <= cutoff_12m]
+    if past_12m.empty or series_skip_last.empty:
+        return None
+    then = float(past_12m.iloc[-1])
+    now = float(series_skip_last.iloc[-1])
+    return None if then == 0 else (then, now)
+
+
 def compute_single_company_signals(series: pd.Series) -> dict:
     """All price + trend signals for a single entity's price series."""
     if series.empty:
@@ -164,17 +195,11 @@ def compute_single_company_signals(series: pd.Series) -> dict:
     price_now = float(series.iloc[-1])
     ma_200 = float(series.tail(200).mean()) if len(series) >= 200 else float(series.mean())
 
-    # 12-1 momentum: 12-month return excluding the most recent month
-    skip_last_month_cutoff = series.index[-1] - pd.DateOffset(months=1)
-    series_skip_last = series[series.index <= skip_last_month_cutoff]
-    cutoff_12m = series.index[-1] - pd.DateOffset(months=12)
-    past_12m = series[series.index <= cutoff_12m]
-
-    mom_12_1 = None
-    if not past_12m.empty and not series_skip_last.empty:
-        past_12m_price = float(past_12m.iloc[-1])
-        if past_12m_price != 0:
-            mom_12_1 = round((float(series_skip_last.iloc[-1]) / past_12m_price - 1) * 100, 2)
+    # 12-1 momentum: 12-month return excluding the most recent month.
+    # ⚠ THE CUTOFF RULE LIVES IN `mom_12_1_legs` so a caller that wants to SHOW the arithmetic
+    # reads the same two prices this divides — see that function for why it is not two dict keys.
+    legs = mom_12_1_legs(series)
+    mom_12_1 = None if legs is None else round((legs[1] / legs[0] - 1) * 100, 2)
 
     out: dict = {
         "mom_12_1": mom_12_1,

@@ -12,6 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
+import { workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import DebtRatioInputsModal from './DebtRatioInputsModal';
@@ -102,6 +103,7 @@ export default function DebtRatioCard({ holdingsTarget, holdingsName, benchTarge
               what="Average Long-Term Debt ÷ (Total Assets − Goodwill) over the years shown."
               where="Computed here — the ratio per year, weight-averaged across holdings."
               when="The years on the chart."
+              worked={workedMean(stats.own.values)}
               how="Goodwill is stripped from assets so leverage is measured against tangible, fundable assets. Lower = less levered." />} />} />
 
           <div>

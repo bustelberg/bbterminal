@@ -19,6 +19,7 @@ never a failure.
 from __future__ import annotations
 
 import itertools
+import logging
 import random
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -26,6 +27,8 @@ from datetime import date
 
 from common.pg import copy_connection_scope
 from deps import supabase
+
+_log = logging.getLogger(__name__)
 
 # How many companies are fetched at once.
 #
@@ -207,7 +210,60 @@ def due_company_ids(ids: list[int], today: date | None = None) -> tuple[list[int
     return out, None
 
 
+def _refresh_prices(ctx, label: str, comps: list[dict]) -> str:
+    """Re-fetch the daily closes for these companies, bypassing the price cache. One line summary.
+
+    ⚠⚠ PRICES ARE NOT ONE OF THE THREE FEEDS, AND THAT IS WHY "Refresh fundamentals" NEVER MOVED
+    A SHARE PRICE. `ingest_company` runs `fin`/`est`/`ind` — statements, consensus, indicators — and
+    `metric_data.close_price` comes from an entirely separate ingest. So Quick Valuation's "Current
+    share price" tile, and the closes its multiple chart is priced off, were untouched by the one
+    button on that screen that says it refreshes the data.
+
+    ⚠ `force_refresh=True`, DELIBERATELY, AND IT IS THE SAME ARGUMENT `ingest_company` MAKES ABOUT
+    ITS OWN CACHE: pressing Refresh is a request to LOOK. The staleness window that is right for a
+    nightly pass is wrong for a human who has just pressed a button and is watching the number.
+
+    ⚠ IT NEVER RAISES. A price fetch failing must not lose the fundamentals that already landed —
+    the feeds ran first and are already written.
+    """
+    from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
+    from ingest.prices import ensure_prices_for_company  # noqa: PLC0415
+
+    ok = failed = skipped = 0
+    rows = 0
+    ctx.emit("info", f"{label}: refreshing prices for {len(comps):,} compan"
+                     f"{'y' if len(comps) == 1 else 'ies'}…")
+    for n, c in enumerate(comps, 1):
+        ctx.check()
+        exch = ((c.get("gurufocus_exchange") or {}) or {}).get("exchange_code")
+        # ⚠ A ROW WITH NO LISTING IS SKIPPED BUT STILL COUNTED. `continue`-ing past the progress
+        # emit below stalled the bar whenever the LAST company was one of these — the run finished
+        # reporting "prices 18/20" and looked hung at exactly the moment it was done.
+        if c.get("gurufocus_ticker") and exch:
+            try:
+                res = ensure_prices_for_company(
+                    supabase, c["company_id"], c["gurufocus_ticker"], exch,
+                    force_refresh=True, data_cutoff=DATA_CUTOFF)
+                ok += 1
+                rows += getattr(res, "rows_loaded", 0) or 0
+            except Exception as e:  # noqa: BLE001 — one price must not lose the run
+                failed += 1
+                _log.warning("[fill] price refresh failed for %s: %s: %s",
+                             c.get("gurufocus_ticker"), type(e).__name__, e)
+        else:
+            skipped += 1
+        if n % 5 == 0 or n == len(comps):
+            ctx.emit("info", f"{label}: prices {n}/{len(comps)}")
+    # ⚠ THE SKIPPED COUNT IS NAMED, never folded into the total. A holding with no GuruFocus
+    # listing (an ETF, a certificate, cash) has no price for us to fetch — which is a different
+    # answer from a fetch that failed, and the two send an operator to different places.
+    return (f"prices: {ok} refreshed ({rows:,} row(s))"
+            + (f", {failed} failed" if failed else "")
+            + (f", {skipped} with no GuruFocus listing" if skipped else ""))
+
+
 def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statements",
+                     prices: bool = False,
                      force: bool = False, limit: int = 0, only_due: bool = False,
                      today: date | None = None) -> str:
     """Fetch the GuruFocus feeds for `ids`, reporting through the job `ctx`. Returns the summary.
@@ -282,7 +338,18 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     #
     # ⚠ THE TWO FLAGS ARE SET EXPLICITLY, WHICH IS NOT REDUNDANT NOW THEY ARE UNPROBED.
     # `ingest_company` reads `c.get(flag, True)` — an ABSENT flag means "fetch it".
-    if feeds == "statements":
+    # ⚠⚠ `all` NARROWS NOTHING, AND IT IS SPELLED OUT RATHER THAN LEFT TO FALL THROUGH. Every
+    # other value here clears two of the three flags; `all` deliberately clears none, so a forced
+    # press runs statements, estimates AND indicators. It exists because the Fundamental modal asks
+    # for it: `indicator_q_forward_pe_ratio` is the ONLY line left on Quick Valuation's multiple
+    # chart, and `annual_eps_nri_estimate` is the dotted forecast leg on Long Equity's EPS card —
+    # neither is in `statements`, so pressing Refresh could never move either, however often.
+    # ⚠ IT WOULD HAVE WORKED BY ACCIDENT (an unknown value falls past both branches with its flags
+    # intact) and that is precisely why it is written down: behaviour nothing names is behaviour
+    # the next `elif` deletes.
+    if feeds == "all":
+        pass
+    elif feeds == "statements":
         todo = [{**c, "need_est": False, "need_ind": False}
                 for c in todo if c.get("need_fin")]
     # ⚠⚠ THE ESTIMATES FILL, AND IT SELECTS ON ITS OWN SENTINEL. Under `statements` a company
@@ -316,6 +383,8 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     scope = ("refetching every one" if force
              else "missing statements" if feeds == "statements"
              else "missing a feed")
+    if prices:
+        scope += " (+ prices)"
     budget = remaining_budget(supabase)
     left = " · ".join(f"{k.upper() if k == 'usa' else k.title()} {v:,}"
                       for k, v in sorted(budget.items()))
@@ -510,6 +579,16 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     # about, arriving through the one door it was not guarded on.
     _blend_cache.invalidate()
 
+    # ⚠⚠ AFTER THE FEEDS, NOT BESIDE THEM. A price fetch is a different ingest with a different
+    # cache, and the feeds are the expensive, cancellable half — running prices first would spend
+    # the cheap calls and then risk the run being stopped before the data anybody pressed the button
+    # for arrived. It is also why a failure here cannot lose what the feeds already wrote.
+    #
+    # ⚠ OVER `work`, THE COMPANIES THIS RUN ACTUALLY TOUCHED — not `comps`. A press that was capped
+    # by `limit`, or narrowed by the due filter, must not quietly re-price the whole book: the two
+    # halves of one button should describe the same set.
+    price_note = _refresh_prices(ctx, label, work) if prices and work else ""
+
     summary = (f"{label} — {ok} companies {'refetched' if force else 'loaded'}"
                + (f", {failed} failed" if failed else "")
                + f", {rows:,} data points"
@@ -519,7 +598,8 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                # 31,204,880 already stored" is the run reporting what it changed and what it did not
                # have to touch; the first number alone would read as a fill that barely worked.
                + (f", {unchanged:,} already stored" if unchanged else "")
-               + (f", {calls:,} API calls" if calls else ""))
+               + (f", {calls:,} API calls" if calls else "")
+               + (f" · {price_note}" if price_note else ""))
     if stopped:
         # ⚠⚠ THE CANCELLED CARD REPORTS WHAT IT GOT THROUGH, AND THAT IS THE WHOLE ANSWER TO "did
         # it even work?". `jobs.py` promotes this message to the job's summary precisely so a worker

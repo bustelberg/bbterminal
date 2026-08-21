@@ -12,6 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
+import { workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import { fcfLabel } from './sbcCorrection';
@@ -117,6 +118,7 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
               what="Average (FCF − SBC) ÷ Market Cap over the years shown."
               where="Computed here — the yield per year, weight-averaged across holdings."
               when="The years on the chart."
+              worked={workedMean(stats.own.values)}
               how="The cash a buyer earns per euro of price, after removing non-cash stock comp from FCF. Higher = cheaper for the cash it generates." />} />} />
 
           <div>

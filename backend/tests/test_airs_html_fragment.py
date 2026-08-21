@@ -168,47 +168,73 @@ class TestTheRosterIsCheckedAgainstAirsOwnCount:
 
 
 class TestTheValuationDateIsDiscoveredOncePerRun:
-    """⚠ EVERY ACCOUNT RE-DISCOVERED THE SAME FLEET-WIDE FACT, FROM SCRATCH, STARTING AT TODAY.
+    """AirSPMS values end-of-day in ONE batch, so a day it never valued is a fact about the DAY.
+    `_vermogen_most_recent` used to re-discover that per account, starting at today: measured
+    2026-07-30 the day's valuation had not run, so all ~25 books with holdings paid a wasted request
+    before landing on the 29th — on a Monday it is three (Mon, Sun, Sat) before Friday.
 
-    AirSPMS values end-of-day and in ONE batch, so a date with no valuation has none for any book.
-    `_vermogen_most_recent` still walked back from today for each account: measured 2026-07-30 the
-    day's valuation had not run, so all ~25 books with holdings paid a wasted request before landing
-    on the 29th — and on a Monday it is three (Mon, Sun, Sat) before Friday. Over 44 accounts that
-    is 44 to 130 round trips through a headless browser, for information the first account already
-    had.
+    ⚠⚠ THE MEMO THAT FIXED IT THEN BROKE 29 OF 46 BOOKS (2026-08-21), and this class now pins the
+    rule that makes it sound. A single failure was taken as proof the DATE was dead, and a failure is
+    only ever proof about the BOOK that made it — books are valued on different cadences, so one book
+    a week behind ruled out six good dates on its way back to its own, and every account scanned
+    afterwards skipped them. It compounds: the more books walk back, the fewer dates remain, until
+    the rest skip their whole horizon without making one request and raise.
 
-    ⚠ ONLY MISSES ARE SHARED, NEVER HITS. A book valued monthly legitimately sits weeks behind a
-    daily-valued one, so "this date worked for A" says nothing about B — caching that would hand B
-    a stale snapshot. "This date has no valuation" is the only fleet-wide fact available.
+    Measured on the real fleet (29 books, valuation dates spread over 8 days):
+
+        one failure rules a date out, 7-day walk     refreshed 22   badged 7   downloads  29
+        quorum of 3 alone                            refreshed 22   badged 7   downloads  64
+        no memo at all                               refreshed 29   badged 0   downloads 139
+        quorum of 3, and only ABOVE the newest hit   refreshed 29   badged 0   downloads 113
+
+    ⚠ THE QUORUM ALONE IS NOT ENOUGH, which is why the second row is in that table: books SHARE
+    cadences, so three books that are all a week behind rule out the very date a fourth one needs.
+    What makes it sound is the second condition — a book cannot be valued AHEAD of the newest batch
+    that has run, so a date is only dead once some account has successfully fetched an OLDER one.
     """
 
-    def _patch(self, monkeypatch, unvalued_from: str):
+    def _patch(self, monkeypatch, unvalued_from: str, behind: dict[str, str] | None = None):
+        """`unvalued_from` = dates >= this return nothing for everyone. `behind` = per-account
+        override: that account is valued only ON that date, whatever the fleet is doing."""
         import airs_scanner
         import airs_vermogen
 
         calls: list[tuple[str, str]] = []
+        behind = behind or {}
 
         def fake(name, van, tot):
             calls.append((name, tot))
+            if name in behind:
+                if tot != behind[name]:
+                    raise RuntimeError("Response too small")
+                return b"ok"
             if tot >= unvalued_from:
                 raise RuntimeError("Response too small")
             return b"ok"
 
         monkeypatch.setattr(airs_scanner, "download_vermogensoverzicht_sync", fake)
-        airs_vermogen._UNVALUED_DATES.clear()
+        # ⚠ ALL THREE, so a test starts from a known memo rather than from whatever the previous
+        # one left in the module. The TTL stamp matters as much as the two it guards: leaving it
+        # unset would make the first call in each test reset the memo again, which is fine here but
+        # would quietly hide a test that MEANT to carry state across a phase (see the inheritance
+        # regression below, which does exactly that on purpose).
+        airs_vermogen._reset_valuation_memo()
         return calls
 
-    def test_a_proven_unvalued_date_is_not_re_tried_by_the_next_account(self, monkeypatch):
+    def test_a_dead_date_is_ruled_out_once_a_quorum_agrees(self, monkeypatch):
+        """The saving the memo exists for: three books pay for the discovery, the rest skip it."""
         import airs_vermogen
         from datetime import date
 
         today = date.today().isoformat()
         calls = self._patch(monkeypatch, unvalued_from=today)
-        for acct in ("A", "B", "C"):
+        for acct in ("A", "B", "C", "D", "E"):
             airs_vermogen._vermogen_most_recent(acct, "2026-01-01")
-        # A pays for the discovery; B and C skip straight to the valued day.
-        assert [c for c in calls if c[1] == today] == [("A", today)]
-        assert len(calls) == 4, calls
+        tried_today = [c[0] for c in calls if c[1] == today]
+        # ⚠ EXACTLY THE QUORUM, THEN NEVER AGAIN. Fewer would mean one book can speak for the
+        # fleet (the bug); more would mean the memo never pays for itself.
+        assert tried_today == ["A", "B", "C"], tried_today
+        assert [c[0] for c in calls].count("E") == 1, "E should have skipped straight to the hit"
 
     def test_every_account_still_gets_its_OWN_valued_date(self, monkeypatch):
         """The memo must not pin the fleet to one answer — only rule dates OUT."""
@@ -220,15 +246,131 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
         dates = {a: airs_vermogen._vermogen_most_recent(a, "2026-01-01")[0] for a in ("A", "B")}
         assert dates["A"] == dates["B"] < today
 
-    def test_the_memo_is_cleared_per_run(self):
-        """"Unvalued" is true until the next end-of-day batch, not for ever — a scan an hour later
-        must be able to find a date that has since been valued."""
-        import inspect
+    def test_a_book_that_is_simply_BEHIND_does_not_rule_dates_out_for_the_fleet(self, monkeypatch):
+        """⚠⚠ THE REGRESSION. This is the production failure, in five accounts.
 
+        `slow` is valued a week ago, so it fails on six dates the fleet is perfectly valued on. Under
+        the old rule those six were dead for everyone after it, and the books that needed them wore a
+        permanent "⚠ Vermogensoverzicht" on /management-dashboard while their stored holdings sat
+        days out of date. Every one of them must still get its own snapshot.
+        """
+        import airs_vermogen
+        from datetime import date, timedelta
+
+        day = lambda b: (date.today() - timedelta(days=b)).isoformat()  # noqa: E731
+        # The fleet is valued up to yesterday; `slow` only ever on day 7.
+        self._patch(monkeypatch, unvalued_from=day(0), behind={"slow": day(7)})
+
+        # The offender goes FIRST, which is the worst case: it poisons before anyone succeeds.
+        assert airs_vermogen._vermogen_most_recent("slow", "2026-01-01")[0] == day(7)
+        for acct in ("A", "B", "C", "D"):
+            got, _blob = airs_vermogen._vermogen_most_recent(acct, "2026-01-01")
+            assert got == day(1), f"{acct} got {got}, not the fleet's newest valued date"
+
+    def test_the_horizon_reaches_a_book_valued_more_than_a_week_ago(self, monkeypatch):
+        """⚠ THE SECOND, INDEPENDENT DEFECT. The walk was `range(0, 7)`, and two of the 29 badged
+        books were last valued 8 days back — unreachable even with an empty memo."""
+        import airs_vermogen
+        from datetime import date, timedelta
+
+        day = lambda b: (date.today() - timedelta(days=b)).isoformat()  # noqa: E731
+        self._patch(monkeypatch, unvalued_from=day(0), behind={"stale": day(8)})
+        assert airs_vermogen._vermogen_most_recent("stale", "2026-01-01")[0] == day(8)
+        assert airs_vermogen._WALK_BACK_DAYS > 8
+
+    def test_a_dead_session_still_raises_rather_than_returning_a_wrong_date(self, monkeypatch):
+        """⚠ EXHAUSTION IS STILL A FAILURE. An auth failure returns the same empty body on EVERY
+        date; widening the horizon must not turn that into a silent success on some old date."""
+        import airs_vermogen
+        import pytest as _pytest
+
+        self._patch(monkeypatch, unvalued_from="0000-00-00")   # nothing is ever valued
+        with _pytest.raises(RuntimeError, match="no valued Vermogensoverzicht"):
+            airs_vermogen._vermogen_most_recent("A", "2026-01-01")
+
+    def test_a_later_refresh_does_not_inherit_a_finished_runs_ruled_out_dates(self, monkeypatch):
+        """⚠⚠ THE PRODUCTION FAILURE, ONE LEVEL UP FROM THE CASCADE (2026-08-22).
+
+        The memo is process-global and `run_airs_vermogen_refresh_sync` was the only caller that
+        ever reset it. `refresh_one_portfolio` — the per-row Refresh button, the Analyse modal's
+        Refresh, and `refresh_many` under the 05:00 model-prices job — did not, and the backend is
+        a long-lived process.
+
+        The dates a fleet run rules out are by construction the NEWEST ones (today, and the weekend
+        behind it), which are exactly the dates AirSPMS has since valued by the time anybody presses
+        Refresh. So the button walked past the date it needed, landed older or exhausted its
+        horizon, and the row kept its ⚠ Vermogensoverzicht — reported as "I still see this behind
+        most portfolios" after the cascade fix had shipped.
+
+        This is the whole bug in two phases and one process, and it is deliberately written against
+        BEHAVIOUR rather than source text — see the test below it for why.
+        """
+        import airs_scanner
+        import airs_vermogen
+        from datetime import date, timedelta
+
+        day = lambda b: (date.today() - timedelta(days=b)).isoformat()  # noqa: E731
+
+        # Phase 1 — a fleet pass at a moment AirSPMS has not yet valued today. Four books is enough
+        # to meet the quorum and have the fourth skip today, which is the state that then persists.
+        calls = self._patch(monkeypatch, unvalued_from=day(0))
+        for acct in ("A", "B", "C", "D"):
+            airs_vermogen._vermogen_most_recent(acct, "2026-01-01")
+        assert airs_vermogen._UNVALUED_DATES.get(day(0)) == {"A", "B", "C"}
+
+        # Phase 2 — the batch runs, today becomes valued, and somebody presses Refresh on a row.
+        # ⚠ NO RESET BETWEEN THE PHASES, deliberately: not resetting is precisely what the per-row
+        # button did, and a test that reset here would be testing the fleet path a second time.
+        airs_vermogen._MEMO_STARTED_AT = (
+            airs_vermogen._time.monotonic() - airs_vermogen._MEMO_TTL_S - 1)
+        calls.clear()
+
+        def now_valued(name, van, tot):
+            calls.append((name, tot))
+            return b"ok"
+
+        monkeypatch.setattr(airs_scanner, "download_vermogensoverzicht_sync", now_valued)
+
+        got, _blob = airs_vermogen._vermogen_most_recent("A", "2026-01-01")
+        # ⚠ THE ASSERTION THAT FAILS WITHOUT THE FIX: it comes back with day(1), the newest date the
+        # PREVIOUS run had proved, having skipped today without asking.
+        assert got == day(0), (
+            f"the refresh got {got}, not today — it skipped a date that has since been valued")
+        assert calls == [("A", day(0))], calls
+
+    def test_the_memo_expires_on_a_clock_not_on_a_caller_remembering(self):
+        """⚠⚠ WHY THE TTL LIVES ON THE READ PATH. The rule this replaces was "the fleet run clears
+        it at the top", pinned by a test that grepped `run_airs_vermogen_refresh_sync` for the
+        string `_UNVALUED_DATES.clear()`. That assertion was true for the entire time production was
+        broken: the clear was there, and two other entry points reached the memo without it.
+
+        A source-text assertion can only ever confirm that one caller does the right thing, which is
+        the exact shape of the bug. So the invariant is stated where it can be checked for ALL
+        callers — reaching the walk with a memo older than the TTL leaves it empty, whoever called.
+        """
         import airs_vermogen
 
-        assert "_UNVALUED_DATES.clear()" in inspect.getsource(
-            airs_vermogen.run_airs_vermogen_refresh_sync)
+        airs_vermogen._UNVALUED_DATES["2026-08-20"] = {"A", "B", "C"}
+        airs_vermogen._NEWEST_VALUED = "2026-08-19"
+        airs_vermogen._MEMO_STARTED_AT = (
+            airs_vermogen._time.monotonic() - airs_vermogen._MEMO_TTL_S - 1)
+
+        airs_vermogen._expire_valuation_memo()
+
+        assert airs_vermogen._UNVALUED_DATES == {}
+        # ⚠ BOTH HALVES, OR THE PAIR IS INCOHERENT — `_NEWEST_VALUED` is the LICENCE to rule a date
+        # out, so keeping it while dropping the misses licences one run's answer against another's
+        # evidence.
+        assert airs_vermogen._NEWEST_VALUED is None
+
+    def test_the_memo_survives_within_one_run(self):
+        """The saving still has to happen — an expiry on every call would be no memo at all."""
+        import airs_vermogen
+
+        airs_vermogen._reset_valuation_memo()
+        airs_vermogen._UNVALUED_DATES["2026-08-20"] = {"A", "B", "C"}
+        airs_vermogen._expire_valuation_memo()
+        assert airs_vermogen._UNVALUED_DATES == {"2026-08-20": {"A", "B", "C"}}
 
 
 class TestBooksTooSmallToBePortfoliosAreNotRescanned:

@@ -146,10 +146,22 @@ export function sharedSpan(
 export type TileStats = {
   avg: number | null; latest: number | null; latestX: number | null;
   n: number; fromX: number | null; toX: number | null;
+  /**
+   * THE VALUES `avg` WAS TAKEN OVER, in year order — what `workedMean` prints under the tile.
+   *
+   * ⚠⚠ CARRIED ON THE RESULT RATHER THAN RE-FILTERED BY THE CARD, for the same reason `Cagr` carries
+   * its endpoints. The filter above is not trivial (the span clip, the null skip, the sort), and a
+   * card that redoes it "the same way" to list the addends is a second implementation whose only
+   * job is to agree with this one. It would drift silently and in the worst possible place: a
+   * worked example that does not add up to the figure it sits under is worse than no example.
+   *
+   * ⚠ EMPTY, NEVER ABSENT, when there is nothing in the window — so a caller can always map it.
+   */
+  values: readonly number[];
 };
 
 const EMPTY_TILE: TileStats =
-  { avg: null, latest: null, latestX: null, n: 0, fromX: null, toX: null };
+  { avg: null, latest: null, latestX: null, n: 0, fromX: null, toX: null, values: [] };
 
 /**
  * The `Avg` and `Latest` a tile prints, over `span` (the whole series when null).
@@ -178,6 +190,7 @@ export function tileStats(
     n: pts.length,
     fromX: pts[0][0],
     toX: pts[pts.length - 1][0],
+    values: pts.map(([, v]) => v),
   };
 }
 

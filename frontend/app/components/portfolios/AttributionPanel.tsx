@@ -407,8 +407,12 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
     : 'EUR close at the window’s end ÷ its close at the start − 1';
 
   return (
-    <section className="bg-card border border-accent-500/30 rounded-xl p-4">
-      <div className="flex items-start justify-between gap-3 mb-2">
+    <section className="h-full min-h-0 flex flex-col bg-card border border-accent-500/30
+      rounded-xl p-4">
+      {/* ⚠⚠ `shrink-0`, AND IT CARRIES THE AXIS PICKER. Sized to its content, this dialog
+          resized every time the axis changed — moving the select the reader had just used
+          out from under the pointer. See `PanelDialog` for the fixed box. */}
+      <div className="shrink-0 flex items-start justify-between gap-3 mb-2">
         <div>
           <h4 className="text-sm font-semibold text-fg-strong">
             {`${label} performance attribution compared to ${benchmark}`}
@@ -429,12 +433,20 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
         </div>
       </div>
 
+      {/* ⚠ `min-h-0` OR THE FIXED HEIGHT GIVES WAY. A flex item defaults to `min-height:auto`,
+          which refuses to shrink below its content, so `overflow-auto` here would be ignored and
+          the section would grow instead — silently, and only for the longest tables. */}
+      <div className="flex-1 min-h-0 overflow-auto">
       {error && (
         <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">
           {error}
         </div>
       )}
-      {!data && !error && <p className="text-xs text-fg-subtle">Computing attribution…</p>}
+      {!data && !error && (
+        <div className="h-full grid place-items-center">
+          <p className="text-xs text-fg-subtle">Computing attribution…</p>
+        </div>
+      )}
 
       {data && (
         <>
@@ -677,6 +689,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
           </div>
         </>
       )}
+      </div>
     </section>
   );
 }

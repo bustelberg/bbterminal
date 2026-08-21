@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { trace } from '../../../lib/debugTrace';
 import { type Basket } from './types';
-import FundamentalCharts from './FundamentalCharts';
-import FundamentalCoverage from './FundamentalCoverage';
 import LongEquityTab from './LongEquityTab';
 import TablesTab from './TablesTab';
 import QuickValuationTab from './QuickValuationTab';
@@ -13,20 +11,24 @@ import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFund
 import LangSwitch from '../LangSwitch';
 import { useLang } from '../../../lib/i18n';
 
-type Tab = 'fundamentals' | 'longequity' | 'quickval' | 'deepval' | 'tables';
+type Tab = 'longequity' | 'quickval' | 'deepval' | 'tables';
 
 /**
  * The Fundamental modal: one company's fundamental chart suite.
  *
- * ⚠ IT USED TO OPEN ON AN OWNER-EARNINGS / STOCK-PRICE CHART, and that whole section was removed
- * 2026-07-23 — the tab bar, the currency and cadence toggles, the R²/growth-SD/CAGR headline, the
- * log-axis trend chart and its footnote, plus the two data fetches behind them (the owner-earnings
- * SSE stream and the price series). ~300 lines. `FundamentalCharts` is the whole modal now.
+ * ⚠ IT USED TO OPEN ON AN OWNER-EARNINGS / STOCK-PRICE CHART, removed 2026-07-23, and then on
+ * `FundamentalCharts` — the suite this modal spent a year being. That one was demoted to last and
+ * renamed "Old charts" once Long Equity, Quick Valuation, Deep Valuation and Tables superseded it,
+ * and it was REMOVED ENTIRELY on 2026-08-21 along with `FundamentalCharts.tsx` and
+ * `FundamentalCoverage.tsx`, which nothing else mounted.
  *
- * ⚠ THAT SECTION WAS THE ONLY CONTENT AN AGGREGATE EVER HAD. A basket or a whole portfolio has no
- * single company to chart, so `FundamentalCharts` has never rendered for one. Rather than open an
- * empty box, an aggregate now says so — see the note below. The /portfolios portfolio-level
- * "Fundamental" button opens exactly this case.
+ * ⚠⚠ THE COVERAGE PANEL WENT WITH IT, AND IT WAS NOT AN OLD CHART. `FundamentalCoverage` answered
+ * "how much of this book, BY WEIGHT, can a blended figure actually reach" — the question every
+ * blend on the Long Equity tab depends on, with a per-holding reason and an ingest button for the
+ * ones it could not. What survives of it is narrower and lives where the number does: each card's
+ * own coverage figure, `HoldingsIngestPanel` when a blend comes back empty, and the drill-down's
+ * per-row Refresh. If the whole-book view is wanted back, it is one mount under Long Equity, which
+ * already receives `basket`/`portfolioId` — see the deleted component in git history.
  */
 export default function OwnerEarningsModal({
   isin, name, bookName, sharePct, basket, portfolioId, refreshScope, onClose, embedded = false,
@@ -139,14 +141,6 @@ export default function OwnerEarningsModal({
   const eyebrow = ['Fundamental', book ? title : null,
     book && sharePct != null ? `${sharePct.toFixed(1)}% of the portfolio` : null,
   ].filter(Boolean).join(' · ');
-  // Bumped whenever the coverage panel ingests something, so the blended charts re-fetch and pick
-  // up the data that ingest just created (they'd otherwise show the pre-ingest blend until reopen).
-  // Used as FundamentalCharts' `key` — a remount is the clean way to force one fresh blend fetch.
-  const [blendKey, setBlendKey] = useState(0);
-  // ⚠ MEMOISED, OR IT REFETCHES FOR EVER. A fresh object literal here is a new reference every
-  // render, and it is in the child's effect deps — so each fetch would set state, re-render, and
-  // fetch again. The blend is an expensive multi-company query; this is not a micro-optimisation.
-  const blend = useMemo(() => ({ basket, portfolioId }), [basket, portfolioId]);
   // ⚠ A MISSING CONTROL LOOKS IDENTICAL TO A BROKEN ONE, SO THE ABSENCE EXPLAINS ITSELF. The
   // fundamentals refresh needs a real model portfolio to scope to, and the Analyse modal only has
   // one when it was opened WITH an id — `/portfolios` always passes one, the overview panel's
@@ -175,10 +169,9 @@ export default function OwnerEarningsModal({
         + 'single instrument nor a book (no isin, no basket, no portfolio) to scope the fill to.');
     }
   }, [scope]);
-  // ⚠ THE FIRST TAB, WHICH IS NO LONGER `fundamentals`. Demoting those charts to last and naming
-  // them "Old charts" while still opening on them would say two opposite things at once — and it
-  // is the one tab both an aggregate and a single company have, so the landing tab never depends
-  // on which the modal was opened for.
+  // ⚠ THE LANDING TAB, AND IT IS THE ONE TAB BOTH AN AGGREGATE AND A SINGLE COMPANY HAVE — so
+  // where the modal opens never depends on which it was opened for. (It became the landing tab when
+  // `fundamentals` was demoted to "Old charts"; that tab is now gone entirely.)
   const [tab, setTab] = useState<Tab>('longequity');
   /** Which tabs have been opened at least once — the mount set. A tab enters it on first visit
    *  and never leaves, so its data survives every subsequent switch. Seeded with the landing tab
@@ -210,7 +203,7 @@ export default function OwnerEarningsModal({
    * ⚠ HOISTED OUT OF `LongEquityTab` SO IT CAN SIT IN THE TAB ROW. The setting belongs to that tab
    * and governs only its charts, but the row is the modal's — and the row is in the fixed head, so
    * putting the control there is what keeps it visible without any sticky positioning of its own.
-   * Rendered only on the tab it affects: a checkbox on screen while Old charts is open would
+   * Rendered only on the tab it affects: a checkbox on screen while another tab is open would
    * claim to be doing something to charts it cannot reach.
    */
   const [sbcCorrection, setSbcCorrection] = useState(true);
@@ -278,15 +271,15 @@ export default function OwnerEarningsModal({
           <div className="flex items-center gap-3 mb-3 shrink-0 flex-wrap">
           <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 w-fit">
             {((isAgg
-              // ⚠ LAST, AND CALLED WHAT IT IS. These charts are superseded by the three reads to
-              // their left; keeping them first made the modal open on the oldest thing in it.
-              // ⚠ `Tables` SITS BESIDE `Long Equity`, NOT AFTER `Old charts`. It is the same three
-              // reads those cards draw, summarised — so it belongs with them, and putting it last
-              // would file the newest thing in the modal behind the one named for being superseded.
-              ? [['longequity', 'Long Equity'], ['tables', 'Tables'], ['fundamentals', 'Old charts']]
+              // ⚠ `Tables` SITS BESIDE `Long Equity`. It is the same reads those cards draw,
+              // summarised, so it belongs with them rather than at the far end of the row.
+              // ⚠ AN AGGREGATE GETS TWO OF THE FOUR. Quick and Deep Valuation are per-company — a
+              // reverse DCF wants one share price and one share count — so a book is offered only
+              // the two that blend. The list is the whole difference; nothing downstream branches.
+              ? [['longequity', 'Long Equity'], ['tables', 'Tables']]
               : [['longequity', 'Long Equity'], ['tables', 'Tables'],
                 ['quickval', 'Quick Valuation'],
-                ['deepval', 'Deep Valuation'], ['fundamentals', 'Old charts']]
+                ['deepval', 'Deep Valuation']]
             ) as [Tab, string][]).map(([t, label]) => (
               <button key={t} type="button" onClick={() => openTab(t)}
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
@@ -305,9 +298,16 @@ export default function OwnerEarningsModal({
               you were looking at. It sits in the right-aligned group so it keeps its place when
               the SBC label comes and goes; `ml-auto` moved onto this wrapper for the same reason. */}
           <div className="ml-auto flex items-center gap-3 min-w-0">
+          {/* ⚠ NO `onDone` — THE COMPONENT ALREADY DROPS THE READ CACHE ITSELF, which is what makes
+              a filled figure reachable on every tab here. This used to re-key the Old-charts blend,
+              the one mounted view that could not otherwise see the new data; that tab is gone and
+              no tab in this modal holds a view that needs re-keying. */}
+          {/* ⚠ `everything` — THIS MODAL PRICES THINGS, so the statements feed alone was never what
+              its tabs draw. Quick Valuation shows today's share price and charts the multiple off
+              the daily closes; its forward line and Long Equity's dotted consensus are the
+              indicator and estimate feeds. None of the three is in the default fill. */}
           {scope && (
-            <PortfolioFundamentalsRefresh scope={scope}
-              onDone={() => setBlendKey((k) => k + 1)} />
+            <PortfolioFundamentalsRefresh scope={scope} everything />
           )}
           {/* ⚠ ALWAYS ON, NOT ONLY ON THE TAB IT CURRENTLY TRANSLATES. It was tab-scoped first, on
               the same reasoning as the SBC checkbox below — a control that governs nothing on the
@@ -398,29 +398,6 @@ export default function OwnerEarningsModal({
               holdingsName={subject}
               sbcCorrection={sbcCorrection}
               lang={lang} />
-          </div>
-        )}
-        {visited.has('fundamentals') && (
-          <div className={tab === 'fundamentals' ? undefined : 'hidden'}>
-            {/* An aggregate gets the SAME chart suite, blended across its holdings, with the
-                coverage breakdown beneath it — how much of the book those charts actually span,
-                and which holdings are missing. */}
-            {isAgg ? (
-              // ⚠ THE SAME COMPONENT AS A SINGLE COMPANY. The portfolio is fetched as a blended
-              // pseudo-company in the identical payload shape, so this is the same screen — not a
-              // second, parallel implementation that would drift from it.
-              <>
-                <FundamentalCharts key={blendKey} blend={blend} name={subject} />
-                <div className="mt-6 pt-5 border-t border-neutral-800/40">
-                  <FundamentalCoverage basket={basket} portfolioId={portfolioId}
-                    onIngested={() => setBlendKey((k) => k + 1)} />
-                </div>
-              </>
-            ) : isin ? (
-              <FundamentalCharts isin={isin} name={name} />
-            ) : (
-              <p className="text-sm text-fg-subtle py-16 text-center">No instrument to look up.</p>
-            )}
           </div>
         )}
         {/* The selected tab has nothing to render at all — an aggregate on a single-company tab,

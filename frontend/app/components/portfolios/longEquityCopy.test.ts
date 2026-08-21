@@ -31,7 +31,10 @@ const ENGLISH_BEFORE: Record<ChartKey, [string, string]> = {
   sharePrice: ['Share price', 'Share price'],
   epsNri: ['EPS (excl. non-recurring)', 'EPS (excl. non-recurring)'],
   revenue: ['Revenue', 'Revenue'],
-  fcfPs: ['FCF / share', 'FCF / share'],
+  // ⚠ RENAMED 2026-08-21, ON REQUEST: the slash became the word. "FCF / share" reads as a
+  // division in a list of headings that are names, and the Dutch was worse — "Vrije kasstroom /
+  // aandeel" next to "Winst per aandeel" said the same relation two different ways.
+  fcfPs: ['FCF per share', 'FCF per share'],
   shares: ['Shares outstanding', 'Shares outstanding'],
   fcfMargin: ['FCF margin', 'FCF-SBC margin'],
   croic: ['Cash return on capital', 'Cash return on capital'],

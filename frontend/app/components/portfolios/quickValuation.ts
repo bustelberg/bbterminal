@@ -107,7 +107,11 @@ export const BASIS: Record<Basis, {
 }> = {
   fcf: {
     tab: 'FCF',
-    perShare: 'FCF / share',
+    // ⚠ THE SAME WORDS AS THE LONG EQUITY CARD AND THE TABLES ROW — renamed together
+    // 2026-08-21. This label reaches the calculator's row names ("Current FCF per share"),
+    // so a slash here and the word two tabs away would be one metric under two names inside
+    // one modal.
+    perShare: 'FCF per share',
     yieldTitle: 'FCF yield',
     yieldInline: 'FCF yield',
     codes: FCF_PS_CODES,

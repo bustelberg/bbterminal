@@ -10,6 +10,7 @@ import CorrelationInstruments from './CorrelationInstruments';
 import { sliceMatrix } from './correlationFilter';
 import { VARIANT_FILTERS } from './portfolioVariants';
 import type { Variant } from './portfolioVariants';
+import { useMgmtCopy } from './management/managementCopy';
 
 type Window = 'ytd' | 'trailing_12m';
 
@@ -139,6 +140,9 @@ export function diagonalExtentPx(labels: string[]): number {
  * `min_overlap_days` common returns — a model defined last week has nothing to correlate yet.
  */
 export default function CorrelationMatrix() {
+  // ⚠ THE SHARED PREFERENCE, read through one hook so this panel and the sidebar switch that
+  // sets it cannot disagree. Missing Dutch is a compile error, not a fallback — see the file.
+  const t = useMgmtCopy();
   const [data, setData] = useState<PortfolioCorrelationMatrix | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -257,7 +261,7 @@ export default function CorrelationMatrix() {
     <section className="isolate bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-sm font-semibold text-fg-strong">Portfolio correlations</h3>
+          <h3 className="text-sm font-semibold text-fg-strong">{t.correlation.title}</h3>
           <p className="text-[12px] text-fg-faint mt-0.5"
             title="Computed from the same daily EUR return series the portfolios' YTD is read off.">
             Pairwise correlation of daily EUR returns
@@ -289,7 +293,7 @@ export default function CorrelationMatrix() {
         </div>
       </div>
 
-      {loading && <p className="text-xs text-fg-subtle">Computing…</p>}
+      {loading && <p className="text-xs text-fg-subtle">{t.common.computing}</p>}
       {error && (
         <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">{error}</div>
       )}
@@ -300,7 +304,7 @@ export default function CorrelationMatrix() {
           unaskable). */}
       {!loading && !error && data && labels.length === 0 && (
         <p className="text-xs text-fg-subtle">
-          No model portfolio is offered at <span className="text-fg">{variant}</span>.{' '}
+          {t.correlation.noPortfolios} <span className="text-fg">{variant}</span>.{' '}
           <button type="button" onClick={() => setVariant('all')}
             className="text-accent-400 hover:underline">Show all {data.labels.length}</button>.
         </p>

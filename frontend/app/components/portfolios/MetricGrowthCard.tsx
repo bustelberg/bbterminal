@@ -23,6 +23,7 @@ import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, rebaseSeries, seriesCrossesZero, type BenchTarget } from './benchSeries';
 import { benchTileLabel, pairedSpan, SpanNote, Stat } from './CardStats';
 import { clipPoints, sharedSpan } from './windowStats';
+import { withWorked, workedCagr, workedMean } from './workedFormula';
 
 /**
  * One "Long Equity" growth card: a metric per fiscal year on a LOG axis with an exponential-trend
@@ -35,7 +36,7 @@ import { clipPoints, sharedSpan } from './windowStats';
  */
 
 export type MetricCfg = {
-  title: string;                 // 'Revenue' | 'FCF / share' | 'ROIC'
+  title: string;                 // 'Revenue' | 'FCF per share' | 'ROIC'
   /**
    * The heading's translation key — see `longEquityCopy`.
    *
@@ -812,6 +813,10 @@ export default function MetricGrowthCard({
                     where="Computed here from the points below."
                     when={`${ratioStats.own.n} year(s)${ratioStats.span
                       ? ' — the span shared with the benchmark' : ''}.`}
+                    // ⚠ THE ADDENDS COME OFF `tileStats` ITSELF (see `TileStats.values`), not from
+                    // re-filtering the series here — so the list under the formula is provably the
+                    // one the tile averaged, span clip and null-skip included.
+                    worked={workedMean(ratioStats.own.values, cfg.unit === 'percent' ? '%' : '')}
                     how="A simple mean — a ratio doesn't compound, so there's no growth rate." />} />} />
                 {/* ⚠ THE SAME TILE FOR THE INDEX, FROM THE SAME `pairedSpan` CALL — one mean,
                     two series, one window. See `CardStats`. */}
@@ -895,7 +900,11 @@ export default function MetricGrowthCard({
                       : '(end ÷ start) ^ (1 ÷ years) − 1. ⚠ NOT the slope of the fitted trend beside '
                         + 'it: that smooths the endpoints, and how far it differs from this IS what '
                         + 'the R² is telling you. Only these two periods matter here, so one '
-                        + 'unrepresentative year at either end moves it.'} />} />} />
+                        + 'unrepresentative year at either end moves it.'}
+                    // ⚠ THE SAME FORMULA AS `how`, WITH THIS CARD'S OWN TWO ENDPOINTS IN IT. The
+                    // operands ride on `ptp` itself (see `Cagr.fromValue`), so the worked line
+                    // cannot be the right rate beside the wrong pair of numbers.
+                    worked={linear ? '' : workedCagr(ptp)} />} />} />
                 {/* ⚠⚠ THE INDEX'S RATE OVER **THE SAME TWO PERIODS**. A CAGR is the one figure here
                     that is meaningless across mismatched windows — `(end/start)^(1/n)` divides by a
                     span — so this is the tile `statSpan` exists for. Both sides refuse for their
@@ -908,9 +917,13 @@ export default function MetricGrowthCard({
                       ? `${benchLabel ?? 'The benchmark'}'s line changes sign; growth from a `
                         + 'non-positive base is not a percentage.'
                       : benchPtp.pct == null ? benchPtp.reason
-                        : `${benchLabel ?? 'The benchmark'}, ${benchPtp.from} → ${benchPtp.to}, `
-                          + `${benchPtp.years} year(s) — the same endpoints, the same function and `
-                          + 'the same window as the tile beside it.'} />} />
+                        // ⚠ THE SAME SHAPE AS THE TILE BESIDE IT, on the index's own two points.
+                        // Two tiles under one heading that explain themselves differently invite
+                        // the reading that they were computed differently — and the whole claim
+                        // here is that they were not.
+                        : withWorked('(end ÷ start) ^ (1 ÷ years) − 1', workedCagr(benchPtp),
+                          `${benchLabel ?? 'The benchmark'} — the same endpoints, the same `
+                          + 'function and the same window as the tile beside it.')} />} />
                 )}
               </>
             )}

@@ -41,7 +41,7 @@ const en: ChartTitles = {
   sharePrice: () => 'Share price',
   epsNri: () => 'EPS (excl. non-recurring)',
   revenue: () => 'Revenue',
-  fcfPs: () => 'FCF / share',
+  fcfPs: () => 'FCF per share',
   shares: () => 'Shares outstanding',
   fcfMargin: (sbc) => `${sbc ? 'FCF-SBC' : 'FCF'} margin`,
   croic: () => 'Cash return on capital',
@@ -58,10 +58,13 @@ const en: ChartTitles = {
 };
 
 /**
- * ⚠ THE SAME DUTCH TERM FOR THE SAME THING AS THE `Tables` TAB USES. Both surfaces live in the same
- * modal, one summarising the other, so "vrije kasstroom / aandeel" and "rendement op geïnvesteerd
- * vermogen" have to be the identical phrase in both — a summary that renames the rows it summarises
- * is a summary of something else. See `tablesCopy`.
+ * ⚠⚠ THE SAME DUTCH TERM FOR THE SAME THING AS THE `Tables` TAB USES, AND IT IS ENFORCED. Both
+ * surfaces live in the same modal, one summarising the other, so "vrije kasstroom per aandeel" and
+ * "rendement op geïnvesteerd vermogen" have to be the identical phrase in both — a summary that
+ * renames the rows it summarises is a summary of something else. `longEquityCopy.test` asserts the
+ * three overlapping pairs, which is what caught it when the Tables chips gained a " CAGR" suffix
+ * the headings here do not carry: `nl.chip.fcfCagr` must equal this heading exactly, so the CHIP is
+ * the short name and the row LABEL is the one that says CAGR. See `tablesCopy`.
  *
  * ⚠ `SBC` SURVIVES AS A SHORT MARKER where spelling it out would double a heading's length
  * ("na aandelenbeloning"). It is the one abbreviation kept, and it is kept because the checkbox
@@ -72,7 +75,7 @@ const nl: ChartTitles = {
   sharePrice: () => 'Aandelenkoers',
   epsNri: () => 'Winst per aandeel (excl. bijzondere posten)',
   revenue: () => 'Omzet',
-  fcfPs: () => 'Vrije kasstroom / aandeel',
+  fcfPs: () => 'Vrije kasstroom per aandeel',
   shares: () => 'Uitstaande aandelen',
   fcfMargin: (sbc) => (sbc ? 'Vrije kasstroom-marge na SBC' : 'Vrije kasstroom-marge'),
   croic: () => 'Kasrendement op kapitaal',

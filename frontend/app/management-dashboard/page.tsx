@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { API_URL } from '../../lib/apiUrl';
 import { trace } from '../../lib/debugTrace';
+import { useMgmtCopy } from '../components/management/managementCopy';
 import BenchmarksPanel from '../components/BenchmarksPanel';
 import CorrelationMatrix from '../components/CorrelationMatrix';
 import PortfolioOverviewPanel from '../components/PortfolioOverviewPanel';
@@ -25,16 +26,13 @@ import PortfolioOverviewPanel from '../components/PortfolioOverviewPanel';
  */
 type TabKey = 'overview' | 'cross' | 'benchmarks';
 
-const TABS: { key: TabKey; label: string; note: string }[] = [
-  { key: 'overview', label: 'Overview',
-    note: 'Each portfolio on its own — its holdings, weights and returns.' },
-  { key: 'cross', label: 'Cross-portfolio',
-    note: 'How the portfolios move together. A pairwise view: no single portfolio has this number.' },
-  { key: 'benchmarks', label: 'Benchmarks',
-    note: 'The indices the portfolios are measured against, cap-weighted and rebuilt from our own constituents.' },
-];
+/** ⚠ THE ORDER LIVES HERE, THE WORDS LIVE IN `managementCopy`. A tab's label and its hover are
+ *  copy and are translated; which tabs exist and in what order is a fact about the page. Keeping
+ *  the strings here would have meant a second English original for the translation to drift from. */
+const TAB_ORDER: TabKey[] = ['overview', 'cross', 'benchmarks'];
 
 export default function Page() {
+  const t = useMgmtCopy();
   const [tab, setTab] = useState<TabKey>('overview');
   // ⚠ MOUNTED ON FIRST VISIT, THEN KEPT. Each panel is a real request — the correlation matrix an
   // N×N grid over every portfolio's YTD, the benchmarks a full index rebuild — expensive enough
@@ -75,20 +73,20 @@ export default function Page() {
   return (
     <div className="min-h-screen bg-page text-fg">
       <div className="px-8 py-5 border-b border-neutral-800/40">
-        <h1 className="text-xl font-semibold text-fg-strong">Management Dashboard</h1>
+        <h1 className="text-xl font-semibold text-fg-strong">{t.page.title}</h1>
       </div>
 
       <div className="px-8 py-6 space-y-6">
         {/* The segmented control the rest of the app uses for a small, fixed set of named views
             (see the holdings table's "Weight returns by") — two discrete choices, not a slider. */}
         <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden text-xs">
-          {TABS.map((t) => (
-            <button key={t.key} type="button" onClick={() => select(t.key)} title={t.note}
-              aria-pressed={tab === t.key}
-              className={`px-3 py-1.5 font-medium transition-colors ${tab === t.key
+          {TAB_ORDER.map((k) => (
+            <button key={k} type="button" onClick={() => select(k)} title={t.page.tabs[k].note}
+              aria-pressed={tab === k}
+              className={`px-3 py-1.5 font-medium transition-colors ${tab === k
                 ? 'bg-accent-600 text-white'
                 : 'text-fg-subtle hover:bg-overlay/5'}`}>
-              {t.label}
+              {t.page.tabs[k].label}
             </button>
           ))}
         </div>

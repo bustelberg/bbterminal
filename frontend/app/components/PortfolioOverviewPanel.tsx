@@ -26,6 +26,7 @@ import {
 import type {
   AirsAccountDetail, AirsAccountIsins, AirsHoldingSegment, AirsPortfolioOverview,
 } from '../../lib/types/api';
+import { useMgmtCopy } from './management/managementCopy';
 
 /**
  * The one table: a portfolio, by the name you gave it, on AIRS's own numbers.
@@ -152,6 +153,10 @@ const REPORT_LABELS: Record<string, string> = {
 
 
 export default function PortfolioOverviewPanel() {
+  // ⚠ ITS OWN CALL, NOT A PROP THREADED DOWN. `useMgmtCopy` reads an external store, so every
+  // component in one render gets the same value — passing copy down would add a prop to each
+  // nested piece for a value none of them can disagree about. Missing Dutch is a build error.
+  const t = useMgmtCopy();
   // ⚠ READING AND REFRESHING ARE FOR EVERYONE; CHANGING WHAT THE TABLE SAYS IS NOT. The line moved
   // (2026-08-19): re-scanning AIRS — the fleet button, a row's, and the Analyse modal's — is now
   // open to every authenticated user, because a reader who can see a stale figure and cannot act
@@ -943,7 +948,7 @@ export default function PortfolioOverviewPanel() {
           still recomputed on every read (never frozen into the table), so it self-corrects when a
           portfolio is renamed, and the Link control still overrides it per row. */}
 
-      {!rows && !err && <p className="text-xs text-fg-subtle">Loading…</p>}
+      {!rows && !err && <p className="text-xs text-fg-subtle">{t.common.loading}</p>}
       {err && (
         <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">{err}</div>
       )}
@@ -1257,6 +1262,10 @@ function BucketBadge({ bucket, isin, overridden, onOverride }: {
   bucket?: string | null; isin?: string | null; overridden?: boolean | null;
   onOverride?: (isin: string, bucket: string | null) => void | Promise<void>;
 }) {
+  // ⚠ ITS OWN CALL, NOT A PROP THREADED DOWN. `useMgmtCopy` reads an external store, so every
+  // component in one render gets the same value — passing copy down would add a prop to each
+  // nested piece for a value none of them can disagree about. Missing Dutch is a build error.
+  const t = useMgmtCopy();
   const [saving, setSaving] = useState(false);
   if (!bucket) return <span className="text-fg-faint">—</span>;
 
@@ -1291,7 +1300,7 @@ function BucketBadge({ bucket, isin, overridden, onOverride }: {
         }}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
       >
-        <option value="">Auto (calculated)</option>
+        <option value="">{t.overview.autoCalculated}</option>
         {BUCKET_ORDER.map((b) => <option key={b} value={b}>{bucketLabel(b)}</option>)}
       </select>
     </span>
@@ -1410,6 +1419,9 @@ function SegmentHeader({ s, asOf, stats, altReturnPct, basisKey }: {
    *  rows would put this segment's figure under someone else's column heading. */
   basisKey: WeightBasis;
 }) {
+  // ⚠ NO `useMgmtCopy` HERE, DELIBERATELY. Every string this row renders is ⓘ Provenance
+  // prose, which is outside the translated scope (see `managementCopy`'s header). Holding an
+  // unused copy handle 'just in case' is how a component comes to look translated and is not.
   const { etfPct, partial } = stats;
   // The figure this row actually prints: the chosen weight basis, falling back to the row's own
   // start-weighted return when the basis is "start" (where the two are the same by construction).
@@ -1548,6 +1560,10 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
    *  non-admin sees each one's ANSWER as plain text and no control to change it. */
   canEdit?: boolean;
 }) {
+  // ⚠ ITS OWN CALL, NOT A PROP THREADED DOWN. `useMgmtCopy` reads an external store, so every
+  // component in one render gets the same value — passing copy down would add a prop to each
+  // nested piece for a value none of them can disagree about. Missing Dutch is a build error.
+  const t = useMgmtCopy();
   // ⚠ THE 21-ROW TABLE IS BEHIND A SECOND CLICK (2026-08-05, on request). Expanding an account
   // used to land the reader straight in the full position list, which is the DETAIL — the thing
   // you go looking for once you already know which book you are in. Collapsed by default, the
@@ -1624,8 +1640,8 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
     }
     if (portefeuille && onOverride) await onOverride(portefeuille);
   }, [portefeuille, onOverride]);
-  if (!d) return <p className="text-[12px] text-fg-subtle">Loading holdings…</p>;
-  if (!d.rows?.length) return <p className="text-[12px] text-fg-subtle">No holdings snapshot stored.</p>;
+  if (!d) return <p className="text-[12px] text-fg-subtle">{t.overview.loadingHoldings}</p>;
+  if (!d.rows?.length) return <p className="text-[12px] text-fg-subtle">{t.overview.noSnapshot}</p>;
   const byName = new Map((i?.rows ?? []).map((r) => [r.holding_name, r]));
 
   // Grouped by the CALCULATED Class (the `bucket`, incl. manual overrides), in the backend's order
@@ -1716,7 +1732,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
         aria-expanded={showRows}
         className="w-full flex items-center gap-2 text-left text-[12px] px-2 py-1.5 rounded-lg border border-neutral-800/40 bg-card hover:bg-overlay/5 transition-colors">
         <span className={`text-[9px] text-fg-faint transition-transform ${showRows ? 'rotate-90' : ''}`}>▶</span>
-        <span className="font-medium text-fg-strong">Current portfolio</span>
+        <span className="font-medium text-fg-strong">{t.overview.currentPortfolio}</span>
         <span className="text-fg-faint">
           {all.length} holding{all.length === 1 ? '' : 's'}
         </span>
@@ -1748,7 +1764,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
           unlabelled 3/4 position and make the default indistinguishable from a nudge.
           ⚠ ONLY "Start wt" is the book's own return; the rest are clearly-marked hypotheticals. */}
       <div className="flex items-center gap-2 flex-wrap text-[11px]">
-        <span className="text-fg-faint">Weight returns by</span>
+        <span className="text-fg-faint">{t.overview.weightReturnsBy}</span>
         <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden">
           {WEIGHT_BASES.map((b) => (
             <button key={b.key} type="button" onClick={() => setBasisKey(b.key)}
@@ -1783,14 +1799,14 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
         <table className="w-full text-xs whitespace-nowrap">
           <thead className="bg-card z-20 [&_th]:bg-card">
             <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
-              <th className="px-3 py-1.5 font-medium text-left">Fund</th>
+              <th className="px-3 py-1.5 font-medium text-left">{t.overview.colFund}</th>
               <th className="px-3 py-1.5 font-medium text-left"
                 title="AIRS's own ISIN-code where the book carries one (exact), else matched by name to a Fixed portfolio position, else pinned by hand. Always price-checked against that instrument's own close. ⚠ = the price disagrees; ? = no series, so nothing cross-checks it.">
-                ISIN
+                {t.overview.colIsin}
               </th>
               <th className="px-3 py-1.5 font-medium text-left"
                 title="Smart asset-class label — Stocks · Bonds · Alternatives · Cash · Unclassified (genuinely unsure). Every class names what the holding INVESTS IN, so an equity ETF is Stocks and a bond ETF is Bonds. AIRS's own class first, then the instrument's grid data and name.">
-                Class
+                {t.overview.colClass}
               </th>
               {/* ⚠ Some holdings are not instruments — they are other model portfolios, wrapped as
                   a Leonteq certificate so they can be held like a security. Those are CH ISINs
@@ -1803,8 +1819,8 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                 title="The model portfolio this holding IS, for the few positions that are certificates wrapping another strategy rather than instruments. The badge is the confidence of our automatic guess; pick from the dropdown to overrule it, and the choice applies to this holding everywhere it is held.">
                 Link
               </th>
-              <th className="px-3 py-1.5 font-medium text-left" title="The instrument's own yfinance sector. A fund is opaque, so it reads “—”.">Sector</th>
-              <th className="px-3 py-1.5 font-medium text-left" title="MSCI region from the instrument's yfinance geo. ⚠ For an ETF this describes its listing, not what it holds.">Region</th>
+              <th className="px-3 py-1.5 font-medium text-left" title="The instrument's own yfinance sector. A fund is opaque, so it reads “—”.">{t.overview.colSector}</th>
+              <th className="px-3 py-1.5 font-medium text-left" title="MSCI region from the instrument's yfinance geo. ⚠ For an ETF this describes its listing, not what it holds.">{t.overview.colRegion}</th>
               <th className="px-3 py-1.5 font-medium text-left">Ccy</th>
               <th className="px-3 py-1.5 font-medium text-right"
                 title="Beginwaarde lopend jaar EUR — what this holding was worth when the year opened, restated by AIRS to the CURRENT quantity so a purchase does not read as a gain. EUR 0 means it was not held then.">
@@ -1816,11 +1832,11 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
               </th>
               <th className="px-3 py-1.5 font-medium text-right"
                 title="Dividend received on this holding this year, GROSS, in EUR — from the AIRS Mutaties journal. A price return cannot see it: the money leaves the position's value and arrives as cash. Blank = no journal line for it (which is not the same as “paid nothing”).">
-                Direct result
+                {t.overview.colDirectResult}
               </th>
               <th className="px-3 py-1.5 font-medium text-right"
                 title="Withholding tax on that dividend, as AIRS books it (NEGATIVE). Kept in its own column because a US name losing 15% and a Dutch one losing nothing is a fact about the holding. Net income is the two added.">
-                Div tax
+                {t.overview.colDivTax}
               </th>
               {/* ⚠ ONE WEIGHT COLUMN, THE SELECTED ONE. The other three are not hidden to save
                   space — they are hidden because only this one produced the Return beside them,
@@ -1828,19 +1844,19 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
               {basisKey === 'start' && (
               <th className="px-3 py-1.5 font-medium text-right"
                 title="Share of the book at the START of the year (Beginwaarde ÷ total Beginwaarde). This is the weight the Return column belongs to: weighting each return by it reproduces the Total exactly. “—” = no opening value, so the holding was not there when the year began.">
-                Start wt
+                {t.overview.colStartWeight}
               </th>
               )}
               {basisKey === 'now' && (
               <th className="px-3 py-1.5 font-medium text-right"
                 title="AIRS's own Weging — today's share of the book. It answers what you hold NOW; it is NOT the weight behind the Return column, because a holding that rose carries a bigger share today than it held while it was rising.">
-                Weight
+                {t.overview.colWeight}
               </th>
               )}
               {basisKey === 'model' && (
               <th className="px-3 py-1.5 font-medium text-right"
                 title="Model percentage — what this book's own strategy says it should hold, from the AIRS Model report. Blank = the model does not name this holding, which is drift, not 0%.">
-                Model wt
+                {t.overview.colModelWeight}
               </th>
               )}
               {basisKey === 'actual' && (
@@ -1849,7 +1865,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                 Werkelijk
               </th>
               )}
-              <th className="px-3 py-1.5 font-medium text-right">Return</th>
+              <th className="px-3 py-1.5 font-medium text-right">{t.overview.colReturn}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-800/20">

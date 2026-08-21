@@ -92,9 +92,111 @@ _MIN_ROSTER = 10
 # because the same symptom has two opposite causes and only the page's own count separates them.
 _EXPECTED_ROSTER = 44
 
-# Dates proved to have NO valuation during the current run — see `_vermogen_most_recent`. Cleared
-# at the start of every run: "unvalued" is true until AirSPMS's next end-of-day batch, not for ever.
-_UNVALUED_DATES: set[str] = set()
+# Dates that FAILED during the current run, and for WHICH accounts — see `_vermogen_most_recent`.
+# Cleared at the start of every run: "unvalued" is true until AirSPMS's next end-of-day batch, not
+# for ever.
+#
+# ⚠⚠ A SET OF DATES ONCE, AND THAT SHAPE WAS THE BUG (2026-08-21). One failure was taken as proof
+# the date had no valuation FLEET-WIDE, so it was skipped for every later account. But a failure is
+# only ever proof about the book that made it: books are valued on different cadences — this file
+# says so itself two paragraphs down — so a book last valued a week ago walks back through six
+# perfectly good dates, marks them all dead, and every account scanned after it skips them.
+#
+# Measured in production 2026-08-21, one run, 46 accounts: **29 badged "Vermogensoverzicht not
+# retrieved", and nothing else ever missing**. The 16 complete books all reached 2026-08-20; not one
+# badged book did. Their stored holdings are dated 08-13 to 08-19 — their real valuation dates — so
+# the dates they needed existed and had been ruled out by a book scanned before them.
+_UNVALUED_DATES: dict[str, set[str]] = {}
+
+# The newest date ANY account has successfully fetched this run, or None. See `_vermogen_most_recent`
+# — this is the half that makes the memo sound, and a quorum on its own is NOT enough.
+_NEWEST_VALUED: str | None = None
+
+# When the memo above was last started, on the monotonic clock — and how long it may live.
+#
+# ⚠⚠ THE MEMO EXPIRES ON A CLOCK RATHER THAN ON SOMEBODY REMEMBERING TO CLEAR IT (2026-08-22).
+# `run_airs_vermogen_refresh_sync` cleared it at the top of a fleet run and documented why: "PER
+# RUN, NOT PER PROCESS — caching it beyond one run would make a scan an hour later skip the very
+# date that has since been valued." That was correct and it covered exactly ONE of the three entry
+# points. `refresh_one_portfolio` — the per-row Refresh button, the Analyse modal's Refresh, and
+# `refresh_many`/`refresh_portfolio_fully` under the 05:00 model-prices job — never cleared it, and
+# the backend is a long-lived process.
+#
+# So pressing Refresh on a row inherited the previous run's ruled-out dates. The dates a fleet run
+# rules out are, by construction, the NEWEST ones — today, and the weekend behind it — which are
+# precisely the dates that have since been valued by the time anyone presses the button. The walk
+# skipped them, landed on something older or exhausted its horizon, and the row kept the badge.
+# Reported as "I still see ⚠ Vermogensoverzicht behind most portfolios" after the cascade fix, and
+# it is the same failure one level up: a memo outliving the fact it records.
+#
+# ⚠ A TTL RATHER THAN A CLEAR IN EACH ENTRY POINT, because this is the second time this memo has
+# poisoned a later caller and adding a fourth entry point would be the third. "This date has no
+# valuation" is true only until AirSPMS's next end-of-day batch, so an expiry IS the fact's real
+# shape; nothing has to remember anything.
+#
+# ⚠ EXPIRY ONLY EVER COSTS REQUESTS, NEVER CORRECTNESS. A fleet run longer than the TTL re-pays the
+# discovery for its remaining accounts — a handful of round trips against a run of ~113, and the
+# alternative is the run holding a memo that has outlived the batch it describes.
+_MEMO_STARTED_AT: float | None = None
+_MEMO_TTL_S = 900
+
+# How many DIFFERENT accounts must fail on a date before it counts as fleet-wide unvalued.
+#
+# ⚠ A QUORUM, BECAUSE THE TWO CASES LOOK IDENTICAL FROM ONE ACCOUNT. A weekend or a batch that has
+# not run fails for EVERY book; a book valued weekly fails alone. Nothing in the response
+# distinguishes them, so the only available signal is agreement between books.
+#
+# ⚠⚠ AND A QUORUM ALONE STILL DOES NOT FIX IT — measured on the real fleet (29 books, valuation
+# dates spread over 8 days). Books share cadences, so THREE books that are all a week behind rule
+# out the very date a fourth book needs, and the failure comes straight back:
+#
+#     one failure rules a date out, 7-day walk    refreshed 22   badged 7   downloads  29
+#     quorum 3 alone                              refreshed 22   badged 7   downloads  64
+#     no memo at all                              refreshed 29   badged 0   downloads 139
+#     quorum 3, and only ABOVE the newest success refreshed 29   badged 0   downloads 113
+#
+# The last rule is the one below, and the second condition is what makes it SOUND rather than
+# merely better: a book cannot be valued AHEAD of the newest batch AirSPMS has run, so once any
+# account has fetched date D, a newer date that several accounts failed on genuinely has no
+# valuation for anybody. A date OLDER than a proven success is never ruled out — which is exactly
+# the case that broke, and the reason the cheap version cannot be recovered by raising the quorum.
+#
+# ⚠ THE COST IS REAL AND IS THE RIGHT TRADE: ~113 downloads a run against ~29. It buys back the
+# documented win (today, and Sat/Sun on a Monday, are ruled out after three books discover it) while
+# leaving no book unrefreshed. The old number was cheap because 7 of 29 books silently did not run.
+_UNVALUED_QUORUM = 3
+
+# How far back to look for a book's own last valuation.
+#
+# ⚠ 7 WAS TOO SHORT AND THAT IS A SECOND, INDEPENDENT DEFECT. Of the 29 books badged on 2026-08-21,
+# two were last valued 08-13 and 08-14 — 8 and 7 days back — so even with an empty memo the walk
+# could never have reached them. The horizon has to cover the slowest cadence we actually see, not
+# the fastest.
+_WALK_BACK_DAYS = 14
+
+
+def _reset_valuation_memo() -> None:
+    """Start a fresh memo. See `_MEMO_STARTED_AT`.
+
+    ⚠ BOTH HALVES TOGETHER, ALWAYS. `_NEWEST_VALUED` is the licence to rule a date out and
+    `_UNVALUED_DATES` is what it licences; keeping either without the other licences one run's
+    answer against another run's evidence.
+    """
+    _UNVALUED_DATES.clear()
+    globals()["_NEWEST_VALUED"] = None
+    globals()["_MEMO_STARTED_AT"] = _time.monotonic()
+
+
+def _expire_valuation_memo() -> None:
+    """Drop the memo once it is older than `_MEMO_TTL_S` — called before every walk.
+
+    ⚠ THE CHECK IS ON THE READ PATH, NOT ON THE ENTRY POINTS. That is the whole point: any caller
+    that reaches `_vermogen_most_recent` gets a memo no older than the TTL, whether it remembered
+    to start a run or not. A caller added tomorrow inherits the protection by existing.
+    """
+    started = _MEMO_STARTED_AT
+    if started is None or (_time.monotonic() - started) > _MEMO_TTL_S:
+        _reset_valuation_memo()
 
 
 def _discover_portfolios() -> list[str]:
@@ -513,6 +615,29 @@ def accounts_to_scan(
         fresh = at is not None and cutoff <= at <= now and needed.issubset(got)
         (skipped if fresh else to_scan).append(name)
     return to_scan, skipped
+
+
+def _roster_names() -> list[str]:
+    """The accounts the LAST successful discovery found — the fallback when this one cannot run.
+
+    ⚠ THIS IS A DEGRADED ANSWER AND ONLY THE CALLER CAN DECIDE THAT IT IS GOOD ENOUGH. It is the
+    previous scrape's output, so it cannot contain a portfolio opened since; the caller says so
+    on the run rather than letting a short list pass for a complete one. See the discovery
+    fallback in `run_airs_vermogen_refresh_sync`.
+
+    ⚠ EMPTY ON FAILURE, never a partial guess — the caller's `_MIN_ROSTER` floor then declines the
+    fallback and reports the original discovery error, which is the honest outcome when we know
+    neither the live population nor the stored one.
+    """
+    try:
+        resp = (supabase.table("airs_account_roster")
+                .select("portefeuille").limit(2000).execute())
+    except Exception as e:  # noqa: BLE001 — the fallback must not raise over the error it handles
+        _log.warning("[airs_vermogen] could not read the stored roster: %s: %s",
+                     type(e).__name__, e)
+        return []
+    return sorted({(r.get("portefeuille") or "").strip()
+                   for r in (resp.data or []) if (r.get("portefeuille") or "").strip()})
 
 
 def _roster_verdicts() -> dict[str, dict]:
@@ -1007,20 +1132,54 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         # ⚠ PER RUN, NOT PER PROCESS. "This date has no valuation" is true until AirSPMS's next
         # end-of-day batch; caching it beyond one run would make a scan an hour later skip the very
         # date that has since been valued.
-        _UNVALUED_DATES.clear()
+        #
+        # ⚠ THE TTL IN `_vermogen_most_recent` NOW GUARANTEES THIS ANYWAY, and the explicit reset
+        # stays because a fleet run is the one caller that genuinely wants a clean slate at a known
+        # moment rather than "some time in the last quarter of an hour". It is no longer the thing
+        # holding the invariant up — which is the point, since for months it was, and it only ever
+        # covered this one entry point.
+        _reset_valuation_memo()
         _STATUS.update({
         })
 
+        degraded: str | None = None
         try:
             names = _discover_portfolios()
         except Exception as e:
-            _STATUS.update({
-                "status": "error",
-                "message": f"Portfolio discovery failed: {type(e).__name__}: {e}",
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-            })
-            _log.warning("[airs_vermogen] discovery failed: %s: %s", type(e).__name__, e)
-            return dict(_STATUS)
+            # ⚠⚠ DISCOVERY IS THE RISKIEST STEP AND WAS THE ONLY FATAL ONE (2026-08-22). It is the
+            # single place that drives somebody else's UI with a browser, and a menu item that
+            # became unclickable ended a 46-account run at step one:
+            #
+            #   [airs_vermogen] discovery failed: TimeoutError: ElementHandle.click: Timeout 30000ms
+            #   [job] Refresh all portfolios (airs.vermogen.refresh) failed
+            #
+            # Nothing was scanned, and the refresh is exactly what clears a ⚠ Vermogensoverzicht
+            # badge — so a broken menu presented as forty-six stale books.
+            #
+            # ⚠ BUT WE ALREADY KNOW THE ACCOUNTS. `airs_account_roster` is the previous discovery's
+            # own output, and the population changes a few times a year. Refusing to scan a roster
+            # we are holding, because we could not re-derive the identical list, throws away the
+            # entire run to protect against a difference that is usually empty.
+            names = _roster_names()
+            if len(names) < _MIN_ROSTER:
+                _STATUS.update({
+                    "status": "error",
+                    "message": f"Portfolio discovery failed: {type(e).__name__}: {e}",
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                })
+                _log.warning("[airs_vermogen] discovery failed: %s: %s", type(e).__name__, e)
+                return dict(_STATUS)
+            # ⚠ LOUD, AND CARRIED TO THE END. A degraded run must not look like a clean one: a book
+            # added since the last discovery is NOT in this list and will not be scanned, which is
+            # invisible from the result. `_MIN_ROSTER` is the same floor `_record_roster` uses to
+            # decide a discovery is untrustworthy — one definition of "too few to believe".
+            degraded = (f"⚠ Portfolio discovery failed ({type(e).__name__}) — scanning the "
+                        f"{len(names)} accounts from the last successful discovery instead. "
+                        "A portfolio added since then is NOT in this run.")
+            _log.warning("[airs_vermogen] discovery failed: %s: %s — falling back to the stored "
+                         "roster (%d accounts)", type(e).__name__, e, len(names))
+            _emit("discovery", step="fallback", message=f"  {degraded}")
+            _STATUS["message"] = degraded
 
         _STATUS["portfolios_found"] = len(names)
         # ⚠ THE ROSTER ITSELF, NAMED. "44 found" is a number you cannot check; the 44 names are the
@@ -1254,7 +1413,12 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             # so the job summary can carry it too; a toast that ends on "44 accounts" and a row
             # that says "3 trading days old" otherwise look like they disagree.
             "newest_as_of": newest_as_of,
-            "message": format_run_message(counts, newest_as_of),
+            # ⚠ THE DEGRADED NOTE LEADS, because it changes what every count below it MEANS. "46
+            # accounts refreshed" off a stored roster is not the same claim as "46 accounts
+            # refreshed" off a live discovery — the second says that is the whole population and
+            # the first cannot. Appending it would put the caveat after the numbers it qualifies.
+            "message": (f"{degraded} {format_run_message(counts, newest_as_of)}"
+                        if degraded else format_run_message(counts, newest_as_of)),
             "detail": detail,
         })
         _log.info("[airs_vermogen] %s refresh — %s (%s)",
@@ -1282,32 +1446,73 @@ def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
     snapshot's as_of — the holdings are valued as of THEN, not today (matching what the AirSPMS UI
     shows, which also defaults to the last valued date, e.g. Friday's on a Monday).
 
-    ⚠ AND THE WALK IS SHARED ACROSS THE RUN, BECAUSE VALUATION IS FLEET-WIDE. AirSPMS values in one
-    end-of-day batch, so a date that has no valuation has none for ANY book — yet every account
-    re-discovered that from scratch, starting at today. Measured 2026-07-30: today's valuation had
-    not run, so all ~25 books with holdings paid one wasted request before landing on the 29th; on
-    a Monday it is three (Mon, Sun, Sat) before Friday. `_UNVALUED_DATES` remembers the misses for
-    the duration of a run and skips them, which removes 44-130 round trips from a full scan.
+    ⚠ THE WALK IS SHARED ACROSS THE RUN, because a day AirSPMS never valued is a fact about the
+    day rather than about one book. Measured 2026-07-30: today's valuation had not run, so all ~25
+    books with holdings paid one wasted request before landing on the 29th; on a Monday it is three
+    (Mon, Sun, Sat) before Friday. `_UNVALUED_DATES` remembers the misses for the duration of a run,
+    which removes 44-130 round trips from a full scan.
+
+    ⚠⚠ BUT A SINGLE FAILURE DOES NOT PROVE IT, AND TREATING IT AS PROOF BROKE 29 OF 46 BOOKS
+    (2026-08-21). The paragraph above used to end "so a date that has no valuation has none for ANY
+    book" — true of a day the batch did not run, and NOT true of the case immediately below it: a
+    book valued weekly fails on six good dates on its way back to its own, and every one of them was
+    then skipped for every account scanned afterwards. The result is the worst kind of failure —
+    silent, systematic, and self-inflating: the more books that walked back, the fewer dates were
+    left for the rest, until the remainder skipped their entire horizon without making one request
+    and raised. Every badge on the Overview page was this, and only ever on this report.
+
+    So a date is ruled out only when BOTH hold: `_UNVALUED_QUORUM` different accounts have failed on
+    it, AND it is newer than a date some account has already fetched successfully. A book cannot be
+    valued ahead of the newest batch AirSPMS has run, so that pair is sound where the quorum alone
+    is not — see the constant for the measurement showing a quorum by itself changes nothing.
 
     ⚠ ONLY MISSES ARE CACHED, NEVER HITS. A book valued monthly legitimately sits weeks behind a
     daily-valued one, so "this date worked for account A" says nothing about account B and caching
-    it would hand B a stale snapshot. A date that returned NOTHING is the only fleet-wide fact here.
+    it would hand B a stale snapshot.
+
+    ⚠ AND THE WALK IS ALWAYS NEWEST-FIRST. The memo may only SKIP a date, never reorder the walk:
+    the function's contract is the MOST RECENT valued snapshot, and trying an older date earlier
+    because it happens to be uncached would return a stale one that looks entirely normal.
     """
     from airs_scanner import download_vermogensoverzicht_sync  # noqa: PLC0415
 
+    global _NEWEST_VALUED
+    # ⚠⚠ BEFORE ANYTHING ELSE, AND ON EVERY CALL. The memo is process-global and only ONE of the
+    # three entry points ever reset it, so a per-row Refresh ran against a previous run's ruled-out
+    # dates — which are exactly the dates that have since been valued. See `_MEMO_STARTED_AT`.
+    _expire_valuation_memo()
     last_err: Exception | None = None
-    for back in range(0, 7):
+    tried = 0
+    for back in range(_WALK_BACK_DAYS):
         tot = (date.today() - timedelta(days=back)).isoformat()
-        if tot in _UNVALUED_DATES:
-            continue                      # another account already proved this day has no valuation
+        # ⚠ BOTH CONDITIONS, AND THE SECOND IS THE LOAD-BEARING ONE — see `_UNVALUED_QUORUM`.
+        if (_NEWEST_VALUED is not None and tot > _NEWEST_VALUED
+                and len(_UNVALUED_DATES.get(tot, ())) >= _UNVALUED_QUORUM):
+            continue
         try:
-            return tot, download_vermogensoverzicht_sync(name, van, tot)
+            tried += 1
+            blob = download_vermogensoverzicht_sync(name, van, tot)
         except RuntimeError as e:
-            # Unvalued date → empty body / error page. Try the day before. A real auth failure
-            # returns the same on EVERY date, exhausts the loop, and is raised below.
-            _UNVALUED_DATES.add(tot)
+            # Unvalued FOR THIS BOOK → empty body / error page. Try the day before, and record which
+            # account it was: the quorum above is what stops this one failure speaking for the
+            # fleet. A real auth failure returns the same on EVERY date, exhausts the walk, and is
+            # raised below.
+            _UNVALUED_DATES.setdefault(tot, set()).add(name)
             last_err = e
-    raise RuntimeError(f"no valued Vermogensoverzicht in the last 7 days ({last_err})")
+            continue
+        # ⚠ A SUCCESS IS THE ONLY PROOF THE BATCH RAN FOR A DATE, which is what licenses ruling out
+        # anything newer. Recorded before returning, so the next account benefits from it.
+        if _NEWEST_VALUED is None or tot > _NEWEST_VALUED:
+            _NEWEST_VALUED = tot
+        return tot, blob
+    # ⚠ THE MESSAGE SAYS HOW HARD IT LOOKED. "no valued Vermogensoverzicht in the last 7 days" was
+    # printed identically whether the walk made seven requests or zero — and zero is what it made
+    # once the memo had ruled out the whole horizon, which is the failure that hid the bug above.
+    raise RuntimeError(
+        f"no valued Vermogensoverzicht in the last {_WALK_BACK_DAYS} days for {name} "
+        f"({tried} date(s) tried, "
+        f"{_WALK_BACK_DAYS - tried} already ruled out by ≥{_UNVALUED_QUORUM} other accounts)"
+        + (f": {last_err}" if last_err else ""))
 
 
 def dependent_accounts(portefeuille: str) -> list[str]:

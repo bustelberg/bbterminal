@@ -12,6 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
+import { workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import CapexMarginInputsModal from './CapexMarginInputsModal';
@@ -102,6 +103,7 @@ export default function CapexMarginCard({ holdingsTarget, holdingsName, benchTar
               what="Average capex margin (capital intensity) over the years shown."
               where="Computed here — |Capex| ÷ Revenue per year, weight-averaged across holdings."
               when="The years on the chart."
+              worked={workedMean(stats.own.values)}
               how="The share of each sales-euro reinvested in property, plant & intangibles. Lower = more capital-light (asset-heavy businesses read high)." />} />} />
 
           <div>

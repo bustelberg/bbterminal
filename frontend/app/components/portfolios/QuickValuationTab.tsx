@@ -10,6 +10,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { tiltedAxis } from '../../../lib/chartAxis';
 import { AspectCard } from '../../../lib/tipCard';
+import { workedMean, workedRatio } from './workedFormula';
 import InfoTip from '../InfoTip';
 import { Stat } from './MetricGrowthCard';
 import QuickValuationInputsModal from './QuickValuationInputsModal';
@@ -18,8 +19,7 @@ import { meanOf, paddedDomain, paddedLogDomain } from './marginData';
 import { logLinearFit, trendValueAt } from '../../../lib/trendFit';
 import MultipleHistoryChart from './MultipleHistoryChart';
 import {
-  CLOSE_CODE, forwardSeries, pick, QUARTERLY_EPS_CODES, QUARTERLY_FCF_CODES, since, thin,
-  trailingMultiples, ttm,
+  forwardSeries, since,
 } from './multiplesSeries';
 import {
   addYears, BASIS, cagrBetween, cagrOf, compoundFrom, latestDateOf, priceTarget, priceVsMetric,
@@ -371,17 +371,16 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
    * PER-QUARTER — verified against the annual row before this was written — so a rolling four-
    * quarter sum is the honest trailing-twelve-month figure and updates four times a year.
    */
-  const closes = useMemo(() => pick(metrics ?? [], [CLOSE_CODE]), [metrics]);
-  const quarters = useMemo(
-    () => ttm(pick(metrics ?? [], basis === 'eps' ? QUARTERLY_EPS_CODES : QUARTERLY_FCF_CODES)),
-    [metrics, basis]);
-  const trailingHistory = useMemo(
-    // Fall back to the ANNUAL series when a company files no quarterlies — a coarser line beats
-    // an empty chart, and `reportedAt` treats both identically.
-    () => since(thin(trailingMultiples(closes, quarters.length ? quarters
-      : pick(metrics ?? [], b.codes).map((r) => ({ date: r.date, value: r.value })))),
-    MULTIPLE_FROM_YEAR),
-    [closes, quarters, metrics, b.codes]);
+  // ⚠⚠ THE TRAILING SERIES WAS REMOVED HERE, 2026-08-21, ON REQUEST — with the quarterly TTM roll
+  // and the annual fallback that fed it. The multiple-through-time chart now draws the vendor's
+  // forward indicator alone; see `MultipleHistoryChart` for what the removed line was for and why
+  // the FCF basis is consequently empty until a forward FCF series exists.
+  //
+  // ⚠ `trailingMultiples` / `ttm` / `thin` STAY IN `multiplesSeries`, unused for now. They are pure,
+  // tested, and the natural home for the plumbing a forward FCF line will need; deleting tested
+  // arithmetic to satisfy an import list would be the wrong direction on a change described as
+  // "for now". They are named here so the next reader knows the module is deliberately wider than
+  // its callers rather than half-cleaned.
   const forwardHistory = useMemo(
     () => (basis === 'eps' ? since(forwardSeries(metrics ?? []), MULTIPLE_FROM_YEAR) : []),
     [metrics, basis]);
@@ -393,7 +392,17 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     () => points.map((p) => ({ year: p.year, yld: yieldOf(p.value, p.price) })), [points]);
   const yieldValues = yields.map((y) => y.yld).filter((v): v is number => v != null);
   const avgYield = meanOf(yieldValues);
-  const latestYield = [...yields].reverse().find((y) => y.yld != null)?.yld ?? null;
+  /**
+   * ⚠⚠ THE POINT THE LATEST YIELD CAME FROM, NOT JUST THE YIELD — because its ⓘ works the division
+   * out and the two operands have to be the SAME year's. `latestPs` and `latestPrice` are found
+   * INDEPENDENTLY (each is the newest point carrying that field), so on a company whose newest
+   * price arrived before its newest filing they are different years, and dividing them would print
+   * a plausible expression that does not equal the figure above it.
+   */
+  const latestYieldPoint = [...points].reverse()
+    .find((p) => yieldOf(p.value, p.price) != null) ?? null;
+  const latestYield = latestYieldPoint
+    ? yieldOf(latestYieldPoint.value, latestYieldPoint.price) : null;
 
   /**
    * ⚠ SWITCHING BASIS CLEARS BOTH OVERRIDES, and that is not tidiness. A hand-typed "forecast 12.40"
@@ -646,7 +655,14 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           value={`${ccy}${fmtPrice(target.forecastPrice)}`} color={chartTheme.accentStrong}
           info={<InfoTip content={<AspectCard
             what={`Where the share price lands if ${b.perShare} reaches the forecast and the market pays the forecast ${b.yieldInline} for it.`}
-            where={`Forecast ${b.perShare} ÷ forecast ${b.yieldInline} — ${ccy}${target.forecastPs?.toFixed(2) ?? '—'} ÷ ${target.forecastYield?.toFixed(1) ?? '—'}%, both editable in the Price target panel.`}
+            where={`Forecast ${b.perShare} ÷ forecast ${b.yieldInline} — both editable in the Price target panel.`}
+            // ⚠ THIS TILE ALREADY CARRIED ITS NUMBERS, INLINE IN `where`, WHERE THEY READ AS PROSE.
+            // Moving them into the block gives them the same monospaced, selectable shape every
+            // other worked formula now has — and puts them directly under the symbols they fill in
+            // rather than trailing an em dash at the end of a sentence.
+            worked={workedRatio(target.forecastPs, target.forecastYield,
+              target.forecastPrice == null ? '' : `${ccy}${fmtPrice(target.forecastPrice)}`,
+              '', '%')}
             when={targetYear == null ? 'At the end of the forecast window.' : `FY${targetYear}, ${PROJECT_YEARS} years past the last reported year.`}
             how="⚠ AN ASSUMPTION, NOT A FORECAST ANYBODY PUBLISHED. Change the growth rate or the demanded yield in the panel and this moves with the dot on the chart — that is what it is for." />} />} />
         <Stat label={targetYear == null ? 'Est. CAGR' : `Est. CAGR to FY${targetYear}`}
@@ -657,6 +673,12 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
             what="The annual return the target implies, from today's price."
             where="Price target ÷ current share price, annualised."
             when={`Over ${horizonYears.toFixed(1)} years — ⚠ NOT ${PROJECT_YEARS}. The forecast sits ${PROJECT_YEARS} years past the last REPORTED year; from a live price that is up to a year nearer, and holding the divisor at the full horizon would understate the return by exactly the reporting lag.`}
+            worked={target.forecastPrice != null && target.currentPrice != null
+              && target.currentPrice > 0 && target.cagr != null
+              ? `(${target.forecastPrice.toFixed(2)} ÷ ${target.currentPrice.toFixed(2)})`
+                + ` ^ (1 ÷ ${horizonYears.toFixed(1)}) − 1`
+                + ` = ${pct(target.cagr * 100)}`
+              : ''}
             how={`⚠ THE PRICE RETURN, WHICH IS NOT THE ${b.perShare} GROWTH RATE. It carries the rerating too: the gap between today’s ${b.yieldInline} and the forecast one. Excludes dividends.`} />} />} />
       </div>
 
@@ -827,12 +849,21 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
             what={`The average ${b.yieldInline} over the years shown — the dashed line.`}
             where="Computed here from the same two lines the chart above plots, not from GuruFocus's own ratio (whose denominator convention we don't control)."
             when={`${yieldValues.length} of the last ${YEARS} fiscal years.`}
+            // ⚠ `yieldValues` IS WHAT THE MEAN WAS TAKEN OVER — the same array `avgYield` divides,
+            // so the addends listed here provably sum to the figure on the tile. It is also the
+            // dashed line on the chart below, which is the third place this one number appears.
+            worked={workedMean(yieldValues)}
             how="A simple mean of the yearly yields. A yield doesn't compound, so there is no growth rate to quote." />} />} />
         <Stat label="Latest" value={yld(latestYield)} color={chartTheme.accent}
           info={<InfoTip content={<AspectCard
             what={`The most recent fiscal year's ${b.yieldInline}.`}
             where={`That year's ${b.perShare} ÷ that year's closing price.`}
             when="The last fiscal year with a price — up to a year ago, not today."
+            // ⚠ BOTH OPERANDS OFF THE SAME POINT — see `latestYieldPoint`. The FY label is in the
+            // expression because that year is not necessarily the newest one on either line.
+            worked={workedRatio(latestYieldPoint?.value, latestYieldPoint?.price,
+              latestYield == null ? '' : `${yld(latestYield)}   (FY${latestYieldPoint?.year})`,
+              '', ` ${ccy}`)}
             how="Above the average = the shares are cheaper on this measure than they usually have been, on the year-end price." />} />} />
       </div>
 
@@ -866,7 +897,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     {/* Bottom-right, by auto-flow. Handed the computed series, never the ISIN — same rule as the
         drill-down modal, so it cannot disagree with the charts above about what the company earned. */}
     <MultipleHistoryChart height={CHART_HEIGHT} basis={b} currency={currency}
-      forward={forwardHistory} trailing={trailingHistory} fromYear={MULTIPLE_FROM_YEAR}
+      forward={forwardHistory} fromYear={MULTIPLE_FROM_YEAR}
       name={name} isin={isin} />
 
     {/* Top-right, but LAST IN THE DOM — see the grid note above. The only non-chart card, so it
