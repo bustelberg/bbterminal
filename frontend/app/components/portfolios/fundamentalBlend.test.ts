@@ -192,9 +192,13 @@ describe('the step is weighted at the anchor, not at the period', () => {
     expect(buildBlend(resp(['2020', '2021'], book)).level['2021'].value).toBeCloseTo(175, 10);
   });
 
-  it('⚠ `spanPct` is measured against the ANCHOR’s line weight, so it stays a share', () => {
-    // `den` is anchor-weighted now; divided by this period's weight sum it would be one basis over
-    // another — a ratio of nothing, free to exceed 100%. Both members span, so it is exactly 100.
+  it('⚠ `spanPct` is coverage of THIS period’s weight, in one basis, so it stays a share', () => {
+    // ⚠⚠ THE MOVE AND THE COVERAGE ANSWER DIFFERENT QUESTIONS AND NEED DIFFERENT BASES, which is
+    // the mistake the anchor-weighting fix originally made here: it divided the anchor-weighted
+    // `den` by the anchor's weight sum, giving "how much of the ANCHOR's weight survived" under a
+    // tooltip that says "of this period's weight". Both sides are period-`y` weights now, so this
+    // is a genuine subset share — it cannot exceed 100%, and the case above (where half the
+    // period's weight cannot be measured over the interval) reads 50, not 100.
     expect(buildBlend(resp(['2020', '2021'], [WINNER, LOSER])).step['2021'].spanPct)
       .toBeCloseTo(100, 10);
   });
