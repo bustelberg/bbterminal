@@ -21,6 +21,8 @@ import { atSharedX, ltmWindowsDiffer, ltmYearX, sharedLtmX, type LtmPoint } from
 import { endpointCagr } from './lineCagr';
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, rebaseSeries, seriesCrossesZero, type BenchTarget } from './benchSeries';
+import { benchTileLabel, pairedSpan, SpanNote, Stat } from './CardStats';
+import { clipPoints, sharedSpan } from './windowStats';
 
 /**
  * One "Long Equity" growth card: a metric per fiscal year on a LOG axis with an exponential-trend
@@ -189,54 +191,13 @@ export function pctSince(step: Step | null | undefined, ltmXs?: ReadonlySet<numb
 }
 
 /**
- * One stat tile. ⚠ EVERY TILE IN THE PORTFOLIOS CARD FAMILY IS THIS COMPONENT AND EVERY ONE IS THE
- * SAME SIZE (2026-08-18) — thirteen cards import it.
- *
- * ⚠⚠ FIXED, NOT `min-w`. It was `min-w-[6.5rem]` with content-sized growth, so a row of tiles came
- * out as a ragged set of different widths (`+18.4%` narrow, `EUR 1,240` wide) and different heights
- * the moment one label wrapped to a second line and its neighbours did not. Five tiles of five
- * shapes read as five unrelated readouts rather than one row of comparable figures — which on the
- * Quick Valuation card is exactly wrong, since comparing them IS the card.
- *
- * ⚠⚠ THE LABEL GETS **TWO** LINES, ALWAYS RESERVED, AND THAT IS WHAT MAKES THE HEIGHT CONSTANT.
- * One line was tried first and it is the obvious answer: truncate, hang the full text on `title`,
- * done. But at this width a single 10px line holds ~13 characters, and FOUR of the Quick Valuation
- * card's five labels are longer than that — `CURRENT SHARE PRICE`, `PRICE TARGET FY2035`,
- * `EST. CAGR TO FY2035`, `FCF / SHARE CAGR`. A row of tiles reading `CURRENT SHARE P…` /
- * `PRICE TARGET F…` / `EST. CAGR TO F…` is uniform and useless: the truncation lands exactly where
- * the labels stop differing. Two clamped lines fit every label in the family, and reserving the
- * space whether or not it is used is what keeps a one-line tile the same height as a two-line one.
- *
- * ⚠ THE VALUE STILL TRUNCATES, on purpose. `EUR 124,000` is hoverable rather than allowed to
- * resize the tile it sits in — a figure that wide is rare, and one wide tile in a row of narrow
- * ones is the raggedness this exists to remove.
- *
- * ⚠ THE ⓘ IS `shrink-0`. Without it a long label truncates by eating its own info icon first, which
- * removes the explanation from precisely the tiles whose labels were too long to be self-evident.
- *
- * `color` (a chart hex) ties the tile to its line — a coloured left bar + matching value ink — and
- * OVERRIDES `tone`, so a caller wanting sign-coloured ink (red/green) must not also pass a colour.
+ * ⚠ `Stat` NOW LIVES IN `CardStats`, AND THIS RE-EXPORT IS LOAD-BEARING. Thirteen cards import it
+ * from here and always have; it moved because `CardStats` — which renders the book's tile and the
+ * benchmark's twin beside it — has to build tiles, and this file has to use `CardStats`, which
+ * would have been an import cycle. Re-exporting keeps every existing call site correct rather than
+ * rewriting thirteen import lines to prove a point about module layout.
  */
-export function Stat({ label, value, tone, color, info }: {
-  label: string; value: string; tone?: string; color?: string; info?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-lg border border-neutral-800/40 bg-inset px-2 py-1.5 w-[8rem] h-[3.6rem]
-                    flex flex-col justify-between overflow-hidden"
-      style={color ? { borderLeft: `3px solid ${color}` } : undefined}>
-      {/* ⚠ THE HEIGHT IS ON THE ROW, NOT LEFT TO THE TEXT — two lines' worth at 10px/leading-tight,
-          reserved whether the label uses them or not. `items-start` keeps the ⓘ beside the FIRST
-          line rather than floating to the middle of a two-line label. */}
-      <div className="flex items-start gap-1 h-[1.6rem] text-[10px] uppercase tracking-wide text-fg-muted leading-tight">
-        <span className="line-clamp-2" title={label}>{label}</span>
-        <span className="shrink-0 flex items-center leading-none">{info}</span>
-      </div>
-      <div title={value}
-        className={`font-mono text-base font-semibold leading-tight truncate ${color ? '' : (tone ?? 'text-fg-strong')}`}
-        style={color ? { color } : undefined}>{value}</div>
-    </div>
-  );
-}
+export { Stat } from './CardStats';
 
 export default function MetricGrowthCard({
   cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin, onIngested,
@@ -367,16 +328,28 @@ export default function MetricGrowthCard({
    *  behind it (not with today), so for ASML both sit on 2026-06-30 → 2026.25. Without it the
    *  company line ran a quarter past an index line that simply stopped, and the gap read as
    *  outperformance in a period the index did not cover. */
+  /**
+   * The INDEX's reported points, through the identical extraction as ours.
+   *
+   * ⚠ HOISTED BECAUSE FOUR THINGS NEED IT NOW — the LTM probe below, the forecast seed, the drawn
+   * series, and (since the benchmark got its own stat tiles) the fit and the point-to-point rate
+   * behind them. It was re-extracted inline in each; a fifth caller doing the same would be the
+   * one that quietly used a different `cadence`.
+   */
+  const benchReported = useMemo(
+    () => (benchMetrics ? extractPoints(benchMetrics, cfg.codes, cadence) : null),
+    [benchMetrics, cfg, cadence]);
+
   const benchLtm = useMemo(
     () => {
-      if (cadence !== 'annual' || !benchMetrics) return null;
+      if (cadence !== 'annual' || !benchReported) return null;
       // ⚠ MEASURED FROM THE INDEX'S OWN LAST FISCAL YEAR — this is the WINDOW, which is a fact
       // about the index (its `date` is the quarter its trailing year ends in, and the tooltip
       // reads it out). It is NOT where the point is drawn: see `ltmX`.
-      const bench = extractPoints(benchMetrics, cfg.codes, cadence);
-      return ltmPoint(benchMetrics, cfg.codes, bench.length ? bench[bench.length - 1] : null);
+      return ltmPoint(benchMetrics ?? [], cfg.codes,
+                      benchReported.length ? benchReported[benchReported.length - 1] : null);
     },
-    [benchMetrics, cfg, cadence]);
+    [benchMetrics, benchReported, cfg, cadence]);
 
   /**
    * ⚠⚠ THE LTM STUB IS **ONE** POSITION ON THE AXIS, WHATEVER THE TWO WINDOWS ARE.
@@ -414,14 +387,13 @@ export default function MetricGrowthCard({
    *  would silently cancel the first. `rebaseOnto` still exists for callers that plot an absolute
    *  axis. A ratio card needs neither: both lines are already the same unit (%). */
   const benchByX = useMemo(() => {
-    if (!benchMetrics) return null;
-    const raw = new Map<number, number | null>(
-      extractPoints(benchMetrics, cfg.codes, cadence).map((p) => [p.year, p.value]));
+    if (!benchReported) return null;
+    const raw = new Map<number, number | null>(benchReported.map((p) => [p.year, p.value]));
     // ⚠ AT THE SHARED LTM x — see `ltmX`. Keyed on the index's own `benchLtm.year` this map grew a
     // second trailing entry one fiscal-calendar's difference away from the book's.
     if (benchLtmAt) raw.set(benchLtmAt.year, benchLtmAt.value);
     return raw.size ? raw : null;
-  }, [benchMetrics, cfg, cadence, benchLtmAt]);
+  }, [benchReported, benchLtmAt]);
 
   /**
    * Every x on this chart that carries a trailing-twelve-month point — OURS **AND** THE INDEX'S.
@@ -522,10 +494,9 @@ export default function MetricGrowthCard({
     // the solid line actually ends on — seeded at `benchLtm.year` it started one fiscal-calendar's
     // difference away from the index's own last drawn point, i.e. floating, which is the bug the
     // seed exists to prevent.
-    () => forecastOf(benchMetrics, extractPoints(benchMetrics ?? [], cfg.codes, cadence),
-                     benchLtmAt),
+    () => forecastOf(benchMetrics, benchReported ?? [], benchLtmAt),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [benchMetrics, benchLtmAt, cfg, cadence]);
+    [benchMetrics, benchReported, benchLtmAt, cfg, cadence]);
 
   /**
    * Where each forecast leg is SEEDED — its lowest x, which is the newest actual drawn a second
@@ -590,14 +561,45 @@ export default function MetricGrowthCard({
   }, [benchNotes, cfg]);
 
   // ⚠⚠ FITTED ON THE REPORTED YEARS, NOT ON `points` — the LTM point is deliberately out. The
-  // interval into it is a quarter or two, not a year; a log-linear regression that treats it as a
-  // full period reads that stub as a year of growth, and both the trend line and the CAGR headline
-  // (which IS this slope — see the file header) come out overstated. It is drawn, not fitted.
-  // ⚠⚠ FITTED ON THE REPORTED YEARS, NOT ON `points` — the LTM point is deliberately out. The
   // interval into it is a quarter or two, not a year, and `logLinearFit` treats every x-step as one
   // unit; including it reads that stub as a year of growth. The CAGR headline IS this slope (see the
   // file header), so both the trend line and the number above it would come out overstated.
-  const fit = useMemo(() => logLinearFit(reported), [reported]);        // growth only
+  /**
+   * ⚠⚠ THE WINDOW BOTH TILES ARE MEASURED OVER — see the ⚠⚠ block above `sharedSpan`, and
+   * `CardStats` for the rule it belongs to. Every figure above this chart now has a benchmark twin
+   * beside it, and two tiles side by side are a subtraction waiting to happen: a single company
+   * reaches back to 1998 while an index blend starts around 2015, so an unpinned pair would print a
+   * 27-year rate next to a 10-year one under the same word.
+   *
+   * ⚠ IT NARROWS THE **FIT** TOO, WHICH IS WHY THE TREND LINE MOVES WHEN A BENCHMARK IS PICKED.
+   * That is deliberate and it preserves this file's oldest invariant: R² is computed from the points
+   * on screen, so the headline cannot disagree with the plotted line. Narrowing the number and not
+   * the line would break exactly that.
+   *
+   * ⚠ THE AXIS DECISION IS **NOT** WINDOWED. `crossesZero` still reads the whole drawn series,
+   * because it decides which axis the CHART uses — and the chart draws every year, inside the shared
+   * span or not. A log axis chosen off a clipped view would silently drop the loss years outside it.
+   */
+  const statSpan = useMemo(
+    () => (benchReported?.length
+      ? sharedSpan(new Map(reported.map((p) => [p.year, p.value])),
+                   new Map(benchReported.map((p) => [p.year, p.value])))
+      : null),
+    [reported, benchReported]);
+  /** ⚠ THE SAME CLIP ON BOTH SIDES, OR IT IS NOT ONE WINDOW. */
+  const ownStat = useMemo(() => clipPoints(reported, statSpan), [reported, statSpan]);
+  const benchStat = useMemo(
+    () => clipPoints(benchReported ?? [], statSpan), [benchReported, statSpan]);
+
+  const fit = useMemo(() => logLinearFit(ownStat), [ownStat]);          // growth only
+  /** The index's own fit, through the IDENTICAL function over its own points — there is no
+   *  "benchmark R²" implementation to drift from this one. */
+  const benchFit = useMemo(() => logLinearFit(benchStat), [benchStat]);
+  /** ⚠ THE INDEX'S OWN SIGN TEST, NOT OURS. `linear` below is a fact about the BOOK's series and
+   *  governs the axis; whether a growth RATE exists for the index is a fact about the index. An
+   *  index that dips through zero has no CAGR even on a card whose own line never does. */
+  const benchCrossesZero = useMemo(
+    () => seriesCrossesZero(benchStat.map((p) => p.value)), [benchStat]);
   /**
    * The headline CAGR — POINT TO POINT, the same `endpointCagr` the Tables tab measures with.
    *
@@ -616,10 +618,24 @@ export default function MetricGrowthCard({
    * interval into it is a quarter or two, so ending a "per annum" rate there overstates it by the
    * fraction of the year that has not happened.
    */
-  const ptp = useMemo(() => endpointCagr(reported, (x) => periodTick(x, ltmXs)),
-                      [reported, ltmXs]);
-  const avg = points.length ? points.reduce((a, p) => a + p.value, 0) / points.length : null;  // ratio only
-  const latest = points.length ? points[points.length - 1].value : null;
+  const ptp = useMemo(() => endpointCagr(ownStat, (x) => periodTick(x, ltmXs)),
+                      [ownStat, ltmXs]);
+  const benchPtp = useMemo(() => endpointCagr(benchStat, (x) => periodTick(x, ltmXs)),
+                           [benchStat, ltmXs]);
+  /**
+   * The ratio branch's two tiles, book and index, over that same shared window — `pairedSpan` is
+   * the helper the ten ratio CARDS use, so a `kind: 'ratio'` config here reads its Avg and Latest
+   * through the identical code path they do.
+   *
+   * ⚠ ON `points`, NOT `ownStat` — the LTM belongs in an average and a "latest" (it is the newest
+   * thing known) and is out of the fit and the rate (its interval is a quarter, not a year). Same
+   * split the two branches have always had; the window is what is new.
+   */
+  const ratioStats = useMemo(
+    () => pairedSpan(new Map(points.map((p) => [p.year, p.value as number | null])), benchByX),
+    [points, benchByX]);
+  const avg = ratioStats.own.avg;                                        // ratio only
+  const latest = ratioStats.own.latest;
 
   const chartData = useMemo(() => {
     const trendByYear = new Map(fit.trend.map((t) => [t.year, t.value]));
@@ -793,22 +809,30 @@ export default function MetricGrowthCard({
                 <Stat label="Avg" value={fmt(avg)} color={chartTheme.accent}
                   info={<InfoTip content={<AspectCard
                     what={`Average ${cfg.noun} over the years shown.`}
-                    where="Computed here from the points below." when={`${points.length} year(s).`}
+                    where="Computed here from the points below."
+                    when={`${ratioStats.own.n} year(s)${ratioStats.span
+                      ? ' — the span shared with the benchmark' : ''}.`}
                     how="A simple mean — a ratio doesn't compound, so there's no growth rate." />} />} />
+                {/* ⚠ THE SAME TILE FOR THE INDEX, FROM THE SAME `pairedSpan` CALL — one mean,
+                    two series, one window. See `CardStats`. */}
+                {ratioStats.bench && (
+                  <Stat label={benchTileLabel('Avg', benchLabel)} value={fmt(ratioStats.bench.avg)}
+                    color={chartTheme.pos} />
+                )}
                 {/* ⚠ THE TILE IS RENAMED WHEN IT IS SHOWING THE LTM POINT. `latest` reads the last
                     plotted value, so on an annual chart that has one it is a trailing-twelve-month
                     figure, not a fiscal year — and "Latest" over a number nobody filed is the kind
                     of quiet mislabel this tab keeps removing. */}
-                {/* ⚠ RENAMED WHEN IT IS SHOWING THE LTM POINT. `latest` reads the last plotted
-                    value, so on a chart that has one it is a trailing-twelve-month figure, not a
-                    fiscal year — and "Latest" over a number nobody filed is the quiet mislabel this
-                    tab keeps removing. */}
                 <Stat label={ltm ? 'LTM' : 'Latest'} value={fmt(latest)} color={chartTheme.accent}
                   info={ltm ? <InfoTip text={'The trailing twelve months to the newest quarterly '
                     + 'filing — past the last full fiscal year, so it is drawn as an extra point at '
                     + 'its real position on the axis. It is NOT in the trend fit or the CAGR: the '
                     + 'interval into it is a quarter or two, and regressing it as a full year would '
                     + 'overstate the growth rate.'} /> : undefined} />
+                {ratioStats.bench && (
+                  <Stat label={benchTileLabel(ltm ? 'LTM' : 'Latest', benchLabel)}
+                    value={fmt(ratioStats.bench.latest)} color={chartTheme.pos} />
+                )}
               </>
             ) : (
               <>
@@ -826,13 +850,29 @@ export default function MetricGrowthCard({
                       ? 'Not computed — this series changes sign.'
                       : 'Computed here — a log-linear regression on the points below.'}
                     when={linear
-                      ? `${fit.dropped} of ${reported.length} year(s) are zero or negative.`
+                      ? `${fit.dropped} of ${ownStat.length} year(s) are zero or negative.`
                       : `Over the ${fit.n} year(s) shown.`}
                     how={linear
                       ? 'A constant-growth exponential has no logarithm at or below zero, so it '
                         + 'cannot describe a series that crosses it. Fitting the positive years '
                         + 'alone would measure a period nobody chose and label it as the whole.'
                       : `R² of ln(${cfg.noun}) vs year. 1.0 = perfectly steady compounding; low = lumpy or cyclical.`} />} />} />
+                {/* ⚠⚠ THE INDEX'S OWN R², FROM `logLinearFit` — THE SAME FUNCTION, OVER THE SAME
+                    YEARS. It answers a question about the BENCHMARK, not about this book's fit to
+                    it: how steadily the index compounded. ⚠ ITS OWN SIGN TEST GATES IT
+                    (`benchCrossesZero`) — an index that dips through zero has no constant-growth
+                    exponential even on a card whose own line never does, and borrowing `linear`
+                    here would have answered a question about our series for theirs. */}
+                {statSpan != null && (
+                  <Stat label={benchTileLabel('R²', benchLabel)} color={chartTheme.pos}
+                    value={benchCrossesZero || benchFit.r2 == null ? '—' : benchFit.r2.toFixed(2)}
+                    info={<InfoTip text={benchCrossesZero
+                      ? `${benchLabel ?? 'The benchmark'}'s line changes sign, so a constant-growth `
+                        + 'exponential cannot describe it and no R² is reported.'
+                      : `How tightly ${benchLabel ?? 'the benchmark'} hugs a constant-growth line, `
+                        + `over the ${benchFit.n} year(s) it shares with this one. Same regression `
+                        + 'as the tile beside it, over the other series.'} />} />
+                )}
                 {/* ⚠⚠ POINT TO POINT, THE SAME `endpointCagr` THE TABLES TAB USES — see `ptp`. The
                     tile next to it (R²) is still the fit, so the two now answer different
                     questions on purpose: what the rate WAS, and how steadily it got there. */}
@@ -856,8 +896,28 @@ export default function MetricGrowthCard({
                         + 'it: that smooths the endpoints, and how far it differs from this IS what '
                         + 'the R² is telling you. Only these two periods matter here, so one '
                         + 'unrepresentative year at either end moves it.'} />} />} />
+                {/* ⚠⚠ THE INDEX'S RATE OVER **THE SAME TWO PERIODS**. A CAGR is the one figure here
+                    that is meaningless across mismatched windows — `(end/start)^(1/n)` divides by a
+                    span — so this is the tile `statSpan` exists for. Both sides refuse for their
+                    own reasons and each says which. */}
+                {statSpan != null && (
+                  <Stat label={benchTileLabel('CAGR', benchLabel)} color={chartTheme.pos}
+                    value={benchCrossesZero || benchPtp.pct == null ? '—'
+                      : `${benchPtp.pct >= 0 ? '+' : ''}${benchPtp.pct.toFixed(1)}%`}
+                    info={<InfoTip text={benchCrossesZero
+                      ? `${benchLabel ?? 'The benchmark'}'s line changes sign; growth from a `
+                        + 'non-positive base is not a percentage.'
+                      : benchPtp.pct == null ? benchPtp.reason
+                        : `${benchLabel ?? 'The benchmark'}, ${benchPtp.from} → ${benchPtp.to}, `
+                          + `${benchPtp.years} year(s) — the same endpoints, the same function and `
+                          + 'the same window as the tile beside it.'} />} />
+                )}
               </>
             )}
+            {/* ⚠ THE ONLY THING THAT SAYS THE FIGURES MOVED when a benchmark shortened their span
+                — and it is silent when it did not. See `SpanNote`. */}
+            <SpanNote span={statSpan} benchLabel={benchLabel}
+              narrowed={statSpan != null && reported.length > ownStat.length} />
           </div>
 
           <div>

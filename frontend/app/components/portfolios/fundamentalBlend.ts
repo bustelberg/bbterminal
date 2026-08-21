@@ -321,11 +321,12 @@ export function buildBlend(data: Resp) {
      * ⚠⚠ BOTH FACTORS, NOT JUST THE PRODUCT — `pp === sharePct × growthPct ÷ 100`, exactly, so the
      * cell can show a reader the multiplication it is looking at instead of asserting a number.
      *
-     * ⚠ `sharePct` IS NOT THE WEIGHT THE CELL PRINTS UNDER IT. That one divides by `denom[y]` (the
-     * whole period's line weight); this one divides by `den` (the weight that spans the interval),
-     * because that is the denominator the contribution was actually taken over. They are equal
-     * whenever every member spans the interval — i.e. `spanPct === 100` — and where they are not,
-     * quoting the printed weight as the factor gives a multiplication that does not reach the pp.
+     * ⚠ `sharePct` IS NOT THE WEIGHT THE CELL PRINTS UNDER IT, and since 2026-08-21 it is not even
+     * measured at the same period. The printed weight divides this period's cap by `denom[y]` — the
+     * composition of the index NOW, which is what a weight column should say. This one is the
+     * member's share of the weight AT THE ANCHOR, because that is the denominator the contribution
+     * was actually taken over (see the ⚠⚠ on `w` above). Quoting the printed weight as the factor
+     * gives a multiplication that does not reach the pp.
      */
     const contrib = new Map<Row,
       Record<string, { pp: number; growthPct: number; sharePct: number }>>();
@@ -344,7 +345,19 @@ export function buildBlend(data: Resp) {
          */
         const terms: { r: Row; w: number; g: number }[] = [];
         for (const p of parts) {
-          const w = wAt(p.r, y);
+          /**
+           * ⚠⚠ THE WEIGHT IS THE **ANCHOR'S**, NOT THIS PERIOD'S — the client twin of the ⚠⚠ in
+           * `_fundamental_blend.blend_series`, and it was worth 9 percentage points a year
+           * (2026-08-21). `g` spans anchor -> y, so weighting it by the cap at `y` weights each
+           * constituent's growth by a number that already contains that growth (cap = price x
+           * shares). Measured on ACWI's share price 2015->2025: +20.21%/yr end-weighted against
+           * +11.14%/yr anchor-weighted, where the index really did ~10-11%.
+           *
+           * ⚠ IT MUST MATCH THE SERVER EXACTLY. This function exists to reproduce the plotted line
+           * in the drill-down's footer; weighted differently it would print a `Rebased` total that
+           * disagrees with the chart it was opened from, and both would look reasonable.
+           */
+          const w = wAt(p.r, anchor);
           // ⚠ THE SHARED RULE, NOT AN INLINE `prev > 0`. That guard caught zero and missed the
           // near-zero base — which is what let one holding drive an index through zero and take
           // most of the line off a log axis with it. See `stepGrowth`.
@@ -362,7 +375,10 @@ export function buildBlend(data: Resp) {
         chained *= 1 + num / den;
         step[y] = { from: anchor,
                     growthPct: 100 * num / den,
-                    spanPct: 100 * den / (denom[y] || 1) };
+                    // ⚠ AGAINST THE **ANCHOR'S** LINE WEIGHT, now that `den` is anchor-weighted.
+                    // Divided by `denom[y]` it would be one period's weight sum over another's —
+                    // two different bases, a ratio of nothing, and free to exceed 100%.
+                    spanPct: 100 * den / (denom[anchor] || 1) };
         for (const t of terms) {
           const byPeriod = contrib.get(t.r) ?? {};
           // ⚠ A ZERO HERE IS A MEASUREMENT, NOT AN ABSENCE — the opposite of the weight line's rule,

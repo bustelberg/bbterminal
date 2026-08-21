@@ -606,9 +606,42 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket) -> d
                 continue
             # ⚠ ONE RULE, IN ONE PLACE — `step_growth`. The guard that used to live inline here
             # (`prev > 0`) missed the near-zero base, which is the failure that deletes a chart.
+            #
+            # ⚠⚠ THE WEIGHT IS TAKEN AT THE **ANCHOR**, NOT AT `d`, AND THIS WAS WORTH 9 POINTS A
+            # YEAR (2026-08-21). `g_i` spans anchor -> d, so weighting it by the cap at `d` weights
+            # each constituent's growth by an amount that already CONTAINS that growth: cap = price
+            # x shares, so a name that tripled carried ~3x the weight in the very step where it
+            # tripled, and one that halved carried half. Winners over-weighted in their own winning
+            # step, losers under-weighted in their own losing step — an index that reads high by
+            # construction, with no missing data and no error anywhere.
+            #
+            # Measured on ACWI's `Month End Stock Price`, 1,512 constituents, 2015 -> 2025
+            # (`scripts/profile_price_index_weighting.py`):
+            #
+            #     end weight     index 100 -> 630.2    +20.21%/yr
+            #     anchor weight  index 100 -> 287.6    +11.14%/yr
+            #
+            # ACWI's real price return over that decade is ~10-11%/yr. The first number is not a
+            # near miss, and nothing on the chart could have shown it: the line was smooth, every
+            # period cleared both coverage floors, and the drill-down reconciled to it exactly.
+            #
+            # ⚠ THIS IS WHAT A CAP-WEIGHTED INDEX **IS**, not a tuning choice. Holding the index
+            # over [anchor, d] gives Sum(V_i(d) - V_i(anchor)) / Sum V_i(anchor), i.e. the average
+            # of `g_i` weighted by the cap AT THE ANCHOR. You buy at the start weights and let it
+            # run; there is no portfolio whose return the end weights describe.
+            #
+            # ⚠ IT CANNOT CHANGE **WHO** CONTRIBUTES, ONLY BY HOW MUCH. `p["at"][period]` is only
+            # written where `_weight_at(p, period)` was truthy, so `at[anchor]` existing already
+            # implies an anchor weight exists. A member joining after the anchor has no `g` to
+            # begin with (`step_growth` needs both ends) and was never in this step.
+            #
+            # ⚠ A PORTFOLIO IS UNAFFECTED, WHICH IS WHY THE BOOK'S OWN LINE NEVER LOOKED WRONG. A
+            # holding has no `weights`, so `_weight_at` returns the same scalar for every period and
+            # anchor and end are the same number. Only a UNIVERSE carries per-period caps — so the
+            # bias sat entirely on the benchmark line, next to a correct one, in a comparison.
             pairs = [(abs(float(w)), g)
                      for p in prepared
-                     for w in [_weight_at(p, d)]
+                     for w in [_weight_at(p, anchor)]
                      for g in [step_growth(p["at"].get(anchor), p["at"].get(d), p["scale"])]
                      if w and g is not None]
             step = _weighted_arithmetic(pairs)
@@ -879,7 +912,13 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
         # absent from the other loses its ratio for reasons that have nothing to do with it.
         contrib = []
         for p in reporting:
-            w = _weight_at(p, period)
+            # ⚠⚠ AT THE **ANCHOR**, FOR THE SAME REASON AND BY THE SAME RULE AS THE LINE — see the
+            # ⚠⚠ in `blend_series`. This panel exists to decompose the step the chart drew; taken
+            # at `period` it would decompose a DIFFERENT step (the end-weighted one) and still sum
+            # to its own total, so the table would reconcile perfectly to a number the chart no
+            # longer shows. A decomposition that is internally consistent and externally wrong is
+            # the worst of the two failures, because it is the one that gets checked and believed.
+            w = _weight_at(p, anchor)
             at = p.get("at") or {k: v for k, (_d, v) in p["by_year"].items()}
             # ⚠ THE SAME `step_growth` THE LINE USES, INCLUDING THE MATERIALITY BAR AND THE −100%
             # FLOOR. Re-deriving "the same way" here is how a panel comes to attribute a −2,700%

@@ -23,6 +23,12 @@ import { CHART_KEYS, CHART_TITLES, chartTitle, type ChartKey } from './longEquit
 /** Exactly what each `<h4>` rendered before the strings moved into `longEquityCopy`. */
 const ENGLISH_BEFORE: Record<ChartKey, [string, string]> = {
   //                        [ sbc off,                    sbc on                     ]
+  // ⚠ NOT A "BEFORE" — this card was added AFTER the strings moved here, so there is no earlier
+  // `<h4>` for it to have survived unchanged. It is in the table because the table is keyed on
+  // `ChartKey` and a missing key would fail on destructure rather than on an assertion, which
+  // names the wrong problem. What it pins is the same thing for a new heading as for an old one:
+  // the string is asserted in one place, so a rename has to be deliberate.
+  sharePrice: ['Share price', 'Share price'],
   epsNri: ['EPS (excl. non-recurring)', 'EPS (excl. non-recurring)'],
   revenue: ['Revenue', 'Revenue'],
   fcfPs: ['FCF / share', 'FCF / share'],

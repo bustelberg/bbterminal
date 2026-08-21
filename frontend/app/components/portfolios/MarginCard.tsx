@@ -11,12 +11,12 @@ import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
-import { Stat } from './MetricGrowthCard';
+import { pairedSpan, RatioStats } from './CardStats';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import { fcfLabel } from './sbcCorrection';
 import MarginInputsModal from './MarginInputsModal';
-import { marginByYear, meanOf, paddedDomain, type MarginInputs , xToPeriod } from './marginData';
+import { marginByYear, paddedDomain, type MarginInputs , xToPeriod } from './marginData';
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
@@ -79,9 +79,13 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
     () => mergeSeries(marginByYr, benchByYr, 'margin'), [marginByYr, benchByYr]);
 
   const own = holdingsName ?? 'Margin';
-  const avg = meanOf([...marginByYr.values()]);
-  const latestYear = Math.max(-Infinity, ...marginByYr.keys());
-  const latest = Number.isFinite(latestYear) ? marginByYr.get(latestYear) ?? null : null;
+  /**
+   * The book's figures and the benchmark's, over the ONE window both lines cover — see
+   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * line on the chart below, so the card cannot plot a mean it does not print.
+   */
+  const stats = useMemo(() => pairedSpan(marginByYr, benchByYr), [marginByYr, benchByYr]);
+  const avg = stats.own.avg;
   const pct = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)}%`);
 
   return (
@@ -96,14 +100,12 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
         <p className="text-[12px] text-fg-faint py-16 text-center">No revenue / FCF ingested to compute a margin.</p>
       ) : (
         <>
-          <div className="flex flex-wrap gap-2">
-            <Stat label="Avg margin" value={pct(avg)} color={chartTheme.accent}
-              info={<InfoTip content={<AspectCard
-                what={`Average ${fcfLabel(sbcCorrection)} margin over the years shown.`}
-                where="Computed here — (FCF − SBC) ÷ Revenue per year, weight-averaged across holdings."
-                when="The years on the chart." how="SBC is a non-cash add-back to FCF, so subtracting it gives a truer cash margin." />} />} />
-            <Stat label="Latest" value={pct(latest)} color={chartTheme.accent} />
-          </div>
+          <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
+            avgLabel="Avg margin"
+            avgInfo={<InfoTip content={<AspectCard
+              what={`Average ${fcfLabel(sbcCorrection)} margin over the years shown.`}
+              where="Computed here — (FCF − SBC) ÷ Revenue per year, weight-averaged across holdings."
+              when="The years on the chart." how="SBC is a non-cash add-back to FCF, so subtracting it gives a truer cash margin." />} />} />
 
           <div>
             <ResponsiveContainer width="100%" height={320}>

@@ -11,14 +11,14 @@ import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
-import { Stat } from './MetricGrowthCard';
+import { pairedSpan, RatioStats } from './CardStats';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import { fcfLabel } from './sbcCorrection';
 import FcfSbcYieldInputsModal from './FcfSbcYieldInputsModal';
 import { fcfSbcYieldByYear, type FcfSbcYieldInputs } from './fcfSbcYieldData';
 import DailyToggle from './DailyToggle';
-import { meanOf, paddedDomain, xToMonth, xToPeriod } from './marginData';
+import { paddedDomain, xToMonth, xToPeriod } from './marginData';
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
@@ -85,9 +85,13 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
     () => mergeSeries(yieldByYr, benchByYr, 'yld'), [yieldByYr, benchByYr]);
 
   const own = holdingsName ?? `${fcfLabel(sbcCorrection)} yield`;
-  const avg = meanOf([...yieldByYr.values()]);
-  const latestYear = Math.max(-Infinity, ...yieldByYr.keys());
-  const latest = Number.isFinite(latestYear) ? yieldByYr.get(latestYear) ?? null : null;
+  /**
+   * The book's figures and the benchmark's, over the ONE window both lines cover — see
+   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * line on the chart below, so the card cannot plot a mean it does not print.
+   */
+  const stats = useMemo(() => pairedSpan(yieldByYr, benchByYr), [yieldByYr, benchByYr]);
+  const avg = stats.own.avg;
   const pct = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)}%`);
 
   return (
@@ -108,15 +112,12 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
         <p className="text-[12px] text-fg-faint py-16 text-center">No FCF / market-cap figures ingested to compute a yield.</p>
       ) : (
         <>
-          <div className="flex flex-wrap gap-2">
-            <Stat label="Avg" value={pct(avg)} color={chartTheme.accent}
-              info={<InfoTip content={<AspectCard
-                what="Average (FCF − SBC) ÷ Market Cap over the years shown."
-                where="Computed here — the yield per year, weight-averaged across holdings."
-                when="The years on the chart."
-                how="The cash a buyer earns per euro of price, after removing non-cash stock comp from FCF. Higher = cheaper for the cash it generates." />} />} />
-            <Stat label="Latest" value={pct(latest)} color={chartTheme.accent} />
-          </div>
+          <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
+            avgInfo={<InfoTip content={<AspectCard
+              what="Average (FCF − SBC) ÷ Market Cap over the years shown."
+              where="Computed here — the yield per year, weight-averaged across holdings."
+              when="The years on the chart."
+              how="The cash a buyer earns per euro of price, after removing non-cash stock comp from FCF. Higher = cheaper for the cash it generates." />} />} />
 
           <div>
             <ResponsiveContainer width="100%" height={320}>

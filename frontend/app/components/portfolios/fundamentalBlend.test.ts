@@ -127,3 +127,75 @@ describe('buildBlend contributions', () => {
     expect(b.contrib.get(rows[0])!['2024'].pp).toBeCloseTo(b.step['2024'].growthPct, 10);
   });
 });
+
+/**
+ * AN INDEX'S STEP IS WEIGHTED BY THE CAP IT HAD AT THE START OF THAT STEP.
+ *
+ * ⚠⚠ THE BUG THIS PINS READ +20.21%/yr WHERE THE ANSWER IS +11.14%/yr (2026-08-21). `buildBlend`
+ * chains from weighted growth, `g = value(y)/value(anchor) − 1`, and took each member's weight at
+ * `y` — the END of the interval. For revenue that is a mild inconsistency; for a PRICE series it is
+ * nearly circular, because market cap = price × shares. A constituent that tripled carried ~3× the
+ * weight in the very step where it tripled, and one that halved carried half: winners over-weighted
+ * in their own winning step, losers under-weighted in theirs, and an index that reads high by
+ * construction with no missing data anywhere.
+ *
+ * Measured on ACWI's `Month End Stock Price`, 1,512 constituents, 2015 → 2025: end-weighted the
+ * index ran 100 → 630.2 (+20.21%/yr), anchor-weighted 100 → 287.6 (+11.14%/yr). ACWI really did
+ * ~10-11%/yr on price.
+ *
+ * ⚠ THIS FILE IS THE CLIENT TWIN OF `_fundamental_blend.blend_series` AND EXISTS TO REPRODUCE THE
+ * PLOTTED LINE — the `Tables` tab's rates and the drill-down's `Rebased` footer both come from here.
+ * Weighted differently from the server it would print figures that disagree with the chart they
+ * explain, and both would look entirely reasonable. Pinned on both sides: see
+ * `backend/tests/test_blend_step_weight.py`, which asserts the same 100 → 175 panel.
+ *
+ * ⚠ A PORTFOLIO CANNOT HIT THIS. Without `market_cap_by_period`, `wAt` returns the holding weight
+ * for every period, so anchor and end are the same number — which is why the book's own line was
+ * right all along and only the benchmark beside it was inflated.
+ */
+describe('the step is weighted at the anchor, not at the period', () => {
+  /** Two constituents, equal at the start and opposite after. The panel's own total market cap goes
+   *  200 → 350, so a cap-weighted index that held both returned exactly +75%. There is no other
+   *  defensible number, which is what makes this a test rather than a preference. */
+  const capped = (isin: string, revenue: Record<string, number>,
+    caps: Record<string, number>): Row => ({
+    ...row(isin, 50, revenue), market_cap_by_period: caps,
+  });
+  const WINNER = capped('A', { 2020: 100, 2021: 300 }, { 2020: 100, 2021: 300 });   // ×3
+  const LOSER = capped('B', { 2020: 100, 2021: 50 }, { 2020: 100, 2021: 50 });      // ÷2
+
+  it('reproduces the index’s own market-cap move', () => {
+    const b = buildBlend(resp(['2020', '2021'], [WINNER, LOSER]));
+    expect(b.level['2020'].value).toBeCloseTo(100, 10);
+    expect(b.level['2021'].value).toBeCloseTo(175, 10);
+    expect(b.step['2021'].growthPct).toBeCloseTo(75, 10);
+  });
+
+  it('⚠ the end-weighted answer is the one that was shipped', () => {
+    // (300·(+2.00) + 50·(−0.50)) ÷ 350 = +164.3% → level 264.3, against a true 175. Written out so
+    // the size of the error lives in the test and not only in a commit message.
+    const endWeighted = (300 * 2.0 + 50 * -0.5) / 350;
+    expect(100 * (1 + endWeighted)).toBeCloseTo(264.29, 1);
+    expect(buildBlend(resp(['2020', '2021'], [WINNER, LOSER])).level['2021'].value)
+      .not.toBeCloseTo(264.29, 1);
+  });
+
+  it('the contribution column still adds up to the move it decomposes', () => {
+    const b = buildBlend(resp(['2020', '2021'], [WINNER, LOSER]));
+    expect(b.contrib.get(WINNER)!['2021'].pp).toBeCloseTo(100, 10);
+    expect(b.contrib.get(LOSER)!['2021'].pp).toBeCloseTo(-25, 10);
+    expect(sumPp(b, [WINNER, LOSER], '2021')).toBeCloseTo(b.step['2021'].growthPct, 10);
+  });
+
+  it('⚠ a portfolio is unaffected — no per-period caps, so anchor and end are one number', () => {
+    const book = [row('A', 50, { 2020: 100, 2021: 300 }), row('B', 50, { 2020: 100, 2021: 50 })];
+    expect(buildBlend(resp(['2020', '2021'], book)).level['2021'].value).toBeCloseTo(175, 10);
+  });
+
+  it('⚠ `spanPct` is measured against the ANCHOR’s line weight, so it stays a share', () => {
+    // `den` is anchor-weighted now; divided by this period's weight sum it would be one basis over
+    // another — a ratio of nothing, free to exceed 100%. Both members span, so it is exactly 100.
+    expect(buildBlend(resp(['2020', '2021'], [WINNER, LOSER])).step['2021'].spanPct)
+      .toBeCloseTo(100, 10);
+  });
+});

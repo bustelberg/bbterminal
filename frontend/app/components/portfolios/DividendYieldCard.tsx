@@ -12,12 +12,13 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { Stat } from './MetricGrowthCard';
+import { pairedSpan, RatioStats } from './CardStats';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import DividendYieldInputsModal from './DividendYieldInputsModal';
 import DailyToggle from './DailyToggle';
 import { coverageByYear, dividendYieldByYear, type DividendYieldInputs } from './dividendYieldData';
-import { meanOf, paddedDomain, xToMonth, xToPeriod } from './marginData';
+import { paddedDomain, xToMonth, xToPeriod } from './marginData';
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
@@ -96,11 +97,18 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
     () => mergeSeries(yieldByYr, benchByYr, 'yld'), [yieldByYr, benchByYr]);
 
   const own = holdingsName ?? 'Dividend yield';
-  const avg = meanOf([...yieldByYr.values()]);
-  const latestYear = Math.max(-Infinity, ...yieldByYr.keys());
-  const latest = Number.isFinite(latestYear) ? yieldByYr.get(latestYear) ?? null : null;
+  /**
+   * The book's figures and the benchmark's, over the ONE window both lines cover — see
+   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * line on the chart below, so the card cannot plot a mean it does not print.
+   */
+  const stats = useMemo(() => pairedSpan(yieldByYr, benchByYr), [yieldByYr, benchByYr]);
+  const avg = stats.own.avg;
   // The latest year's coverage — a yield averaged over 40% of the book is not the book's yield.
-  const latestCov = Number.isFinite(latestYear) ? covByYr.get(latestYear) ?? null : null;
+  // ⚠ KEYED ON THE PERIOD THE `Latest` TILE ACTUALLY PRINTS (`own.latestX`), not on this line's own
+  // newest. With a benchmark on screen the tiles are pinned to the shared window, so reading
+  // coverage off a later year would report the share of the book behind a figure that is not shown.
+  const latestCov = stats.own.latestX != null ? covByYr.get(stats.own.latestX) ?? null : null;
   const pct = (v: number | null) => (v == null ? '—' : `${v.toFixed(2)}%`);
 
   return (
@@ -120,14 +128,15 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
         <p className="text-[12px] text-fg-faint py-16 text-center">No dividend / price figures ingested to compute a yield.</p>
       ) : (
         <>
-          <div className="flex flex-wrap gap-2">
-            <Stat label="Avg" value={pct(avg)} color={chartTheme.accent}
-              info={<InfoTip content={<AspectCard
-                what="Average dividend yield over the years shown."
-                where="Computed here — dividends per share ÷ that fiscal year's end price, per holding, then weight-averaged."
-                when="The years on the chart."
-                how="A yield is currency-free, so the weighted average IS the book's yield (the weights are value weights). A company that pays nothing counts as 0%; one we have no dividend line for is left out and the year renormalises over the rest." />} />} />
-            <Stat label="Latest" value={pct(latest)} color={chartTheme.accent} />
+          <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
+            avgInfo={<InfoTip content={<AspectCard
+              what="Average dividend yield over the years shown."
+              where="Computed here — dividends per share ÷ that fiscal year's end price, per holding, then weight-averaged."
+              when="The years on the chart."
+              how="A yield is currency-free, so the weighted average IS the book's yield (the weights are value weights). A company that pays nothing counts as 0%; one we have no dividend line for is left out and the year renormalises over the rest." />} />}>
+            {/* ⚠ THE BOOK'S COVERAGE, AND ONLY THE BOOK'S — passed as a child so it lands after
+                both pairs. The index has its own (very different) coverage; showing one figure
+                under a row that carries two lines would read as if it described both. */}
             {latestCov != null && latestCov < 99.5 && (
               <Stat label="Coverage" value={`${latestCov.toFixed(0)}%`}
                 tone={latestCov < 60 ? 'text-warn-300' : undefined}
@@ -137,7 +146,7 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
                   when="The latest year on the chart."
                   how="Cash, funds and holdings with nothing ingested are not in the average — a yield over part of a book is not the book's yield, so the share is stated rather than assumed." />} />} />
             )}
-          </div>
+          </RatioStats>
 
           <div>
             <ResponsiveContainer width="100%" height={320}>

@@ -28,7 +28,7 @@ import type { Lang } from '../../../lib/i18n';
  */
 
 export const CHART_KEYS = [
-  'epsNri', 'revenue', 'fcfPs', 'shares',
+  'sharePrice', 'epsNri', 'revenue', 'fcfPs', 'shares',
   'fcfMargin', 'croic', 'roic', 'debtAssets', 'interestBurden', 'sbcOcf',
   'investedCapital', 'capexMargin', 'dividendYield', 'fcfYield', 'grossMargin', 'cashConversion',
 ] as const;
@@ -38,6 +38,7 @@ export type ChartKey = (typeof CHART_KEYS)[number];
 export type ChartTitles = Record<ChartKey, (sbc: boolean) => string>;
 
 const en: ChartTitles = {
+  sharePrice: () => 'Share price',
   epsNri: () => 'EPS (excl. non-recurring)',
   revenue: () => 'Revenue',
   fcfPs: () => 'FCF / share',
@@ -68,6 +69,7 @@ const en: ChartTitles = {
  * so the heading names the control the reader just clicked.
  */
 const nl: ChartTitles = {
+  sharePrice: () => 'Aandelenkoers',
   epsNri: () => 'Winst per aandeel (excl. bijzondere posten)',
   revenue: () => 'Omzet',
   fcfPs: () => 'Vrije kasstroom / aandeel',

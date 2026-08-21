@@ -11,12 +11,12 @@ import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
-import { Stat } from './MetricGrowthCard';
+import { pairedSpan, RatioStats } from './CardStats';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import CashConversionInputsModal from './CashConversionInputsModal';
 import { cashConversionByYear, type CashConversionInputs } from './cashConversionData';
-import { meanOf, paddedDomain , xToPeriod } from './marginData';
+import { paddedDomain , xToPeriod } from './marginData';
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
@@ -89,9 +89,13 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
     () => mergeSeries(marginByYr, benchByYr, 'margin'), [marginByYr, benchByYr]);
 
   const own = holdingsName ?? 'FCF / Net Income';
-  const avg = meanOf([...marginByYr.values()]);
-  const latestYear = Math.max(-Infinity, ...marginByYr.keys());
-  const latest = Number.isFinite(latestYear) ? marginByYr.get(latestYear) ?? null : null;
+  /**
+   * The book's figures and the benchmark's, over the ONE window both lines cover — see
+   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * line on the chart below, so the card cannot plot a mean it does not print.
+   */
+  const stats = useMemo(() => pairedSpan(marginByYr, benchByYr), [marginByYr, benchByYr]);
+  const avg = stats.own.avg;
   const pct = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)}%`);
 
   return (
@@ -108,15 +112,12 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
         <p className="text-[12px] text-fg-faint py-16 text-center">No FCF / net-income figures ingested to compute a conversion.</p>
       ) : (
         <>
-          <div className="flex flex-wrap gap-2">
-            <Stat label="Avg" value={pct(avg)} color={chartTheme.accent}
-              info={<InfoTip content={<AspectCard
-                what="Average FCF ÷ Net Income over the years shown — how much of the reported profit turned into cash."
-                where="Computed here — Free Cash Flow ÷ Net Income per year, weight-averaged across holdings. ⚠ FCF is whole-company cash while Net Income is the SHAREHOLDERS' line, so a group with large minorities reads high."
-                when="The years on the chart."
-                how="⚠ 100% IS BREAK-EVEN, NOT A CEILING — above it the business converts more cash than it books as profit (depreciation ahead of capex), which is a compliment. Persistently below it means the earnings are not turning into money. A LOSS has no conversion at all, so that year is a hole rather than a negative percentage." />} />} />
-            <Stat label="Latest" value={pct(latest)} color={chartTheme.accent} />
-          </div>
+          <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
+            avgInfo={<InfoTip content={<AspectCard
+              what="Average FCF ÷ Net Income over the years shown — how much of the reported profit turned into cash."
+              where="Computed here — Free Cash Flow ÷ Net Income per year, weight-averaged across holdings. ⚠ FCF is whole-company cash while Net Income is the SHAREHOLDERS' line, so a group with large minorities reads high."
+              when="The years on the chart."
+              how="⚠ 100% IS BREAK-EVEN, NOT A CEILING — above it the business converts more cash than it books as profit (depreciation ahead of capex), which is a compliment. Persistently below it means the earnings are not turning into money. A LOSS has no conversion at all, so that year is a hole rather than a negative percentage." />} />} />
 
           <div>
             <ResponsiveContainer width="100%" height={320}>
