@@ -31,7 +31,10 @@ import { withWorked, subNum } from './workedFormula';
 import type { PortfolioConcentration } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 
-const pct1 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(1)}%`);
+/** ⚠ TWO DECIMALS ON EVERY NON-INTEGER, ACROSS ALL SEVEN VIEWS. One decimal read as false
+ *  precision on a figure the reader is asked to check against a table that carries two: "79.5%"
+ *  beside rows summing to 79.53 invites the arithmetic to be redone and found wrong. Counts
+ *  (issuers, observations, lines, periods) stay integers — they ARE integers. */
 const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
 
 function Tile({ label, value, sub, tone, info }: {
@@ -94,35 +97,35 @@ export default function ConcentrationView({ holdings, benchmark }: {
         <>
           <div className="flex flex-wrap gap-2">
             <Tile label="Effective positions"
-              value={data.effective_positions == null ? '—' : data.effective_positions.toFixed(1)}
+              value={data.effective_positions == null ? '—' : data.effective_positions.toFixed(2)}
               sub={`of ${data.issuers} issuers held`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="How many equally-sized positions this book behaves like."
                 where={`1 ÷ HHI, over ${data.issuers} issuers.`}
                 worked={data.hhi == null || data.effective_positions == null ? '' : withWorked(
-                  'HHI = Σ wᵢ²  (weights as fractions),  N_eff = 1 ÷ HHI',
-                  `1 ÷ ${subNum(data.hhi, 4)} = ${data.effective_positions.toFixed(1)}`)}
+                  String.raw`HHI = \sum_i w_i^2\qquad N_{\text{eff}} = \dfrac{1}{HHI}`,
+                  String.raw`\dfrac{1}{${subNum(data.hhi, 4)}} = ${data.effective_positions.toFixed(2)}`)}
                 how={'⚠ THE BETTER NUMBER, and the reason it leads. A cut at exactly ten is '
                   + 'arbitrary — two books with the same C₁₀ can be an even ten-name portfolio and '
                   + 'one dominated by its top three. This has no cut-off. Forty names of which '
                   + 'five dominate reads far below forty.'} />} />} />
-            <Tile label="Top 10" value={pct1(data.top10_pct)}
-              sub={`${pct1(data.top10_of_book_pct)} of the whole book`}
+            <Tile label="Top 10" value={pct2(data.top10_pct)}
+              sub={`${pct2(data.top10_of_book_pct)} of the whole book`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="The share of the stock sleeve in its ten largest issuers."
                 where={`Σ of the ten biggest of ${data.issuers}, sorted descending.`}
                 worked={data.top10_pct == null ? '' : withWorked(
-                  'C₁₀ = Σᵢ₌₁¹⁰ w₍ᵢ₎',
-                  `C₁ ${subNum(data.top1_pct ?? 0, 1)}%`
-                  + ` · C₃ ${subNum(data.top3_pct ?? 0, 1)}%`
-                  + ` · C₅ ${subNum(data.top5_pct ?? 0, 1)}%`
-                  + ` · C₁₀ ${subNum(data.top10_pct, 1)}%`
-                  + ` · C₂₀ ${subNum(data.top20_pct ?? 0, 1)}%`)}
+                  String.raw`C_{10} = \sum_{i=1}^{10} w_{(i)}`,
+                  String.raw`C_1 = ${subNum(data.top1_pct ?? 0, 2)}\%`
+                  + String.raw`\quad C_3 = ${subNum(data.top3_pct ?? 0, 2)}\%`
+                  + String.raw`\quad C_5 = ${subNum(data.top5_pct ?? 0, 2)}\%`
+                  + String.raw`\quad C_{10} = ${subNum(data.top10_pct, 2)}\%`
+                  + String.raw`\quad C_{20} = ${subNum(data.top20_pct ?? 0, 2)}\%`)}
                 how={'⚠⚠ TWO DENOMINATORS, BOTH TRUE. The headline is of the STOCK SLEEVE, which is '
                   + 'what compares across books; the line beneath is of the whole book including '
-                  + `cash and funds (the sleeve is ${pct1(data.stocks_pct)} of it). A book that is `
+                  + `cash and funds (the sleeve is ${pct2(data.stocks_pct)} of it). A book that is `
                   + '30% cash really is less concentrated in absolute terms.'} />} />} />
-            <Tile label="Largest position" value={pct1(data.top1_pct)} tone="text-fg-strong"
+            <Tile label="Largest position" value={pct2(data.top1_pct)} tone="text-fg-strong"
               sub={rows[0]?.name}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="The single biggest issuer, as a share of the sleeve."
@@ -132,9 +135,9 @@ export default function ConcentrationView({ holdings, benchmark }: {
                   + '6pp one. The table below carries both.'} />} />} />
             <Tile label={`${data.benchmark} effective`}
               value={data.benchmark_effective_positions == null ? '—'
-                : data.benchmark_effective_positions.toFixed(0)}
+                : data.benchmark_effective_positions.toFixed(2)}
               tone="text-fg-muted"
-              sub={`of ${data.benchmark_issuers} · top 10 ${pct1(data.benchmark_top10_pct)}`}
+              sub={`of ${data.benchmark_issuers} · top 10 ${pct2(data.benchmark_top10_pct)}`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="The index's own effective position count, on the same measure."
                 where={`1 ÷ HHI over ${data.benchmark_issuers} priced constituents.`}
@@ -145,7 +148,7 @@ export default function ConcentrationView({ holdings, benchmark }: {
 
           {data.benchmark_covered_pct != null && data.benchmark_covered_pct < 99.5 && (
             <p className="text-[11px] text-fg-faint">
-              {`Priced ${data.benchmark_covered_pct.toFixed(1)}% of ${data.benchmark}'s members — `}
+              {`Priced ${data.benchmark_covered_pct.toFixed(2)}% of ${data.benchmark}'s members — `}
               the missing weight redistributes over the rest, so the index reads slightly more
               concentrated than it is.
             </p>
@@ -178,7 +181,7 @@ export default function ConcentrationView({ holdings, benchmark }: {
                         {pct2(r.weight_pct)}
                       </td>
                       <td className="text-right font-mono tabular-nums text-fg-muted">
-                        {pct1(r.cumulative_pct)}
+                        {pct2(r.cumulative_pct)}
                       </td>
                       <td className="text-right font-mono tabular-nums text-fg-muted">
                         {(r.benchmark_pct ?? 0) > 0 ? pct2(r.benchmark_pct) : '—'}

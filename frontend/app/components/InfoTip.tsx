@@ -166,7 +166,12 @@ export default function InfoTip({ text, content, children, className = "" }: {
           // styling. The tooltip renders inside its trigger, so it inherits whatever the trigger
           // sits in — a table header carries `uppercase tracking-wide text-right`, which once
           // rendered the whole explanation SHOUTED IN CAPS, right-aligned. Inheritance did it.
-          className={`fixed w-72 max-h-[80vh] overflow-hidden px-3 py-2 bg-popover border rounded-lg text-xs text-fg-soft leading-relaxed z-[9999] shadow-xl whitespace-pre-line normal-case text-left tracking-normal font-normal ${
+          // ⚠ `w-[22rem]`, WIDENED FROM `w-72` (2026-08-22) BECAUSE THESE CARDS NOW CARRY FORMULAS.
+          // At 288px `σ = √( Σ(Rₜ − R̄)² ÷ (T − 1) ) × √f` wraps mid-expression, and a formula
+          // broken across a line at an arbitrary operator is harder to read than no formula.
+          // ⚠ `max-w-[calc(100vw-1rem)]` IS THE GUARD THE CLAMP CANNOT PROVIDE: the positioner
+          // clamps the LEFT edge, so a box wider than the viewport would still run off the right.
+          className={`fixed w-[22rem] max-w-[calc(100vw-1rem)] max-h-[80vh] overflow-hidden px-3 py-2 bg-popover border rounded-lg text-xs text-fg-soft leading-relaxed z-[9999] shadow-xl whitespace-pre-line normal-case text-left tracking-normal font-normal ${
             pinned
               ? 'pointer-events-auto cursor-auto select-text border-accent-500/50'
               : 'pointer-events-none border-neutral-700'}`}

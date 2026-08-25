@@ -122,9 +122,9 @@ export default function TrackingErrorView({ holdings, benchmark }: {
                 where={`${data.observations} ${data.frequency} active returns over ${data.years} years, against ${data.benchmark}'s tracker.`}
                 when="Trailing window — the sleeve as it stands today, carried backwards."
                 worked={data.tracking_error_pct == null ? '' : withWorked(
-                  'aₜ = Rₜᵖ − Rₜᵇ,  then  √( Σ(aₜ − ā)² ÷ (T − 1) ) × √f',
-                  `T = ${data.observations}, f = ${data.periods_per_year}`
-                  + `  →  ${subNum(data.tracking_error_pct, 2)}%`)}
+                  String.raw`a_t = R_t^{\,p} - R_t^{\,b}\quad\Rightarrow\quad TE = \sqrt{\dfrac{\sum_t (a_t - \bar{a})^2}{T - 1}}\;\sqrt{f}`,
+                  String.raw`T = ${data.observations},\; f = ${data.periods_per_year}`
+                  + String.raw` \;\Rightarrow\; ${subNum(data.tracking_error_pct, 2)}\%`)}
                 how={'⚠ REALISED (ex-post), not the ex-ante forecast from a covariance matrix — '
                   + 'those are different numbers and routinely disagree. ā IS subtracted and the '
                   + 'divisor is T−1 (Bessel); some providers do neither, which reads higher.'} />} />} />
@@ -144,8 +144,8 @@ export default function TrackingErrorView({ holdings, benchmark }: {
                 what="Active return per unit of tracking error."
                 where="Active return ÷ tracking error, both annualised."
                 worked={data.information_ratio == null || data.tracking_error_pct == null ? ''
-                  : `${subNum(data.active_return_ann_pct ?? 0, 2)}%`
-                    + ` ÷ ${subNum(data.tracking_error_pct, 2)}%`
+                  : String.raw`\dfrac{${subNum(data.active_return_ann_pct ?? 0, 2)}\%}`
+                    + String.raw`{${subNum(data.tracking_error_pct, 2)}\%}`
                     + ` = ${data.information_ratio.toFixed(2)}`}
                 how={'Whether the divergence was worth taking. ⚠ A dash means the tracking error '
                   + 'is ~0 — there is no risk to divide by, not that the ratio is zero.'} />} />} />
@@ -168,7 +168,7 @@ export default function TrackingErrorView({ holdings, benchmark }: {
             return. It is the same portfolio the Active share view describes.
             {data.avg_weight_covered_pct != null && data.avg_weight_covered_pct < 99.5 && (
               <>
-                {` The average period covered ${data.avg_weight_covered_pct.toFixed(1)}% of the sleeve`}
+                {` The average period covered ${data.avg_weight_covered_pct.toFixed(2)}% of the sleeve`}
                 {` (${data.priced_holdings} of ${data.total_holdings} holdings priced); the rest were `}
                 renormalised over, never carried at zero.
               </>

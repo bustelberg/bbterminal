@@ -139,9 +139,12 @@ export default function DrawdownView({ holdings, benchmark }: {
                 what="The deepest peak-to-trough fall in the window."
                 where={`${data.observations} ${data.frequency} returns over ${data.years} years.`}
                 worked={data.max_drawdown_pct == null ? '' : withWorked(
-                  'Wₜ = ∏(1 + Rₛ),  Mₜ = max Wₛ,  MDD = min (Wₜ/Mₜ − 1)',
-                  `${day(worst?.peak_date)} → ${day(worst?.trough_date)}`
-                  + `  =  ${subNum(data.max_drawdown_pct, 2)}%`)}
+                  // ⚠ ONE STATEMENT PER LINE, BROKEN HERE RATHER THAN BY THE BOX. The formula
+                  // block honours `\n`; left as one line it wraps at whatever operator lands on
+                  // the 22rem edge, which is harder to read than no formula at all.
+                  String.raw`W_t = \prod_s (1 + R_s)\qquad M_t = \max_{s \le t} W_s\qquad MDD = \min_t \left( \dfrac{W_t}{M_t} - 1 \right)`,
+                  String.raw`\text{${day(worst?.peak_date)}} \;\rightarrow\; \text{${day(worst?.trough_date)}}`
+                  + String.raw` \;=\; ${subNum(data.max_drawdown_pct, 2)}\%`)}
                 how={'⚠ THE CADENCE IS IN THE LABEL because it changes the answer: a fall that '
                   + 'recovers inside a week is invisible to a weekly series. See the comparison '
                   + 'below.'} />} />} />

@@ -136,10 +136,10 @@ export default function CorrelationView({ holdings, benchmark }: {
                 what="How closely the stock sleeve has moved with the benchmark."
                 where={`${data.observations} ${data.frequency} returns, both series on one aligned calendar.`}
                 worked={data.benchmark_corr == null ? '' : withWorked(
-                  'ρ = Cov(portfolio, benchmark) ÷ (σₚ · σᵦ)',
-                  `σₚ ${subNum(data.portfolio_vol_pct ?? 0, 2)}%`
-                  + ` · σᵦ ${subNum(data.benchmark_vol_pct ?? 0, 2)}%`
-                  + `  →  ρ = ${data.benchmark_corr.toFixed(4)}`)}
+                  String.raw`\rho = \dfrac{\mathrm{Cov}(p,\, b)}{\sigma_p \,\sigma_b}`,
+                  String.raw`\sigma_p = ${subNum(data.portfolio_vol_pct ?? 0, 2)}\%`
+                  + String.raw`\quad \sigma_b = ${subNum(data.benchmark_vol_pct ?? 0, 2)}\%`
+                  + String.raw`\quad\Rightarrow\quad \rho = ${data.benchmark_corr.toFixed(4)}`)}
                 how={'⚠ THIS IS THE OTHER SIDE OF THE TRACKING ERROR, not a separate fact: '
                   + 'σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ. The lower this is, the more the book can diverge.'} />} />} />
             <Tile label="R²" value={data.r_squared == null ? '—' : data.r_squared.toFixed(2)}
@@ -163,13 +163,13 @@ export default function CorrelationView({ holdings, benchmark }: {
                 what="The same tracking error the view beside this one reports."
                 where="Built from the same series, so the identity below is exact, not approximate."
                 worked={data.implied_active_vol_pct == null ? '' : withWorked(
-                  'σₐ = √(σₚ² + σᵦ² − 2ρσₚσᵦ)',
-                  `√(${subNum(data.portfolio_vol_pct ?? 0, 2)}²`
-                  + ` + ${subNum(data.benchmark_vol_pct ?? 0, 2)}²`
-                  + ` − 2 × ${(data.benchmark_corr ?? 0).toFixed(4)}`
-                  + ` × ${subNum(data.portfolio_vol_pct ?? 0, 2)}`
-                  + ` × ${subNum(data.benchmark_vol_pct ?? 0, 2)})`
-                  + ` = ${subNum(data.implied_active_vol_pct, 2)}%`)}
+                  String.raw`\sigma_a = \sqrt{\sigma_p^2 + \sigma_b^2 - 2\rho\,\sigma_p\,\sigma_b}`,
+                  String.raw`\sqrt{${subNum(data.portfolio_vol_pct ?? 0, 2)}^2`
+                  + String.raw` + ${subNum(data.benchmark_vol_pct ?? 0, 2)}^2`
+                  + String.raw` - 2 \times ${(data.benchmark_corr ?? 0).toFixed(4)}`
+                  + String.raw` \times ${subNum(data.portfolio_vol_pct ?? 0, 2)}`
+                  + String.raw` \times ${subNum(data.benchmark_vol_pct ?? 0, 2)}}`
+                  + String.raw` = ${subNum(data.implied_active_vol_pct, 2)}\%`)}
                 how={'⚠ THE IDENTITY IS SHOWN, NOT ASSERTED. The figure above is measured directly '
                   + 'from the active returns; the worked line rebuilds it from ρ. They agree to '
                   + 'floating-point noise, and would visibly diverge if the two views ever stopped '

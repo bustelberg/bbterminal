@@ -23,6 +23,33 @@
 import { type Cagr } from './lineCagr';
 
 /**
+ * A literal that must survive being read as LaTeX — `%` starts a comment, `_` and `^` are scripts.
+ *
+ * ⚠⚠ `%` IS THE ONE THAT BITES, AND IT FAILS SILENTLY. An unescaped `20.54%` makes KaTeX treat
+ * the rest of the LINE as a comment, so the expression renders truncated at the first percentage
+ * with no error anywhere — `overlap 20.54` and nothing after it. Everything numeric here carries a
+ * percent sign, so this is not an edge case, it is the common path.
+ */
+const tex = (s: string) => s
+  // ⚠⚠ `€` IS NOT A CHARACTER KaTeX KNOWS, in maths mode OR in `\text{}` — verified against
+  // 0.18.4 with `strict: 'error'`. Callers hand formatted money in (`€220` from the price-target
+  // tile), so this is not hypothetical. Under the app's default strictness it would render as a
+  // warning and a fallback glyph rather than throwing, which is the worst outcome: it looks
+  // deliberate. The ISO code set upright is unambiguous and typesets cleanly.
+  .replace(/€/g, String.raw`\text{EUR}\,`)
+  .replace(/£/g, String.raw`\pounds `)
+  // ⚠⚠ AND `%` STARTS A COMMENT — the escape that matters most, because the failure is INVISIBLE
+  // ON SCREEN. `\text{overlap } 20.54% + …` renders as `overlap 20.54` and stops: measured, not
+  // supposed. KaTeX logs a `commentAtEnd` warning to the console under its default strictness and
+  // paints nothing to say the rest is gone, so what the reader gets is a shorter formula that
+  // looks finished. Everything numeric here carries a percent sign, so this is the common path.
+  // Pinned by `workedFormula.latex.test.ts`, which renders in STRICT mode so it throws instead.
+  .replace(/([%$&#_{}])/g, '\\$1');
+
+/** Prose inside an expression — upright, spaced, and not italicised as a product of variables. */
+const words = (s: string) => `\\text{${tex(s)}}`;
+
+/**
  * How many decimals an OPERAND needs to survive being divided into.
  *
  * ⚠⚠ AN OPERAND NEEDS MORE DIGITS THAN A RESULT, AND GETTING THAT WRONG DEFEATS THE WHOLE FEATURE.
@@ -36,14 +63,26 @@ import { type Cagr } from './lineCagr';
  */
 export const subDigits = (v: number): number => {
   const a = Math.abs(v);
+  // ⚠⚠ TWO IS THE FLOOR, NOT THE CEILING (2026-08-22). Every figure on the risk views now prints
+  // two decimals, and a worked line that renders the same quantity as `55.4` beside a tile reading
+  // `55.40` invites the reader to check whether they are the same number. More precision on an
+  // operand is always safe — it is the direction that keeps the arithmetic reconciling.
+  //
+  // ⚠ EXCEPT AT OR ABOVE 1000, where the figure already reads as an integer and `1234567.00` is
+  // noise that costs the digits that matter.
   if (a >= 1000) return 0;
-  if (a >= 10) return 1;
-  if (a >= 1) return 2;
-  return 3;
+  return a >= 1 ? 2 : 3;
 };
 
 /** A number as it goes into a worked formula. `digits` forces a whole list to one precision. */
 export const subNum = (v: number, digits?: number) => v.toFixed(digits ?? subDigits(v));
+
+/** ⚠ ESCAPE ANY LITERAL THAT GOES INTO A FORMULA. See `tex` — an unescaped `%` truncates the
+ *  expression at that point, silently. Exported because several call sites interpolate their own
+ *  numbers and labels rather than going through a builder here. */
+export const texEscape = tex;
+/** Prose inside an expression, upright rather than italic. */
+export const texWords = words;
 
 /** A signed percentage, as a RESULT — one decimal, because nothing divides by it. */
 export const subPct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
@@ -62,7 +101,13 @@ export const subPct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
  * Same for an empty `tail`.
  */
 export function withWorked(formula: string, worked: string, tail = ''): string {
-  return [formula, worked, tail].filter(Boolean).join('\n\n');
+  // ⚠ `\\\\` IS A LINE BREAK IN LaTeX, not a paragraph in text. The old shape joined on `\n\n`
+  // and the card split it back apart — which stopped working the moment either half became LaTeX,
+  // because a backslash means something in both languages and neither knows about the other.
+  //
+  // ⚠ AND `tail` IS GONE FROM THE FORMULA BLOCK. It was prose, and prose does not belong inside a
+  // typeset expression; the two callers that used it now pass it as the card's `how`.
+  return [formula, worked].filter(Boolean).join(' \\\\[4pt] ') + (tail ? '' : '');
 }
 
 /**
@@ -81,8 +126,11 @@ export function workedCagr(got: Cagr): string {
   // `(606 ÷ -3) ^ …` beside a positive rate would be a worked example of something impossible,
   // so the guard stays rather than resting on an invariant three functions away.
   if (!(got.fromValue > 0)) return '';
-  return `(${subNum(got.toValue)} [${got.to}] ÷ ${subNum(got.fromValue)} [${got.from}])`
-    + ` ^ (1 ÷ ${got.years}) − 1 = ${subPct(got.pct)}`;
+  // ⚠ THE PERIODS RIDE AS SUBSCRIPTS on the values they belong to, which is what the bracketed
+  // `[2025]` was standing in for. A subscript cannot be mistaken for another operand.
+  return `\\left(\\dfrac{${subNum(got.toValue)}_{\\,${tex(got.to)}}}`
+    + `{${subNum(got.fromValue)}_{\\,${tex(got.from)}}}\\right)^{1/${got.years}} - 1`
+    + ` = ${tex(subPct(got.pct))}`;
 }
 
 /**
@@ -98,8 +146,10 @@ export function workedMean(vals: readonly number[], unit = '%'): string {
   if (!vals.length) return '';
   const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
   const d = subDigits(mean);
-  return `(${vals.map((v) => subNum(v, d)).join(' + ')}) ÷ ${vals.length}`
-    + ` = ${subNum(mean, d)}${unit}`;
+  // ⚠ `\dfrac`, NOT `a ÷ b`. A displayed fraction is the whole reason to typeset this at all: the
+  // addends sit over their own count instead of trailing off to the right of a division sign.
+  return `\\dfrac{${vals.map((v) => subNum(v, d)).join(' + ')}}{${vals.length}}`
+    + ` = ${subNum(mean, d)}${tex(unit)}`;
 }
 
 /**
@@ -126,5 +176,6 @@ const ratioDigits = (v: number): number => {
 export function workedRatio(a: number | null | undefined, b: number | null | undefined,
   result: string, aUnit = '', bUnit = ''): string {
   if (a == null || b == null || b === 0) return '';
-  return `${subNum(a, ratioDigits(a))}${aUnit} ÷ ${subNum(b, ratioDigits(b))}${bUnit} = ${result}`;
+  return `\\dfrac{${subNum(a, ratioDigits(a))}${tex(aUnit)}}`
+    + `{${subNum(b, ratioDigits(b))}${tex(bUnit)}} = ${tex(result)}`;
 }

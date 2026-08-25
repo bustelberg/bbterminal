@@ -40,9 +40,13 @@ describe('meanSub', () => {
     const { addends, n, printed } = parseMean(line);
     expect(addends).toEqual([55.4, 54.1, 53.3, 56.6, 57.5]);
     expect(n).toBe(5);
-    // The reader's own arithmetic, on what is actually on screen.
+    // The reader's own arithmetic, on what is actually on screen — at whatever precision is
+    // printed, DERIVED rather than hard-coded. The claim is that the line reconciles, not that it
+    // uses any given number of decimals; hard-coding one is what broke this when the floor moved
+    // to two (2026-08-22).
+    const dp = (String(printed).split('.')[1] ?? '').length;
     const reader = addends.reduce((a, b) => a + b, 0) / n;
-    expect(Number(reader.toFixed(1))).toBe(printed);
+    expect(Number(reader.toFixed(dp))).toBe(printed);
   });
 
   it('reconciles the coverage inversion at the printed precision', () => {
@@ -147,10 +151,13 @@ describe('rateSub', () => {
 
 describe('subNum', () => {
   it('scales precision to magnitude', () => {
-    expect(subDigits(1200)).toBe(0);
-    expect(subDigits(55.4)).toBe(1);
+    // ⚠ TWO IS THE FLOOR since 2026-08-22 — every figure on the risk views prints two decimals, so
+    // a worked line showing `55.4` beside a tile reading `55.40` invites the reader to check
+    // whether they are the same number. See `workedFormula.subDigits`.
+    expect(subDigits(55.4)).toBe(2);
     expect(subDigits(1.18)).toBe(2);
-    expect(subDigits(0.108)).toBe(3);
+    expect(subDigits(1200)).toBe(0);       // reads as an integer at that magnitude
+    expect(subDigits(0.108)).toBe(3);      // about to be a denominator
     expect(subNum(1.18)).toBe('1.18');
     expect(subNum(1.18, 1)).toBe('1.2');
   });

@@ -56,7 +56,11 @@ export type ActiveShareHolding = {
   currency?: string | null;
 };
 
-const pct1 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(1)}%`);
+/** ⚠ TWO DECIMALS ON EVERY NON-INTEGER, ACROSS ALL SEVEN VIEWS. One decimal read as false
+ *  precision on a figure the reader is asked to check against a table that carries two: "79.5%"
+ *  beside rows summing to 79.53 invites the arithmetic to be redone and found wrong. Counts
+ *  (issuers, observations, lines, periods) stay integers — they ARE integers. */
+const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
 const signed = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
 
 /** ⚠ ONE ROW'S BAR IS SCALED TO THE LARGEST BET ON SCREEN, not to 100%. The biggest active weight
@@ -152,6 +156,25 @@ export default function ActiveSharePanel({ holdings, benchmark, onClose }: {
   const all: ActiveShareRow[] = data?.rows ?? [];
   const rows = all.filter((r) => (showAll ? true : r.held));
   const maxBet = Math.max(0, ...all.map((r) => Math.abs(r.active_pct ?? 0)));
+  /**
+   * The footer row's sums — over the ROWS ON SCREEN, not over `all`.
+   *
+   * ⚠⚠ WHAT THEY MEAN CHANGES WITH THE FILTER, AND THE ROW HAS TO SAY WHICH. Over EVERY name both
+   * weight columns sum to 100% and Active sums to exactly zero — that zero is the reason active
+   * share is halved, since every overweight has a matching underweight by construction. Over the
+   * HELD names only, Active sums to the book's whole overweight, which is carried by the index
+   * constituents not on screen. Both are useful; a footer that printed either without naming the
+   * set would be read as the other.
+   *
+   * ⚠ AND ½ Σ|Active| RECONCILES TO THE TILE ABOVE **ONLY OVER EVERY NAME**. On the held subset
+   * half the sum is missing, so it is not shown there rather than shown and quietly wrong.
+   */
+  const totals = rows.reduce((a, r) => ({
+    book: a.book + (r.portfolio_pct ?? 0),
+    bench: a.bench + (r.benchmark_pct ?? 0),
+    active: a.active + (r.active_pct ?? 0),
+    abs: a.abs + Math.abs(r.active_pct ?? 0),
+  }), { book: 0, bench: 0, active: 0, abs: 0 });
 
   return (
     <div className="h-full min-h-0 flex flex-col rounded-xl border border-neutral-800/40
@@ -248,27 +271,28 @@ export default function ActiveSharePanel({ holdings, benchmark, onClose }: {
                 table carries the sentences, not the arithmetic. A `where` with two numbers in it
                 would need a formatter per language for no gain; these are counts and a benchmark
                 name, which read the same in both. */}
-            <Tile label={t.active.activeShare} value={pct1(data.active_share_pct)}
+            <Tile label={t.active.activeShare} value={pct2(data.active_share_pct)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.activeShare.what}
-                where={`${data.n_holdings} / ${data.benchmark_members}`}
+                where={t.active.heldVsIndex(data.n_holdings ?? 0, data.benchmark_members ?? 0)}
                 when={t.active.cards.activeShare.when}
                 worked={data.active_share_pct == null ? '' : withWorked(
-                  '½ · Σ |wᵖ − wᵇ|',
-                  `overlap ${subNum(data.overlap_pct ?? 0, 1)}%`
-                  + ` + active ${subNum(data.active_share_pct, 1)}% = 100%`)}
+                  String.raw`\tfrac{1}{2}\sum_i \left| w_i^{\,p} - w_i^{\,b} \right|`,
+                  String.raw`\text{overlap } ${subNum(data.overlap_pct ?? 0, 2)}\%`
+                  + String.raw` + \text{active } ${subNum(data.active_share_pct, 2)}\% = 100\%`)}
                 how={t.active.cards.activeShare.how} />} />} />
-            <Tile label={t.active.overlap} value={pct1(data.overlap_pct)}
+            <Tile label={t.active.overlap} value={pct2(data.overlap_pct)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.overlap.what}
                 where={t.active.cards.overlap.where}
                 how={t.active.cards.overlap.how} />} />} />
-            <Tile label={t.active.offBenchmark} value={pct1(data.off_benchmark_pct)}
+            <Tile label={t.active.offBenchmark} value={pct2(data.off_benchmark_pct)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.offBenchmark.what}
-                where={`${(data.n_holdings ?? 0) - (data.n_in_benchmark ?? 0)} / ${data.n_holdings ?? 0}`}
+                where={t.active.offBenchWhere(
+                  (data.n_holdings ?? 0) - (data.n_in_benchmark ?? 0), data.n_holdings ?? 0)}
                 how={t.active.cards.offBenchmark.how} />} />} />
-            <Tile label={t.active.stocks} value={pct1(data.stocks_pct)}
+            <Tile label={t.active.stocks} value={pct2(data.stocks_pct)}
               tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.stocks.what}
@@ -281,7 +305,7 @@ export default function ActiveSharePanel({ holdings, benchmark, onClose }: {
               it redistributes it across the rest, which makes active share read slightly LOW. */}
           {data.benchmark_covered_pct != null && data.benchmark_covered_pct < 99.5 && (
             <p className="text-[11px] text-fg-faint">
-              {t.active.coverage(`${data.benchmark_covered_pct.toFixed(1)}%`,
+              {t.active.coverage(`${data.benchmark_covered_pct.toFixed(2)}%`,
                 data.benchmark ?? benchmark)}
             </p>
           )}
@@ -290,7 +314,7 @@ export default function ActiveSharePanel({ holdings, benchmark, onClose }: {
             <p className="text-[11px] text-warn-300">
               {t.active.unmatched(
                 (data.unresolved ?? []).length,
-                pct1((data.unresolved ?? []).reduce((acc, u) => acc + (u.weight_pct ?? 0), 0)),
+                pct2((data.unresolved ?? []).reduce((acc, u) => acc + (u.weight_pct ?? 0), 0)),
                 (data.unresolved ?? []).slice(0, 4).map((u) => u.name ?? u.isin).join(', ')
                   + ((data.unresolved ?? []).length > 4 ? '…' : ''))}
             </p>
@@ -355,6 +379,37 @@ export default function ActiveSharePanel({ holdings, benchmark, onClose }: {
                   </tr>
                 ))}
               </tbody>
+              {/* ⚠ STICKY TO THE BOTTOM OF THE SCROLL BOX, like the header is to the top. With
+                  1,678 rows a plain `<tfoot>` is a footer nobody reaches, and the total is the
+                  one row that reconciles this table to the tiles above it.
+                  ⚠ A SOLID BACKGROUND IS LOAD-BEARING: the rows scroll UNDER it, and at any
+                  alpha the digits of two rows overlap. */}
+              <tfoot className="sticky bottom-0 bg-inset">
+                <tr className="[&>td]:px-2.5 [&>td]:py-1.5 [&>td]:border-t
+                  [&>td]:border-neutral-700/60 font-medium">
+                  <td className="text-fg-soft">
+                    {showAll ? t.active.totalAll(rows.length) : t.active.totalHeld(rows.length)}
+                    <InfoTip className="ml-1" content={<AspectCard
+                      {...(showAll ? t.active.totalCard : t.active.totalCardHeld)}
+                      worked={showAll
+                        ? String.raw`\tfrac{1}{2} \times ${totals.abs.toFixed(2)} = ${(totals.abs / 2).toFixed(2)}\%`
+                        : ''} />} />
+                  </td>
+                  <td className="text-right font-mono tabular-nums text-fg">
+                    {`${totals.book.toFixed(2)}%`}
+                  </td>
+                  <td className="text-right font-mono tabular-nums text-fg">
+                    {`${totals.bench.toFixed(2)}%`}
+                  </td>
+                  {/* ⚠ NO TONE ON THE TOTAL. Over every name it is zero and a colour would imply a
+                      direction; over the held subset it is always positive and a green would read
+                      as a verdict on a number that is positive by construction. */}
+                  <td className="text-right font-mono tabular-nums text-fg">
+                    {signed(totals.active)}
+                  </td>
+                  <td />
+                </tr>
+              </tfoot>
             </table>
           </div>
         </>

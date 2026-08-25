@@ -1,3 +1,5 @@
+import Formula from './formula';
+
 /** THE tooltip card. One shell, every info icon.
  *
  * ⚠ THIS EXISTS BECAUSE THERE WERE TWO. A number's provenance rendered as a designed card
@@ -50,45 +52,33 @@ export function Field({ label, children }: { label: string; children: React.Reac
 /**
  * THE ARITHMETIC, WORKED, WITH THIS SCREEN'S OWN NUMBERS IN IT — see `portfolios/workedFormula`.
  *
- * ⚠⚠ IT IS A BLOCK, NOT A `Field`, BECAUSE IT IS NOT PROSE. `Field`'s value column is about 14rem
- * wide next to its label, and `(55.4 + 54.1 + 53.3 + 56.6 + 57.5) ÷ 5 = 55.4%` reflowed through
- * that is a wall of digits with the operators landing wherever the wrap puts them — which is
- * unreadable in exactly the way that makes a reader stop checking. Full width and monospaced, so
- * the operands line up and the expression survives being wrapped at all.
+ * ⚠⚠ IT IS TYPESET, NOT WRITTEN OUT IN UNICODE (2026-08-22). `½ · Σ |wᵖ − wᵇ|` in a mono face is
+ * not a formula, it is a row of glyphs that resemble one — a summation with no limits, superscripts
+ * that are baseline-shifted characters rather than real scripts, a fraction that is one codepoint
+ * and cannot grow, and `Σ` given the same advance width as a comma. Reported, correctly, as "still
+ * very hard to see". KaTeX sets the same expression properly; see `lib/formula`.
  *
- * ⚠ AND IT SITS DIRECTLY UNDER `where`, which is where the symbolic formula lives. Formula, then
- * the same formula with numbers: the two have to be adjacent or the reader is comparing a shape at
- * the top of a card with an answer at the bottom.
+ * ⚠ IT IS A BLOCK, NOT A `Field`. `Field`'s value column is about 14rem next to its label, and
+ * display maths reflowed through that is unreadable in exactly the way that makes a reader stop
+ * checking.
  *
- * ⚠ `select-text` IS LOAD-BEARING. The tooltip is `pointer-events-none` on hover and interactive
- * only when PINNED (a click), which is the state this block exists for — pasting the expression
- * into whatever the reader checks numbers in. See `InfoTip`.
+ * ⚠ AND IT SITS DIRECTLY UNDER `where`, which is where the formula is described in words. Prose,
+ * then the maths: the two have to be adjacent or the reader is comparing a description at the top
+ * of a card with an expression at the bottom.
  */
 function Worked({ text }: { text: string }) {
+  // ⚠⚠ ONE TYPESET EXPRESSION, NOT TWO BLOCKS. `withWorked` joins the symbolic half and the
+  // substituted half with `\\[4pt]` — a LaTeX line break — so KaTeX sets them as one display,
+  // aligned and in one face. The previous version split on a blank line and styled each half
+  // differently, which is what made them read as two unrelated objects: mono digits under
+  // pseudo-mathematical Unicode.
   return (
-    <span className="block font-mono text-[11px] text-fg-soft leading-relaxed whitespace-pre-line
-      select-text rounded bg-overlay/[0.04] px-2 py-1.5">
-      {text}
+    <span className="block rounded-md border border-neutral-800/40 bg-overlay/[0.05] px-3 py-2.5">
+      <Formula tex={text} />
     </span>
   );
 }
 
-/**
- * THE default explanatory template: WHAT (headline) · WHERE · [worked] · WHEN · HOW.
- *
- * ⚠ WHAT LEADS, THE REST ARE ABOUT IT. Where/When/How all answer questions about a thing the
- * reader has already identified, so they are useless — worse, they look like an answer — to someone
- * who does not yet know what they are looking at. So `what` is the headline and the other three are
- * fields beneath it. Each field is optional and simply omitted when a column has nothing to say for
- * it (a definition with no origin renders WHAT alone rather than "WHERE: —", which would fabricate
- * provenance). This is the same shell + field grid the per-value provenance card uses; only the
- * source-specific machinery (freshness pill, copied/formula) is left to that one.
- *
- * ⚠ `worked` IS OMITTED WHEN EMPTY, and that is the common path rather than an edge case: every
- * builder in `workedFormula` returns '' when an operand is missing, so a thin series renders the
- * card exactly as it did before worked lines existed. A blank framed block would read as a
- * rendering failure — which is the opposite of what a verification aid is for.
- */
 export function AspectCard({ what, where, when, how, worked }: {
   what: React.ReactNode;
   where?: React.ReactNode;

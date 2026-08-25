@@ -61,6 +61,15 @@ export type RiskCopy = {
     activeShare: string; overlap: string; offBenchmark: string; stocks: string;
     heldOnly: (n: number) => string; everyName: (n: number) => string;
     colCompany: string; colBook: string; colActive: string; notHeld: string;
+    /** The footer row. ⚠ IT SAYS WHICH SET IT TOTALS — see the ⚠⚠ in `ActiveSharePanel`. */
+    totalHeld: (n: number) => string;
+    totalAll: (n: number) => string;
+    totalCard: Card;
+    totalCardHeld: Card;
+    /** ⚠ A SENTENCE, NOT `20 / 1678`. Two bare numbers over a slash is not a `Where` — it was
+     *  shortened to dodge a translation and the meaning went with it. */
+    heldVsIndex: (held: number, members: number) => string;
+    offBenchWhere: (off: number, held: number) => string;
     coverage: (pct: string, bench: string) => string;
     unmatched: (n: number, pct: string, names: string) => string;
     cards: { activeShare: Card; overlap: Card; offBenchmark: Card; stocks: Card };
@@ -157,6 +166,25 @@ const en: RiskCopy = {
     stocks: 'Stocks',
     heldOnly: (n) => `What we hold (${n})`, everyName: (n) => `Every name (${n})`,
     colCompany: 'Company', colBook: 'Book', colActive: 'Active', notHeld: 'not held',
+    heldVsIndex: (h, m) => `${h} issuers held, against ${m} priced index members.`,
+    offBenchWhere: (o, h) => `${o} of the ${h} issuers held are not in the index.`,
+    totalHeld: (n) => `Total — ${n} held`,
+    totalAll: (n) => `Total — all ${n} names`,
+    totalCard: {
+      what: 'Both columns sum to 100%, so the Active column sums to exactly zero.',
+      where: '½ · Σ |Active| is the active share in the tile above — the same number, from this '
+        + 'table.',
+      how: '⚠ THAT ZERO IS THE REASON FOR THE ½. Every overweight has a matching underweight by '
+        + 'construction, so without halving it every difference would be counted twice.',
+    },
+    totalCardHeld: {
+      what: 'The held names only, so the Active column does NOT sum to zero.',
+      where: 'Book is 100% by construction; the benchmark column is what the index holds in these '
+        + 'same names.',
+      how: '⚠ THE TOTAL IS THE BOOK\'S WHOLE OVERWEIGHT, and it is carried, name for name, by the '
+        + 'index constituents not shown here. Switch to every name to see it cancel. ⚠ ½ Σ |Active| '
+        + 'over this subset is NOT the active share — half the sum is missing.',
+    },
     coverage: (pct, b) => `Priced ${pct} of ${b}'s members. The missing weight is redistributed `
       + 'over the rest, so the active share reads slightly low.',
     unmatched: (n, pct, names) => `${n} holding${n === 1 ? '' : 's'} (${pct} of the sleeve) could `
@@ -482,6 +510,26 @@ const nl: RiskCopy = {
     stocks: 'Aandelen',
     heldOnly: (n) => `Wat we houden (${n})`, everyName: (n) => `Alle namen (${n})`,
     colCompany: 'Onderneming', colBook: 'Boek', colActive: 'Actief', notHeld: 'niet gehouden',
+    heldVsIndex: (h, m) => `${h} gehouden emittenten, tegenover ${m} geprijsde indexleden.`,
+    offBenchWhere: (o, h) => `${o} van de ${h} gehouden emittenten zitten niet in de index.`,
+    totalHeld: (n) => `Totaal — ${n} gehouden`,
+    totalAll: (n) => `Totaal — alle ${n} namen`,
+    totalCard: {
+      what: 'Beide kolommen tellen op tot 100%, dus de kolom Actief telt op tot precies nul.',
+      where: '½ · Σ |Actief| is de active share in de tegel hierboven — hetzelfde getal, uit deze '
+        + 'tabel.',
+      how: '⚠ DIE NUL IS DE REDEN VOOR DE ½. Elke overweging heeft per constructie een even grote '
+        + 'onderweging, dus zonder halveren zou elk verschil dubbel worden geteld.',
+    },
+    totalCardHeld: {
+      what: 'Alleen de gehouden namen, dus de kolom Actief telt niet op tot nul.',
+      where: 'Boek is per constructie 100%; de benchmarkkolom is wat de index in diezelfde namen '
+        + 'houdt.',
+      how: '⚠ HET TOTAAL IS DE VOLLEDIGE OVERWEGING VAN HET BOEK, en die wordt naam voor naam '
+        + 'gedragen door de indexposities die hier niet staan. Schakel naar alle namen om het te '
+        + 'zien wegvallen. ⚠ ½ Σ |Actief| over deze deelverzameling is NIET de active share — de '
+        + 'helft van de som ontbreekt.',
+    },
     coverage: (pct, b) => `${pct} van de leden van ${b} geprijsd. Het ontbrekende gewicht wordt over `
       + 'de rest herverdeeld, waardoor de active share iets te laag uitvalt.',
     unmatched: (n, pct, names) => `${n} positie${n === 1 ? '' : 's'} (${pct} van de selectie) kon `

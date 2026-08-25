@@ -33,9 +33,17 @@ describe('subDigits', () => {
     // ⚠ THE REGRESSION THIS EXISTS FOR: at a flat one decimal the interest-coverage tooltip read
     // `100 ÷ 1.2% = 84.7×`, and 100 ÷ 1.2 is 83.3.
     expect(100 / Number(subNum(1.18))).toBeCloseTo(84.7, 1);
-    expect(subDigits(1200)).toBe(0);
-    expect(subDigits(55.4)).toBe(1);
+    // ⚠ TWO IS THE FLOOR (2026-08-22), because every figure on the risk views now prints two
+    // decimals — a worked line rendering the same quantity as `55.4` beside a tile reading `55.40`
+    // invites the reader to check whether they are the same number. More precision on an operand
+    // is always the safe direction.
+    expect(subDigits(55.4)).toBe(2);
     expect(subDigits(1.18)).toBe(2);
+    // ⚠ EXCEPT AT OR ABOVE 1000, where the value already reads as an integer and `1234567.00` is
+    // noise that costs the digits that matter.
+    expect(subDigits(1200)).toBe(0);
+    // ⚠ AND MORE THAN TWO BELOW 1 — the rule that predates this and still governs: a number under
+    // one is almost always about to be a denominator.
     expect(subDigits(0.108)).toBe(3);
   });
 
@@ -66,8 +74,12 @@ describe('workedMean', () => {
     const addends = m[1].split(' + ').map(Number);
     expect(addends).toEqual(vals);
     expect(Number(m[2])).toBe(vals.length);
+    // ⚠ THE READER REDOES IT AT WHATEVER PRECISION IS PRINTED, derived rather than hard-coded —
+    // the point is that the arithmetic on screen reconciles, not that it uses any given number of
+    // decimals. Hard-coding one is what made this test fail when the floor moved to two.
+    const dp = (m[3].split('.')[1] ?? '').length;
     const reader = addends.reduce((a, b) => a + b, 0) / addends.length;
-    expect(Number(reader.toFixed(1))).toBe(Number(m[3]));
+    expect(Number(reader.toFixed(dp))).toBe(Number(m[3]));
   });
 
   it('uses one precision for the whole list', () => {

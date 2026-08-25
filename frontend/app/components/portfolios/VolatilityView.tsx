@@ -118,9 +118,9 @@ export default function VolatilityView({ holdings, benchmark }: {
                 what="How much the sleeve's own return has varied, annualised."
                 where={`${data.observations} ${data.frequency} returns over ${data.years} years.`}
                 worked={data.volatility_pct == null ? '' : withWorked(
-                  'σ = √( Σ(Rₜ − R̄)² ÷ (T − 1) ) × √f',
-                  `T = ${data.observations}, f = ${data.periods_per_year}`
-                  + `  →  ${subNum(data.volatility_pct, 2)}%`)}
+                  String.raw`\sigma = \sqrt{\dfrac{\sum_t (R_t - \bar{R})^2}{T - 1}}\;\sqrt{f}`,
+                  String.raw`T = ${data.observations},\; f = ${data.periods_per_year}`
+                  + String.raw` \;\Rightarrow\; ${subNum(data.volatility_pct, 2)}\%`)}
                 how={'⚠⚠ NO CASH FLOWS IN IT, and not because they were chain-linked out — this is '
                   + 'a weighted basket of instrument price returns, not an account value, so a '
                   + 'deposit or withdrawal is simply not in the series. ⚠ Same σₚ the Correlation '
@@ -146,7 +146,7 @@ export default function VolatilityView({ holdings, benchmark }: {
               tone="text-neg-300"
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={`The single worst ${period} in the window.`}
-                where={`Best was ${signed2(data.best_period_pct)}; ${data.negative_periods_pct?.toFixed(0)}% of ${period}s were negative.`}
+                where={`Best was ${signed2(data.best_period_pct)}; ${data.negative_periods_pct?.toFixed(2)}% of ${period}s were negative.`}
                 how={'⚠ NOBODY HAS EVER EXPERIENCED "18% ANNUALISED VOLATILITY". They have '
                   + `experienced the worst ${period}. For a fat-tailed book the two are far apart, `
                   + 'which is exactly when σ on its own misleads.'} />} />} />
@@ -164,9 +164,10 @@ export default function VolatilityView({ holdings, benchmark }: {
               tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="Return per unit of total volatility."
-                where={`At a risk-free rate of ${data.risk_free_pct?.toFixed(1)}%.`}
-                worked={data.sharpe == null ? '' : `${subNum(data.return_ann_pct ?? 0, 2)}%`
-                  + ` ÷ ${subNum(data.volatility_pct ?? 0, 2)}% = ${data.sharpe.toFixed(2)}`}
+                where={`At a risk-free rate of ${data.risk_free_pct?.toFixed(2)}%.`}
+                worked={data.sharpe == null ? ''
+                  : String.raw`\dfrac{${subNum(data.return_ann_pct ?? 0, 2)}\%}`
+                    + String.raw`{${subNum(data.volatility_pct ?? 0, 2)}\%} = ${data.sharpe.toFixed(2)}`}
                 how={'⚠ THE RISK-FREE RATE IS STATED because a Sharpe quoted without it is not '
                   + 'comparable with anybody else\'s, and at current rates that is not cosmetic.'} />} />} />
             <Tile label="Sortino" value={data.sortino == null ? '—' : data.sortino.toFixed(2)}
@@ -174,8 +175,9 @@ export default function VolatilityView({ holdings, benchmark }: {
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="The same ratio, over downside deviation instead of total volatility."
                 where="Return ÷ downside deviation, both annualised."
-                worked={data.sortino == null ? '' : `${subNum(data.return_ann_pct ?? 0, 2)}%`
-                  + ` ÷ ${subNum(data.downside_dev_pct ?? 0, 2)}% = ${data.sortino.toFixed(2)}`}
+                worked={data.sortino == null ? ''
+                  : String.raw`\dfrac{${subNum(data.return_ann_pct ?? 0, 2)}\%}`
+                    + String.raw`{${subNum(data.downside_dev_pct ?? 0, 2)}\%} = ${data.sortino.toFixed(2)}`}
                 how={'⚠ A DASH MEANS NOTHING EVER FELL BELOW THE TARGET — there is no downside to '
                   + 'divide by. That is a measurement, not a missing number.'} />} />} />
           </div>

@@ -29,7 +29,10 @@ import { traceError } from '../../../lib/debugTrace';
 import type { PortfolioExposure } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 
-const pct1 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(1)}%`);
+/** ⚠ TWO DECIMALS ON EVERY NON-INTEGER, ACROSS ALL SEVEN VIEWS. One decimal read as false
+ *  precision on a figure the reader is asked to check against a table that carries two: "79.5%"
+ *  beside rows summing to 79.53 invites the arithmetic to be redone and found wrong. Counts
+ *  (issuers, observations, lines, periods) stay integers — they ARE integers. */
 const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
 /** ⚠ NO DECIMALS ON A POSITION VALUE. Cents on a six-figure holding are noise that costs the
  *  reader the digits that matter, and AIRS's own valuation is not precise to the cent anyway. */
@@ -96,7 +99,7 @@ export default function ExposureView({ holdings, benchmark }: {
       {data?.available && (
         <>
           <div className="flex flex-wrap gap-2">
-            <Tile label="Stock sleeve" value={data.has_values ? eur0(data.sleeve_eur) : pct1(100)}
+            <Tile label="Stock sleeve" value={data.has_values ? eur0(data.sleeve_eur) : pct2(100)}
               sub={data.has_values ? `of ${eur0(data.book_eur)} in the book` : 'weights only'}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="The euros in individual stocks — the sleeve every view in this panel measures."
@@ -115,7 +118,7 @@ export default function ExposureView({ holdings, benchmark }: {
                   + 'TABLE". Alphabet A + Alphabet C is one position. The same fold feeds Active '
                   + 'share and Concentration, so all three agree by construction.'} />} />} />
             <Tile label="Currencies" value={`${ccys.length}`}
-              sub={ccys[0] ? `${ccys[0].currency} ${pct1(ccys[0].weight_pct)} largest` : undefined}
+              sub={ccys[0] ? `${ccys[0].currency} ${pct2(ccys[0].weight_pct)} largest` : undefined}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="How many currencies the sleeve's value actually sits in."
                 where="The LISTING's currency, from the holding or our grid mapping of the ISIN."
@@ -124,7 +127,7 @@ export default function ExposureView({ holdings, benchmark }: {
                   + 'The economic argument is true and is a different, softer claim.'} />} />} />
             <Tile label="Other" value={data.has_values ? eur0(data.other_eur) : '—'}
               tone="text-fg-muted"
-              sub={`funds, cash, bonds — ${pct1(100 - (data.stocks_pct ?? 0))} of the book`}
+              sub={`funds, cash, bonds — ${pct2(100 - (data.stocks_pct ?? 0))} of the book`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="Everything outside the stock sleeve."
                 where="Funds, cash, bonds, and any line without a usable ISIN."
@@ -150,7 +153,7 @@ export default function ExposureView({ holdings, benchmark }: {
                   <tr key={c.currency} className="[&>td]:py-1">
                     <td className="text-fg-soft w-12 font-mono">{c.currency}</td>
                     <td className="text-right font-mono tabular-nums text-fg w-16">
-                      {pct1(c.weight_pct)}
+                      {pct2(c.weight_pct)}
                     </td>
                     <td className="text-right font-mono tabular-nums text-fg-muted w-28">
                       {data.has_values ? eur0(c.value_eur) : ''}
