@@ -26,6 +26,9 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { v } from '../../../lib/dynamicValue';
+import { dayOf } from './asOfLine';
+import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
 import { traceError } from '../../../lib/debugTrace';
 import { withWorked, subNum } from './workedFormula';
 import type { PortfolioDrawdown } from '../../../lib/types/api';
@@ -43,6 +46,20 @@ const day = (d: string | null | undefined) =>
   (!d ? '—' : new Date(`${d}T00:00:00`).toLocaleDateString(undefined,
     { day: 'numeric', month: 'short', year: 'numeric' }));
 
+/**
+ * EVERY SYMBOL THIS VIEW USES, DEFINED ONCE — same rule as the other three risk views.
+ *
+ * ⚠ A DRAWDOWN IS THREE QUANTITIES, NOT ONE, and the reader has to hold all three at once: the
+ * wealth curve, its running maximum, and the gap between them. Defining them per card would be
+ * three chances to describe the high-water mark differently.
+ */
+const LEGEND = {
+  Rs: (bookName: string) => `${v(bookName)}'s return in period s, in EUR`,
+  W: 'the wealth curve — one euro compounded through every period up to t, cash flows absent',
+  M: 'the HIGH-WATER MARK: the best that curve had reached by t, so it never falls',
+  MDD: 'the answer: the deepest the curve ever sat below its own peak',
+};
+
 function Tile({ label, value, tone, info }: {
   label: string; value: string; tone?: string; info?: React.ReactNode;
 }) {
@@ -56,9 +73,16 @@ function Tile({ label, value, tone, info }: {
   );
 }
 
-export default function DrawdownView({ holdings, benchmark }: {
+export default function DrawdownView({
+  holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource,
+}: {
   holdings: ActiveShareHolding[];
   benchmark: string;
+  /** The book's identity, forwarded from the panel — see `ActiveSharePanel`'s own props. */
+  portfolioName: string;
+  portfolioAsOf?: string | null;
+  portfolioFetchedAt?: string | null;
+  portfolioSource: SourceKey;
 }) {
   const [data, setData] = useState<PortfolioDrawdown | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +119,26 @@ export default function DrawdownView({ holdings, benchmark }: {
     : data?.frequency === 'monthly' ? 'months' : 'weeks';
   const worst = data?.worst;
   const byFreq = data?.by_frequency ?? {};
+
+  /**
+   * WHAT EVERY CARD HERE IS MEASURED FROM, AND OVER WHAT WINDOW — built once.
+   *
+   * ⚠ THE SAME TWO STRINGS THE OTHER THREE RISK VIEWS BUILD, from one `build_paired_series`.
+   */
+  const where = data?.available
+    ? `${v(data.observations)} ${v(data.frequency)} returns, prices from ${v(sourceField('yfinance'))} `
+      + `at ${v(sourceVendor('yfinance'))}, weights from ${v(sourceLabel(portfolioSource))}, `
+      + `against ${v(data.benchmark)}'s tracker.`
+    : '';
+
+  /** ⚠ TWO CLOCKS — a price window and a weights date. See the ⚠⚠ in `TrackingErrorView`. */
+  const when = data?.available
+    ? `Returns: ${v(data.window_from ?? 'no recorded start')} to `
+      + `${v(data.window_to ?? 'no recorded end')} (${v(data.observations)} periods)\n`
+      + `${v(portfolioName)} weights: ${v(dayOf(portfolioAsOf) ?? 'no recorded date')}`
+      + `${dayOf(portfolioFetchedAt) && dayOf(portfolioFetchedAt) !== dayOf(portfolioAsOf)
+        ? ` (read ${v(dayOf(portfolioFetchedAt))})` : ''}`
+    : '';
 
   return (
     <div className="space-y-3">
@@ -137,7 +181,8 @@ export default function DrawdownView({ holdings, benchmark }: {
               tone="text-neg-300"
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="The deepest peak-to-trough fall in the window."
-                where={`${data.observations} ${data.frequency} returns over ${data.years} years.`}
+                where={where}
+                when={when}
                 worked={data.max_drawdown_pct == null ? '' : withWorked(
                   // ⚠ ONE STATEMENT PER LINE, BROKEN HERE RATHER THAN BY THE BOX. The formula
                   // block honours `\n`; left as one line it wraps at whatever operator lands on
@@ -146,32 +191,42 @@ export default function DrawdownView({ holdings, benchmark }: {
                   String.raw`\text{${day(worst?.peak_date)}} \;\rightarrow\; \text{${day(worst?.trough_date)}}`
                   + String.raw` \;=\; ${subNum(data.max_drawdown_pct, 2)}\%`)}
                 legend={[
-                  { sym: 'R_s', is: 'the return in period s' },
-                  { sym: 'W_t', is: 'the wealth curve — one euro compounded through every period up to t' },
-                  { sym: 'M_t', is: 'the high-water mark: the best that curve had reached by t' },
-                  { sym: String.raw`MDD`, is: 'the answer: the deepest the curve ever sat below its own peak' },
+                  { sym: 'R_s', is: LEGEND.Rs(portfolioName) },
+                  { sym: 'W_t', is: LEGEND.W },
+                  { sym: 'M_t', is: LEGEND.M },
+                  { sym: String.raw`MDD`, is: LEGEND.MDD },
                 ]}
-                how={'⚠ THE CADENCE IS IN THE LABEL because it changes the answer: a fall that '
-                  + 'recovers inside a week is invisible to a weekly series. See the comparison '
-                  + 'below.'} />} />} />
+                /* ⚠ NO `how`. The cadence point is made three times over already: the label
+                   carries the frequency, each cadence button's title says what coarsening costs,
+                   and the comparison table below measures it on this book rather than asserting
+                   it. A fourth statement in a tooltip was the only one nobody could act on. */
+                />} />} />
             <Tile label={`${data.benchmark} max drawdown`}
               value={pct2(data.benchmark_max_drawdown_pct)} tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="The index's own deepest fall, over the same periods."
-                where="Same formula, same window, different series."
+                what={`The same measurement run over ${data.benchmark}'s own tracker instead of `
+                  + `${portfolioName} — same formula, same periods, so the two are directly `
+                  + 'comparable.'}
+                where={where}
+                when={when}
                 how={'For scale. ⚠ It carries none of this book\'s survivorship bias — the index '
                   + 'kept its fallers — so the gap between the two flatters the book.'} />} />} />
-            <Tile label="Today" value={pct2(data.current_drawdown_pct)}
-              tone={(data.current_drawdown_pct ?? 0) < -0.005 ? 'text-neg-300' : 'text-pos-300'}
+            {/* ⚠⚠ THE VALUE IS THE FILTERED COUNT, and it did not used to be. The label has
+                always promised "over 5%" while the tile showed `episodes_total`, which counts
+                every peak-to-recovery cycle including a bad afternoon that came back the next
+                session — 68 of them here against 6 real falls. A heading that names a
+                threshold the number does not apply is worse than no threshold. */}
+            <Tile label={`Falls over ${Math.abs(data.episode_threshold_pct ?? 5).toFixed(0)}%`}
+              value={`${data.episodes_over_threshold ?? 0}`} tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="How far below its own high water mark the sleeve sits right now."
-                where="0% means it ended the window at a new high."
-                how={'⚠ "Worst ever −31%" and "down 28% right now" are very different '
-                  + 'conversations, and the second is the one being had.'} />} />} />
-            <Tile label="Falls over 5%" value={`${data.episodes_total ?? 0}`} tone="text-fg-muted"
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={`Distinct peak-to-trough episodes in the window (${data.episodes_total} in all).`}
-                where="An episode ends only when the previous high is regained."
+                what={`How many distinct falls of at least `
+                  + `${Math.abs(data.episode_threshold_pct ?? 5).toFixed(0)}% the sleeve had. A `
+                  + 'fall opens when the wealth curve leaves a high-water mark and closes only '
+                  + 'when it regains it, so a slide that bounces part-way and drops again is ONE '
+                  + `fall, not two. ${v(data.episodes_total ?? 0)} cycles in all once every `
+                  + 'shallower dip is counted too.'}
+                where={where}
+                when={when}
                 how={'⚠ ONE NUMBER HIDES WHETHER IT WAS A PATTERN OR AN EVENT. One −30% and four '
                   + '−25%s share a maximum and are not the same risk. ⚠ A 40% fall that bounces 5% '
                   + 'and falls further is ONE drawdown, not two — splitting on direction would '
@@ -272,7 +327,11 @@ export default function DrawdownView({ holdings, benchmark }: {
           )}
 
           <p className="text-[11px] text-fg-faint leading-relaxed">
-            {`Today's stock sleeve at today's weights over ${data.years} years `}
+            {/* ⚠ THE BOOK IS NAMED AND THE WINDOW IS DATED — same fix as the tracking-error and
+                volatility footnotes. "Today's weights over 5 years" asserted a start date
+                instead of reporting one, and the paired grid rarely reaches the full five. */}
+            {`${portfolioName}'s stock sleeve at its current weights, priced from `}
+            {`${data.window_from ?? 'an unrecorded start'} to ${data.window_to ?? 'an unrecorded end'} `}
             {`(${data.priced_holdings} of ${data.total_holdings} priced). `}
             Durations are in {unit} of the selected cadence, not calendar days.
           </p>

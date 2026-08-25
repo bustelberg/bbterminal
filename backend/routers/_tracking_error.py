@@ -275,6 +275,15 @@ def compute_tracking_error(holdings: list[dict], benchmark: str,
         "periods_per_year": ppy,
         "observations": len(active),
         "years": years,
+        # ⚠⚠ THE WINDOW THE RETURNS ACTUALLY COVER, not `years` back from today. The card used to
+        # say "trailing window — as it stands today", which is an assumption where a date belongs:
+        # a holding that listed two years ago shortens the paired grid, and a stale price series
+        # ends it early. `obs_dates` is each period's own last trading day, so these are real dates
+        # the reader can check against a chart.
+        # ⚠ FILTERED — a bucket whose end date could not be resolved contributes None, and
+        # min()/max() over a list containing one would raise rather than report the gap.
+        "window_from": (dates[0] if (dates := sorted(d for d in built["obs_dates"] if d)) else None),
+        "window_to": (dates[-1] if dates else None),
         "tracking_error_pct": None if te is None else te * 100.0,
         # ⚠ THE ACTIVE RETURN ITSELF, because it is the quantity TE is the spread OF and reporting
         # one without the other is what makes the two get confused. Mean per period, and the same

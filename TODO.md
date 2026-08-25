@@ -1435,3 +1435,52 @@ ruff/tsc/eslint clean**; what is missing is production measurement, not code.
   Single-year cap-weighted *growth* IS accurate (−0.11pp ACWI, +0.60pp SP500), and a
   properly chained per-year version lands at +1.15% (SP500) / −5.42% (ACWI) over a decade —
   so it is only defensible for growth-based series, and only if labelled on the chart.
+
+## Aggregate fundamental blend — WIRED, `fcf_ps` STILL BROKEN (2026-08-25)
+
+**Why.** The level line averages per-member growth rates and chains them. Two defects, both
+measured on ACWI:
+
+* **Wrong weight.** Growth of a sum is `Σv(d)/Σv(a) − 1`, i.e. each member's growth weighted by
+  its share of the total being grown. The old path weighted by MARKET CAP, so a company with a
+  big valuation and small cash flow got a big vote on cash-flow growth. ⚠ Cap-weighting is still
+  the right *answer* — a cap-weighted index holds the same fraction `shares_i/Σcap` of every
+  company, so its claim is `(1/Σcap)·ΣF_i`, exactly proportional to the sum. Cap enters through
+  the SHARE COUNT, not as a weight on a rate.
+* **Upward bias.** A growth rate is floored at −100% and unbounded above, so averaging an
+  asymmetric distribution is biased and the bias scales with DISPERSION. Cutting
+  `_MAX_STEP_GROWTH` from +10,000% to +1,000% costs `revenue` 0.03pp/yr and `fcf_ps` 4.06pp.
+
+⚠ Two hypotheses were tested and KILLED, do not revisit: "chain the aggregate of per-share
+values" (per-share figures are not additive across companies), and the Eli Lilly zero-crossing
+asymmetry (dropping all 976 crossers, 37% of cap, moved the line 19.80% → 19.79%).
+
+**Shipped and measured.**
+* `earnings.py` universe blend now passes `weights` (per-period caps) — it was weighting every
+  historical step by TODAY's cap. ACWI `fcf_ps` 26.22% → 19.80%/yr.
+* `_fundamental_blend.blend_series` has an aggregate branch: when members carry `fund_points`
+  it SUMS EUR totals per period and chains the sums, intersecting members per step. No guards —
+  a sum never takes a ratio of a member to itself.
+* `earnings.fundamental_totals()` builds `{code: {cid: {period: EUR}}}` = `value × shares × fx`
+  at the period's own rate, via the same helpers `period_caps_eur` uses.
+* `_blend_rows` forwards them as `totals=`; still pure of I/O.
+
+**State — ACWI 2015→2025, growth vs aggregate:**
+
+    revenue   +9.95%  ->  +11.68%   OK  (11 points)
+    eps_nri  +17.62%  ->   +9.39%   OK  (11 points, price was +11.2% — consistent at last)
+    fcf_ps   +19.80%  ->  -19.22%   BROKEN: series ENDS 2023, hits the `now_sum <= 0` guard
+
+**Next step, precisely.** Aggregate FCF must be deeply positive; hitting the guard means the
+totals are wrong for some member. A standalone endpoint-only sum over the 2015/2025
+intersection gave 2,123bn → 8,900bn (+15.41%/yr, `scripts/measure_aggregate_fundamental.py`),
+so the defect is in the PER-STEP path, not in `fundamental_totals`. Prime suspect: per-step
+intersections admit members the endpoint intersection excluded, and one has a huge negative EUR
+total — a bad share count or a mis-scaled per-share figure. Dump `Σfund` per period with the
+top ±5 contributors per period and it will be one name.
+
+⚠ NOTHING IS USER-VISIBLE YET. No caller passes `totals=`, so every chart still draws the
+growth path (with the per-period weight fix). Do not wire the caller until `fcf_ps` is right
+AND the portfolio side is done — a benchmark line on the aggregate beside a portfolio line on
+the growth chain is two constructions in one comparison. The portfolio form is
+`w_i × F_i / cap_i` and `fundamental_totals` already takes `weight_by_cid` + `caps` for it.

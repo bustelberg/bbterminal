@@ -47,11 +47,11 @@ type Card = { what: string; where?: string; when?: string; how?: string };
 export type RiskCopy = {
   /** The switch. ⚠ SHORT — six of these sit on one row inside a fixed dialog. */
   views: {
-    active: string; te: string; corr: string; vol: string; dd: string; conc: string; exp: string;
+    active: string; te: string; corr: string; vol: string; dd: string; conc: string;
   };
   /** The dialog heading per view, rendered as `<title> vs <benchmark>`. */
   titles: {
-    active: string; te: string; corr: string; vol: string; dd: string; conc: string; exp: string;
+    active: string; te: string; corr: string; vol: string; dd: string; conc: string;
   };
   subtitle: string;
   close: string;
@@ -208,26 +208,13 @@ export type RiskCopy = {
     cards: { effective: Card; top10: Card; largest: Card; benchEffective: Card };
   };
 
-  exp: {
-    sleeve: string; issuers: string; currencies: string; other: string;
-    ofBook: (eur: string) => string; weightsOnly: string;
-    linesFolded: (lines: number, folded: number) => string; linesOnly: (lines: number) => string;
-    largestCcy: (ccy: string, pct: string) => string;
-    otherSub: (pct: string) => string;
-    unknownCcy: (pct: string) => string;
-    currencyTitle: string; positionsTitle: string;
-    colIssuer: string; colWeight: string; colValue: string; colCurrency: string;
-    lines: (n: number) => string; issuerCount: (n: number) => string;
-    note: string;
-    cards: { sleeve: Card; issuers: Card; currencies: Card; other: Card };
-  };
 };
 
 const en: RiskCopy = {
   views: { active: 'Active share', te: 'Tracking error', corr: 'Correlation', vol: 'Volatility',
-    dd: 'Drawdown', conc: 'Concentration', exp: 'Positions' },
+    dd: 'Drawdown', conc: 'Concentration' },
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlation',
-    vol: 'Volatility', dd: 'Max drawdown', conc: 'Concentration', exp: 'Effective positions' },
+    vol: 'Volatility', dd: 'Max drawdown', conc: 'Concentration' },
   subtitle: 'The individual stocks only, taken as 100% of the portfolio.',
   close: 'close',
 
@@ -551,61 +538,13 @@ const en: RiskCopy = {
       },
     },
   },
-
-  exp: {
-    sleeve: 'Stock sleeve', issuers: 'Companies', currencies: 'Currencies', other: 'Other',
-    ofBook: (e) => `of ${e} in the book`, weightsOnly: 'weights only',
-    linesFolded: (l, f) => `${l} lines, ${f} folded`, linesOnly: (l) => `${l} lines`,
-    largestCcy: (c, p) => `${c} ${p} largest`,
-    otherSub: (p) => `funds, cash, bonds — ${p} of the book`,
-    unknownCcy: (p) => `${p} of the sleeve has no currency we could assign. It is reported `
-      + 'separately rather than folded into EUR — that default would make the book look more '
-      + 'domestic than it is.',
-    currencyTitle: 'Currency exposure', positionsTitle: 'Effective position per company',
-    colIssuer: 'Company', colWeight: 'Weight', colValue: 'Value', colCurrency: 'Currency',
-    lines: (n) => `${n} lines`, issuerCount: (n) => `${n} ${n === 1 ? 'company' : 'companies'}`,
-    note: "Eᵢ is AIRS's own EUR valuation of the position, not a quantity × price × FX of ours — "
-      + "it is the figure on the client's statement, and a second derivation would disagree with "
-      + 'it on most rows with no way to say which was right. The weights here are the same ones '
-      + 'Active share and Concentration read, folded once.',
-    cards: {
-      sleeve: {
-        what: 'The euros in individual stocks — the sleeve every view in this panel measures.',
-        where: "AIRS's own `current_value_eur` per holding, summed. ⚠ NOT a q·P·X of ours: AIRS "
-          + "values the book, and that is the number on the client's statement.",
-        how: "⚠ TRADE DATE vs SETTLEMENT DATE IS AIRS'S CONVENTION and it exposes no flag saying "
-          + 'which it used, so a book with a very recent trade may differ from a trade-date view '
-          + "by that trade's value. Stated rather than assumed away.",
-      },
-      issuers: {
-        what: 'Distinct companies held, after folding share classes and dual listings.',
-        how: '⚠ THE ONE-LINE ANSWER TO "WHY DOES THIS COUNT DIFFERENTLY FROM THE HOLDINGS TABLE". '
-          + 'Alphabet A + Alphabet C is one position. The same fold feeds Active share and '
-          + 'Concentration, so all three agree by construction.',
-      },
-      currencies: {
-        what: "How many currencies the sleeve's value actually sits in.",
-        where: "The LISTING's currency, from the holding or our grid mapping of the ISIN.",
-        how: '⚠ THE EXPOSURE YOU BEAR, not the one the company earns in. Nestlé on SIX is CHF '
-          + 'exposure whatever its revenue mix — that is a fact about the position. The economic '
-          + 'argument is true and is a different, softer claim.',
-      },
-      other: {
-        what: 'Everything outside the stock sleeve.',
-        where: 'Funds, cash, bonds, and any line without a usable ISIN.',
-        how: '⚠ EVERY OTHER VIEW IN THIS PANEL EXCLUDES THIS AND RENORMALISES. The figure is here '
-          + 'so the renormalisation is never invisible.',
-      },
-    },
-  },
 };
 
 const nl: RiskCopy = {
   views: { active: 'Active share', te: 'Tracking error', corr: 'Correlatie', vol: 'Volatiliteit',
-    dd: 'Drawdown', conc: 'Concentratie', exp: 'Posities' },
+    dd: 'Drawdown', conc: 'Concentratie' },
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlatie',
-    vol: 'Volatiliteit', dd: 'Maximale drawdown', conc: 'Concentratie',
-    exp: 'Effectieve posities' },
+    vol: 'Volatiliteit', dd: 'Maximale drawdown', conc: 'Concentratie' },
   subtitle: 'Alleen de individuele aandelen, genomen als 100% van de portefeuille.',
   close: 'sluiten',
 
@@ -936,56 +875,6 @@ const nl: RiskCopy = {
         how: '⚠ Een naar marktkapitalisatie gewogen index is veel geconcentreerder dan zijn aantal '
           + 'leden doet vermoeden, dus dit is meestal een kleine fractie daarvan — en dat is de '
           + 'eerlijke vergelijking, niet het ruwe aantal.',
-      },
-    },
-  },
-
-  exp: {
-    sleeve: 'Aandelenselectie', issuers: 'Ondernemingen', currencies: 'Valuta', other: 'Overig',
-    ofBook: (e) => `van ${e} in het boek`, weightsOnly: 'alleen gewichten',
-    linesFolded: (l, f) => `${l} regels, ${f} samengevoegd`, linesOnly: (l) => `${l} regels`,
-    largestCcy: (c, p) => `${c} ${p} grootste`,
-    otherSub: (p) => `fondsen, liquiditeiten, obligaties — ${p} van het boek`,
-    unknownCcy: (p) => `Aan ${p} van de selectie konden we geen valuta toekennen. Dat wordt apart `
-      + 'gerapporteerd in plaats van bij de euro geteld — die keuze zou het boek binnenlandser doen '
-      + 'lijken dan het is.',
-    currencyTitle: 'Valuta-exposure', positionsTitle: 'Effectieve positie per onderneming',
-    colIssuer: 'Onderneming', colWeight: 'Gewicht', colValue: 'Waarde', colCurrency: 'Valuta',
-    lines: (n) => `${n} regels`, issuerCount: (n) => `${n} onderneming${n === 1 ? '' : 'en'}`,
-    note: 'Eᵢ is de eigen eurowaardering van AIRS van de positie, geen eigen berekening van stuks × '
-      + 'koers × wisselkoers — het is het cijfer op het overzicht van de klant, en een tweede '
-      + 'afleiding zou daar op de meeste regels van afwijken zonder dat te zeggen valt welke klopt. '
-      + 'De gewichten hier zijn dezelfde die Active share en Concentratie lezen, één keer '
-      + 'samengevoegd.',
-    cards: {
-      sleeve: {
-        what: "De euro's in individuele aandelen — de selectie die elke weergave in dit paneel meet.",
-        where: 'De eigen `current_value_eur` van AIRS per positie, opgeteld. ⚠ GEEN eigen q·P·X: '
-          + 'AIRS waardeert het boek, en dat is het cijfer op het overzicht van de klant.',
-        how: '⚠ TRANSACTIEDATUM versus AFWIKKELINGSDATUM IS DE CONVENTIE VAN AIRS, en AIRS geeft '
-          + 'nergens aan welke is gebruikt. Een boek met een zeer recente transactie kan daardoor '
-          + 'van een transactiedatum-weergave afwijken met de waarde van die transactie. Dit wordt '
-          + 'vermeld in plaats van weggeredeneerd.',
-      },
-      issuers: {
-        what: 'Afzonderlijke ondernemingen in bezit, na samenvoeging van aandelenklassen en '
-          + 'dubbele noteringen.',
-        how: '⚠ HET ANTWOORD IN ÉÉN REGEL OP "WAAROM TELT DIT ANDERS DAN DE POSITIETABEL". Alphabet '
-          + 'A + Alphabet C is één positie. Dezelfde samenvoeging voedt Active share en '
-          + 'Concentratie, dus alle drie komen per constructie overeen.',
-      },
-      currencies: {
-        what: "In hoeveel valuta de waarde van de selectie feitelijk staat.",
-        where: 'De valuta van de NOTERING, uit de positie of uit onze koppeling van de ISIN.',
-        how: '⚠ DE EXPOSURE DIE U DRAAGT, niet die waarin de onderneming verdient. Nestlé op SIX is '
-          + 'CHF-exposure, ongeacht de omzetverdeling — dat is een feit over de positie. Het '
-          + 'economische argument is waar en is een andere, zachtere bewering.',
-      },
-      other: {
-        what: 'Alles buiten de aandelenselectie.',
-        where: 'Fondsen, liquiditeiten, obligaties, en elke regel zonder bruikbare ISIN.',
-        how: '⚠ ELKE ANDERE WEERGAVE IN DIT PANEEL LAAT DIT WEG EN HERWEEGT. Het cijfer staat hier '
-          + 'zodat die herweging nooit onzichtbaar is.',
       },
     },
   },

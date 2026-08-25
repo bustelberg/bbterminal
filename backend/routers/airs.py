@@ -1760,6 +1760,11 @@ class TrackingError(BaseModel):
     #: `T` — how many active returns the spread was taken over.
     observations: int = 0
     years: int | None = None
+    #: The first and last period-end the paired grid actually reached. ⚠ NOT simply `years` back
+    #: from today: a recently-listed holding shortens the grid and a stale series ends it early, so
+    #: the card states real dates rather than asserting a trailing window.
+    window_from: str | None = None
+    window_to: str | None = None
 
     tracking_error_pct: float | None = None
     #: ⚠ THE QUANTITY TE IS THE SPREAD **OF**, returned beside it because the two are constantly
@@ -1826,6 +1831,11 @@ class RiskCorrelation(BaseModel):
     periods_per_year: float | None = None
     observations: int = 0
     years: int | None = None
+    #: The window the paired grid actually reached. ⚠ THE SAME TWO DATES THE TRACKING-ERROR
+    #: response carries, because both come from one `build_paired_series` — two panels quoting
+    #: different windows for one series is what the shared builder exists to prevent.
+    window_from: str | None = None
+    window_to: str | None = None
 
     #: ρ between the book's return series and the benchmark's. Full precision — `r_squared` is its
     #: square, and a rounded ρ beside an unrounded R² would not reconcile on screen.
@@ -1850,6 +1860,11 @@ class RiskCorrelation(BaseModel):
     #: Mean off-diagonal ρ — the one number that summarises a matrix. Unweighted on purpose: it is
     #: a question about the NAMES, not about the sizing.
     mean_pair_corr: float | None = None
+    #: Σ of the measured pair correlations — the numerator, so the card prints the division
+    #: rather than asserting its result. ⚠ Not derivable client-side: `mean_pair_corr` is
+    #: rounded, and rebuilding an operand from a rounded answer drifts in the digits the worked
+    #: line exists to justify.
+    pair_rho_sum: float | None = None
     pairs_measured: int = 0
     min_pair_observations: int = 0
     least_correlated: list[CorrelationPair] = []
@@ -1900,6 +1915,10 @@ class PortfolioVolatility(BaseModel):
     periods_per_year: float | None = None
     observations: int = 0
     years: int | None = None
+    #: The window the paired grid reached. ⚠ The same two dates the tracking-error and
+    #: correlation responses carry — one shared `build_paired_series`, one window.
+    window_from: str | None = None
+    window_to: str | None = None
 
     volatility_pct: float | None = None
     benchmark_volatility_pct: float | None = None
@@ -1920,6 +1939,13 @@ class PortfolioVolatility(BaseModel):
     #: have experienced the worst week. For a fat-tailed book the two are far apart, which is
     #: precisely when σ alone misleads.
     worst_period_pct: float | None = None
+    #: The index twins of the three above, and of both ratios — so the view can pair every
+    #: figure with its benchmark instead of pairing only volatility.
+    benchmark_worst_period_pct: float | None = None
+    benchmark_best_period_pct: float | None = None
+    benchmark_negative_periods_pct: float | None = None
+    benchmark_sharpe: float | None = None
+    benchmark_sortino: float | None = None
     best_period_pct: float | None = None
     negative_periods_pct: float | None = None
 
@@ -1985,6 +2011,10 @@ class PortfolioDrawdown(BaseModel):
     periods_per_year: float | None = None
     observations: int = 0
     years: int | None = None
+    #: The window the paired grid reached — the same two dates the other three risk views
+    #: carry, because all four read one `build_paired_series`.
+    window_from: str | None = None
+    window_to: str | None = None
 
     max_drawdown_pct: float | None = None
     benchmark_max_drawdown_pct: float | None = None
@@ -1998,6 +2028,10 @@ class PortfolioDrawdown(BaseModel):
     #: and four −25%s have the same maximum and are not the same risk.
     episodes: list[DrawdownEpisode] = []
     episodes_total: int = 0
+    #: How many of those were at least `episode_threshold_pct` deep. ⚠ The tile counts THESE —
+    #: `episodes_total` includes every one-session dip that recovered, which is not a risk fact.
+    episodes_over_threshold: int = 0
+    episode_threshold_pct: float | None = None
 
     #: ⚠⚠ THE SAME MDD AT ALL THREE CADENCES, MEASURED IN THE SAME REQUEST. The gap between them
     #: is the thing this view has to be honest about, and a reader cannot compare figures they must
@@ -2077,6 +2111,11 @@ class PortfolioConcentration(BaseModel):
 
     top: list[ConcentrationRow] = []
     benchmark_covered_pct: float | None = None
+    #: When the index caps behind those weights were read — the same range the active-share
+    #: response carries, because both weight the benchmark from one `members()` call.
+    benchmark_caps_from: str | None = None
+    benchmark_caps_to: str | None = None
+    benchmark_caps_unstamped: int = 0
     unresolved: int = 0
 
 

@@ -38,7 +38,6 @@ import { type BenchTarget } from './benchSeries';
 export type { Resp, Row, WeightBasis } from './fundamentalBlend';
 export { isEstimatePeriod, periodOrder } from './fundamentalBlend';
 import { buildBlend, isEstimatePeriod, periodOrder, type Resp, type Row } from './fundamentalBlend';
-import CagrTable, { type CagrBenchmark } from './CagrTable';
 
 /**
  * `2026-08-04T09:12:00Z` → `4 August 2026`. The date we concluded something, in the form a person
@@ -129,11 +128,6 @@ function cmp(a: number | string | null | undefined, b: number | string | null | 
  * which one reproduces the chart.
  */
 /**
- * ⚠ `table` IS NOT A CELL TRANSFORM LIKE THE OTHER THREE. Reported/Rebased/YoY re-render the same
- * matrices; `table` REPLACES them with the CAGR summary. It shares the control because it answers
- * the same question at a different altitude — "how fast is this compounding" against "what are the
- * figures" — and a second switch beside the first would be one more thing to notice.
- */
 /**
  * ⚠⚠ `contrib` IS THE ONLY ONE OF THE FOUR CELL VIEWS THAT IS **ADDITIVE**, and that is what it is
  * for. Reported, Rebased and YoY are each a transform of ONE company's own figures, so a column of
@@ -143,7 +137,7 @@ function cmp(a: number | string | null | undefined, b: number | string | null | 
  * most-to-least-impact ranking, which sorting the other three is not (and they deliberately keep
  * ranking on the reported figure — see the period header's tooltip).
  */
-type View = 'reported' | 'rebased' | 'yoy' | 'contrib' | 'table';
+type View = 'reported' | 'rebased' | 'yoy' | 'contrib';
 
 /**
  * A period cell's contents, at a WIDTH THAT DOES NOT DEPEND ON THE STRING.
@@ -234,9 +228,6 @@ const VIEWS: [View, string, string][] = [
     + 'SUMS to the footer, which is what makes it a decomposition rather than a ranking: sort a '
     + 'period column here and you get most-to-least impact, the drivers at the top and the '
     + 'detractors at the bottom. This is the one view whose sort does NOT rank on the figure.'],
-  ['table', 'Table','Compound annual growth of the weighted line — 5 and 10 years — for this book '
-    + 'against a benchmark you pick. It REPLACES the two matrices rather than adding to them: they '
-    + 'are what it is derived from, and the other views are one click away.'],
 ];
 
 function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRefresh }: {
@@ -274,7 +265,21 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    */
   onRefresh?: (row: Row) => Promise<{ id: string; done: Promise<JobToast> }>;
 }) {
-  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'weight', dir: 'desc' });
+  /**
+   * The sort, AND THE VIEW IT WAS CHOSEN UNDER.
+   *
+   * ⚠⚠ `basis` EXISTS SO SWITCHING VIEW DOES NOT REORDER THE TABLE. A period column ranks on the
+   * reported figure in three views and on the contribution in `contrib`, so `view` in the
+   * comparator meant every switch into or out of `contrib` silently reshuffled every row — while
+   * the reader was looking at it, having asked for none of it. Freezing the basis at the moment
+   * the sort is CHOSEN keeps the order until they choose again, which is what a sort is.
+   *
+   * ⚠ IT IS NOT THE SAME AS DROPPING `contrib`'s OWN RULE. Click a period column while in
+   * `contrib` and it still ranks by impact; the rule now applies at click time rather than at
+   * render time, so it decides the order once instead of re-deciding it on every switch.
+   */
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc'; basis: View }>(
+    { key: 'weight', dir: 'desc', basis: 'reported' });
   /** Per-row refresh state, keyed by ISIN — separate from `ingest` because the two controls are
    *  different actions on the same row (first load vs re-ask the vendor) and can each be mid-flight
    *  with their own outcome. */
@@ -575,10 +580,13 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     const asked = r.financials_fetched_at;
     return asked && periodEndDate(y) <= asked.slice(0, 10) ? 'no_data' : 'not_tried';
   };
+  // ⚠ `basis: view` ON BOTH BRANCHES — a re-click in a different view is a NEW sort and must
+  // re-rank on what is on screen now, not on whatever was showing when the column was first
+  // picked. Only an untouched sort survives a view switch.
   const toggle = (key: string) => setSort((s) => (s.key === key
-    ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' }
+    ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc', basis: view }
     // Names/currency read A→Z first; weight, cap and figures read biggest-first.
-    : { key, dir: (key === 'name' || key === 'ccy') ? 'asc' : 'desc' }));
+    : { key, dir: (key === 'name' || key === 'ccy') ? 'asc' : 'desc', basis: view }));
   const caret = (k: string) => (sort.key === k ? (sort.dir === 'desc' ? ' ▾' : ' ▴') : '');
 
   /**
@@ -605,10 +613,12 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
             : sort.key === 'weight' ? r.weight_pct
               : sort.key === 'cap' ? (r.market_cap_eur ?? null)
                 : sort.key === 'ccy' ? (r.currency ?? '')
-                  : view === 'contrib' ? (blend.contrib.get(r)?.[sort.key]?.pp ?? null)
+                  : sort.basis === 'contrib' ? (blend.contrib.get(r)?.[sort.key]?.pp ?? null)
                     : r.revenue[sort.key]);    // a period column
     return [...data.rows].sort((a, b) => cmp(get(a), get(b), sort.dir));
-  }, [data, sort, view, blend]);
+    // ⚠ `view` IS DELIBERATELY NOT A DEPENDENCY. It used to be, and that is precisely what made
+    // the table reorder on a tab switch — see `sort.basis`.
+  }, [data, sort, blend]);
 
   /**
    * ⚠⚠ ROW VIRTUALIZATION — AND THIS TABLE HAS ITS OWN SCROLL BOX BECAUSE OF IT.
@@ -1457,20 +1467,6 @@ export default function HoldingsRevenueModal({
   const [view, setView] = useState<View>('reported');
 
   /**
-   * The `Table` view's OWN benchmark — see `CagrTable`'s picker.
-   *
-   * ⚠ NOT `benchTarget`. The drill-down inherits whatever index the card behind it was drawn
-   * against, which is right for the matrices (they explain that chart). Here the question is
-   * "compounding against what", and answering it only for the one benchmark the chart happened to
-   * use would make the comparison not worth having. Defaults to AEX.
-   *
-   * ⚠ AND IT FETCHES ONLY WHEN THE VIEW IS OPEN. On ACWI this is ~1,900 constituents; paying for it
-   * on every drill-down, for a tab most opens never reach, is the shape the constituent matrix used
-   * to have before it was measured down to 0.19s — and this one is a second copy of that read.
-   */
-  const [cagrBenchChoice, setCagrBenchChoice] = useState<CagrBenchmark>('AEX');
-  const [cagrBench, setCagrBench] = useState<Resp | null>(null);
-  const [cagrBenchErr, setCagrBenchErr] = useState<string | null>(null);
 
   /**
    * ⚠ A ZERO ON A MONEY LINE IS A PLACEHOLDER, NOT A MEASUREMENT — AND IT READS AS A FACT.
@@ -1565,35 +1561,6 @@ export default function HoldingsRevenueModal({
   }, [benchKey, metric, benchReload]);
 
   /**
-   * The `Table` view's benchmark constituents.
-   *
-   * ⚠ LAZY, AND KEYED ON THE VIEW BEING OPEN. `view !== 'table'` short-circuits, so opening the
-   * drill-down and never touching Table costs nothing — and switching benchmark refetches only that
-   * index. It reuses `load`, so the Table's line is built from exactly the same payload shape the
-   * matrices use and cannot drift from them.
-   *
-   * ⚠ ITS OWN STATE, NOT `bench`. They can legitimately be different indices at the same time —
-   * the chart was drawn against one, the reader is asking about another — and sharing one slot
-   * would make switching the Table's picker silently rewrite the matrix below it.
-   */
-  useEffect(() => {
-    let alive = true;
-    if (view !== 'table') return;
-    void (async () => {
-      setCagrBench(null); setCagrBenchErr(null);
-      try {
-        const b = await load({ universe: cagrBenchChoice,
-          // The CAGR is annual by definition; the matrices' cadence is about the chart behind them.
-          cadence: 'annual' });
-        if (alive) setCagrBench(b);
-      } catch (e) {
-        console.warn('[bb:cagr] benchmark constituents:', e);
-        if (alive) setCagrBenchErr(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, cagrBenchChoice, metric]);
 
 
   /**
@@ -1740,33 +1707,16 @@ export default function HoldingsRevenueModal({
             <span className="text-fg-faint">
               {view === 'reported' ? 'as filed, each in its own currency'
                 : view === 'rebased' ? 'indexed to 100 at each company’s first period — what the chart weights'
-                  : view === 'table' ? 'compound annual growth of the weighted line, vs a benchmark'
-                    : view === 'contrib'
+                  : view === 'contrib'
                       ? 'percentage points of the line’s own move — sums to the footer, so sorting a '
                         + 'column ranks impact'
                       : 'growth on that company’s previous reported period'}
-              {view !== 'reported' && view !== 'table' && ' · hover a cell for the reported figure'}
+              {view !== 'reported' && ' · hover a cell for the reported figure'}
             </span>
           </div>
 
-          {/* ⚠ THE SUMMARY REPLACES THE MATRICES — see the `View` type. They are what it is derived
-              from, and this modal is already 84vh; a summary you scroll past its own inputs to
-              reach is one nobody reads. */}
-          {view === 'table' && (
-            <CagrTable
-              portfolio={data ? buildBlend(data) : null}
-              benchmark={cagrBench ? buildBlend(cagrBench) : null}
-              portfolioName={portfolioName || 'This book'}
-              benchLabel={cagrBenchChoice}
-              metricLabel={seriesLabel ?? noun}
-              benchChoice={cagrBenchChoice}
-              onBenchChoice={setCagrBenchChoice}
-              benchLoading={!cagrBench && !cagrBenchErr}
-              benchErr={cagrBenchErr} />
-          )}
 
           {/* 1 — the book (or the single company), on the same three views as the index below it. */}
-          {view !== 'table' && (
           <div className="space-y-1.5">
             {/* ⚠ THE FILL SITS ON THE TABLE IT FILLS, and there are two of them. A `no_data` row
                 here has a per-row Fetch already; this is the same action over every company at
@@ -1799,10 +1749,9 @@ export default function HoldingsRevenueModal({
                 onRefresh={refreshRow(target, setData)} />
             )}
           </div>
-          )}
 
           {/* 3 — the same, for the index, on demand. */}
-          {view !== 'table' && benchTarget && (
+          {benchTarget && (
             <div className="space-y-1.5">
               <div className="flex items-baseline gap-3">
                 <h3 className={section}>{benchLabel} constituents — {noun} by period</h3>

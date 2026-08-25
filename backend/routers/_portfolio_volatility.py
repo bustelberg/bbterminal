@@ -60,6 +60,13 @@ def compute_volatility(holdings: list[dict], benchmark: str,
     worst = float(p.min()) if p.size else None
     best = float(p.max()) if p.size else None
     negative = float(np.mean(p < 0)) if p.size else None
+    # ⚠ THE SAME THREE FOR THE INDEX, so the panel can put the two side by side. Every other
+    # figure here already had its benchmark twin; these did not, which meant the one tile a
+    # reader most wants a reference for — the worst period actually lived through — was the one
+    # with nothing to compare it against.
+    b_worst = float(b.min()) if b.size else None
+    b_best = float(b.max()) if b.size else None
+    b_negative = float(np.mean(b < 0)) if b.size else None
 
     return {
         "available": True,
@@ -68,6 +75,11 @@ def compute_volatility(holdings: list[dict], benchmark: str,
         "periods_per_year": ppy,
         "observations": int(p.size),
         "years": years,
+        # ⚠ THE WINDOW THE PAIRED GRID REACHED — the SAME two dates the tracking-error and
+        # correlation responses carry, because all three read one `build_paired_series`. Three
+        # panels quoting three windows for one series is exactly what sharing it prevents.
+        "window_from": (dates[0] if (dates := sorted(d for d in built["obs_dates"] if d)) else None),
+        "window_to": (dates[-1] if dates else None),
 
         "volatility_pct": None if sp.ann_vol is None else sp.ann_vol * 100.0,
         # ⚠ THE SAME FUNCTION AND THE SAME SERIES AS THE BOOK'S — printed for scale, never as a
@@ -86,6 +98,13 @@ def compute_volatility(holdings: list[dict], benchmark: str,
         "risk_free_pct": 0.0,
 
         "worst_period_pct": None if worst is None else worst * 100.0,
+        "benchmark_worst_period_pct": None if b_worst is None else b_worst * 100.0,
+        "benchmark_best_period_pct": None if b_best is None else b_best * 100.0,
+        "benchmark_negative_periods_pct": None if b_negative is None else b_negative * 100.0,
+        # ⚠ `sb` WAS ALREADY COMPUTED AND ITS RATIOS THROWN AWAY. Same function, same rf = 0,
+        # so the pair is comparable by construction rather than by coincidence.
+        "benchmark_sharpe": sb.sharpe,
+        "benchmark_sortino": sb.sortino,
         "best_period_pct": None if best is None else best * 100.0,
         "negative_periods_pct": None if negative is None else negative * 100.0,
 

@@ -277,10 +277,9 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
   const ref = useRef<HTMLElement>(null);
 
   // Docked full-width BELOW the charts. `nearest` scrolls it into view only when it is not already
-  // visible — so a bar click reveals the panel when it is off-screen, and stays put otherwise.
-  useEffect(() => {
-    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [axis, bucket]);
+  // ⚠ NO `scrollIntoView` ANY MORE. It existed to reveal this panel when it sat in the flow
+  // below the charts; in a dialog there is nothing to scroll to, and calling it would scroll
+  // the modal BEHIND the backdrop while the reader looks at something fixed on top of it.
 
   // Keyed on axis + window + benchmark, NOT on bucket: one fetch serves every bucket in the axis,
   // so switching bars in the same chart is instant.
@@ -313,8 +312,15 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
   const shared = (list?: Name[] | null) => (list ?? []).filter((h) => h.in_both).length;
 
   return (
-    <section ref={ref} className="bg-card border border-accent-500/30 rounded-xl p-4">
-      <div className="flex items-start justify-between gap-3 mb-2">
+    /* ⚠⚠ `h-full min-h-0 flex flex-col` + an inner scroll — the shape `PanelDialog` requires.
+       The dialog is a FIXED box; a body that sizes to its content would overflow it silently,
+       and `min-h-0` is what lets a flex child shrink below its content so the scroll actually
+       engages. Same construction as `ActiveSharePanel`. */
+    <section ref={ref} className="h-full min-h-0 flex flex-col bg-card border
+      border-accent-500/30 rounded-xl p-4">
+      {/* ⚠ `shrink-0` — the heading names which bar was clicked, which is the one thing that
+          must stay visible while the tables under it scroll. */}
+      <div className="shrink-0 flex items-start justify-between gap-3 mb-2">
         <h4 className="text-sm font-semibold text-fg-strong">
           {AXIS_LABEL[axis] ?? axis}: <span className="font-mono">{bucket}</span>
         </h4>
@@ -323,6 +329,11 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
           ✕
         </button>
       </div>
+
+      {/* ⚠ EVERYTHING BELOW THE HEADING SCROLLS AS ONE. `min-h-0` is what lets it: a flex child
+          refuses to shrink below its content without it, so the fixed dialog would silently
+          give way instead of the body scrolling — see the ⚠⚠ on the root. */}
+      <div className="flex-1 min-h-0 overflow-auto">
 
       {loading && <p className="text-xs text-fg-subtle">Computing attribution…</p>}
       {error && (
@@ -429,6 +440,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
           )}
         </>
       )}
+      </div>
     </section>
   );
 }

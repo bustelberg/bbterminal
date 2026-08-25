@@ -114,5 +114,11 @@ def compute_concentration(holdings: list[dict], benchmark: str) -> dict:
 
         "top": top,
         "benchmark_covered_pct": built["coverage"].get("covered_pct"),
+        # ⚠ WHEN THE INDEX SIDE WAS MEASURED. This view weights the benchmark by market cap,
+        # exactly as active share does, so it owes the reader the same date range — a cap read
+        # three weeks ago is a three-week-old weight, and N_eff computed off it is that old too.
+        "benchmark_caps_from": built["coverage"].get("caps_from"),
+        "benchmark_caps_to": built["coverage"].get("caps_to"),
+        "benchmark_caps_unstamped": built["coverage"].get("caps_unstamped"),
         "unresolved": len(built["unresolved"]),
     }

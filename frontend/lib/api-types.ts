@@ -12252,6 +12252,15 @@ export interface components {
             available?: boolean;
             /** Benchmark */
             benchmark: string;
+            /** Benchmark Caps From */
+            benchmark_caps_from?: string | null;
+            /** Benchmark Caps To */
+            benchmark_caps_to?: string | null;
+            /**
+             * Benchmark Caps Unstamped
+             * @default 0
+             */
+            benchmark_caps_unstamped?: number;
             /** Benchmark Covered Pct */
             benchmark_covered_pct?: number | null;
             /** Benchmark Effective Positions */
@@ -12392,11 +12401,18 @@ export interface components {
             };
             /** Current Drawdown Pct */
             current_drawdown_pct?: number | null;
+            /** Episode Threshold Pct */
+            episode_threshold_pct?: number | null;
             /**
              * Episodes
              * @default []
              */
             episodes?: components["schemas"]["DrawdownEpisode"][];
+            /**
+             * Episodes Over Threshold
+             * @default 0
+             */
+            episodes_over_threshold?: number;
             /**
              * Episodes Total
              * @default 0
@@ -12433,6 +12449,10 @@ export interface components {
              * @default 0
              */
             total_holdings?: number;
+            /** Window From */
+            window_from?: string | null;
+            /** Window To */
+            window_to?: string | null;
             worst?: components["schemas"]["DrawdownEpisode"] | null;
             /** Years */
             years?: number | null;
@@ -12643,12 +12663,22 @@ export interface components {
             available?: boolean;
             /** Benchmark */
             benchmark: string;
+            /** Benchmark Best Period Pct */
+            benchmark_best_period_pct?: number | null;
             /** Benchmark Downside Dev Pct */
             benchmark_downside_dev_pct?: number | null;
+            /** Benchmark Negative Periods Pct */
+            benchmark_negative_periods_pct?: number | null;
             /** Benchmark Return Ann Pct */
             benchmark_return_ann_pct?: number | null;
+            /** Benchmark Sharpe */
+            benchmark_sharpe?: number | null;
+            /** Benchmark Sortino */
+            benchmark_sortino?: number | null;
             /** Benchmark Volatility Pct */
             benchmark_volatility_pct?: number | null;
+            /** Benchmark Worst Period Pct */
+            benchmark_worst_period_pct?: number | null;
             /** Best Period Pct */
             best_period_pct?: number | null;
             /** Cadence Note */
@@ -12694,6 +12724,10 @@ export interface components {
             total_holdings?: number;
             /** Volatility Pct */
             volatility_pct?: number | null;
+            /** Window From */
+            window_from?: string | null;
+            /** Window To */
+            window_to?: string | null;
             /** Worst Period Pct */
             worst_period_pct?: number | null;
             /** Years */
@@ -13098,6 +13132,8 @@ export interface components {
              * @default 0
              */
             observations?: number;
+            /** Pair Rho Sum */
+            pair_rho_sum?: number | null;
             /**
              * Pairs Measured
              * @default 0
@@ -13121,6 +13157,10 @@ export interface components {
              * @default 0
              */
             total_holdings?: number;
+            /** Window From */
+            window_from?: string | null;
+            /** Window To */
+            window_to?: string | null;
             /** Years */
             years?: number | null;
         };
@@ -13498,6 +13538,10 @@ export interface components {
             total_holdings?: number;
             /** Tracking Error Pct */
             tracking_error_pct?: number | null;
+            /** Window From */
+            window_from?: string | null;
+            /** Window To */
+            window_to?: string | null;
             /** Years */
             years?: number | null;
         };

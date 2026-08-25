@@ -1057,9 +1057,123 @@ def _drop_superseded_forecasts(by_metric: dict[str, dict[int, dict[str, float]]]
                     del points[d]
 
 
+#: The per-share lines whose euro total is `value x shares`. ⚠ DECLARED, NOT INFERRED FROM THE
+#: NAME. A code ending in "per share" that is not in here keeps the growth chain rather than being
+#: multiplied by a share count that may mean something else — the same rule `TTM_RULES` follows,
+#: and for the same reason: the wrong guess produces a plausible number, not an error.
+_AGGREGATABLE_PER_SHARE = frozenset({"fcf_ps", "eps_nri"})
+
+#: Levels that are ALREADY a company total — no share count involved.
+_AGGREGATABLE_TOTAL = frozenset({"revenue"})
+
+
+def fundamental_totals(company_ids: list[int], metrics: list[str],
+                       weight_by_cid: dict[int, float] | None = None,
+                       caps: dict[int, dict[str, float]] | None = None,
+                       ) -> dict[str, dict[int, dict[str, float]]]:
+    """`{metric_code: {company_id: {period: EUR}}}` — the euros each member contributes.
+
+    ⚠⚠ THIS IS WHAT MAKES THE AGGREGATE PATH POSSIBLE, and it is two conversions, not one. A
+    GuruFocus per-share figure is in the LISTING's trading currency, so it becomes a company
+    total only after multiplying by the share count AND converting at the PERIOD's own rate. An
+    ACWI cross-section is 26 currencies; summing them raw over-weights Japan by ~150x, and
+    converting Apple's September year-end at 31 December's rate applies a rate struck three
+    months after the figure.
+
+    ⚠ THE SAME HELPERS `period_caps_eur` USES, deliberately. It is the only other place that
+    turns a GuruFocus financial into EUR, so a second definition of "which currency is this filed
+    in" would be a second thing to keep true.
+
+    `weight_by_cid` + `caps` are the PORTFOLIO form: a book's claim on a fundamental is
+    `w_i x F_i / cap_i`, not `F_i`. For an INDEX both are omitted — a cap-weighted index holds the
+    same fraction of every company, so its claim is proportional to the plain sum (see the
+    aggregate branch in `_fundamental_blend`). ⚠ A MEMBER WITH NO CAP FOR A PERIOD IS LEFT OUT OF
+    THAT PERIOD rather than falling back to another one: mixing bases inside one sum is the
+    failure the per-period basis exists to remove.
+    """
+    from routers._benchmark_index import _fx_to_eur, _rate  # noqa: PLC0415
+
+    wanted = [m for m in metrics if m in _AGGREGATABLE_PER_SHARE or m in _AGGREGATABLE_TOTAL]
+    if not wanted or not company_ids:
+        return {}
+
+    ccy: dict[int, str] = {}
+    for i in range(0, len(company_ids), IN_CHUNK_SIZE):
+        for c in (supabase.table("company")
+                  .select("company_id,gurufocus_exchange:gurufocus_exchange(currency_code)")
+                  .in_("company_id", company_ids[i:i + IN_CHUNK_SIZE]).execute().data or []):
+            code = ((c.get("gurufocus_exchange") or {}) or {}).get("currency_code")
+            if code:
+                ccy[c["company_id"]] = code
+    if not ccy:
+        return {}
+    fx = _fx_to_eur(set(ccy.values()), "2014-01-01", "2026-12-31")
+
+    need_shares = any(m in _AGGREGATABLE_PER_SHARE for m in wanted)
+    shares = _metric_by_company_period(company_ids, "shares") if need_shares else {}
+
+    out: dict[str, dict[int, dict[str, float]]] = {}
+    for metric in wanted:
+        per_share = metric in _AGGREGATABLE_PER_SHARE
+        vals = _metric_by_company_period(company_ids, metric)
+        for code in _metric_codes(metric):
+            per_cid: dict[int, dict[str, float]] = {}
+            for cid, by_period in vals.items():
+                cur = ccy.get(cid)
+                if not cur:
+                    continue
+                got: dict[str, float] = {}
+                for period, v in by_period.items():
+                    # ⚠ THE KEY IS ALREADY THE FILING DATE (`target_date`, YYYY-MM-DD), so it
+                    # IS the period end and needs no derivation — which is the whole point of
+                    # keying on it: `period_end` would re-derive a date we were handed.
+                    rate = _rate(fx, cur, period)
+                    if rate is None:
+                        continue
+                    n = (shares.get(cid) or {}).get(period) if per_share else 1.0
+                    if n is None:
+                        continue
+                    eur = v * n * rate
+                    if weight_by_cid is not None:
+                        cap = ((caps or {}).get(cid) or {}).get(period)
+                        if not cap:
+                            continue
+                        eur = (weight_by_cid.get(cid) or 0.0) * eur / cap
+                    got[period] = eur
+                if got:
+                    per_cid[cid] = got
+            if per_cid:
+                out[code] = per_cid
+    return out
+
+
+def _metric_by_company_period(company_ids: list[int], metric: str) -> dict[int, dict[str, float]]:
+    """`{company_id: {period: value}}`, paged. ⚠ `.range()` — an index's history is far past any
+    server row cap, and an unpaged read would silently aggregate a fraction of the members."""
+    codes = list(_metric_codes(metric))
+    out: dict[int, dict[str, float]] = defaultdict(dict)
+    for i in range(0, len(company_ids), IN_CHUNK_SIZE):
+        chunk = company_ids[i:i + IN_CHUNK_SIZE]
+        off = 0
+        while True:
+            rows = (supabase.table("metric_data")
+                    .select("company_id,target_date,numeric_value")
+                    .in_("company_id", chunk).in_("metric_code", codes)
+                    .gte("target_date", _BLEND_START)
+                    .order("company_id").order("target_date")
+                    .range(off, off + 999).execute().data or [])
+            if not rows:
+                break
+            for r in rows:
+                if r.get("numeric_value") is not None:
+                    out[r["company_id"]][str(r["target_date"])[:10]] = float(r["numeric_value"])
+            off += len(rows)
+    return out
+
 def _blend_rows(rows: list[dict], covered: list[dict],
                 caps: dict[int, dict[str, float]] | None = None,
-                cadence: str = "annual") -> dict:
+                cadence: str = "annual",
+                totals: dict[str, dict[int, dict[str, float]]] | None = None) -> dict:
     """The blend itself, over rows already fetched. Pure of I/O, so the plain endpoint and the
     streaming one cannot drift: they differ only in HOW the rows arrive.
 
@@ -1067,6 +1181,15 @@ def _blend_rows(rows: list[dict], covered: list[dict],
     period is weighted by what the constituents were worth THEN. `None` for a portfolio, where a
     holding weight is not a market cap and does not vary by period; `_weight_at` reads the absence
     as "one basis for every period". See `_fundamental_blend._weight_at`.
+
+    `totals` is `{metric_code: {company_id: {period: EUR}}}` — the euros of the fundamental each
+    member contributes. Where it is present for a metric, `blend_series` SUMS them instead of
+    averaging per-member growth rates; see the aggregate branch there for why that is both more
+    correct and still the cap-weighted answer. Absent, every metric keeps the growth chain.
+
+    ⚠ IT ARRIVES AS A PARAMETER BECAUSE THIS FUNCTION IS PURE OF I/O, and building it needs two
+    reads (share counts and FX). Computing it here would put I/O back into the one function whose
+    docstring promises the plain endpoint and the streaming one cannot drift.
 
     ⚠⚠ `cadence` DECIDES THE PERIOD ALIGNMENT, AND IT IS NOT COSMETIC. Quarterly rows carry
     trailing-twelve-month points at four dates a year; aligned on the YEAR they collapse to the
@@ -1103,10 +1226,15 @@ def _blend_rows(rows: list[dict], covered: list[dict],
         # exists only in the arithmetic.
         base_code = _FORECAST_BASE.get(code)
         base_by_company = by_metric.get(base_code, {}) if base_code else {}
+        # ⚠ THE EUR TOTALS FOR **THIS** METRIC ONLY. `totals` is keyed by metric code because a
+        # per-share line and a level line become different quantities, and handing a member the
+        # wrong metric's euros would sum revenue into an FCF chart with nothing to show for it.
+        fund_for = (totals or {}).get(code, {})
         blend_members = [{"weight": r["weight_pct"],
                           # Absent for a portfolio — see the `caps` note on this function.
                           **({"weights": caps.get(r["company_id"], {})} if caps else {}),
                           "points": per_company.get(r["company_id"], {}),
+                          "fund_points": fund_for.get(r["company_id"], {}),
                           "base_points": base_by_company.get(r["company_id"], {})}
                          for r in covered]
         s = blend_series(blend_members, code, bucket)
@@ -2461,12 +2589,32 @@ async def benchmark_revenue(label: str = "AEX", metric: str = "revenue"):
                 for r in page:
                     raw_by_cid[r["company_id"]].append(r)
                 off += len(page)
+        # ⚠⚠ PER-PERIOD CAPS, NOT ONE OF TODAY'S (2026-08-25). This assembly passed only a scalar
+        # `weight`, and `_weight_at` reads the absence of `weights` as "single basis" — correct
+        # for a PORTFOLIO, whose holding weight has no history, and look-ahead bias for an INDEX.
+        # Every historical step was weighted by the constituent's size TODAY.
+        #
+        # Measured on ACWI FCF/share (`scripts/diagnose_blend_steps.py`): NVIDIA's 2017->2018
+        # step carried a 4.40% weight — its 2026 size — against the ~0.4% it actually was, and
+        # one 2023->2024 NVIDIA step moved the whole line by +26.94pp. On a metric whose biggest
+        # movers grew INTO the index, weight and growth are correlated by construction, so this
+        # inflates the line with no cell being wrong and nothing on the chart to show it.
+        #
+        # ⚠ THE SAME CLASS AS THE ANCHOR-WEIGHT FIX one level down in `blend_series`: that one
+        # corrected WHICH END of a step the cap is taken from, and it could only ever help a
+        # caller that supplies per-period caps at all. This one does.
+        #
+        # ⚠ A MEMBER WITH NO CAP FOR A PERIOD IS DROPPED FROM THAT PERIOD, by `_weight_at` — not
+        # fallen back to the scalar. Mixing the two bases inside one column is the failure the
+        # whole per-period basis exists to remove.
+        period_caps = period_caps_eur(ids, "annual")
         for cid in ids:
             pts = {str(m["target_date"])[:10]: float(m["numeric_value"])
                    for m in raw_by_cid.get(cid, ())
                    if m.get("numeric_value") is not None}
             if pts:
-                members.append({"weight": caps.get(cid, 1.0), "points": pts})
+                members.append({"weight": caps.get(cid, 1.0), "points": pts,
+                                "weights": period_caps.get(cid) or None})
         blend = blend_series(members, _metric_codes(metric)[0])
         # ⚠ `period` is the YEAR AS A STRING ("2015"); return it as an int so the frontend can join
         # it against the company's numeric years (a string/number mismatch = no overlap = no line).

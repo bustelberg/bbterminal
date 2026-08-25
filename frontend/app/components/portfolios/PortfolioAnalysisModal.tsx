@@ -290,7 +290,7 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
             minimal
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="inline-block w-[3px] h-3 rounded-sm bg-neutral-800/85" />
+            <span className="inline-block w-[4px] h-3 rounded-sm bg-neutral-800/85" />
             target
           </span>
           <span className="flex items-center gap-1.5">
@@ -404,9 +404,10 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
                 {/* The target — the third stripe, and LAST so it crosses the bar: a target hidden
                     under the measure is the one comparison this chart exists to make. Darker and a
                     pixel wider than the two bounds, so the three are never confused. */}
+                {/* ⚠ SAME WHOLE-PIXEL RULE as the composition tick — see its note. */}
                 {bandOf.get(s.bucket)?.default_pct != null && (
-                  <span className="absolute inset-y-0 w-[3px] rounded-sm bg-neutral-800/85 pointer-events-none"
-                    style={{ left: `calc(${bandOf.get(s.bucket)!.default_pct}% - 1.5px)` }} />
+                  <span className="absolute inset-y-0 w-[4px] rounded-sm bg-neutral-800/85 pointer-events-none"
+                    style={{ left: `calc(${bandOf.get(s.bucket)!.default_pct}% - 2px)` }} />
                 )}
               </span>
               {/* Direct value label, in INK — text wears text tokens; the bar beside it carries the
@@ -572,7 +573,7 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           Portfolio
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="inline-block w-[3px] h-3 rounded-sm" style={{ background: SERIES.benchmark }} />
+          <span className="inline-block w-[4px] h-3 rounded-sm" style={{ background: SERIES.benchmark }} />
           {benchmark}
         </span>
       </div>
@@ -600,9 +601,21 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
                   <span className="absolute inset-y-[3px] left-0 rounded"
                     style={{ width: `${Math.min(100, p)}%`, minWidth: 3, background: SERIES.portfolio }} />
                 )}
+                {/* ⚠⚠ A WHOLE-PIXEL WIDTH AND A WHOLE-PIXEL OFFSET, AND THAT IS THE FIX. At
+                    `w-[3px]` with `calc(X% - 1.5px)` the mark was CENTRED on a half pixel, so
+                    every tick straddled a device-pixel boundary and the browser antialiased it —
+                    reported, correctly, as "sometimes thicker than other times". The width never
+                    varied; the rasterisation did, spreading 3px of solid colour across 4px of
+                    washed-out colour whenever the boundary fell mid-mark. 4px centred at -2px
+                    removes the systematic half-pixel error and leaves only the fractional part
+                    of `X%` itself, which is a smaller share of a wider mark.
+                    ⚠ IT CANNOT BE MADE EXACT IN CSS. `X%` of a flex-sized track is a fractional
+                    number of pixels by nature; only snapping the computed offset (a measured
+                    track width, or `round()`) is pixel-perfect, and neither is worth it for a
+                    reference tick. */}
                 {b > 0 && (
-                  <span className="absolute inset-y-0 w-[3px] rounded-sm"
-                    style={{ left: `calc(${Math.min(100, b)}% - 1.5px)`, background: SERIES.benchmark }} />
+                  <span className="absolute inset-y-0 w-[4px] rounded-sm"
+                    style={{ left: `calc(${Math.min(100, b)}% - 2px)`, background: SERIES.benchmark }} />
                 )}
               </span>
               {/* Colour-coded to the series they belong to (portfolio blue / benchmark amber), so
@@ -3226,17 +3239,22 @@ export default function PortfolioAnalysisModal({
                       selected={bucket?.axis === a.axis ? bucket.bucket : null} />
                   ))}
                 </div>
-                {/* ⚠⚠ THE BUCKET PANEL STAYS IN FLOW; RISK AND ATTRIBUTION DO NOT. This one is
-                    opened by clicking a BAR in the chart directly above it, so appearing beneath
-                    that bar is the right answer — it is already beside what opened it. The other
-                    two are opened from buttons at the TOP of the modal and used to render here,
-                    a screen further down, which is why they are dialogs now. See `PanelDialog`. */}
+                {/* ⚠⚠ A DIALOG, NOT AN IN-FLOW DOCK (2026-08-25) — REVERSING THE NOTE THAT USED
+                    TO SIT HERE. That note argued this panel belongs beneath the bar that opened
+                    it, "already beside its context". Two things undid it. The charts sit in a
+                    THREE-COLUMN grid, so the dock lands below all three rather than under the
+                    bar clicked — the adjacency it claimed only ever held for the first chart.
+                    And an in-flow panel PUSHES everything under it, so opening one moves the
+                    rest of the modal out from under the reader, which is the same complaint
+                    that made Risk and Attribution dialogs. The three drill-downs now behave
+                    identically. ⚠ `PanelDialog` still mounts INSIDE this content box — see its
+                    header for why a sibling backdrop would dismiss both at once. */}
                 {bucket && (
-                  <div className="mt-4">
+                  <PanelDialog onClose={() => setBucket(null)}>
                     <BucketDetailPanel id={id ?? 0} benchmark={data.benchmark ?? benchmark}
                       axis={bucket.axis} bucket={bucket.bucket} source={source}
                       onClose={() => setBucket(null)} />
-                  </div>
+                  </PanelDialog>
                 )}
               </>
             )}

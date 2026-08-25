@@ -374,6 +374,15 @@ def _prepare(members: list[dict], kind: str, bucket=year_bucket) -> tuple[list[d
                    # a continuation must not restart the index at 100. See `blend_series`.
                    "continues": bool(m.get("base_points")),
                    "by_year": _latest_per_bucket(pts, bucket),
+                   # ⚠⚠ BUCKETED BY THE SAME FUNCTION AS THE VALUES, AND THAT IS THE WHOLE
+                   # REQUIREMENT. The caller keys its EUR totals by FILING DATE; the chain walks
+                   # BUCKETED periods ("2015", or "2025-Q3"). Left unbucketed every lookup misses,
+                   # `fund` comes back empty, and the aggregate branch silently never fires —
+                   # which is exactly how it first shipped: three metrics, identical numbers on
+                   # both paths, and nothing to say the new one had not run.
+                   "fund_by_year": _latest_per_bucket(
+                       {d: float(v) for d, v in (m.get("fund_points") or {}).items()
+                        if v is not None}, bucket),
                    "raw_by_year": _latest_per_bucket(raw, bucket)})
     return ok, dropped
 
@@ -533,11 +542,19 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket) -> d
         # periods are in it: a member that has not reported since still holds its last figure, so
         # its growth over the interval is correctly zero rather than absent.
         p["at"] = {}
+        # ⚠ THE MEMBER'S OWN EUR TOTAL PER PERIOD, when the caller supplied one — see the
+        # aggregate branch below. Keyed the same way as `at` so the two cannot fall out of step.
+        p["fund"] = {}
         for period, (v, reported) in carry_forward(p["by_year"], axis).items():
             w = _weight_at(p, period)
             if not w:
                 continue
             p["at"][period] = v
+            # ⚠ `_latest_per_bucket` STORES `(date, value)`, not a bare value — the date is what
+            # lets it keep the LATEST filing when a member reports twice in one period.
+            fv = (p.get("fund_by_year") or {}).get(period)
+            if fv is not None:
+                p["fund"][period] = float(fv[1])
             by_date[period].append((abs(float(w)), v))
             if reported:
                 cover_w[period] += abs(float(p.get("weight") or 0))
@@ -557,7 +574,72 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket) -> d
                 "covered_names_pct": round(100.0 * cover_n[d] / total_n, 2)}
 
     out: list[dict] = []
-    if kind == "level":
+    if kind == "level" and any(p["fund"] for p in prepared):
+        # ⚠⚠ THE AGGREGATE PATH: SUM THE EUROS, DO NOT AVERAGE THE GROWTH RATES.
+        #
+        # The chain below this one takes each member's own growth and averages those growths by
+        # MARKET CAP. That is the wrong weight for a fundamental and it is biased upward:
+        #
+        #   * WRONG WEIGHT. Growth of a sum is Sum(v_i(d)) / Sum(v_i(a)) - 1, which is each
+        #     member's growth weighted by ITS SHARE OF THE TOTAL BEING GROWN. Weighting by cap
+        #     instead gives a company with a big valuation and small cash flow a big vote on cash
+        #     flow growth. Cap is the right weight for a PRICE index, where cap IS the quantity.
+        #   * UPWARD BIAS. A growth rate is floored at -100% and unbounded above, so averaging an
+        #     asymmetric distribution is biased, and the bias scales with DISPERSION. Measured on
+        #     ACWI (`scripts/diagnose_blend_steps.py`), cutting the accepted-growth cap from
+        #     +10,000% to +1,000% costs `revenue` 0.03pp a year and `fcf_ps` 4.06pp — revenue's
+        #     growth rates are tight, FCF/share's are not (p99 +706%, p99.9 +2,183%).
+        #
+        # ⚠⚠ AND THIS IS STILL THE CAP-WEIGHTED ANSWER, which is the part that is easy to doubt.
+        # A cap-weighted index holds the SAME FRACTION of every company: buying w_i = cap_i/Sum
+        # cap of each at price p_i leaves you n_i = cap_i/(Sum cap * p_i) = shares_i / Sum cap —
+        # the price cancels. So the claim on a fundamental is (1/Sum cap) * Sum F_i, exactly
+        # proportional to the sum. Cap weighting enters through the SHARE COUNT inside F_i, not
+        # as a weight on a growth rate. A portfolio is the same statement with its own weights:
+        # its claim is w_i * F_i / cap_i, and the caller supplies that instead.
+        #
+        # ⚠ NO GUARDS HERE, AND NONE ARE NEEDED. Every refusal in `step_growth` — non-positive
+        # base, immaterial base, the growth cap, the -100% floor — exists because that path takes
+        # a ratio of a member TO ITSELF. A sum never does: a member at -200 subtracts 200 and a
+        # later +200 adds them back, so a round trip through zero nets out instead of being
+        # floored one year and refused the next.
+        #
+        # ⚠⚠ EACH STEP IS SUMMED OVER THE MEMBERS PRESENT AT **BOTH** ENDS. A sum changes when
+        # its members change, so comparing Sum(everyone with a 2025 figure) against Sum(everyone
+        # with a 2015 one) reports composition as growth. Intersecting per step is what makes the
+        # ratio a growth rate — the same discipline the growth path gets for free, since a member
+        # that cannot span a step simply has no `g`.
+        anchor: str | None = None
+        level = 100.0
+        for d in sorted(by_date):
+            if not _clears(d):
+                continue
+            if anchor is None:
+                anchor = d
+                out.append(_point(d, level))
+                continue
+            both = [p for p in prepared
+                    if p["fund"].get(anchor) is not None and p["fund"].get(d) is not None]
+            prev_sum = sum(p["fund"][anchor] for p in both)
+            now_sum = sum(p["fund"][d] for p in both)
+            # ⚠ A NON-POSITIVE AGGREGATE HAS NO RATIO. Vanishingly unlikely for an index and
+            # possible for a small book, and the honest answer is to leave the step undrawn
+            # rather than to invent a sign.
+            if not both or prev_sum <= 0:
+                continue
+            # ⚠⚠ AND THE NUMERATOR TOO — GUARDING ONLY THE DIVISOR IS NOT ENOUGH. A negative
+            # aggregate makes the ratio negative, the level negative, and every later point a
+            # sign-flipped nonsense that a log axis cannot draw. The growth path ends its series
+            # for the same case (`1 + step <= 0`) and for the same reason: a line that STOPS is
+            # visible where unplottable points are not. It should be unreachable for an index —
+            # aggregate free cash flow is deeply positive — so reaching it means the totals are
+            # wrong, and stopping is how that becomes noticeable.
+            if now_sum <= 0:
+                break
+            level *= now_sum / prev_sum
+            out.append(_point(d, level))
+            anchor = d
+    elif kind == "level":
         # ⚠⚠ A LEVEL SERIES IS CHAINED FROM WEIGHTED **GROWTH**, NOT AVERAGED FROM REBASED LEVELS.
         # Between two drawn points the index moves by the cap-weighted average of what its
         # constituents actually did over exactly that interval:

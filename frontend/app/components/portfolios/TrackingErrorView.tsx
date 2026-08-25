@@ -25,6 +25,8 @@ import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { v } from '../../../lib/dynamicValue';
+import { dayOf } from './asOfLine';
+import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
 import { traceError } from '../../../lib/debugTrace';
 import { withWorked, subNum, subPct2, workedBand } from './workedFormula';
 import { oneSigmaBand } from './activeBand';
@@ -40,6 +42,33 @@ const FREQS = [
 
 const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
 
+/**
+ * EVERY SYMBOL THIS VIEW USES, DEFINED ONCE.
+ *
+ * ⚠⚠ FOUR CARDS SHARE `aₜ`, `T` AND `f`. Written out per tile, the definitions drift on the first
+ * edit — and a view where `T` means "paired periods" in one tooltip and "observations" in the next
+ * has taught the reader that the symbol is decorative. One variable, one sentence, four cards.
+ *
+ * ⚠ THE "the answer:" PREFIX MARKS THE SYMBOL THE TILE ACTUALLY PRINTS, so a reader scanning a
+ * six-row legend can find the one that is the number in front of them.
+ */
+const LEGEND = {
+  a: 'the active return in period t — what the sleeve did that period, minus what the tracker did',
+  R: (bookName: string, bench: string | null | undefined) =>
+    `${v(bookName)}'s and ${v(bench)}'s own returns in that period, both in EUR`,
+  aBar: 'the mean active return over the window — the band above is centred on it, not on zero',
+  T: (n: number | null | undefined) =>
+    `the number of paired periods (${v(n)} here) — the intersection of the two calendars`,
+  f: (n: number | null | undefined) => `periods per year (${v(n)}), the annualisation factor`,
+  te: 'one standard deviation of the active return, per year',
+  // ⚠ THE PRODUCT IS THE POINT OF THIS TILE, and it is what separates it from the mean the TE card
+  // uses: chaining the periods answers what the gap actually grew to, averaging them does not.
+  prod: 'the periods CHAINED, not averaged — this is what the gap compounded to, which is why it '
+    + 'sits slightly below the arithmetic mean the band on the tracking-error tile is centred on',
+  Ra: 'the active return from the tile beside this one, annualised',
+  IR: 'the answer: active return per unit of the tracking error taken to earn it',
+};
+
 function Tile({ label, value, tone, info }: {
   label: string; value: string; tone?: string; info?: React.ReactNode;
 }) {
@@ -53,9 +82,22 @@ function Tile({ label, value, tone, info }: {
   );
 }
 
-export default function TrackingErrorView({ holdings, benchmark }: {
+export default function TrackingErrorView({
+  holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource,
+}: {
   holdings: ActiveShareHolding[];
   benchmark: string;
+  /**
+   * The book's identity, forwarded from the panel — see the ⚠ on `ActiveSharePanel`'s own props.
+   *
+   * ⚠ THIS VIEW HAS TWO CLOCKS AND THEY ARE NOT THE SAME ONE. The WEIGHTS are today's book at its
+   * AIRS valuation date; the RETURNS are a five-year price window ending at the last close both
+   * series shared. A card that named only one would date half of what it measured.
+   */
+  portfolioName: string;
+  portfolioAsOf?: string | null;
+  portfolioFetchedAt?: string | null;
+  portfolioSource: SourceKey;
 }) {
   const [data, setData] = useState<TrackingError | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +147,34 @@ export default function TrackingErrorView({ holdings, benchmark }: {
   const band = oneSigmaBand(
     data?.mean_active_per_period_pct, data?.periods_per_year, data?.tracking_error_pct);
 
+  /**
+   * WHAT EVERY CARD IN THIS VIEW IS MEASURED FROM, built once.
+   *
+   * ⚠ FOUR CARDS, ONE PAIR OF INPUTS. Each tile is a different reading of the SAME paired series,
+   * so four separately-worded Wheres would be four places for the sources to drift — and two tiles
+   * naming different vendors for one number is unreconcilable from the outside.
+   */
+  const where = data?.available
+    ? `${v(data.observations)} ${v(data.frequency)} active returns, prices from `
+      + `${v(sourceField('yfinance'))} at ${v(sourceVendor('yfinance'))}, weights from `
+      + `${v(sourceLabel(portfolioSource))}, against ${v(data.benchmark)}'s tracker `
+      + `${v(data.benchmark_isin ?? 'not resolved')}.`
+    : '';
+
+  /**
+   * ⚠⚠ TWO CLOCKS, BOTH STATED. The returns span a real window that is NOT "five years back from
+   * today" — a recently-listed holding shortens the grid and a stale series ends it early — and the
+   * WEIGHTS are today's book at its own AIRS valuation date. The card used to say "trailing window
+   * — the sleeve as it stands today, carried backwards", which asserted both and dated neither.
+   */
+  const when = data?.available
+    ? `Returns: ${v(data.window_from ?? 'no recorded start')} to `
+      + `${v(data.window_to ?? 'no recorded end')} (${v(data.observations)} periods)\n`
+      + `${v(portfolioName)} weights: ${v(dayOf(portfolioAsOf) ?? 'no recorded date')}`
+      + `${dayOf(portfolioFetchedAt) && dayOf(portfolioFetchedAt) !== dayOf(portfolioAsOf)
+        ? ` (read ${v(dayOf(portfolioFetchedAt))})` : ''}`
+    : '';
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
@@ -134,8 +204,8 @@ export default function TrackingErrorView({ holdings, benchmark }: {
             <Tile label="Tracking error (realised)" value={pct2(data.tracking_error_pct)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="How much the book's return has diverged from the benchmark's, annualised."
-                where={`${v(data.observations)} ${v(data.frequency)} active returns over ${v(data.years)} years, against ${v(data.benchmark)}'s tracker.`}
-                when="Trailing window — the sleeve as it stands today, carried backwards."
+                where={where}
+                when={when}
                 worked={data.tracking_error_pct == null ? '' : withWorked(
                   String.raw`a_t = R_t^{\,p} - R_t^{\,b}\quad\Rightarrow\quad TE = \sqrt{\dfrac{\sum_t (a_t - \bar{a})^2}{T - 1}}\;\sqrt{f}`,
                   String.raw`T = ${data.observations},\; f = ${data.periods_per_year}`
@@ -146,12 +216,12 @@ export default function TrackingErrorView({ holdings, benchmark }: {
                   // one aligned display rather than as a formula with a sentence stuck under it.
                   + (band ? String.raw` \\[4pt] ` + workedBand(band) : ''))}
                 legend={[
-                  { sym: String.raw`a_t`, is: 'the active return in period t — what the sleeve did that period, minus what the tracker did' },
-                  { sym: String.raw`R_t^{\,p},\; R_t^{\,b}`, is: `the sleeve's and ${v(data.benchmark)}'s own returns in that period, both in EUR` },
-                  { sym: String.raw`\bar{a}`, is: 'the mean active return over the window — the band above is centred on it, not on zero' },
-                  { sym: 'T', is: `the number of paired periods (${v(data.observations)} here) — the intersection of the two calendars` },
-                  { sym: 'f', is: `periods per year (${v(data.periods_per_year)}), the annualisation factor` },
-                  { sym: String.raw`TE`, is: 'the answer: one standard deviation of the active return, per year' },
+                  { sym: String.raw`a_t`, is: LEGEND.a },
+                  { sym: String.raw`R_t^{\,p},\; R_t^{\,b}`, is: LEGEND.R(portfolioName, data.benchmark) },
+                  { sym: String.raw`\bar{a}`, is: LEGEND.aBar },
+                  { sym: 'T', is: LEGEND.T(data.observations) },
+                  { sym: 'f', is: LEGEND.f(data.periods_per_year) },
+                  { sym: String.raw`TE`, is: `the answer: ${LEGEND.te}` },
                 ]}
                 how={(band
                   ? `A typical year lands ā ± TE — between ${v(subPct2(band.lo))} and `
@@ -171,7 +241,18 @@ export default function TrackingErrorView({ holdings, benchmark }: {
               tone={(data.active_return_ann_pct ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300'}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="What the sleeve earned above or below the benchmark, per year."
-                where="The same active returns, compounded — not their spread."
+                where={where}
+                when={when}
+                worked={data.active_return_ann_pct == null ? '' : withWorked(
+                  String.raw`\left( \prod_t (1 + a_t) \right)^{f/T} - 1`,
+                  String.raw`T = ${data.observations},\; f = ${data.periods_per_year}`
+                  + String.raw` \;\Rightarrow\; ${subNum(data.active_return_ann_pct, 2)}\%`)}
+                legend={[
+                  { sym: String.raw`a_t`, is: LEGEND.a },
+                  { sym: String.raw`\prod_t`, is: LEGEND.prod },
+                  { sym: 'T', is: LEGEND.T(data.observations) },
+                  { sym: 'f', is: LEGEND.f(data.periods_per_year) },
+                ]}
                 how={'⚠ THIS IS THE QUANTITY THE TILE BESIDE IT MEASURES THE VOLATILITY OF. They '
                   + 'are constantly confused: a book can wander a long way from its index and end '
                   + 'up exactly level, which is a large tracking error and no active return.'} />} />} />
@@ -180,17 +261,26 @@ export default function TrackingErrorView({ holdings, benchmark }: {
               tone={(data.information_ratio ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300'}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="Active return per unit of tracking error."
-                where="Active return ÷ tracking error, both annualised."
+                where={where}
+                when={when}
                 worked={data.information_ratio == null || data.tracking_error_pct == null ? ''
-                  : String.raw`\dfrac{${subNum(data.active_return_ann_pct ?? 0, 2)}\%}`
+                  : withWorked(
+                    String.raw`IR = \dfrac{R_a}{TE}`,
+                    String.raw`\dfrac{${subNum(data.active_return_ann_pct ?? 0, 2)}\%}`
                     + String.raw`{${subNum(data.tracking_error_pct, 2)}\%}`
-                    + ` = ${data.information_ratio.toFixed(2)}`}
+                    + ` = ${data.information_ratio.toFixed(2)}`)}
+                legend={[
+                  { sym: 'R_a', is: LEGEND.Ra },
+                  { sym: String.raw`TE`, is: LEGEND.te },
+                  { sym: String.raw`IR`, is: LEGEND.IR },
+                ]}
                 how={'Whether the divergence was worth taking. ⚠ A dash means the tracking error '
                   + 'is ~0 — there is no risk to divide by, not that the ratio is zero.'} />} />} />
             <Tile label="Observations" value={`${data.observations}`} tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={`The T in the formula — ${v(data.frequency)} periods both series had.`}
-                where="The INTERSECTION of the two calendars, never a positional pairing."
+                where={where}
+                when={when}
                 how={'A Stockholm listing and a London-traded tracker do not share holidays; '
                   + 'zipping them offsets the two series from the first mismatch onward and '
                   + 'produces a plausible figure measured against the wrong days.'} />} />} />
@@ -201,7 +291,12 @@ export default function TrackingErrorView({ holdings, benchmark }: {
           )}
 
           <p className="text-[11px] text-fg-faint leading-relaxed">
-            {`Today's stock sleeve at today's weights, carried back ${data.years} years — `}
+            {/* ⚠ THE BOOK IS NAMED AND THE WINDOW IS DATED, same rule as the cards above — see the
+                ⚠⚠ on `when`. "Today's sleeve carried back 5 years" asserted a start date rather
+                than reporting one, and the grid rarely reaches the full five. ⚠ NOT badged: this
+                is a plain <p> outside the card system, and `v()` only renders inside one. */}
+            {`${portfolioName}'s stock sleeve at its current weights, priced from `}
+            {`${data.window_from ?? 'an unrecorded start'} to ${data.window_to ?? 'an unrecorded end'} — `}
             not the book&apos;s realised history, so a name bought in March contributes its January
             return. It is the same portfolio the Active share view describes.
             {data.avg_weight_covered_pct != null && data.avg_weight_covered_pct < 99.5 && (

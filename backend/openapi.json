@@ -10630,6 +10630,33 @@
             "title": "Benchmark",
             "type": "string"
           },
+          "benchmark_caps_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Caps From"
+          },
+          "benchmark_caps_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Caps To"
+          },
+          "benchmark_caps_unstamped": {
+            "default": 0,
+            "title": "Benchmark Caps Unstamped",
+            "type": "integer"
+          },
           "benchmark_covered_pct": {
             "anyOf": [
               {
@@ -11009,6 +11036,17 @@
             ],
             "title": "Current Drawdown Pct"
           },
+          "episode_threshold_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Episode Threshold Pct"
+          },
           "episodes": {
             "default": [],
             "items": {
@@ -11016,6 +11054,11 @@
             },
             "title": "Episodes",
             "type": "array"
+          },
+          "episodes_over_threshold": {
+            "default": 0,
+            "title": "Episodes Over Threshold",
+            "type": "integer"
           },
           "episodes_total": {
             "default": 0,
@@ -11079,6 +11122,28 @@
             "default": 0,
             "title": "Total Holdings",
             "type": "integer"
+          },
+          "window_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window From"
+          },
+          "window_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window To"
           },
           "worst": {
             "anyOf": [
@@ -11611,6 +11676,17 @@
             "title": "Benchmark",
             "type": "string"
           },
+          "benchmark_best_period_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Best Period Pct"
+          },
           "benchmark_downside_dev_pct": {
             "anyOf": [
               {
@@ -11621,6 +11697,17 @@
               }
             ],
             "title": "Benchmark Downside Dev Pct"
+          },
+          "benchmark_negative_periods_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Negative Periods Pct"
           },
           "benchmark_return_ann_pct": {
             "anyOf": [
@@ -11633,6 +11720,28 @@
             ],
             "title": "Benchmark Return Ann Pct"
           },
+          "benchmark_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Sharpe"
+          },
+          "benchmark_sortino": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Sortino"
+          },
           "benchmark_volatility_pct": {
             "anyOf": [
               {
@@ -11643,6 +11752,17 @@
               }
             ],
             "title": "Benchmark Volatility Pct"
+          },
+          "benchmark_worst_period_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Worst Period Pct"
           },
           "best_period_pct": {
             "anyOf": [
@@ -11778,6 +11898,28 @@
               }
             ],
             "title": "Volatility Pct"
+          },
+          "window_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window From"
+          },
+          "window_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window To"
           },
           "worst_period_pct": {
             "anyOf": [
@@ -12928,6 +13070,17 @@
             "title": "Observations",
             "type": "integer"
           },
+          "pair_rho_sum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pair Rho Sum"
+          },
           "pairs_measured": {
             "default": 0,
             "title": "Pairs Measured",
@@ -12986,6 +13139,28 @@
             "default": 0,
             "title": "Total Holdings",
             "type": "integer"
+          },
+          "window_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window From"
+          },
+          "window_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window To"
           },
           "years": {
             "anyOf": [
@@ -14029,6 +14204,28 @@
               }
             ],
             "title": "Tracking Error Pct"
+          },
+          "window_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window From"
+          },
+          "window_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window To"
           },
           "years": {
             "anyOf": [

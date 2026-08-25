@@ -44,7 +44,6 @@ import CorrelationView from './CorrelationView';
 import VolatilityView from './VolatilityView';
 import DrawdownView from './DrawdownView';
 import ConcentrationView from './ConcentrationView';
-import ExposureView from './ExposureView';
 
 /**
  * ONE BODY FOR ALL SEVEN RISK VIEWS.
@@ -159,7 +158,7 @@ export default function ActiveSharePanel({
    * every open would make the cheap view as slow as the expensive one.
    */
   const [view, setView] =
-    useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc' | 'exp'>('active');
+    useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc'>('active');
 
   // ⚠ THE BODY IS THE DEPENDENCY, NOT AN OBJECT IDENTITY. `holdings` is rebuilt on every render of
   // the parent, so depending on the array itself would refetch forever.
@@ -246,12 +245,12 @@ export default function ActiveSharePanel({
               one of these". The filter chips elsewhere in this modal are separate pills because
               they mean "any of these"; borrowing that look here would promise both views at once.
               See the ⚠ on `Chip` in `TablesTab` for the same distinction. */}
-          {/* ⚠ `flex-wrap`, NOT `inline-flex` — at six positions the row is wider than a
+          {/* ⚠ `flex-wrap`, NOT `inline-flex` — at six positions the row was wider than a
               narrow dialog, and an overflowing segmented control silently hides its last option.
               Wrapping keeps every view reachable; the joined look survives via the shared border. */}
           <div className="flex flex-wrap mt-2 rounded-lg border border-neutral-800/40
             overflow-hidden max-w-full">
-            {/* ⚠⚠ SIX RISK MEASURES, AND ATTRIBUTION IS DELIBERATELY NOT THE SEVENTH. Every one
+            {/* ⚠⚠ FIVE RISK MEASURES, AND ATTRIBUTION IS DELIBERATELY NOT THE SIXTH. Every one
                 of these describes the SHAPE of the book — how far it sits from the index, how far
                 that gap has moved, how much of the movement is shared, how much it varies, how
                 deep it has fallen, and how few names it is. Attribution DECOMPOSES the active
@@ -261,7 +260,7 @@ export default function ActiveSharePanel({
             {/* ⚠ THE KEYS DRIVE THE ORDER, THE COPY TABLE DRIVES THE WORDS — a label typed
                 here in one language is exactly the drift `riskCopy`'s compile-time guarantee
                 exists to prevent. */}
-            {(['active', 'te', 'corr', 'vol', 'dd', 'conc', 'exp'] as const).map((k) => (
+            {(['active', 'te', 'corr', 'vol', 'dd', 'conc'] as const).map((k) => (
               <button key={k} type="button" onClick={() => setView(k)}
                 aria-pressed={view === k}
                 className={`cursor-pointer px-3 py-1 text-[11px] transition-colors ${
@@ -286,22 +285,32 @@ export default function ActiveSharePanel({
           lazy load real rather than merely hidden. It takes the SAME holdings, so both views
           describe one portfolio; see `compute_tracking_error`. */}
       {view === 'te' && (
-        <TrackingErrorView holdings={holdings} benchmark={data?.benchmark ?? benchmark} />
+        <TrackingErrorView holdings={holdings} benchmark={data?.benchmark ?? benchmark}
+          // ⚠ THE SAME BOOK IDENTITY THE ACTIVE-SHARE CARDS CARRY. This view measures the same
+          // sleeve, so its cards owe the reader the same answer to "whose weights, read when, from
+          // where" — and a second copy of those facts would be a second thing to keep true.
+          portfolioName={portfolioName} portfolioAsOf={portfolioAsOf}
+          portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'corr' && (
-        <CorrelationView holdings={holdings} benchmark={data?.benchmark ?? benchmark} />
+        <CorrelationView holdings={holdings} benchmark={data?.benchmark ?? benchmark}
+          portfolioName={portfolioName} portfolioAsOf={portfolioAsOf}
+          portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'vol' && (
-        <VolatilityView holdings={holdings} benchmark={data?.benchmark ?? benchmark} />
+        <VolatilityView holdings={holdings} benchmark={data?.benchmark ?? benchmark}
+          portfolioName={portfolioName} portfolioAsOf={portfolioAsOf}
+          portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'dd' && (
-        <DrawdownView holdings={holdings} benchmark={data?.benchmark ?? benchmark} />
+        <DrawdownView holdings={holdings} benchmark={data?.benchmark ?? benchmark}
+          portfolioName={portfolioName} portfolioAsOf={portfolioAsOf}
+          portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'conc' && (
-        <ConcentrationView holdings={holdings} benchmark={data?.benchmark ?? benchmark} />
-      )}
-      {view === 'exp' && (
-        <ExposureView holdings={holdings} benchmark={data?.benchmark ?? benchmark} />
+        <ConcentrationView holdings={holdings} benchmark={data?.benchmark ?? benchmark}
+          portfolioName={portfolioName} portfolioAsOf={portfolioAsOf}
+          portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
 
       {/* ⚠ CENTRED, BECAUSE THE BOX NO LONGER SHRINKS TO THEM. One line of text in the top
@@ -426,13 +435,39 @@ export default function ActiveSharePanel({
             </button>
           </div>
 
-          {/* ⚠ NO HEIGHT CAP OF ITS OWN ANY MORE. The dialog is fixed and its body scrolls,
-              so a second cap here would nest one scrollbar inside another — and the outer
-              one would have nothing to scroll, which is the shape that feels broken. */}
-          <div className="rounded-lg border border-neutral-800/40">
+          {/* ⚠⚠ THE TABLE SCROLLS IN ITS OWN BOX AGAIN (2026-08-25), REVERSING THE NOTE THAT USED
+              TO SIT HERE. That note said a cap would "nest one scrollbar inside another — and the
+              outer one would have nothing to scroll". The first half is true and the second is
+              not: the outer box still scrolls the tiles, the coverage note and the filter chips.
+              What the cap buys is the only thing that reliably fixes a sticky header — a
+              SCROLLPORT THE HEADER BELONGS TO. Pinned to the shared panel body, the header
+              depended on `position: sticky` being honoured on a table section across the whole
+              ancestor chain, and it was not: rows rode straight over it, through two attempts at
+              fixing the paint order. Sticking a cell to the top of the box it actually lives in is
+              the most-tested table pattern there is, and it is what the mobile rule in the project
+              docs already asks for ("keep dense tables inside their own overflow-auto container").
+              ⚠ `max-h`, NOT `h` — a short book must not get a half-empty box with a scrollbar. */}
+          <div className="rounded-lg border border-neutral-800/40 max-h-[55vh] overflow-auto">
             <table className="w-full text-xs">
-              <thead className="sticky top-0 bg-inset">
-                <tr className="text-fg-faint [&>th]:px-2.5 [&>th]:py-1 [&>th]:font-medium">
+              {/* ⚠⚠ STICKY AND THE BACKGROUND BOTH SIT ON THE `<th>` CELLS, NOT ON `<thead>`, AND
+                  THAT IS THE WHOLE FIX. Two separate reasons, either of which alone produces the
+                  reported symptom — rows travelling over a header that should absorb them:
+
+                  1. `position: sticky` ON A TABLE SECTION IS NOT UNIVERSALLY IMPLEMENTED. Several
+                     engines honour it only on `<th>`/`<td>`, and one that ignores it on `<thead>`
+                     lets the header scroll away with the rows rather than pinning at all.
+                  2. Tailwind's preflight sets `border-collapse: collapse`, and under collapse a
+                     background painted on `<thead>` or `<tr>` sits BELOW the cells of the rows
+                     passing it. `#eef3fa` is fully opaque, so this was never a transparency
+                     problem and darkening the token would not have fixed it — a `<th>` background
+                     paints in the cell's own layer and covers what goes underneath.
+
+                  ⚠ `z-10` BECAUSE STICKY ALONE ONLY WINS AGAINST NON-POSITIONED CONTENT, and the
+                  rows are not that: `Bar` uses `relative`/`absolute` for its bars, so its spans
+                  paint in the positioned phase and would sit over a z-auto header. */}
+              <thead>
+                <tr className="text-fg-faint [&>th]:px-2.5 [&>th]:py-1 [&>th]:font-medium
+                  [&>th]:sticky [&>th]:top-0 [&>th]:z-10 [&>th]:bg-inset">
                   <th className="text-left">{t.active.colCompany}</th>
                   <th className="text-right">{t.active.colBook}</th>
                   <th className="text-right">{data.benchmark ?? benchmark}</th>
@@ -474,9 +509,12 @@ export default function ActiveSharePanel({
                   one row that reconciles this table to the tiles above it.
                   ⚠ A SOLID BACKGROUND IS LOAD-BEARING: the rows scroll UNDER it, and at any
                   alpha the digits of two rows overlap. */}
-              <tfoot className="sticky bottom-0 bg-inset">
+              {/* ⚠ SAME TREATMENT AS THE HEADER AND FOR BOTH THE SAME REASONS — see above. Rows
+                  pass under this end too, so it carried the identical bug. */}
+              <tfoot>
                 <tr className="[&>td]:px-2.5 [&>td]:py-1.5 [&>td]:border-t
-                  [&>td]:border-neutral-700/60 font-medium">
+                  [&>td]:border-neutral-700/60 [&>td]:sticky [&>td]:bottom-0 [&>td]:z-10
+                  [&>td]:bg-inset font-medium">
                   <td className="text-fg-soft">
                     {showAll ? t.active.totalAll(rows.length) : t.active.totalHeld(rows.length)}
                     <InfoTip className="ml-1" content={<AspectCard

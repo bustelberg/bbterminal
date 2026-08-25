@@ -122,6 +122,12 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
         "periods_per_year": ppy,
         "observations": len(a),
         "years": years,
+        # ⚠ THE WINDOW THE PAIRED GRID ACTUALLY REACHED, not `years` back from today — identical
+        # reasoning to `_tracking_error`, and it must be the SAME two dates because both views read
+        # one `build_paired_series`. Two panels quoting different windows for one series is the
+        # discrepancy the shared builder exists to make impossible.
+        "window_from": (dates[0] if (dates := sorted(d for d in built["obs_dates"] if d)) else None),
+        "window_to": (dates[-1] if dates else None),
 
         # ── portfolio vs benchmark ──
         # ⚠ NOT ROUNDED HERE. `r_squared` below is ρ², and rounding ρ in the payload while squaring
@@ -145,6 +151,11 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
         "labels": labels,
         "matrix": grid,
         "mean_pair_corr": None if mean_rho is None else round(mean_rho, 4),
+        # ⚠ THE NUMERATOR, so the card can print the division instead of asserting its answer. It
+        # cannot be rebuilt on the client from `mean_pair_corr × pairs_measured`: the mean is
+        # rounded to 4dp, so over ~950 pairs that reconstruction drifts in the digits it is meant
+        # to justify — and deriving an operand FROM the result is backwards in any case.
+        "pair_rho_sum": (sum(r["rho"] for r in pairs) if pairs else None),
         "pairs_measured": len(pairs),
         "min_pair_observations": MIN_PAIR_OBS,
         "least_correlated": by_rho[:_TOP_PAIRS],

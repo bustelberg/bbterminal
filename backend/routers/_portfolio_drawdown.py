@@ -39,6 +39,19 @@ from routers._tracking_error import PERIODS, SeriesError, build_paired_series
 #: a different risk from one with four −25%s, and the max is identical.
 _TOP_N = 5
 
+#: How deep a fall has to be to be COUNTED as an episode on the panel.
+#:
+#: ⚠⚠ `drawdown_episodes` FILTERS NOTHING — it returns every peak→trough→recovery cycle, and on
+#: a daily series most of those are a bad afternoon that recovered the next session. Counting
+#: them answers no question anybody has: a book is not risky for having dipped 0.4% and come
+#: back. The tile has always been labelled "Falls over 5%"; until now it reported the unfiltered
+#: total under that label, so the number contradicted its own heading.
+#:
+#: ⚠ THE FULL COUNT IS STILL RETURNED beside it. The point of this tile is whether the maximum
+#: was an event or a pattern, and "6 falls over 5%, 68 in all" answers that better than either
+#: number alone.
+_EPISODE_MIN_DEPTH_PCT = -5.0
+
 
 def drawdown_episodes(returns: list[float], dates: list[str | None]) -> list[dict]:
     """Every peak→trough→recovery episode in the series, deepest first.
@@ -166,6 +179,11 @@ def compute_drawdown(holdings: list[dict], benchmark: str,
         "periods_per_year": built["periods_per_year"],
         "observations": len(built["portfolio"]),
         "years": years,
+        # ⚠ THE WINDOW THE PAIRED GRID REACHED — the same two dates the tracking-error,
+        # correlation and volatility responses carry. Four views, one `build_paired_series`,
+        # one window; four different answers to "over what period" would be four bugs waiting.
+        "window_from": (dates[0] if (dates := sorted(d for d in built["obs_dates"] if d)) else None),
+        "window_to": (dates[-1] if dates else None),
 
         "max_drawdown_pct": _mdd(built["portfolio"]),
         "benchmark_max_drawdown_pct": _mdd(built["benchmark"]),
@@ -178,6 +196,9 @@ def compute_drawdown(holdings: list[dict], benchmark: str,
         "worst": worst,
         "episodes": episodes[:_TOP_N],
         "episodes_total": len(episodes),
+        "episodes_over_threshold": sum(1 for e in episodes
+                                       if e["depth_pct"] <= _EPISODE_MIN_DEPTH_PCT),
+        "episode_threshold_pct": _EPISODE_MIN_DEPTH_PCT,
 
         # ⚠ THE HONESTY REQUIREMENT: the same number at all three cadences, measured not claimed.
         "by_frequency": by_freq,
