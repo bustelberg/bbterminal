@@ -58,7 +58,9 @@ describe('buildBlend contributions', () => {
       const c = b.contrib.get(r)!['2024'];
       // What the cell's tooltip prints: `share × growth = pp`. If this drifts, the tooltip is
       // showing arithmetic that does not reach the number above it.
-      expect(c.sharePct * c.growthPct / 100).toBeCloseTo(c.pp, 10);
+      // ⚠ Both factors are non-null on the growth path; on the euro-sum path a member with a
+      // non-positive base has an exact pp and no factors at all. See `fund_by_period`.
+      expect(c.sharePct! * c.growthPct! / 100).toBeCloseTo(c.pp, 10);
     }
     expect(sumPp(b, rows, '2024')).toBeCloseTo(b.step['2024'].growthPct, 10);
   });
@@ -113,10 +115,10 @@ describe('buildBlend contributions', () => {
     expect(b.contrib.get(rows[0])!['2024'].pp).toBeCloseTo(20, 10);
   });
 
-  it('never contributes for a member the rebase excluded (the AMD case)', () => {
+  it('never contributes for a member with NO positive period at all', () => {
     const rows = [
       row('A', 50, { 2023: 100, 2024: 120 }),
-      row('B', 50, { 2023: -5, 2024: 10 }),     // negative first period ⇒ dropped from the line
+      row('B', 50, { 2023: -5, 2024: -10 }),    // never positive ⇒ no base to divide by
     ];
     const b = buildBlend(resp(['2023', '2024'], rows));
 
@@ -125,6 +127,30 @@ describe('buildBlend contributions', () => {
     expect(b.contrib.get(rows[1])).toBeUndefined();
     // And it is not in the denominator either: A carries the whole move.
     expect(b.contrib.get(rows[0])!['2024'].pp).toBeCloseTo(b.step['2024'].growthPct, 10);
+  });
+
+  it('⚠ KEEPS a member whose FIRST period is negative but which recovers (the AMD case)', () => {
+    /**
+     * ⚠⚠ THIS PINNED THE OPPOSITE UNTIL 2026-08-25, AND THE OLD ASSERTION WAS THE BUG. The client
+     * dropped any row whose first REPORTED period was ≤ 0, under a comment claiming it matched
+     * `_prepare` — which skips to the first POSITIVE period and keeps the member. So a company
+     * whose earliest year happened to be negative was in the CHART (server) and missing from the
+     * drill-down that explains it (client): a footer that cannot reach the line above it, and a
+     * Contribution column short by that company with nothing on screen wrong.
+     */
+    const rows = [
+      row('A', 50, { 2022: 100, 2023: 100, 2024: 120 }),
+      row('B', 50, { 2022: -5, 2023: 10, 2024: 20 }),   // recovers ⇒ rebased on 2023, kept
+    ];
+    const b = buildBlend(resp(['2022', '2023', '2024'], rows));
+
+    expect(b.excluded.has(rows[1])).toBe(false);
+    // Its pre-base period goes with the base — it has nothing at 2022, so it is not in that
+    // period's denominator and cannot move the 2022 → 2023 step.
+    expect(b.contrib.get(rows[1])?.['2023']).toBeUndefined();
+    // …and from its own base onward it is a full member: +100% at half the weight.
+    expect(b.contrib.get(rows[1])!['2024'].growthPct).toBeCloseTo(100, 10);
+    expect(sumPp(b, rows, '2024')).toBeCloseTo(b.step['2024'].growthPct, 10);
   });
 });
 
@@ -201,5 +227,104 @@ describe('the step is weighted at the anchor, not at the period', () => {
     // period's weight cannot be measured over the interval) reads 50, not 100.
     expect(buildBlend(resp(['2020', '2021'], [WINNER, LOSER])).step['2021'].spanPct)
       .toBeCloseTo(100, 10);
+  });
+});
+
+/**
+ * THE EURO-SUM CONSTRUCTION — the client twin of `blend_series`'s aggregate branch and
+ * `_level_breakdown`'s aggregate decomposition.
+ *
+ * ⚠⚠ THE TWO CONSTRUCTIONS DISAGREE BY MORE THAN 5pp/yr ON ACWI AND NEITHER LOOKS WRONG ON SCREEN.
+ * Averaging per-member growth rates weighted by MARKET CAP gives a company with a big valuation and
+ * small cash flow a big vote on cash-flow growth. Growth of a sum weights each member by its share
+ * of the total being grown, which is the only weight the question admits. Measured: ACWI revenue
+ * ~9.95%/yr averaged against +4.60%/yr summed; FCF/share +19.1% against +7.56%.
+ *
+ * ⚠ IT IS NOT ABOUT NEGATIVES. Revenue is never negative, so every zero-crossing rule is a no-op on
+ * it, and the gap above is entirely the weight.
+ */
+const fundRow = (isin: string, weight: number, revenue: Record<string, number | null>,
+                 fund: Record<string, number>, caps?: Record<string, number>): Row => ({
+  ...row(isin, weight, revenue),
+  fund_by_period: fund,
+  ...(caps ? { market_cap_by_period: caps } : {}),
+});
+
+describe('buildBlend — the euro sum', () => {
+  // Cap ranking is the REVERSE of the euro ranking, which is the only shape that tells the two
+  // constructions apart — and the shape ACWI has.
+  //   BIG_CAP  euros 10 → 20 (+100%), cap 900
+  //   SMALL    euros 90 → 90 (   0%), cap 100
+  // Euro total 100 → 110, so the index returned exactly +10%. Cap-weighting the RATES gives +90%.
+  const mk = () => [
+    fundRow('BIG', 90, { 2023: 10, 2024: 20 }, { 2023: 10, 2024: 20 },
+            { 2023: 900, 2024: 900 }),
+    fundRow('SML', 10, { 2023: 90, 2024: 90 }, { 2023: 90, 2024: 90 },
+            { 2023: 100, 2024: 100 }),
+  ];
+
+  it('moves with the euro total, not with the cap-weighted average of the rates', () => {
+    const rows = mk();
+    const b = buildBlend(resp(['2023', '2024'], rows));
+    expect(b.level['2023'].value).toBeCloseTo(100, 10);
+    expect(b.level['2024'].value).toBeCloseTo(110, 10);       // not 190
+    expect(b.step['2024'].growthPct).toBeCloseTo(10, 10);
+  });
+
+  it('falls back to the growth chain when no row carries euros', () => {
+    // ⚠ THE ASSERTION THAT CATCHES A SILENT NON-FIRING. Same rows minus `fund_by_period`: if the
+    // aggregate ever stopped running, this and the test above would print the same number and
+    // nothing would say which construction had produced it.
+    const rows = mk().map(({ fund_by_period: _drop, ...r }) => r as Row);
+    const b = buildBlend(resp(['2023', '2024'], rows));
+    expect(b.level['2024'].value).toBeCloseTo(190, 10);
+  });
+
+  it('shares out the move by share of the EUROS, and the column sums exactly', () => {
+    const rows = mk();
+    const b = buildBlend(resp(['2023', '2024'], rows));
+    const big = b.contrib.get(rows[0])!['2024'];
+    // ⚠ THE ENTIRE FINDING IN ONE ASSERTION: BIG holds 90% of the cap and 10% of the euros, and
+    // its share of the move is the second.
+    expect(big.sharePct).toBeCloseTo(10, 10);
+    expect(big.growthPct).toBeCloseTo(100, 10);
+    expect(big.pp).toBeCloseTo(10, 10);
+    expect(sumPp(b, rows, '2024')).toBeCloseTo(b.step['2024'].growthPct, 10);
+  });
+
+  it('keeps a sign-crosser in the sum, with an exact pp and no factors', () => {
+    // ⚠⚠ NOBODY IS DROPPED, WHICH THE GROWTH PATH CANNOT MANAGE. `share × growth` needs a positive
+    // base; the difference form does not. Factors go null, the pp stays exact, the column sums.
+    const rows = [
+      fundRow('CRS', 50, { 2023: 12, 2024: 3 }, { 2023: -200, 2024: 300 }),
+      fundRow('STD', 50, { 2023: 12, 2024: 12 }, { 2023: 1200, 2024: 1200 }),
+    ];
+    const b = buildBlend(resp(['2023', '2024'], rows));
+    const c = b.contrib.get(rows[0])!['2024'];
+    expect(c.growthPct).toBeNull();
+    expect(c.sharePct).toBeNull();
+    expect(c.pp).toBeCloseTo(50, 10);                          // +500 euros over a 1,000 base
+    expect(sumPp(b, rows, '2024')).toBeCloseTo(b.step['2024'].growthPct, 10);
+  });
+
+  it('intersects each step, so a member joining is not counted as growth', () => {
+    const rows = [
+      fundRow('OLD', 50, { 2023: 1, 2024: 1.1 }, { 2023: 100, 2024: 110 }),
+      fundRow('NEW', 50, { 2024: 5 }, { 2024: 500 }),
+    ];
+    const b = buildBlend(resp(['2023', '2024'], rows));
+    expect(b.step['2024'].growthPct).toBeCloseTo(10, 10);
+  });
+
+  it('nets out a round trip through zero instead of marking the index for ever', () => {
+    // The property that makes this construction right for FCF: the growth path floors a member at
+    // −100% one year and refuses the ratio the next, so the round trip never closes.
+    const rows = [
+      fundRow('A', 50, { 2022: 1, 2023: 2, 2024: 1 }, { 2022: 100, 2023: -200, 2024: 100 }),
+      fundRow('B', 50, { 2022: 9, 2023: 9, 2024: 9 }, { 2022: 900, 2023: 900, 2024: 900 }),
+    ];
+    const b = buildBlend(resp(['2022', '2023', '2024'], rows));
+    expect(b.level['2023'].value).toBeCloseTo(70, 10);         // 700/1000
+    expect(b.level['2024'].value).toBeCloseTo(100, 10);        // back to 1000/1000
   });
 });

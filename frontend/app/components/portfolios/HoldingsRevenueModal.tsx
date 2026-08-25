@@ -13,6 +13,7 @@ import InfoTip from '../InfoTip';
 import { BADGE_TONE, StateBadge } from '../StateBadge';
 import { MIN_YEAR_COVERAGE_PCT } from './marginData';
 import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
+import { medianAbs, negativeRunStart, usableStep } from './positiveChain';
 import { type BenchTarget } from './benchSeries';
 
 /**
@@ -220,9 +221,15 @@ const VIEWS: [View, string, string][] = [
   ['reported', 'Reported', 'The figures as filed, in each company’s own reporting currency.'],
   ['rebased', 'Rebased', 'Each company indexed to 100 at ITS OWN first period — exactly what the '
     + 'chart weight-averages. The footer row is the weighted average, i.e. the plotted line.'],
-  ['yoy', 'YoY %', 'Growth from that company’s previous reported period. ⚠ The chart does NOT '
-    + 'average these: it averages the Rebased levels. The footer is the plotted line’s own '
-    + 'period-on-period change, not the average of the column above it.'],
+  ['yoy', 'YoY %', 'Growth from the last period that company reported a USABLE base in — positive, '
+    + 'and big enough to divide by. A base that is negative or a rounding error against the '
+    + 'company’s own scale is stepped over, and the growth is then shown annualised over the span '
+    + 'it really took: a recovery through zero reads as its true rate instead of +1,348%. A company '
+    + 'that turned negative and never came back reads NEGATIVE rather than a number — there is no '
+    + 'rate across a sign change, and the two levels are the only true statement. Hover a '
+    + 'cell for the base, the span and anything skipped. ⚠ The chart does NOT average these: it '
+    + 'averages the Rebased levels. The footer is the plotted line’s own period-on-period change, '
+    + 'not the average of the column above it.'],
   ['contrib', 'Contribution', 'How many percentage points of the LINE’s own move each company '
     + 'accounts for — its weight in that period × its own growth over the interval. ⚠ The column '
     + 'SUMS to the footer, which is what makes it a decomposition rather than a ranking: sort a '
@@ -321,12 +328,18 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * hand both rows the first one's periods.
    */
   const rowFacts = useMemo(() => {
-    const m = new Map<Row, { reported: string[]; newest: string | undefined; hasEstimate: boolean }>();
+    const m = new Map<Row, {
+      reported: string[]; newest: string | undefined; hasEstimate: boolean; scale: number;
+    }>();
     for (const r of data.rows) {
       const reported = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort(periodOrder);
       m.set(r, {
         reported,
         newest: reported[reported.length - 1],
+        // ⚠ THE ROW'S OWN TYPICAL SIZE, for the YoY skip rule — see `positiveChain`. It is a
+        // property of the whole series, so it belongs here and not in a cell: computing it per
+        // cell would sort the row's values once per period column to get one constant.
+        scale: medianAbs(reported.map((p) => r.revenue[p])),
         // ⚠ WHETHER THE ROW CARRIES A CONSENSUS FOR **ANY** YEAR — what separates "analysts do not
         // forecast this far" from "the estimates feed has never been fetched for this company".
         // `reported` is already filtered to non-null, so this is the same test `stateTitle` made.
@@ -412,11 +425,42 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     }
     // ⚠ THE PREVIOUS PERIOD **THIS ROW REPORTED**, not the previous column. A company that skipped
     // a year would otherwise show its two-year growth in the same ink as everyone's one-year.
-    const i = periods.indexOf(y);
-    if (i <= 0) return null;                  // its first period has nothing to grow from
-    const prev = r.revenue[periods[i - 1]] as number;
-    return prev > 0 ? 100 * (v / prev - 1) : null;
+    const s = yoyStep(r, y);
+    // ⚠ `annualised` NULL IS NOT "NO DATA" — it is a multi-period step ending at or below zero, for
+    // which no real rate exists. The tooltip names it; see `positiveChain.Step.annualised`.
+    return s && s.annualised != null ? 100 * s.annualised : null;
   };
+
+  /**
+   * The YoY step behind a cell — the base it grew from, over how many periods, annualised.
+   *
+   * ⚠⚠ IT IS NOT `v / previous − 1`, AND THAT IS THE POINT. A ratio needs a base that is positive
+   * AND big enough to divide by. This column used to take whichever figure sat behind the cell and
+   * refuse only the non-positive ones, so Eli Lilly's `5.085 → −3.489 → 0.458 → 6.632` printed a
+   * −100%, a blank and then **+1,348%**, and the +30.4% the company actually managed over those
+   * three years appeared nowhere. `usableStep` walks back to the last base clearing both tests and
+   * annualises over the span, so Lilly reads **+9.2%/yr** and the column stays comparable row to
+   * row. See `positiveChain` for why the floor is not optional.
+   *
+   * ⚠ IT GUARDS THE DIVISOR, NOT THE NUMERATOR, and the difference is worth knowing before reading
+   * a cell as fixed. Japan Post Bank's **+25,147,989.7%** had two causes: a base of 4.998 (gone —
+   * that one is a divisor artefact) and an FY2025 figure 1,000x too large, because its `shares`
+   * cell is 1,000x too small and GuruFocus divides by it. The remaining ~+25,000% is a real vendor
+   * defect in the value itself; no growth rule can mend it, and the tooltip now shows both ends so
+   * it reads as the data problem it is. ⚠ It does NOT reach the aggregate index line, which
+   * multiplies `per_share × shares` and cancels the two errors exactly — see `acwi_fcf_growth.py`.
+   */
+  const yoyStep = (r: Row, y: string) => {
+    const facts = rowFacts.get(r);
+    if (!facts) return null;
+    return usableStep((p) => r.revenue[p], facts.reported, facts.reported.indexOf(y), facts.scale);
+  };
+
+  /** Whether this YoY cell is the "turned negative and stayed there" case — a step that exists and
+   *  has no rate. ⚠ IT GETS A WORD, NOT A DASH: the figures are present and correct, and a blank
+   *  in a column of numbers is read as missing data every time. See `Step.annualised`. */
+  const yoyHasNoRate = (r: Row, y: string) =>
+    view === 'yoy' && yoyStep(r, y)?.annualised === null;
 
   /**
    * What the FIRST of a cell's stacked numbers is called — in the `Line` column and in the footer's
@@ -1135,8 +1179,22 @@ market cap it was weighted by in that period, and the weight that produced.">
                                         + 'keeps off the chart, so nothing is measured from it.';
                                   }
                                   const st = blend.step[y];
-                                  return ` · ${c.sharePct.toFixed(2)}% × `
-                                    + `${c.growthPct >= 0 ? '+' : ''}${c.growthPct.toFixed(1)}% = `
+                                  /**
+                                   * ⚠⚠ THE FACTORS ARE OPTIONAL AND THE pp IS NOT. On the euro-sum
+                                   * construction a member's contribution is `(Fᵢ(d) − Fᵢ(a)) ÷
+                                   * ΣFᵢ(a)` — exact for every member, INCLUDING one whose base is
+                                   * at or below zero. That member has no growth RATE and no share
+                                   * of a negative base to quote, so both factors are null while
+                                   * the pp stands. Printing `null% × null%` would be the old
+                                   * failure in a new place: a multiplication that does not reach
+                                   * the number beside it.
+                                   */
+                                  const factors = c.sharePct != null && c.growthPct != null
+                                    ? `${c.sharePct.toFixed(2)}% × `
+                                      + `${c.growthPct >= 0 ? '+' : ''}`
+                                      + `${c.growthPct.toFixed(1)}% = `
+                                    : '';
+                                  return ` · ${factors}`
                                     + `${c.pp >= 0 ? '+' : ''}${c.pp.toFixed(2)}pp of the line’s `
                                     + `${st ? `${st.from} → ${y} move `
                                       + `(${st.growthPct >= 0 ? '+' : ''}${st.growthPct.toFixed(1)}%)`
@@ -1145,6 +1203,64 @@ market cap it was weighted by in that period, and the weight that produced.">
                                       ? ` — over the ${st.spanPct.toFixed(1)}% of this period’s `
                                         + 'weight that spans the interval, which is why this share '
                                         + 'is not the weight on the line below'
+                                      : '');
+                                })()
+                                /**
+                                 * ⚠⚠ THE YoY CELL MUST SAY WHAT IT DIVIDED BY. Its base is not
+                                 * always the period to its left — `usableStep` walks back past any
+                                 * that is non-positive or too small to divide by (see
+                                 * `positiveChain`), and the number shown is then ANNUALISED over
+                                 * the span. Unexplained, an annualised three-year step and a real
+                                 * one-year step are the same ink, and the reader has no way to tell
+                                 * that a company went through zero in between.
+                                 *
+                                 * ⚠ AND A BLANK GETS A SENTENCE TOO. "No usable base" and "no data"
+                                 * are different facts and were the same empty cell.
+                                 */
+                                + (() => {
+                                  if (view !== 'yoy' || state !== 'value' || carried) return '';
+                                  const s = yoyStep(r, y);
+                                  if (!s) {
+                                    return rowFacts.get(r)?.reported[0] === y
+                                      ? ' · Its first reported period — nothing behind it to grow '
+                                        + 'from.'
+                                      : ' · No growth shown: every earlier period is either '
+                                        + 'negative or too small a base to divide by, so any '
+                                        + 'percentage here would be an artefact of the divisor '
+                                        + 'rather than the business.';
+                                  }
+                                  /**
+                                   * ⚠⚠ A MULTI-PERIOD STEP ENDING BELOW ZERO HAS NO RATE, AND THIS
+                                   * IS THE ONE CASE THE SKIP RULE CANNOT REACH. It bridges a dip
+                                   * BETWEEN two positive years; a company that turned negative and
+                                   * never came back has nothing on the far side to bridge to. The
+                                   * honest output is the two levels and the date it turned — a
+                                   * percentage here would be invented, and a bare blank would read
+                                   * as missing data when the data is present and correct.
+                                   */
+                                  if (s.annualised == null) {
+                                    const since = negativeRunStart(
+                                      (p) => r.revenue[p], rowFacts.get(r)!.reported,
+                                      rowFacts.get(r)!.reported.indexOf(y));
+                                    return ` · ${fmt(s.base)} in ${s.from} → `
+                                      + `${fmt(r.revenue[y])} in ${y}`
+                                      + (since ? `, negative since ${since} and not recovered` : '')
+                                      + '. There is no growth rate across a sign change: a rate '
+                                      + 'claims V₀(1+r)ⁿ = Vₙ, and no real r satisfies that over '
+                                      + `${s.span} periods when the end is below zero. Read the `
+                                      + 'two figures, not a percentage.';
+                                  }
+                                  const skipped = rowFacts.get(r)!.reported
+                                    .slice(rowFacts.get(r)!.reported.indexOf(s.from) + 1,
+                                      rowFacts.get(r)!.reported.indexOf(y))
+                                    .map((p) => `${p} ${fmt(r.revenue[p])}`).join(', ');
+                                  return ` · ${fmt(s.base)} in ${s.from} → ${fmt(r.revenue[y])} in `
+                                    + `${y}, ${s.growth >= 0 ? '+' : ''}`
+                                    + `${(s.growth * 100).toFixed(1)}% over ${s.span} period`
+                                    + `${s.span === 1 ? '' : 's'}`
+                                    + (s.span === 1 ? '' : ' — shown annualised, so it stays '
+                                      + 'comparable with the one-year steps around it')
+                                    + (skipped ? ` · stepped over ${skipped}, unusable as a base`
                                       : '');
                                 })()}>
                       {/* ⚠ THE SAME BADGES AS THE /asset-pipeline GRID, from `StateBadge`. The two
@@ -1175,7 +1291,11 @@ market cap it was weighted by in that period, and the weight that produced.">
                                   reported={r.revenue.LTM ?? null} fmt={fmt} />} />
                               </span>
                             )
-                            : <Cell>{cellText(cellOf(r, y))}</Cell>)
+                            : yoyHasNoRate(r, y)
+                              // ⚠ THE BADGE VOCABULARY OF THIS TABLE, not a hand-rolled span — the
+                              // reader already knows a chip here is a state rather than a figure.
+                              ? <StateBadge label="Negative" tone={BADGE_TONE.warnSoft} />
+                              : <Cell>{cellText(cellOf(r, y))}</Cell>)
                           : (
                             // ⚠ `cursor-default` — the badge already reads as a state, so the help
                             // cursor adds nothing but a question mark dragged across the table.

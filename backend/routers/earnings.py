@@ -638,11 +638,19 @@ async def fundamental_blend(body: FundamentalCoverageRequest, request: Request):
                 continue
             by_metric.setdefault(r["metric_code"], {}).setdefault(r["company_id"], {})[
                 str(r["target_date"])[:10]] = float(r["numeric_value"])
+        # ⚠ THE EUROS, ON THIS PATH TOO — asked for as "everything aggregatable" rather than by
+        # name, because `BLEND_METRICS` holds metric CODES and `_totals_for` takes metric KEYS. A
+        # code passed there matches nothing and this whole path would silently keep the growth
+        # chain with no error anywhere, which is the failure this conversion exists to end. The
+        # answer comes back keyed by CODE, so the loop below looks its own codes up directly.
+        totals = _totals_for(covered, [], body.universe, body.cadence)
         out: dict[str, dict] = {}
         for code in BLEND_METRICS:
             per_company = by_metric.get(code, {})
+            fund_for = totals.get(code, {})
             out[code] = blend_series(
-                [{"weight": r["weight_pct"], "points": per_company.get(r["company_id"], {})}
+                [{"weight": r["weight_pct"], "points": per_company.get(r["company_id"], {}),
+                  "fund_points": fund_for.get(r["company_id"], {})}
                  for r in covered], code)
         return out
 
@@ -1066,14 +1074,50 @@ _AGGREGATABLE_PER_SHARE = frozenset({"fcf_ps", "eps_nri"})
 #: Levels that are ALREADY a company total — no share count involved.
 _AGGREGATABLE_TOTAL = frozenset({"revenue"})
 
+#: Metrics whose SUM is meaningless for a financial, and the sectors that means.
+#:
+#: ⚠⚠ A BANK HAS NO MEANINGFUL FREE CASH FLOW. Its operating cash flow moves with DEPOSIT AND
+#: LOAN FLOWS, so `FCF` swings by trillions with no economic content — PT Bank Mandiri showed
+#: -1,278bn, -1,482bn and +3,909bn EUR in consecutive years. Averaging growth rates hid that
+#: behind a -100% floor, a +10,000% cap and dilution across 1,700 members; a SUM has none of
+#: those, and a handful of banks dominate the aggregate outright. Excluding financials from an
+#: aggregate FCF is the standard treatment, not a workaround.
+#:
+#: ⚠ REVENUE AND NET INCOME ARE FINE FOR A BANK and are NOT excluded. The rule is per metric
+#: because the defect is per metric: interest income is revenue, and a bank earns profit like
+#: anything else. Excluding financials from every line would delete a fifth of the index from
+#: charts that had nothing wrong with them.
+#:
+#: ⚠⚠ BOTH SPELLINGS, AND THIS IS THE TRAP THE PROJECT DOCS ALREADY RECORD. Yahoo speaks two
+#: sector vocabularies — measured on ACWI, "Financials" (225 members) AND "Financial Services"
+#: (78) are both present. Listing one leaves 78 banks in the sum and the exclusion looks like it
+#: worked. Canonicalised through `_airs_portfolio_analysis._sector`, which is the one place that
+#: knows the aliases.
+#:
+#: ⚠ REAL ESTATE IS DELIBERATELY NOT HERE. A REIT's FCF is distorted by property purchases in a
+#: way that is arguable, not definitional, and dropping 71 more members is a judgement nobody
+#: asked for. Revisit with a measurement, not by extending this set.
+_NO_AGGREGATE_FOR_FINANCIALS = frozenset({"fcf_ps"})
+_FINANCIAL_SECTORS = frozenset({"Financials", "Financial Services"})
+
 
 def fundamental_totals(company_ids: list[int], metrics: list[str],
                        weight_by_cid: dict[int, float] | None = None,
                        caps: dict[int, dict[str, float]] | None = None,
+                       cadence: str = "annual",
                        ) -> dict[str, dict[int, dict[str, float]]]:
     """`{metric_code: {company_id: {period: EUR}}}` — the euros each member contributes.
 
-    ⚠⚠ THIS IS WHAT MAKES THE AGGREGATE PATH POSSIBLE, and it is two conversions, not one. A
+    ⚠⚠ NOTHING ON THE REQUEST PATH CALLS THIS. Its only caller is `scripts/acwi_fcf_growth.py`,
+    which is where the corrected ACWI figures come from (FCF +7.56%/yr, revenue +4.60%/yr, on a
+    fixed 1,240-member basket). It was briefly wired into `_blend_rows` and REVERTED 2026-08-25,
+    because only one of the five blend paths was converted: the level line came back as an
+    aggregate while `blend_matrix`, `_level_breakdown` and `benchmark_revenue` kept the growth
+    chain, so the Contribution column decomposed a move the line no longer made. ⚠ THE WIRING IS
+    ALL-OR-NOTHING — a benchmark drawn one way beside a portfolio drawn the other is two answers
+    to one question in the same chart with nothing saying so. Keep it that way, or finish all five.
+
+    ⚠⚠ THE TWO CONVERSIONS, NOT ONE, are what make an aggregate possible at all. A
     GuruFocus per-share figure is in the LISTING's trading currency, so it becomes a company
     total only after multiplying by the share count AND converting at the PERIOD's own rate. An
     ACWI cross-section is 26 currencies; summing them raw over-weights Japan by ~150x, and
@@ -1086,14 +1130,18 @@ def fundamental_totals(company_ids: list[int], metrics: list[str],
 
     `weight_by_cid` + `caps` are the PORTFOLIO form: a book's claim on a fundamental is
     `w_i x F_i / cap_i`, not `F_i`. For an INDEX both are omitted — a cap-weighted index holds the
-    same fraction of every company, so its claim is proportional to the plain sum (see the
-    aggregate branch in `_fundamental_blend`). ⚠ A MEMBER WITH NO CAP FOR A PERIOD IS LEFT OUT OF
+    same fraction of every company, so its claim is proportional to the plain sum. ⚠ THE PORTFOLIO
+    FORM IS UNMEASURED: it is derived and implemented but has never been run against a real book,
+    because the caller that would have exercised it is the reverted one above. ⚠ A MEMBER WITH NO
+    CAP FOR A PERIOD IS LEFT OUT OF
     THAT PERIOD rather than falling back to another one: mixing bases inside one sum is the
     failure the per-period basis exists to remove.
     """
     from routers._benchmark_index import _fx_to_eur, _rate  # noqa: PLC0415
 
-    wanted = [m for m in metrics if m in _AGGREGATABLE_PER_SHARE or m in _AGGREGATABLE_TOTAL]
+    wanted = [m for m in metrics
+              if m in _AGGREGATABLE_PER_SHARE or m in _AGGREGATABLE_TOTAL
+              or m in _AGGREGATABLE_FORECAST]
     if not wanted or not company_ids:
         return {}
 
@@ -1109,16 +1157,105 @@ def fundamental_totals(company_ids: list[int], metrics: list[str],
         return {}
     fx = _fx_to_eur(set(ccy.values()), "2014-01-01", "2026-12-31")
 
-    need_shares = any(m in _AGGREGATABLE_PER_SHARE for m in wanted)
+    # ⚠ THE SECTOR COMES THROUGH THE ISIN BRIDGE, and its coverage is stated rather than assumed:
+    # measured on ACWI it resolves 1,735 of 1,998 members and 97.9% of cap. A member with NO
+    # sector is KEPT — refusing what we cannot classify would silently shrink the index, which is
+    # the larger error of the two.
+    financial: set[int] = set()
+    if any(m in _NO_AGGREGATE_FOR_FINANCIALS for m in wanted):
+        from routers._airs_portfolio_analysis import _sector  # noqa: PLC0415
+
+        isin_by_cid: dict[int, str] = {}
+        for i in range(0, len(company_ids), IN_CHUNK_SIZE):
+            for c in (supabase.table("company").select("company_id,isin")
+                      .in_("company_id", company_ids[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                if c.get("isin"):
+                    isin_by_cid[c["company_id"]] = c["isin"].strip().upper()
+        isins = sorted(set(isin_by_cid.values()))
+        sector_by_isin: dict[str, str] = {}
+        for i in range(0, len(isins), IN_CHUNK_SIZE):
+            for r in (supabase.table("asset_grid").select("isin,sector")
+                      .in_("isin", isins[i:i + IN_CHUNK_SIZE]).execute().data or []):
+                if r.get("sector"):
+                    sector_by_isin.setdefault(r["isin"].strip().upper(), r["sector"])
+        financial = {cid for cid, isin in isin_by_cid.items()
+                     if _sector(sector_by_isin.get(isin)) in _FINANCIAL_SECTORS}
+
+    # ⚠⚠ ONE COMPANY, ONE ROW — AND A SUM IS WHERE THIS BITES HARDEST. A dual-class constituent
+    # is two `company` rows (Alphabet A and Alphabet C, Samsung ordinary and preferred), and
+    # BOTH carry the whole company's revenue, earnings and cash flow. Averaging growth rates
+    # merely double-voted one company; SUMMING adds its entire income statement twice.
+    #
+    # Measured on ACWI: 42 names appear more than once, 43 extra rows, 5.83% of the index
+    # fictional — Alphabet alone reads 7.60% of cap where it is 3.80%.
+    #
+    # ⚠ THE SAME KEY `_asset_benchmark.members` ALREADY DEDUPES ON, deliberately: the normalised
+    # company name. A second notion of "same company" here would disagree with the one the
+    # benchmark weights are built from, and the disagreement would show up as growth.
+    #
+    # ⚠ THE LARGEST CAP WINS, not the first row returned — otherwise which share class survives
+    # depends on row order, and the answer changes between runs with nothing to show for it.
+    keep: dict[int, bool] = {}
+    best_by_name: dict[str, tuple[float, int]] = {}
+    for i in range(0, len(company_ids), IN_CHUNK_SIZE):
+        for c in (supabase.table("company").select("company_id,company_name,market_cap_eur")
+                  .in_("company_id", company_ids[i:i + IN_CHUNK_SIZE]).execute().data or []):
+            nm = (c.get("company_name") or "").strip().lower()
+            mc = float(c.get("market_cap_eur") or 0)
+            if not nm:
+                # ⚠ AN UNNAMED ROW IS KEPT. It cannot collide with anything, and dropping what we
+                # cannot key would shrink the index for a reason nobody could see.
+                keep[c["company_id"]] = True
+                continue
+            prev = best_by_name.get(nm)
+            if prev is None or mc > prev[0]:
+                best_by_name[nm] = (mc, c["company_id"])
+    for _mc, cid in best_by_name.values():
+        keep[cid] = True
+    company_ids = [c for c in company_ids if keep.get(c)]
+
+    need_shares = any(m in _AGGREGATABLE_PER_SHARE or m in _AGGREGATABLE_FORECAST for m in wanted)
     shares = _metric_by_company_period(company_ids, "shares") if need_shares else {}
+
+    def _shares_at(cid: int, period: str) -> float | None:
+        """The share count to multiply a per-share figure by — filed, or the latest before it.
+
+        ⚠⚠ THE AS-OF FALLBACK IS ONLY FOR A **FORECAST**, and it is the whole reason an estimate
+        can be aggregated at all: nobody has filed a share count for a year nobody has lived. Held
+        at the latest filed figure, `estimate × shares` is "the consensus applied to today's
+        capital base" — which is what a forward earnings total means.
+
+        ⚠ AND IT MAKES THE ACTUAL→FORECAST BOUNDARY EXACT, not approximately so. The latest filed
+        share count IS the last actual period's, so the ratio that joins the two legs
+        (`Σest(first forecast) ÷ Σactual(last actual)`) has the same `shares` on both sides and the
+        step is a pure change in earnings rather than half a change in share count.
+
+        ⚠ A FILED PERIOD NEVER TAKES THE FALLBACK. Only periods past the last filing do, so an
+        actual year with a genuinely missing share count is still skipped rather than quietly
+        valued at a neighbour's — the gap stays a gap.
+        """
+        per = shares.get(cid) or {}
+        if period in per:
+            return per[period]
+        earlier = [p for p in per if p <= period]
+        return per[max(earlier)] if earlier else None
 
     out: dict[str, dict[int, dict[str, float]]] = {}
     for metric in wanted:
-        per_share = metric in _AGGREGATABLE_PER_SHARE
+        forecast = metric in _AGGREGATABLE_FORECAST
+        per_share = forecast or metric in _AGGREGATABLE_PER_SHARE
         vals = _metric_by_company_period(company_ids, metric)
+        # ⚠ NOT FOR A CONSENSUS — there is no trailing twelve months of a forecast, and asking
+        # `_ltm_by_company` for one would roll estimate rows into a period the chart labels as
+        # measured. Annual only; see the ⚠⚠ where it is used.
+        ltm_by = ({} if (forecast or cadence == "quarterly")
+                  else _ltm_by_company(company_ids, metric, cadence))
         for code in _metric_codes(metric):
             per_cid: dict[int, dict[str, float]] = {}
+            skip = financial if metric in _NO_AGGREGATE_FOR_FINANCIALS else set()
             for cid, by_period in vals.items():
+                if cid in skip:
+                    continue
                 cur = ccy.get(cid)
                 if not cur:
                     continue
@@ -1130,16 +1267,63 @@ def fundamental_totals(company_ids: list[int], metrics: list[str],
                     rate = _rate(fx, cur, period)
                     if rate is None:
                         continue
-                    n = (shares.get(cid) or {}).get(period) if per_share else 1.0
+                    # ⚠ AS-OF ONLY FOR A FORECAST — see `_shares_at`. An actual period with a
+                    # missing share count stays missing rather than borrowing a neighbour's.
+                    n = ((_shares_at(cid, period) if forecast
+                          else (shares.get(cid) or {}).get(period)) if per_share else 1.0)
                     if n is None:
                         continue
-                    eur = v * n * rate
+                    # ⚠⚠ DIVIDE, AND SCALE BY 1e6 — BOTH, AND I SHIPPED NEITHER. `_rate` returns
+                    # UNITS PER EUR (IDR 19,640.83, JPY 184.09, USD 1.175), so multiplying
+                    # inflates a rupiah filing by 19,641x. `period_caps_eur` does exactly
+                    # `native / rate * 1e6` two hundred lines below and is the convention to
+                    # match; mirroring its LOOKUP without its DIRECTION is how this got here.
+                    #
+                    # ⚠ IT WAS INVISIBLE ON A POSITIVE METRIC. Revenue and EPS are near-always
+                    # positive, so the same error only inflated a positive sum and still produced
+                    # a plausible CAGR. Only `fcf_ps`, where large negatives are ordinary, pushed
+                    # the aggregate below zero and tripped the guard — which is the whole reason
+                    # that guard ends the series instead of drawing on.
+                    #
+                    # ⚠ THE 1e6 IS NOT COSMETIC EITHER: GuruFocus financials are in MILLIONS and
+                    # `shares` is a million-share count, so the product is millions-of-millions
+                    # until it is scaled. It cancels in a ratio and does NOT cancel in a sum
+                    # across companies, which is the only place it has ever mattered.
+                    eur = (v * n / rate) * 1e6
                     if weight_by_cid is not None:
                         cap = ((caps or {}).get(cid) or {}).get(period)
                         if not cap:
                             continue
                         eur = (weight_by_cid.get(cid) or 0.0) * eur / cap
                     got[period] = eur
+                # ⚠⚠ THE **LTM** PERIOD NEEDS ITS OWN EUROS, AND WITHOUT THEM THE NEWEST POINT ON
+                # THE LINE IS A LIE RATHER THAN A GAP. `_metric_by_company_period` reads filed
+                # `metric_data` rows, and LTM is not one — this app assembles it. So the fund map
+                # has no `LTM` key, and `carry_forward` then holds the previous year's euros into
+                # it (`period_end("LTM")` is TODAY, comfortably inside `_MAX_CARRY_DAYS`), drawing
+                # the aggregate flat from the last fiscal year to LTM. Not missing, not empty —
+                # flat, which reads as "nothing changed" for the one point everybody looks at.
+                #
+                # ⚠ ANNUAL ONLY, and `_ltm_by_company` already enforces it: every point of a
+                # quarterly series is a trailing twelve months, so there is no separate LTM there.
+                #
+                # ⚠ SHARES AS-OF, like a forecast — the LTM window ends at the newest QUARTERLY
+                # filing, past the last annual share count. Same `_shares_at`, same reasoning.
+                ltm = ltm_by.get(cid)
+                if ltm is not None:
+                    ltm_date, ltm_v = ltm
+                    ltm_rate = _rate(fx, cur, ltm_date)
+                    ltm_n = _shares_at(cid, ltm_date) if per_share else 1.0
+                    if ltm_rate is not None and ltm_n is not None:
+                        ltm_eur = (ltm_v * ltm_n / ltm_rate) * 1e6
+                        if weight_by_cid is not None:
+                            per_caps = (caps or {}).get(cid) or {}
+                            cap = per_caps.get("LTM") or (
+                                per_caps[max(per_caps)] if per_caps else None)
+                            ltm_eur = ((weight_by_cid.get(cid) or 0.0) * ltm_eur / cap
+                                       if cap else None)
+                        if ltm_eur is not None:
+                            got["LTM"] = ltm_eur
                 if got:
                     per_cid[cid] = got
             if per_cid:
@@ -1170,6 +1354,82 @@ def _metric_by_company_period(company_ids: list[int], metric: str) -> dict[int, 
             off += len(rows)
     return out
 
+def aggregatable_metrics(metrics: list[str]) -> list[str]:
+    """Which of these metric KEYS may be summed in euros. Empty input ⇒ every eligible metric.
+
+    ⚠⚠ A METRIC IS AGGREGATABLE ONLY IF ITS FORECAST LEG IS TOO, BECAUSE OTHERWISE ONLY HALF OF
+    ONE CHART WOULD BE.
+
+    A forecast is a SEPARATE metric code (`annual_eps_nri_estimate`), blended by its own
+    `blend_series` call and continuing the actual it extends. Aggregating the ACTUAL leg alone puts
+    the two halves of ONE chart on two different scales: the actual ends at the euro-chain level
+    and the forecast restarts near the per-share one. Measured on `eps_nri` (2026-08-25), that drew
+    a vertical jump from LTM to 2026e. ⚠ IT WAS CAUGHT BY EYE, NOT BY A TEST — every unit here was
+    individually right, and the defect lived in the seam between two `blend_series` calls that
+    nothing asserts across.
+
+    ⚠ DERIVED FROM `_FORECAST_METRIC` / `_AGGREGATABLE_FORECAST`, NOT HARDCODED. A forecast leg is
+    aggregatable when `fundamental_totals` can build its euros (`estimate × latest filed shares`,
+    at the latest FX — see `_shares_at`). Add a consensus for a metric whose euros cannot be built
+    and this refuses the pair automatically, without anyone remembering to come back here.
+
+    ⚠ AND IT IS DECIDED ONCE, NOT PER REQUEST. Keying it off "is the forecast code in this payload"
+    would aggregate a narrowed request and not a full one — the same metric drawing two different
+    lines depending on which chart happened to ask for it.
+    """
+    wanted = list(metrics) or list(_AGGREGATABLE_PER_SHARE | _AGGREGATABLE_TOTAL)
+    return [m for m in wanted
+            if m not in _FORECAST_METRIC or _FORECAST_METRIC[m] in _AGGREGATABLE_FORECAST]
+
+
+def _totals_for(covered: list[dict], metrics: list[str], universe: str | None,
+                cadence: str) -> dict[str, dict[int, dict[str, float]]]:
+    """The euros behind the line, in the form this caller's members require.
+
+    ⚠⚠ ONE HELPER, BECAUSE THE ALTERNATIVE SHIPPED ONCE AND WAS REVERTED. Five call sites blend
+    these metrics, and converting some of them leaves the app drawing a benchmark on the aggregate
+    beside a portfolio on the growth chain — two constructions in one chart, both plausible, with
+    nothing saying so. Whatever this function decides, every path decides identically.
+
+    ⚠ THE TWO FORMS DIFFER AND `fundamental_totals` KNOWS WHICH BY ITS ARGUMENTS. An INDEX holds
+    the same fraction of every company, so its claim is the plain sum `F_i`. A PORTFOLIO holds its
+    own weights, so its claim is `w_i·F_i/cap_i` — the weight it actually carries, times that
+    company's fundamental per euro of it — which needs per-period caps.
+
+    ⚠ A PORTFOLIO'S CAPS ARE LOADED HERE RATHER THAN LEFT TO CHANCE. Callers only compute `caps`
+    for a universe (it is the weighting basis, and a holding weight has no cap behind it). Without
+    them there is no `cap_i` to divide by and the book would silently fall back to the growth chain
+    — exactly the mismatched pair the paragraph above exists to prevent.
+
+    ⚠ IT TAKES METRIC **KEYS** AND RETURNS METRIC **CODES**, which is `fundamental_totals`'s own
+    convention (`out[code]` for every `code in _metric_codes(metric)`). An empty `metrics` means
+    "every aggregatable one" — what the callers that blend the whole set want, and what lets a
+    caller holding CODES (`BLEND_METRICS`) ask for everything and look its codes up directly. ⚠ A
+    caller passing a CODE where a key belongs matches nothing, and the path silently keeps the
+    growth chain with no error anywhere; pass keys or pass nothing.
+    """
+    ids = [r["company_id"] for r in covered]
+    if not ids:
+        return {}
+    wanted = aggregatable_metrics(metrics)
+    # ⚠ AND THE CONSENSUS LEG OF EACH. A chart with a forecast is TWO `blend_series` calls and both
+    # need euros, or the pair lands on two constructions — the LTM→2026e jump. `aggregatable_metrics`
+    # has already refused any base whose forecast cannot be built, so this only ever adds legs that
+    # `fundamental_totals` can actually price.
+    wanted += [_FORECAST_METRIC[m] for m in wanted if m in _FORECAST_METRIC]
+    book_caps = None
+    if not universe:
+        key = "__period_caps_eur"
+        book_caps = cached_metric_reads(
+            ids, [key], cadence, lambda _ms: {key: period_caps_eur(ids, cadence)})[key]
+    return fundamental_totals(
+        ids, wanted,
+        weight_by_cid=(None if universe
+                       else {r["company_id"]: float(r["weight_pct"] or 0) for r in covered}),
+        caps=(None if universe else book_caps),
+        cadence=cadence)
+
+
 def _blend_rows(rows: list[dict], covered: list[dict],
                 caps: dict[int, dict[str, float]] | None = None,
                 cadence: str = "annual",
@@ -1184,8 +1444,8 @@ def _blend_rows(rows: list[dict], covered: list[dict],
 
     `totals` is `{metric_code: {company_id: {period: EUR}}}` — the euros of the fundamental each
     member contributes. Where it is present for a metric, `blend_series` SUMS them instead of
-    averaging per-member growth rates; see the aggregate branch there for why that is both more
-    correct and still the cap-weighted answer. Absent, every metric keeps the growth chain.
+    averaging per-member growth rates, and `_level_breakdown` decomposes the sum exactly; see the
+    aggregate branch there. Absent, every metric keeps the growth chain.
 
     ⚠ IT ARRIVES AS A PARAMETER BECAUSE THIS FUNCTION IS PURE OF I/O, and building it needs two
     reads (share counts and FX). Computing it here would put I/O back into the one function whose
@@ -1219,7 +1479,19 @@ def _blend_rows(rows: list[dict], covered: list[dict],
 
     out: list[dict] = []
     notes: dict[str, dict] = {}
-    for code, per_company in by_metric.items():
+    # ⚠⚠ BASES BEFORE FORECASTS, AND THE ORDER IS LOAD-BEARING ON THE AGGREGATE PATH. A forecast
+    # leg joins the line its actual reached (`continue_from`), so the actual has to have been
+    # blended already. `by_metric` is in row-arrival order, which puts them either way round
+    # depending on what the query returned first — a chart that joined correctly or not depending
+    # on row order is the worst kind of intermittent.
+    #
+    # ⚠ It changes nothing on the growth path, where each leg is rebased per member and neither
+    # needs the other's result.
+    ordered = sorted(by_metric, key=lambda c: 1 if c in _FORECAST_BASE else 0)
+    # `{base metric code: {"level": …, "period": …}}` — where each actual leg's line ended.
+    joins: dict[str, dict] = {}
+    for code in ordered:
+        per_company = by_metric[code]
         # ⚠ A FORECAST INHERITS THE ANCHOR OF THE ACTUAL IT CONTINUES. Both are the same quantity
         # and the chart indexes them off ONE base, so rebasing them independently draws the forecast
         # restarting at 100 beside an actual that has run to 1,808 — a ~94% earnings collapse that
@@ -1230,14 +1502,25 @@ def _blend_rows(rows: list[dict], covered: list[dict],
         # per-share line and a level line become different quantities, and handing a member the
         # wrong metric's euros would sum revenue into an FCF chart with nothing to show for it.
         fund_for = (totals or {}).get(code, {})
+        # ⚠ THE ACTUAL'S EUROS TRAVEL WITH THE FORECAST, so the aggregate can measure the real step
+        # across the boundary rather than restarting the chain. The euro twin of `base_points`.
+        fund_base_for = (totals or {}).get(base_code, {}) if base_code else {}
         blend_members = [{"weight": r["weight_pct"],
                           # Absent for a portfolio — see the `caps` note on this function.
                           **({"weights": caps.get(r["company_id"], {})} if caps else {}),
                           "points": per_company.get(r["company_id"], {}),
                           "fund_points": fund_for.get(r["company_id"], {}),
+                          "fund_base_points": fund_base_for.get(r["company_id"], {}),
                           "base_points": base_by_company.get(r["company_id"], {})}
                          for r in covered]
-        s = blend_series(blend_members, code, bucket)
+        s = blend_series(blend_members, code, bucket,
+                         continue_from=joins.get(base_code) if base_code else None)
+        # ⚠ WHERE THIS LEG'S LINE ENDED, for the forecast that continues it. Recorded only on the
+        # AGGREGATE path: the growth path joins per member through `base_points` and would be
+        # double-continued by this.
+        if s.get("aggregate") and s["points"]:
+            joins[code] = {"level": s["points"][-1]["value"],
+                           "period": s["points"][-1]["period"]}
         if not s["points"]:
             # ⚠ AN EMPTY SERIES IS NOT AN EMPTY DATABASE, AND THE CHART CANNOT TELL. Measured on a
             # real book's Dividends per Share: every holding carried the line and the card still
@@ -1338,11 +1621,12 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest, request: R
             caps = cached_metric_reads(
                 ids, [key], body.cadence,
                 lambda _ms: {key: period_caps_eur(ids, body.cadence)})[key]
+        totals = _totals_for(covered, list(body.metrics or ()), body.universe, body.cadence)
         if body.metrics:
             # ⚠ SAME BLEND, DIFFERENT READ. Only the fetch changes — `_blend_rows` is untouched, so
             # a narrowed request cannot blend by a different rule than a full one.
             rows = _bulk_blend_rows([r["company_id"] for r in covered], body.metrics, body.cadence)
-            return _blend_rows(rows, covered, caps, body.cadence)
+            return _blend_rows(rows, covered, caps, body.cadence, totals)
         # The PORTFOLIO path takes the same cadence as the single-company one, through the same
         # roll-up — otherwise a book's Long Equity tab would ignore a toggle its holdings honour.
         load = (_ttm_metric_rows if body.cadence == "quarterly" else _company_metric_rows)
@@ -1353,7 +1637,7 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest, request: R
         # stops at its last full fiscal year while a benchmark blended through `_bulk_blend_rows`
         # runs a quarter further — see `_ltm_blend_rows`.
         rows += _ltm_blend_rows([r["company_id"] for r in covered], None, body.cadence)
-        return _blend_rows(rows, covered, caps, body.cadence)
+        return _blend_rows(rows, covered, caps, body.cadence, totals)
 
     return _blend_envelope(await asyncio.to_thread(_build), covered, cov)
 
@@ -1645,6 +1929,20 @@ def _period_sort_key(period: str) -> tuple[int, str]:
 
 
 _FORECAST_METRIC = _build_forecast_metric_map()
+
+# The CONSENSUS metrics whose euros can be built, so a chart's forecast leg aggregates alongside its
+# actual one.
+#
+# ⚠⚠ IT IS DERIVED FROM THE BASE, NOT LISTED. A forecast is aggregatable exactly when the series it
+# CONTINUES is — otherwise the two legs of one chart end up on two constructions, which is the bug
+# this whole pair of sets exists to prevent (measured 2026-08-25: the actual ran to the euro-chain
+# level and the forecast restarted near the per-share one, a vertical jump from LTM to 2026e).
+#
+# ⚠ DEFINED HERE, AFTER `_FORECAST_METRIC`, because module-level code runs top-down — the callers
+# above read it at RUNTIME, which is why they can sit earlier in the file.
+_AGGREGATABLE_FORECAST = frozenset(
+    fc for base, fc in _FORECAST_METRIC.items()
+    if base in _AGGREGATABLE_PER_SHARE or base in _AGGREGATABLE_TOTAL)
 _REVENUE_CODES = _METRIC_CODES["revenue"]
 _REVENUE_CODE = _REVENUE_CODES[0]   # for blend_kind() only — it classifies, it doesn't query
 
@@ -2534,13 +2832,18 @@ def _rows_by_company(company_ids: list[int], codes: list[str]) -> dict[int, list
 @router.get("/api/earnings/benchmark-revenue")
 async def benchmark_revenue(label: str = "AEX", metric: str = "revenue"):
     """A benchmark index's revenue (or any `_METRIC_CODES` metric) as a GROWTH INDEX — its
-    constituents' figures blended the same
-    way a portfolio's is (a LEVEL → each rebased to 100 at its first year, then weighted).
+    constituents' figures blended exactly the way a portfolio's is, so the two lines on the
+    /Long Equity tab are one construction rather than two.
 
-    ⚠ NOT A SUM OF ABSOLUTE REVENUES. AEX constituents report in different currencies (Shell/RELX/
-    Unilever in GBP), so a euro total would silently add pounds to euros. The level-blend sidesteps
-    that — it compares GROWTH, which is what the R² read on the /Long Equity tab needs — and drops
-    any year under the 60% coverage floor rather than drawing it thin.
+    ⚠⚠ IT **IS** A SUM OF ABSOLUTE REVENUES NOW, IN EUR — and the objection that used to sit here
+    ("AEX constituents report in different currencies, so a euro total would silently add pounds to
+    euros") was right about the hazard and wrong about the remedy. The hazard is real: Shell, RELX
+    and Unilever file in GBP. The remedy is to CONVERT, at each period's own end rate, which is
+    what `fundamental_totals` does — not to avoid summing. Avoiding it cost more than it saved:
+    averaging per-member growth rates weighted by market cap is the wrong weight for a fundamental
+    and is upward-biased, worth ~5pp/yr on ACWI revenue (~9.95% averaged against +4.60% summed).
+    See the aggregate branch in `_fundamental_blend`. Years under the coverage floor are still
+    dropped rather than drawn thin.
 
     Cap-weighted by `market_cap_eur` where known, else equal-weighted (a benchmark growth reference,
     not a priced index). Returns `{label, series:[{year, value}], members, covered_pct}`.
@@ -2608,14 +2911,23 @@ async def benchmark_revenue(label: str = "AEX", metric: str = "revenue"):
         # fallen back to the scalar. Mixing the two bases inside one column is the failure the
         # whole per-period basis exists to remove.
         period_caps = period_caps_eur(ids, "annual")
+        # ⚠⚠ THE EUROS, SO THIS LINE IS THE SAME CONSTRUCTION AS EVERY OTHER. This endpoint feeds
+        # the /Long Equity benchmark leg, which is drawn beside a portfolio line built by
+        # `_blend_rows` — the one pairing where two constructions in one chart would be invisible
+        # and read as a real divergence. It is an INDEX (no `weight_by_cid`, no `caps`), so the
+        # claim is the plain sum; see `_totals_for`.
+        code = _metric_codes(metric)[0]
+        totals = _totals_for([{"company_id": c} for c in ids], [metric], label,
+                             "annual").get(code, {})
         for cid in ids:
             pts = {str(m["target_date"])[:10]: float(m["numeric_value"])
                    for m in raw_by_cid.get(cid, ())
                    if m.get("numeric_value") is not None}
             if pts:
                 members.append({"weight": caps.get(cid, 1.0), "points": pts,
+                                "fund_points": totals.get(cid, {}),
                                 "weights": period_caps.get(cid) or None})
-        blend = blend_series(members, _metric_codes(metric)[0])
+        blend = blend_series(members, code)
         # ⚠ `period` is the YEAR AS A STRING ("2015"); return it as an int so the frontend can join
         # it against the company's numeric years (a string/number mismatch = no overlap = no line).
         return {"label": label, "members": len(members),
@@ -2834,6 +3146,69 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
         caps = (period_caps_eur([c["company_id"] for c in comp.values() if c.get("company_id")],
                                 body.cadence)
                 if body.universe else {})
+        # ⚠⚠ THE EUROS PER PERIOD, SHIPPED TO THE CLIENT — this table's footer and its Contribution
+        # column are computed in the BROWSER (`fundamentalBlend.ts::buildBlend`), so the client
+        # needs the same `F_i(t)` the server line is built from. Without it the drill-down would
+        # decompose a growth chain under a chart drawn as an aggregate: a table that reconciles
+        # perfectly to a number nobody is looking at.
+        #
+        # ⚠ KEYED BY CANONICAL ISIN, LIKE `caps`, because that is what a row is keyed on here —
+        # `fundamental_totals` answers by `company_id`, and handing the client that key would join
+        # against nothing and silently draw the growth chain instead.
+        #
+        # ⚠ `only_company_id` NARROWS `comp`, SO THIS IS ALREADY ONE COMPANY on the per-row
+        # refresh — the same reason every other read below is keyed on `comp` and not on `canon`.
+        # ⚠ THE WEIGHT IS THE ONE THE ROW PRINTS — the share of the WHOLE book, over `total_w`.
+        # `_totals_for` needs it for the portfolio form (`w_i·F_i/cap_i`), and a weight computed
+        # over anything narrower would hand the browser a decomposition that sums to a different
+        # total from the one in the weight column beside it.
+        fund_members = [{"company_id": c["company_id"],
+                         "weight_pct": 100.0 * weight_by[ci] / total_w}
+                        for ci, c in comp.items() if c.get("company_id") and ci in weight_by]
+        all_totals = (_totals_for(fund_members, [metric], body.universe, body.cadence)
+                      if fund_members else {})
+        by_cid = all_totals.get(_metric_codes(metric)[0], {})
+        # ⚠⚠ BUCKETED INTO THE TABLE'S OWN PERIOD KEYS, AND THIS IS THE TRAP THAT SILENTLY DISABLES
+        # THE WHOLE THING. `fundamental_totals` answers by FILING DATE (`2024-09-28`) because the
+        # server-side blend re-buckets it inside `_prepare`; this payload's cells are keyed by
+        # PERIOD (`2024`, or `2025-Q3`), the same keys `market_cap_by_period` uses. Shipped raw,
+        # every client lookup misses, `fund_by_period` is effectively empty, and `buildBlend`
+        # quietly draws the growth chain under a chart the server drew as an aggregate — with no
+        # error, no empty cell, and two plausible lines.
+        #
+        # ⚠ LATEST FILING WINS WITHIN A PERIOD, exactly as `_latest_per_bucket` does it: a company
+        # changing its year-end can file twice against one period and must contribute once.
+        from routers._fundamental_blend import (  # noqa: PLC0415
+            quarter_bucket, year_bucket,
+        )
+        bucket = quarter_bucket if body.cadence == "quarterly" else year_bucket
+
+        def _by_period(dated: dict[str, float]) -> dict[str, float]:
+            latest: dict[str, tuple[str, float]] = {}
+            for d, v in dated.items():
+                k = bucket(d)
+                if k not in latest or d > latest[k][0]:
+                    latest[k] = (d, v)
+            return {k: v for k, (_d, v) in latest.items()}
+
+        # ⚠ AND THE CONSENSUS COLUMNS TOO, under the SAME `…e` suffix the values use. The forecast
+        # is a different metric code, so without this the drill-down's footer would stop at LTM
+        # while the chart above it runs on through the estimate years.
+        #
+        # ⚠ AN ESTIMATE FOR AN ALREADY-FILED YEAR IS LEFT IN AND IS INERT: `rev` only keeps
+        # `{p}e` past `newest_filed`, so such a key never enters `data.years` and the client never
+        # looks it up. Filtering it here would need `newest_filed`, which is per-company and not
+        # known until the row loop below.
+        fc_by_cid = (all_totals.get(_metric_codes(fc_metric)[0], {}) if fc_metric else {})
+        fund: dict[str, dict[str, float]] = {}
+        for ci, c in comp.items():
+            cid = c.get("company_id")
+            if not cid:
+                continue
+            got = _by_period(by_cid.get(cid) or {})
+            got.update({f"{p}e": v for p, v in _by_period(fc_by_cid.get(cid) or {}).items()})
+            if got:
+                fund[ci] = got
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -2888,6 +3263,11 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
                 # and that company is left out of that period's average entirely rather
                 # than weighted on a different basis from its neighbours.
                 **({"market_cap_by_period": caps.get(ci, {})} if caps else {}),
+                # ⚠ ABSENT, NOT `{}`, WHEN THERE ARE NO EUROS FOR THIS ROW. The client reads the
+                # presence of this field as "this metric is drawn as an aggregate"; an empty map on
+                # every row would claim the aggregate and then have nothing to sum, and the line
+                # would come back empty rather than falling back to the growth chain.
+                **({"fund_by_period": fund[ci]} if fund.get(ci) else {}),
                 "currency": gx.get("currency_code"),
                 "ticker": c.get("gurufocus_ticker"),
                 "exchange": exch,

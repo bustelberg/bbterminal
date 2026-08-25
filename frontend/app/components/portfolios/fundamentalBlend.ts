@@ -56,6 +56,21 @@ export type Row = {
    * then left out of that period's average entirely.
    */
   market_cap_by_period?: Record<string, number>;
+  /**
+   * THE EUROS THIS ROW CONTRIBUTES TO THE METRIC, per fiscal period — `per_share × shares`,
+   * converted at that period's own end rate (index form), or `wᵢ·Fᵢ/capᵢ` (portfolio form).
+   *
+   * ⚠⚠ ITS PRESENCE IS THE SWITCH BETWEEN TWO CONSTRUCTIONS. Where rows carry it, the line is
+   * `ΣFᵢ(d)/ΣFᵢ(a) − 1` — growth of a SUM — and the Contribution column is the exact
+   * decomposition of that. Where they do not, both fall back to the cap-weighted growth chain.
+   * The two differ by a lot and neither is obviously wrong on screen: measured on ACWI revenue,
+   * ~9.95%/yr averaged against +4.60%/yr summed, and on FCF/share +19.1% against +7.56%.
+   *
+   * ⚠ ABSENT, NOT `{}`, WHEN THE BACKEND HAS NO EUROS FOR THE ROW — an empty map would claim the
+   * aggregate and have nothing to sum. Sparse WITHIN a row is fine and expected (a period with no
+   * share count or no FX rate simply has no figure), and the per-step intersection handles it.
+   */
+  fund_by_period?: Record<string, number>;
 };
 /** Universe requests only: how the weights were arrived at, and who fell out. See the backend's
  *  `weight_basis` — the names it lists are NOT in the index at any weight. */
@@ -171,17 +186,36 @@ export function buildBlend(data: Resp) {
       // drops the non-positive bases afterwards. Filtering first would shrink the denominator,
       // lift every coverage figure, and let a period slip over the floor that the chart omits.
       coverTotal += stableW(r);
-      const base = r.revenue[periods[0]] as number;
-      if (!(base > 0)) {                      // matches `_prepare`'s non_positive_base drop
-        excluded.set(r, `its first reported period (${periods[0]}) is `
-          + `${base === 0 ? 'zero' : 'negative'} at ${base}, and a level series is indexed to 100 `
-          + 'at its own first point — dividing by it would invert every later point rather than '
-          + 'show growth. The figures below are still this company’s; only the blended line '
-          + 'leaves it out.');
+      /**
+       * ⚠⚠ THE FIRST **POSITIVE** PERIOD, NOT THE FIRST REPORTED ONE — and this line used to claim
+       * in a comment that it matched `_prepare` while doing something stricter (2026-08-25). The
+       * server skips forward to the first positive figure and keeps the member; this dropped it
+       * outright, so any company whose earliest year happens to be negative was in the CHART and
+       * missing from the drill-down that explains it — a footer that cannot reach the line above
+       * it, and a Contribution column silently short by that company.
+       *
+       * ⚠ A leading zero or negative on a flow line is usually not a measurement. GuruFocus
+       * back-fills the years before a company existed: Universal Music sits inside Vivendi until
+       * the 2021 spin-off and its 2017 revenue is stored as `0`. Anchoring on that throws away
+       * every good year after it; skipping to the first positive period starts the curve where
+       * the company's history really starts.
+       */
+      const basePeriod = periods.find((p) => (r.revenue[p] as number) > 0);
+      if (basePeriod == null) {
+        excluded.set(r, 'it never reports a positive figure for this metric, and a level series is '
+          + 'indexed to 100 at its own first point — there is no base to divide by. The figures '
+          + 'below are still this company’s; only the blended line leaves it out.');
         continue;
       }
+      const base = r.revenue[basePeriod] as number;
+      // ⚠ AND ITS PRE-BASE PERIODS GO WITH IT, exactly as `_prepare` truncates them. A zero before
+      // the anchor would rebase to 0 and read as a company that lost everything rather than one
+      // that had not started. ⚠ The EUROS are not truncated — see the `fund` fill below, which is
+      // the whole reason it is a separate pass.
       const idx: Record<string, number> = {};
-      for (const p of periods) idx[p] = 100 * (r.revenue[p] as number) / base;
+      for (const p of periods.slice(periods.indexOf(basePeriod))) {
+        idx[p] = 100 * (r.revenue[p] as number) / base;
+      }
       const part = { r, idx };
       parts.push(part);
       partOf.set(r, part);
@@ -239,10 +273,27 @@ export function buildBlend(data: Resp) {
     /** Each part's value at each period it contributed to — own or carried. The chaining below
      *  takes ratios between periods that need not be adjacent, so the values have to be kept. */
     const at = new Map<typeof parts[number], Record<string, number>>();
+    /**
+     * ⚠⚠ THE EUROS, CARRIED ON THEIR OWN CLOCK — the client twin of the second `carry_forward` in
+     * `_fundamental_blend.blend_series`. A row's euros are a filing like its value, so a
+     * semi-annual filer's trailing figure stands in the quarters it does not file; uncarried it
+     * would drop out of them, the per-step intersection would shrink to the quarterly filers, and
+     * the aggregate would sawtooth on composition alone.
+     *
+     * ⚠ ITS OWN `lastF`/`sinceF`, NOT THE VALUE'S. A row can have a value at a period and no
+     * euros there (no share count, no FX rate for that date), and reusing the value's carry state
+     * would then look the euros up at a period that has none and silently drop the row from the
+     * step. Same bound, same gate, separate clock — which is what the server does by calling
+     * `carry_forward` twice.
+     */
+    const fund = new Map<typeof parts[number], Record<string, number>>();
     for (const p of parts) {
       let last: { idx: number; y: string } | null = null;
       let since = 0;
+      let lastF: { v: number; y: string } | null = null;
+      let sinceF = 0;
       at.set(p, {});
+      fund.set(p, {});
       for (const y of data.years) {
         const own = p.idx[y];
         /**
@@ -262,12 +313,34 @@ export function buildBlend(data: Resp) {
          */
         if (last && isEstimatePeriod(y) !== isEstimatePeriod(last.y)) { last = null; since = 0; }
         if (own != null) { last = { idx: own, y }; since = 0; } else if (last) { since += 1; }
+        /**
+         * ⚠⚠ THE EUROS' CARRY CLOCK ADVANCES HERE, BEFORE ANY `continue` BELOW — otherwise a
+         * period this row is not in at all (no value, or no cap) would not age the carry, and the
+         * euros would be held further than the server holds them. On the server the two carries
+         * are two independent `carry_forward` passes over the whole axis, so neither can be
+         * shortened by the other's gaps; this is that, unrolled.
+         *
+         * ⚠ Same forecast reset, same reason: a filed figure must not be carried into a column
+         * that claims to be a forecast.
+         */
+        const ownF = p.r.fund_by_period?.[y];
+        if (lastF && isEstimatePeriod(y) !== isEstimatePeriod(lastF.y)) { lastF = null; sinceF = 0; }
+        if (ownF != null) { lastF = { v: ownF, y }; sinceF = 0; } else if (lastF) { sinceF += 1; }
+        const w = wAt(p.r, y);
+        /**
+         * ⚠⚠ THE EUROS ARE WRITTEN BEFORE THE VALUE'S GATE, ON THE WEIGHT ALONE — the client twin
+         * of the separate `fund` loop in `blend_series`. A sum never divides a member by itself,
+         * so none of the rebase's preconditions apply to it, and hanging the euros off `v` would
+         * make a member's presence in the SUM depend on whether its rebased LEVEL exists. It is
+         * the same decoupling the server needed and for the same case.
+         */
+        const fv = ownF ?? (lastF && sinceF <= maxCarry && drawn(y) ? lastF.v : null);
+        if (fv != null && w) fund.get(p)![y] = fv;
         // ⚠ ONLY INTO A PERIOD THE CHART DRAWS — see the ⚠⚠ on `drawn`. Elsewhere a carried figure
         // holds up nothing and reads as a projection.
         const carried = own == null && last && since <= maxCarry && drawn(y) ? last : null;
         const v = own ?? carried?.idx ?? null;
         if (v == null) continue;
-        const w = wAt(p.r, y);
         if (!w) continue;                     // no cap on or before this period ⇒ out of it
         denom[y] = (denom[y] ?? 0) + w;
         at.get(p)![y] = v;
@@ -329,11 +402,79 @@ export function buildBlend(data: Resp) {
      * gives a multiplication that does not reach the pp.
      */
     const contrib = new Map<Row,
-      Record<string, { pp: number; growthPct: number; sharePct: number }>>();
+      Record<string, { pp: number; growthPct: number | null; sharePct: number | null }>>();
+    /**
+     * ⚠⚠ WHICH CONSTRUCTION THIS IS — and it decides the line AND its decomposition together.
+     * `true` when any row shipped `fund_by_period`, matching the server's
+     * `any(p["fund"] for p in prepared)`. Splitting the two would put a chart drawn one way over a
+     * table that decomposes the other, and the table is the thing people check.
+     */
+    const aggregate = parts.some((p) => Object.keys(fund.get(p) ?? {}).length > 0);
     let anchor: string | null = null;
     let chained = 100;
     for (const y of data.years) {
       if (!denom[y] || !drawn(y)) continue;
+      if (aggregate && anchor != null) {
+        /**
+         * ⚠⚠ GROWTH OF A SUM, AND ITS DECOMPOSITION IS AN IDENTITY RATHER THAN AN APPROXIMATION:
+         *
+         *     G   = ΣFᵢ(y)/ΣFᵢ(a) − 1 = Σ(Fᵢ(y) − Fᵢ(a)) / ΣFᵢ(a)
+         *     ppᵢ = 100 · (Fᵢ(y) − Fᵢ(a)) / ΣFᵢ(a)        so   Σppᵢ = 100·G, exactly
+         *
+         * The column adds to the footer because the algebra says so, not because it nearly does —
+         * and no row is dropped for crossing zero: −200 → +300 contributes +500/ΣFᵢ(a), cleanly.
+         *
+         * ⚠ `sharePct × growthPct ÷ 100 = pp` still holds and is still what the cell shows, but
+         * only where `Fᵢ(a) > 0`. Below zero there is no rate and no share of a negative base to
+         * quote; the pp is exact regardless, so both factors go null and the pp stands alone.
+         *
+         * ⚠⚠ INTERSECTED PER STEP. A sum changes when its members change, so `Σ(everyone at y)`
+         * over `Σ(everyone at a)` would report composition as growth. Only rows with euros at
+         * BOTH ends are in it — the same discipline the growth path gets for free, since a row
+         * that cannot span a step has no `g`.
+         */
+        const a = anchor;                     // narrowed for the closures below
+        const spanning = parts.filter(
+          (p) => fund.get(p)?.[a] != null && fund.get(p)?.[y] != null);
+        const sA = spanning.reduce((s, p) => s + fund.get(p)![a], 0);
+        const sD = spanning.reduce((s, p) => s + fund.get(p)![y], 0);
+        // ⚠ NO RATIO WITHOUT A POSITIVE BASE, and no line past a non-positive numerator — the same
+        // two guards, and for the same reasons, as the server's aggregate branch. A negative
+        // aggregate makes every later point a sign-flipped value a log axis cannot draw, so the
+        // series STOPS (visible) rather than continuing into points that vanish (not).
+        if (!spanning.length || sA <= 0) { anchor = y; continue; }
+        if (sD <= 0) break;
+        chained *= sD / sA;
+        step[y] = {
+          from: a,
+          growthPct: 100 * (sD / sA - 1),
+          // ⚠ COVERAGE IN THE UNIT THE LINE IS BUILT FROM — what share of this period's euros the
+          // decomposition speaks for. The growth path asks the same question in weight; asking it
+          // in weight here would mix two bases and could exceed 100%.
+          spanPct: 100 * sD / (parts.reduce(
+            (s, p) => s + (fund.get(p)?.[y] ?? 0), 0) || sD),
+        };
+        for (const p of spanning) {
+          const base = fund.get(p)![a];
+          const now = fund.get(p)![y];
+          const byPeriod = contrib.get(p.r) ?? {};
+          byPeriod[y] = {
+            pp: 100 * (now - base) / sA,
+            growthPct: base > 0 ? 100 * (now / base - 1) : null,
+            sharePct: base > 0 ? 100 * base / sA : null,
+          };
+          contrib.set(p.r, byPeriod);
+        }
+        anchor = y;
+        level[y] = { value: chained, covered: 100 * (coverW[y] ?? 0) / (coverTotal || 1) };
+        continue;
+      }
+      if (aggregate) {
+        // The first drawn period IS the base — the same rule as the growth chain below.
+        anchor = y;
+        level[y] = { value: chained, covered: 100 * (coverW[y] ?? 0) / (coverTotal || 1) };
+        continue;
+      }
       if (anchor != null) {
         let num = 0;
         let den = 0;

@@ -4778,13 +4778,18 @@ export interface paths {
         /**
          * Benchmark Revenue
          * @description A benchmark index's revenue (or any `_METRIC_CODES` metric) as a GROWTH INDEX — its
-         *     constituents' figures blended the same
-         *     way a portfolio's is (a LEVEL → each rebased to 100 at its first year, then weighted).
+         *     constituents' figures blended exactly the way a portfolio's is, so the two lines on the
+         *     /Long Equity tab are one construction rather than two.
          *
-         *     ⚠ NOT A SUM OF ABSOLUTE REVENUES. AEX constituents report in different currencies (Shell/RELX/
-         *     Unilever in GBP), so a euro total would silently add pounds to euros. The level-blend sidesteps
-         *     that — it compares GROWTH, which is what the R² read on the /Long Equity tab needs — and drops
-         *     any year under the 60% coverage floor rather than drawing it thin.
+         *     ⚠⚠ IT **IS** A SUM OF ABSOLUTE REVENUES NOW, IN EUR — and the objection that used to sit here
+         *     ("AEX constituents report in different currencies, so a euro total would silently add pounds to
+         *     euros") was right about the hazard and wrong about the remedy. The hazard is real: Shell, RELX
+         *     and Unilever file in GBP. The remedy is to CONVERT, at each period's own end rate, which is
+         *     what `fundamental_totals` does — not to avoid summing. Avoiding it cost more than it saved:
+         *     averaging per-member growth rates weighted by market cap is the wrong weight for a fundamental
+         *     and is upward-biased, worth ~5pp/yr on ACWI revenue (~9.95% averaged against +4.60% summed).
+         *     See the aggregate branch in `_fundamental_blend`. Years under the coverage floor are still
+         *     dropped rather than drawn thin.
          *
          *     Cap-weighted by `market_cap_eur` where known, else equal-weighted (a benchmark growth reference,
          *     not a priced index). Returns `{label, series:[{year, value}], members, covered_pct}`.

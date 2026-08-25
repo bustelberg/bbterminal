@@ -152,7 +152,12 @@ def main() -> int:
                     skipped_fx += 1
                     tot[y0] = tot[y0]  # no-op; the member is simply not added
                     break
-                v = vals[c][y] * (shares[c][y] if per_share else 1.0) * rate
+                # ⚠⚠ DIVIDE BY THE RATE AND SCALE BY 1e6 — `_rate` returns UNITS PER EUR (IDR
+                # 19,640.83), and GuruFocus financials are in millions. This script shipped with
+                # both wrong and still printed plausible CAGRs, because revenue and EPS are
+                # near-always positive so the error only inflated a positive sum. Its first
+                # numbers (fcf 15.41%, eps 10.06%, revenue 11.55%) were all wrong.
+                v = vals[c][y] * (shares[c][y] if per_share else 1.0) / rate * 1e6
                 tot[y] += v
 
         if tot[y0] <= 0:
