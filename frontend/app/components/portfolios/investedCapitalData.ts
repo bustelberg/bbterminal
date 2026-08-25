@@ -6,7 +6,7 @@
 
 import { type CashReturnRow } from './cashReturnData';
 import { periodToX } from './marginData';
-import { buildBlend, periodOrder, type Resp, type Row } from './fundamentalBlend';
+import { buildBlend, periodOrder, type Blend, type Resp, type Row } from './fundamentalBlend';
 
 /** One company's invested capital per fiscal year (2015+), in its reporting currency. Both legs
  *  must be present for a year — a missing non-current-liabilities line (a bank / Berkshire) means
@@ -94,7 +94,16 @@ function labelledSeries(row: CashReturnRow): { label: string; value: number }[] 
  * anchor-weighted step, the carry-forward and both coverage floors. There is no invested-capital
  * blend left to drift.
  */
-export function investedCapitalIndexByYear(rows: CashReturnRow[]): Map<number, number> {
+/**
+ * The blend itself, for callers that need more than a `{year: value}` map.
+ *
+ * ⚠ EXTRACTED SO THERE IS STILL ONE CONSTRUCTION. The `Tables` tab's invested-capital CAGR row
+ * needs the `Blend` (its `level` keys are PERIODS — `lineCagr` reads `LTM` and `2026e`, which a
+ * `Map<number, …>` has already thrown away), while the card wants the year map. Building a second
+ * payload there "the same way" is exactly what this file's header warns about, so the map is now
+ * derived from this rather than beside it.
+ */
+export function investedCapitalBlend(rows: CashReturnRow[]): Blend {
   // ⚠ `revenue` IS `buildBlend`'S FIELD NAME FOR "THE SERIES", not a claim about revenue — the
   // payload shape it takes is the drill-down matrix's, whose metric column is named that whatever
   // the metric is (see `Row`). Mapping into it is what buys the one implementation.
@@ -117,8 +126,12 @@ export function investedCapitalIndexByYear(rows: CashReturnRow[]): Map<number, n
   // two of twelve holdings read as 100% covered.
   const years = [...new Set(asRows.flatMap((r) => Object.keys(r.revenue)))].sort(periodOrder);
   const resp: Resp = { years, rows: asRows, holdings: asRows.length };
+  return buildBlend(resp);
+}
+
+export function investedCapitalIndexByYear(rows: CashReturnRow[]): Map<number, number> {
   const out = new Map<number, number>();
-  for (const [label, point] of Object.entries(buildBlend(resp).level)) {
+  for (const [label, point] of Object.entries(investedCapitalBlend(rows).level)) {
     out.set(periodToX(label), point.value);
   }
   return out;

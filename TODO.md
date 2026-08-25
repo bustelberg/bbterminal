@@ -1727,3 +1727,41 @@ median |value|, then annualise over the span it really took. `positiveChain.ts` 
 * Every cell explains itself on hover — base, span, what was stepped over — and a blank says
   which of "first period" / "no usable base" it is. An unexplained blank is how the refusal was
   invisible in the first place.
+
+## Tables tab — one rate row per level chart (2026-08-25)
+
+The `Tables` tab summarised **three** of the Long Equity tab's **six** LEVEL charts, so revenue,
+FCF/share and price had a 5y/10y CAGR and EPS, invested capital and shares outstanding did not —
+leaving the reader to eyeball three compounding rates off a log axis, which is the one thing a
+summary exists to remove.
+
+Added: **`epsCagr`**, **`invCapCagr`**, **`sharesCagr`**.
+
+* ⚠ **The rule is LEVEL vs RATIO, not "add more rows".** A currency-or-count level compounds, so
+  its summary is a rate; a margin, a return on capital or a coverage ratio oscillates around a
+  level and does not, so its summary stays a window MEAN. Annualising a percentage is not a rate of
+  anything. `RATE_KEYS` declares the set and `tablesCopy.test.tsx` pins it, so a seventh level chart
+  arriving without a row is a visible omission.
+* ⚠ **`epsCagr` shares `epsBase` with the forward row**, deliberately: the consensus is measured
+  FROM the latest period both sides reported, so a history ending anywhere else would be a rate that
+  does not hand over to the expectation beneath it. One `commonEndPeriod`, read twice.
+* ⚠ **`invCapCagr` costs no request** — invested capital comes from the two raw lines
+  `cash-return-inputs` already returns for the ROIC row. `investedCapitalBlend()` was EXTRACTED from
+  `investedCapitalIndexByYear` rather than re-implemented: the map throws the period labels away
+  (`Map<number, …>` cannot hold `LTM` or `2026e`) and `lineCagr` needs them. The map now derives
+  from the blend, so there is still one construction. Its drill-down is `CashReturnInputsModal` —
+  the same panel as ROIC, because that genuinely is where its numbers are.
+* ⚠ **`sharesCagr` is the only row where NEGATIVE is the good direction**, and the cell is coloured
+  by sign like every other rate. Its note says so. It is the wedge between the revenue row and the
+  per-share rows: a book whose EPS outruns its revenue is either widening margins or retiring stock,
+  and nothing else on the table said which.
+* ⚠ `shares` uses `unit: 'per_share'` in `MATRIX_ROWS` — that is the drill-down's "not millions"
+  setting, not a claim that a share count is per share. `millions` would print 1.2bn shares as 1,200.
+* ⚠ The footnote's fit-vs-point-to-point clause used to name ONE row because there was one. With six
+  it now says "the rate rows", gated on `RATE_KEYS.some(on)` — singling out FCF/share would read as
+  "the others DO match the cards", which is the opposite of true.
+
+**Still open**: the ratio charts without a mean row — debt ratio, SBC/OCF, capex margin, dividend
+yield, FCF+SBC yield. Each needs its own `*-inputs` payload and a `…ByYear` helper, and none of them
+is a rate, so they were out of scope for "the annualized metric per chart". Worth doing if the tab
+is meant to mirror the charts one-for-one.

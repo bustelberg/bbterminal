@@ -32,17 +32,39 @@ import type { Lang } from '../../../lib/i18n';
 /**
  * The rows, in the order they are drawn.
  *
- * ⚠ GROUPED BY WHAT THEY ANSWER, not by when they were added: the three RATES first (what grew,
- * and how fast), then the four per-year RATIOS averaged over the window (how good the business is),
- * then the one FORWARD row last — an expectation is a different kind of claim from a measurement
- * and reads oddly in among them.
+ * ⚠ GROUPED BY WHAT THEY ANSWER, not by when they were added: the RATES first (what grew, and how
+ * fast), then the per-year RATIOS averaged over the window (how good the business is), then the one
+ * FORWARD row last — an expectation is a different kind of claim from a measurement and reads oddly
+ * in among them.
+ *
+ * ⚠⚠ THERE IS ONE RATE ROW PER **LEVEL** CHART ON THE LONG EQUITY TAB, AND THAT IS THE RULE. Share
+ * price, EPS, Revenue, FCF/share, Invested capital and Shares outstanding are all currency-or-count
+ * levels that COMPOUND, so "what did it grow at" is the summary of each — and a tab that draws six
+ * such charts while summarising three leaves the reader to eyeball the other three off a log axis.
+ * The RATIO charts (margins, ROIC, coverage, yields) do not compound and get a window MEAN instead;
+ * annualising a percentage that oscillates around a level is not a rate of anything.
+ *
+ * ⚠ THE RATE ORDER MIRRORS THE CHART ORDER on the tab, so a reader moving between the two is not
+ * re-finding rows: revenue → EPS → FCF/share → price → invested capital → shares.
  */
 export const MEASURE_KEYS = [
-  'revCagr', 'fcfCagr', 'priceCagr',
+  'revCagr', 'epsCagr', 'fcfCagr', 'priceCagr', 'invCapCagr', 'sharesCagr',
   'grossMargin', 'fcfMargin', 'roic', 'cashConv', 'intCover',
   'epsFwd',
 ] as const;
 export type MeasureKey = (typeof MEASURE_KEYS)[number];
+
+/**
+ * The rows that are RATES — a compounded growth of a level — as opposed to a window mean.
+ *
+ * ⚠ DECLARED, NOT INFERRED FROM THE `Cagr` SUFFIX. `epsFwd` is a rate too and is deliberately NOT
+ * in here: this list exists for the footnote clause about point-to-point vs fitted trend, which is
+ * a statement about measuring HISTORY against the Long Equity growth cards. A forecast has no card
+ * to disagree with.
+ */
+export const RATE_KEYS = [
+  'revCagr', 'epsCagr', 'fcfCagr', 'priceCagr', 'invCapCagr', 'sharesCagr',
+] as const satisfies readonly MeasureKey[];
 
 export type TablesCopy = {
   /** ⚠ The heading follows the window chips — see the ⚠ on it in `TablesTab`. */
@@ -127,8 +149,11 @@ const en: TablesCopy = {
   showRow: (chip) => `Show ${chip}`,
   chip: {
     revCagr: 'Revenue CAGR',
+    epsCagr: 'EPS CAGR',
     fcfCagr: 'FCF per share CAGR',
     priceCagr: 'Share price CAGR',
+    invCapCagr: 'Invested capital CAGR',
+    sharesCagr: 'Share count CAGR',
     grossMargin: 'Gross margin',
     fcfMargin: 'FCF margin',
     roic: 'ROIC',
@@ -138,8 +163,11 @@ const en: TablesCopy = {
   },
   rowLabel: {
     revCagr: 'Revenue CAGR',
+    epsCagr: 'EPS (excl. NRI) CAGR',
     fcfCagr: 'FCF per share CAGR',
     priceCagr: 'Share price CAGR',
+    invCapCagr: 'Invested capital CAGR',
+    sharesCagr: 'Shares outstanding CAGR',
     grossMargin: 'Gross margin (avg)',
     fcfMargin: 'FCF margin (avg)',
     roic: 'ROIC (avg)',
@@ -149,8 +177,11 @@ const en: TablesCopy = {
   },
   rowFormula: {
     revCagr: () => '(revenue index at the end ÷ at the start) ^ (1 ÷ years) − 1',
+    epsCagr: () => '(EPS index at the end ÷ at the start) ^ (1 ÷ years) − 1',
     fcfCagr: () => '(FCF-per-share index at the end ÷ at the start) ^ (1 ÷ years) − 1',
     priceCagr: () => '(price index at the end ÷ at the start) ^ (1 ÷ years) − 1',
+    invCapCagr: () => '(invested-capital index at the end ÷ at the start) ^ (1 ÷ years) − 1',
+    sharesCagr: () => '(share-count index at the end ÷ at the start) ^ (1 ÷ years) − 1',
     grossMargin: () =>
       'per year: Σ(w × gross profit ÷ revenue) ÷ Σw, then the mean of those years',
     fcfMargin: (sbc) =>
@@ -199,6 +230,26 @@ const en: TablesCopy = {
       + '⚠ The Long Equity growth card fits a log-linear TREND through every year instead '
       + '(that is what its R² is about), so the two will differ — most where one endpoint '
       + 'year is unrepresentative, which is when the gap is worth seeing.',
+    epsCagr: () =>
+      'Compound annual growth of the weighted EPS (excl. non-recurring) line, point to point. '
+      + '⚠ THIS IS THE HISTORY, NOT THE EXPECTATION — the row at the bottom of this table is the '
+      + 'analysts’ 3-year consensus off the latest reported year, and the two answer different '
+      + 'questions. Read them together: a book compounding at 8% behind a consensus of 15% is a '
+      + 'claim someone has to justify.',
+    invCapCagr: () =>
+      'Compound annual growth of the weighted INVESTED-CAPITAL line, point to point — how fast '
+      + 'the capital the business runs on is growing. '
+      + '⚠ IT IS THE DENOMINATOR OF THE ROIC ROW ABOVE, which is what makes the pair worth '
+      + 'reading in one glance: capital growing faster than returns is a book buying its growth, '
+      + 'and neither row says that on its own.',
+    sharesCagr: () =>
+      'Compound annual growth of the weighted SHARE-COUNT line, point to point. '
+      + '⚠⚠ NEGATIVE IS USUALLY THE GOOD DIRECTION HERE, and it is the one row on this table '
+      + 'where that is true: a falling share count is net buybacks, so it is the wedge between '
+      + 'the Revenue row and the EPS and FCF-per-share rows beside it. A book whose per-share '
+      + 'lines outrun its revenue is either widening margins or retiring stock, and this row is '
+      + 'which. ⚠ The cell is coloured by SIGN like every other rate, so read the sign, not '
+      + 'the colour.',
     priceCagr: () =>
       'Compound annual growth of the weighted SHARE-PRICE line, point to point — the same '
       + 'weighting, chaining and coverage floor as the rows around it, run over each holding’s '
@@ -264,9 +315,12 @@ const en: TablesCopy = {
         <code className="text-fg-subtle">3y</code> on the figure
         {windows.length > 1 && ', centred across both columns rather than sitting in either'}.
       </>}
+      {/* ⚠ EVERY RATE ROW, NOT JUST FCF/SHARE. The clause used to name one row because there was
+          one; with six of them, singling out FCF/share reads as "the others DO match the cards",
+          which is the opposite of true. */}
       {showFcf && <>
-        {' '}The CAGR row is point-to-point and will not match the FCF/share growth card, which
-        fits a trend through every year ({whyLink}).
+        {' '}The rate rows are point-to-point and will not match the growth cards on the Long
+        Equity tab, which fit a trend through every year ({whyLink}).
       </>}
     </>
   ),
@@ -296,8 +350,11 @@ const nl: TablesCopy = {
   // and that is the correct trade: this language reads them, it does not decode them.
   chip: {
     revCagr: 'Omzet',
+    epsCagr: 'Winst per aandeel',
     fcfCagr: 'Vrije kasstroom per aandeel',
     priceCagr: 'Aandelenkoers',
+    invCapCagr: 'Geïnvesteerd vermogen',
+    sharesCagr: 'Aantal aandelen',
     grossMargin: 'Brutomarge',
     fcfMargin: 'Vrije kasstroom-marge',
     roic: 'Rendement op geïnvesteerd vermogen',
@@ -307,8 +364,11 @@ const nl: TablesCopy = {
   },
   rowLabel: {
     revCagr: 'Omzet CAGR',
+    epsCagr: 'Winst per aandeel (excl. eenmalig) CAGR',
     fcfCagr: 'Vrije kasstroom per aandeel CAGR',
     priceCagr: 'Aandelenkoers CAGR',
+    invCapCagr: 'Geïnvesteerd vermogen CAGR',
+    sharesCagr: 'Uitstaande aandelen CAGR',
     grossMargin: 'Brutomarge (gem.)',
     fcfMargin: 'Vrije kasstroom-marge (gem.)',
     roic: 'Rendement op geïnvesteerd vermogen (gem.)',
@@ -318,9 +378,15 @@ const nl: TablesCopy = {
   },
   rowFormula: {
     revCagr: () => '(omzetindex aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
+    epsCagr: () =>
+      '(index winst per aandeel aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
     fcfCagr: () =>
       '(index vrije kasstroom per aandeel aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
     priceCagr: () => '(koersindex aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
+    invCapCagr: () =>
+      '(index geïnvesteerd vermogen aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
+    sharesCagr: () =>
+      '(index aantal aandelen aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
     grossMargin: () =>
       'per jaar: Σ(w × brutowinst ÷ omzet) ÷ Σw, daarna het gemiddelde van die jaren',
     fcfMargin: (sbc) =>
@@ -368,6 +434,28 @@ const nl: TablesCopy = {
       + 'log-lineaire TREND '
       + 'door alle jaren (dáár gaat de R² over), dus de twee zullen verschillen — het meest '
       + 'wanneer één eindjaar niet representatief is, en juist dan is het verschil de moeite waard.',
+    epsCagr: () =>
+      'Samengestelde jaarlijkse groei van de gewogen lijn van de winst per aandeel (excl. '
+      + 'bijzondere posten), van eindpunt tot eindpunt. '
+      + '⚠ DIT IS DE HISTORIE, NIET DE VERWACHTING — de onderste rij van deze tabel is de '
+      + '3-jaars consensus van analisten vanaf het laatst gerapporteerde jaar, en de twee '
+      + 'beantwoorden verschillende vragen. Lees ze samen: een boek dat op 8% groeit achter een '
+      + 'consensus van 15% is een claim die iemand moet onderbouwen.',
+    invCapCagr: () =>
+      'Samengestelde jaarlijkse groei van de gewogen lijn van het GEÏNVESTEERD VERMOGEN, van '
+      + 'eindpunt tot eindpunt: hoe snel het kapitaal groeit waarop de onderneming draait. '
+      + '⚠ HET IS DE NOEMER VAN DE RENDEMENTSRIJ hieronder, en dat maakt het paar in één oogopslag '
+      + 'de moeite waard: kapitaal dat sneller groeit dan het rendement is een boek dat zijn groei '
+      + 'koopt, en geen van beide rijen zegt dat op zichzelf.',
+    sharesCagr: () =>
+      'Samengestelde jaarlijkse groei van de gewogen lijn van het AANTAL AANDELEN, van eindpunt '
+      + 'tot eindpunt. '
+      + '⚠⚠ NEGATIEF IS HIER MEESTAL DE GOEDE RICHTING, en dit is de enige rij in deze tabel waar '
+      + 'dat geldt: een dalend aantal aandelen is netto inkoop, en daarmee is dit de wig tussen de '
+      + 'omzetrij en de rijen per aandeel ernaast. Een boek waarvan de cijfers per aandeel harder '
+      + 'lopen dan de omzet verbreedt zijn marges óf koopt aandelen in, en deze rij zegt welke van '
+      + 'de twee. ⚠ De cel wordt op TEKEN gekleurd zoals elke andere groeirij, dus lees het teken, '
+      + 'niet de kleur.',
     priceCagr: () =>
       'Samengestelde jaarlijkse groei van de gewogen KOERSLIJN, van eindpunt tot eindpunt — '
       + 'dezelfde weging, kettingberekening en dekkingsdrempel als de rijen eromheen, toegepast op '
@@ -432,8 +520,8 @@ const nl: TablesCopy = {
         {windows.length > 1 && ', gecentreerd over beide kolommen in plaats van in één ervan'}.
       </>}
       {showFcf && <>
-        {' '}De CAGR-rij loopt van eindpunt tot eindpunt en zal niet overeenkomen met de
-        groeikaart voor de vrije kasstroom per aandeel, die een trend door alle jaren legt
+        {' '}De groeirijen lopen van eindpunt tot eindpunt en zullen niet overeenkomen met de
+        groeikaarten op het Long Equity-tabblad, die een trend door alle jaren leggen
         ({whyLink}).
       </>}
     </>

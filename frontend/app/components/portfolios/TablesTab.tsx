@@ -7,6 +7,7 @@ import InfoTip from '../InfoTip';
 import { useBenchInputs, type BenchTarget } from './benchSeries';
 import { CAGR_BENCHMARKS, type CagrBenchmark } from './CagrTable';
 import { roicByYear, type CashReturnInputs } from './cashReturnData';
+import { investedCapitalBlend } from './investedCapitalData';
 import { buildBlend, type Blend, type Resp } from './fundamentalBlend';
 import { cagrExcess, commonEndPeriod, forwardCagr, lineCagr, type Cagr } from './lineCagr';
 import { marginByYear, xToPeriod, type MarginInputs } from './marginData';
@@ -21,7 +22,7 @@ import MarginInputsModal from './MarginInputsModal';
 import CashReturnInputsModal from './CashReturnInputsModal';
 import CashConversionInputsModal from './CashConversionInputsModal';
 import InterestBurdenInputsModal from './InterestBurdenInputsModal';
-import { COPY, MEASURE_KEYS, type MeasureKey, type TablesCopy } from './tablesCopy';
+import { COPY, MEASURE_KEYS, RATE_KEYS, type MeasureKey, type TablesCopy } from './tablesCopy';
 import { latestCommonX, meanExcess, windowMean, type WindowMean } from './windowStats';
 import {
   meanSub, rateSub, type MeanTransform,
@@ -29,7 +30,14 @@ import {
 import { type Lang } from '../../../lib/i18n';
 
 /**
- * `Tables` — the three quality reads on one screen, book against index, over 5 and 10 years.
+ * `Tables` — every quality read on one screen, book against index, over 5 and 10 years.
+ *
+ * ⚠⚠ THERE IS ONE ROW PER LONG EQUITY CHART, AND THAT IS THE RULE THE TABLE IS FOR. A tab drawing
+ * six level charts while summarising three left the reader to eyeball the other three off a log
+ * axis — which is the one thing a summary exists to remove. Every LEVEL chart gets a rate row
+ * (revenue, EPS, FCF/share, price, invested capital, shares outstanding); every RATIO chart gets a
+ * window mean, because a percentage oscillating around a level does not compound and annualising it
+ * is not a rate of anything.
  *
  * ⚠ BOTH AXES FILTER, INDEPENDENTLY — the windows (columns) and the measures (rows). Everything
  * defaults on; the state is two Sets over `WINDOWS` and `MEASURES`, and both the chips and the
@@ -89,8 +97,15 @@ const MATRIX_ROWS: Partial<Record<MeasureKey, {
   metric: string; unit: 'millions' | 'per_share'; noun: string;
 }>> = {
   revCagr: { metric: 'revenue', unit: 'millions', noun: 'revenue' },
+  // ⚠ THE SAME `eps_nri` MATRIX THE EXPECTATION ROW OPENS — one series, two questions about it, so
+  // both labels lead to the same numbers rather than to two panels a reader has to reconcile.
+  epsCagr: { metric: 'eps_nri', unit: 'per_share', noun: 'EPS (excl. NRI)' },
   fcfCagr: { metric: 'fcf_ps', unit: 'per_share', noun: 'FCF per share' },
   priceCagr: { metric: 'price_ps', unit: 'per_share', noun: 'share price' },
+  // ⚠ `shares` IS A COUNT, NOT A CURRENCY — `unit: 'per_share'` is the drill-down's "not millions"
+  // setting rather than a claim that a share count is per share. The matrix formats it as a plain
+  // figure either way; `millions` would divide it and print a book's 1.2bn shares as 1,200.
+  sharesCagr: { metric: 'shares', unit: 'per_share', noun: 'shares outstanding' },
   epsFwd: { metric: 'eps_nri', unit: 'per_share', noun: 'EPS (excl. NRI)' },
 };
 
@@ -317,6 +332,10 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   const [grossM, setGrossM] = useState<GrossMarginInputs | null>(null);
   const [cashConvD, setCashConvD] = useState<CashConversionInputs | null>(null);
   const [intBurden, setIntBurden] = useState<InterestBurdenInputs | null>(null);
+  // ⚠ THE SHARE COUNT IS A LEVEL LIKE THE REST, and its CAGR is the wedge between the revenue row
+  // and the two per-share rows: a book whose EPS outruns its revenue is either widening margins or
+  // retiring stock, and nothing else on this table says which.
+  const [sharesResp, setSharesResp] = useState<Resp | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -335,7 +354,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
       try {
         // ⚠ THE SAME ENDPOINTS THE CARDS USE, so `apiFetch`'s read cache serves them when the Long
         // Equity tab has already loaded them — this tab is usually free to open.
-        const [m, c, f, e, p, rev, gm, cc, ib] = await Promise.all([
+        const [m, c, f, e, p, rev, gm, cc, ib, sh] = await Promise.all([
           post<MarginInputs>('margin-inputs', holdingsTarget),
           post<CashReturnInputs>('cash-return-inputs', holdingsTarget),
           post<Resp>('portfolio-revenue-matrix?metric=fcf_ps', holdingsTarget),
@@ -360,10 +379,13 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
           post<GrossMarginInputs>('gross-margin-inputs', holdingsTarget),
           post<CashConversionInputs>('cash-conversion-inputs', holdingsTarget),
           post<InterestBurdenInputs>('interest-burden-inputs', holdingsTarget),
+          // ⚠ SAME ENDPOINT AND SAME SHAPE as the four matrices above — a share COUNT is a level
+          // per period, so it blends by exactly the rule they do and needs nothing new.
+          post<Resp>('portfolio-revenue-matrix?metric=shares', holdingsTarget),
         ]);
         if (!alive) return;
         setMarginData(m); setRoicData(c); setFcfPs(f); setEpsNri(e); setPricePs(p);
-        setRevenue(rev); setGrossM(gm); setCashConvD(cc); setIntBurden(ib);
+        setRevenue(rev); setGrossM(gm); setCashConvD(cc); setIntBurden(ib); setSharesResp(sh);
       } catch (e) {
         if (alive) setErr(e instanceof Error ? e.message : String(e));
       }
@@ -388,6 +410,8 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
     'cash-conversion-inputs', benchTarget);
   const [bIntBurden, bIntBurdenErr] = useBenchInputs<InterestBurdenInputs>(
     'interest-burden-inputs', benchTarget);
+  const [bShares, bSharesErr] = useBenchInputs<Resp>(
+    'portfolio-revenue-matrix?metric=shares', benchTarget);
 
   const book: Side = useMemo(() => ({
     margin: marginByYear(marginData?.rows ?? [], sbcCorrection),
@@ -407,11 +431,14 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
     cashConv: bCashConv ? cashConversionByYear(bCashConv.rows, sbcCorrection) : new Map(),
     intBurden: bIntBurden ? interestBurdenByYear(bIntBurden.rows) : new Map(),
     fcfPs: bFcfPs,
+    // ⚠ EVERY BENCHMARK FETCH IS IN THIS CHAIN. One left out fails as a row of dashes whose
+    // tooltip says the line has no periods — true, and it sends the reader to look at the data
+    // rather than at the request that never arrived.
     err: bMarginErr ?? bRoicErr ?? bFcfPsErr ?? bEpsNriErr ?? bPricePsErr
-      ?? bRevenueErr ?? bGrossMErr ?? bCashConvErr ?? bIntBurdenErr,
+      ?? bRevenueErr ?? bGrossMErr ?? bCashConvErr ?? bIntBurdenErr ?? bSharesErr,
   }), [bMargin, bRoic, bGrossM, bCashConv, bIntBurden, bFcfPs, sbcCorrection, bMarginErr,
     bRoicErr, bFcfPsErr, bEpsNriErr, bPricePsErr, bRevenueErr, bGrossMErr, bCashConvErr,
-    bIntBurdenErr]);
+    bIntBurdenErr, bSharesErr]);
 
   /**
    * ⚠⚠ ONE WINDOW PER ROW, SHARED BY BOTH SIDES. Each series ends at its own latest year, and a
@@ -446,6 +473,25 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   /** ⚠ THE SHARED BASE IS AN **ACTUAL** — `commonEndPeriod` only ever returns a reported period, so
    *  the expectation is always measured from something that happened. See `forwardCagr`. */
   const epsBase = bookEps && idxEps ? commonEndPeriod(bookEps.level, idxEps.level) : null;
+  /**
+   * ⚠ THE HISTORICAL EPS ROW SHARES ITS END PERIOD WITH THE EXPECTATION ROW, and that is the point
+   * rather than a saving: the consensus is measured FROM the latest period both sides reported, so
+   * a history ending anywhere else would be a rate that does not hand over to the forecast beneath
+   * it. One `commonEndPeriod`, read twice.
+   */
+  const bookShares = useMemo(
+    () => (sharesResp ? buildBlend(sharesResp) : null), [sharesResp]);
+  const idxShares = useMemo(() => (bShares ? buildBlend(bShares) : null), [bShares]);
+  const sharesEnd = bookShares && idxShares
+    ? commonEndPeriod(bookShares.level, idxShares.level) : null;
+  /** ⚠ FROM `cash-return-inputs`, WHICH THIS TAB ALREADY LOADS for the ROIC row — invested capital
+   *  is derived from the same two raw lines, so the row costs no request. `investedCapitalBlend` is
+   *  the card's own construction, extracted rather than re-implemented. */
+  const bookInvCap = useMemo(
+    () => (roicData ? investedCapitalBlend(roicData.rows) : null), [roicData]);
+  const idxInvCap = useMemo(() => (bRoic ? investedCapitalBlend(bRoic.rows) : null), [bRoic]);
+  const invCapEnd = bookInvCap && idxInvCap
+    ? commonEndPeriod(bookInvCap.level, idxInvCap.level) : null;
 
   const ready = marginData && roicData && fcfPs;
   const th = 'px-2.5 py-1 font-medium text-right whitespace-nowrap';
@@ -717,6 +763,11 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
                   They are different questions and the labels are the only thing saying so. */}
               {on('revCagr') && rateRow('revCagr', bookRev, idxRev,
                 (lvl, y) => lineCagr(lvl, y, revEnd ?? undefined))}
+              {/* ⚠ THE HISTORY OF THE SERIES THE LAST ROW FORECASTS, on the same shared end period
+                  (`epsBase`) — so the rate hands over to the expectation instead of ending
+                  somewhere else. See the ⚠ where `epsBase` is computed. */}
+              {on('epsCagr') && rateRow('epsCagr', bookEps, idxEps,
+                (lvl, y) => lineCagr(lvl, y, epsBase ?? undefined))}
               {on('fcfCagr') && rateRow('fcfCagr', bookBlend, idxBlend,
                 (lvl, y) => lineCagr(lvl, y, fcfEnd ?? undefined))}
               {/* ⚠ ITS OWN `priceEnd`, NOT `fcfEnd`. Every row on this table pins both sides to the
@@ -727,6 +778,14 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
                   one row over a span its own line does not reach — see `lineCagr`'s ⚠. */}
               {on('priceCagr') && rateRow('priceCagr', bookPrice, idxPrice,
                 (lvl, y) => lineCagr(lvl, y, priceEnd ?? undefined))}
+              {/* ⚠ THE DENOMINATOR OF THE ROIC ROW BELOW, deliberately adjacent to it: capital
+                  growing faster than the return on it is a book buying its growth, and neither row
+                  says that alone. */}
+              {on('invCapCagr') && rateRow('invCapCagr', bookInvCap, idxInvCap,
+                (lvl, y) => lineCagr(lvl, y, invCapEnd ?? undefined))}
+              {/* ⚠ THE WEDGE BETWEEN THE REVENUE ROW AND THE PER-SHARE ROWS — see its note. */}
+              {on('sharesCagr') && rateRow('sharesCagr', bookShares, idxShares,
+                (lvl, y) => lineCagr(lvl, y, sharesEnd ?? undefined))}
               {on('grossMargin')
                 && meanRow('grossMargin', book.grossMargin, index.grossMargin, grossEnd)}
               {on('fcfMargin') && meanRow('fcfMargin', book.margin, index.margin, marginEnd)}
@@ -774,7 +833,8 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
         {copy.footnote({
           windows: shown,
           showEps: on('epsFwd'),
-          showFcf: on('fcfCagr'),
+          // ⚠ ANY rate row, not just FCF/share — the clause is about every one of them.
+          showFcf: RATE_KEYS.some(on),
           showPrice: on('priceCagr'),
           whyLink: <InfoTip text={copy.whyDiffer}>{copy.whyDifferLabel}</InfoTip>,
         })}
@@ -793,6 +853,10 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
       {drill === 'grossMargin' && <GrossMarginInputsModal {...drillProps} />}
       {drill === 'fcfMargin' && <MarginInputsModal {...drillProps} />}
       {drill === 'roic' && <CashReturnInputsModal {...drillProps} />}
+      {/* ⚠ THE SAME PANEL AS `roic`, AND THAT IS THE RIGHT ANSWER RATHER THAN A SHORTCUT: invested
+          capital is derived from the two raw lines `cash-return-inputs` returns, so this IS where
+          its numbers are. A dedicated panel would be a second view of one payload. */}
+      {drill === 'invCapCagr' && <CashReturnInputsModal {...drillProps} />}
       {drill === 'cashConv' && <CashConversionInputsModal {...drillProps} />}
       {/* ⚠ THE BURDEN'S OWN PANEL, WHICH IS THE HONEST ONE FOR A COVERAGE ROW. Coverage is one over
           the burden and there is no separate coverage series to inspect — the panel lists the
