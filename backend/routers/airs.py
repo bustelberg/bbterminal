@@ -1650,6 +1650,10 @@ class ActiveShare(BaseModel):
     #: How much of the WHOLE book the compared sleeve is. ⚠ The comparison assumes the individual
     #: stocks are 100%; this is the number that stops that assumption being silent.
     stocks_pct: float | None = None
+    #: The two sums behind `stocks_pct`, so the card can print the division rather than assert its
+    #: answer. ⚠ Weights as the caller sent them — the book's own, before any renormalisation.
+    stocks_weight: float | None = None
+    total_weight: float | None = None
     n_holdings: int = 0
     n_in_benchmark: int = 0
     #: The book's weight in names the index does not hold at all — the SELECTION half of the bet,
@@ -1660,6 +1664,16 @@ class ActiveShare(BaseModel):
     #: ⚠ How much of the index we could price. A missing constituent does not lose its weight, it
     #: redistributes it — so an unpriceable name we do not hold makes active share read LOW.
     benchmark_covered_pct: float | None = None
+
+    #: ⚠⚠ WHEN THE INDEX'S CAPS WERE READ — the OLDEST and NEWEST stamp across its constituents,
+    #: because a cap-weighted index is exactly as current as the caps under it and those are
+    #: refreshed per name, not per index. Reported as a range rather than a single "as of": one
+    #: date would describe the freshest constituent and imply it of all of them.
+    benchmark_caps_from: str | None = None
+    benchmark_caps_to: str | None = None
+    #: How many priced constituents carry no stamp at all — the range above says nothing about
+    #: these, and a partial range read as a full one is the failure the count exists to prevent.
+    benchmark_caps_unstamped: int = 0
 
     unresolved: list[ActiveShareUnmatched] = []
     rows: list[ActiveShareRow] = []

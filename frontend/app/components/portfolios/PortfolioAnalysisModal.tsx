@@ -3288,6 +3288,16 @@ export default function PortfolioAnalysisModal({
               // slightly different portfolios.
               value_eur: h.current_value_eur, currency: h.currency,
             }))}
+            // ⚠ THE BOOK'S DATES TRAVEL WITH ITS WEIGHTS. The panel cannot derive them — an array
+            // of holdings carries no date — so without these its When line can only assume
+            // "today", which is exactly what it used to do.
+            portfolioName={name}
+            portfolioAsOf={data.returns?.portfolio_as_of}
+            portfolioFetchedAt={data.holdings_fetched_at}
+            // ⚠ THE TWO AIRS SCANS ARE DIFFERENT SOURCES, and this modal is the only place that
+            // knows which one it opened — a model portfolio's composition or an account's own
+            // Vermogensoverzicht. Same distinction `source` already draws for the return.
+            portfolioSource={source === 'model' ? 'airs_model' : 'airs_volk'}
             onClose={() => setRisk(false)} />
         </PanelDialog>
       )}

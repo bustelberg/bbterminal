@@ -24,6 +24,33 @@
             "title": "Benchmark",
             "type": "string"
           },
+          "benchmark_caps_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Caps From"
+          },
+          "benchmark_caps_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Caps To"
+          },
+          "benchmark_caps_unstamped": {
+            "default": 0,
+            "title": "Benchmark Caps Unstamped",
+            "type": "integer"
+          },
           "benchmark_covered_pct": {
             "anyOf": [
               {
@@ -101,6 +128,28 @@
               }
             ],
             "title": "Stocks Pct"
+          },
+          "stocks_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stocks Weight"
+          },
+          "total_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Weight"
           },
           "unresolved": {
             "default": [],

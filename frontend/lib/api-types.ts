@@ -8313,6 +8313,15 @@ export interface components {
             available?: boolean;
             /** Benchmark */
             benchmark: string;
+            /** Benchmark Caps From */
+            benchmark_caps_from?: string | null;
+            /** Benchmark Caps To */
+            benchmark_caps_to?: string | null;
+            /**
+             * Benchmark Caps Unstamped
+             * @default 0
+             */
+            benchmark_caps_unstamped?: number;
             /** Benchmark Covered Pct */
             benchmark_covered_pct?: number | null;
             /**
@@ -8343,6 +8352,10 @@ export interface components {
             rows?: components["schemas"]["ActiveShareRow"][];
             /** Stocks Pct */
             stocks_pct?: number | null;
+            /** Stocks Weight */
+            stocks_weight?: number | null;
+            /** Total Weight */
+            total_weight?: number | null;
             /**
              * Unresolved
              * @default []

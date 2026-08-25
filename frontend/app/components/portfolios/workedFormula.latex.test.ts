@@ -16,8 +16,9 @@
 import { describe, expect, it } from 'vitest';
 import katex from 'katex';
 import {
-  subPct, withWorked, workedCagr, workedMean, workedRatio,
+  subPct, withWorked, workedBand, workedCagr, workedMean, workedRatio,
 } from './workedFormula';
+import { oneSigmaBand } from './activeBand';
 
 /** Render exactly as `lib/formula` does, but refusing anything KaTeX would only warn about. */
 function render(tex: string): string {
@@ -51,6 +52,9 @@ const shown = (tex: string) => {
 const CAGR = { pct: 19.7, from: '2015', to: '2025', years: 10,
   fromValue: 100, toValue: 606.34 } as const;
 
+/** A weekly book ~3pp/yr ahead of its index at a 12.41% TE — the shape of the live figures. */
+const BAND = oneSigmaBand(0.06, 52, 12.41)!;
+
 describe('every builder emits parseable LaTeX', () => {
   it('workedMean', () => {
     expect(() => render(workedMean([55.4, 54.1, 53.3, 56.6, 57.5]))).not.toThrow();
@@ -72,6 +76,15 @@ describe('every builder emits parseable LaTeX', () => {
     expect(() => render(workedRatio(12.34, 5.6, '£220', '', '%'))).not.toThrow();
   });
 
+  it('workedBand, including the negative lower end', () => {
+    expect(() => render(workedBand(BAND))).not.toThrow();
+    // ⚠ A NEGATIVE LOWER END IS THE COMMON CASE, and its minus sits beside a `\pm` and inside a
+    // `\left[ \right]` pair — the one place a stray sign breaks the delimiters rather than the
+    // spacing, which is a red block rather than a slightly-off one.
+    expect(() => render(workedBand(oneSigmaBand(-0.05, 52, 8)))).not.toThrow();
+    expect(workedBand(null)).toBe('');
+  });
+
   it('withWorked joins two halves into one display', () => {
     const tex = withWorked(String.raw`\tfrac{1}{2}\sum_i \left| w_i^{\,p} - w_i^{\,b} \right|`,
       String.raw`\text{overlap } 20.54\% + \text{active } 79.46\% = 100\%`);
@@ -80,6 +93,15 @@ describe('every builder emits parseable LaTeX', () => {
 });
 
 describe('an unescaped percent would truncate the expression', () => {
+  it('⚠ and the band keeps BOTH ends of its interval', () => {
+    // ⚠⚠ FOUR PERCENT SIGNS ON ONE LINE MAKES THIS THE MOST EXPOSED BUILDER OF THE SET, and the
+    // end that would vanish is the LOWER one — the end a reader actually needs. `ā f ± TE = +3.12`
+    // with the interval silently gone still reads as a finished formula.
+    const seen = shown(workedBand(BAND));
+    expect(seen).toContain('9.29');
+    expect(seen).toContain('15.53');
+  });
+
   it('the escaped form keeps its tail', () => {
     // The real string the Active share card builds.
     const good = String.raw`\text{overlap } 20.54\% + \text{active } 79.46\% = 100\%`;
@@ -105,7 +127,8 @@ describe('an unescaped percent would truncate the expression', () => {
     expect(workedRatio(1, 2, subPct(5), '', '%')).toContain(String.raw`\%`);
     // ⚠ AND NONE OF THEM LEAVES A BARE ONE. `\%` contains `%`, so a `toContain` check alone would
     // pass on `\% ... %`; this asserts there is no percent that is not preceded by a backslash.
-    for (const tex of [workedMean([55.4, 54.1]), workedCagr(CAGR),
+    expect(workedBand(BAND)).toContain(String.raw`\%`);
+    for (const tex of [workedMean([55.4, 54.1]), workedCagr(CAGR), workedBand(BAND),
       workedRatio(1, 2, subPct(5), '', '%')]) {
       expect(tex).not.toMatch(/(^|[^\\])%/);
     }

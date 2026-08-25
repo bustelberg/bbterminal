@@ -25,6 +25,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { v } from '../../../lib/dynamicValue';
 import { traceError } from '../../../lib/debugTrace';
 import type { PortfolioExposure } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
@@ -33,11 +34,11 @@ import type { ActiveShareHolding } from './ActiveSharePanel';
  *  precision on a figure the reader is asked to check against a table that carries two: "79.5%"
  *  beside rows summing to 79.53 invites the arithmetic to be redone and found wrong. Counts
  *  (issuers, observations, lines, periods) stay integers — they ARE integers. */
-const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
+const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
 /** ⚠ NO DECIMALS ON A POSITION VALUE. Cents on a six-figure holding are noise that costs the
  *  reader the digits that matter, and AIRS's own valuation is not precise to the cent anyway. */
-const eur0 = (v: number | null | undefined) =>
-  (v == null ? '—' : `€${Math.round(v).toLocaleString('nl-NL')}`);
+const eur0 = (n: number | null | undefined) =>
+  (n == null ? '—' : `€${Math.round(n).toLocaleString('nl-NL')}`);
 
 function Tile({ label, value, sub, tone, info }: {
   label: string; value: string; sub?: string; tone?: string; info?: React.ReactNode;
@@ -108,12 +109,12 @@ export default function ExposureView({ holdings, benchmark }: {
                 how={'⚠ TRADE DATE vs SETTLEMENT DATE IS AIRS\'S CONVENTION and it exposes no flag '
                   + 'saying which it used, so a book with a very recent trade may differ from a '
                   + 'trade-date view by that trade\'s value. Stated rather than assumed away.'} />} />} />
-            <Tile label="Issuers" value={`${data.issuers}`}
+            <Tile label="Companies" value={`${data.issuers}`}
               sub={(data.folded_lines ?? 0) > 0
                 ? `${data.lines} lines, ${data.folded_lines} folded` : `${data.lines} lines`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="Distinct companies held, after folding share classes and dual listings."
-                where={`${data.lines} holdings on the table → ${data.issuers} issuers here.`}
+                where={`${v(data.lines)} holdings on the table → ${v(data.issuers)} companies here.`}
                 how={'⚠ THE ONE-LINE ANSWER TO "WHY DOES THIS COUNT DIFFERENTLY FROM THE HOLDINGS '
                   + 'TABLE". Alphabet A + Alphabet C is one position. The same fold feeds Active '
                   + 'share and Concentration, so all three agree by construction.'} />} />} />
@@ -159,7 +160,7 @@ export default function ExposureView({ holdings, benchmark }: {
                       {data.has_values ? eur0(c.value_eur) : ''}
                     </td>
                     <td className="text-fg-faint w-20 text-right pr-2">
-                      {c.issuers} issuer{c.issuers === 1 ? '' : 's'}
+                      {c.issuers} {c.issuers === 1 ? 'company' : 'companies'}
                     </td>
                     <td>
                       <span className="block h-2 rounded-sm" style={{
@@ -175,13 +176,13 @@ export default function ExposureView({ holdings, benchmark }: {
 
           <div>
             <div className="text-[10px] uppercase tracking-wider text-fg-faint mb-1">
-              Effective position per issuer
+              Effective position per company
             </div>
             <div className="overflow-auto">
               <table className="w-full text-[11px]">
                 <thead>
                   <tr className="text-fg-faint [&>th]:py-1 [&>th]:font-medium">
-                    <th className="text-left">Issuer</th>
+                    <th className="text-left">Company</th>
                     <th className="text-right">Weight</th>
                     <th className="text-right">Value</th>
                     <th className="text-left pl-3">Currency</th>

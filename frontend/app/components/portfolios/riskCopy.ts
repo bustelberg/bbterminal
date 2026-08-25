@@ -1,6 +1,7 @@
 'use client';
 
 import { useLang, type Lang } from '../../../lib/i18n';
+import { v } from '../../../lib/dynamicValue';
 
 /**
  * THE RISK PANEL'S COPY, IN BOTH LANGUAGES — the seven views behind the Analyse modal's Risk button.
@@ -26,14 +27,22 @@ import { useLang, type Lang } from '../../../lib/i18n';
  * share", "tracking error", "drawdown", "Sharpe", "Sortino", "information ratio" and "HHI" are what
  * a Dutch wealth manager says out loud; "actief aandeel" is not a term, it is a translation of one.
  * Where a real Dutch word exists it is used — volatiliteit, correlatie, concentratie, rendement,
- * gewicht, positie, emittent.
+ * gewicht, positie, onderneming.
  *
  * ⚠ AIRS'S OWN FIELD NAMES ARE NOT IN HERE, same rule as `managementCopy`: `Beginwaarde`,
  * `Huidige waarde` are the SOURCE's column names and appear identically in both languages.
  */
 
-/** A ⓘ card: headline, where it comes from, over what window, and the caveat. */
-type Card = { what: string; where?: string; when?: string; how: string };
+/**
+ * A ⓘ card: headline, where it comes from, over what window, and the caveat.
+ *
+ * ⚠ `how` IS OPTIONAL (2026-08-25). It used to be required, on the reasoning that every figure
+ * owes the reader a caveat — but a required field gets filled whether or not there is anything to
+ * say, and a card whose How restates its What in different words teaches nothing while making the
+ * one card that DOES carry a warning look like more of the same. Where a measure is explained by
+ * its own formula and legend, How is left off.
+ */
+type Card = { what: string; where?: string; when?: string; how?: string };
 
 export type RiskCopy = {
   /** The switch. ⚠ SHORT — six of these sit on one row inside a fixed dialog. */
@@ -66,17 +75,89 @@ export type RiskCopy = {
     totalAll: (n: number) => string;
     totalCard: Card;
     totalCardHeld: Card;
-    /** ⚠ A SENTENCE, NOT `20 / 1678`. Two bare numbers over a slash is not a `Where` — it was
-     *  shortened to dodge a translation and the meaning went with it. */
-    heldVsIndex: (held: number, members: number) => string;
+    /**
+     * ⚠ A SENTENCE, NOT `20 / 1678`. Two bare numbers over a slash is not a `Where` — it was
+     * shortened to dodge a translation and the meaning went with it.
+     *
+     * ⚠⚠ AND IT NAMES BOTH VENDORS, because the two sides of this comparison come from different
+     * ones — the book from an AIRS scan, the index's weights from yfinance market caps — and a
+     * `Where` that counted the rows without saying where they came from answered half its own
+     * question. ⚠ The labels come from `provenance.sourceLabel`, never typed here: a source is
+     * named once in this app, and a hand-written "AIRS" drifts the moment that table is made
+     * more precise.
+     */
+    heldVsIndex: (held: number, members: number,
+      bookSrc: string, benchField: string, benchVendor: string) => string;
     offBenchWhere: (off: number, held: number) => string;
     coverage: (pct: string, bench: string) => string;
     unmatched: (n: number, pct: string, names: string) => string;
+    /**
+     * What each symbol in the active-share formula stands for — see `tipCard`'s `Legend`.
+     *
+     * ⚠ THE SYMBOLS THEMSELVES ARE NOT IN HERE. `w_i^{\,p}` is LaTeX, identical in every language,
+     * and a translated copy of it is a second place for a superscript to go wrong. Only the prose
+     * is translated; the call site owns the notation.
+     */
+    /**
+     * ⚠ BOTH WEIGHT ROWS NAME THEIR SIDE, and neither says "the book". A legend defining `wᵖ` and
+     * `wᵇ` is defining which of two weightings a symbol refers to, so "the book's weight" makes
+     * the reader carry the mapping themselves — on a screen that already shows the book's name.
+     * The names go in badges (`v`), like every other live value in these cards.
+     */
+    legend: {
+      issuer: string; wp: (bookName: string) => string; wb: (bench: string) => string;
+      /** ⚠ THE ROW THAT ANSWERS THE QUESTION THE OVERLAP TILE ACTUALLY PROVOKES — why the
+       *  benchmark column can sum to more than the overlap. It is the min, and nothing else. */
+      min: string;
+      /** The condition under the Off-benchmark sum. */
+      notInBench: (bench: string) => string;
+      stocksNum: string; stocksDen: string;
+      absActive: string;
+    };
+    /**
+     * The active-share card's `When` — ONE LINE PER SIDE, each naming what it dates.
+     *
+     * ⚠⚠ IT TAKES ALREADY-FORMATTED DAYS (`asOfLine`) AND NULLS, and the null is the whole point:
+     * the copy renders "no recorded date" rather than letting a missing stamp read as now. See the
+     * ⚠⚠ on `asOfLine` — the string this replaced asserted "Today's weights", which is an
+     * assumption printed as a fact.
+     *
+     * ⚠⚠ TWO LINES AND NO EXPLANATION OF WHY THERE ARE TWO. An earlier version spent a sentence
+     * saying the book and the index are refreshed by different jobs, so judge for yourself — which
+     * is what the two dated lines already say, at four times the length. A `When` is read at a
+     * glance; prose in it is prose nobody finishes. ⚠ `\n` is a real line break here: the tooltip
+     * panel carries `whitespace-pre-line`.
+     *
+     * ⚠ THE TWO PARENTHETICALS APPEAR ONLY WHEN THEY HAVE SOMETHING TO SAY — the read date only if
+     * it differs from the valuation date, the undated count only if it is not zero. That is what
+     * keeps the normal case to one date per line without dropping a fact when the fact exists.
+     *
+     * ⚠ DATES ARE NOT TRANSLATED. `2026-08-25` is the same in both languages; only the words are.
+     */
+    whenWeights: (bookName: string, book: string | null, read: string | null,
+      bench: string, caps: string | null, unstamped: number) => string;
+    /**
+     * The BOOK's date alone — for a figure with no benchmark in it.
+     *
+     * ⚠ THE STOCKS TILE IS ABOUT THE BOOK AND NOTHING ELSE, so printing the index's cap range
+     * beside it would date a side that does not appear in the number. Two cards, two Whens,
+     * because they genuinely measure different things.
+     */
+    whenBook: (bookName: string, book: string | null, read: string | null) => string;
     cards: { activeShare: Card; overlap: Card; offBenchmark: Card; stocks: Card };
   };
 
   te: {
     trackingError: string; activeReturn: string; infoRatio: string; observations: string;
+    /**
+     * The ā ± TE interval, prepended to the TE card's `how` — see `activeBand`.
+     *
+     * ⚠ THE OPERANDS ARRIVE PRE-FORMATTED, SIGNS AND ALL (`signed2` in `TrackingErrorView`). A
+     * translation places numbers, it never renders them: a `toFixed` on this side would be a
+     * second rounding convention, and the band's ends would stop matching the worked line above
+     * them in the same card.
+     */
+    bandReading: (lo: string, hi: string, centre: string, bench: string) => string;
     cards: { te: Card; activeReturn: Card; infoRatio: Card; observations: Card };
     note: string;
   };
@@ -166,8 +247,10 @@ const en: RiskCopy = {
     stocks: 'Stocks',
     heldOnly: (n) => `What we hold (${n})`, everyName: (n) => `Every name (${n})`,
     colCompany: 'Company', colBook: 'Book', colActive: 'Active', notHeld: 'not held',
-    heldVsIndex: (h, m) => `${h} issuers held, against ${m} priced index members.`,
-    offBenchWhere: (o, h) => `${o} of the ${h} issuers held are not in the index.`,
+    heldVsIndex: (h, m, bookSrc, benchField, benchVendor) =>
+      `${v(h)} companies and their weights from ${v(bookSrc)}, against ${v(m)} priced index `
+      + `members weighted by ${v(benchField)} from ${v(benchVendor)}.`,
+    offBenchWhere: (o, h) => `${v(o)} of the ${v(h)} companies held are not in the index.`,
     totalHeld: (n) => `Total — ${n} held`,
     totalAll: (n) => `Total — all ${n} names`,
     totalCard: {
@@ -189,23 +272,47 @@ const en: RiskCopy = {
       + 'over the rest, so the active share reads slightly low.',
     unmatched: (n, pct, names) => `${n} holding${n === 1 ? '' : 's'} (${pct} of the sleeve) could `
       + `not be matched to a company name and count as fully active: ${names}`,
+    legend: {
+      // ⚠ IT SAYS WHAT `i` IS, then gives the case that makes the fold matter. The previous
+      // version — "both of its share classes are ONE i, not two" — presupposed two share classes,
+      // which almost no company has, and never said that `i` is a term in the sum above.
+      issuer: 'one company, and one term in the sum — Alphabet A and Alphabet C are folded into a '
+        + 'single i, not two',
+      wp: (bookName) =>
+        `${v(bookName)}'s weight in that company, over the stock sleeve renormalised to 100%`,
+      wb: (bench) => `${v(bench)}'s own weight in the same company, by market cap`,
+      min: 'the SMALLER of the two weights — where we hold less of a company than the index does, '
+        + 'only our weight counts, which is why the benchmark column can sum to more than this',
+      notInBench: (bench) => `read as "over the companies ${v(bench)} does not hold at all" — the `
+        + 'sum runs over those alone',
+      stocksNum: 'the weight in individual stocks with an ISIN we could match',
+      stocksDen: 'the weight in everything the book holds, funds and cash and bonds included',
+      absActive: 'the size of each bet regardless of direction — an overweight and an underweight '
+        + 'of the same size count the same',
+    },
+    whenBook: (bookName, book, read) =>
+      `${v(bookName)} weights: ${v(book ?? 'no recorded date')}`
+      + `${read && read !== book ? ` (read ${v(read)})` : ''}`,
+    whenWeights: (bookName, book, read, bench, caps, unstamped) =>
+      `${v(bookName)} weights: ${v(book ?? 'no recorded date')}`
+      + `${read && read !== book ? ` (read ${v(read)})` : ''}\n`
+      + `${v(bench)} weights based on marketcap from yfinance: ${v(caps ?? 'no recorded date')}`
+      + `${unstamped > 0 ? ` (${v(unstamped)} undated)` : ''}`,
     cards: {
       activeShare: {
         what: 'How much of the stock sleeve differs from the benchmark.',
-        when: "Today's weights — a structural measure, not a return.",
-        how: '0% is the index itself; 100% shares no name with it. ⚠ NOT A SCORE — it is the size '
-          + 'of the bet, and the only thing it tells you is how far the return CAN diverge, in '
-          + 'either direction.',
       },
       overlap: {
         what: 'The share of the sleeve that IS the benchmark.',
-        where: 'Σ min(portfolio weight, benchmark weight), over every name on either side.',
-        how: 'Exactly 100% − active share, by construction. The two are one number.',
+        how: 'Exactly 100% − active share, by construction. The two are one number, so nothing '
+          + 'is learned by reading both — they are printed together because each is the natural '
+          + 'answer to a different question.',
       },
       offBenchmark: {
         what: 'Weight in companies the index does not hold at all.',
         how: 'Active share mixes two decisions — owning something the index does not, and sizing '
-          + 'something it does. This is only the first.',
+          + 'something it does. This is only the first, so a book can be highly active with this '
+          + 'at zero.',
       },
       stocks: {
         what: 'How much of the whole book this comparison covers.',
@@ -220,12 +327,20 @@ const en: RiskCopy = {
   te: {
     trackingError: 'Tracking error (realised)', activeReturn: 'Active return (ann.)',
     infoRatio: 'Information ratio', observations: 'Observations',
+    bandReading: (lo, hi, centre, bench) =>
+      `A typical year lands ā ± TE — between ${v(lo)} and ${v(hi)} against ${v(bench)}, centred on the mean `
+      + `active return of ${v(centre)} and NOT on zero. About two years in three; active returns are `
+      + 'fatter-tailed than normal, so read it as a scale rather than a promise. ⚠ THE CENTRE IS '
+      + 'THE ARITHMETIC mean annualised, so it sits a little above the geometric Active return '
+      + 'tile beside it — the gap is roughly TE²/2, and a ±σ band is only coherent around the '
+      + 'arithmetic one.',
     cards: {
       te: {
         what: "How much the book's return has diverged from the benchmark's, annualised.",
         how: '⚠ REALISED (ex-post), not the ex-ante forecast from a covariance matrix — those are '
           + 'different numbers and routinely disagree. ā IS subtracted and the divisor is T−1 '
-          + '(Bessel); some providers do neither, which reads higher.',
+          + '(Bessel); some providers do neither — that version is symmetric about the benchmark, '
+          + 'and larger.',
       },
       activeReturn: {
         what: 'What the sleeve earned above or below the benchmark, per year.',
@@ -396,18 +511,18 @@ const en: RiskCopy = {
   },
 
   conc: {
-    effective: 'Effective positions', ofIssuers: (n) => `of ${n} issuers held`,
+    effective: 'Effective positions', ofIssuers: (n) => `of ${n} companies held`,
     top10: 'Top 10', ofBook: (p) => `${p} of the whole book`,
     largest: 'Largest position', benchEffective: (b) => `${b} effective`,
     benchSub: (n, t) => `of ${n} · top 10 ${t}`,
-    tableTitle: "Largest issuers, with the index's weight in each",
-    colIssuer: 'Issuer', colWeight: 'Weight', colCumulative: 'Cumulative',
+    tableTitle: "Largest companies, with the index's weight in each",
+    colIssuer: 'Company', colWeight: 'Weight', colCumulative: 'Cumulative',
     coverage: (pct, b) => `Priced ${pct} of ${b}'s members — the missing weight redistributes over `
       + 'the rest, so the index reads slightly more concentrated than it is.',
     note: 'Folded onto ISSUERS, not lines — two share classes of one company are a single '
       + 'position, which is what stops the ten largest being decided by an identifier.',
     unresolved: (n) => ` ${n} holding${n === 1 ? '' : 's'} could not be matched to a company name `
-      + 'and each counts as its own issuer.',
+      + 'and each counts as its own company.',
     cards: {
       effective: {
         what: 'How many equally-sized positions this book behaves like.',
@@ -417,13 +532,13 @@ const en: RiskCopy = {
           + 'below forty.',
       },
       top10: {
-        what: 'The share of the stock sleeve in its ten largest issuers.',
+        what: 'The share of the stock sleeve in its ten largest companies.',
         how: '⚠⚠ TWO DENOMINATORS, BOTH TRUE. The headline is of the STOCK SLEEVE, which is what '
           + 'compares across books; the line beneath is of the whole book including cash and '
           + 'funds. A book that is 30% cash really is less concentrated in absolute terms.',
       },
       largest: {
-        what: 'The single biggest issuer, as a share of the sleeve.',
+        what: 'The single biggest company, as a share of the sleeve.',
         how: '⚠ A BIG POSITION IS NOT AUTOMATICALLY A BIG BET. Apple at 6% against an index '
           + 'holding 5% is a 1pp bet; the same 6% in a name the index does not hold is a 6pp one. '
           + 'The table below carries both.',
@@ -438,7 +553,7 @@ const en: RiskCopy = {
   },
 
   exp: {
-    sleeve: 'Stock sleeve', issuers: 'Issuers', currencies: 'Currencies', other: 'Other',
+    sleeve: 'Stock sleeve', issuers: 'Companies', currencies: 'Currencies', other: 'Other',
     ofBook: (e) => `of ${e} in the book`, weightsOnly: 'weights only',
     linesFolded: (l, f) => `${l} lines, ${f} folded`, linesOnly: (l) => `${l} lines`,
     largestCcy: (c, p) => `${c} ${p} largest`,
@@ -446,9 +561,9 @@ const en: RiskCopy = {
     unknownCcy: (p) => `${p} of the sleeve has no currency we could assign. It is reported `
       + 'separately rather than folded into EUR — that default would make the book look more '
       + 'domestic than it is.',
-    currencyTitle: 'Currency exposure', positionsTitle: 'Effective position per issuer',
-    colIssuer: 'Issuer', colWeight: 'Weight', colValue: 'Value', colCurrency: 'Currency',
-    lines: (n) => `${n} lines`, issuerCount: (n) => `${n} issuer${n === 1 ? '' : 's'}`,
+    currencyTitle: 'Currency exposure', positionsTitle: 'Effective position per company',
+    colIssuer: 'Company', colWeight: 'Weight', colValue: 'Value', colCurrency: 'Currency',
+    lines: (n) => `${n} lines`, issuerCount: (n) => `${n} ${n === 1 ? 'company' : 'companies'}`,
     note: "Eᵢ is AIRS's own EUR valuation of the position, not a quantity × price × FX of ours — "
       + "it is the figure on the client's statement, and a second derivation would disagree with "
       + 'it on most rows with no way to say which was right. The weights here are the same ones '
@@ -510,8 +625,10 @@ const nl: RiskCopy = {
     stocks: 'Aandelen',
     heldOnly: (n) => `Wat we houden (${n})`, everyName: (n) => `Alle namen (${n})`,
     colCompany: 'Onderneming', colBook: 'Boek', colActive: 'Actief', notHeld: 'niet gehouden',
-    heldVsIndex: (h, m) => `${h} gehouden emittenten, tegenover ${m} geprijsde indexleden.`,
-    offBenchWhere: (o, h) => `${o} van de ${h} gehouden emittenten zitten niet in de index.`,
+    heldVsIndex: (h, m, bookSrc, benchField, benchVendor) =>
+      `${v(h)} ondernemingen en hun gewichten uit ${v(bookSrc)}, tegenover ${v(m)} geprijsde `
+      + `indexleden gewogen naar ${v(benchField)} van ${v(benchVendor)}.`,
+    offBenchWhere: (o, h) => `${v(o)} van de ${v(h)} gehouden ondernemingen zitten niet in de index.`,
     totalHeld: (n) => `Totaal — ${n} gehouden`,
     totalAll: (n) => `Totaal — alle ${n} namen`,
     totalCard: {
@@ -534,23 +651,45 @@ const nl: RiskCopy = {
       + 'de rest herverdeeld, waardoor de active share iets te laag uitvalt.',
     unmatched: (n, pct, names) => `${n} positie${n === 1 ? '' : 's'} (${pct} van de selectie) kon `
       + `niet aan een ondernemingsnaam worden gekoppeld en telt volledig als actief: ${names}`,
+    legend: {
+      issuer: 'één onderneming, en één term in de som — Alphabet A en Alphabet C worden tot één i '
+        + 'samengevoegd, niet twee',
+      wp: (bookName) => `het gewicht van ${v(bookName)} in die onderneming, over de tot 100% `
+        + 'geherwogen aandelenselectie',
+      wb: (bench) => `het gewicht van ${v(bench)} zelf in diezelfde onderneming, naar marktkapitalisatie`,
+      min: 'het KLEINSTE van de twee gewichten — houden we minder van een onderneming dan de index, '
+        + 'dan telt alleen ons gewicht mee; daarom kan de benchmarkkolom hoger uitkomen dan dit',
+      notInBench: (bench) => `te lezen als "over de ondernemingen die ${v(bench)} helemaal niet `
+        + 'houdt" — de som loopt alleen over die',
+      stocksNum: 'het gewicht in individuele aandelen met een ISIN die we konden koppelen',
+      stocksDen: 'het gewicht in alles wat het boek houdt, inclusief fondsen, liquiditeiten en obligaties',
+      absActive: 'de omvang van elke positie ongeacht de richting — een over- en een onderweging '
+        + 'van dezelfde grootte tellen even zwaar',
+    },
+    whenBook: (bookName, book, read) =>
+      `Gewichten ${v(bookName)}: ${v(book ?? 'geen vastgelegde datum')}`
+      + `${read && read !== book ? ` (opgehaald ${v(read)})` : ''}`,
+    whenWeights: (bookName, book, read, bench, caps, unstamped) =>
+      `Gewichten ${v(bookName)}: ${v(book ?? 'geen vastgelegde datum')}`
+      + `${read && read !== book ? ` (opgehaald ${v(read)})` : ''}\n`
+      + `Gewichten ${v(bench)} op basis van marktkapitalisatie van yfinance: `
+      + `${v(caps ?? 'geen vastgelegde datum')}`
+      + `${unstamped > 0 ? ` (${v(unstamped)} zonder datum)` : ''}`,
     cards: {
       activeShare: {
         what: 'Hoeveel van de aandelenselectie afwijkt van de benchmark.',
-        when: 'De gewichten van vandaag — een structurele maat, geen rendement.',
-        how: '0% is de index zelf; 100% deelt er geen enkele naam mee. ⚠ GEEN RAPPORTCIJFER — het '
-          + 'is de omvang van de positionering, en het enige wat het zegt is hoe ver het rendement '
-          + 'KAN afwijken, in beide richtingen.',
       },
       overlap: {
         what: 'Het deel van de selectie dat de benchmark WEL is.',
-        where: 'Σ min(portefeuillegewicht, benchmarkgewicht), over elke naam aan beide zijden.',
-        how: 'Per definitie exact 100% − active share. De twee zijn één getal.',
+        how: 'Per definitie exact 100% − active share. De twee zijn één getal, dus beide lezen '
+          + 'levert niets extra op — ze staan samen omdat elk het natuurlijke antwoord is op een '
+          + 'andere vraag.',
       },
       offBenchmark: {
         what: 'Gewicht in ondernemingen die de index helemaal niet houdt.',
         how: 'Active share mengt twee beslissingen — iets bezitten dat de index niet heeft, en iets '
-          + 'zwaarder of lichter wegen dat hij wél heeft. Dit is alleen de eerste.',
+          + 'zwaarder of lichter wegen dat hij wél heeft. Dit is alleen de eerste, dus een boek kan '
+          + 'zeer actief zijn terwijl dit nul is.',
       },
       stocks: {
         what: 'Welk deel van het hele boek deze vergelijking beslaat.',
@@ -565,13 +704,22 @@ const nl: RiskCopy = {
   te: {
     trackingError: 'Tracking error (gerealiseerd)', activeReturn: 'Actief rendement (geann.)',
     infoRatio: 'Information ratio', observations: 'Waarnemingen',
+    bandReading: (lo, hi, centre, bench) =>
+      `Een doorsnee jaar landt op ā ± TE — tussen ${v(lo)} en ${v(hi)} ten opzichte van ${v(bench)}, met `
+      + `als midden het gemiddelde actieve rendement van ${v(centre)} en dus NIET nul. Ongeveer twee `
+      + 'op de drie jaren; actieve rendementen hebben dikkere staarten dan een normale verdeling, '
+      + 'dus lees het als een orde van grootte en niet als een belofte. ⚠ HET MIDDEN IS HET '
+      + 'REKENKUNDIG gemiddelde op jaarbasis en ligt daarmee iets boven de geometrische tegel '
+      + 'Actief rendement ernaast — het verschil is ruwweg TE²/2, en een ±σ-band is alleen '
+      + 'consistent rond het rekenkundige gemiddelde.',
     cards: {
       te: {
         what: 'Hoeveel het rendement van het boek is afgeweken van dat van de benchmark, '
           + 'geannualiseerd.',
         how: '⚠ GEREALISEERD (ex-post), niet de ex-ante voorspelling uit een covariantiematrix — '
           + 'dat zijn verschillende getallen en ze lopen structureel uiteen. ā WORDT afgetrokken en '
-          + 'de noemer is T−1 (Bessel); sommige aanbieders doen geen van beide, wat hoger uitkomt.',
+          + 'de noemer is T−1 (Bessel); sommige aanbieders doen geen van beide — die versie is '
+          + 'symmetrisch rond de benchmark, en groter.',
       },
       activeReturn: {
         what: 'Wat de selectie boven of onder de benchmark verdiende, per jaar.',
@@ -749,19 +897,19 @@ const nl: RiskCopy = {
   },
 
   conc: {
-    effective: 'Effectieve posities', ofIssuers: (n) => `van ${n} gehouden emittenten`,
+    effective: 'Effectieve posities', ofIssuers: (n) => `van ${n} gehouden ondernemingen`,
     top10: 'Top 10', ofBook: (p) => `${p} van het hele boek`,
     largest: 'Grootste positie', benchEffective: (b) => `Effectief ${b}`,
     benchSub: (n, t) => `van ${n} · top 10 ${t}`,
-    tableTitle: 'Grootste emittenten, met het gewicht van de index in elk',
-    colIssuer: 'Emittent', colWeight: 'Gewicht', colCumulative: 'Cumulatief',
+    tableTitle: 'Grootste ondernemingen, met het gewicht van de index in elk',
+    colIssuer: 'Onderneming', colWeight: 'Gewicht', colCumulative: 'Cumulatief',
     coverage: (pct, b) => `${pct} van de leden van ${b} geprijsd — het ontbrekende gewicht wordt over `
       + 'de rest herverdeeld, waardoor de index iets geconcentreerder oogt dan hij is.',
     note: 'Samengevoegd per EMITTENT, niet per regel — twee aandelenklassen van één onderneming '
       + 'zijn één positie, en dat voorkomt dat de tien grootste door een identificatiecode worden '
       + 'bepaald.',
     unresolved: (n) => ` ${n} positie${n === 1 ? '' : 's'} kon niet aan een ondernemingsnaam worden `
-      + 'gekoppeld en telt elk als eigen emittent.',
+      + 'gekoppeld en telt elk als eigen onderneming.',
     cards: {
       effective: {
         what: 'Naar hoeveel even grote posities dit boek zich gedraagt.',
@@ -771,14 +919,14 @@ const nl: RiskCopy = {
           + 'namen waarvan er vijf domineren komt ver onder veertig uit.',
       },
       top10: {
-        what: 'Het deel van de aandelenselectie dat in de tien grootste emittenten zit.',
+        what: 'Het deel van de aandelenselectie dat in de tien grootste ondernemingen zit.',
         how: '⚠⚠ TWEE NOEMERS, ALLEBEI WAAR. De kop gaat over de AANDELENSELECTIE, en dat is wat '
           + 'tussen boeken vergelijkbaar is; de regel eronder gaat over het hele boek inclusief '
           + 'liquiditeiten en fondsen. Een boek dat voor 30% uit liquiditeiten bestaat is in '
           + 'absolute zin werkelijk minder geconcentreerd.',
       },
       largest: {
-        what: 'De grootste enkele emittent, als aandeel van de selectie.',
+        what: 'De grootste enkele onderneming, als aandeel van de selectie.',
         how: '⚠ EEN GROTE POSITIE IS NIET AUTOMATISCH EEN GROTE KEUZE. Apple op 6% tegenover een '
           + 'index met 5% is een keuze van 1pp; dezelfde 6% in een naam die de index niet houdt is '
           + 'er een van 6pp. De tabel hieronder toont beide.',
@@ -793,7 +941,7 @@ const nl: RiskCopy = {
   },
 
   exp: {
-    sleeve: 'Aandelenselectie', issuers: 'Emittenten', currencies: 'Valuta', other: 'Overig',
+    sleeve: 'Aandelenselectie', issuers: 'Ondernemingen', currencies: 'Valuta', other: 'Overig',
     ofBook: (e) => `van ${e} in het boek`, weightsOnly: 'alleen gewichten',
     linesFolded: (l, f) => `${l} regels, ${f} samengevoegd`, linesOnly: (l) => `${l} regels`,
     largestCcy: (c, p) => `${c} ${p} grootste`,
@@ -801,9 +949,9 @@ const nl: RiskCopy = {
     unknownCcy: (p) => `Aan ${p} van de selectie konden we geen valuta toekennen. Dat wordt apart `
       + 'gerapporteerd in plaats van bij de euro geteld — die keuze zou het boek binnenlandser doen '
       + 'lijken dan het is.',
-    currencyTitle: 'Valuta-exposure', positionsTitle: 'Effectieve positie per emittent',
-    colIssuer: 'Emittent', colWeight: 'Gewicht', colValue: 'Waarde', colCurrency: 'Valuta',
-    lines: (n) => `${n} regels`, issuerCount: (n) => `${n} emittent${n === 1 ? '' : 'en'}`,
+    currencyTitle: 'Valuta-exposure', positionsTitle: 'Effectieve positie per onderneming',
+    colIssuer: 'Onderneming', colWeight: 'Gewicht', colValue: 'Waarde', colCurrency: 'Valuta',
+    lines: (n) => `${n} regels`, issuerCount: (n) => `${n} onderneming${n === 1 ? '' : 'en'}`,
     note: 'Eᵢ is de eigen eurowaardering van AIRS van de positie, geen eigen berekening van stuks × '
       + 'koers × wisselkoers — het is het cijfer op het overzicht van de klant, en een tweede '
       + 'afleiding zou daar op de meeste regels van afwijken zonder dat te zeggen valt welke klopt. '

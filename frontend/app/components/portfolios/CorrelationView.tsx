@@ -140,6 +140,12 @@ export default function CorrelationView({ holdings, benchmark }: {
                   String.raw`\sigma_p = ${subNum(data.portfolio_vol_pct ?? 0, 2)}\%`
                   + String.raw`\quad \sigma_b = ${subNum(data.benchmark_vol_pct ?? 0, 2)}\%`
                   + String.raw`\quad\Rightarrow\quad \rho = ${data.benchmark_corr.toFixed(4)}`)}
+                legend={[
+                  { sym: 'p,\\; b', is: `the sleeve's and ${data.benchmark}'s return series over the window` },
+                  { sym: String.raw`\mathrm{Cov}(p,\, b)`, is: 'how far the two move together — positive when they rise and fall in the same periods' },
+                  { sym: String.raw`\sigma_p,\; \sigma_b`, is: 'the standard deviation of each series on its own' },
+                  { sym: String.raw`\rho`, is: 'the answer: the covariance stripped of both scales, so it lands in −1…+1' },
+                ]}
                 how={'⚠ THIS IS THE OTHER SIDE OF THE TRACKING ERROR, not a separate fact: '
                   + 'σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ. The lower this is, the more the book can diverge.'} />} />} />
             <Tile label="R²" value={data.r_squared == null ? '—' : data.r_squared.toFixed(2)}
@@ -170,6 +176,12 @@ export default function CorrelationView({ holdings, benchmark }: {
                   + String.raw` \times ${subNum(data.portfolio_vol_pct ?? 0, 2)}`
                   + String.raw` \times ${subNum(data.benchmark_vol_pct ?? 0, 2)}}`
                   + String.raw` = ${subNum(data.implied_active_vol_pct, 2)}\%`)}
+                legend={[
+                  { sym: String.raw`\sigma_p`, is: "the sleeve's own volatility, annualised" },
+                  { sym: String.raw`\sigma_b`, is: `${data.benchmark}'s volatility, annualised` },
+                  { sym: String.raw`\rho`, is: 'the correlation between the two — the tile beside this one' },
+                  { sym: String.raw`\sigma_a`, is: 'the answer: the volatility of the difference, which IS the tracking error' },
+                ]}
                 how={'⚠ THE IDENTITY IS SHOWN, NOT ASSERTED. The figure above is measured directly '
                   + 'from the active returns; the worked line rebuilds it from ρ. They agree to '
                   + 'floating-point noise, and would visibly diverge if the two views ever stopped '

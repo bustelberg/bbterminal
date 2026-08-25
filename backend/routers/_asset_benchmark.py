@@ -292,6 +292,27 @@ def _universe_analysis_ids(label: str) -> list[int]:
     return sorted(out)
 
 
+def cap_stamp_range(rows: list[dict]) -> tuple[str | None, str | None, int]:
+    """`(oldest, newest, how_many_unstamped)` over `market_cap_checked_at`.
+
+    ⚠⚠ WHEN A CAP-WEIGHTED INDEX WAS MEASURED IS A RANGE, NOT A DATE, and reporting one date would
+    be a claim the data does not support. `market_cap_checked_at` is stamped per constituent by
+    whichever refresh last touched that name, so on a live index the stamps spread over days. A
+    caller that printed only the newest would be describing the freshest constituent and implying
+    it of all 1,700.
+
+    ⚠⚠ AND THE UNSTAMPED ONES ARE COUNTED, NEVER JUST SKIPPED. A plain min/max silently narrows to
+    whatever happens to carry a stamp, so an index where two names were refreshed this morning and
+    nothing else has ever been stamped would report a tight, recent, entirely meaningless window —
+    and it would look more precise than a wide honest one. The count is what tells the reader the
+    range speaks for only part of the index.
+    """
+    stamps = sorted(s for s in (r.get("market_cap_checked_at") for r in rows) if s)
+    if not stamps:
+        return None, None, len(rows)
+    return stamps[0], stamps[-1], len(rows) - len(stamps)
+
+
 def members(label: str) -> tuple[list[dict], dict]:
     """The index's constituents, priced from the ASSET world. Returns (members, coverage).
 
@@ -395,9 +416,13 @@ def members(label: str) -> tuple[list[dict], dict]:
             }
 
     out = list(by_name.values())
+    caps_from, caps_to, caps_unstamped = cap_stamp_range(out)
     coverage = {
         "universe_members": len(ids),
         "priced": len(out),
+        "caps_from": caps_from,
+        "caps_to": caps_to,
+        "caps_unstamped": caps_unstamped,
         # How much of the universe we could actually price. ALWAYS reported: a cap-weighted index
         # renormalised over a fraction of its constituents is exactly the invention the portfolio
         # returns refuse to make, and here the missing names are systematic (a whole country), not

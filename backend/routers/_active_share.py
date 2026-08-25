@@ -240,6 +240,12 @@ def compute_active_share(holdings: list[dict], benchmark: str) -> dict:
         # printed numbers must find it holds to the digit rather than to the rounding.
         "overlap_pct": overlap,
         "stocks_pct": (stocks_w / total_all * 100.0) if total_all > 0 else None,
+        # ⚠ THE TWO OPERANDS, NOT JUST THEIR RATIO. `stocks_pct` is the one figure on this panel a
+        # reader cannot check against anything on screen — the Holdings table shows the lines, not
+        # the two sums — so the card prints the division and needs both halves to do it. Returned
+        # rather than re-derived on the client, which would be a second definition of "a stock".
+        "stocks_weight": stocks_w,
+        "total_weight": total_all,
         "n_holdings": len(port),
         "n_in_benchmark": len(in_bench),
         # The book's weight that sits in names the index does not hold at all — the part of active
@@ -247,6 +253,14 @@ def compute_active_share(holdings: list[dict], benchmark: str) -> dict:
         "off_benchmark_pct": sum(r["portfolio_pct"] for r in held if r["benchmark_pct"] <= 0),
         "benchmark_members": len(bench),
         "benchmark_covered_pct": coverage.get("covered_pct"),
+        # ⚠⚠ WHEN THE INDEX SIDE WAS MEASURED — a RANGE, and separate from the book's own date.
+        # The two sides of this comparison are read from different places on different schedules
+        # (the book from AIRS, the caps from Yahoo), so one "as of" over the pair would be a date
+        # that is true of neither. The panel prints both and lets the reader judge whether they are
+        # close enough to compare, which is a judgement only they can make.
+        "benchmark_caps_from": coverage.get("caps_from"),
+        "benchmark_caps_to": coverage.get("caps_to"),
+        "benchmark_caps_unstamped": coverage.get("caps_unstamped"),
         "unresolved": sorted(unresolved, key=lambda r: -r["weight_pct"]),
         # Everything the book holds, plus the index names it is most under-weight in. Sorted by the
         # size of the bet either way, which is the order a risk report is read in.

@@ -1,4 +1,16 @@
 import Formula from './formula';
+import DynamicText from './dynamicValue';
+
+/**
+ * Prose on its way into a card field, with any marked live values badged.
+ *
+ * ⚠ A STRING GOES THROUGH THE BADGER; ANYTHING ELSE IS PASSED STRAIGHT THROUGH. Several call sites
+ * hand these fields real JSX (a link, a nested tip), and those have already decided how they look.
+ * ⚠ And an unmarked string comes out unchanged, which is what lets copy adopt `v()` one string at a
+ * time instead of in one 660-string commit.
+ */
+const prose = (n: React.ReactNode) =>
+  (typeof n === 'string' ? <DynamicText text={n} /> : n);
 
 /** THE tooltip card. One shell, every info icon.
  *
@@ -62,9 +74,13 @@ export function Field({ label, children }: { label: string; children: React.Reac
  * display maths reflowed through that is unreadable in exactly the way that makes a reader stop
  * checking.
  *
- * ⚠ AND IT SITS DIRECTLY UNDER `where`, which is where the formula is described in words. Prose,
- * then the maths: the two have to be adjacent or the reader is comparing a description at the top
- * of a card with an expression at the bottom.
+ * ⚠⚠ IT SITS IN THE `how` SECTION, WHICH REVERSES THE EARLIER DECISION (it used to sit under
+ * `where`, on the reasoning that prose and maths describing the same thing must be adjacent). Two
+ * things changed that. `where` names the INPUTS — how many observations, over what window, against
+ * which tracker — and a formula is not an input; `how` is where the card says how to read the
+ * figure, which is the question a formula answers. And the formula now carries its own
+ * {@link Legend}, so it no longer leans on a neighbouring sentence to say what its symbols mean —
+ * which was the whole argument for keeping it beside `where`.
  */
 function Worked({ text }: { text: string }) {
   // ⚠⚠ ONE TYPESET EXPRESSION, NOT TWO BLOCKS. `withWorked` joins the symbolic half and the
@@ -79,20 +95,71 @@ function Worked({ text }: { text: string }) {
   );
 }
 
-export function AspectCard({ what, where, when, how, worked }: {
+/** One row of a {@link Legend}: the symbol as it appears in the formula, and what it stands for. */
+export type FormulaSymbol = {
+  /** ⚠ LaTeX, NOT A UNICODE LOOKALIKE — it is set by the same renderer as the formula above it. */
+  sym: string;
+  is: React.ReactNode;
+};
+
+/**
+ * WHAT EACH SYMBOL IN THE FORMULA ABOVE ACTUALLY IS.
+ *
+ * ⚠⚠ TYPESET BY KaTeX, NOT WRITTEN AS TEXT, AND THAT IS THE ENTIRE POINT. A legend that renders
+ * `w_i^p` as "w_i^p" in the UI font asks the reader to match two differently-shaped objects and
+ * trust that they are the same variable — which is the same failure `lib/formula` exists to fix
+ * one level up, reintroduced in the very place that explains the notation. Same engine, same face,
+ * same scripts: the symbol in the row IS the symbol in the equation.
+ *
+ * ⚠ THE SYMBOL COLUMN IS FIXED-WIDTH AND RIGHT-ALIGNED, so the descriptions form a single column
+ * the eye can run down. Ragged-left definitions read as a list of unrelated notes.
+ *
+ * ⚠ IT DEFINES WHAT THE FORMULA USES AND NOTHING ELSE. A legend that also explains a constant the
+ * reader can see (the ½, the T−1) turns four rows into eight and buries the two symbols that were
+ * genuinely opaque; the constants belong in `how`, where the reasoning for them already lives.
+ */
+function Legend({ items }: { items: readonly FormulaSymbol[] }) {
+  return (
+    <span className="block space-y-1 pl-1">
+      {items.map((s) => (
+        <span key={s.sym} className="flex items-baseline gap-2.5">
+          <span className="shrink-0 min-w-[3rem] text-right leading-none">
+            <Formula inline tex={s.sym} />
+          </span>
+          {/* ⚠ THROUGH `prose` TOO — a legend row routinely carries a live operand ("the number of
+              paired periods (261 here)"), and a badge that appears in the card body but not four
+              lines below it reads as two different kinds of number rather than one convention. */}
+          <span className="min-w-0 text-[12px] text-fg-muted">{prose(s.is)}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+export function AspectCard({ what, where, when, how, worked, legend }: {
   what: React.ReactNode;
   where?: React.ReactNode;
   when?: React.ReactNode;
   how?: React.ReactNode;
-  /** The same formula as `where`, with real numbers substituted. See {@link Worked}. */
+  /** The formula, then the same formula with real numbers substituted. See {@link Worked}. */
   worked?: string;
+  /** What each symbol in `worked` stands for. See {@link Legend}. */
+  legend?: readonly FormulaSymbol[];
 }) {
   return (
-    <TipCard label="What" title={what}>
-      {where != null && where !== '' && <Field label="Where">{where}</Field>}
-      {worked ? <Worked text={worked} /> : null}
-      {when != null && when !== '' && <Field label="When">{when}</Field>}
-      {how != null && how !== '' && <Field label="How">{how}</Field>}
+    <TipCard label="What" title={prose(what)}>
+      {where != null && where !== '' && <Field label="Where">{prose(where)}</Field>}
+      {when != null && when !== '' && <Field label="When">{prose(when)}</Field>}
+      {/* ⚠ THE THREE ARE ONE GROUP, not three siblings — the prose, the maths it describes and the
+          key to that maths are the How section, and spacing them like separate fields would put
+          the legend as far from its formula as from the sentence above it. */}
+      {(how != null && how !== '') || worked || legend?.length ? (
+        <div className="space-y-1.5">
+          {how != null && how !== '' && <Field label="How">{prose(how)}</Field>}
+          {worked ? <Worked text={worked} /> : null}
+          {legend?.length ? <Legend items={legend} /> : null}
+        </div>
+      ) : null}
     </TipCard>
   );
 }

@@ -16,9 +16,16 @@
  * is printed rather than assumed: a book that is 40% ETFs has an active share describing 60% of
  * itself, and a figure whose denominator is invisible is a figure nobody can compare.
  *
- * ⚠ THE ROWS ARE ISSUERS, NOT HOLDINGS. Two share classes fold into one line with their weights
+ * ⚠ THE ROWS ARE COMPANIES, NOT HOLDINGS. Two share classes fold into one line with their weights
  * summed — see `_active_share._issuer_key` — so the count here will not always match the Holdings
  * table's, and that is correct rather than a discrepancy.
+ *
+ * ⚠ AND THE WORD ON SCREEN IS "COMPANY", not "issuer" (2026-08-25). The code still says issuer,
+ * which is right there: `_issuer_key` folds share classes and ADRs onto one entity, and "issuer"
+ * is the term for that entity in general. But every row this panel can produce IS a company —
+ * funds, cash and bonds are dropped before the fold — so on screen "issuer" was jargon buying no
+ * precision, and the table's own column header already said Company while the counts beside it
+ * said issuers. Same rename in Concentration and Effective positions, which fold identically.
  */
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
@@ -27,7 +34,9 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { traceError } from '../../../lib/debugTrace';
-import { withWorked, subNum } from './workedFormula';
+import { withWorked, subNum, workedRatio } from './workedFormula';
+import { dayOf, dayRange } from './asOfLine';
+import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
 import type { ActiveShare, ActiveShareRow } from '../../../lib/types/api';
 import { useRiskCopy } from './riskCopy';
 import TrackingErrorView from './TrackingErrorView';
@@ -97,9 +106,35 @@ function Tile({ label, value, tone, info }: {
   );
 }
 
-export default function ActiveSharePanel({ holdings, benchmark, onClose }: {
+export default function ActiveSharePanel({
+  holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource, onClose,
+}: {
   holdings: ActiveShareHolding[];
   benchmark: string;
+  /** The book's own name, so its date line names the thing it dates rather than saying "the book".
+   *  ⚠ It is on screen anyway (the modal's heading), which is what makes it the shortest possible
+   *  label here — the reader does not have to work out which of the two lines is theirs. */
+  portfolioName: string;
+  /**
+   * ⚠⚠ THE BOOK'S OWN VALUATION DATE, PASSED IN RATHER THAN ASSUMED. AIRS values end-of-day on
+   * its own cadence, so "the weights" are as of whenever it last valued this book — Friday on a
+   * Monday morning, older after a failed scrape. The card used to say "Today's weights", which
+   * was an assumption printed as a fact; the reader can only judge whether it is current if they
+   * are told the date. ⚠ It cannot be derived here: a holdings array carries no date, which is
+   * exactly why the claim went unchecked for as long as it did.
+   */
+  portfolioAsOf?: string | null;
+  /** When WE last read that valuation — a different fact from when AIRS produced it. */
+  portfolioFetchedAt?: string | null;
+  /**
+   * WHICH AIRS scan these weights came from — a model portfolio's composition or an account's own
+   * Vermogensoverzicht.
+   *
+   * ⚠ IT IS THE CALLER'S FACT, NOT A DEFAULT. The modal already knows (`isBasket`), and the two
+   * scans are different objects read by different jobs; picking one here would print a source that
+   * happens to be right for whichever kind of book was opened first.
+   */
+  portfolioSource: SourceKey;
   onClose: () => void;
 }) {
   const t = useRiskCopy();
@@ -169,6 +204,21 @@ export default function ActiveSharePanel({ holdings, benchmark, onClose }: {
    * ⚠ AND ½ Σ|Active| RECONCILES TO THE TILE ABOVE **ONLY OVER EVERY NAME**. On the held subset
    * half the sum is missing, so it is not shown there rather than shown and quietly wrong.
    */
+  /**
+   * The two-sided date line, built once and shared by every tile that compares the book WITH the
+   * index — active share, overlap, off-benchmark.
+   *
+   * ⚠ ONE STRING FOR THE THREE, because they are three readings of ONE pair of inputs. Three
+   * separate calls would be three places for the operands to drift apart, and a panel where two
+   * tiles date the same weights differently is a panel nobody can reconcile. ⚠ The Stocks tile is
+   * deliberately NOT here — no index appears in it, so it takes `whenBook`.
+   */
+  const whenBoth = t.active.whenWeights(
+    portfolioName, dayOf(portfolioAsOf), dayOf(portfolioFetchedAt),
+    data?.benchmark ?? benchmark,
+    dayRange(data?.benchmark_caps_from, data?.benchmark_caps_to),
+    data?.benchmark_caps_unstamped ?? 0);
+
   const totals = rows.reduce((a, r) => ({
     book: a.book + (r.portfolio_pct ?? 0),
     bench: a.bench + (r.benchmark_pct ?? 0),
@@ -274,29 +324,69 @@ export default function ActiveSharePanel({ holdings, benchmark, onClose }: {
             <Tile label={t.active.activeShare} value={pct2(data.active_share_pct)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.activeShare.what}
-                where={t.active.heldVsIndex(data.n_holdings ?? 0, data.benchmark_members ?? 0)}
-                when={t.active.cards.activeShare.when}
+                where={t.active.heldVsIndex(data.n_holdings ?? 0, data.benchmark_members ?? 0,
+                  sourceLabel(portfolioSource),
+                  sourceField('benchmark_caps'), sourceVendor('benchmark_caps'))}
+                when={whenBoth}
                 worked={data.active_share_pct == null ? '' : withWorked(
                   String.raw`\tfrac{1}{2}\sum_i \left| w_i^{\,p} - w_i^{\,b} \right|`,
                   String.raw`\text{overlap } ${subNum(data.overlap_pct ?? 0, 2)}\%`
                   + String.raw` + \text{active } ${subNum(data.active_share_pct, 2)}\% = 100\%`)}
-                how={t.active.cards.activeShare.how} />} />} />
+                legend={[
+                  { sym: 'i', is: t.active.legend.issuer },
+                  { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
+                  { sym: String.raw`w_i^{\,b}`, is: t.active.legend.wb(data.benchmark ?? benchmark) },
+                ]}
+                />} />} />
             <Tile label={t.active.overlap} value={pct2(data.overlap_pct)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.overlap.what}
-                where={t.active.cards.overlap.where}
+                where={t.active.heldVsIndex(data.n_holdings ?? 0, data.benchmark_members ?? 0,
+                  sourceLabel(portfolioSource),
+                  sourceField('benchmark_caps'), sourceVendor('benchmark_caps'))}
+                when={whenBoth}
+                worked={data.overlap_pct == null ? '' : withWorked(
+                  String.raw`\sum_i \min\!\left( w_i^{\,p},\; w_i^{\,b} \right)`,
+                  String.raw`${subNum(data.overlap_pct, 2)}\% = 100\%`
+                  + String.raw` - \text{active } ${subNum(data.active_share_pct ?? 0, 2)}\%`)}
+                legend={[
+                  { sym: String.raw`\min`, is: t.active.legend.min },
+                  { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
+                  { sym: String.raw`w_i^{\,b}`, is: t.active.legend.wb(data.benchmark ?? benchmark) },
+                ]}
                 how={t.active.cards.overlap.how} />} />} />
             <Tile label={t.active.offBenchmark} value={pct2(data.off_benchmark_pct)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.offBenchmark.what}
                 where={t.active.offBenchWhere(
                   (data.n_holdings ?? 0) - (data.n_in_benchmark ?? 0), data.n_holdings ?? 0)}
+                when={whenBoth}
+                worked={data.off_benchmark_pct == null ? '' : withWorked(
+                  String.raw`\sum_{i \,:\; w_i^{\,b} = 0} w_i^{\,p}`,
+                  String.raw`${subNum(data.off_benchmark_pct, 2)}\%`)}
+                legend={[
+                  { sym: String.raw`w_i^{\,b} = 0`,
+                    is: t.active.legend.notInBench(data.benchmark ?? benchmark) },
+                  { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
+                ]}
                 how={t.active.cards.offBenchmark.how} />} />} />
             <Tile label={t.active.stocks} value={pct2(data.stocks_pct)}
               tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.stocks.what}
                 where={t.active.cards.stocks.where}
+                // ⚠ THE BOOK'S DATE ALONE. No index appears in this figure, so dating the caps
+                // beside it would date a side the number does not contain.
+                when={t.active.whenBook(
+                  portfolioName, dayOf(portfolioAsOf), dayOf(portfolioFetchedAt))}
+                worked={withWorked(
+                  String.raw`\dfrac{W_{\text{stocks}}}{W_{\text{book}}}`,
+                  workedRatio(data.stocks_weight, data.total_weight,
+                    pct2(data.stocks_pct), '%', '%'))}
+                legend={[
+                  { sym: String.raw`W_{\text{stocks}}`, is: t.active.legend.stocksNum },
+                  { sym: String.raw`W_{\text{book}}`, is: t.active.legend.stocksDen },
+                ]}
                 how={t.active.cards.stocks.how} />} />} />
           </div>
 
@@ -391,9 +481,20 @@ export default function ActiveSharePanel({ holdings, benchmark, onClose }: {
                     {showAll ? t.active.totalAll(rows.length) : t.active.totalHeld(rows.length)}
                     <InfoTip className="ml-1" content={<AspectCard
                       {...(showAll ? t.active.totalCard : t.active.totalCardHeld)}
+                      when={whenBoth}
+                      // ⚠ THE SYMBOLIC HALF ONLY OVER EVERY NAME. On the held subset half the sum
+                      // is missing, so ½ Σ|Active| is NOT the active share — printing the formula
+                      // there would invite exactly the reconciliation the copy warns against.
                       worked={showAll
-                        ? String.raw`\tfrac{1}{2} \times ${totals.abs.toFixed(2)} = ${(totals.abs / 2).toFixed(2)}\%`
-                        : ''} />} />
+                        ? withWorked(
+                          String.raw`\tfrac{1}{2}\sum_i \left| w_i^{\,p} - w_i^{\,b} \right|`,
+                          String.raw`\tfrac{1}{2} \times ${totals.abs.toFixed(2)}`
+                          + String.raw` = ${(totals.abs / 2).toFixed(2)}\%`)
+                        : ''}
+                      legend={showAll
+                        ? [{ sym: String.raw`\left| w_i^{\,p} - w_i^{\,b} \right|`,
+                          is: t.active.legend.absActive }]
+                        : undefined} />} />
                   </td>
                   <td className="text-right font-mono tabular-nums text-fg">
                     {`${totals.book.toFixed(2)}%`}

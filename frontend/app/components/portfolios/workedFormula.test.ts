@@ -10,8 +10,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  subDigits, subNum, subPct, withWorked, workedCagr, workedMean, workedRatio,
+  subDigits, subNum, subPct, withWorked, workedBand, workedCagr, workedMean, workedRatio,
 } from './workedFormula';
+import { oneSigmaBand } from './activeBand';
 
 describe('withWorked', () => {
   it('separates the halves with a blank line', () => {
@@ -166,5 +167,41 @@ describe('workedRatio', () => {
     expect(workedRatio(5, null, 'x')).toBe('');
     expect(workedRatio(5, 0, 'x')).toBe('');
     expect(workedRatio(undefined, undefined, 'x')).toBe('');
+  });
+});
+
+describe('workedBand', () => {
+  const band = oneSigmaBand(0.06, 52, 12.41)!;
+
+  it('prints the interval it claims — the ends really are centre ∓ TE', () => {
+    // ⚠⚠ THE WHOLE VALUE OF THE LINE IS THAT A READER CAN REDO IT. +3.12 − 12.41 = −9.29 and
+    // +3.12 + 12.41 = +15.53; a rounding convention that made either end miss by 0.01 would hand
+    // the reader a second reason to distrust the tile, which is the failure this file exists for.
+    const tex = workedBand(band);
+    expect(tex).toContain('+3.12');
+    expect(tex).toContain('12.41');
+    expect(tex).toContain('-9.29');
+    expect(tex).toContain('+15.53');
+  });
+
+  it('signs both ends but never the tracking error itself', () => {
+    // ⚠ A `± +12.41%` reads as two signs on a standard deviation, which cannot be negative — and
+    // the tile above prints it unsigned. The interval's ends DO carry theirs: the band is not
+    // symmetric about zero, and that is a claim about signs.
+    expect(workedBand(band)).toContain(String.raw`\pm 12.41\%`);
+    expect(workedBand(band)).not.toContain(String.raw`\pm +12.41`);
+  });
+
+  it('keeps the centre out in front, because it is what the reader is missing', () => {
+    // ⚠ ā·f COMES FIRST rather than being left to be inferred from the interval. The point of the
+    // line is that the band is NOT centred on the benchmark; burying the centre inside two
+    // endpoints would leave the reader to subtract it back out.
+    expect(workedBand(band)).toMatch(/^\bar\{a\}/);
+  });
+
+  it('refuses rather than printing half a band', () => {
+    expect(workedBand(null)).toBe('');
+    expect(workedBand(undefined)).toBe('');
+    expect(workedBand(oneSigmaBand(0.06, 52, 0))).toBe('');
   });
 });

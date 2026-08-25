@@ -121,6 +121,13 @@ export default function VolatilityView({ holdings, benchmark }: {
                   String.raw`\sigma = \sqrt{\dfrac{\sum_t (R_t - \bar{R})^2}{T - 1}}\;\sqrt{f}`,
                   String.raw`T = ${data.observations},\; f = ${data.periods_per_year}`
                   + String.raw` \;\Rightarrow\; ${subNum(data.volatility_pct, 2)}\%`)}
+                legend={[
+                  { sym: String.raw`R_t`, is: "the sleeve's return in period t, in EUR" },
+                  { sym: String.raw`\bar{R}`, is: 'the mean return over the window' },
+                  { sym: 'T', is: `the number of periods (${data.observations} here)` },
+                  { sym: 'f', is: `periods per year (${data.periods_per_year}), the annualisation factor` },
+                  { sym: String.raw`\sigma`, is: 'the answer: one standard deviation of the return, per year' },
+                ]}
                 how={'⚠⚠ NO CASH FLOWS IN IT, and not because they were chain-linked out — this is '
                   + 'a weighted basket of instrument price returns, not an account value, so a '
                   + 'deposit or withdrawal is simply not in the series. ⚠ Same σₚ the Correlation '

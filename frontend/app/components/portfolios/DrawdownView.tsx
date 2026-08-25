@@ -145,6 +145,12 @@ export default function DrawdownView({ holdings, benchmark }: {
                   String.raw`W_t = \prod_s (1 + R_s)\qquad M_t = \max_{s \le t} W_s\qquad MDD = \min_t \left( \dfrac{W_t}{M_t} - 1 \right)`,
                   String.raw`\text{${day(worst?.peak_date)}} \;\rightarrow\; \text{${day(worst?.trough_date)}}`
                   + String.raw` \;=\; ${subNum(data.max_drawdown_pct, 2)}\%`)}
+                legend={[
+                  { sym: 'R_s', is: 'the return in period s' },
+                  { sym: 'W_t', is: 'the wealth curve — one euro compounded through every period up to t' },
+                  { sym: 'M_t', is: 'the high-water mark: the best that curve had reached by t' },
+                  { sym: String.raw`MDD`, is: 'the answer: the deepest the curve ever sat below its own peak' },
+                ]}
                 how={'⚠ THE CADENCE IS IN THE LABEL because it changes the answer: a fall that '
                   + 'recovers inside a week is invisible to a weekly series. See the comparison '
                   + 'below.'} />} />} />

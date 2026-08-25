@@ -21,6 +21,7 @@
  * this existed. A worked example is worth having only while every number in it is real.
  */
 import { type Cagr } from './lineCagr';
+import { type ActiveBand } from './activeBand';
 
 /**
  * A literal that must survive being read as LaTeX — `%` starts a comment, `_` and `^` are scripts.
@@ -86,6 +87,18 @@ export const texWords = words;
 
 /** A signed percentage, as a RESULT — one decimal, because nothing divides by it. */
 export const subPct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+
+/**
+ * The same thing at TWO decimals — for a figure that appears in a card's PROSE and in its worked
+ * line at once.
+ *
+ * ⚠ NOT A SECOND OPINION ABOUT PRECISION, A SECOND SITUATION. `subPct` is a terminal result nobody
+ * checks against anything; this is for a number the reader is invited to find twice in one tooltip,
+ * and the risk views all print two decimals (see `subDigits`' own ⚠⚠). Rounding the sentence at one
+ * decimal and the formula at two puts `+3.1%` and `+3.12%` four lines apart in the same card, which
+ * is precisely the "are these the same number?" doubt the worked lines exist to remove.
+ */
+export const subPct2 = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
 
 /**
  * THE SHAPE ITSELF: symbols, a blank line, the same expression with numbers, then any caveats.
@@ -178,4 +191,29 @@ export function workedRatio(a: number | null | undefined, b: number | null | und
   if (a == null || b == null || b === 0) return '';
   return `\\dfrac{${subNum(a, ratioDigits(a))}${tex(aUnit)}}`
     + `{${subNum(b, ratioDigits(b))}${tex(bUnit)}} = ${tex(result)}`;
+}
+
+/**
+ * `ā f ± TE = +3.12% ± 12.41% ⟹ [−9.29%, +15.53%]`
+ *
+ * ⚠⚠ THE LINE EXISTS BECAUSE THE TILE ABOVE IT NAMES A SPREAD AND NOT ITS CENTRE, and every reader
+ * supplies the missing centre themselves — as zero. It is ā (see `activeBand`), so the interval is
+ * asymmetric about the benchmark, and writing it out is the only way that fact reaches anybody.
+ *
+ * ⚠ THE INTERVAL IS PRINTED AS WELL AS THE `centre ± TE` FORM, redundantly and on purpose. `+3.12%
+ * ± 12.41%` still asks the reader to do two signed additions, and the one they get wrong is the
+ * lower end — which is the end that matters.
+ *
+ * ⚠ IT TAKES THE `ActiveBand` AND NOTHING ELSE, the same rule {@link workedCagr} follows: the ends
+ * ride on the object that computed them, so there is no way to hand this the right TE and a centre
+ * from another cadence.
+ */
+export function workedBand(band: ActiveBand | null | undefined): string {
+  if (!band) return '';
+  // ⚠ THROUGH `tex` — every one of these carries a `%`, which starts a LaTeX comment and would
+  // truncate the line at the first figure, silently. See the ⚠⚠ on `tex` itself.
+  // ⚠ THE TE ITSELF CARRIES NO SIGN. It is a standard deviation — a `+12.41%` after a `±` reads as
+  // a second sign on a quantity that cannot be negative, and the tile above prints it unsigned too.
+  return String.raw`\bar{a}\,f \pm TE = ${tex(subPct2(band.centre))} \pm ${subNum(band.te, 2)}\%`
+    + String.raw` \;\Rightarrow\; \left[\,${tex(subPct2(band.lo))},\;${tex(subPct2(band.hi))}\,\right]`;
 }

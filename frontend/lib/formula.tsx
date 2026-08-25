@@ -9,9 +9,15 @@
  * codepoint that cannot grow, and a mono font gives `Σ` the same advance width as a comma. Set it
  * properly and the same expression reads at a glance.
  *
- * ⚠ `displayMode`, NOT INLINE. These stand alone in their own block, so the summation gets its
+ * ⚠ `displayMode` BY DEFAULT. These stand alone in their own block, so the summation gets its
  * limits above and below and fractions get full height — which is the entire visual difference
  * between `\sum_{i=1}^{N}` rendered inline and rendered as display math.
+ *
+ * ⚠⚠ AND `inline` IS FOR A SYMBOL, NEVER FOR AN EXPRESSION. It exists so the legend under a
+ * formula can set `w_i^{\,p}` in the SAME face as the formula above it — a variable explained in
+ * a text font is a different-looking object from the one in the equation, which is exactly the
+ * gap the legend is there to close. Display mode inside a table row would centre each symbol on
+ * its own line and blow the row heights apart, so the two modes are not interchangeable.
  *
  * ⚠ `throwOnError: false` — A BAD FORMULA MUST NOT BLANK THE CARD. KaTeX renders the offending
  * source in red instead of throwing, so a typo in one tooltip degrades to a visible mistake in that
@@ -32,23 +38,29 @@ import { useMemo } from 'react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 
-export default function Formula({ tex, className = '' }: {
+export default function Formula({ tex, className = '', inline = false }: {
   tex: string;
   className?: string;
+  /** One symbol set in running text rather than a display block. See the ⚠⚠ above. */
+  inline?: boolean;
 }) {
   const html = useMemo(
-    () => katex.renderToString(tex, { displayMode: true, throwOnError: false, trust: false }),
-    [tex],
+    () => katex.renderToString(tex, { displayMode: !inline, throwOnError: false, trust: false }),
+    [tex, inline],
   );
   return (
     // ⚠ `overflow-x-auto` ON THE WRAPPER, not `break-words`: a formula cannot be broken at an
     // arbitrary operator the way a sentence can be broken at a space. A long one scrolls; the
     // alternative is `\sum` on one line and its summand on the next, which is worse than either.
     //
+    // ⚠ THE INLINE FORM MUST NOT SCROLL. It sits in a legend row a couple of characters wide, and
+    // an `overflow-x-auto` on something that narrow gives every symbol its own scrollbar.
+    //
     // ⚠ `text-fg-strong` AND NOT A KATEX COLOUR OVERRIDE. KaTeX draws its rules (fraction bars,
     // radicals) with `currentColor`, so setting the colour here carries them along; recolouring
     // `.katex` internals would leave the bars behind at the old ink.
-    <span className={`block overflow-x-auto text-fg-strong ${className}`}
+    <span className={`${inline ? 'inline-block align-baseline' : 'block overflow-x-auto'}`
+      + ` text-fg-strong ${className}`}
       // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={{ __html: html }} />
   );

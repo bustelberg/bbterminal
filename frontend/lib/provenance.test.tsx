@@ -19,7 +19,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
-import { Provenance, ProvenanceFetchedAt, provenanceFreshness } from './provenance';
+import {
+  Provenance, ProvenanceFetchedAt, provenanceFreshness, sourceField, sourceLabel, sourceVendor,
+} from './provenance';
 import { snapshotFreshness } from './snapshotAge';
 
 /** Years back, so it is stale under any definition of "trading days behind" — the test must not
@@ -262,5 +264,63 @@ describe('the icon and its card carry ONE verdict', () => {
     expect(renderToStaticMarkup(
       <Provenance source="airs_att" asOf={LONG_AGO} column kind="copied" note="a value" />,
     )).not.toContain(INFO_ICON_WARN);
+  });
+});
+
+/**
+ * ⚠ THE PROSE AND THE BADGE MUST NAME A SOURCE THE SAME WAY. `sourceLabel` exists so a card that
+ * says where a figure came from in a sentence reads out of the same table the badge beside it
+ * renders from — the alternative is a hand-typed "AIRS" that drifts the moment a label here is
+ * made more precise.
+ */
+describe('sourceLabel', () => {
+  it('gives the badge’s own words for a source', () => {
+    expect(sourceLabel('airs_model')).toBe('AIRS Model-portefeuille');
+    expect(sourceLabel('airs_volk')).toBe('AIRS Vermogensoverzicht (VOLK)');
+  });
+
+  it('⚠ keeps the benchmark’s three inputs apart', () => {
+    // ⚠⚠ AN INDEX HAS A PRICE SOURCE, A WEIGHT SOURCE AND AN ETF SOURCE, and they are genuinely
+    // different data: closes give it a return, market caps give it its weights, and the ETF is a
+    // separate series again (ACWI YTD reads 11.83% rebuilt vs 14.67% from the fund). Active share
+    // reads the CAPS and never touches a close, so collapsing any two of these labels would print
+    // a series the figure does not use — the exact mislabel `benchmark_etf` was split out for.
+    const [close, caps, etf] = (['benchmark', 'benchmark_caps', 'benchmark_etf'] as const)
+      .map(sourceLabel);
+    expect(new Set([close, caps, etf]).size).toBe(3);
+    expect(caps).toContain('market cap');
+    expect(close).not.toContain('market cap');
+  });
+});
+
+/**
+ * ⚠⚠ THE PARTS AND THE LABEL CANNOT DISAGREE, because the label is BUILT from the parts. This is
+ * the invariant that makes it safe for prose to badge "market cap" and "yfinance" separately: the
+ * day `benchmark_caps` stops being yfinance, the sentence changes with the registry instead of
+ * quietly keeping a hand-typed vendor name.
+ */
+describe('sourceVendor / sourceField', () => {
+  it('splits a label into the two facts a sentence needs apart', () => {
+    expect(sourceField('benchmark_caps')).toBe('market cap');
+    expect(sourceVendor('benchmark_caps')).toBe('yfinance');
+  });
+
+  it('⚠ the field carries no qualifier', () => {
+    // ⚠ "(benchmark constituents)" disambiguates a label standing alone; inside a sentence that has
+    // already said "priced index members" it is the same fact twice.
+    expect(sourceField('benchmark_caps')).not.toContain('(');
+    expect(sourceLabel('benchmark_caps')).toContain('(benchmark constituents)');
+  });
+
+  it('composes back into the label for every source', () => {
+    for (const k of ['airs_volk', 'airs_att', 'airs_model', 'yfinance', 'fx',
+      'benchmark', 'benchmark_etf', 'benchmark_caps', 'derived'] as const) {
+      const label = sourceLabel(k);
+      expect(label).toContain(sourceField(k));
+      if (sourceVendor(k)) expect(label).toContain(sourceVendor(k));
+      // ⚠ NO LEADING SPACE ON THE VENDORLESS ONE. `derived` has no third party to name, and a
+      // label that starts with a space is the kind of defect nobody reports and everybody sees.
+      expect(label).toBe(label.trim());
+    }
   });
 });

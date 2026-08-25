@@ -24,8 +24,10 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { v } from '../../../lib/dynamicValue';
 import { traceError } from '../../../lib/debugTrace';
-import { withWorked, subNum } from './workedFormula';
+import { withWorked, subNum, subPct2, workedBand } from './workedFormula';
+import { oneSigmaBand } from './activeBand';
 import type { TrackingError } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 
@@ -36,7 +38,7 @@ const FREQS = [
   { key: 'daily', label: 'Daily', f: 252 },
 ] as const;
 
-const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
+const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
 
 function Tile({ label, value, tone, info }: {
   label: string; value: string; tone?: string; info?: React.ReactNode;
@@ -90,6 +92,19 @@ export default function TrackingErrorView({ holdings, benchmark }: {
 
   const f = FREQS.find((x) => x.key === freq)!;
 
+  /**
+   * ⚠⚠ THE READING THE NUMBER DOES NOT GIVE ANYONE ON ITS OWN — see `activeBand`. A tracking error
+   * is a spread with no stated centre, and the centre every reader supplies is the benchmark; ours
+   * is ā, because `_tracking_error.py` subtracts it. So the tile prints the interval rather than
+   * leaving the reader to assume the symmetric one, which belongs to the other definition.
+   *
+   * ⚠ COMPUTED HERE AND NOT INSIDE THE TOOLTIP, so the arithmetic is unit-tested (`activeBand`)
+   * and this file only formats it. Returns null on any missing operand, and the worked line then
+   * falls back to the formula alone.
+   */
+  const band = oneSigmaBand(
+    data?.mean_active_per_period_pct, data?.periods_per_year, data?.tracking_error_pct);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
@@ -119,15 +134,38 @@ export default function TrackingErrorView({ holdings, benchmark }: {
             <Tile label="Tracking error (realised)" value={pct2(data.tracking_error_pct)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="How much the book's return has diverged from the benchmark's, annualised."
-                where={`${data.observations} ${data.frequency} active returns over ${data.years} years, against ${data.benchmark}'s tracker.`}
+                where={`${v(data.observations)} ${v(data.frequency)} active returns over ${v(data.years)} years, against ${v(data.benchmark)}'s tracker.`}
                 when="Trailing window — the sleeve as it stands today, carried backwards."
                 worked={data.tracking_error_pct == null ? '' : withWorked(
                   String.raw`a_t = R_t^{\,p} - R_t^{\,b}\quad\Rightarrow\quad TE = \sqrt{\dfrac{\sum_t (a_t - \bar{a})^2}{T - 1}}\;\sqrt{f}`,
                   String.raw`T = ${data.observations},\; f = ${data.periods_per_year}`
-                  + String.raw` \;\Rightarrow\; ${subNum(data.tracking_error_pct, 2)}\%`)}
-                how={'⚠ REALISED (ex-post), not the ex-ante forecast from a covariance matrix — '
+                  + String.raw` \;\Rightarrow\; ${subNum(data.tracking_error_pct, 2)}\%`
+                  // ⚠ A SECOND WORKED LINE, because the band is a second piece of arithmetic and
+                  // not a restatement of the first. `\\[4pt]` is the same separator `withWorked`
+                  // puts between the symbolic and substituted halves, so all three lines set as
+                  // one aligned display rather than as a formula with a sentence stuck under it.
+                  + (band ? String.raw` \\[4pt] ` + workedBand(band) : ''))}
+                legend={[
+                  { sym: String.raw`a_t`, is: 'the active return in period t — what the sleeve did that period, minus what the tracker did' },
+                  { sym: String.raw`R_t^{\,p},\; R_t^{\,b}`, is: `the sleeve's and ${v(data.benchmark)}'s own returns in that period, both in EUR` },
+                  { sym: String.raw`\bar{a}`, is: 'the mean active return over the window — the band above is centred on it, not on zero' },
+                  { sym: 'T', is: `the number of paired periods (${v(data.observations)} here) — the intersection of the two calendars` },
+                  { sym: 'f', is: `periods per year (${v(data.periods_per_year)}), the annualisation factor` },
+                  { sym: String.raw`TE`, is: 'the answer: one standard deviation of the active return, per year' },
+                ]}
+                how={(band
+                  ? `A typical year lands ā ± TE — between ${v(subPct2(band.lo))} and `
+                    + `${v(subPct2(band.hi))} against ${v(data.benchmark)}, centred on the mean active `
+                    + `return of ${v(subPct2(band.centre))} and NOT on zero. About two years in `
+                    + 'three; active returns are fatter-tailed than normal, so read it as a scale '
+                    + 'rather than a promise. ⚠ THE CENTRE IS THE ARITHMETIC mean annualised, so '
+                    + 'it sits a little above the geometric Active return tile beside it — the gap '
+                    + 'is roughly TE²/2, and a ±σ band is only coherent around the arithmetic one. '
+                  : '')
+                  + '⚠ REALISED (ex-post), not the ex-ante forecast from a covariance matrix — '
                   + 'those are different numbers and routinely disagree. ā IS subtracted and the '
-                  + 'divisor is T−1 (Bessel); some providers do neither, which reads higher.'} />} />} />
+                  + 'divisor is T−1 (Bessel); some providers do neither — that version is '
+                  + 'symmetric about the benchmark, and larger.'} />} />} />
             <Tile label="Active return (ann.)"
               value={pct2(data.active_return_ann_pct)}
               tone={(data.active_return_ann_pct ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300'}
@@ -151,7 +189,7 @@ export default function TrackingErrorView({ holdings, benchmark }: {
                   + 'is ~0 — there is no risk to divide by, not that the ratio is zero.'} />} />} />
             <Tile label="Observations" value={`${data.observations}`} tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={`The T in the formula — ${data.frequency} periods both series had.`}
+                what={`The T in the formula — ${v(data.frequency)} periods both series had.`}
                 where="The INTERSECTION of the two calendars, never a positional pairing."
                 how={'A Stockholm listing and a London-traded tracker do not share holidays; '
                   + 'zipping them offsets the two series from the first mismatch onward and '

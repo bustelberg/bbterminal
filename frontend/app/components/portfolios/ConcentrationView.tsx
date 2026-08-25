@@ -5,10 +5,11 @@
  *
  *     C₁₀ = Σᵢ₌₁¹⁰ w₍ᵢ₎        HHI = Σ wᵢ²        N_eff = 1 / HHI
  *
- * ⚠⚠ ON ISSUERS, NOT ON LINES — the same folding Active share uses. Alphabet A + Alphabet C is ONE
- * position, and counting two would understate concentration exactly at the top, where the ten
+ * ⚠⚠ ON COMPANIES, NOT ON LINES — the same folding Active share uses. Alphabet A + Alphabet C is
+ * ONE position, and counting two would understate concentration exactly at the top, where the ten
  * largest are decided. Two views of the same book disagreeing about how many positions it holds
- * would be worse than either.
+ * would be worse than either. (The code says `issuer` and still should — see the ⚠ in
+ * `ActiveSharePanel` for why the screen says company and the fold does not.)
  *
  * ⚠⚠ BOTH DENOMINATORS ARE ON SCREEN. "Of the stock sleeve" is what compares across books and is
  * the panel's convention everywhere else; "of the whole book" is what is true in absolute terms for
@@ -26,6 +27,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { v } from '../../../lib/dynamicValue';
 import { traceError } from '../../../lib/debugTrace';
 import { withWorked, subNum } from './workedFormula';
 import type { PortfolioConcentration } from '../../../lib/types/api';
@@ -35,7 +37,7 @@ import type { ActiveShareHolding } from './ActiveSharePanel';
  *  precision on a figure the reader is asked to check against a table that carries two: "79.5%"
  *  beside rows summing to 79.53 invites the arithmetic to be redone and found wrong. Counts
  *  (issuers, observations, lines, periods) stay integers — they ARE integers. */
-const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
+const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
 
 function Tile({ label, value, sub, tone, info }: {
   label: string; value: string; sub?: string; tone?: string; info?: React.ReactNode;
@@ -98,13 +100,18 @@ export default function ConcentrationView({ holdings, benchmark }: {
           <div className="flex flex-wrap gap-2">
             <Tile label="Effective positions"
               value={data.effective_positions == null ? '—' : data.effective_positions.toFixed(2)}
-              sub={`of ${data.issuers} issuers held`}
+              sub={`of ${data.issuers} companies held`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="How many equally-sized positions this book behaves like."
-                where={`1 ÷ HHI, over ${data.issuers} issuers.`}
+                where={`1 ÷ HHI, over ${v(data.issuers)} companies.`}
                 worked={data.hhi == null || data.effective_positions == null ? '' : withWorked(
                   String.raw`HHI = \sum_i w_i^2\qquad N_{\text{eff}} = \dfrac{1}{HHI}`,
                   String.raw`\dfrac{1}{${subNum(data.hhi, 4)}} = ${data.effective_positions.toFixed(2)}`)}
+                legend={[
+                  { sym: 'w_i', is: 'company i’s weight in the sleeve, as a fraction of 1' },
+                  { sym: String.raw`HHI`, is: 'the sum of those weights SQUARED — squaring is what makes a big position count for more than its size' },
+                  { sym: String.raw`N_{\text{eff}}`, is: 'the answer: how many EQUALLY-sized positions would concentrate the book this much' },
+                ]}
                 how={'⚠ THE BETTER NUMBER, and the reason it leads. A cut at exactly ten is '
                   + 'arbitrary — two books with the same C₁₀ can be an even ten-name portfolio and '
                   + 'one dominated by its top three. This has no cut-off. Forty names of which '
@@ -112,8 +119,8 @@ export default function ConcentrationView({ holdings, benchmark }: {
             <Tile label="Top 10" value={pct2(data.top10_pct)}
               sub={`${pct2(data.top10_of_book_pct)} of the whole book`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="The share of the stock sleeve in its ten largest issuers."
-                where={`Σ of the ten biggest of ${data.issuers}, sorted descending.`}
+                what="The share of the stock sleeve in its ten largest companies."
+                where={`Σ of the ten biggest of ${v(data.issuers)}, sorted descending.`}
                 worked={data.top10_pct == null ? '' : withWorked(
                   String.raw`C_{10} = \sum_{i=1}^{10} w_{(i)}`,
                   String.raw`C_1 = ${subNum(data.top1_pct ?? 0, 2)}\%`
@@ -121,6 +128,10 @@ export default function ConcentrationView({ holdings, benchmark }: {
                   + String.raw`\quad C_5 = ${subNum(data.top5_pct ?? 0, 2)}\%`
                   + String.raw`\quad C_{10} = ${subNum(data.top10_pct, 2)}\%`
                   + String.raw`\quad C_{20} = ${subNum(data.top20_pct ?? 0, 2)}\%`)}
+                legend={[
+                  { sym: String.raw`w_{(i)}`, is: 'the weights sorted largest first — the bracket is what makes (i) a RANK rather than a name' },
+                  { sym: String.raw`C_{10}`, is: 'the answer: how much of the sleeve sits in its ten largest companies' },
+                ]}
                 how={'⚠⚠ TWO DENOMINATORS, BOTH TRUE. The headline is of the STOCK SLEEVE, which is '
                   + 'what compares across books; the line beneath is of the whole book including '
                   + `cash and funds (the sleeve is ${pct2(data.stocks_pct)} of it). A book that is `
@@ -128,7 +139,7 @@ export default function ConcentrationView({ holdings, benchmark }: {
             <Tile label="Largest position" value={pct2(data.top1_pct)} tone="text-fg-strong"
               sub={rows[0]?.name}
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="The single biggest issuer, as a share of the sleeve."
+                what="The single biggest company, as a share of the sleeve."
                 where={rows[0] ? `${rows[0].name} — the index holds ${pct2(rows[0].benchmark_pct)}.` : undefined}
                 how={'⚠ A BIG POSITION IS NOT AUTOMATICALLY A BIG BET. Apple at 6% against an index '
                   + 'holding 5% is a 1pp bet; the same 6% in a name the index does not hold is a '
@@ -140,7 +151,7 @@ export default function ConcentrationView({ holdings, benchmark }: {
               sub={`of ${data.benchmark_issuers} · top 10 ${pct2(data.benchmark_top10_pct)}`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="The index's own effective position count, on the same measure."
-                where={`1 ÷ HHI over ${data.benchmark_issuers} priced constituents.`}
+                where={`1 ÷ HHI over ${v(data.benchmark_issuers)} priced constituents.`}
                 how={'For scale. ⚠ A cap-weighted index is far more concentrated than its member '
                   + 'count suggests, so this is usually a small fraction of it — which is the '
                   + 'honest comparison, not the raw count.'} />} />} />
@@ -156,7 +167,7 @@ export default function ConcentrationView({ holdings, benchmark }: {
 
           <div>
             <div className="text-[10px] uppercase tracking-wider text-fg-faint mb-1">
-              Largest issuers, with the index&apos;s weight in each
+              Largest companies, with the index&apos;s weight in each
             </div>
             {/* ⚠ ITS OWN SCROLL — twenty rows must not stretch the fixed dialog. */}
             <div className="overflow-auto">
@@ -164,7 +175,7 @@ export default function ConcentrationView({ holdings, benchmark }: {
                 <thead>
                   <tr className="text-fg-faint [&>th]:py-1 [&>th]:font-medium">
                     <th className="text-left w-6">#</th>
-                    <th className="text-left">Issuer</th>
+                    <th className="text-left">Company</th>
                     <th className="text-right">Weight</th>
                     <th className="text-right">Cumulative</th>
                     <th className="text-right">{data.benchmark}</th>
@@ -210,7 +221,7 @@ export default function ConcentrationView({ holdings, benchmark }: {
             which is what stops the ten largest being decided by an identifier.
             {(data.unresolved ?? 0) > 0
               && ` ${data.unresolved} holding${data.unresolved === 1 ? '' : 's'} could not be `
-                + 'matched to a company name and each counts as its own issuer.'}
+                + 'matched to a company name and each counts as its own company.'}
           </p>
         </>
       )}
