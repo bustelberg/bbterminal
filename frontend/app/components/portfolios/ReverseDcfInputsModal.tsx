@@ -90,7 +90,15 @@ export default function ReverseDcfInputsModal({
                       <td className={`px-3 py-1 text-right font-mono ${obs.used == null ? 'text-warn-300' : 'text-fg-soft'}`}>
                         {obs.used == null ? 'n/a' : (kind === 'money' ? mn(obs.used) : n2(obs.used))}
                       </td>
-                      <td className="px-3 py-1 text-fg-muted whitespace-nowrap">{obs.date?.slice(0, 10) ?? '—'}</td>
+                      {/* ⚠⚠ A TTM ROW IS A SUM OF FOUR QUARTERS, NOT THE FIGURE FILED AT THAT DATE.
+                          Printed bare, `2026-06-30 · −89,325` is a quarter-end over a number four
+                          times any quarter's size — which reads as a vendor error rather than a
+                          window, in the one table whose whole job is to show where a number came
+                          from. See `egmInputs.ttmObs`. */}
+                      <td className="px-3 py-1 text-fg-muted whitespace-nowrap">
+                        {obs.date == null ? '—'
+                          : obs.ttm ? `TTM to ${obs.date.slice(0, 10)}` : obs.date.slice(0, 10)}
+                      </td>
                       <td className="px-3 py-1 font-mono text-[11px] text-fg-faint">{obs.code ?? '—'}</td>
                     </tr>
                   ))}

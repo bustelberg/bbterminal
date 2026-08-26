@@ -110,17 +110,22 @@ function Field({ label, value, onChange, suffix, info, tone, dim }: {
  * reader cannot check what they cannot see.
  */
 function DerivedRow({ label, value, info, tone = 'step', dim }: {
-  label: string; value: string; info?: React.ReactNode; tone?: 'step' | 'total' | 'ref';
+  label: string; value: string; info?: React.ReactNode;
+  /** ⚠ `sub` IS AN INPUT TO THE ROW BELOW IT, NOT A TERM OF THE SUM. Indented and unsigned: a `−`
+   *  on the depreciation row would read as a deduction from the cash flow, which is the opposite
+   *  of what it does (it makes the add-back SMALLER). */
+  tone?: 'step' | 'total' | 'ref' | 'sub';
   /** See `Field`'s `dim`: a correction that is no longer reaching the total, kept legible. */
   dim?: boolean;
 }) {
   const total = tone === 'total';
   const ref = tone === 'ref';
+  const sub = tone === 'sub';
   return (
     <div className={`flex items-center gap-2 py-1 ${total ? 'border-t border-neutral-800/40' : ''}${
       ref ? 'border-t border-dashed border-neutral-800/30' : ''}${dim ? ' opacity-45' : ''}`}>
       <span className={`min-w-0 truncate text-[12px] flex-1 ${
-        total ? 'text-fg-soft' : 'text-fg-faint'}${ref ? ' italic' : ''}`}>{label}</span>
+        total ? 'text-fg-soft' : 'text-fg-faint'}${ref ? ' italic' : ''}${sub ? ' pl-3' : ''}`}>{label}</span>
       {/* ⚠ `border border-transparent` MATCHES `Field`'s INPUT BORDER. Without it this span is 2px
           shorter than an editable row's box, so the interleaved rows sit at slightly different
           heights and the numbers drift off each other's baseline — visible precisely because the
@@ -157,6 +162,19 @@ Read them as a sanity check on the order of magnitude, not as an equality.`;
 const NORM_OFF = `
 
 Untick Normalise to value the reported figure instead.`;
+
+/**
+ * ⚠⚠ THE WINDOW THE FOUR FLOW LINES ARE MEASURED OVER, AND IT HAS TO BE ON SCREEN. Free cash flow,
+ * stock comp, capex and depreciation are trailing twelve months where four quarters exist and the
+ * last fiscal year otherwise (`egmInputs.flowLegs`) — and the two can be far apart: measured on
+ * Meta, capex is −69,691 on the last fiscal year against **−89,325** trailing, so the growth-capex
+ * row reads 51,075 one way and 66,596 the other. A reader reconciling this panel against
+ * GuruFocus's own page needs to know which of the two they are looking at, and the vendor's page
+ * shows the trailing one.
+ */
+const TTM_NOTE = `
+
+⚠ Trailing twelve months where the company has filed four quarters, its last full fiscal year otherwise — the same window for all four cash-flow lines, so the corrections cannot mix bases. The header row says which one is in use.`;
 
 export default function ReverseDcfPanel({ src, currency, metrics, name, isin, growthEst, today }: {
   src: ReverseDcfSource; currency?: string | null;
@@ -247,6 +265,12 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   const forward = base === 'forward';
   /** The fiscal period the consensus is for — `2027-12-31` → `FY2027e`. */
   const estFy = src.ocfEstimateDate ? `FY${src.ocfEstimateDate.slice(0, 4)}e` : null;
+  /** ⚠ THE WINDOW, NAMED. "Most recent fiscal year" was hard-coded on four cards and stopped being
+   *  true the day the flow legs went trailing — a `when` that states the wrong period is worse
+   *  than none, because it is checkable and wrong. See `TTM_NOTE`. */
+  const flowWhen = src.flowBasis.ttm
+    ? `Trailing twelve months to ${src.flowBasis.date ?? 'the latest quarter'}.`
+    : `Most recent fiscal year${src.flowBasis.date ? ` (${src.flowBasis.date})` : ''}.`;
   const defFcf = forward ? fwdFcf : src.fcf;
   const defTarget = marketCapOf(src);
   const defPerp = PERPETUITY_GROWTH;
@@ -434,7 +458,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 where={forward
                   ? 'GuruFocus — analyst consensus operating cash flow, less the last filed capital expenditure.'
                   : 'GuruFocus — cashflow statement, as filed.'}
-                when={forward ? (estFy ?? 'Next fiscal year.') : 'Most recent fiscal year.'}
+                when={forward ? (estFy ?? 'Next fiscal year.') : flowWhen}
                 // ⚠ NO WORKED LINE ON THE REPORTED BASE, and that is the rule rather than an
                 // omission: it is a figure the vendor filed, not an arithmetic anybody performed.
                 // A formula over raw data fabricates a derivation — the same reason the four
@@ -468,16 +492,42 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
               info={<InfoTip content={<AspectCard
                 what="Stock-based compensation, subtracted."
                 where="GuruFocus — cashflow statement."
-                when="Most recent fiscal year."
+                when={flowWhen}
                 how={norm.applied.sbc
                   ? `A real cost that never leaves the cash flow statement: it is added back into operating cash flow as a non-cash charge, so reported FCF flatters every company that pays people in equity. The shares are issued and the holder bears the dilution.${NORM_OFF}`
                   : 'Not reported for this company, so nothing is subtracted. ⚠ An absent line is not a zero — this is not a company that pays no stock compensation, it is one we have no figure for.'} />} />} />
+            {/* ⚠⚠ THE TWO DIRECT FIGURES, ABOVE THE CORRECTION THEY MAKE. `+ Growth capex` alone is
+                one number a reader cannot check against anything: it is a subtraction of two
+                vendor lines, and the only way to reconcile it with GuruFocus's own page was to
+                open the ⓘ. Shown as their own rows it is arithmetic anybody can do on screen —
+                which is how the Meta basis mismatch surfaced (capex −69,691 on the last fiscal
+                year against the −89,325 trailing figure the vendor prints).
+                ⚠ NO LEADING SIGN AND INDENTED: these are the INPUTS to the row below, not two more
+                terms of the sum above. A `−` on the depreciation row would read as a deduction
+                from the cash flow, which is exactly what it is not. */}
+            <DerivedRow tone="sub" dim={overridden}
+              label="Capital expenditure"
+              value={src.capex == null ? '—' : mn(Math.abs(src.capex))}
+              info={<InfoTip content={<AspectCard
+                what="Capital expenditure, as the magnitude spent."
+                where="GuruFocus — cashflow statement. ⚠ Filed NEGATIVE; shown here as the spend."
+                when={flowWhen}
+                how={`The first of the two lines the growth-capex row below subtracts.${TTM_NOTE}`} />} />} />
+            <DerivedRow tone="sub" dim={overridden}
+              label="Depreciation & amortisation"
+              value={src.dep == null ? '—' : mn(src.dep)}
+              info={<InfoTip content={<AspectCard
+                what="Cash-flow depreciation, depletion and amortisation."
+                where="GuruFocus — cashflow statement."
+                when={flowWhen}
+                how={'⚠ THE CASH-FLOW LINE, NOT THE INCOME STATEMENT\'S. GuruFocus files both and they are not always equal; capex is a cash figure, so its maintenance proxy has to be one too — comparing a cash figure with an accrual one is a difference in basis dressed up as growth spend.'
+                  + TTM_NOTE} />} />} />
             <DerivedRow label="+ Growth capex" dim={overridden}
               value={normalise && !overridden && norm.applied.growthCapex ? mn(norm.growthCapex) : '—'}
               info={<InfoTip content={<AspectCard
                 what="Capital spending above depreciation, added back."
                 where="GuruFocus — cashflow statement: capital expenditure and cash-flow depreciation."
-                when="Most recent fiscal year."
+                when={flowWhen}
                 // ⚠ GATED ON `normalise` LIKE THE ROW ITSELF. With it off the row reads `—` because
                 // the correction did not run; a tooltip still showing its arithmetic would be a
                 // number the panel is not using, one hover away from a dash.
@@ -513,7 +563,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 where={overridden ? 'Typed here. The three rows above are no longer feeding it.'
                   : 'Computed here from the three rows above.'}
                 when={overridden ? 'Whatever period you mean it to be.'
-                  : forward ? (estFy ?? 'Next fiscal year.') : 'Most recent fiscal year.'}
+                  : forward ? (estFy ?? 'Next fiscal year.') : flowWhen}
                 // ⚠ THE SYMBOLIC HALF CARRIES ONLY THE CORRECTIONS THAT RAN. A formula printing
                 // `− S` over a company with no stock-comp line states an arithmetic that did not
                 // happen — the same "an absent line is not a zero" rule the rows themselves keep,
@@ -560,7 +610,7 @@ Type a figure here to bypass all three and value it directly.`
                 where={forward
                   ? 'GuruFocus — cashflow statement, as filed.'
                   : 'GuruFocus — analyst consensus operating cash flow, less the last filed capex.'}
-                when={forward ? 'Most recent fiscal year.' : (estFy ?? 'Next fiscal year.')}
+                when={forward ? flowWhen : (estFy ?? 'Next fiscal year.')}
                 how={(forward ? src.fcf : fwdFcf) == null
                   ? (forward
                     ? 'No free cash flow line is ingested for this company.'

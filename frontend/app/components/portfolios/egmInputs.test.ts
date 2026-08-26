@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   dividendYieldWorking, egmSource, estimateCagr, estimateCagrWorking, medianPE, medianPEWorking,
-  nextFyEps, reverseDcfSource, reverseDcfWorking,
+  nextFyEps, reverseDcfSource, reverseDcfWorking, ttmObs,
 } from './egmInputs';
 import { type MetricRow } from './quickValuation';
 
@@ -174,6 +174,7 @@ describe('reverseDcfSource', () => {
     expect(reverseDcfSource(rows, TODAY)).toEqual({
       price: 100, sharesOutstanding: 1000, fcf: 10000, wacc: null,
       sbc: null, capex: null, dep: null, ocfEstimate: null, ocfEstimateDate: null,
+      flowBasis: { ttm: false, date: null },
     });
   });
 
@@ -218,6 +219,84 @@ describe('reverseDcfSource', () => {
     expect(reverseDcfSource([], TODAY)).toEqual({
       price: null, sharesOutstanding: null, fcf: null, wacc: null,
       sbc: null, capex: null, dep: null, ocfEstimate: null, ocfEstimateDate: null,
+      flowBasis: { ttm: false, date: null },
+    });
+  });
+
+  /**
+   * ⚠⚠ THE FOUR CASH-FLOW LEGS ARE TRAILING TWELVE MONTHS, AND THE GAP IS NOT SMALL. Measured on
+   * Meta (2026-08-26, the figures below are the real ones): the last filed fiscal year has capex
+   * −69,691 and D&A 18,616, while the four newest quarters sum to **−89,325** and 22,729 — so the
+   * growth-capex correction reads 51,075 on the annual basis against 66,596 on the trailing one.
+   * GuruFocus's own page shows the trailing figure, so a reader checking the panel against the
+   * vendor found two different numbers with nothing on either screen to say why.
+   */
+  describe('the trailing-twelve-month window', () => {
+    const Q = (code: string, date: string, v: number) =>
+      m(`quarterly__Cashflow Statement__${code}`, date, v);
+    //        quarter end,  capex,  D&A,  FCF — Meta's real filings.
+    const QUARTERS: [string, number, number, number][] = [
+      ['2026-06-30', -30116, 6356, 1746],
+      ['2026-03-31', -18997, 5999, 13229],
+      ['2025-12-31', -21383, 5411, 14831],
+      ['2025-09-30', -18829, 4963, 11170],
+    ];
+    const meta = [
+      ...rows,
+      m('annuals__Cashflow Statement__Capital Expenditure', '2025-12-31', -69691),
+      m('annuals__Cashflow Statement__Cash Flow Depreciation, Depletion and Amortization',
+        '2025-12-31', 18616),
+      ...QUARTERS.flatMap(([d, capex, dep, fcf]) => [
+        Q('Capital Expenditure', d, capex),
+        Q('Cash Flow Depreciation, Depletion and Amortization', d, dep),
+        Q('Free Cash Flow', d, fcf),
+      ]),
+    ];
+
+    it('sums the four newest quarters — the figure the vendor prints', () => {
+      const s = reverseDcfSource(meta, TODAY);
+      expect(s.capex).toBe(-89325);
+      expect(s.dep).toBe(22729);
+      expect(s.flowBasis).toEqual({ ttm: true, date: '2026-06-30' });
+    });
+
+    it('⚠ EXACTLY FOUR OR NOTHING — three quarters is a nine-month figure under an annual label', () => {
+      // Smaller than the year it claims to be, in the same direction for every company, invisible.
+      const three = meta.filter((r) => r.target_date !== '2025-09-30');
+      const s = reverseDcfSource(three, TODAY);
+      expect(s.capex).toBe(-69691);                     // fell back to the fiscal year
+      expect(s.flowBasis).toEqual({ ttm: false, date: '2025-12-31' });
+    });
+
+    it('⚠⚠ ONE BASIS FOR ALL FOUR LEGS, decided once', () => {
+      // `normalisedFcf` subtracts one leg from another: a TTM capex against an annual free cash
+      // flow is a split basis, appearing only on companies that filed four quarters of one line
+      // and three of another — rarely, unpredictably, and with no way to see it.
+      const noQuarterlyFcf = meta.filter(
+        (r) => r.metric_code !== 'quarterly__Cashflow Statement__Free Cash Flow');
+      const s = reverseDcfSource(noQuarterlyFcf, TODAY);
+      expect(s.flowBasis.ttm).toBe(false);
+      expect(s.capex).toBe(-69691);
+      expect(s.dep).toBe(18616);
+    });
+
+    it('⚠ but a missing stock-comp line does NOT drag the other three back', () => {
+      // Plenty of companies report none at all; requiring four quarters of it would put every
+      // other leg on the annual basis over a line that is legitimately absent.
+      expect(reverseDcfSource(meta, TODAY).flowBasis.ttm).toBe(true);
+      expect(reverseDcfSource(meta, TODAY).sbc).toBeNull();
+    });
+
+    it('⚠ a quarter filed under BOTH section spellings is counted once', () => {
+      // Summing one quarter twice inflates the window by exactly one quarter — again in one
+      // direction, again invisibly.
+      const dupes = [...meta, ...QUARTERS.map(([d, capex]) =>
+        m(`quarterly__cashflow_statement__Capital Expenditure`, d, capex))];
+      expect(reverseDcfSource(dupes, TODAY).capex).toBe(-89325);
+    });
+
+    it('takes nothing at all when there are no quarterly rows', () => {
+      expect(ttmObs(rows, ['annuals__Cashflow Statement__Capital Expenditure']).used).toBeNull();
     });
   });
 

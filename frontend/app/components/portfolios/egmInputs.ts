@@ -266,6 +266,11 @@ export type ReverseDcfSource = {
   /** WHICH fiscal year that estimate is for. ⚠ The panel states it: a base labelled "next year"
    *  over a figure whose period nobody named is the same defect `priceDate` fixed for the close. */
   ocfEstimateDate: string | null;
+  /** ⚠ THE WINDOW THE FOUR FLOW LEGS ARE MEASURED OVER — trailing twelve months (`ttm: true`, with
+   *  the quarter it ends at) or the last fiscal year. The panel LABELS it: 51,075 on one basis and
+   *  66,596 on the other is the same row saying two things, and the reader checking against
+   *  GuruFocus needs to know which window they are looking at. See `flowLegs`. */
+  flowBasis: { ttm: boolean; date: string | null };
 };
 
 /**
@@ -283,7 +288,55 @@ export type ReverseDcfSource = {
  *  sign-normalised where the two differ), and where it came from. */
 export type SourceObs = {
   raw: number | null; used: number | null; date: string | null; code: string | null;
+  /** ⚠ THE VALUE IS A SUM OF FOUR QUARTERS, NOT THE FIGURE FILED AT `date`. Without this the raw
+   *  -data modal renders `quarterly__…Capital Expenditure · 2026-06-30 · −89,325` — a quarter-end
+   *  date over a number four times its size, which reads as a vendor error rather than a window. */
+  ttm?: boolean;
 };
+
+/** `annuals__Cashflow Statement__X` → `quarterly__Cashflow Statement__X`, for both section
+ *  spellings. ⚠ THE BACKEND BUILDS THE TWINS THE SAME WAY (`_DASHBOARD_METRIC_CODES`), so every
+ *  annual code in this payload has its quarterly counterpart already loaded beside it. */
+const quarterlyTwin = (code: string) =>
+  (code.startsWith('annuals__') ? `quarterly__${code.slice('annuals__'.length)}` : code);
+
+/**
+ * The TRAILING TWELVE MONTHS of a FLOW, from the four newest quarterly filings.
+ *
+ * ⚠⚠ IT IS WHAT GURUFOCUS'S OWN SCREEN SHOWS, AND THE GAP IS NOT SMALL. Measured on Meta
+ * (2026-08-26): the last filed fiscal year has capex −69,691 and D&A 18,616, while the trailing
+ * twelve months are **−89,325** and 22,729 — so the growth-capex correction reads 51,075 on the
+ * annual basis against 66,596 on the trailing one. A reader checking the panel against GuruFocus
+ * finds two different numbers with nothing on either screen to say why.
+ *
+ * ⚠ SUM, BECAUSE THESE ARE FLOWS. Capex, depreciation, stock comp and free cash flow are all
+ * measured OVER a period, so four quarters are a year of it. A STOCK (a balance-sheet line) would
+ * be the latest quarter, not the sum — see the backend's `_TTM_RULE`, which declares this per
+ * metric precisely because the wrong rule produces a plausible number rather than an error.
+ *
+ * ⚠⚠ EXACTLY FOUR OR NOTHING. Three quarters summed is a nine-month figure wearing an annual
+ * label — smaller than the year it claims to be, in the same direction for every company, and
+ * invisible. A company that has not filed four quarters falls back to its annual line instead.
+ */
+export function ttmObs(metrics: MetricRow[], annualCodes: string[]): SourceObs {
+  const want = new Set(annualCodes.map(quarterlyTwin));
+  const rows = metrics
+    .filter((m) => want.has(m.metric_code) && m.numeric_value != null)
+    .sort((a, b) => b.target_date.localeCompare(a.target_date));
+  // ⚠ DEDUPED BY DATE. Both section spellings can carry the same quarter, and summing a quarter
+  // twice inflates the window by exactly one quarter — again in one direction, again invisibly.
+  const byDate = new Map<string, MetricRow>();
+  for (const m of rows) if (!byDate.has(m.target_date)) byDate.set(m.target_date, m);
+  const four = [...byDate.values()].slice(0, 4);
+  if (four.length < 4) return NONE;
+  return {
+    raw: four.reduce((s, m) => s + (m.numeric_value as number), 0),
+    used: four.reduce((s, m) => s + (m.numeric_value as number), 0),
+    date: four[0].target_date,
+    code: four[0].metric_code,
+    ttm: true,
+  };
+}
 export type ReverseDcfWorking = {
   price: SourceObs; shares: SourceObs; fcf: SourceObs; wacc: SourceObs;
   /** The normalisation legs. ⚠ Each may be absent, and an absent one is NOT a zero — see
@@ -309,6 +362,40 @@ function latestObs(metrics: MetricRow[], codes: string[], magnitude = false): So
   return { raw, used: magnitude ? Math.abs(raw) : raw, date: best.target_date, code: best.metric_code };
 }
 
+/**
+ * The four flow legs, on ONE basis: trailing twelve months if EVERY one of them has four quarters,
+ * the last fiscal year otherwise.
+ *
+ * ⚠⚠ ONE BASIS, DECIDED ONCE — NOT LEG BY LEG. `normalisedFcf` subtracts stock comp from free cash
+ * flow and adds the excess of capex over depreciation: a TTM capex against an annual free cash
+ * flow is a split basis, and it would appear only on companies filing three quarters of one line
+ * and four of another — i.e. rarely, unpredictably, and with no way to see it. All four move
+ * together or none do.
+ *
+ * ⚠ THE FALLBACK IS THE OLD BEHAVIOUR, so a company GuruFocus files only annually is exactly as it
+ * was rather than losing its corrections.
+ */
+function flowLegs(metrics: MetricRow[]): {
+  fcf: SourceObs; sbc: SourceObs; capex: SourceObs; dep: SourceObs;
+} {
+  const codes = { fcf: FCF_CODES, sbc: SBC_CODES, capex: CAPEX_CODES, dep: DEP_CODES };
+  const ttm = {
+    fcf: ttmObs(metrics, codes.fcf), sbc: ttmObs(metrics, codes.sbc),
+    capex: ttmObs(metrics, codes.capex), dep: ttmObs(metrics, codes.dep),
+  };
+  // ⚠ SBC IS EXCUSED FROM THE QUORUM, and only SBC. Plenty of companies report none at all, so
+  // requiring four quarters of it would drop every other leg back to the annual basis over a line
+  // that is legitimately absent. It still takes the TTM window when it has one.
+  const all = ttm.fcf.used != null && ttm.capex.used != null && ttm.dep.used != null;
+  if (!all) {
+    return {
+      fcf: latestObs(metrics, codes.fcf), sbc: latestObs(metrics, codes.sbc),
+      capex: latestObs(metrics, codes.capex), dep: latestObs(metrics, codes.dep),
+    };
+  }
+  return { ...ttm, sbc: ttm.sbc.used != null ? ttm.sbc : latestObs(metrics, codes.sbc) };
+}
+
 /** A `… %` observation as the DECIMAL the models want, keeping the vendor's figure in `raw`. */
 function asDecimal(o: SourceObs): SourceObs {
   return o.used == null ? o : { ...o, used: o.used / 100 };
@@ -328,13 +415,18 @@ export function reverseDcfWorking(metrics: MetricRow[], today: string): ReverseD
       : NONE,
     price: latestObs(metrics, [PRICE_CODE]),
     shares: latestObs(metrics, SHARES_CODES),
-    fcf: latestObs(metrics, FCF_CODES),
-    sbc: latestObs(metrics, SBC_CODES),
-    // ⚠ NOT `magnitude: true`. The vendor files capex NEGATIVE and `growthCapex` takes the
+    // ⚠⚠ THE FOUR FLOW LEGS ARE TRAILING TWELVE MONTHS, FALLING BACK TO THE LAST FISCAL YEAR —
+    // and they move TOGETHER on purpose. `normalisedFcf` subtracts one from another and adds a
+    // third; a TTM capex against an annual free cash flow is a split basis, which is the shape of
+    // most of the bugs this file has ever had. All four or none.
+    //
+    // ⚠ IT IS ALSO WHAT GURUFOCUS'S SCREEN SHOWS. Measured on Meta: capex −69,691 on the last
+    // fiscal year against **−89,325** trailing, so the growth-capex row read 51,075 where the
+    // vendor's own page says 66,596. See `ttmObs`.
+    // ⚠ NOT `magnitude: true` on capex. The vendor files it NEGATIVE and `growthCapex` takes the
     // magnitude itself; normalising the sign here too would leave the drill-down showing a
     // positive number under "as filed", which is the one thing that panel exists to show.
-    capex: latestObs(metrics, CAPEX_CODES),
-    dep: latestObs(metrics, DEP_CODES),
+    ...flowLegs(metrics),
     // ⚠ FILED AS A PERCENT, like every other `… %` line — 8.2 means 8.2%. Passed through unscaled
     // it would be an 820% discount rate, and every company on earth would read as worthless.
     wacc: asDecimal(latestObs(metrics, WACC_CODES)),
@@ -347,6 +439,9 @@ export function reverseDcfSource(metrics: MetricRow[], today: string): ReverseDc
     price: w.price.used, sharesOutstanding: w.shares.used, fcf: w.fcf.used, wacc: w.wacc.used,
     sbc: w.sbc.used, capex: w.capex.used, dep: w.dep.used,
     ocfEstimate: w.ocfEst.used, ocfEstimateDate: w.ocfEst.date,
+    // ⚠ TAKEN OFF CAPEX, which is in the quorum — `sbc` is excused from it and could be the one
+    // leg on the other window, so reading the basis off that would mislabel the other three.
+    flowBasis: { ttm: w.capex.ttm === true, date: w.capex.date },
   };
 }
 
