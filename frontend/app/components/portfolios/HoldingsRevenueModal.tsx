@@ -237,8 +237,12 @@ const VIEWS: [View, string, string][] = [
     + 'detractors at the bottom. This is the one view whose sort does NOT rank on the figure.'],
 ];
 
-function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRefresh }: {
+function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRefresh,
+  metric }: {
   data: Resp;
+  /** ⚠ THE METRIC KEY, ONLY SO THE FOOTER CAN APPLY THE SAME MEMBER RULE THE LINE DID —
+   *  `fcf_ps` is drawn from the positives-only set. See `fundamentalBlend`. */
+  metric?: string;
   fmt: (v: number | null | undefined) => string;
   noun: string;
   /** The chart's own name — 'Revenue', 'FCF per share', 'ROIC'. Names the FIRST line of every period
@@ -311,7 +315,10 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * would put SP500's 264 contributors over its 489 listed rows and every coverage figure — and
    * the floor decision that rides on it — would be wrong by that ratio.
    */
-  const blend = useMemo(() => buildBlend(data), [data]);
+  // ⚠ THE METRIC IS PASSED so the footer applies the same member rule the server's line did —
+  // `fcf_ps` is drawn from the positives-only set. Without it the table reconciles to a line
+  // nobody is looking at. See `fundamentalBlend.POSITIVE_ONLY_METRICS`.
+  const blend = useMemo(() => buildBlend(data, metric), [data, metric]);
 
   /**
    * Per-row facts that every one of that row's period cells would otherwise re-derive.
@@ -1865,7 +1872,7 @@ export default function HoldingsRevenueModal({
             )}
             {data && data.rows.length > 0 && (
               <MatrixTable data={data} fmt={fmtM} noun={noun} metricLabel={seriesLabel ?? noun}
-                valueIsCurrency={valueIsCurrency} view={view}
+                valueIsCurrency={valueIsCurrency} view={view} metric={metric}
                 onRefresh={refreshRow(target, setData)} />
             )}
           </div>
@@ -1940,7 +1947,7 @@ export default function HoldingsRevenueModal({
                       removed from `_benchmark_index.weight_basis` — so a compact form (a count, with
                       the names in a tooltip) can be put back without touching the backend. */}
                   <MatrixTable data={bench} fmt={fmtM} noun={noun} metricLabel={seriesLabel ?? noun}
-                valueIsCurrency={valueIsCurrency} view={view}
+                valueIsCurrency={valueIsCurrency} view={view} metric={metric}
                 onRefresh={refreshRow(benchTarget!, setBench)} />
                 </>
               )}

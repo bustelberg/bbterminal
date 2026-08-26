@@ -203,7 +203,7 @@ export { Stat } from './CardStats';
 export default function MetricGrowthCard({
   cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin, onIngested,
   blendNotes, onReloadMetrics, cadence = 'annual', benchMetrics, benchLabel, benchTarget, benchErr,
-  benchNotes,
+  benchNotes, memberCounts, benchCounts,
 }: {
   cfg: MetricCfg;
   /** 'annual' = one point per fiscal year. 'quarterly' = one TRAILING-TWELVE-MONTH point per
@@ -251,6 +251,20 @@ export default function MetricGrowthCard({
   /** Why the blend failed, if it did — so a missing overlay states its reason instead of looking
    *  like an index that happens to track this book exactly. See `benchNote`. */
   benchErr?: string | null;
+  /**
+   * How many members each line was drawn from, per metric code — the book's, then the index's.
+   *
+   * ⚠⚠ IT IS RENDERED BECAUSE A FILTER NOBODY CAN SEE IS THE WHOLE HAZARD. `fcf_ps` is drawn from
+   * the companies POSITIVE IN EVERY PERIOD (`earnings._POSITIVE_ONLY_METRICS`) — which silently
+   * deletes the cash-burners, the recoveries and every bank whose free cash flow swings on deposit
+   * flows, leaving a line that looks exactly like an index line. "142 of 1,514 companies" is what
+   * turns a survivorship filter back into a fact the reader can weigh.
+   *
+   * ⚠ BOTH SIDES, SEPARATELY. The book and the index are two blends over two sets of companies and
+   * drop different numbers; one count standing for both would be wrong on whichever it was not.
+   */
+  memberCounts?: Record<string, { considered: number; total: number }>;
+  benchCounts?: Record<string, { considered: number; total: number }>;
 }) {
   // ⚠ The heading only — see `longEquityCopy` for why the rest of the card
   // (tiles, legend, tooltips) is deliberately not in scope.
@@ -548,6 +562,30 @@ export default function MetricGrowthCard({
   // "not ingested" would be false.
   const blendNote = noteFor(blendNotes, cfg.codes);
   /**
+   * "142 of 1,514 companies" — or nothing at all when none were withheld.
+   *
+   * ⚠ THE COUNTS ARE KEYED BY METRIC CODE and a card knows several (`cfg.codes` carries both
+   * section spellings), so it takes the first that answered rather than assuming which spelling
+   * this company files under — the same reason `noteFor` exists one line above.
+   */
+  const countFor = (
+    m?: Record<string, { considered: number; total: number }>,
+  ) => (m ? cfg.codes.map((c) => m[c]).find(Boolean) : undefined);
+  const countLine = useMemo(() => {
+    const own = countFor(memberCounts);
+    const bench = countFor(benchCounts);
+    const parts: string[] = [];
+    // ⚠ ONLY WHEN SOMETHING WAS WITHHELD. `considered === total` is every other card, every day.
+    if (isAgg && own && own.considered < own.total) {
+      parts.push(`${ownLabel}: ${own.considered} of ${own.total} companies`);
+    }
+    if (bench && benchLabel && bench.considered < bench.total) {
+      parts.push(`${benchLabel}: ${bench.considered.toLocaleString('en-US')} of ${bench.total.toLocaleString('en-US')}`);
+    }
+    return parts.join(' · ');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memberCounts, benchCounts, cfg.codes, isAgg, ownLabel, benchLabel]);
+  /**
    * Why the INDEX has no forecast leg, in one short clause.
    *
    * ⚠ THE SERVER'S OWN REASON WHERE THERE IS ONE. `explain_empty` already measured which cause
@@ -759,6 +797,20 @@ export default function MetricGrowthCard({
       <h4 className="text-base font-semibold text-fg-strong">
         {cfg.titleKey ? chartTitle(lang, cfg.titleKey) : cfg.title}
       </h4>
+      {/* ⚠ ONLY WHERE MEMBERS WERE ACTUALLY WITHHELD. On every other card `considered === total`
+          and a line saying so is noise on thirteen charts to make one honest. */}
+      {countLine && (
+        <p className="text-[11px] text-fg-faint -mt-2">
+          {countLine}
+          <InfoTip className="ml-1" content={<AspectCard
+            what="How many companies this line is drawn from."
+            where="The blend, after the metric's own member rule."
+            when="The window on the chart."
+            how={'Free cash flow per share is drawn from the companies positive in every period, so a weighted year-on-year growth can be taken over figures that are all positive.\n\n'
+              + 'The cost is survivorship, and it runs one way: cash-burners, recoveries and banks are excluded, and averaging growth rates is upward-biased on top of that. Read it as how the survivors grew.\n\n'
+              + 'The excluded companies are still in the per-holding table behind the chart.'} />} />
+        </p>
+      )}
 
       {metrics == null ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>

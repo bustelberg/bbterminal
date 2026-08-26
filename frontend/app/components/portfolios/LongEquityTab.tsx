@@ -32,6 +32,10 @@ type MetricsResponse = {
   // Portfolio only: per metric_code, why a code the holdings DO carry produced no blended line.
   // See `blendNotes` / the backend's `explain_empty`.
   blend_notes?: Record<string, BlendNote>;
+  /** Per metric code, how many members the line was drawn from and how many were on offer.
+   *  ⚠ DIFFERENT FROM `coverage`, which answers "how many hold this metric at all" — for a metric
+   *  filtered to positives-only the two are different numbers on purpose. */
+  member_counts?: Record<string, { considered: number; total: number }>;
 };
 
 // Each card is one metric. `codes` carries BOTH GuruFocus section spellings (see the backend's
@@ -366,6 +370,11 @@ export default function LongEquityTab({
    * "the index has no expectations" and "too few of its members are covered" was true.
    */
   const [benchNotes, setBenchNotes] = useState<Record<string, BlendNote> | undefined>();
+  /** The index's own member counts — see `MetricsResponse.member_counts`. ⚠ ITS OWN STATE, beside
+   *  `benchNotes`, because the benchmark is a SEPARATE blend: on a positives-only metric the index
+   *  and the book drop different numbers of members and the card names both. */
+  const [benchCounts, setBenchCounts] =
+    useState<Record<string, { considered: number; total: number }> | undefined>();
   const [benchErr, setBenchErr] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -374,6 +383,7 @@ export default function LongEquityTab({
     const ctrl = new AbortController();
     void (async () => {
       setBenchMetrics(null); setBenchErr(null); setBenchNotes(undefined);
+      setBenchCounts(undefined);
       if (!benchTarget) return;
       try {
         const r = await apiFetch(`${API_URL}/api/earnings/fundamental-blend-metrics`, {
@@ -407,6 +417,7 @@ export default function LongEquityTab({
         }
         setBenchMetrics((b as MetricsResponse)?.metrics ?? []);
         setBenchNotes((b as MetricsResponse)?.blend_notes);
+        setBenchCounts((b as MetricsResponse)?.member_counts);
       } catch (e) {
         if (!alive) return;                     // aborted by the switch — not a failure to report
         const detail = e instanceof Error ? e.message : String(e);
@@ -449,9 +460,11 @@ export default function LongEquityTab({
   const gName = name ?? data?.company_name;
   const growth = {
     metrics: data?.metrics ?? null, isAgg, currency: data?.currency,
-    blendNotes: data?.blend_notes, holdingsTarget, holdingsName: gName,
+    blendNotes: data?.blend_notes, memberCounts: data?.member_counts,
+    holdingsTarget, holdingsName: gName,
     ingestIsin, onIngested, onReloadMetrics, cadence,
     benchMetrics, benchLabel: benchTarget?.label ?? null, benchTarget, benchErr, benchNotes,
+    benchCounts,
   };
   // ⚠ ONE KEY SUFFIX FOR EVERY DERIVED CARD. They each own their fetch, so without the cadence in
   // the key a switch would leave twelve charts showing the previous basis until something else

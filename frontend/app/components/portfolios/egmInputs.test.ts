@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   dividendYieldWorking, egmSource, estimateCagr, estimateCagrWorking, medianPE, medianPEWorking,
   nextFyEps, reverseDcfSource, reverseDcfWorking, ttmObs,
+  SOURCE_CODES, vendorName,
 } from './egmInputs';
 import { forwardLegs } from './normalisedFcf';
 import { type MetricRow } from './quickValuation';
@@ -174,6 +175,7 @@ describe('reverseDcfSource', () => {
     // reason it was ripped out has been undone.
     expect(reverseDcfSource(rows, TODAY)).toEqual({
       price: 100, sharesOutstanding: 1000, fcf: 10000, wacc: null,
+      priceDate: '2026-07-27', sharesDate: '2025-12-31', waccDate: null,
       sbc: null, capex: null, dep: null, ocfEstimate: null, ocfEstimateDate: null,
       fcfEstimate: null, ebitdaEstimate: null, ebitEstimate: null,
       flowBasis: { ttm: false, date: null },
@@ -220,6 +222,7 @@ describe('reverseDcfSource', () => {
   it('leaves everything null on an empty payload', () => {
     expect(reverseDcfSource([], TODAY)).toEqual({
       price: null, sharesOutstanding: null, fcf: null, wacc: null,
+      priceDate: null, sharesDate: null, waccDate: null,
       sbc: null, capex: null, dep: null, ocfEstimate: null, ocfEstimateDate: null,
       fcfEstimate: null, ebitdaEstimate: null, ebitEstimate: null,
       flowBasis: { ttm: false, date: null },
@@ -388,5 +391,45 @@ describe('reverseDcfSource', () => {
         m('annual_operating_cash_flow_per_share_estimate', '2026-12-31', 17)];
       expect(reverseDcfSource(perShare, TODAY).ocfEstimate).toBeNull();
     });
+  });
+});
+
+/**
+ * A card's `Where` names what the VENDOR calls a figure. The stored code is this app's encoding —
+ * `quarterly__Valuation Ratios__Dividend Yield %` names a key no reader can look up on GuruFocus's
+ * own screens, and reads as a leaked database identifier.
+ */
+describe('vendorName', () => {
+  it('drops our encoding and keeps the vendor’s line name', () => {
+    expect(vendorName('quarterly__Valuation Ratios__Dividend Yield %')).toBe('Dividend Yield %');
+    expect(vendorName('annuals__Cashflow Statement__Free Cash Flow')).toBe('Free Cash Flow');
+    expect(vendorName('annuals__Ratios__WACC %')).toBe('WACC %');
+    // ⚠ BOTH SECTION SPELLINGS resolve to the same name — the rename is ours to absorb.
+    expect(vendorName('annuals__cashflow_statement__Free Cash Flow')).toBe('Free Cash Flow');
+  });
+
+  it('⚠ drops the CADENCE too — the card’s `When` already answers that', () => {
+    expect(vendorName('annuals__Cashflow Statement__Capital Expenditure'))
+      .toBe(vendorName('quarterly__Cashflow Statement__Capital Expenditure'));
+  });
+
+  it('names the estimate block as the add-in does', () => {
+    expect(vendorName('annual_fcf_estimate')).toBe('Estimated Free Cash Flow for Next FY1 End');
+    expect(vendorName('indicator_q_forward_pe_ratio')).toBe('Forward PE Ratio');
+  });
+
+  it('⚠ returns an unknown code UNCHANGED — ugly beats wrong', () => {
+    // A card naming the raw key is a bug report; one naming a guessed pretty label is a bug
+    // nobody can see.
+    expect(vendorName('some_new_code')).toBe('some_new_code');
+  });
+
+  it('⚠ every code the cards name resolves to something readable', () => {
+    // The guard that matters: `SOURCE_CODES` is what the reads use, so a code added there without
+    // a vendor name shows up here rather than on a tooltip.
+    for (const code of Object.values(SOURCE_CODES)) {
+      expect(vendorName(code)).not.toContain('__');
+      expect(vendorName(code).length).toBeGreaterThan(2);
+    }
   });
 });

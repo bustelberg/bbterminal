@@ -110,7 +110,29 @@ export type Blend = ReturnType<typeof buildBlend>;
  *
  * Pure: same payload in, same answer out, no React. See the module header for why it is out here.
  */
-export function buildBlend(data: Resp) {
+/**
+ * ⚠⚠ METRICS DRAWN FROM MEMBERS POSITIVE IN EVERY PERIOD — the client twin of
+ * `earnings._POSITIVE_ONLY_METRICS`, and it MUST stay one.
+ *
+ * The chart's line is computed on the server; this footer reproduces it from the same rows. A rule
+ * applied there and not here means the drill-down explains a line it cannot reach — which this file
+ * has already done once (it dropped rows `_prepare` KEEPS, and the comment claimed they matched),
+ * so the failure mode is documented rather than hypothetical.
+ */
+const POSITIVE_ONLY_METRICS = new Set(['fcf_ps']);
+
+export function buildBlend(data: Resp, metric?: string) {
+    /**
+     * ⚠ THE SAME FILTER THE SERVER APPLIES, over the same window. A member with any negative value
+     * is out of the line entirely — see `POSITIVE_ONLY_METRICS`. It stays in `data.rows`, so the
+     * table still LISTS it; what it loses is its vote in the footer.
+     */
+    const eligible = (r: Row): boolean => {
+      if (!metric || !POSITIVE_ONLY_METRICS.has(metric)) return true;
+      // ⚠ `revenue` IS THE FIELD NAME FOR "THE SERIES", whatever metric it holds.
+      const vals = Object.values(r.revenue ?? {}).filter((v): v is number => v != null);
+      return vals.length > 0 && vals.every((v) => v >= 0);
+    };
     /**
      * This row's weight IN THIS PERIOD — the mirror of the backend's `_fundamental_blend
      * ._weight_at`, and it has to stay one because the footer below reproduces the plotted line
@@ -176,6 +198,12 @@ export function buildBlend(data: Resp) {
       return w && w > 0 ? w : 0;
     };
     for (const r of data.rows) {
+      // ⚠⚠ BEFORE THE DENOMINATOR, UNLIKE THE BASE TEST BELOW — and the difference is real. The
+      // base test mirrors `_prepare`, which runs INSIDE `blend_series` on members it was already
+      // handed, so its drops belong in the coverage denominator. This filter runs one level up, in
+      // `_blend_rows`, BEFORE `blend_series` is called at all: an excluded member was never handed
+      // over, so counting it here would report a coverage the server never computed.
+      if (!eligible(r)) continue;
       const periods = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort(periodOrder);
       if (!periods.length) {
         // Nothing filed at all — the row already says so via `status`, so no second badge.
