@@ -15,7 +15,23 @@
 import { isEstimatePeriod, periodOrder } from './fundamentalBlend';
 
 export type Cagr =
-  | { pct: number; from: string; to: string; years: number }
+  | {
+    pct: number; from: string; to: string; years: number;
+    /**
+     * THE TWO VALUES THE RATE WAS COMPUTED FROM — what `workedCagr` prints so a reader can redo it.
+     *
+     * ⚠⚠ CARRIED ON THE RESULT RATHER THAN LOOKED UP AGAIN BY THE CALLER, and that is the point.
+     * Three functions here produce a `Cagr` from three different sources (a blended line by period,
+     * the same line's forward leg, a raw point series), and every one of them already HAS the two
+     * endpoints in hand. A tooltip that re-reads them from "the same" series is a second lookup
+     * that can quietly find a different pair — the endpoint a rate actually used is not always the
+     * one a fresh `level[from]` returns, because `from`/`to` are chosen here, under rules
+     * (`endPeriod` pinning, quarter matching, the estimate suffix) the caller does not repeat.
+     *
+     * ⚠ SO A WORKED LINE CANNOT DISAGREE WITH ITS OWN RATE. That is the whole reason to print one.
+     */
+    fromValue: number; toValue: number;
+  }
   /** ⚠ A REASON, NOT A NULL. Every absence here has a different fix — fetch more history, wait for
    *  a filing, lower the coverage floor — and a bare dash sends the reader to guess which. */
   | { pct: null; reason: string };
@@ -98,7 +114,8 @@ export function lineCagr(
   if (!(a > 0) || !(b > 0)) {
     return { pct: null, reason: 'the line is not positive at both ends, so a growth RATE is undefined' };
   }
-  return { pct: 100 * ((b / a) ** (1 / years) - 1), from, to, years };
+  return { pct: 100 * ((b / a) ** (1 / years) - 1), from, to, years,
+           fromValue: a, toValue: b };
 }
 
 /**
@@ -160,7 +177,8 @@ export function forwardCagr(
   if (!(a > 0) || !(b > 0)) {
     return { pct: null, reason: 'the line is not positive at both ends, so a growth RATE is undefined' };
   }
-  return { pct: 100 * ((b / a) ** (1 / years) - 1), from, to, years };
+  return { pct: 100 * ((b / a) ** (1 / years) - 1), from, to, years,
+           fromValue: a, toValue: b };
 }
 
 /**
@@ -206,7 +224,8 @@ export function endpointCagr(
         + `${label(b.year)} ${b.value}), so a compound growth RATE is undefined` };
   }
   return { pct: 100 * ((b.value / a.value) ** (1 / years) - 1),
-           from: label(a.year), to: label(b.year), years };
+           from: label(a.year), to: label(b.year), years,
+           fromValue: a.value, toValue: b.value };
 }
 
 /**

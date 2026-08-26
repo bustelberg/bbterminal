@@ -13,6 +13,7 @@ import InfoTip from '../InfoTip';
 import { BADGE_TONE, StateBadge } from '../StateBadge';
 import { MIN_YEAR_COVERAGE_PCT } from './marginData';
 import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
+import { medianAbs, negativeRunStart, usableStep } from './positiveChain';
 import { type BenchTarget } from './benchSeries';
 
 /**
@@ -38,7 +39,6 @@ import { type BenchTarget } from './benchSeries';
 export type { Resp, Row, WeightBasis } from './fundamentalBlend';
 export { isEstimatePeriod, periodOrder } from './fundamentalBlend';
 import { buildBlend, isEstimatePeriod, periodOrder, type Resp, type Row } from './fundamentalBlend';
-import CagrTable, { type CagrBenchmark } from './CagrTable';
 
 /**
  * `2026-08-04T09:12:00Z` → `4 August 2026`. The date we concluded something, in the form a person
@@ -129,11 +129,6 @@ function cmp(a: number | string | null | undefined, b: number | string | null | 
  * which one reproduces the chart.
  */
 /**
- * ⚠ `table` IS NOT A CELL TRANSFORM LIKE THE OTHER THREE. Reported/Rebased/YoY re-render the same
- * matrices; `table` REPLACES them with the CAGR summary. It shares the control because it answers
- * the same question at a different altitude — "how fast is this compounding" against "what are the
- * figures" — and a second switch beside the first would be one more thing to notice.
- */
 /**
  * ⚠⚠ `contrib` IS THE ONLY ONE OF THE FOUR CELL VIEWS THAT IS **ADDITIVE**, and that is what it is
  * for. Reported, Rebased and YoY are each a transform of ONE company's own figures, so a column of
@@ -143,7 +138,7 @@ function cmp(a: number | string | null | undefined, b: number | string | null | 
  * most-to-least-impact ranking, which sorting the other three is not (and they deliberately keep
  * ranking on the reported figure — see the period header's tooltip).
  */
-type View = 'reported' | 'rebased' | 'yoy' | 'contrib' | 'table';
+type View = 'reported' | 'rebased' | 'yoy' | 'contrib';
 
 /**
  * A period cell's contents, at a WIDTH THAT DOES NOT DEPEND ON THE STRING.
@@ -226,24 +221,27 @@ const VIEWS: [View, string, string][] = [
   ['reported', 'Reported', 'The figures as filed, in each company’s own reporting currency.'],
   ['rebased', 'Rebased', 'Each company indexed to 100 at ITS OWN first period — exactly what the '
     + 'chart weight-averages. The footer row is the weighted average, i.e. the plotted line.'],
-  ['yoy', 'YoY %', 'Growth from that company’s previous reported period. ⚠ The chart does NOT '
-    + 'average these: it averages the Rebased levels. The footer is the plotted line’s own '
-    + 'period-on-period change, not the average of the column above it.'],
+  ['yoy', 'YoY %', 'Growth from the last period that company reported a USABLE base in — positive, '
+    + 'and big enough to divide by. A base that is negative or a rounding error against the '
+    + 'company’s own scale is stepped over, and the growth is then shown annualised over the span '
+    + 'it really took: a recovery through zero reads as its true rate instead of +1,348%. A company '
+    + 'that turned negative and never came back reads NEGATIVE rather than a number — there is no '
+    + 'rate across a sign change, and the two levels are the only true statement. Hover a '
+    + 'cell for the base, the span and anything skipped. ⚠ The chart does NOT average these: it '
+    + 'averages the Rebased levels. The footer is the plotted line’s own period-on-period change, '
+    + 'not the average of the column above it.'],
   ['contrib', 'Contribution', 'How many percentage points of the LINE’s own move each company '
     + 'accounts for — its weight in that period × its own growth over the interval. ⚠ The column '
     + 'SUMS to the footer, which is what makes it a decomposition rather than a ranking: sort a '
     + 'period column here and you get most-to-least impact, the drivers at the top and the '
     + 'detractors at the bottom. This is the one view whose sort does NOT rank on the figure.'],
-  ['table', 'Table','Compound annual growth of the weighted line — 5 and 10 years — for this book '
-    + 'against a benchmark you pick. It REPLACES the two matrices rather than adding to them: they '
-    + 'are what it is derived from, and the other views are one click away.'],
 ];
 
 function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRefresh }: {
   data: Resp;
   fmt: (v: number | null | undefined) => string;
   noun: string;
-  /** The chart's own name — 'Revenue', 'FCF / share', 'ROIC'. Names the FIRST line of every period
+  /** The chart's own name — 'Revenue', 'FCF per share', 'ROIC'. Names the FIRST line of every period
    *  cell, so the three stacked numbers are all identified rather than only the two derived ones.
    *  Display-cased by the caller (`seriesLabel`); `noun` is the lowercase prose form and reads
    *  wrong as a column label. */
@@ -274,7 +272,21 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    */
   onRefresh?: (row: Row) => Promise<{ id: string; done: Promise<JobToast> }>;
 }) {
-  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'weight', dir: 'desc' });
+  /**
+   * The sort, AND THE VIEW IT WAS CHOSEN UNDER.
+   *
+   * ⚠⚠ `basis` EXISTS SO SWITCHING VIEW DOES NOT REORDER THE TABLE. A period column ranks on the
+   * reported figure in three views and on the contribution in `contrib`, so `view` in the
+   * comparator meant every switch into or out of `contrib` silently reshuffled every row — while
+   * the reader was looking at it, having asked for none of it. Freezing the basis at the moment
+   * the sort is CHOSEN keeps the order until they choose again, which is what a sort is.
+   *
+   * ⚠ IT IS NOT THE SAME AS DROPPING `contrib`'s OWN RULE. Click a period column while in
+   * `contrib` and it still ranks by impact; the rule now applies at click time rather than at
+   * render time, so it decides the order once instead of re-deciding it on every switch.
+   */
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc'; basis: View }>(
+    { key: 'weight', dir: 'desc', basis: 'reported' });
   /** Per-row refresh state, keyed by ISIN — separate from `ingest` because the two controls are
    *  different actions on the same row (first load vs re-ask the vendor) and can each be mid-flight
    *  with their own outcome. */
@@ -316,12 +328,18 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * hand both rows the first one's periods.
    */
   const rowFacts = useMemo(() => {
-    const m = new Map<Row, { reported: string[]; newest: string | undefined; hasEstimate: boolean }>();
+    const m = new Map<Row, {
+      reported: string[]; newest: string | undefined; hasEstimate: boolean; scale: number;
+    }>();
     for (const r of data.rows) {
       const reported = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort(periodOrder);
       m.set(r, {
         reported,
         newest: reported[reported.length - 1],
+        // ⚠ THE ROW'S OWN TYPICAL SIZE, for the YoY skip rule — see `positiveChain`. It is a
+        // property of the whole series, so it belongs here and not in a cell: computing it per
+        // cell would sort the row's values once per period column to get one constant.
+        scale: medianAbs(reported.map((p) => r.revenue[p])),
         // ⚠ WHETHER THE ROW CARRIES A CONSENSUS FOR **ANY** YEAR — what separates "analysts do not
         // forecast this far" from "the estimates feed has never been fetched for this company".
         // `reported` is already filtered to non-null, so this is the same test `stateTitle` made.
@@ -407,11 +425,42 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     }
     // ⚠ THE PREVIOUS PERIOD **THIS ROW REPORTED**, not the previous column. A company that skipped
     // a year would otherwise show its two-year growth in the same ink as everyone's one-year.
-    const i = periods.indexOf(y);
-    if (i <= 0) return null;                  // its first period has nothing to grow from
-    const prev = r.revenue[periods[i - 1]] as number;
-    return prev > 0 ? 100 * (v / prev - 1) : null;
+    const s = yoyStep(r, y);
+    // ⚠ `annualised` NULL IS NOT "NO DATA" — it is a multi-period step ending at or below zero, for
+    // which no real rate exists. The tooltip names it; see `positiveChain.Step.annualised`.
+    return s && s.annualised != null ? 100 * s.annualised : null;
   };
+
+  /**
+   * The YoY step behind a cell — the base it grew from, over how many periods, annualised.
+   *
+   * ⚠⚠ IT IS NOT `v / previous − 1`, AND THAT IS THE POINT. A ratio needs a base that is positive
+   * AND big enough to divide by. This column used to take whichever figure sat behind the cell and
+   * refuse only the non-positive ones, so Eli Lilly's `5.085 → −3.489 → 0.458 → 6.632` printed a
+   * −100%, a blank and then **+1,348%**, and the +30.4% the company actually managed over those
+   * three years appeared nowhere. `usableStep` walks back to the last base clearing both tests and
+   * annualises over the span, so Lilly reads **+9.3%/yr** and the column stays comparable row to
+   * row. See `positiveChain` for why the floor is not optional.
+   *
+   * ⚠ IT GUARDS THE DIVISOR, NOT THE NUMERATOR, and the difference is worth knowing before reading
+   * a cell as fixed. Japan Post Bank's **+25,147,989.7%** had two causes: a base of 4.998 (gone —
+   * that one is a divisor artefact) and an FY2025 figure 1,000x too large, because its `shares`
+   * cell is 1,000x too small and GuruFocus divides by it. The remaining ~+25,000% is a real vendor
+   * defect in the value itself; no growth rule can mend it, and the tooltip now shows both ends so
+   * it reads as the data problem it is. ⚠ It does NOT reach the aggregate index line, which
+   * multiplies `per_share × shares` and cancels the two errors exactly — see `acwi_fcf_growth.py`.
+   */
+  const yoyStep = (r: Row, y: string) => {
+    const facts = rowFacts.get(r);
+    if (!facts) return null;
+    return usableStep((p) => r.revenue[p], facts.reported, facts.reported.indexOf(y), facts.scale);
+  };
+
+  /** Whether this YoY cell is the "turned negative and stayed there" case — a step that exists and
+   *  has no rate. ⚠ IT GETS A WORD, NOT A DASH: the figures are present and correct, and a blank
+   *  in a column of numbers is read as missing data every time. See `Step.annualised`. */
+  const yoyHasNoRate = (r: Row, y: string) =>
+    view === 'yoy' && yoyStep(r, y)?.annualised === null;
 
   /**
    * What the FIRST of a cell's stacked numbers is called — in the `Line` column and in the footer's
@@ -575,10 +624,13 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     const asked = r.financials_fetched_at;
     return asked && periodEndDate(y) <= asked.slice(0, 10) ? 'no_data' : 'not_tried';
   };
+  // ⚠ `basis: view` ON BOTH BRANCHES — a re-click in a different view is a NEW sort and must
+  // re-rank on what is on screen now, not on whatever was showing when the column was first
+  // picked. Only an untouched sort survives a view switch.
   const toggle = (key: string) => setSort((s) => (s.key === key
-    ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' }
+    ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc', basis: view }
     // Names/currency read A→Z first; weight, cap and figures read biggest-first.
-    : { key, dir: (key === 'name' || key === 'ccy') ? 'asc' : 'desc' }));
+    : { key, dir: (key === 'name' || key === 'ccy') ? 'asc' : 'desc', basis: view }));
   const caret = (k: string) => (sort.key === k ? (sort.dir === 'desc' ? ' ▾' : ' ▴') : '');
 
   /**
@@ -605,10 +657,12 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
             : sort.key === 'weight' ? r.weight_pct
               : sort.key === 'cap' ? (r.market_cap_eur ?? null)
                 : sort.key === 'ccy' ? (r.currency ?? '')
-                  : view === 'contrib' ? (blend.contrib.get(r)?.[sort.key]?.pp ?? null)
+                  : sort.basis === 'contrib' ? (blend.contrib.get(r)?.[sort.key]?.pp ?? null)
                     : r.revenue[sort.key]);    // a period column
     return [...data.rows].sort((a, b) => cmp(get(a), get(b), sort.dir));
-  }, [data, sort, view, blend]);
+    // ⚠ `view` IS DELIBERATELY NOT A DEPENDENCY. It used to be, and that is precisely what made
+    // the table reorder on a tab switch — see `sort.basis`.
+  }, [data, sort, blend]);
 
   /**
    * ⚠⚠ ROW VIRTUALIZATION — AND THIS TABLE HAS ITS OWN SCROLL BOX BECAUSE OF IT.
@@ -1125,8 +1179,22 @@ market cap it was weighted by in that period, and the weight that produced.">
                                         + 'keeps off the chart, so nothing is measured from it.';
                                   }
                                   const st = blend.step[y];
-                                  return ` · ${c.sharePct.toFixed(2)}% × `
-                                    + `${c.growthPct >= 0 ? '+' : ''}${c.growthPct.toFixed(1)}% = `
+                                  /**
+                                   * ⚠⚠ THE FACTORS ARE OPTIONAL AND THE pp IS NOT. On the euro-sum
+                                   * construction a member's contribution is `(Fᵢ(d) − Fᵢ(a)) ÷
+                                   * ΣFᵢ(a)` — exact for every member, INCLUDING one whose base is
+                                   * at or below zero. That member has no growth RATE and no share
+                                   * of a negative base to quote, so both factors are null while
+                                   * the pp stands. Printing `null% × null%` would be the old
+                                   * failure in a new place: a multiplication that does not reach
+                                   * the number beside it.
+                                   */
+                                  const factors = c.sharePct != null && c.growthPct != null
+                                    ? `${c.sharePct.toFixed(2)}% × `
+                                      + `${c.growthPct >= 0 ? '+' : ''}`
+                                      + `${c.growthPct.toFixed(1)}% = `
+                                    : '';
+                                  return ` · ${factors}`
                                     + `${c.pp >= 0 ? '+' : ''}${c.pp.toFixed(2)}pp of the line’s `
                                     + `${st ? `${st.from} → ${y} move `
                                       + `(${st.growthPct >= 0 ? '+' : ''}${st.growthPct.toFixed(1)}%)`
@@ -1135,6 +1203,64 @@ market cap it was weighted by in that period, and the weight that produced.">
                                       ? ` — over the ${st.spanPct.toFixed(1)}% of this period’s `
                                         + 'weight that spans the interval, which is why this share '
                                         + 'is not the weight on the line below'
+                                      : '');
+                                })()
+                                /**
+                                 * ⚠⚠ THE YoY CELL MUST SAY WHAT IT DIVIDED BY. Its base is not
+                                 * always the period to its left — `usableStep` walks back past any
+                                 * that is non-positive or too small to divide by (see
+                                 * `positiveChain`), and the number shown is then ANNUALISED over
+                                 * the span. Unexplained, an annualised three-year step and a real
+                                 * one-year step are the same ink, and the reader has no way to tell
+                                 * that a company went through zero in between.
+                                 *
+                                 * ⚠ AND A BLANK GETS A SENTENCE TOO. "No usable base" and "no data"
+                                 * are different facts and were the same empty cell.
+                                 */
+                                + (() => {
+                                  if (view !== 'yoy' || state !== 'value' || carried) return '';
+                                  const s = yoyStep(r, y);
+                                  if (!s) {
+                                    return rowFacts.get(r)?.reported[0] === y
+                                      ? ' · Its first reported period — nothing behind it to grow '
+                                        + 'from.'
+                                      : ' · No growth shown: every earlier period is either '
+                                        + 'negative or too small a base to divide by, so any '
+                                        + 'percentage here would be an artefact of the divisor '
+                                        + 'rather than the business.';
+                                  }
+                                  /**
+                                   * ⚠⚠ A MULTI-PERIOD STEP ENDING BELOW ZERO HAS NO RATE, AND THIS
+                                   * IS THE ONE CASE THE SKIP RULE CANNOT REACH. It bridges a dip
+                                   * BETWEEN two positive years; a company that turned negative and
+                                   * never came back has nothing on the far side to bridge to. The
+                                   * honest output is the two levels and the date it turned — a
+                                   * percentage here would be invented, and a bare blank would read
+                                   * as missing data when the data is present and correct.
+                                   */
+                                  if (s.annualised == null) {
+                                    const since = negativeRunStart(
+                                      (p) => r.revenue[p], rowFacts.get(r)!.reported,
+                                      rowFacts.get(r)!.reported.indexOf(y));
+                                    return ` · ${fmt(s.base)} in ${s.from} → `
+                                      + `${fmt(r.revenue[y])} in ${y}`
+                                      + (since ? `, negative since ${since} and not recovered` : '')
+                                      + '. There is no growth rate across a sign change: a rate '
+                                      + 'claims V₀(1+r)ⁿ = Vₙ, and no real r satisfies that over '
+                                      + `${s.span} periods when the end is below zero. Read the `
+                                      + 'two figures, not a percentage.';
+                                  }
+                                  const skipped = rowFacts.get(r)!.reported
+                                    .slice(rowFacts.get(r)!.reported.indexOf(s.from) + 1,
+                                      rowFacts.get(r)!.reported.indexOf(y))
+                                    .map((p) => `${p} ${fmt(r.revenue[p])}`).join(', ');
+                                  return ` · ${fmt(s.base)} in ${s.from} → ${fmt(r.revenue[y])} in `
+                                    + `${y}, ${s.growth >= 0 ? '+' : ''}`
+                                    + `${(s.growth * 100).toFixed(1)}% over ${s.span} period`
+                                    + `${s.span === 1 ? '' : 's'}`
+                                    + (s.span === 1 ? '' : ' — shown annualised, so it stays '
+                                      + 'comparable with the one-year steps around it')
+                                    + (skipped ? ` · stepped over ${skipped}, unusable as a base`
                                       : '');
                                 })()}>
                       {/* ⚠ THE SAME BADGES AS THE /asset-pipeline GRID, from `StateBadge`. The two
@@ -1165,7 +1291,11 @@ market cap it was weighted by in that period, and the weight that produced.">
                                   reported={r.revenue.LTM ?? null} fmt={fmt} />} />
                               </span>
                             )
-                            : <Cell>{cellText(cellOf(r, y))}</Cell>)
+                            : yoyHasNoRate(r, y)
+                              // ⚠ THE BADGE VOCABULARY OF THIS TABLE, not a hand-rolled span — the
+                              // reader already knows a chip here is a state rather than a figure.
+                              ? <StateBadge label="Negative" tone={BADGE_TONE.warnSoft} />
+                              : <Cell>{cellText(cellOf(r, y))}</Cell>)
                           : (
                             // ⚠ `cursor-default` — the badge already reads as a state, so the help
                             // cursor adds nothing but a question mark dragged across the table.
@@ -1457,20 +1587,6 @@ export default function HoldingsRevenueModal({
   const [view, setView] = useState<View>('reported');
 
   /**
-   * The `Table` view's OWN benchmark — see `CagrTable`'s picker.
-   *
-   * ⚠ NOT `benchTarget`. The drill-down inherits whatever index the card behind it was drawn
-   * against, which is right for the matrices (they explain that chart). Here the question is
-   * "compounding against what", and answering it only for the one benchmark the chart happened to
-   * use would make the comparison not worth having. Defaults to AEX.
-   *
-   * ⚠ AND IT FETCHES ONLY WHEN THE VIEW IS OPEN. On ACWI this is ~1,900 constituents; paying for it
-   * on every drill-down, for a tab most opens never reach, is the shape the constituent matrix used
-   * to have before it was measured down to 0.19s — and this one is a second copy of that read.
-   */
-  const [cagrBenchChoice, setCagrBenchChoice] = useState<CagrBenchmark>('AEX');
-  const [cagrBench, setCagrBench] = useState<Resp | null>(null);
-  const [cagrBenchErr, setCagrBenchErr] = useState<string | null>(null);
 
   /**
    * ⚠ A ZERO ON A MONEY LINE IS A PLACEHOLDER, NOT A MEASUREMENT — AND IT READS AS A FACT.
@@ -1565,35 +1681,6 @@ export default function HoldingsRevenueModal({
   }, [benchKey, metric, benchReload]);
 
   /**
-   * The `Table` view's benchmark constituents.
-   *
-   * ⚠ LAZY, AND KEYED ON THE VIEW BEING OPEN. `view !== 'table'` short-circuits, so opening the
-   * drill-down and never touching Table costs nothing — and switching benchmark refetches only that
-   * index. It reuses `load`, so the Table's line is built from exactly the same payload shape the
-   * matrices use and cannot drift from them.
-   *
-   * ⚠ ITS OWN STATE, NOT `bench`. They can legitimately be different indices at the same time —
-   * the chart was drawn against one, the reader is asking about another — and sharing one slot
-   * would make switching the Table's picker silently rewrite the matrix below it.
-   */
-  useEffect(() => {
-    let alive = true;
-    if (view !== 'table') return;
-    void (async () => {
-      setCagrBench(null); setCagrBenchErr(null);
-      try {
-        const b = await load({ universe: cagrBenchChoice,
-          // The CAGR is annual by definition; the matrices' cadence is about the chart behind them.
-          cadence: 'annual' });
-        if (alive) setCagrBench(b);
-      } catch (e) {
-        console.warn('[bb:cagr] benchmark constituents:', e);
-        if (alive) setCagrBenchErr(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, cagrBenchChoice, metric]);
 
 
   /**
@@ -1740,33 +1827,16 @@ export default function HoldingsRevenueModal({
             <span className="text-fg-faint">
               {view === 'reported' ? 'as filed, each in its own currency'
                 : view === 'rebased' ? 'indexed to 100 at each company’s first period — what the chart weights'
-                  : view === 'table' ? 'compound annual growth of the weighted line, vs a benchmark'
-                    : view === 'contrib'
+                  : view === 'contrib'
                       ? 'percentage points of the line’s own move — sums to the footer, so sorting a '
                         + 'column ranks impact'
                       : 'growth on that company’s previous reported period'}
-              {view !== 'reported' && view !== 'table' && ' · hover a cell for the reported figure'}
+              {view !== 'reported' && ' · hover a cell for the reported figure'}
             </span>
           </div>
 
-          {/* ⚠ THE SUMMARY REPLACES THE MATRICES — see the `View` type. They are what it is derived
-              from, and this modal is already 84vh; a summary you scroll past its own inputs to
-              reach is one nobody reads. */}
-          {view === 'table' && (
-            <CagrTable
-              portfolio={data ? buildBlend(data) : null}
-              benchmark={cagrBench ? buildBlend(cagrBench) : null}
-              portfolioName={portfolioName || 'This book'}
-              benchLabel={cagrBenchChoice}
-              metricLabel={seriesLabel ?? noun}
-              benchChoice={cagrBenchChoice}
-              onBenchChoice={setCagrBenchChoice}
-              benchLoading={!cagrBench && !cagrBenchErr}
-              benchErr={cagrBenchErr} />
-          )}
 
           {/* 1 — the book (or the single company), on the same three views as the index below it. */}
-          {view !== 'table' && (
           <div className="space-y-1.5">
             {/* ⚠ THE FILL SITS ON THE TABLE IT FILLS, and there are two of them. A `no_data` row
                 here has a per-row Fetch already; this is the same action over every company at
@@ -1799,10 +1869,9 @@ export default function HoldingsRevenueModal({
                 onRefresh={refreshRow(target, setData)} />
             )}
           </div>
-          )}
 
           {/* 3 — the same, for the index, on demand. */}
-          {view !== 'table' && benchTarget && (
+          {benchTarget && (
             <div className="space-y-1.5">
               <div className="flex items-baseline gap-3">
                 <h3 className={section}>{benchLabel} constituents — {noun} by period</h3>

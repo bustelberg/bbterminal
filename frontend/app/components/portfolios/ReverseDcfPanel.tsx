@@ -8,7 +8,15 @@ import {
   PERPETUITY_GROWTH,
 } from './reverseDcf';
 import { type ReverseDcfSource } from './egmInputs';
-import { normalisedFcf } from './normalisedFcf';
+import { forwardFcf, normalisedFcf } from './normalisedFcf';
+// ⚠ THE SAME VOCABULARY THE RISK VIEWS USE. Every ⓘ stating a formula owes the reader the same
+// expression with this company's operands in it, typeset by the same engine — see `workedFormula`.
+// ⚠ THE EXPRESSIONS LIVE IN A PURE MODULE, not in this JSX: a LaTeX string is testable and a
+// tooltip is not, and the failure they guard against (a bare `%` truncating the line) is invisible
+// on screen. See `valuationFormulas` and its strict-mode render test.
+import {
+  workedCashFlowValued, workedForwardFcf, workedGrowthCapex, workedImpliedGrowth, workedMarketCap,
+} from './valuationFormulas';
 import ReverseDcfInputsModal from './ReverseDcfInputsModal';
 import { type MetricRow } from './quickValuation';
 
@@ -46,20 +54,31 @@ export type GrowthEstimates = {
  * Clearing the box hands control back to the default; `null` (never typed) and `''` (cleared) both
  * fall through to it.
  */
-function Field({ label, value, onChange, suffix, info }: {
+function Field({ label, value, onChange, suffix, info, tone, dim }: {
   label: string; value: string; onChange: (v: string) => void;
   suffix?: string; info?: React.ReactNode;
+  /** `'total'` gives this row `DerivedRow`'s total weight — the rule and the border, so an
+   *  editable total and a computed one are the same object at a glance. */
+  tone?: 'total';
+  /** ⚠ NOT DISABLED — DIMMED. A row that has stopped feeding the total is still a fact about the
+   *  company and still the way back (clear the total and it takes over again), so it stays live
+   *  and legible; what it loses is the claim to be part of the sum below it. */
+  dim?: boolean;
 }) {
+  const total = tone === 'total';
   return (
-    <label className="flex items-center gap-2 py-1">
-      <span className="min-w-0 flex-1 truncate text-[12px] text-fg-muted">{label}</span>
+    <label className={`flex items-center gap-2 py-1 ${total ? 'border-t border-neutral-800/40' : ''}${
+      dim ? ' opacity-45' : ''}`}>
+      <span className={`min-w-0 flex-1 truncate text-[12px] ${
+        total ? 'text-fg-soft' : 'text-fg-muted'}`}>{label}</span>
       {/* ⚠ ONE WIDTH FOR EVERY BOX, whatever it holds. They were `w-32` / `w-36` / `w-20`, sized to
           their content — five inputs at three widths, so the column they form was a staircase.
           A market cap in millions is the widest thing here and it overflows INSIDE the box rather
           than widening it, which is what keeps the rows aligned and the panel from resizing as the
           reader types. */}
       <input type="number" value={value} onChange={(e) => onChange(e.target.value)}
-        className="w-24 shrink-0 rounded border border-neutral-700 bg-page px-1.5 py-0.5 text-right font-mono text-[12px] text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />
+        className={`w-24 shrink-0 rounded border border-neutral-700 bg-page px-1.5 py-0.5 text-right font-mono text-[12px] text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30${
+          total ? ' font-semibold' : ''}`} />
       <span className="w-2 shrink-0 text-[11px] text-fg-muted">{suffix}</span>
       {/* ⚠⚠ THE ⓘ IS A TRAILING SLOT, NOT A SUFFIX ON THE LABEL — the same rule and the same width
           as the EGM panel above. Beside the label its x landed wherever that label happened to end
@@ -82,15 +101,31 @@ function Field({ label, value, onChange, suffix, info }: {
  *
  * ⚠ `tone` CARRIES NO MEANING BEYOND EMPHASIS. The total is the figure the model actually values,
  * so it is the one a reader's eye should land on; the two corrections are workings.
+ *
+ * ⚠⚠ EXCEPT `ref`, WHICH IS NOT PART OF THE SUM AND MUST NOT READ AS ONE. It carries the base the
+ * panel did NOT take (see the base selector), and it sits BELOW the total — where a row with a
+ * leading `−` or `+` would be read as one more term. Hence a dashed rule, the faintest ink, and a
+ * label that starts with "vs": three signals that this is a comparison, not an addend. The
+ * alternative was leaving it in a tooltip, which this panel's own history argues against — a
+ * reader cannot check what they cannot see.
  */
-function DerivedRow({ label, value, info, tone = 'step' }: {
-  label: string; value: string; info?: React.ReactNode; tone?: 'step' | 'total';
+function DerivedRow({ label, value, info, tone = 'step', dim }: {
+  label: string; value: string; info?: React.ReactNode;
+  /** ⚠ `sub` IS AN INPUT TO THE ROW BELOW IT, NOT A TERM OF THE SUM. Indented and unsigned: a `−`
+   *  on the depreciation row would read as a deduction from the cash flow, which is the opposite
+   *  of what it does (it makes the add-back SMALLER). */
+  tone?: 'step' | 'total' | 'ref' | 'sub';
+  /** See `Field`'s `dim`: a correction that is no longer reaching the total, kept legible. */
+  dim?: boolean;
 }) {
   const total = tone === 'total';
+  const ref = tone === 'ref';
+  const sub = tone === 'sub';
   return (
-    <div className={`flex items-center gap-2 py-1 ${total ? 'border-t border-neutral-800/40' : ''}`}>
-      <span className={`min-w-0 flex-1 truncate text-[12px] ${
-        total ? 'text-fg-soft' : 'text-fg-faint'}`}>{label}</span>
+    <div className={`flex items-center gap-2 py-1 ${total ? 'border-t border-neutral-800/40' : ''}${
+      ref ? 'border-t border-dashed border-neutral-800/30' : ''}${dim ? ' opacity-45' : ''}`}>
+      <span className={`min-w-0 truncate text-[12px] flex-1 ${
+        total ? 'text-fg-soft' : 'text-fg-faint'}${ref ? ' italic' : ''}${sub ? ' pl-3' : ''}`}>{label}</span>
       {/* ⚠ `border border-transparent` MATCHES `Field`'s INPUT BORDER. Without it this span is 2px
           shorter than an editable row's box, so the interleaved rows sit at slightly different
           heights and the numbers drift off each other's baseline — visible precisely because the
@@ -128,9 +163,27 @@ const NORM_OFF = `
 
 Untick Normalise to value the reported figure instead.`;
 
-export default function ReverseDcfPanel({ src, currency, metrics, name, isin, growthEst }: {
+/**
+ * ⚠⚠ THE WINDOW THE FOUR FLOW LINES ARE MEASURED OVER, AND IT HAS TO BE ON SCREEN. Free cash flow,
+ * stock comp, capex and depreciation are trailing twelve months where four quarters exist and the
+ * last fiscal year otherwise (`egmInputs.flowLegs`) — and the two can be far apart: measured on
+ * Meta, capex is −69,691 on the last fiscal year against **−89,325** trailing, so the growth-capex
+ * row reads 51,075 one way and 66,596 the other. A reader reconciling this panel against
+ * GuruFocus's own page needs to know which of the two they are looking at, and the vendor's page
+ * shows the trailing one.
+ */
+const TTM_NOTE = `
+
+⚠ Trailing twelve months where the company has filed four quarters, its last full fiscal year otherwise — the same window for all four cash-flow lines, so the corrections cannot mix bases. The header row says which one is in use.`;
+
+export default function ReverseDcfPanel({ src, currency, metrics, name, isin, growthEst, today }: {
   src: ReverseDcfSource; currency?: string | null;
   metrics: MetricRow[]; name?: string | null; isin: string;
+  /** ⚠ PASSED IN, NOT READ FROM THE CLOCK, and it reaches the raw-data modal from here rather than
+   *  being re-derived there — "which estimate is next year's" has to be the same question in the
+   *  panel and in the table that claims to show what the panel read. Same convention as
+   *  `egmSource(metrics, today)` one tab over. */
+  today: string;
   /** Analysts' 3–5y consensus — context beside the implied rate, never an input to it. */
   growthEst?: GrowthEstimates | null;
 }) {
@@ -139,11 +192,43 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   // seeded into state; instead the input DISPLAYS the default until an override exists, which also
   // means the box keeps tracking the data if the payload updates underneath it.
   const [fcfStr, setFcfStr] = useState<string | null>(null);
+  /**
+   * The TOTAL, typed directly — the figure the model discounts, bypassing the base and both
+   * corrections.
+   *
+   * ⚠⚠ IT IS A SECOND INPUT FOR ONE NUMBER, AND THE PANEL HAS TO SAY WHICH ONE WON. The base box
+   * exists so a typed figure still flows through the corrections ("the FCF was really 9,000" and
+   * having the stock comp silently stop being deducted would be a second, invisible edit). That
+   * rule is intact — this is the other question: "value THIS, whatever the workings say", for a
+   * normalised year you do not believe, a restructuring, or a figure from your own model. When it
+   * is set the three rows above are dimmed and the corrections read `—`, so the sum on screen
+   * never disagrees with the number beneath it.
+   *
+   * ⚠ CLEARING IT HANDS CONTROL BACK, like every other box: `null` (never typed) and `''`
+   * (cleared) both fall through to the computed total, and the base above resumes feeding it.
+   */
+  const [totalStr, setTotalStr] = useState<string | null>(null);
   const [targetStr, setTargetStr] = useState<string | null>(null);
   const [rateStr, setRateStr] = useState<string | null>(null);
   const [perpStr, setPerpStr] = useState<string | null>(null);
   const [yearsStr, setYearsStr] = useState<string | null>(null);
   const [showRaw, setShowRaw] = useState(false);
+  /**
+   * WHICH cash flow the model starts from — next year's consensus, or the last one filed.
+   *
+   * ⚠ `null` MEANS "NEVER CHOSEN", like every input box above, so the default follows the data: a
+   * company with a consensus gets the forward base, one without falls back to the filing. Seeding
+   * this with a concrete mode would freeze it before the payload arrived and leave a company that
+   * HAS estimates valued on last year's cash for no reason a reader could see.
+   *
+   * ⚠⚠ THE SWAP IS NOT SILENT, AND THAT IS THE WHOLE OF THE UI CHANGE. The base is named in the
+   * field's own label WITH ITS PERIOD, the mode sits in the header as a control rather than a
+   * setting, and the base NOT taken is a row of its own beneath the total. A reverse DCF that
+   * quietly changed its starting cash flow would move every number on the panel — the implied
+   * growth, the sweep, the comparison against the analyst rows — with nothing on screen to say
+   * which of the company and the method had changed.
+   */
+  const [baseMode, setBaseMode] = useState<'forward' | 'reported' | null>(null);
   /**
    * ⚠ DEFAULT ON, LIKE THE LONG EQUITY TAB'S SBC BOX AND FOR THE SAME REASON: the uncorrected
    * figure is the flattering one on the SBC leg, and the reported one is the misleading one on the
@@ -167,7 +252,26 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
    * BASE rather than the result. Typing "the FCF was really 9,000" and having the stock comp
    * silently stop being deducted would be a second, invisible edit.
    */
-  const defFcf = src.fcf;
+  /**
+   * Next year's free cash flow, derived — the spreadsheet's `Estimated Free Cash Flow for Next FY1
+   * End (M)`, which the REST API does not publish. See `forwardFcf`: consensus operating cash flow
+   * minus capex, and the capex cancels out of the figure actually valued.
+   */
+  const fwdFcf = forwardFcf(src.ocfEstimate, src.capex);
+  /** ⚠ THE FORWARD BASE ONLY WHEN THERE IS ONE. Fewer than a fifth of ACWI's members carry a
+   *  consensus at all, so "forward by default" has to mean "forward where it exists" or most
+   *  companies would open on an n/a where a perfectly good filed figure was sitting. */
+  const base = baseMode ?? (fwdFcf != null ? 'forward' : 'reported');
+  const forward = base === 'forward';
+  /** The fiscal period the consensus is for — `2027-12-31` → `FY2027e`. */
+  const estFy = src.ocfEstimateDate ? `FY${src.ocfEstimateDate.slice(0, 4)}e` : null;
+  /** ⚠ THE WINDOW, NAMED. "Most recent fiscal year" was hard-coded on four cards and stopped being
+   *  true the day the flow legs went trailing — a `when` that states the wrong period is worse
+   *  than none, because it is checkable and wrong. See `TTM_NOTE`. */
+  const flowWhen = src.flowBasis.ttm
+    ? `Trailing twelve months to ${src.flowBasis.date ?? 'the latest quarter'}.`
+    : `Most recent fiscal year${src.flowBasis.date ? ` (${src.flowBasis.date})` : ''}.`;
+  const defFcf = forward ? fwdFcf : src.fcf;
   const defTarget = marketCapOf(src);
   const defPerp = PERPETUITY_GROWTH;
   const defRate = defaultDiscountRate(src.wacc, defPerp);
@@ -182,9 +286,15 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   const norm = useMemo(
     () => normalisedFcf({ fcf: baseFcf, sbc: src.sbc, capex: src.capex, dep: src.dep }),
     [baseFcf, src.sbc, src.capex, src.dep]);
-  /** What the model actually values. ⚠ `?? baseFcf` covers the case where nothing was correctable;
-   *  `normalisedFcf` already returns `used === reported` there, so this is a null guard only. */
-  const fcf = normalise ? (norm.used ?? baseFcf) : baseFcf;
+  /** The total the rows above add up to. ⚠ `?? baseFcf` covers the case where nothing was
+   *  correctable; `normalisedFcf` already returns `used === reported` there, so this is a null
+   *  guard only. */
+  const computedFcf = normalise ? (norm.used ?? baseFcf) : baseFcf;
+  /** ⚠ THE TYPED TOTAL WINS OVER EVERYTHING, including the corrections — see `totalStr`. */
+  const totalOverride = num(totalStr);
+  const overridden = totalOverride != null;
+  /** What the model actually values. */
+  const fcf = overridden ? totalOverride : computedFcf;
   const target = num(targetStr) ?? defTarget;
   const perpetuityGrowth = (num(perpStr) ?? defPerp * 100) / 100;
   const rate = (num(rateStr) ?? defRate * 100) / 100;
@@ -194,11 +304,12 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   const show = (s: string | null, def: number | null, dp = 0) =>
     (s != null ? s : def == null ? '' : def.toFixed(dp));
 
-  const dirty = [fcfStr, targetStr, rateStr, perpStr, yearsStr].some((s) => s != null)
-    || !normalise;
+  const dirty = [fcfStr, totalStr, targetStr, rateStr, perpStr, yearsStr].some((s) => s != null)
+    || !normalise || baseMode != null;
   const reset = () => {
-    setFcfStr(null); setTargetStr(null); setRateStr(null); setPerpStr(null); setYearsStr(null);
-    setNormalise(true);
+    setFcfStr(null); setTotalStr(null); setTargetStr(null); setRateStr(null);
+    setPerpStr(null); setYearsStr(null);
+    setNormalise(true); setBaseMode(null);
   };
 
   const growth = useMemo(() => impliedGrowth(src, {
@@ -295,7 +406,28 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
             {/* ⚠ `ml-auto` MOVED HERE FROM `Reset`, so the group stays right-aligned as one. The
                 checkbox is always mounted — it is not conditional on anything — so it cannot make
                 the header row grow or shrink under the reader. */}
-            <label className="ml-auto flex items-center gap-1.5 text-[11px] text-fg-soft cursor-pointer whitespace-nowrap"
+            {/* ⚠⚠ ALWAYS MOUNTED, AND DISABLED RATHER THAN HIDDEN when no consensus exists — the
+                same height rule as the Reset button and the correction rows. A control that
+                appears for some companies and not others makes this box change height, which
+                changes the OUTPUT box beside it through the grid's stretch. Disabled, the option
+                still says the forward base EXISTS and this company has no estimate for it, which
+                is a fact about the company rather than an absence a reader has to infer. */}
+            <label className="ml-auto flex items-center gap-1.5 text-[11px] text-fg-soft whitespace-nowrap"
+              title={'Which cash flow the model grows from.\n\n'
+                + 'Next FY: the analysts\' consensus operating cash flow for the coming fiscal '
+                + 'year, less capital expenditure — free cash flow the company has not earned yet.\n'
+                + 'Last reported: free cash flow exactly as filed for the most recent fiscal year.\n\n'
+                + 'The stock-compensation and growth-capex corrections below run on either.'}>
+              Base
+              <select value={base} onChange={(e) => setBaseMode(e.target.value as 'forward' | 'reported')}
+                className="rounded border border-neutral-700 bg-page px-1 py-0.5 text-[11px] text-fg-strong focus:border-accent-500">
+                <option value="forward" disabled={fwdFcf == null}>
+                  {fwdFcf == null ? 'Next FY (none)' : (estFy ?? 'Next FY')}
+                </option>
+                <option value="reported">Last reported</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] text-fg-soft cursor-pointer whitespace-nowrap"
               title={'Value free cash flow net of stock compensation and before growth capex.\n\n'
                 + 'SBC is subtracted: it is a real cost that never leaves the cash flow statement.\n'
                 + 'Growth capex (capex above depreciation) is ADDED BACK: reported FCF already '
@@ -314,13 +446,37 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
           </div>
 
           <div className="flex flex-col divide-y divide-neutral-800/30">
-            <Field label={`Free cash flow${currency ? ` (${currency}m)` : ' (m)'}`}
+            {/* ⚠ THE LABEL NAMES THE PERIOD, because the two bases differ by a YEAR and by nothing
+                a reader can see in the number itself. `Free cash flow (USD m)` over a consensus
+                figure is the same defect `priceDate` fixed on the EGM panel: a word making a claim
+                about time, over a number carrying none. */}
+            <Field dim={overridden}
+              label={`Free cash flow${forward && estFy ? ` ${estFy}` : forward ? ' next FY' : ''}${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(fcfStr, defFcf)} onChange={setFcfStr}
               info={<InfoTip content={<AspectCard
-                what="Latest reported free cash flow."
-                where="GuruFocus — cashflow statement, as filed."
-                when="Most recent fiscal year."
-                how={`Raw data, no formula. Operating cash flow minus TOTAL capital expenditure — which is why the growth-capex row below ADDS back rather than subtracting.${defFcf != null ? ` The box holds MILLIONS — ${mn(defFcf)} is ${scaled(defFcf)}.` : ' The box holds MILLIONS.'}`} />} />} />
+                what={forward ? 'Next fiscal year\'s free cash flow, derived.' : 'Latest reported free cash flow.'}
+                where={forward
+                  ? 'GuruFocus — analyst consensus operating cash flow, less the last filed capital expenditure.'
+                  : 'GuruFocus — cashflow statement, as filed.'}
+                when={forward ? (estFy ?? 'Next fiscal year.') : flowWhen}
+                // ⚠ NO WORKED LINE ON THE REPORTED BASE, and that is the rule rather than an
+                // omission: it is a figure the vendor filed, not an arithmetic anybody performed.
+                // A formula over raw data fabricates a derivation — the same reason the four
+                // assumption boxes below carry none.
+                worked={!forward ? '' : workedForwardFcf(src.ocfEstimate, src.capex, fwdFcf)}
+                legend={!forward || fwdFcf == null ? undefined : [
+                  { sym: String.raw`OCF_{\text{est}}`,
+                    is: `consensus operating cash flow for ${estFy ?? 'the next fiscal year'}` },
+                  { sym: 'C', is: 'capital expenditure, LAST FILED — no consensus for it exists' },
+                ]}
+                how={(forward
+                  ? `⚠ DERIVED, BECAUSE THERE IS NO CONSENSUS FREE CASH FLOW TO READ. GuruFocus's spreadsheet add-in publishes one; the API we ingest publishes only operating cash flow. FCF = OCF − capex is the definition of the line, so the only forecast quantity here is the operating cash flow.
+
+⚠ THE CAPEX LEG IS LAST YEAR'S FILING, not a forecast — nobody publishes one. It very largely cancels: with the growth-capex row below, what the model values is (OCF − capex) − stock comp + (capex − depreciation) = consensus OCF − depreciation − stock comp. The capex figure leaves the answer entirely unless the company is spending BELOW depreciation.
+
+⚠ A CONSENSUS IS A FORECAST AND THE MODEL SOLVES FOR GROWTH ON TOP OF IT. Year 1 is analysts' work; every year after it is the rate this panel is asking you to judge.`
+                  : 'Raw data, no formula. Operating cash flow minus TOTAL capital expenditure — which is why the growth-capex row below ADDS back rather than subtracting.')
+                  + (defFcf != null ? ` The box holds MILLIONS — ${mn(defFcf)} is ${scaled(defFcf)}.` : ' The box holds MILLIONS.')} />} />} />
 
             {/* ⚠⚠ THE CORRECTIONS ARE ROWS, NOT A TOOLTIP. They were both folded into the figure
                 above with the working hidden behind an ⓘ, which meant the one number on screen
@@ -331,45 +487,137 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 total falls back to the reported figure. Hiding them would resize the input box,
                 which resizes the OUTPUT box beside it through the grid's stretch, so the whole
                 panel would jump on a checkbox. Same rule as the Reset button above. */}
-            <DerivedRow label="− Stock compensation"
-              value={normalise && norm.applied.sbc ? mn(norm.sbc) : '—'}
+            <DerivedRow label="− Stock compensation" dim={overridden}
+              value={normalise && !overridden && norm.applied.sbc ? mn(norm.sbc) : '—'}
               info={<InfoTip content={<AspectCard
                 what="Stock-based compensation, subtracted."
                 where="GuruFocus — cashflow statement."
-                when="Most recent fiscal year."
+                when={flowWhen}
                 how={norm.applied.sbc
                   ? `A real cost that never leaves the cash flow statement: it is added back into operating cash flow as a non-cash charge, so reported FCF flatters every company that pays people in equity. The shares are issued and the holder bears the dilution.${NORM_OFF}`
                   : 'Not reported for this company, so nothing is subtracted. ⚠ An absent line is not a zero — this is not a company that pays no stock compensation, it is one we have no figure for.'} />} />} />
-            <DerivedRow label="+ Growth capex"
-              value={normalise && norm.applied.growthCapex ? mn(norm.growthCapex) : '—'}
+            {/* ⚠⚠ THE TWO DIRECT FIGURES, ABOVE THE CORRECTION THEY MAKE. `+ Growth capex` alone is
+                one number a reader cannot check against anything: it is a subtraction of two
+                vendor lines, and the only way to reconcile it with GuruFocus's own page was to
+                open the ⓘ. Shown as their own rows it is arithmetic anybody can do on screen —
+                which is how the Meta basis mismatch surfaced (capex −69,691 on the last fiscal
+                year against the −89,325 trailing figure the vendor prints).
+                ⚠ NO LEADING SIGN AND INDENTED: these are the INPUTS to the row below, not two more
+                terms of the sum above. A `−` on the depreciation row would read as a deduction
+                from the cash flow, which is exactly what it is not. */}
+            <DerivedRow tone="sub" dim={overridden}
+              label="Capital expenditure"
+              value={src.capex == null ? '—' : mn(Math.abs(src.capex))}
+              info={<InfoTip content={<AspectCard
+                what="Capital expenditure, as the magnitude spent."
+                where="GuruFocus — cashflow statement. ⚠ Filed NEGATIVE; shown here as the spend."
+                when={flowWhen}
+                how={`The first of the two lines the growth-capex row below subtracts.${TTM_NOTE}`} />} />} />
+            <DerivedRow tone="sub" dim={overridden}
+              label="Depreciation & amortisation"
+              value={src.dep == null ? '—' : mn(src.dep)}
+              info={<InfoTip content={<AspectCard
+                what="Cash-flow depreciation, depletion and amortisation."
+                where="GuruFocus — cashflow statement."
+                when={flowWhen}
+                how={'⚠ THE CASH-FLOW LINE, NOT THE INCOME STATEMENT\'S. GuruFocus files both and they are not always equal; capex is a cash figure, so its maintenance proxy has to be one too — comparing a cash figure with an accrual one is a difference in basis dressed up as growth spend.'
+                  + TTM_NOTE} />} />} />
+            <DerivedRow label="+ Growth capex" dim={overridden}
+              value={normalise && !overridden && norm.applied.growthCapex ? mn(norm.growthCapex) : '—'}
               info={<InfoTip content={<AspectCard
                 what="Capital spending above depreciation, added back."
                 where="GuruFocus — cashflow statement: capital expenditure and cash-flow depreciation."
-                when="Most recent fiscal year."
+                when={flowWhen}
+                // ⚠ GATED ON `normalise` LIKE THE ROW ITSELF. With it off the row reads `—` because
+                // the correction did not run; a tooltip still showing its arithmetic would be a
+                // number the panel is not using, one hover away from a dash.
+                worked={!normalise || overridden ? ''
+                  : workedGrowthCapex(src.capex, src.dep, norm.growthCapex)}
+                legend={!norm.applied.growthCapex ? undefined : [
+                  // ⚠ THE BARS ARE IN THE FORMULA BECAUSE THE SIGN IS THE TRAP. The vendor files
+                  // capex negative; written `C − D` the expression is always negative, always
+                  // clamps to zero, and the add-back silently never happens on any company.
+                  { sym: 'C', is: 'capital expenditure, as filed — a NEGATIVE outflow' },
+                  { sym: 'D', is: 'cash-flow depreciation, the maintenance-capex proxy' },
+                ]}
                 how={norm.applied.growthCapex
-                  ? `capex ${mn(Math.abs(src.capex as number))} − depreciation ${mn(src.dep)} = ${mn(norm.growthCapex)}, floored at zero.
-
-⚠ ADDED, NOT SUBTRACTED, because reported FCF already took ALL capex out. What sustains the business is maintenance capex; the excess buys the growth this model is solving for, so leaving it in charges the same expansion twice — once as a cost and again as the thing to explain.
+                  ? `⚠ ADDED, NOT SUBTRACTED, because the base above already took ALL capex out.${forward ? ' On the forward base it cancels almost exactly: (OCF − capex) + (capex − depreciation) = OCF − depreciation.' : ''} What sustains the business is maintenance capex; the excess buys the growth this model is solving for, so leaving it in charges the same expansion twice — once as a cost and again as the thing to explain.
 
 ⚠ Depreciation is a PROXY for maintenance capex, not a measurement, and it is weakest for a company building an asset base for the first time: new plant depreciates far less than it costs to build, so nearly all of its capex reads as growth.
 
 ⚠ Floored at zero: spending BELOW depreciation is under-investment, and treating that shortfall as a windfall would reward exactly what hollows a business out.${NORM_OFF}`
                   : 'Capital expenditure or cash-flow depreciation is not reported for this company, so nothing is added back. ⚠ An absent line is not a zero.'} />} />} />
-            <DerivedRow tone="total"
+            {/* ⚠⚠ EDITABLE, AND IT OVERRIDES THE THREE ROWS ABOVE IT. The base box answers "the
+                cash flow was really X, now correct it"; this one answers "value X, whatever the
+                workings say" — a normalised year you do not believe, a restructuring, a figure
+                from your own model. Both exist because they are different questions, and the
+                panel makes plain which one is live: type here and the rows above dim, their
+                corrections read `—`, and the worked line disappears rather than explaining a
+                total it no longer produces. Clearing it hands control straight back. */}
+            <Field tone="total"
               label={`Cash flow valued${currency ? ` (${currency}m)` : ' (m)'}`}
-              value={fcf == null ? 'n/a' : mn(fcf)}
+              value={show(totalStr, computedFcf)} onChange={setTotalStr}
               info={<InfoTip content={<AspectCard
-                what="The figure the model actually discounts."
-                where="Computed here from the three rows above."
-                when="Most recent fiscal year."
-                how={normalise
-                  ? `${mn(baseFcf)} reported${norm.applied.sbc ? ` − ${mn(norm.sbc)} stock comp` : ''}${norm.applied.growthCapex ? ` + ${mn(norm.growthCapex)} growth capex` : ''} = ${mn(fcf)}${
-                    !norm.applied.sbc || !norm.applied.growthCapex
-                      ? `
+                what={overridden ? 'The figure the model discounts — YOURS.'
+                  : 'The figure the model actually discounts.'}
+                where={overridden ? 'Typed here. The three rows above are no longer feeding it.'
+                  : 'Computed here from the three rows above.'}
+                when={overridden ? 'Whatever period you mean it to be.'
+                  : forward ? (estFy ?? 'Next fiscal year.') : flowWhen}
+                // ⚠ THE SYMBOLIC HALF CARRIES ONLY THE CORRECTIONS THAT RAN. A formula printing
+                // `− S` over a company with no stock-comp line states an arithmetic that did not
+                // happen — the same "an absent line is not a zero" rule the rows themselves keep,
+                // one level up in the notation.
+                worked={!normalise || overridden ? '' : workedCashFlowValued(
+                  baseFcf, norm.applied.sbc ? norm.sbc : null,
+                  norm.applied.growthCapex ? norm.growthCapex : null, fcf)}
+                legend={!normalise || overridden || baseFcf == null ? undefined : [
+                  { sym: 'F', is: forward ? `the derived ${estFy ?? 'next-FY'} free cash flow` : 'free cash flow as filed' },
+                  ...(norm.applied.sbc
+                    ? [{ sym: 'S', is: 'stock-based compensation' as React.ReactNode }] : []),
+                  ...(norm.applied.growthCapex
+                    ? [{ sym: 'G', is: 'growth capex, the row above' as React.ReactNode }] : []),
+                ]}
+                how={overridden
+                  // ⚠ IT STATES WHAT IT REPLACED, IN NUMBERS. "Overridden" alone leaves the reader
+                  // to remember what the panel would have said, which is the whole thing they are
+                  // deciding against — and the row that held it is now dimmed and reads `—`.
+                  ? `Overridden. Base, corrections and Normalise are all bypassed: the model discounts exactly ${mn(fcf)}.
 
-⚠ ${[!norm.applied.sbc ? 'Stock compensation' : null, !norm.applied.growthCapex ? 'Capex or depreciation' : null].filter(Boolean).join(' and ')} not reported, so that correction did not run.`
-                      : ''}`
-                  : 'Normalise is off, so this is the reported free cash flow unchanged — stock compensation is not deducted and growth capex is not added back.'} />} />} />
+The workings would have given ${computedFcf == null ? 'no figure' : mn(computedFcf)}. Clear the box to go back to them.`
+                  : normalise
+                    ? `${!norm.applied.sbc || !norm.applied.growthCapex
+                      ? `⚠ ${[!norm.applied.sbc ? 'Stock compensation' : null, !norm.applied.growthCapex ? 'Capex or depreciation' : null].filter(Boolean).join(' and ')} not reported, so that correction did not run — and an absent line is not a zero.`
+                      : 'Every correction ran; the three rows above are the whole of it.'}
+
+Type a figure here to bypass all three and value it directly.`
+                    : 'Normalise is off, so this is the base free cash flow unchanged — stock compensation is not deducted and growth capex is not added back.'} />} />} />
+
+            {/* ⚠⚠ THE BASE **NOT** TAKEN, ON SCREEN RATHER THAN IN A TOOLTIP. Switching base moves
+                the implied growth, the whole sweep and the comparison against the analyst rows at
+                once; without the other figure visible there is no way to tell a company that
+                changed from a method that did. It sits below the total, in italic, behind a dashed
+                rule and labelled "vs" — see `DerivedRow`'s `ref` tone for why all three. */}
+            <DerivedRow tone="ref"
+              label={forward
+                ? 'vs last reported FCF'
+                : `vs ${estFy ?? 'next FY'} FCF (derived)`}
+              value={forward
+                ? (src.fcf == null ? 'n/a' : mn(src.fcf))
+                : (fwdFcf == null ? 'n/a' : mn(fwdFcf))}
+              info={<InfoTip content={<AspectCard
+                what="The base this panel is NOT using."
+                where={forward
+                  ? 'GuruFocus — cashflow statement, as filed.'
+                  : 'GuruFocus — analyst consensus operating cash flow, less the last filed capex.'}
+                when={forward ? flowWhen : (estFy ?? 'Next fiscal year.')}
+                how={(forward ? src.fcf : fwdFcf) == null
+                  ? (forward
+                    ? 'No free cash flow line is ingested for this company.'
+                    : 'No consensus operating cash flow, or no capex to net off it, so no forward base can be derived. ⚠ Fewer than a fifth of a broad index\'s members carry a consensus at all — an absent one is ordinary, not a gap to fix.')
+                  : `Shown for comparison only — nothing on this panel is computed from it. Switch the Base control above to value it instead.
+
+⚠ A LARGE GAP BETWEEN THE TWO IS INFORMATION, NOT AN ERROR: it is the year analysts expect, sitting next to the year the company had.`} />} />} />
 
             <Field label={`Target market cap${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(targetStr, defTarget)} onChange={setTargetStr}
@@ -377,8 +625,15 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 what="The valuation solved against."
                 where="Computed from the price and the share count."
                 when="Latest close, latest reported share count."
-                how={`Price × diluted shares${src.price != null && src.sharesOutstanding != null
-                  ? ` = ${currency ? `${currency} ` : ''}${src.price.toFixed(2)} × ${src.sharesOutstanding.toLocaleString('en-US', { maximumFractionDigits: 0 })}M` : ''}. In MILLIONS, like the cash flow above.`} />} />} />
+                worked={workedMarketCap(src.price, src.sharesOutstanding, defTarget)}
+                legend={src.price == null || src.sharesOutstanding == null ? undefined : [
+                  { sym: 'P_0', is: 'the latest close' },
+                  // ⚠ IN MILLIONS, WHICH IS WHY THE PRODUCT IS TOO. GuruFocus files the share
+                  // count in millions, so price × shares lands in the same unit as the cash flow
+                  // above it and no scaling happens anywhere in this panel.
+                  { sym: 'N', is: 'diluted shares outstanding, in MILLIONS' },
+                ]}
+                how="The box holds MILLIONS, like the cash flow above. Override it to ask what a different valuation would have to assume." />} />} />
             <Field label="Discount rate" value={show(rateStr, defRate * 100, 1)} onChange={setRateStr}
               suffix="%"
               info={<InfoTip content={<AspectCard
@@ -451,8 +706,26 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                       what="FCF growth the market cap already assumes."
                       where="Computed — solved, not forecast."
                       when={`Years 1 to ${years}, then the perpetuity growth.`}
+                      // ⚠⚠ THE EQUATION IS WRITTEN AS AN EQUALITY, NOT AS A VALUE, because that is
+                      // what a REVERSE DCF is: everything but `g` is known and `g` is what makes
+                      // the two sides meet. Printed as `PV = …` it would read as a valuation the
+                      // panel had computed, which is the one reading its subtitle exists to refuse.
+                      worked={workedImpliedGrowth({
+                        fcf, rate, perpetuityGrowth, years, target, growth })}
+                      legend={fcf == null || !(fcf > 0) || growth == null || target == null
+                        ? undefined : [
+                          // ⚠ YEAR 1 IS `F` ITSELF — growth starts in year 2. A real convention
+                          // with a real effect (one fewer compounding year than the naive
+                          // reading), and the `t-1` exponent is the only other place it shows.
+                          { sym: 'F',
+                            is: 'the cash flow valued — paid in full in year 1, then grown' },
+                          { sym: 'g', is: 'THE UNKNOWN: the rate this solves for' },
+                          { sym: 'r', is: 'the discount rate' },
+                          { sym: String.raw`g_\infty`, is: 'perpetuity growth, after year n' },
+                          { sym: 'M', is: 'the target market cap' },
+                        ]}
                       how={fcf != null && fcf > 0 && growth != null
-                        ? `The rate at which the discounted cash flows equal the target market cap. Not a valuation — what you would have to believe.${NOT_LIKE_FOR_LIKE}`
+                        ? `Bisected on demand rather than solved algebraically — there is no closed form for g. Not a valuation: what you would have to believe.${NOT_LIKE_FOR_LIKE}`
                         : fcf != null && fcf <= 0
                           ? `Free cash flow of ${mn(fcf)} is at or below zero, so no growth rate works. A fact about the company, not an error.`
                           : missing.length > 0
@@ -566,7 +839,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
       )}
 
       {showRaw && (
-        <ReverseDcfInputsModal metrics={metrics} currency={currency}
+        <ReverseDcfInputsModal metrics={metrics} currency={currency} today={today}
           name={name} isin={isin} fcf={fcf} target={target} discountRate={rate}
           years={years} perpetuityGrowth={perpetuityGrowth}
           onClose={() => setShowRaw(false)} />

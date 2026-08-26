@@ -4,7 +4,7 @@ import { trace } from './debugTrace';
 
 /**
  * An in-memory cache for the FUNDAMENTAL READS — the requests behind the Fundamental modal's tabs
- * (Long Equity · Quick Valuation · Deep Valuation · Old charts) and their drill-downs.
+ * (Long Equity · Tables · Quick Valuation · Deep Valuation) and their drill-downs.
  *
  * WHY IT EXISTS. Switching tabs inside one open modal was already free (`OwnerEarningsModal` keeps
  * a visited tab MOUNTED), but everything else about those screens re-paid full price: closing the
@@ -79,6 +79,28 @@ const CACHEABLE: RegExp[] = [
   /^\/api\/earnings\/portfolio-revenue-matrix$/,
   /^\/api\/asset-pipeline\/latest-close\/isin\/[^/]+$/,
   /^\/api\/asset-pipeline\/fundamentals\/isin\/[^/]+$/,
+
+  /**
+   * THE ANALYSE MODAL'S RISK AND ATTRIBUTION PANELS.
+   *
+   * ⚠⚠ EVERY ONE OF THESE IS RE-PAID ON EVERY OPEN, and the panels are opened, read, closed and
+   * reopened constantly — each view unmounts on close (deliberately: mounting the tracking-error
+   * side costs a five-year daily price load for every holding), so its state goes with it and
+   * the next open recomputes an answer that cannot have changed. Switching cadence weekly →
+   * daily → weekly pays three times for two answers.
+   *
+   * ⚠ SAFE TO CACHE FOR THE SAME REASON THE FUNDAMENTAL READS ARE: each is a pure function of
+   * the posted holdings, the benchmark and the cadence over `asset_price` and `asset_analysis`,
+   * both of which move only by an ingest or a refresh — and a refresh is a write, so it clears
+   * everything here on its way through `apiFetch`. None of them is a live figure.
+   *
+   * ⚠ THE BODY IS THE KEY, NOT THE URL. All six POST the holdings list and differ only by it
+   * plus a query string, which is exactly the case `readKey` already folds the body in for.
+   */
+  /^\/api\/airs\/portfolio\/(active-share|tracking-error|risk-correlation|volatility|drawdown|concentration)$/,
+  // ⚠ A PLAIN GET, and its four selectors (benchmark, window, axis, source) live in the query —
+  // so flipping the axis and back is two requests for one answer without this.
+  /^\/api\/airs\/model-portfolios\/\d+\/attribution$/,
 ];
 
 /**

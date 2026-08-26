@@ -14,9 +14,11 @@ import { type MetricRow } from './quickValuation';
  */
 
 export default function ReverseDcfInputsModal({
-  metrics, currency, name, isin, fcf, target, discountRate, years, perpetuityGrowth, onClose,
+  metrics, currency, name, isin, fcf, target, discountRate, years, perpetuityGrowth, today, onClose,
 }: {
   metrics: MetricRow[];
+  /** ⚠ THE PANEL'S OWN `today`, so "next fiscal year" means the same period in both. */
+  today: string;
 
   currency?: string | null;
   name?: string | null;
@@ -28,7 +30,7 @@ export default function ReverseDcfInputsModal({
   perpetuityGrowth: number;
   onClose: () => void;
 }) {
-  const w = useMemo(() => reverseDcfWorking(metrics), [metrics]);
+  const w = useMemo(() => reverseDcfWorking(metrics, today), [metrics, today]);
   const src = useMemo<ReverseDcfInputs>(() => ({
     price: w.price.used, sharesOutstanding: w.shares.used, fcf: w.fcf.used,
   }), [w]);
@@ -44,6 +46,11 @@ export default function ReverseDcfInputsModal({
     ['Share price', w.price, 'plain'],
     ['Shares outstanding (m)', w.shares, 'plain'],
     ['Free cash flow', w.fcf, 'money'],
+    // ⚠ THE ONE ROW WHOSE PERIOD IS IN THE FUTURE. Everything else in this table is a filing; this
+    // is the consensus the forward base is derived from (`forwardFcf` nets capex off it), and its
+    // `when` column is what makes the difference visible — the section's own caption says "as
+    // filed, nothing forecast", which stopped being true the day the base could be a forecast.
+    ['Operating cash flow (next FY, est.)', w.ocfEst, 'money'],
     ['WACC (%)', w.wacc, 'plain'],
   ];
 
@@ -63,7 +70,8 @@ export default function ReverseDcfInputsModal({
           <section className="space-y-2 min-w-0">
             <h3 className="text-sm font-semibold text-fg-strong">Company figures</h3>
             <p className="text-[12px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
-              The latest observation of each line, as filed — nothing adjusted, nothing forecast.
+              The latest observation of each line, as filed and unadjusted — except the last
+              estimate row, whose period is in the FUTURE and which is a consensus, not a filing.
             </p>
             <div className="overflow-auto rounded-lg border border-neutral-800/40 max-w-full">
               <table className="w-full text-xs">
@@ -82,7 +90,15 @@ export default function ReverseDcfInputsModal({
                       <td className={`px-3 py-1 text-right font-mono ${obs.used == null ? 'text-warn-300' : 'text-fg-soft'}`}>
                         {obs.used == null ? 'n/a' : (kind === 'money' ? mn(obs.used) : n2(obs.used))}
                       </td>
-                      <td className="px-3 py-1 text-fg-muted whitespace-nowrap">{obs.date?.slice(0, 10) ?? '—'}</td>
+                      {/* ⚠⚠ A TTM ROW IS A SUM OF FOUR QUARTERS, NOT THE FIGURE FILED AT THAT DATE.
+                          Printed bare, `2026-06-30 · −89,325` is a quarter-end over a number four
+                          times any quarter's size — which reads as a vendor error rather than a
+                          window, in the one table whose whole job is to show where a number came
+                          from. See `egmInputs.ttmObs`. */}
+                      <td className="px-3 py-1 text-fg-muted whitespace-nowrap">
+                        {obs.date == null ? '—'
+                          : obs.ttm ? `TTM to ${obs.date.slice(0, 10)}` : obs.date.slice(0, 10)}
+                      </td>
                       <td className="px-3 py-1 font-mono text-[11px] text-fg-faint">{obs.code ?? '—'}</td>
                     </tr>
                   ))}

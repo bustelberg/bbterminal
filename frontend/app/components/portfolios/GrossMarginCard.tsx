@@ -11,12 +11,13 @@ import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
-import { Stat } from './MetricGrowthCard';
+import { pairedSpan, RatioStats } from './CardStats';
+import { workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import GrossMarginInputsModal from './GrossMarginInputsModal';
 import { grossMarginByYear, type GrossMarginInputs } from './grossMarginData';
-import { meanOf, paddedDomain , xToPeriod } from './marginData';
+import { paddedDomain , xToPeriod } from './marginData';
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
 
@@ -86,9 +87,13 @@ export default function GrossMarginCard({ holdingsTarget, holdingsName, benchTar
     () => mergeSeries(marginByYr, benchByYr, 'margin'), [marginByYr, benchByYr]);
 
   const own = holdingsName ?? 'Gross margin';
-  const avg = meanOf([...marginByYr.values()]);
-  const latestYear = Math.max(-Infinity, ...marginByYr.keys());
-  const latest = Number.isFinite(latestYear) ? marginByYr.get(latestYear) ?? null : null;
+  /**
+   * The book's figures and the benchmark's, over the ONE window both lines cover — see
+   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * line on the chart below, so the card cannot plot a mean it does not print.
+   */
+  const stats = useMemo(() => pairedSpan(marginByYr, benchByYr), [marginByYr, benchByYr]);
+  const avg = stats.own.avg;
   const pct = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)}%`);
 
   return (
@@ -103,15 +108,18 @@ export default function GrossMarginCard({ holdingsTarget, holdingsName, benchTar
         <p className="text-[12px] text-fg-faint py-16 text-center">No gross-profit / revenue figures ingested to compute a margin.</p>
       ) : (
         <>
-          <div className="flex flex-wrap gap-2">
-            <Stat label="Avg" value={pct(avg)} color={chartTheme.accent}
-              info={<InfoTip content={<AspectCard
-                what="Average gross margin over the years shown — what is left of each sale after the direct cost of making it."
-                where="Computed here — Gross Profit ÷ Revenue per year, weight-averaged across holdings. Reproduces GuruFocus's own `Gross Margin %` exactly, but leaves the two lines visible in the drill-down."
-                when="The years on the chart."
-                how="The share of each sales-euro reinvested in property, plant & intangibles. Lower = more capital-light (asset-heavy businesses read high)." />} />} />
-            <Stat label="Latest" value={pct(latest)} color={chartTheme.accent} />
-          </div>
+          <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
+            avgInfo={<InfoTip content={<AspectCard
+              what="Average gross margin over the years shown — what is left of each sale after the direct cost of making it."
+              where="Computed here — Gross Profit ÷ Revenue per year, weight-averaged across holdings. Reproduces GuruFocus's own `Gross Margin %` exactly, but leaves the two lines visible in the drill-down."
+              when="The years on the chart."
+              worked={workedMean(stats.own.values)}
+              // ⚠ THIS LINE USED TO BE THE CAPEX CARD'S, PASTED IN — "the share of each sales-euro
+              // reinvested in property, plant & intangibles. Lower = more capital-light". That is
+              // capital intensity, and it reads the metric BACKWARDS: on gross margin, higher is
+              // better. It survived because the sentence is fluent and plausible, which is exactly
+              // how a wrong tooltip survives.
+              how="Higher = more pricing power, or a mix tilted towards software and services; a commoditised or resale-heavy business reads low. ⚠ A BANK HAS NO GROSS PROFIT LINE AT ALL — GuruFocus's bank template reports net interest income instead — so a book with banks in it is averaged over the rest." />} />} />
 
           <div>
             <ResponsiveContainer width="100%" height={320}>

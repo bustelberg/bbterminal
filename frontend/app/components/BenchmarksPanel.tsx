@@ -9,6 +9,7 @@ import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { cancelJob, startJob } from '../../lib/stores/jobs';
 import type { ReconstructedIndex } from '../../lib/types/api';
 import FundamentalGridPane from './benchmarks/FundamentalGridPane';
+import { useMgmtCopy } from './management/managementCopy';
 
 /** `runOwner` when the HEADER button started the run. A sentinel rather than a label because no
  *  index can be called this, and the alternative — a separate boolean — would let "a row owns it"
@@ -84,6 +85,9 @@ const tone = (v: number | null | undefined) =>
  */
 
 export default function BenchmarksPanel() {
+  // ⚠ THE SHARED PREFERENCE, read through one hook so this panel and the sidebar switch that
+  // sets it cannot disagree. Missing Dutch is a compile error, not a fallback — see the file.
+  const t = useMgmtCopy();
   const isAdmin = useIsAdmin();
   const [data, setData] = useState<Record<string, ReconstructedIndex>>({});
   const [loading, setLoading] = useState(true);
@@ -409,7 +413,7 @@ export default function BenchmarksPanel() {
       )}
       {runOwner !== null && <div className="loading-bar h-0.5 w-full rounded-full" aria-hidden />}
 
-      {loading && <p className="text-xs text-fg-subtle">Computing…</p>}
+      {loading && <p className="text-xs text-fg-subtle">{t.common.computing}</p>}
       {error && (
         <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">{error}</div>
       )}
@@ -419,11 +423,11 @@ export default function BenchmarksPanel() {
           <table className="w-full text-xs">
             <thead className="bg-card">
               <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
-                <th className="px-3 py-1.5 font-medium text-left">Benchmark</th>
-                <th className="px-3 py-1.5 font-medium text-right">Members</th>
-                <th className="px-3 py-1.5 font-medium text-right">YTD (€)</th>
-                <th className="px-3 py-1.5 font-medium text-right">YTD (local)</th>
-                <th className="px-3 py-1.5 font-medium text-left">As of</th>
+                <th className="px-3 py-1.5 font-medium text-left">{t.benchmarks.colBenchmark}</th>
+                <th className="px-3 py-1.5 font-medium text-right">{t.benchmarks.colMembers}</th>
+                <th className="px-3 py-1.5 font-medium text-right">{t.benchmarks.colYtdEur}</th>
+                <th className="px-3 py-1.5 font-medium text-right">{t.benchmarks.colYtdLocal}</th>
+                <th className="px-3 py-1.5 font-medium text-left">{t.common.asOf}</th>
                 <th className="px-3 py-1.5 font-medium text-right"> </th>
               </tr>
             </thead>
@@ -510,6 +514,10 @@ export default function BenchmarksPanel() {
  *  keep a progress box alive while this collapsible pane unmounted. A job needs neither: the run
  *  has a handle, the toast lives in the root layout, and this pane can simply start it. */
 function IndexDetail({ d, fundKey = 0 }: { d: ReconstructedIndex; fundKey?: number }) {
+  // ⚠ ITS OWN CALL, NOT A PROP THREADED DOWN. `useMgmtCopy` reads an external store, so two
+  // components calling it in one render get the same value by construction — passing copy
+  // down would add a prop to every nested piece for a value none of them can disagree about.
+  const t = useMgmtCopy();
   return (
     <div className="space-y-2">
       {/* ⚠ THE PANE CANNOT NOTICE A FILL ON ITS OWN — it caches both cadences precisely so that
@@ -537,7 +545,7 @@ function IndexDetail({ d, fundKey = 0 }: { d: ReconstructedIndex; fundKey?: numb
       {/* A corrected price is a CLAIM. Show it — never adjust silently. */}
       {(d.split_adjusted?.length ?? 0) > 0 && (
         <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2 text-[12px] text-warn-300">
-          <span className="font-semibold">Split-adjusted on the fly:</span>{' '}
+          <span className="font-semibold">{t.benchmarks.splitAdjusted}</span>{' '}
           {d.split_adjusted!.map((s) => `${s.ticker} ×${s.factor.toFixed(3)}`).join(' · ')}.
           Our stored closes are not split-adjusted and cannot self-heal (the ingest only
           fetches dates newer than what we hold), so these series were rescaled here. Left

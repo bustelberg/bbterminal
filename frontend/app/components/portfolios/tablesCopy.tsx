@@ -29,8 +29,42 @@ import type { Lang } from '../../../lib/i18n';
  */
 
 /** The rows, declared once and language-free — the labels for these live in `COPY`. */
-export const MEASURE_KEYS = ['fcfCagr', 'priceCagr', 'fcfMargin', 'roic', 'epsFwd'] as const;
+/**
+ * The rows, in the order they are drawn.
+ *
+ * ⚠ GROUPED BY WHAT THEY ANSWER, not by when they were added: the RATES first (what grew, and how
+ * fast), then the per-year RATIOS averaged over the window (how good the business is), then the one
+ * FORWARD row last — an expectation is a different kind of claim from a measurement and reads oddly
+ * in among them.
+ *
+ * ⚠⚠ THERE IS ONE RATE ROW PER **LEVEL** CHART ON THE LONG EQUITY TAB, AND THAT IS THE RULE. Share
+ * price, EPS, Revenue, FCF/share, Invested capital and Shares outstanding are all currency-or-count
+ * levels that COMPOUND, so "what did it grow at" is the summary of each — and a tab that draws six
+ * such charts while summarising three leaves the reader to eyeball the other three off a log axis.
+ * The RATIO charts (margins, ROIC, coverage, yields) do not compound and get a window MEAN instead;
+ * annualising a percentage that oscillates around a level is not a rate of anything.
+ *
+ * ⚠ THE RATE ORDER MIRRORS THE CHART ORDER on the tab, so a reader moving between the two is not
+ * re-finding rows: revenue → EPS → FCF/share → price → invested capital → shares.
+ */
+export const MEASURE_KEYS = [
+  'revCagr', 'epsCagr', 'fcfCagr', 'priceCagr', 'invCapCagr', 'sharesCagr',
+  'grossMargin', 'fcfMargin', 'roic', 'cashConv', 'intCover',
+  'epsFwd',
+] as const;
 export type MeasureKey = (typeof MEASURE_KEYS)[number];
+
+/**
+ * The rows that are RATES — a compounded growth of a level — as opposed to a window mean.
+ *
+ * ⚠ DECLARED, NOT INFERRED FROM THE `Cagr` SUFFIX. `epsFwd` is a rate too and is deliberately NOT
+ * in here: this list exists for the footnote clause about point-to-point vs fitted trend, which is
+ * a statement about measuring HISTORY against the Long Equity growth cards. A forecast has no card
+ * to disagree with.
+ */
+export const RATE_KEYS = [
+  'revCagr', 'epsCagr', 'fcfCagr', 'priceCagr', 'invCapCagr', 'sharesCagr',
+] as const satisfies readonly MeasureKey[];
 
 export type TablesCopy = {
   /** ⚠ The heading follows the window chips — see the ⚠ on it in `TablesTab`. */
@@ -54,12 +88,43 @@ export type TablesCopy = {
   chip: Record<MeasureKey, string>;
   /** Full names, for the rows themselves. */
   rowLabel: Record<MeasureKey, string>;
-  /** The row's own explanation, on hover. `sbc` is the SBC-correction checkbox. */
+  /**
+   * The row's FORMULA IN SYMBOLS — the first line of its ⓘ, above a blank line and then the same
+   * formula with this book's own numbers in it (`TablesTab::subFor` builds that second half).
+   *
+   * ⚠⚠ SYMBOLS FIRST, SUBSTITUTION SECOND, AND THE BLANK LINE BETWEEN THEM IS THE POINT — it is
+   * the shape the Money-weighted column already uses, asked for here by name. A reader checking a
+   * figure has two separate doubts ("what was computed?" and "does that arithmetic give this?") and
+   * prose answers only the first. The substitution answers the second WITHOUT sending them
+   * anywhere: the drill-down behind the row label carries every holding and every year, which is
+   * the right place for a full audit and the wrong one for "is 84.8× the average of those ten".
+   *
+   * ⚠ NO EM DASH IN ANY OF THESE STRINGS. `AboutCard` promotes a leading fragment before ' — ' to
+   * the card's bold title when it is under 48 characters and carries no sentence punctuation — and
+   * half of a formula, bolded, with the rest starting mid-expression, is exactly the wrong split.
+   * Commas and colons instead; the guard is real but it should not be the only thing holding.
+   *
+   * ⚠ `w` IS NOT DEFINED IN EVERY FORMULA, deliberately. It is the same weight on every row (the
+   * holding's own share, or an index constituent's cap for that period), stated once in the
+   * footnote rather than nine times in nine tooltips.
+   */
+  rowFormula: Record<MeasureKey, (sbc: boolean) => string>;
+  /** The row's own explanation, on hover, BELOW the worked formula. `sbc` is the checkbox. */
   rowNote: Record<MeasureKey, (sbc: boolean) => string>;
   /** A rate cell's hover: the window it was actually measured over. */
   rateTip: (from: string, to: string, years: number) => string;
   /** A mean cell's hover. `of` is the window asked for; `n < of` means it is short. */
   meanTip: (n: number, from: string, to: string, of: number | null) => string;
+  /** The row label's own hover: what clicking it opens. ⚠ IT PROMISES THE INPUTS, NOT "details" —
+   *  a reader who doubts a figure is looking for the numbers it was divided from, and a vaguer word
+   *  makes them guess whether it is worth a click. */
+  showNumbers: string;
+  /** ⚠ A COVERAGE THAT DOES NOT EXIST, which is a statement about the book rather than a gap: no
+   *  interest was paid across the whole window, so there is nothing to cover. See
+   *  `coverageFromBurden`. */
+  noCoverage: (from: string, to: string) => string;
+  /** The same absence in the Excess column, where naming the window twice would be noise. */
+  noCoverageExcess: string;
   /** The "why they differ" link inside the footnote, and what it says. */
   whyDiffer: string;
   whyDifferLabel: string;
@@ -83,25 +148,108 @@ const en: TablesCopy = {
   hideRow: (chip) => `Hide ${chip}`,
   showRow: (chip) => `Show ${chip}`,
   chip: {
-    fcfCagr: 'FCF / share CAGR',
+    revCagr: 'Revenue CAGR',
+    epsCagr: 'EPS CAGR',
+    fcfCagr: 'FCF per share CAGR',
     priceCagr: 'Share price CAGR',
+    invCapCagr: 'Invested capital CAGR',
+    sharesCagr: 'Share count CAGR',
+    grossMargin: 'Gross margin',
     fcfMargin: 'FCF margin',
     roic: 'ROIC',
+    cashConv: 'Cash conversion',
+    intCover: 'Interest coverage',
     epsFwd: 'EPS expected',
   },
   rowLabel: {
-    fcfCagr: 'FCF / share CAGR',
+    revCagr: 'Revenue CAGR',
+    epsCagr: 'EPS (excl. NRI) CAGR',
+    fcfCagr: 'FCF per share CAGR',
     priceCagr: 'Share price CAGR',
+    invCapCagr: 'Invested capital CAGR',
+    sharesCagr: 'Shares outstanding CAGR',
+    grossMargin: 'Gross margin (avg)',
     fcfMargin: 'FCF margin (avg)',
     roic: 'ROIC (avg)',
+    cashConv: 'Cash conversion (avg)',
+    intCover: 'Interest coverage (avg)',
     epsFwd: 'EPS (excl. NRI) expected, 3y',
   },
+  rowFormula: {
+    revCagr: () => '(revenue index at the end ÷ at the start) ^ (1 ÷ years) − 1',
+    epsCagr: () => '(EPS index at the end ÷ at the start) ^ (1 ÷ years) − 1',
+    fcfCagr: () => '(FCF-per-share index at the end ÷ at the start) ^ (1 ÷ years) − 1',
+    priceCagr: () => '(price index at the end ÷ at the start) ^ (1 ÷ years) − 1',
+    invCapCagr: () => '(invested-capital index at the end ÷ at the start) ^ (1 ÷ years) − 1',
+    sharesCagr: () => '(share-count index at the end ÷ at the start) ^ (1 ÷ years) − 1',
+    grossMargin: () =>
+      'per year: Σ(w × gross profit ÷ revenue) ÷ Σw, then the mean of those years',
+    fcfMargin: (sbc) =>
+      `per year: Σ(w × (FCF${sbc ? ' − SBC' : ''}) ÷ revenue) ÷ Σw, then the mean of those years`,
+    roic: () => 'per year: Σ(w × ROIC) ÷ Σw, then the mean of those years',
+    cashConv: (sbc) =>
+      `per year: Σ(w × (FCF${sbc ? ' − SBC' : ''}) ÷ net income) ÷ Σw, then the mean of those `
+      + 'years',
+    // ⚠ THE BRACKETS ARE THE CLAIM: the inversion is OUTSIDE the mean. See `coverageFromBurden`.
+    intCover: () =>
+      '100 ÷ [ per year: Σ(w × interest ÷ operating profit) ÷ Σw, then the mean of those years ]',
+    epsFwd: () => '(consensus EPS ÷ the latest reported EPS) ^ (1 ÷ years) − 1',
+  },
   rowNote: {
+    revCagr: () =>
+      'Compound annual growth of the weighted REVENUE line, point to point — the same chaining, '
+      + 'per-period cap weighting and coverage floor as the other rate rows. '
+      + '⚠ A LEVEL, SO IT IS CHAINED FROM WEIGHTED GROWTH, never averaged from rebased revenues: '
+      + 'the constituents report in different currencies, so their euros and dollars cannot be '
+      + 'summed, but what each of them GREW by can be averaged.',
+    grossMargin: () =>
+      'Gross profit ÷ revenue, weighted across the holdings each year and averaged over the '
+      + 'window. The cleanest read on pricing power. '
+      + '⚠ A BANK HAS NO GROSS PROFIT LINE AT ALL — GuruFocus’s bank template reports net interest '
+      + 'income instead — so a book with banks in it is averaged over the rest, and the coverage '
+      + 'floor decides whether a year is drawn at all.',
+    cashConv: (sbc) =>
+      `Free cash flow ${sbc ? 'net of stock comp ' : ''}÷ net income, weighted per year and `
+      + 'averaged over the window — whether the reported profit turns into money. '
+      + '⚠ 100% IS BREAK-EVEN, NOT A CEILING: above it the business converts more cash than it '
+      + 'books as profit, which is a compliment. ⚠ The numerator is whole-company cash while the '
+      + 'denominator is the SHAREHOLDERS’ line, so a group with large minorities reads high. '
+      + 'Follows the SBC checkbox.',
+    intCover: () =>
+      'Operating profit ÷ interest expense — how many times over the book covers its interest, '
+      + 'averaged over the window. '
+      + '⚠⚠ IT IS ONE OVER THE WEIGHTED INTEREST BURDEN, AND THAT IS THE CORRECT AGGREGATE rather '
+      + 'than a shortcut: the burden (interest as a share of profit) is the additive quantity, '
+      + 'exactly as an earnings yield is where a P/E is not, so its reciprocal is the weighted '
+      + 'HARMONIC mean of the holdings’ coverages. Averaging coverage directly would let one '
+      + 'debt-free name scoring in the thousands set the book’s figure. '
+      + '⚠ A year the book pays no interest at all has no coverage to state — it is a dash, not '
+      + '∞, and not a zero.',
     fcfCagr: () =>
       'Compound annual growth of the weighted FCF-per-share line, point to point. '
       + '⚠ The Long Equity growth card fits a log-linear TREND through every year instead '
       + '(that is what its R² is about), so the two will differ — most where one endpoint '
       + 'year is unrepresentative, which is when the gap is worth seeing.',
+    epsCagr: () =>
+      'Compound annual growth of the weighted EPS (excl. non-recurring) line, point to point. '
+      + '⚠ THIS IS THE HISTORY, NOT THE EXPECTATION — the row at the bottom of this table is the '
+      + 'analysts’ 3-year consensus off the latest reported year, and the two answer different '
+      + 'questions. Read them together: a book compounding at 8% behind a consensus of 15% is a '
+      + 'claim someone has to justify.',
+    invCapCagr: () =>
+      'Compound annual growth of the weighted INVESTED-CAPITAL line, point to point — how fast '
+      + 'the capital the business runs on is growing. '
+      + '⚠ IT IS THE DENOMINATOR OF THE ROIC ROW ABOVE, which is what makes the pair worth '
+      + 'reading in one glance: capital growing faster than returns is a book buying its growth, '
+      + 'and neither row says that on its own.',
+    sharesCagr: () =>
+      'Compound annual growth of the weighted SHARE-COUNT line, point to point. '
+      + '⚠⚠ NEGATIVE IS USUALLY THE GOOD DIRECTION HERE, and it is the one row on this table '
+      + 'where that is true: a falling share count is net buybacks, so it is the wedge between '
+      + 'the Revenue row and the EPS and FCF-per-share rows beside it. A book whose per-share '
+      + 'lines outrun its revenue is either widening margins or retiring stock, and this row is '
+      + 'which. ⚠ The cell is coloured by SIGN like every other rate, so read the sign, not '
+      + 'the colour.',
     priceCagr: () =>
       'Compound annual growth of the weighted SHARE-PRICE line, point to point — the same '
       + 'weighting, chaining and coverage floor as the rows around it, run over each holding’s '
@@ -131,6 +279,14 @@ const en: TablesCopy = {
     `Mean of ${n} year${n === 1 ? '' : 's'} over ${from}–${to}`
     + `${of == null ? '' : `, of the ${of} asked for`}. Weighted per year by the same weights the `
     + 'Long Equity chart uses — this is that line, averaged.',
+  showNumbers: 'Show the numbers behind this row — every holding, every year, and the figures each '
+    + 'one was computed from',
+  noCoverage: (from, to) =>
+    `No interest was paid at all over ${from}–${to}, so there is no coverage to state — dividing `
+    + 'by nothing has no answer. That is the best possible outcome, not a missing figure.',
+  noCoverageExcess:
+    'One side paid no interest at all over this window, so it has no coverage — and a difference '
+    + 'against a figure that does not exist would be a number about nothing.',
   whyDiffer:
     'Point-to-point is (end/start)^(1/n) − 1: only the two endpoint years matter, so one weak year '
     + 'at either end swings it. The card\'s log-linear fit uses all of them and reports R² for how '
@@ -159,9 +315,12 @@ const en: TablesCopy = {
         <code className="text-fg-subtle">3y</code> on the figure
         {windows.length > 1 && ', centred across both columns rather than sitting in either'}.
       </>}
+      {/* ⚠ EVERY RATE ROW, NOT JUST FCF/SHARE. The clause used to name one row because there was
+          one; with six of them, singling out FCF/share reads as "the others DO match the cards",
+          which is the opposite of true. */}
       {showFcf && <>
-        {' '}The CAGR row is point-to-point and will not match the FCF/share growth card, which
-        fits a trend through every year ({whyLink}).
+        {' '}The rate rows are point-to-point and will not match the growth cards on the Long
+        Equity tab, which fit a trend through every year ({whyLink}).
       </>}
     </>
   ),
@@ -190,26 +349,113 @@ const nl: TablesCopy = {
   // wearing a Dutch table, and it is gone. The chips are now longer than their English counterparts
   // and that is the correct trade: this language reads them, it does not decode them.
   chip: {
-    fcfCagr: 'Vrije kasstroom / aandeel',
+    revCagr: 'Omzet',
+    epsCagr: 'Winst per aandeel',
+    fcfCagr: 'Vrije kasstroom per aandeel',
     priceCagr: 'Aandelenkoers',
+    invCapCagr: 'Geïnvesteerd vermogen',
+    sharesCagr: 'Aantal aandelen',
+    grossMargin: 'Brutomarge',
     fcfMargin: 'Vrije kasstroom-marge',
     roic: 'Rendement op geïnvesteerd vermogen',
+    cashConv: 'Kasstroomconversie',
+    intCover: 'Rentedekking',
     epsFwd: 'Winst per aandeel verwacht',
   },
   rowLabel: {
-    fcfCagr: 'Vrije kasstroom / aandeel CAGR',
+    revCagr: 'Omzet CAGR',
+    epsCagr: 'Winst per aandeel (excl. eenmalig) CAGR',
+    fcfCagr: 'Vrije kasstroom per aandeel CAGR',
     priceCagr: 'Aandelenkoers CAGR',
+    invCapCagr: 'Geïnvesteerd vermogen CAGR',
+    sharesCagr: 'Uitstaande aandelen CAGR',
+    grossMargin: 'Brutomarge (gem.)',
     fcfMargin: 'Vrije kasstroom-marge (gem.)',
     roic: 'Rendement op geïnvesteerd vermogen (gem.)',
+    cashConv: 'Kasstroomconversie (gem.)',
+    intCover: 'Rentedekking (gem.)',
     epsFwd: 'Winst per aandeel (excl. bijzondere posten) verwacht, 3j',
   },
+  rowFormula: {
+    revCagr: () => '(omzetindex aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
+    epsCagr: () =>
+      '(index winst per aandeel aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
+    fcfCagr: () =>
+      '(index vrije kasstroom per aandeel aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
+    priceCagr: () => '(koersindex aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
+    invCapCagr: () =>
+      '(index geïnvesteerd vermogen aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
+    sharesCagr: () =>
+      '(index aantal aandelen aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
+    grossMargin: () =>
+      'per jaar: Σ(w × brutowinst ÷ omzet) ÷ Σw, daarna het gemiddelde van die jaren',
+    fcfMargin: (sbc) =>
+      `per jaar: Σ(w × (vrije kasstroom${sbc ? ' − SBC' : ''}) ÷ omzet) ÷ Σw, daarna het `
+      + 'gemiddelde van die jaren',
+    roic: () => 'per jaar: Σ(w × ROIC) ÷ Σw, daarna het gemiddelde van die jaren',
+    cashConv: (sbc) =>
+      `per jaar: Σ(w × (vrije kasstroom${sbc ? ' − SBC' : ''}) ÷ nettowinst) ÷ Σw, daarna het `
+      + 'gemiddelde van die jaren',
+    intCover: () =>
+      '100 ÷ [ per jaar: Σ(w × rente ÷ bedrijfsresultaat) ÷ Σw, daarna het gemiddelde van die '
+      + 'jaren ]',
+    epsFwd: () =>
+      '(verwachte winst per aandeel ÷ de laatst gerapporteerde) ^ (1 ÷ jaren) − 1',
+  },
   rowNote: {
+    revCagr: () =>
+      'Samengestelde jaarlijkse groei van de gewogen OMZETLIJN, van punt tot punt — dezelfde '
+      + 'ketening, weging per periode en dekkingsdrempel als de andere groeiregels. '
+      + '⚠ EEN NIVEAU, DUS GEKETEND UIT GEWOGEN GROEI, nooit gemiddeld uit herbasiseerde omzetten: '
+      + 'de deelnemingen rapporteren in verschillende valuta, dus hun euro’s en dollars kunnen niet '
+      + 'worden opgeteld — waarmee ze GEGROEID zijn wel.',
+    grossMargin: () =>
+      'Brutowinst ÷ omzet, per jaar gewogen over de posities en gemiddeld over de periode. De '
+      + 'zuiverste maatstaf voor prijszettingsmacht. '
+      + '⚠ EEN BANK HEEFT GEEN BRUTOWINSTREGEL — GuruFocus rapporteert daar netto rentebaten — dus '
+      + 'een boek met banken wordt over de rest gemiddeld.',
+    cashConv: (sbc) =>
+      `Vrije kasstroom ${sbc ? 'na aandelenbeloning ' : ''}÷ nettowinst, per jaar gewogen en `
+      + 'gemiddeld over de periode — of de gerapporteerde winst ook geld wordt. '
+      + '⚠ 100% IS HET BREEKPUNT, GEEN PLAFOND: daarboven zet de onderneming meer kasstroom om dan '
+      + 'zij als winst boekt, wat een compliment is. Volgt het SBC-vinkje.',
+    intCover: () =>
+      'Bedrijfsresultaat ÷ rentelasten — hoe vaak het boek zijn rente dekt, gemiddeld over de '
+      + 'periode. '
+      + '⚠⚠ HET IS ÉÉN GEDEELD DOOR DE GEWOGEN RENTELAST, en dat is de juiste aggregatie: de '
+      + 'rentelast (rente als aandeel van de winst) is de optelbare grootheid, net zoals een '
+      + 'winstrendement dat is waar een koers-winstverhouding dat niet is. Rechtstreeks middelen '
+      + 'zou één schuldenvrije naam met een dekking in de duizenden het cijfer laten bepalen. '
+      + '⚠ Een jaar zonder rentelasten heeft geen dekking om te tonen — dat is een streepje, geen '
+      + 'oneindig en geen nul.',
     fcfCagr: () =>
       'Samengestelde jaarlijkse groei van de gewogen lijn van de vrije kasstroom per aandeel, van '
       + 'eindpunt tot eindpunt. ⚠ De groeikaart in Long Equity legt in plaats daarvan een '
       + 'log-lineaire TREND '
       + 'door alle jaren (dáár gaat de R² over), dus de twee zullen verschillen — het meest '
       + 'wanneer één eindjaar niet representatief is, en juist dan is het verschil de moeite waard.',
+    epsCagr: () =>
+      'Samengestelde jaarlijkse groei van de gewogen lijn van de winst per aandeel (excl. '
+      + 'bijzondere posten), van eindpunt tot eindpunt. '
+      + '⚠ DIT IS DE HISTORIE, NIET DE VERWACHTING — de onderste rij van deze tabel is de '
+      + '3-jaars consensus van analisten vanaf het laatst gerapporteerde jaar, en de twee '
+      + 'beantwoorden verschillende vragen. Lees ze samen: een boek dat op 8% groeit achter een '
+      + 'consensus van 15% is een claim die iemand moet onderbouwen.',
+    invCapCagr: () =>
+      'Samengestelde jaarlijkse groei van de gewogen lijn van het GEÏNVESTEERD VERMOGEN, van '
+      + 'eindpunt tot eindpunt: hoe snel het kapitaal groeit waarop de onderneming draait. '
+      + '⚠ HET IS DE NOEMER VAN DE RENDEMENTSRIJ hieronder, en dat maakt het paar in één oogopslag '
+      + 'de moeite waard: kapitaal dat sneller groeit dan het rendement is een boek dat zijn groei '
+      + 'koopt, en geen van beide rijen zegt dat op zichzelf.',
+    sharesCagr: () =>
+      'Samengestelde jaarlijkse groei van de gewogen lijn van het AANTAL AANDELEN, van eindpunt '
+      + 'tot eindpunt. '
+      + '⚠⚠ NEGATIEF IS HIER MEESTAL DE GOEDE RICHTING, en dit is de enige rij in deze tabel waar '
+      + 'dat geldt: een dalend aantal aandelen is netto inkoop, en daarmee is dit de wig tussen de '
+      + 'omzetrij en de rijen per aandeel ernaast. Een boek waarvan de cijfers per aandeel harder '
+      + 'lopen dan de omzet verbreedt zijn marges óf koopt aandelen in, en deze rij zegt welke van '
+      + 'de twee. ⚠ De cel wordt op TEKEN gekleurd zoals elke andere groeirij, dus lees het teken, '
+      + 'niet de kleur.',
     priceCagr: () =>
       'Samengestelde jaarlijkse groei van de gewogen KOERSLIJN, van eindpunt tot eindpunt — '
       + 'dezelfde weging, kettingberekening en dekkingsdrempel als de rijen eromheen, toegepast op '
@@ -240,6 +486,14 @@ const nl: TablesCopy = {
     `Gemiddelde van ${n} jaar over ${from}–${to}`
     + `${of == null ? '' : `, van de ${of} gevraagde`}. Per jaar gewogen met dezelfde wegingen als `
     + 'de Long Equity-grafiek — dit is die lijn, gemiddeld.',
+  showNumbers: 'Toon de cijfers achter deze regel — elke positie, elk jaar, en de getallen waaruit '
+    + 'elk cijfer is berekend',
+  noCoverage: (from, to) =>
+    `Over ${from}–${to} is helemaal geen rente betaald, dus er is geen dekking om te tonen — delen `
+    + 'door niets heeft geen uitkomst. Dat is de best mogelijke uitkomst, geen ontbrekend cijfer.',
+  noCoverageExcess:
+    'Eén kant heeft over deze periode helemaal geen rente betaald en heeft dus geen dekking — een '
+    + 'verschil met een cijfer dat niet bestaat zou een getal over niets zijn.',
   whyDiffer:
     'Van eindpunt tot eindpunt is (eind/begin)^(1/n) − 1: alleen de twee eindjaren tellen, dus één '
     + 'zwak jaar aan een van beide kanten laat het uitslaan. De log-lineaire fit van de kaart '
@@ -266,8 +520,8 @@ const nl: TablesCopy = {
         {windows.length > 1 && ', gecentreerd over beide kolommen in plaats van in één ervan'}.
       </>}
       {showFcf && <>
-        {' '}De CAGR-rij loopt van eindpunt tot eindpunt en zal niet overeenkomen met de
-        groeikaart voor de vrije kasstroom per aandeel, die een trend door alle jaren legt
+        {' '}De groeirijen lopen van eindpunt tot eindpunt en zullen niet overeenkomen met de
+        groeikaarten op het Long Equity-tabblad, die een trend door alle jaren leggen
         ({whyLink}).
       </>}
     </>

@@ -374,6 +374,22 @@ def _prepare(members: list[dict], kind: str, bucket=year_bucket) -> tuple[list[d
                    # a continuation must not restart the index at 100. See `blend_series`.
                    "continues": bool(m.get("base_points")),
                    "by_year": _latest_per_bucket(pts, bucket),
+                   # ⚠⚠ BUCKETED BY THE SAME FUNCTION AS THE VALUES, AND THAT IS THE WHOLE
+                   # REQUIREMENT. The caller keys its EUR totals by FILING DATE; the chain walks
+                   # BUCKETED periods ("2015", or "2025-Q3"). Left unbucketed every lookup misses,
+                   # the aggregate silently never fires, and both paths print identical numbers
+                   # with nothing to say the new one did not run — which is exactly how it shipped
+                   # the first time.
+                   "fund_by_year": _latest_per_bucket(
+                       {d: float(v) for d, v in (m.get("fund_points") or {}).items()
+                        if v is not None}, bucket),
+                   # ⚠ THE EUROS OF THE SERIES THIS ONE CONTINUES — a forecast leg carries its
+                   # ACTUAL's totals so the aggregate can join the two at the boundary. The euro
+                   # twin of `base_points`, and needed for the same reason: without it the
+                   # forecast chain restarts at 100 beside an actual that has run to 210.
+                   "fund_base_by_year": _latest_per_bucket(
+                       {d: float(v) for d, v in (m.get("fund_base_points") or {}).items()
+                        if v is not None}, bucket),
                    "raw_by_year": _latest_per_bucket(raw, bucket)})
     return ok, dropped
 
@@ -460,7 +476,8 @@ def _weight_at(m: dict, period: str) -> float | None:
     return ws[max(earlier)] if earlier else None
 
 
-def blend_series(members: list[dict], metric_code: str, bucket=year_bucket) -> dict:
+def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
+                 continue_from: dict | None = None) -> dict:
     """`members` = [{weight, points: {date: value}, base_points?}] -> one blended series.
 
     `bucket` aligns the members onto shared periods — `year_bucket` (default) or `quarter_bucket`
@@ -470,6 +487,18 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket) -> d
     `base_points` (optional, LEVELS only) is the series this one continues — a forecast passes the
     ACTUAL it extends, so both are rebased on the same anchor and the forecast picks up where the
     actual stops instead of restarting at 100.
+
+    `continue_from` is the AGGREGATE path's version of that, and it is a series-level fact rather
+    than a per-member one: `{"level": float, "period": str}` — the level the continued line reached
+    and the period it reached it at. The forecast's first drawn point is then
+
+        level(d₀) = continue_from["level"] × Σ fund(d₀) ÷ Σ fund_base(continue_from["period"])
+
+    over the members carrying both. ⚠⚠ THIS IS MORE EXACT THAN THE GROWTH PATH'S CONTINUATION, not
+    merely equivalent: that one restarts the forecast at the weighted mean of each member's value
+    rebased on its OWN actual base, which only approximates where the line actually stopped. This
+    one measures the real aggregate step from the last actual period into the first forecast one,
+    so the two legs join at the number the chart was already showing.
 
     Returns `{kind, points: [{date, value, covered_pct, covered_names_pct}], covered_pct}` —
     `covered_pct` is the share of the blended weight that REPORTED that period and
@@ -533,6 +562,33 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket) -> d
         # periods are in it: a member that has not reported since still holds its last figure, so
         # its growth over the interval is correctly zero rather than absent.
         p["at"] = {}
+        # ⚠ THE MEMBER'S OWN EUR TOTAL PER PERIOD, when the caller supplied one — see the aggregate
+        # branch below. Keyed the same way as `at`, and gated on the same weight, so the two cannot
+        # disagree about who is in the index at a period.
+        # ⚠⚠ ITS OWN LOOP, NOT A LOOKUP INSIDE THE VALUES' — AND THE DECOUPLING IS THE POINT.
+        # `_prepare` rebases a LEVEL member on its first POSITIVE period and throws away everything
+        # before it, because `100 × v/base` needs a positive base and a negative one flips every
+        # later point's sign. That is right for the growth path and irrelevant to a sum, which
+        # never divides a member by itself — and reading the euros off `by_year` would inherit the
+        # truncation, so a member whose base period is negative would be missing from the sum in
+        # exactly the step where its recovery is the story. Eli Lilly's −3.489 year, precisely.
+        #
+        # ⚠ CARRIED BY THE SAME FUNCTION WITH THE SAME BOUND. A member's euros are a filing like
+        # any other: a semi-annual filer's trailing-twelve-month FCF at Q1 IS its December figure.
+        # Uncarried, it drops out of every quarter it does not file, the per-step intersection
+        # shrinks to the quarterly filers, and the aggregate sawtooths on composition — the failure
+        # `carry_forward` exists to prevent, quietly reintroduced one construction over.
+        #
+        # ⚠ GATED ON THE WEIGHT, LIKE THE VALUES, so both maps agree about who is in the index at a
+        # period. ⚠ RESIDUAL: a member with NO positive period at all never reaches `prepared`
+        # (`_prepare` drops it as `non_positive_base`), so a perennial cash-burner is still out of
+        # the sum. That is the growth path's rule leaking into this one; it is narrow (a company
+        # non-positive in EVERY reported period) and it is documented rather than silently relied
+        # upon.
+        p["fund"] = {}
+        for period, (fv, _rep) in carry_forward(p.get("fund_by_year") or {}, axis).items():
+            if _weight_at(p, period):
+                p["fund"][period] = float(fv)
         for period, (v, reported) in carry_forward(p["by_year"], axis).items():
             w = _weight_at(p, period)
             if not w:
@@ -557,6 +613,109 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket) -> d
                 "covered_names_pct": round(100.0 * cover_n[d] / total_n, 2)}
 
     out: list[dict] = []
+    if kind == "level" and any(p["fund"] for p in prepared):
+        # ⚠⚠ THE AGGREGATE PATH: SUM THE EUROS, DO NOT AVERAGE THE GROWTH RATES.
+        #
+        # The chain below this one takes each member's own growth and averages those growths by
+        # MARKET CAP. That is the wrong weight for a fundamental and it is biased upward:
+        #
+        #   * WRONG WEIGHT. Growth of a sum is `Σv_i(d)/Σv_i(a) − 1`, i.e. each member's growth
+        #     weighted by ITS SHARE OF THE TOTAL BEING GROWN. Weighting by cap instead gives a
+        #     company with a big valuation and small cash flow a big vote on cash-flow growth:
+        #     measured on ACWI revenue, NVIDIA holds 4.77% of cap and supplies 0.02% of revenue.
+        #     Cap is the right weight for a PRICE index, where cap IS the quantity.
+        #   * UPWARD BIAS. A growth rate is floored at −100% and unbounded above, so averaging an
+        #     asymmetric distribution is biased and the bias scales with DISPERSION. Measured
+        #     (`scripts/diagnose_blend_steps.py`), cutting the accepted-growth cap from +10,000%
+        #     to +1,000% costs `revenue` 0.03pp a year and `fcf_ps` 4.06pp.
+        #
+        # ⚠⚠ AND IT IS NOT ABOUT NEGATIVES, WHICH IS THE PART WORTH REMEMBERING. Revenue is never
+        # negative, so every zero-crossing rule is a no-op on it — and the two constructions still
+        # disagree by more than 5pp/yr on ACWI (~9.95% averaged against +4.60% summed). The whole
+        # gap is the weight. ACWI FCF: +19.1% averaged against **+7.56%** summed.
+        #
+        # ⚠⚠ SUMMING IS STILL THE CAP-WEIGHTED ANSWER, which is the part that is easy to doubt. A
+        # cap-weighted index holds the SAME FRACTION of every company: buying `w_i = cap_i/Σcap`
+        # at price `p_i` leaves `n_i = shares_i/Σcap` — the price cancels. So its claim on a
+        # fundamental is `(1/Σcap)·ΣF_i`, exactly proportional to the sum, and the `1/Σcap` scale
+        # cancels in any growth ratio. Cap weighting enters through the SHARE COUNT inside `F_i`,
+        # never as a weight on a rate — so "weighted per year" is automatic: a company's euros ARE
+        # its weight that year. A PORTFOLIO is the same statement with its own weights, its claim
+        # being `w_i·F_i/cap_i`, and the caller supplies that form instead.
+        #
+        # ⚠ NO GUARDS HERE, AND NONE ARE NEEDED. Every refusal in `step_growth` — non-positive
+        # base, immaterial base, the growth cap, the −100% floor — exists because that path takes a
+        # ratio of a member TO ITSELF. A sum never does: a member at −200 subtracts 200 and a later
+        # +200 adds it back, so a round trip through zero nets out instead of being floored one
+        # year and refused the next.
+        #
+        # ⚠⚠ EACH STEP IS SUMMED OVER THE MEMBERS PRESENT AT **BOTH** ENDS. A sum changes when its
+        # members change, so comparing `Σ(everyone with a 2025 figure)` against `Σ(everyone with a
+        # 2015 one)` reports composition as growth. Intersecting per step is what makes the ratio a
+        # growth rate — the discipline the growth path gets for free, since a member that cannot
+        # span a step simply has no `g`.
+        anchor: str | None = None
+        level = 100.0
+        for d in sorted(by_date):
+            if not _clears(d):
+                continue
+            if anchor is None:
+                anchor = d
+                # ⚠⚠ UNLESS THIS SERIES CONTINUES ANOTHER, IN WHICH CASE 100 IS A FAKE COLLAPSE —
+                # the euro twin of the `base_points` branch in the growth path below, and the fix
+                # for a chart whose actual leg ran to 210 and whose forecast leg restarted at 100.
+                # The join is the real aggregate step across the boundary: the last actual period's
+                # euros to the first forecast period's.
+                #
+                # ⚠ ONLY OVER MEMBERS CARRYING **BOTH**, for the same reason every other step is
+                # intersected: a member with a consensus but no actual (or the reverse) would make
+                # the join report composition as growth, and it lands exactly at the seam where
+                # nobody would look for it.
+                #
+                # ⚠ AND IT FALLS BACK TO 100 RATHER THAN GUESSING. No base euros, a non-positive
+                # base sum, or nothing spanning the boundary — then this is a standalone series and
+                # 100 is the honest anchor.
+                if continue_from:
+                    base_at = continue_from.get("period")
+                    span = [p for p in prepared
+                            if p["fund"].get(d) is not None
+                            and (p.get("fund_base_by_year") or {}).get(base_at) is not None]
+                    base_sum = sum(p["fund_base_by_year"][base_at][1] for p in span)
+                    now_sum = sum(p["fund"][d] for p in span)
+                    if span and base_sum > 0 and now_sum > 0:
+                        level = float(continue_from["level"]) * now_sum / base_sum
+                out.append(_point(d, level))
+                continue
+            both = [p for p in prepared
+                    if p["fund"].get(anchor) is not None and p["fund"].get(d) is not None]
+            prev_sum = sum(p["fund"][anchor] for p in both)
+            now_sum = sum(p["fund"][d] for p in both)
+            # ⚠ A NON-POSITIVE AGGREGATE HAS NO RATIO. Vanishingly unlikely for an index and
+            # possible for a small book; the honest answer is to leave the step undrawn rather
+            # than to invent a sign.
+            if not both or prev_sum <= 0:
+                continue
+            # ⚠⚠ AND THE NUMERATOR TOO — GUARDING ONLY THE DIVISOR IS NOT ENOUGH. A negative
+            # aggregate makes the ratio negative, the level negative, and every later point a
+            # sign-flipped nonsense a log axis cannot draw. The growth path ends its series for the
+            # same case (`1 + step <= 0`) and for the same reason: a line that STOPS is visible
+            # where unplottable points are not. It should be unreachable for an index — aggregate
+            # free cash flow is deeply positive — so reaching it means the totals are wrong, and
+            # stopping is how that becomes noticeable.
+            if now_sum <= 0:
+                break
+            level *= now_sum / prev_sum
+            out.append(_point(d, level))
+            anchor = d
+        spanned = max((p["covered_pct"] for p in out), default=0.0)
+        # ⚠ THE CALLER IS TOLD WHICH CONSTRUCTION IT GOT, AND HOW MANY MEMBERS CARRY EUROS. A
+        # member with no share count has no `F_i` and is therefore in `covered_pct` but not in the
+        # sum — the one way this path can quietly speak for less of the index than it claims. The
+        # two counts side by side make that visible instead of leaving it to be discovered.
+        return {"kind": kind, "points": out, "covered_pct": round(spanned, 2),
+                "aggregate": True,
+                "fund_members": sum(1 for p in prepared if p["fund"]),
+                "members": len(prepared)}
     if kind == "level":
         # ⚠⚠ A LEVEL SERIES IS CHAINED FROM WEIGHTED **GROWTH**, NOT AVERAGED FROM REBASED LEVELS.
         # Between two drawn points the index moves by the cap-weighted average of what its
@@ -606,9 +765,42 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket) -> d
                 continue
             # ⚠ ONE RULE, IN ONE PLACE — `step_growth`. The guard that used to live inline here
             # (`prev > 0`) missed the near-zero base, which is the failure that deletes a chart.
+            #
+            # ⚠⚠ THE WEIGHT IS TAKEN AT THE **ANCHOR**, NOT AT `d`, AND THIS WAS WORTH 9 POINTS A
+            # YEAR (2026-08-21). `g_i` spans anchor -> d, so weighting it by the cap at `d` weights
+            # each constituent's growth by an amount that already CONTAINS that growth: cap = price
+            # x shares, so a name that tripled carried ~3x the weight in the very step where it
+            # tripled, and one that halved carried half. Winners over-weighted in their own winning
+            # step, losers under-weighted in their own losing step — an index that reads high by
+            # construction, with no missing data and no error anywhere.
+            #
+            # Measured on ACWI's `Month End Stock Price`, 1,512 constituents, 2015 -> 2025
+            # (`scripts/profile_price_index_weighting.py`):
+            #
+            #     end weight     index 100 -> 630.2    +20.21%/yr
+            #     anchor weight  index 100 -> 287.6    +11.14%/yr
+            #
+            # ACWI's real price return over that decade is ~10-11%/yr. The first number is not a
+            # near miss, and nothing on the chart could have shown it: the line was smooth, every
+            # period cleared both coverage floors, and the drill-down reconciled to it exactly.
+            #
+            # ⚠ THIS IS WHAT A CAP-WEIGHTED INDEX **IS**, not a tuning choice. Holding the index
+            # over [anchor, d] gives Sum(V_i(d) - V_i(anchor)) / Sum V_i(anchor), i.e. the average
+            # of `g_i` weighted by the cap AT THE ANCHOR. You buy at the start weights and let it
+            # run; there is no portfolio whose return the end weights describe.
+            #
+            # ⚠ IT CANNOT CHANGE **WHO** CONTRIBUTES, ONLY BY HOW MUCH. `p["at"][period]` is only
+            # written where `_weight_at(p, period)` was truthy, so `at[anchor]` existing already
+            # implies an anchor weight exists. A member joining after the anchor has no `g` to
+            # begin with (`step_growth` needs both ends) and was never in this step.
+            #
+            # ⚠ A PORTFOLIO IS UNAFFECTED, WHICH IS WHY THE BOOK'S OWN LINE NEVER LOOKED WRONG. A
+            # holding has no `weights`, so `_weight_at` returns the same scalar for every period and
+            # anchor and end are the same number. Only a UNIVERSE carries per-period caps — so the
+            # bias sat entirely on the benchmark line, next to a correct one, in a comparison.
             pairs = [(abs(float(w)), g)
                      for p in prepared
-                     for w in [_weight_at(p, d)]
+                     for w in [_weight_at(p, anchor)]
                      for g in [step_growth(p["at"].get(anchor), p["at"].get(d), p["scale"])]
                      if w and g is not None]
             step = _weighted_arithmetic(pairs)
@@ -859,17 +1051,103 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
     be the previous column: a period under the floor is not drawn, and a decomposition measured
     over a different interval from the one the chart moved over would not reconcile with it.
 
-    ⚠ `share_pct` IS NULL HERE, DELIBERATELY. A share of a step is unbounded — when the step is
-    near zero a 0.1pp contributor reads as 400% of it, and a member that moved the other way reads
-    negative. `contribution_pp` says the same thing in a unit that stays readable, and the caller
-    renders that instead.
+    ⚠ `share_pct` IS NULL ON THE GROWTH PATH, DELIBERATELY. A share of a step is unbounded — when
+    the step is near zero a 0.1pp contributor reads as 400% of it, and a member that moved the
+    other way reads negative. `contribution_pp` says the same thing in a unit that stays readable,
+    and the caller renders that instead.
+
+    ⚠⚠ WHERE THE CALLER SUPPLIES EUR TOTALS THE DECOMPOSITION IS EXACT AND `share_pct` IS REAL —
+    it is then the member's share of the ANCHOR's euros, which is a bounded [0,100] share of a sum
+    rather than a share of a step, and it is the factor that actually multiplies out:
+    `pp = share × growth ÷ 100`. See the aggregate branch, and note that this share is NOT the
+    market-cap weight in the column beside it; the gap between the two is the entire finding.
     """
     series = blend_series(members, metric_code)
     pts = {p["period"]: p for p in series["points"]}
     order = [p["period"] for p in series["points"]]
     anchor = order[order.index(period) - 1] if period in pts and order.index(period) > 0 else None
 
+    # ⚠ THE SAME AXIS AND THE SAME CARRY AS THE LINE. `blend_series` fills `p["fund"]` on the
+    # members it prepares; `blend_breakdown` prepares its OWN and does not, so the map is rebuilt
+    # here rather than read as empty — which would silently take the growth path in the panel while
+    # the chart above it took the aggregate one, and the two would disagree with nothing to say so.
+    # ⚠ `carry_forward`, NOT A RAW UNPACK: uncarried, a semi-annual filer would be missing from the
+    # panel in exactly the periods the line carried it through.
+    _axis = sorted({k for p in prepared for k in p.get("by_year", {})})
+
+    def _fund_of(p: dict) -> dict[str, float]:
+        """This member's EUR totals per period, carried like the line's."""
+        if p.get("fund"):
+            return p["fund"]
+        return {k: v for k, (v, _rep) in
+                carry_forward(p.get("fund_by_year") or {}, _axis).items()}
+
     rows: list[dict] = []
+    if anchor is not None and any(_fund_of(p) for p in reporting):
+        # ⚠⚠ THE AGGREGATE DECOMPOSITION, AND IT IS AN IDENTITY RATHER THAN AN APPROXIMATION.
+        #
+        #     G = ΣF_i(d)/ΣF_i(a) − 1 = Σ(F_i(d) − F_i(a)) / ΣF_i(a)
+        #     c_i = (F_i(d) − F_i(a)) / ΣF_i(a)        so   Σc_i = G, exactly
+        #
+        # A member's contribution is its own euros of CHANGE over the base aggregate. No
+        # renormalisation, no residual, and no "weight that spans the interval" subtlety — the
+        # column adds to the footer because the algebra says so, not because it nearly does.
+        #
+        # ⚠⚠ AND NOBODY IS DROPPED, WHICH THE GROWTH PATH CANNOT MANAGE. The difference form is
+        # defined for every member including sign-crossers: −200 → +300 contributes +500/ΣF_i(a),
+        # cleanly. The `share × growth` form needs `F_i(a) > 0` and is only ever a PRESENTATION of
+        # the number above — so `growth_pct` is null for a non-positive base while
+        # `contribution_pp` is still exact and still sums.
+        agg = [(p, _fund_of(p)) for p in reporting]
+        both = [(p, f) for p, f in agg
+                if f.get(anchor) is not None and f.get(period) is not None]
+        s_a = sum(f[anchor] for _p, f in both)
+        s_d = sum(f[period] for _p, f in both)
+        step = 100.0 * (s_d / s_a - 1.0) if s_a > 0 else None
+        spanning = {id(p) for p, _f in both}
+        for p, f in agg:
+            base = f.get(anchor)
+            now = f.get(period)
+            in_step = id(p) in spanning and s_a > 0
+            # ⚠ LEAVE-ONE-OUT ON THE SUMS, NOT ON A WEIGHTED MEAN — the same question ("what would
+            # the step read without this member") in the construction that is actually drawn.
+            rest_a, rest_d = (s_a - base, s_d - now) if in_step else (s_a, s_d)
+            without = 100.0 * (rest_d / rest_a - 1.0) if in_step and rest_a > 0 else None
+            rows.append({
+                **_label(p["index"]),
+                "value": round(p["by_year"][period][1], 6) if period in p["by_year"] else None,
+                "raw_value": round(p["raw_by_year"][period][1], 6)
+                if period in p["raw_by_year"] else None,
+                # ⚠ NULL, NEVER 0 — see the growth path below. A non-positive base has no rate,
+                # and printing 0.0% would read as "flat" for a member that in fact moved.
+                "growth_pct": round(100.0 * (now / base - 1.0), 4)
+                if (in_step and base > 0) else None,
+                "contribution_pp": round(100.0 * (now - base) / s_a, 4) if in_step else None,
+                # ⚠ THE MEMBER'S SHARE OF THE **EUROS** AT THE ANCHOR — the honest weight for a
+                # fundamental, and the factor that makes `share × growth = pp` come out. It is NOT
+                # the market-cap weight in the column beside it, and the two differ by a lot: that
+                # is the whole finding, not a rounding difference.
+                #
+                # ⚠⚠ IT CAN EXCEED 100%, AND THAT IS CORRECT, NOT A BUG TO CLAMP. `s_a` is a sum
+                # that may contain negatives, so a profitable member's share of it is `F_i/ΣF`
+                # with a denominator SMALLER than its own numerator: measured on a two-member
+                # panel with one member at −200 and one at +1,200, the second's share is 120.0%
+                # and `120% × 0% = 0.00pp` still reconciles exactly. Clamping it would break the
+                # only identity this panel is for.
+                "share_pct": round(100.0 * base / s_a, 4)
+                if (in_step and base > 0) else None,
+                "swing": round(step - without, 4)
+                if (step is not None and without is not None) else None,
+            })
+        rows.sort(key=lambda r: abs(r["contribution_pp"] or 0), reverse=True)
+        covered = pts.get(period, {}).get("covered_pct", 0.0)
+        excluded.sort(key=lambda r: r["weight_pct"], reverse=True)
+        return {"kind": "level", "metric_code": metric_code, "period": period,
+                "value": pts.get(period, {}).get("value"),
+                "anchor": anchor, "step_pct": round(step, 4) if step is not None else None,
+                "covered_pct": covered, "excluded_pct": round(100.0 - covered, 2),
+                "aggregate": True, "members": rows, "excluded": excluded}
+
     if anchor is not None:
         # ⚠⚠ A MEMBER THAT CANNOT SPAN THE INTERVAL STAYS IN THE TABLE, WITH NO GROWTH. It reported
         # this period — it is behind the line's LEVEL — it simply has nothing to have moved FROM
@@ -879,7 +1157,13 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
         # absent from the other loses its ratio for reasons that have nothing to do with it.
         contrib = []
         for p in reporting:
-            w = _weight_at(p, period)
+            # ⚠⚠ AT THE **ANCHOR**, FOR THE SAME REASON AND BY THE SAME RULE AS THE LINE — see the
+            # ⚠⚠ in `blend_series`. This panel exists to decompose the step the chart drew; taken
+            # at `period` it would decompose a DIFFERENT step (the end-weighted one) and still sum
+            # to its own total, so the table would reconcile perfectly to a number the chart no
+            # longer shows. A decomposition that is internally consistent and externally wrong is
+            # the worst of the two failures, because it is the one that gets checked and believed.
+            w = _weight_at(p, anchor)
             at = p.get("at") or {k: v for k, (_d, v) in p["by_year"].items()}
             # ⚠ THE SAME `step_growth` THE LINE USES, INCLUDING THE MATERIALITY BAR AND THE −100%
             # FLOOR. Re-deriving "the same way" here is how a panel comes to attribute a −2,700%

@@ -16,6 +16,8 @@ import { createContext, useContext } from 'react';
 import InfoTip from '../app/components/InfoTip';
 import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
 import { Field, TipCard } from './tipCard';
+import { ValueBadge } from './dynamicValue';
+import { BADGE_NEUTRAL, BADGE_PILL, BADGE_WARN } from './badgeChrome';
 import { trimStop } from './provenanceText';
 import { businessDaysBehind, fetchedToday, lagOwner, snapshotFreshness } from './snapshotAge';
 
@@ -27,6 +29,7 @@ export type SourceKey =
   | 'fx'             // ECB/Yahoo FX rate (fx_rate)
   | 'benchmark'      // yfinance close, benchmark constituents (the reconstructed index)
   | 'benchmark_etf'  // GuruFocus close for the index ETF itself (ACWI, SPY)
+  | 'benchmark_caps' // yfinance market cap per constituent — the index's WEIGHTS, not its prices
   | 'derived';       // computed from the above (no single source of its own)
 
 /**
@@ -37,21 +40,72 @@ export type SourceKey =
  * card spent a line teaching the reader nothing. Name the source once, in terms someone can go
  * and look up.
  */
-const SOURCE: Record<SourceKey, { label: string }> = {
-  airs_volk: { label: 'AIRS Vermogensoverzicht (VOLK)' },
-  airs_att: { label: 'AIRS Rendementen (ATT)' },
-  airs_model: { label: 'AIRS Model-portefeuille' },
-  yfinance: { label: 'yfinance daily close' },
-  fx: { label: 'ECB / Yahoo FX rate' },
-  benchmark: { label: 'yfinance close (benchmark constituents)' },
+/**
+ * ⚠⚠ STORED AS PARTS, COMPOSED INTO THE LABEL — never the other way round. Prose sometimes needs
+ * the halves separately ("weighted by market cap from yfinance"), and the tempting shortcut is to
+ * type those two words at the call site beside a registry that already knows them. That is the
+ * drift this table exists to stop: the day `benchmark_caps` becomes something other than yfinance,
+ * the label changes here and the sentence keeps saying yfinance. So the parts are the source of
+ * truth and {@link sourceLabel} builds the display string from them.
+ *
+ * ⚠ THIS IS NOT THE "SECOND VENDOR LINE" THE ⚠ ABOVE FORBIDS. That one printed the vendor AGAIN
+ * next to a label already naming it — the same fact twice. These are the label's own components,
+ * exposed so a sentence can use one of them instead of the whole thing.
+ */
+const SOURCE: Record<SourceKey, { vendor: string; field: string; qualifier?: string }> = {
+  airs_volk: { vendor: 'AIRS', field: 'Vermogensoverzicht', qualifier: 'VOLK' },
+  airs_att: { vendor: 'AIRS', field: 'Rendementen', qualifier: 'ATT' },
+  airs_model: { vendor: 'AIRS', field: 'Model-portefeuille' },
+  yfinance: { vendor: 'yfinance', field: 'daily close' },
+  fx: { vendor: 'ECB / Yahoo', field: 'FX rate' },
+  benchmark: { vendor: 'yfinance', field: 'close', qualifier: 'benchmark constituents' },
   // ⚠ A KEY OF ITS OWN, NOT `benchmark`. Since 2026-08-19 a benchmark figure can come from either
   // of two places — the index ETF's own price series (GuruFocus) or the constituent rebuild
   // (yfinance) — and they differ by ~2.8pp on ACWI YTD. Reusing `benchmark` would print
   // "yfinance close" over a GuruFocus number, which is precisely the mislabel this whole component
   // exists to make impossible.
-  benchmark_etf: { label: 'GuruFocus daily close (index ETF)' },
-  derived: { label: 'Computed on our side' },
+  benchmark_etf: { vendor: 'GuruFocus', field: 'daily close', qualifier: 'index ETF' },
+  // ⚠ A KEY OF ITS OWN FOR THE SAME REASON `benchmark_etf` IS. A cap-weighted index has two
+  // separate yfinance inputs — the daily CLOSES that give it a return, and the per-constituent
+  // MARKET CAPS that give it its weights (`_benchmark_refresh._caps`, refreshed by its own job and
+  // stamped with its own `market_cap_checked_at`). Active share reads the caps and never touches a
+  // close, so labelling it "yfinance close" would name a series the figure does not use.
+  benchmark_caps: { vendor: 'yfinance', field: 'market cap', qualifier: 'benchmark constituents' },
+  // ⚠ THE ONE SOURCE WITH NO VENDOR, because there is no third party to name — the composer drops
+  // the empty half rather than printing a leading space.
+  derived: { vendor: '', field: 'Computed on our side' },
 };
+
+/**
+ * The canonical name of one source, for prose outside a provenance badge.
+ *
+ * ⚠ SO A CARD THAT NAMES A SOURCE IN A SENTENCE USES THE SAME WORDS AS THE BADGE BESIDE IT. The
+ * alternative is a hand-typed "AIRS" or "Yahoo" in copy, which drifts the moment a label here is
+ * made more precise — and the whole point of this table is that a source is named once.
+ */
+export function sourceLabel(key: SourceKey): string {
+  const s = SOURCE[key];
+  const head = [s.vendor, s.field].filter(Boolean).join(' ');
+  return s.qualifier ? `${head} (${s.qualifier})` : head;
+}
+
+/**
+ * WHO supplies it — `yfinance`, `AIRS`, `GuruFocus`.
+ *
+ * ⚠ FOR A SENTENCE THAT NEEDS THE HALVES APART: "weighted by market cap from yfinance" badges two
+ * different facts, and squeezing the whole label into one badge makes "yfinance market cap
+ * (benchmark constituents)" look like a single opaque token rather than a field and its vendor.
+ * ⚠ Empty for `derived` — check before writing "from …" around it.
+ */
+export const sourceVendor = (key: SourceKey): string => SOURCE[key].vendor;
+
+/**
+ * WHAT is read — `market cap`, `daily close`, `Vermogensoverzicht`.
+ *
+ * ⚠ WITHOUT THE QUALIFIER. "(benchmark constituents)" disambiguates a label standing on its own;
+ * inside a sentence that has already said "priced index members" it is the same fact twice.
+ */
+export const sourceField = (key: SourceKey): string => SOURCE[key].field;
 
 /** The as-of freshness as a small coloured pill: green "current", neutral "1 trading day old",
  *  amber for genuinely stale. The one element in the card that carries colour on purpose. */
@@ -127,14 +181,10 @@ function FreshnessPill({ stale, label }: { stale: boolean; label: string }) {
   if (!label) return null;
   // ⚠ THE SAME TWO COLOURS THE ICON HAS, DRIVEN BY THE SAME BOOLEAN. A third tone here is how the
   // pill and the badge came to disagree in the first place.
-  const cls = stale
-    ? 'bg-warn-500/15 text-warn-600 border-warn-500/40'
-    : 'bg-neutral-500/10 text-fg-muted border-neutral-700/40';
-  return (
-    <span className={`px-1.5 py-px rounded-full text-[10px] font-medium border whitespace-nowrap ${cls}`}>
-      {label}
-    </span>
-  );
+  // ⚠ AND THE CHROME NOW COMES FROM `badgeChrome`, shared with the live-value badge — same tint,
+  // border and radius, so the two objects in this card read as one convention.
+  const cls = stale ? BADGE_WARN : `${BADGE_NEUTRAL} text-fg-muted`;
+  return <span className={`${BADGE_PILL} ${cls}`}>{label}</span>;
 }
 
 /**
@@ -168,7 +218,9 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
   /** The one verdict — see `provenanceFreshness`. Passed so the card cannot differ from the icon. */
   fresh: { stale: boolean; label: string };
 }) {
-  const s = SOURCE[source];
+  // ⚠ THE COMPOSED LABEL, not the parts — this card names the source once and in full, which is
+  // what `sourceLabel` builds. The halves exist for prose that needs them apart; see `sourceField`.
+  const s = { label: sourceLabel(source) };
   // ⚠ THE VERDICT IS PASSED IN, NOT RECOMPUTED. See `provenanceFreshness`: this card recomputing
   // it from `asOf` alone is precisely how it came to contradict the icon that opened it.
   const f = fresh;
@@ -212,14 +264,14 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
             : fetchedAt
               ? (
                 <span className="flex items-center gap-1.5 flex-wrap">
-                  <span className="font-mono text-fg">{fetchedAt.slice(0, 10)}</span>
+                  <ValueBadge>{fetchedAt.slice(0, 10)}</ValueBadge>
                   <FreshnessPill stale={f.stale} label={f.label} />
                 </span>
               )
               : asOf
                 ? (
                   <span className="flex items-center gap-1.5 flex-wrap">
-                    <span className="font-mono text-fg">{asOf}</span>
+                    <ValueBadge>{asOf}</ValueBadge>
                     <FreshnessPill stale={f.stale} label={f.label} />
                   </span>
                 )

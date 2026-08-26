@@ -177,3 +177,49 @@ describe('the store', () => {
     expect(readCacheStats().bytes).toBeLessThanOrEqual(READ_MAX_BYTES);
   });
 });
+
+/**
+ * ⚠⚠ THE RISK PANEL'S SIX READS AND THE ATTRIBUTION READ. Each view unmounts when its panel closes
+ * — deliberately, because mounting the tracking-error side costs a five-year daily price load per
+ * holding — so without these entries every reopen recomputes an answer that cannot have changed.
+ *
+ * The failure this guards is the OPPOSITE direction from the live-dashboard test above: here a miss
+ * costs only speed, but a path typed slightly wrong is a miss that nobody ever notices.
+ */
+describe('the Analyse modal\'s risk and attribution reads', () => {
+  const RISK = [
+    'active-share', 'tracking-error', 'risk-correlation', 'volatility', 'drawdown', 'concentration',
+  ];
+
+  it('caches all six, POSTed with a body', () => {
+    for (const name of RISK) {
+      const url = `http://x/api/airs/portfolio/${name}?benchmark=ACWI&frequency=weekly`;
+      expect(isCacheableRead('POST', url, '{"holdings":[]}'), url).toBe(true);
+      // ⚠ AND NONE OF THEM COUNTS AS A WRITE. Treated as one, opening the Risk panel would wipe
+      // the twelve fundamental entries the tab behind it had just filled.
+      expect(isMutation('POST', url), url).toBe(false);
+    }
+  });
+
+  it('caches attribution, whose selectors are all in the query', () => {
+    const url = 'http://x/api/airs/model-portfolios/34/attribution'
+      + '?benchmark=ACWI&window=ytd&axis=sector&source=model';
+    expect(isCacheableRead('GET', url)).toBe(true);
+  });
+
+  it('⚠ keys the six on the BODY, so two books are two entries', () => {
+    // ⚠⚠ THE URL IS IDENTICAL FOR EVERY PORTFOLIO — the holdings are the only thing distinguishing
+    // them. A key that ignored the body would serve one book's active share for another's, which
+    // is a wrong number rendered with total confidence.
+    const url = 'http://x/api/airs/portfolio/active-share?benchmark=ACWI';
+    const a = readKey('POST', url, '{"holdings":[{"isin":"A"}]}', false);
+    const b = readKey('POST', url, '{"holdings":[{"isin":"B"}]}', false);
+    expect(a).not.toBe(b);
+  });
+
+  it('⚠ does not cache anything else under the portfolio prefix', () => {
+    // A prefix match here would hand every future POST under `/portfolio/` a cached answer.
+    expect(isCacheableRead('POST', 'http://x/api/airs/portfolio/exposure', '{}')).toBe(false);
+    expect(isCacheableRead('POST', 'http://x/api/airs/portfolio/drawdown/refresh', '{}')).toBe(false);
+  });
+});

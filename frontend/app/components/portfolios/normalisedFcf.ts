@@ -60,6 +60,40 @@ export type NormalisedFcf = {
 const ok = (v: number | null | undefined): v is number => v != null && Number.isFinite(v);
 
 /**
+ * The FORWARD base: next year's consensus free cash flow, derived.
+ *
+ * ⚠⚠ DERIVED BECAUSE IT CANNOT BE READ. GuruFocus's Excel add-in has `Estimated Free Cash Flow for
+ * Next FY1 End (M)`; the REST endpoint we ingest has no FCF estimate at all — only operating cash
+ * flow (see `egmInputs.OCF_EST_CODE`). `FCF = OCF − capex` is the definition of the line, not an
+ * approximation of it, so the only estimated quantity here is the OCF; the capex is last year's
+ * filing, which is the same compromise the spreadsheet makes (its capex leg is trailing too).
+ *
+ * ⚠⚠ AND THE APPROXIMATION LARGELY CANCELS, WHICH IS THE REASON THIS IS SOUND RATHER THAN MERELY
+ * CONVENIENT. Feed this to `normalisedFcf` and, for any company spending at or above depreciation:
+ *
+ *     (OCF_est − capex) − sbc + (capex − dep)  =  OCF_est − dep − sbc
+ *
+ * The capex cancels ENTIRELY. What the model values is estimated operating cash flow, less
+ * maintenance capex proxied by depreciation, less stock compensation — and the trailing capex
+ * figure never touches the answer. It survives only in the clamped case (capex below depreciation),
+ * where an under-investing company is charged its actual spend, which is the intended behaviour.
+ *
+ * ⚠ `Math.abs(capex)` for the same reason `growthCapex` takes it: the vendor files capex negative
+ * and a typed override arrives positive. Adding a negative capex here would ADD the spend to the
+ * estimate — a company's capex counted as cash generated, on the one figure the whole panel solves
+ * against.
+ *
+ * ⚠ NULL WHEN EITHER LEG IS MISSING, never a partial answer. `OCF_est` alone is not free cash flow
+ * for any company that owns anything, and a base silently missing its capex leg would read as a
+ * business with no capital needs at all.
+ */
+export function forwardFcf(ocfEstimate: number | null | undefined,
+  capex: number | null | undefined): number | null {
+  if (!ok(ocfEstimate) || !ok(capex)) return null;
+  return ocfEstimate - Math.abs(capex);
+}
+
+/**
  * The growth half of capex: spend above what the existing assets consume.
  *
  * ⚠ `Math.abs(capex)` — the vendor files it negative and a reader typing an override will type it

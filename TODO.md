@@ -1435,3 +1435,333 @@ ruff/tsc/eslint clean**; what is missing is production measurement, not code.
   Single-year cap-weighted *growth* IS accurate (−0.11pp ACWI, +0.60pp SP500), and a
   properly chained per-year version lands at +1.15% (SP500) / −5.42% (ACWI) over a decade —
   so it is only defensible for growth-based series, and only if labelled on the chart.
+
+## Aggregate fundamental blend — WIRED AND LIVE ON ALL FIVE PATHS (2026-08-25)
+
+The level line averages per-member growth rates and chains them, which is wrong twice over (below).
+The correct construction — SUM the euros behind the line, chain the sums — was built, measured, and
+then **unwired** because only one of five blend paths was converted; see "What was wired". The
+corrected ACWI figures below stand and come from `scripts/acwi_fcf_growth.py`. Four defects were
+found on the way; each is recorded because each was invisible on the chart.
+
+### Why the old construction was wrong
+
+* **It cap-weighted a growth RATE.** Growth of a sum is `Σv(d)/Σv(a) − 1` — each member weighted
+  by its share of the total being grown. The clearest measurement in the whole investigation, on
+  ACWI revenue 2015→2025:
+
+        NVIDIA    4.77% of cap    0.02% of revenue    +2,932%
+        Walmart   0.92% of cap    2.07% of revenue       +53%
+
+        cap-weighted mean   +464.5%  ->  +18.90%/yr
+        revenue-weighted     +55.4%  ->   +4.51%/yr
+
+  NVIDIA got a 4.77% vote on revenue it supplies 0.02% of — ~240x its actual contribution.
+  ⚠ CAP-WEIGHTING IS STILL THE RIGHT ANSWER; it enters through the SHARE COUNT, not as a weight
+  on a rate. A cap-weighted index holds the same fraction `shares_i/Σcap` of every company, so
+  its claim is `(1/Σcap)·ΣF_i` — exactly proportional to the sum. Cap is your claim on VALUE, not
+  your claim on CASH FLOW, and the two only coincide at equal yields.
+* **Averaging growth rates is upward-biased.** A rate is floored at −100% and unbounded above, so
+  the bias scales with DISPERSION. Cutting `_MAX_STEP_GROWTH` +10,000% → +1,000% costs `revenue`
+  0.03pp/yr and `fcf_ps` 4.06pp.
+
+⚠ Three hypotheses tested and KILLED — do not revisit: "chain the aggregate of per-share values"
+(per-share figures are not additive across companies); the Eli Lilly zero-crossing asymmetry
+(dropping all 976 crossers, 37% of cap, moved the line 19.80% → 19.79%); a trimmed/median step
+(suppresses the symptom, keeps the wrong weight).
+
+### The four defects, and why each hid
+
+1. **Look-ahead weights.** The universe blend passed only a scalar `weight`, and `_weight_at`
+   reads the absence of `weights` as "single basis" — right for a portfolio, look-ahead for an
+   index. Every historical step was weighted by TODAY's cap; NVIDIA's 2017→2018 step carried its
+   2026 size (4.40% vs ~0.4%). ACWI `fcf_ps` 26.22% → 19.80%/yr.
+2. **⚠⚠ FX INVERTED AND THE MILLIONS SCALE DROPPED.** `_rate` returns UNITS PER EUR (IDR
+   19,640.83) and GuruFocus financials are in millions; `period_caps_eur` has always done
+   `native / rate * 1e6`. The first cut did `value * shares * rate`. A rupiah filing came out
+   19,641x too large. ⚠ **INVISIBLE ON A POSITIVE METRIC** — revenue and EPS only got inflated and
+   still printed plausible CAGRs (`15.41 / 10.06 / 11.55`, all wrong). Only `fcf_ps`, where large
+   negatives are ordinary, crossed zero and tripped the `now_sum <= 0` guard — which is the entire
+   reason that guard ENDS the series instead of drawing on. The tell was Indonesian banks owning
+   both tails of every year.
+3. **Bank FCF is not a summable quantity.** A bank's operating cash flow moves with DEPOSIT AND
+   LOAN FLOWS: PT Bank Mandiri showed −1,278bn, −1,482bn, +3,909bn EUR in consecutive years. The
+   growth-average hid it behind a floor, a cap and dilution across 1,700 members; a sum has none
+   of those. `_NO_AGGREGATE_FOR_FINANCIALS = {"fcf_ps"}` — PER METRIC, because revenue and net
+   income are perfectly well defined for a bank. ⚠⚠ BOTH SPELLINGS: ACWI carries "Financials"
+   (225) AND "Financial Services" (78); listing one leaves 78 banks in and the exclusion looks
+   like it worked. Canonicalised through `_airs_portfolio_analysis._sector`. ⚠ Real Estate is
+   deliberately NOT excluded — arguable, not definitional.
+4. **Dual-class double count.** A dual-class constituent is two `company` rows, each carrying the
+   WHOLE company. Averaging merely double-voted it; SUMMING adds its entire income statement
+   twice. Measured on ACWI: 42 names duplicated, 43 extra rows, **5.83% of the index fictional**
+   (Alphabet read 7.60% of cap where it is 3.80%). Deduped on the normalised company name —
+   the same key `_asset_benchmark.members` uses — largest cap wins, so the survivor does not
+   depend on row order.
+
+### Result — ACWI 2015→2025
+
+    metric     growth-averaged   aggregate      sanity
+    revenue          +9.95%        +4.58%
+    eps_nri         +17.62%        +7.33%       price was +11.2%/yr
+    fcf_ps          +19.80%        +4.64%       ex-financials
+
+Coherent at last: revenue +4.6%, FCF +4.6% (conversion roughly stable), EPS +7.3% (margins and
+buybacks ahead of both), all under price at +11.2% leaving ~3.9pp/yr of multiple expansion. ACWI
+P/E went ~17 → ~22 over that decade, the same ballpark. The old FCF figure implied the index's
+price/FCF HALVED, which is what first made the number suspect.
+
+### What is wired — ALL FIVE PATHS (2026-08-25)
+
+An earlier attempt converted ONE path and was reverted the same day. ⚠⚠ THAT IS WORSE THAN EITHER
+CONSTRUCTION ALONE: the Contribution column decomposed a move the line no longer made, and a
+benchmark drawn one way beside a portfolio drawn the other is two answers to one question in the
+same chart with nothing saying so. **It is all-or-nothing.** All five now go through one helper.
+
+* **`earnings._totals_for()`** — the single decision point. Index form = the plain sum `Fᵢ`;
+  portfolio form = `wᵢ·Fᵢ/capᵢ`, and it loads the book's per-period caps itself rather than leaving
+  them to a caller that only computes them for a universe. ⚠ Takes metric KEYS, returns metric
+  CODES (`fundamental_totals`'s own convention) — a CODE passed in matches nothing and the path
+  silently keeps the growth chain with no error anywhere.
+* **`_fundamental_blend.blend_series`** — aggregate branch. Members carrying `fund_points` are
+  summed per period and the sums chained, intersecting members per step. No guards, because a sum
+  never takes a ratio of a member to itself. Returns `aggregate`/`fund_members`/`members` so a
+  caller can see which construction it got and how much of the index carries euros.
+* **`_fundamental_blend._level_breakdown`** — the exact decomposition (below).
+* **`_fundamental_blend.blend_matrix`** — free: its footer already asks `blend_series` rather than
+  re-deriving. That was paid for once already; it paid off here.
+* **`earnings._blend_rows(totals=)`** → the metric lines. Still pure of I/O.
+* **`earnings.fundamental_blend`** → the book's Long Equity blend.
+* **`earnings.benchmark_revenue`** → the benchmark leg drawn *beside* it — the one pairing where
+  two constructions would read as a real divergence.
+* **`earnings.portfolio_revenue_matrix`** → ships `fund_by_period` per row, because the drill-down's
+  footer and Contribution column are computed in the BROWSER.
+* **`fundamentalBlend.ts::buildBlend`** — the client twin: same aggregate line, same decomposition,
+  same carry.
+
+### The decomposition is an identity, not an approximation
+
+    G   = ΣFᵢ(d)/ΣFᵢ(a) − 1 = Σ(Fᵢ(d) − Fᵢ(a)) / ΣFᵢ(a)
+    ppᵢ = 100 · (Fᵢ(d) − Fᵢ(a)) / ΣFᵢ(a)          so   Σppᵢ = 100·G, exactly
+
+* ⚠⚠ **Nobody is dropped, which the growth path cannot manage.** The difference form is defined for
+  every member including sign-crossers: −200 → +300 contributes +500/ΣFᵢ(a). `share × growth` needs
+  a positive base and is only a PRESENTATION of that number, so both factors go null below zero
+  while the pp stays exact and the column still sums.
+* ⚠ **`share_pct` is the share of the EUROS, not of the cap** — the entire finding in one field.
+* ⚠⚠ **It can exceed 100% and that is correct.** `ΣFᵢ(a)` may contain negatives, so a profitable
+  member's share has a denominator smaller than its own numerator (measured: −200 and +1,200 gives
+  120.0%, and `120% × 0% = 0.00pp` still reconciles). Clamping would break the only identity the
+  panel exists for.
+
+### Three traps this conversion hit
+
+* ⚠⚠ **The euros must be bucketed by the same `bucket()` as the values.** The caller keys by FILING
+  DATE; the chain walks BUCKETED periods. Unbucketed, every lookup misses, the branch silently
+  never fires, and both paths print identical numbers with nothing to say the new one did not run —
+  which is exactly how it shipped the first time. Pinned both sides.
+* ⚠⚠ **The euros need their own carry AND their own loop.** `_prepare` rebases a LEVEL member on its
+  first POSITIVE period and throws away everything before it. Right for the growth path, irrelevant
+  to a sum — and reading the euros off `by_year` inherits the truncation, so a member whose base
+  period is negative goes missing from the sum in exactly the step where its recovery is the story
+  (Eli Lilly's −3.489 year). Fixed by filling `fund` in its own pass over the axis, gated on the
+  weight alone. Same fix, same reason, in the client.
+* ⚠ **And carried, by `carry_forward`, with the same bound.** Uncarried, a semi-annual filer drops
+  out of every quarter it does not file, the per-step intersection shrinks to the quarterly filers,
+  and the aggregate sawtooths on composition — the failure `carry_forward` exists to prevent,
+  quietly reintroduced one construction over.
+
+
+### ⚠⚠ The client dropped rows the server kept (found 2026-08-25, while answering "does it handle negatives")
+
+`buildBlend` excluded any row whose **first reported period** was ≤ 0, under a comment asserting it
+"matches `_prepare`'s non_positive_base drop". It does not: `_prepare` skips forward to the first
+**positive** period and KEEPS the member, rebasing there. So a company whose earliest year happened
+to be negative — the AMD case the old comment was written about — was in the CHART and missing from
+the drill-down that explains it. A footer that cannot reach the line above it, and a Contribution
+column silently short by that company, with nothing on screen wrong.
+
+Pre-existing, and the euro sum made it matter more: the aggregate deliberately includes a member's
+negative years, so the two sides now disagreed about who is in the index rather than only about
+how much. Fixed by matching the server exactly — first positive period, pre-base periods truncated
+with it, euros untruncated (they are a separate pass). ⚠ The old test asserted the WRONG behaviour
+and was green throughout; it now pins the recovery case.
+
+### ⚠⚠ EPS was NOT aggregated for a few hours, because only half of it could be — SUPERSEDED below
+
+`eps_nri` is the only aggregatable metric with a **forecast leg**. A forecast is a separate metric
+code (`annual_eps_nri_estimate`), blended by its own `blend_series` call and rebased on the actual
+it continues (`base_points`) so the two legs join. `fundamental_totals` has no euros for an
+estimate — there is no filed share count and no FX rate for a year nobody has lived — so
+aggregating the ACTUAL leg alone put the two halves of ONE chart on two different scales: the
+actual ran to the euro-chain level, the forecast restarted near the per-share one, and the line
+jumped vertically from LTM to 2026e.
+
+⚠ **Every unit was individually correct.** The defect lived in the seam between two `blend_series`
+calls, which nothing asserts across, and it was caught **by eye on the chart** — not by a test, not
+by a type, not by lint. The same shape as the two other findings in this section.
+
+`aggregatable_metrics()` now holds `eps_nri` back, derived from `_FORECAST_METRIC` rather than
+hardcoded, and decided ONCE rather than per request (keying it off "is the forecast code in this
+payload" would let a narrowed request and a full one draw different lines for the same metric).
+Pinned by `tests/test_aggregate_blend.py::TestAMetricWithAForecastLegIsNotAggregated`, which
+asserts the precondition too — without a real overlap the rule is vacuous and the test would pass
+proving nothing.
+
+**The cost is real and accepted for now**: EPS keeps the cap-weighted growth chain, with the bias
+this whole conversion exists to remove. So the tab is currently **revenue + FCF on the euro sum,
+EPS on the old chain**. Lifting it means giving the estimate leg euros (`estimate × latest shares`,
+at the latest FX) and chaining across the actual→forecast boundary in aggregate space — note
+`p["fund"]`'s axis comes from `by_year`, which for a forecast series covers only the estimate
+periods, so the boundary step needs the actual's last period in the same map.
+
+### The forecast leg, done properly — EPS aggregates too (2026-08-25)
+
+`eps_nri` was held back for a few hours because only half of its chart could be aggregated. Now
+both halves are, and the seam is measured rather than approximated.
+
+**Euros for a consensus.** `_AGGREGATABLE_FORECAST` is derived, not listed: a forecast is
+aggregatable exactly when the series it CONTINUES is. Its euros are `estimate × shares × 1e6 ÷ FX`,
+with two as-of fallbacks that are the whole reason it works:
+
+* ⚠ **Shares as-of** (`_shares_at`). Nobody has filed a share count for a year nobody has lived, so
+  the latest filed one stands — `estimate × shares` is then "the consensus on today's capital
+  base", which is what a forward earnings total means. ⚠⚠ AND IT MAKES THE BOUNDARY EXACT: the
+  latest filed share count IS the last actual period's, so the joining ratio has the same `shares`
+  on both sides and the step is a pure change in earnings, not half a change in share count.
+  ⚠ A FILED period never takes the fallback — only periods past the last filing — so an actual year
+  with a genuinely missing share count stays a gap instead of borrowing a neighbour's.
+* ⚠ **FX as-of**, which `_rate` already does (it falls back to the most recent earlier rate). A
+  forecast year converts at today's rate: the standard convention for forward estimates.
+
+**The join.** `blend_series(..., continue_from={"level", "period"})` — the aggregate twin of
+`base_points`. The forecast's first drawn point is
+
+    level(d₀) = continue_from.level × Σ fund(d₀) ÷ Σ fund_base(continue_from.period)
+
+over the members carrying **both**. ⚠⚠ MORE EXACT THAN THE GROWTH PATH'S CONTINUATION, not merely
+equivalent: that one restarts the forecast at the weighted mean of each member's value rebased on
+its OWN actual base, which only approximates where the line stopped. Measured on the pinned
+fixture: **127.78 against a true 110.0**, a fabricated +16pp jump sitting exactly at the seam.
+⚠ Falls back to 100 rather than guessing when there is no base, a non-positive base sum, or nothing
+spanning the boundary.
+
+**`_blend_rows` blends bases before forecasts.** ⚠ `by_metric` is in row-arrival order, so without
+the sort a chart would join correctly or not depending on what the query returned first — the worst
+kind of intermittent. Inert on the growth path, where each leg is rebased per member.
+
+### ⚠⚠ …and the LTM point needed its own euros (same day)
+
+`_metric_by_company_period` reads filed `metric_data` rows and **LTM is not one** — this app
+assembles it. So the fund map had no `LTM` key, and what happened next **depends on the date the
+code runs**, which is the worst property a defect can have:
+
+* within `_MAX_CARRY_DAYS` of the last filing, `carry_forward` holds the previous year's euros into
+  LTM (`period_end("LTM")` is TODAY) and the line goes **FLAT** into its newest point — not
+  missing, not empty, flat, which reads as "nothing changed" for the one point everybody looks at;
+* past that bound, the point is **dropped** instead.
+
+Fixed by building real LTM euros in `fundamental_totals` (`_ltm_by_company`'s value × the as-of
+share count, at the LTM date's rate). ⚠ Annual only — every point of a quarterly series is already
+a trailing twelve months. ⚠ Never for a consensus: there is no trailing twelve months of a
+forecast, and asking for one would roll estimate rows into a period the chart labels as measured.
+Pinned by `TestTheLtmPointNeedsItsOwnEuros`, which asserts the positive behaviour rather than the
+date-dependent negative one.
+### Still open
+
+* ⚠ **A member non-positive in EVERY reported period is still excluded** — `_prepare` drops it as
+  `non_positive_base` before the aggregate sees it. That is the growth path's rule leaking into
+  this one. Narrow (a perennial cash-burner, empty for revenue) and documented rather than silently
+  relied on; fixing it means teaching `_prepare` that a member can be aggregatable without being
+  rebasable.
+* **Portfolio form now reachable but unmeasured.** `wᵢ·Fᵢ/capᵢ` is wired on every path; the index
+  side is measured end to end and the book side has not been eyeballed against a real portfolio.
+* **Chained vs endpoint gap.** On ACWI FCF ex-financials the chain gives +4.64%/yr where the raw
+  endpoint ratio on the same sums is ~8.6%. The chain intersects members per step, so a member
+  joining mid-series is not counted as growth — correct behaviour, and the chained figure is the
+  one to trust, but a ~4pp spread between two views of one quantity is not yet fully explained.
+
+**Pinned by** `backend/tests/test_aggregate_blend.py` (line, fallback, bucketing, round-trip
+through zero, per-step intersection, carry, and the decomposition identity) +
+`frontend/app/components/portfolios/fundamentalBlend.test.ts` (the client twin of each).
+**Diagnostics** (read-only): `scripts/acwi_fcf_growth.py` (the fixed-basket answer) ·
+`scripts/diagnose_blend_steps.py` (per-step distribution + what the guards refused, ranked by index
+impact) · `scripts/measure_aggregate_fundamental.py` (endpoint sums, surviving member count).
+
+## The YoY column's skip rule (2026-08-25)
+
+`HoldingsRevenueModal`'s **YoY %** cells used to be `value / previous − 1`, refusing only a
+non-positive base. Two ways that goes wrong, and only the first is obvious:
+
+* A base that is **negative** — the cell blanks, and the growth on the other side of the zero
+  crossing is never stated anywhere.
+* A base that is **positive and immaterial** — Eli Lilly's `5.085 → −3.489 → 0.458 → 6.632`
+  printed **+1,348%** off the 0.458 recovery year. The company's real three-year growth is
+  **+30.4%, i.e. +9.3%/yr**, and that number appeared in no cell.
+
+**The rule**: walk back to the last base that is positive AND at least a tenth of the row's own
+median |value|, then annualise over the span it really took. `positiveChain.ts` (pure, tested);
+`rowFacts` carries the per-row scale so it costs one median per row, not one per cell.
+
+* ⚠ **The floor is the half that matters.** Skipping only negatives leaves Lilly at +1,348%.
+  Same constant and same reasoning as the server's `_MIN_STEP_BASE_FRACTION`.
+* ⚠ **Keeping the clock is what makes it honest.** Reporting a three-year recovery as a one-year
+  figure would be the same overstatement moved somewhere new. It telescopes: the retained steps
+  multiply back to the endpoint ratio exactly.
+* ⚠⚠ **A company that turns negative and never recovers has NO RATE, and that is the one case the
+  rule cannot reach.** It bridges a dip BETWEEN two positive years; a trailing negative run has
+  nothing on the far side to bridge to. `V₀(1+r)ⁿ = Vₙ` has no real solution when `Vₙ < 0` and
+  `n > 1`, so `Step.annualised` is **null** and the cell shows a `Negative` badge plus the two
+  levels and the date it turned — not a percentage, and not a blank (a blank in a column of
+  numbers is read as missing data, which is the one reading that is certainly wrong here).
+  ⚠ Over ONE period the rate IS defined — `10 → −5` is exactly −150%, no root taken — so the
+  refusal is narrow. `negativeRunStart` dates the turn, and stops at a gap: an unreported period
+  is not a negative one.
+* ⚠⚠ **NOT lifted to the index line, deliberately.** An index that averages rates gives a
+  constituent influence proportional to its RATE, not its euros. The index fix is summing euros
+  (the section above); the per-company cells keep this rule.
+* ⚠ **It guards the divisor, not the numerator.** Japan Post Bank's **+25,147,989.7%** had two
+  causes; the 4.998 base is gone, the FY2025 figure being 1,000x too large (its `shares` cell is
+  1,000x too small, so GuruFocus's per-share is 1,000x too big) is a vendor defect no growth rule
+  can mend. It never reaches the aggregate line, which multiplies the two errors back together.
+* Every cell explains itself on hover — base, span, what was stepped over — and a blank says
+  which of "first period" / "no usable base" it is. An unexplained blank is how the refusal was
+  invisible in the first place.
+
+## Tables tab — one rate row per level chart (2026-08-25)
+
+The `Tables` tab summarised **three** of the Long Equity tab's **six** LEVEL charts, so revenue,
+FCF/share and price had a 5y/10y CAGR and EPS, invested capital and shares outstanding did not —
+leaving the reader to eyeball three compounding rates off a log axis, which is the one thing a
+summary exists to remove.
+
+Added: **`epsCagr`**, **`invCapCagr`**, **`sharesCagr`**.
+
+* ⚠ **The rule is LEVEL vs RATIO, not "add more rows".** A currency-or-count level compounds, so
+  its summary is a rate; a margin, a return on capital or a coverage ratio oscillates around a
+  level and does not, so its summary stays a window MEAN. Annualising a percentage is not a rate of
+  anything. `RATE_KEYS` declares the set and `tablesCopy.test.tsx` pins it, so a seventh level chart
+  arriving without a row is a visible omission.
+* ⚠ **`epsCagr` shares `epsBase` with the forward row**, deliberately: the consensus is measured
+  FROM the latest period both sides reported, so a history ending anywhere else would be a rate that
+  does not hand over to the expectation beneath it. One `commonEndPeriod`, read twice.
+* ⚠ **`invCapCagr` costs no request** — invested capital comes from the two raw lines
+  `cash-return-inputs` already returns for the ROIC row. `investedCapitalBlend()` was EXTRACTED from
+  `investedCapitalIndexByYear` rather than re-implemented: the map throws the period labels away
+  (`Map<number, …>` cannot hold `LTM` or `2026e`) and `lineCagr` needs them. The map now derives
+  from the blend, so there is still one construction. Its drill-down is `CashReturnInputsModal` —
+  the same panel as ROIC, because that genuinely is where its numbers are.
+* ⚠ **`sharesCagr` is the only row where NEGATIVE is the good direction**, and the cell is coloured
+  by sign like every other rate. Its note says so. It is the wedge between the revenue row and the
+  per-share rows: a book whose EPS outruns its revenue is either widening margins or retiring stock,
+  and nothing else on the table said which.
+* ⚠ `shares` uses `unit: 'per_share'` in `MATRIX_ROWS` — that is the drill-down's "not millions"
+  setting, not a claim that a share count is per share. `millions` would print 1.2bn shares as 1,200.
+* ⚠ The footnote's fit-vs-point-to-point clause used to name ONE row because there was one. With six
+  it now says "the rate rows", gated on `RATE_KEYS.some(on)` — singling out FCF/share would read as
+  "the others DO match the cards", which is the opposite of true.
+
+**Still open**: the ratio charts without a mean row — debt ratio, SBC/OCF, capex margin, dividend
+yield, FCF+SBC yield. Each needs its own `*-inputs` payload and a `…ByYear` helper, and none of them
+is a rate, so they were out of scope for "the annualized metric per chart". Worth doing if the tab
+is meant to mirror the charts one-for-one.

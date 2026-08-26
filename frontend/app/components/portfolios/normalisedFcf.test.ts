@@ -16,7 +16,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { growthCapex, normalisedFcf } from './normalisedFcf';
+import { forwardFcf, growthCapex, normalisedFcf } from './normalisedFcf';
 
 /** ASML's latest filed year, in millions — the row the sign convention was verified against. */
 const ASML = { fcf: 11027.3, sbc: 202.3, capex: -1631.2, dep: 1025.9 };
@@ -104,5 +104,65 @@ describe('normalised FCF', () => {
     const msft = normalisedFcf({ fcf: 66987, sbc: 12405, capex: -90414, dep: 13000 });
     expect(msft.growthCapex).toBe(77414);
     expect(msft.used! / msft.reported!).toBeGreaterThan(1.9);
+  });
+});
+
+/**
+ * ⚠⚠ THE FORWARD BASE — next year's free cash flow, DERIVED, because GuruFocus's REST API has no
+ * consensus FCF line (only the Excel add-in does, and the legacy API never 404s, so asking it for
+ * one returns 200 and a plausible all-zero series).
+ *
+ * The spreadsheet this ports is `Estimated FCF FY1 + MAX(−capex − D&A, 0) − SBC`. Only the base
+ * differs here, and the identity below is what makes the substitution sound rather than merely
+ * convenient.
+ */
+describe('forward FCF', () => {
+  it('is the consensus operating cash flow less capex', () => {
+    expect(forwardFcf(17000, -1631.2)).toBeCloseTo(15368.8, 6);
+  });
+
+  it('⚠ reads a positively-typed capex the same way', () => {
+    // Without the magnitude a negatively-filed capex would be ADDED — a company's capital
+    // spending counted as cash generated, on the one figure the whole panel solves against.
+    expect(forwardFcf(17000, 1631.2)).toBeCloseTo(forwardFcf(17000, -1631.2)!, 6);
+  });
+
+  it('refuses rather than guessing when either leg is missing', () => {
+    // ⚠ OCF alone is not free cash flow for any company that owns anything: a base missing its
+    // capex leg reads as a business with no capital needs at all.
+    expect(forwardFcf(null, -1631.2)).toBeNull();
+    expect(forwardFcf(17000, null)).toBeNull();
+    expect(forwardFcf(NaN, -1631.2)).toBeNull();
+  });
+
+  it('⚠⚠ the trailing capex CANCELS out of the figure the model values', () => {
+    // (OCF − capex) − sbc + (capex − dep) = OCF − dep − sbc.
+    //
+    // This is why a trailing capex leg on a forward base is sound: it leaves the answer entirely.
+    // The only forecast quantity is the operating cash flow, and the only trailing one that
+    // survives is depreciation — which is a maintenance-capex proxy, i.e. deliberately the slow
+    // -moving leg.
+    const ocfEst = 17000;
+    const n = normalisedFcf({ ...ASML, fcf: forwardFcf(ocfEst, ASML.capex) });
+    expect(n.used).toBeCloseTo(ocfEst - ASML.dep - ASML.sbc, 6);
+  });
+
+  it('⚠ and it does NOT cancel below depreciation, which is the intended behaviour', () => {
+    // An under-investing company is charged its ACTUAL spend: the add-back clamps to zero, so the
+    // capex leg stays in. Treating the shortfall as a windfall would reward hollowing a business
+    // out — the same rule `growthCapex` floors for.
+    const parts = { fcf: forwardFcf(17000, -500), sbc: 202.3, capex: -500, dep: 1025.9 };
+    const n = normalisedFcf(parts);
+    expect(n.growthCapex).toBe(0);
+    expect(n.used).toBeCloseTo(17000 - 500 - 202.3, 6);
+    expect(n.used).not.toBeCloseTo(17000 - 1025.9 - 202.3, 6);
+  });
+
+  it('⚠ a missing consensus leaves NO forward base — it does not fall back to the filing', () => {
+    // The fallback is the panel's, and it is a visible one: the Base control names which of the
+    // two is in use and shows the other beside it. A silent fallback here would put a filed figure
+    // under a label reading "next fiscal year".
+    expect(forwardFcf(null, ASML.capex)).toBeNull();
+    expect(normalisedFcf({ ...ASML, fcf: forwardFcf(null, ASML.capex) }).used).toBeNull();
   });
 });

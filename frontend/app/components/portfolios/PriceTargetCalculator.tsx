@@ -1,6 +1,7 @@
 'use client';
 
 import { AspectCard } from '../../../lib/tipCard';
+import { workedRatio } from './workedFormula';
 import InfoTip from '../InfoTip';
 import { type BASIS, type PriceTarget } from './quickValuation';
 
@@ -298,6 +299,8 @@ export default function PriceTargetCalculator({
           when={price.live
             ? `Last filed year's figure over the close of ${fmtDate(price.date)}. ⚠ Two dates, deliberately: that is what a current yield is.`
             : 'The latest fiscal year — both sides.'}
+          worked={workedRatio(target.currentPs, target.currentPrice,
+            target.currentYield == null ? '' : `${n1(target.currentYield)}%`, '', ` ${ccy}`)}
           how={`The starting point the forecast yield is judged against: the gap between the two IS the rerating this calculator assumes.${
             price.live ? ' ⚠ It will not match the “Latest” yield on the chart to the left, which is fiscal on both sides.' : ''}`} />} />}>
         {n1(target.currentYield)}%
@@ -347,6 +350,11 @@ export default function PriceTargetCalculator({
           what={`What the shares are worth if the forecast ${b.perShare} is priced at the forecast ${b.yieldInline}.`}
           where={`Forecast ${b.perShare} ÷ forecast ${b.yieldInline}.`}
           when={`${years} years out.`}
+          // ⚠⚠ THE SAME NUMBER IS WORKED ON THE `Price target FY20xx` TILE IN `QuickValuationTab`
+          // AND WAS SYMBOLS HERE — one figure explained two ways, one click apart, which reads as
+          // two different computations rather than one shown twice.
+          worked={workedRatio(target.forecastPs, target.forecastYield,
+            target.forecastPrice == null ? '' : `${ccy}${n2(target.forecastPrice)}`, '', '%')}
           how="Blank when either input is non-positive: a zero yield divides to infinity, and a forecast that loses money has no price at a positive one." />} />}>
         {ccy}{n2(target.forecastPrice)}
       </Row>
@@ -367,6 +375,16 @@ export default function PriceTargetCalculator({
               price.live
                 ? '⚠ Less than the ' + years + '-year projection above it: the forecast sits ' + years + ' years past the last REPORTED year, and today is already part of the way there.'
                 : `The full ${years}-year projection, because the price is the fiscal one.`}`}
+            /* ⚠ ALL FOUR OPERANDS ARE IN SCOPE HERE and always were; the card simply never
+               used them. `horizonYears` is the one that matters most — it is a fraction off a
+               live price, and the whole reason the tile is named by its endpoint rather than its
+               length, so seeing it in the exponent is what makes the number self-explaining. */
+            worked={target.forecastPrice != null && target.currentPrice != null
+              && target.currentPrice > 0 && target.cagr != null
+              ? `(${n2(target.forecastPrice)} ÷ ${n2(target.currentPrice)})`
+                + ` ^ (1 ÷ ${horizonYears.toFixed(1)}) − 1`
+                + ` = ${target.cagr >= 0 ? '+' : ''}${(target.cagr * 100).toFixed(1)}%`
+              : ''}
             how="⚠ Price only — no dividends, and no return on the cash the business throws off in the meantime. It answers what the multiple and the cash flow do to the share price, not what you would earn holding it." />} />
         </span>
         <Leader />

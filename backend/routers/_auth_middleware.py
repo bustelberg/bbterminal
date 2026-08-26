@@ -164,6 +164,16 @@ _USER_WRITE_PREFIXES: tuple[str, ...] = ()
 # quota to go and fetch it. A prefix would hand a user the second along with the first.
 _USER_POST_READ_PATHS: frozenset[str] = frozenset({
     "/api/airs/basket/analysis",
+    # ⚠ A READ THAT MUST BE A POST — it takes the book's holdings in the body precisely so it can
+    # describe the rows the reader is looking at, and a URL cannot carry 49 ISINs and their
+    # weights. It computes and returns; it stores nothing. See `_active_share`.
+    "/api/airs/portfolio/active-share",
+    "/api/airs/portfolio/exposure",
+    "/api/airs/portfolio/concentration",
+    "/api/airs/portfolio/drawdown",
+    "/api/airs/portfolio/volatility",
+    "/api/airs/portfolio/risk-correlation",
+    "/api/airs/portfolio/tracking-error",
     "/api/asset-pipeline/basket/performance",
     "/api/earnings/capex-margin-inputs",
     "/api/earnings/cash-conversion-inputs",
@@ -172,8 +182,6 @@ _USER_POST_READ_PATHS: frozenset[str] = frozenset({
     "/api/earnings/dividend-yield-inputs",
     "/api/earnings/fcf-sbc-yield-inputs",
     "/api/earnings/fundamental-blend",
-    "/api/earnings/fundamental-blend-breakdown",
-    "/api/earnings/fundamental-blend-matrix",
     "/api/earnings/fundamental-blend-metrics",
     "/api/earnings/fundamental-blend-metrics/stream",
     "/api/earnings/fundamental-coverage",

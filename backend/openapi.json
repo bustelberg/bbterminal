@@ -1,6 +1,314 @@
 {
   "components": {
     "schemas": {
+      "ActiveShare": {
+        "description": "`AS = \u00bd \u03a3|w\u1d56 \u2212 w\u1d47|` over the union of both name sets \u2014 see `routers/_active_share.py`.",
+        "properties": {
+          "active_share_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Share Pct"
+          },
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "benchmark": {
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "benchmark_caps_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Caps From"
+          },
+          "benchmark_caps_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Caps To"
+          },
+          "benchmark_caps_unstamped": {
+            "default": 0,
+            "title": "Benchmark Caps Unstamped",
+            "type": "integer"
+          },
+          "benchmark_covered_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Covered Pct"
+          },
+          "benchmark_members": {
+            "default": 0,
+            "title": "Benchmark Members",
+            "type": "integer"
+          },
+          "n_holdings": {
+            "default": 0,
+            "title": "N Holdings",
+            "type": "integer"
+          },
+          "n_in_benchmark": {
+            "default": 0,
+            "title": "N In Benchmark",
+            "type": "integer"
+          },
+          "off_benchmark_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Off Benchmark Pct"
+          },
+          "overlap_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Pct"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "rows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ActiveShareRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "stocks_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stocks Pct"
+          },
+          "stocks_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stocks Weight"
+          },
+          "total_weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Weight"
+          },
+          "unresolved": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ActiveShareUnmatched"
+            },
+            "title": "Unresolved",
+            "type": "array"
+          }
+        },
+        "required": [
+          "benchmark"
+        ],
+        "title": "ActiveShare",
+        "type": "object"
+      },
+      "ActiveShareHolding": {
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "is_fund": {
+            "default": false,
+            "title": "Is Fund",
+            "type": "boolean"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Eur"
+          },
+          "weight_pct": {
+            "default": 0.0,
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "title": "ActiveShareHolding",
+        "type": "object"
+      },
+      "ActiveShareRequest": {
+        "description": "The holdings the Analyse modal is ALREADY showing.\n\n\u26a0\u26a0 THE WEIGHTS COME FROM THE CLIENT ON PURPOSE, WHICH IS THE OPPOSITE OF THIS FILE'S USUAL\nRULE. Everywhere else a weight is computed server-side precisely so two surfaces cannot\ndisagree \u2014 but this panel sits one click from the Holdings table, and its whole job is to\ndescribe THAT book. Re-deriving the weights here would give the risk figure a second\ndenominator (start weights? design percentages? looked-through or not?) and the first question\nanybody asks of a 71% active share is which rows produced it. So it consumes the displayed\nnumbers, and cannot disagree with the table by construction.\n\n\u26a0 IT ALSO REMOVES THE SECOND HOLDINGS PIPELINE. A model portfolio and an ad-hoc basket reach\nthis with the same body, so unlike Attribution there is no `portfolio_id` variant to keep in\nstep \u2014 one route serves both, the same way `basket/analysis` does for the composition.",
+        "properties": {
+          "holdings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ActiveShareHolding"
+            },
+            "title": "Holdings",
+            "type": "array"
+          }
+        },
+        "title": "ActiveShareRequest",
+        "type": "object"
+      },
+      "ActiveShareRow": {
+        "description": "One ISSUER, on both sides. \u26a0 NOT one holding and not one listing \u2014 a book holding two share\nclasses of the same company contributes ONE of these, with the weights summed. See\n`_active_share._issuer_key`.",
+        "properties": {
+          "active_pct": {
+            "default": 0.0,
+            "title": "Active Pct",
+            "type": "number"
+          },
+          "benchmark_pct": {
+            "default": 0.0,
+            "title": "Benchmark Pct",
+            "type": "number"
+          },
+          "held": {
+            "default": false,
+            "title": "Held",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "portfolio_pct": {
+            "default": 0.0,
+            "title": "Portfolio Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ActiveShareRow",
+        "type": "object"
+      },
+      "ActiveShareUnmatched": {
+        "description": "A stock we hold that could not be resolved to an issuer name, so it can only be ACTIVE.\n\n\u26a0 IT IS IN THE FIGURE, AND IT IS LISTED BECAUSE IT IS. Dropping it would renormalise the rest\nupward and quietly LOWER active share \u2014 the flattering direction \u2014 so the honest choice is to\ncount it and show what could not be matched.",
+        "properties": {
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "weight_pct": {
+            "default": 0.0,
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "title": "ActiveShareUnmatched",
+        "type": "object"
+      },
       "AirsAccount": {
         "description": "One AIRS account's YEAR, on AIRS's own numbers.\n\n\u26a0 EVERY MONEY FIELD HERE IS THE YEAR'S, SUMMED ACROSS AIRS'S MONTHLY ROWS. One ATT row is\none MONTH \u2014 reading the freshest as \"the year\" served AITopSelectie's July price result of\n-130,063 where the year made +420,225: wrong sign, third of the size, beside a +42% YTD.\n`_airs_accounts._year_perf` does the assembly; read it before adding a field here.\n\n\u26a0 `ytd_pct` IS `cumulatief_rendement` \u2014 AIRS's own, flow-aware, and never\n`end_value_eur / begin_value_eur - 1`.\n\n\u26a0 `latest_month_pct` IS NOT A RIVAL YTD. It is AIRS's `rendement` off the newest row: the\nlatest month's return. It was once served as `value_ratio_pct` and described as \"the wrong\nnumber\", on the theory that deposits inflated it \u2014 but AITopSelectie has zero deposits in\nevery month of 2026 and still reads -5.85% there against +46.12% for the year. Different\nwindows, both correct.",
         "properties": {
@@ -4149,6 +4457,17 @@
             ],
             "title": "Isin"
           },
+          "mom_12_1_from": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mom 12 1 From"
+          },
           "mom_12_1_pct": {
             "anyOf": [
               {
@@ -4159,6 +4478,17 @@
               }
             ],
             "title": "Mom 12 1 Pct"
+          },
+          "mom_12_1_to": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mom 12 1 To"
           },
           "money_weighted_return_pct": {
             "anyOf": [
@@ -4629,6 +4959,40 @@
         "title": "CompositionHolding",
         "type": "object"
       },
+      "ConcentrationRow": {
+        "description": "One ISSUER in the top of the book \u2014 not one line. See `_active_share._issuer_key`.",
+        "properties": {
+          "benchmark_pct": {
+            "default": 0.0,
+            "title": "Benchmark Pct",
+            "type": "number"
+          },
+          "cumulative_pct": {
+            "title": "Cumulative Pct",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "rank",
+          "name",
+          "weight_pct",
+          "cumulative_pct"
+        ],
+        "title": "ConcentrationRow",
+        "type": "object"
+      },
       "ConstituentFundamentalColumn": {
         "description": "One RAW GuruFocus line the Long Equity charts consume. Shipped with the data so the table\nrenders the set the SERVER knows about \u2014 add a line backend-side and its columns appear\nwithout a frontend change, which is the only way the two cannot drift.",
         "properties": {
@@ -4893,6 +5257,29 @@
         "title": "CorrelationInstrument",
         "type": "object"
       },
+      "CorrelationPair": {
+        "properties": {
+          "a": {
+            "title": "A",
+            "type": "string"
+          },
+          "b": {
+            "title": "B",
+            "type": "string"
+          },
+          "rho": {
+            "title": "Rho",
+            "type": "number"
+          }
+        },
+        "required": [
+          "a",
+          "b",
+          "rho"
+        ],
+        "title": "CorrelationPair",
+        "type": "object"
+      },
       "CorrelationRequest": {
         "properties": {
           "backtest_run_id": {
@@ -5093,6 +5480,40 @@
           "password"
         ],
         "title": "CreateUserRequest",
+        "type": "object"
+      },
+      "CurrencyExposure": {
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "issuers": {
+            "default": 0,
+            "title": "Issuers",
+            "type": "integer"
+          },
+          "value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Eur"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "currency",
+          "weight_pct"
+        ],
+        "title": "CurrencyExposure",
         "type": "object"
       },
       "CurvePoint": {
@@ -5739,6 +6160,85 @@
         "title": "DividendSeriesResponse",
         "type": "object"
       },
+      "DrawdownEpisode": {
+        "description": "One peak \u2192 trough \u2192 recovery.\n\n\u26a0 AN EPISODE ENDS WHEN THE OLD PEAK IS REGAINED, not when the series turns up. A 40% fall that\nbounces 5% and then falls further is ONE drawdown; splitting on direction would report a set of\nshallow dips and no crash.",
+        "properties": {
+          "decline_periods": {
+            "default": 0,
+            "title": "Decline Periods",
+            "type": "integer"
+          },
+          "depth_pct": {
+            "title": "Depth Pct",
+            "type": "number"
+          },
+          "peak_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peak Date"
+          },
+          "recovered": {
+            "default": false,
+            "title": "Recovered",
+            "type": "boolean"
+          },
+          "recovery_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Date"
+          },
+          "recovery_periods": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Periods"
+          },
+          "total_periods": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Periods"
+          },
+          "trough_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trough Date"
+          }
+        },
+        "required": [
+          "depth_pct"
+        ],
+        "title": "DrawdownEpisode",
+        "type": "object"
+      },
       "DrawdownInfo": {
         "properties": {
           "depth_pct": {
@@ -5820,6 +6320,49 @@
           "fee_bps"
         ],
         "title": "ExchangeFeeIn",
+        "type": "object"
+      },
+      "ExposurePosition": {
+        "description": "One ISSUER's effective position. `lines` > 1 means several holdings folded into it.",
+        "properties": {
+          "currencies": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Currencies",
+            "type": "array"
+          },
+          "lines": {
+            "default": 1,
+            "title": "Lines",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Eur"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "weight_pct"
+        ],
+        "title": "ExposurePosition",
         "type": "object"
       },
       "FeeConfigIn": {
@@ -6033,81 +6576,6 @@
           "quarterly"
         ],
         "title": "FinancialSeriesResponse",
-        "type": "object"
-      },
-      "FundamentalBreakdownRequest": {
-        "description": "One blended point to take apart: which metric, which fiscal year.",
-        "properties": {
-          "cadence": {
-            "default": "annual",
-            "title": "Cadence",
-            "type": "string"
-          },
-          "holdings": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Holdings"
-          },
-          "metric_code": {
-            "title": "Metric Code",
-            "type": "string"
-          },
-          "metrics": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metrics"
-          },
-          "period": {
-            "title": "Period",
-            "type": "string"
-          },
-          "portfolio_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Portfolio Id"
-          },
-          "universe": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Universe"
-          }
-        },
-        "required": [
-          "metric_code",
-          "period"
-        ],
-        "title": "FundamentalBreakdownRequest",
         "type": "object"
       },
       "FundamentalCoverageRequest": {
@@ -6515,76 +6983,6 @@
           "isin"
         ],
         "title": "FundamentalIngestRequest",
-        "type": "object"
-      },
-      "FundamentalMatrixRequest": {
-        "description": "The whole blended line taken apart: which metric (every period, every holding).",
-        "properties": {
-          "cadence": {
-            "default": "annual",
-            "title": "Cadence",
-            "type": "string"
-          },
-          "holdings": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Holdings"
-          },
-          "metric_code": {
-            "title": "Metric Code",
-            "type": "string"
-          },
-          "metrics": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metrics"
-          },
-          "portfolio_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Portfolio Id"
-          },
-          "universe": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Universe"
-          }
-        },
-        "required": [
-          "metric_code"
-        ],
-        "title": "FundamentalMatrixRequest",
         "type": "object"
       },
       "FundamentalPoint": {
@@ -7774,6 +8172,17 @@
             ],
             "title": "Avg Capital Eur"
           },
+          "beta_5y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beta 5Y"
+          },
           "capital_unknown": {
             "default": false,
             "title": "Capital Unknown",
@@ -7821,6 +8230,17 @@
             "title": "Income Eur",
             "type": "number"
           },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
           "last_sale": {
             "anyOf": [
               {
@@ -7831,6 +8251,39 @@
               }
             ],
             "title": "Last Sale"
+          },
+          "mom_12_1_from": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mom 12 1 From"
+          },
+          "mom_12_1_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mom 12 1 Pct"
+          },
+          "mom_12_1_to": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mom 12 1 To"
           },
           "name": {
             "title": "Name",
@@ -7877,6 +8330,17 @@
             "default": 0,
             "title": "Sales",
             "type": "integer"
+          },
+          "vol_5y_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vol 5Y Pct"
           },
           "weight_pct": {
             "anyOf": [
@@ -10009,6 +10473,229 @@
         "title": "PortfolioAnalysisRow",
         "type": "object"
       },
+      "PortfolioConcentration": {
+        "description": "`C\u2081\u2080 = \u03a3 w\u208d\u1d62\u208e` and `HHI = \u03a3 w\u1d62\u00b2` \u2014 see `routers/_portfolio_concentration.py`.\n\n\u26a0\u26a0 ON ISSUERS, NOT LINES. Alphabet A + Alphabet C is ONE position; counting two would\nunderstate concentration exactly at the top, where the ten largest are decided.\n\n\u26a0\u26a0 BOTH DENOMINATORS ARE RETURNED because the choice changes the number: `top10_pct` is of the\nstock sleeve (comparable across books, the panel's convention) and `top10_of_book_pct` is of\neverything including cash and funds (true in absolute terms). Choosing one silently would be\npicking a side of a real question.",
+        "properties": {
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "benchmark": {
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "benchmark_caps_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Caps From"
+          },
+          "benchmark_caps_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Caps To"
+          },
+          "benchmark_caps_unstamped": {
+            "default": 0,
+            "title": "Benchmark Caps Unstamped",
+            "type": "integer"
+          },
+          "benchmark_covered_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Covered Pct"
+          },
+          "benchmark_effective_positions": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Effective Positions"
+          },
+          "benchmark_hhi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Hhi"
+          },
+          "benchmark_issuers": {
+            "default": 0,
+            "title": "Benchmark Issuers",
+            "type": "integer"
+          },
+          "benchmark_top10_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Top10 Pct"
+          },
+          "effective_positions": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Positions"
+          },
+          "hhi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hhi"
+          },
+          "issuers": {
+            "default": 0,
+            "title": "Issuers",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "stocks_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stocks Pct"
+          },
+          "top": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ConcentrationRow"
+            },
+            "title": "Top",
+            "type": "array"
+          },
+          "top10_of_book_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top10 Of Book Pct"
+          },
+          "top10_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top10 Pct"
+          },
+          "top1_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top1 Pct"
+          },
+          "top20_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top20 Pct"
+          },
+          "top3_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top3 Pct"
+          },
+          "top5_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top5 Pct"
+          },
+          "unresolved": {
+            "default": 0,
+            "title": "Unresolved",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "benchmark"
+        ],
+        "title": "PortfolioConcentration",
+        "type": "object"
+      },
       "PortfolioCorrelationMatrix": {
         "description": "Pairwise Pearson correlation of the LISTED model portfolios' daily EUR returns, for two\nwindows. Same return series the /portfolios YTD column is read off, correlated pairwise-\ncomplete. Covers exactly the > 5-holding models the table shows by default (\"42 of 95\").\n\n`ytd` / `trailing_12m` are NxN over `portfolio_ids` (row i = column i = `portfolio_ids[i]`,\n`labels[i]`). A cell is `null` when the pair share fewer than `min_overlap_days` common daily\nreturns (or a side has no priceable series / zero variance). The diagonal is 1.0 where the\nportfolio has enough of its own returns, else null. `*_obs` is each portfolio's daily-return\ncount in that window.",
         "properties": {
@@ -10153,6 +10840,312 @@
           "name"
         ],
         "title": "PortfolioCreate",
+        "type": "object"
+      },
+      "PortfolioDrawdown": {
+        "description": "Max drawdown of the RECONSTRUCTED sleeve \u2014 see `routers/_portfolio_drawdown.py`.\n\n\u26a0\u26a0 NOT THE CLIENT'S REALISED DRAWDOWN, and the two are not interchangeable. This rebuilds a\nseries from the holdings as they stand TODAY: look-ahead bias (those weights were chosen with\nhindsight) and survivorship bias (names since sold are absent, and the sold ones skew towards\nthe fallers). The client's own figure comes from the AIRS returns, with real trades, real costs\nand real timing. Every label here says which one it is.",
+        "properties": {
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "benchmark": {
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "benchmark_max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Max Drawdown Pct"
+          },
+          "by_frequency": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "default": {},
+            "title": "By Frequency",
+            "type": "object"
+          },
+          "current_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Drawdown Pct"
+          },
+          "episode_threshold_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Episode Threshold Pct"
+          },
+          "episodes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/DrawdownEpisode"
+            },
+            "title": "Episodes",
+            "type": "array"
+          },
+          "episodes_over_threshold": {
+            "default": 0,
+            "title": "Episodes Over Threshold",
+            "type": "integer"
+          },
+          "episodes_total": {
+            "default": 0,
+            "title": "Episodes Total",
+            "type": "integer"
+          },
+          "frequency": {
+            "default": "daily",
+            "title": "Frequency",
+            "type": "string"
+          },
+          "in_drawdown": {
+            "default": false,
+            "title": "In Drawdown",
+            "type": "boolean"
+          },
+          "max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown Pct"
+          },
+          "observations": {
+            "default": 0,
+            "title": "Observations",
+            "type": "integer"
+          },
+          "periods_per_year": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periods Per Year"
+          },
+          "priced_holdings": {
+            "default": 0,
+            "title": "Priced Holdings",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "total_holdings": {
+            "default": 0,
+            "title": "Total Holdings",
+            "type": "integer"
+          },
+          "window_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window From"
+          },
+          "window_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window To"
+          },
+          "worst": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DrawdownEpisode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "years": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years"
+          }
+        },
+        "required": [
+          "benchmark"
+        ],
+        "title": "PortfolioDrawdown",
+        "type": "object"
+      },
+      "PortfolioExposure": {
+        "description": "Effective positions \u2014 `E\u1d62 = q\u1d62\u00b7P\u1d62\u00b7X\u1d62` \u2014 see `routers/_portfolio_exposure.py`.\n\n\u26a0\u26a0 WE DO NOT COMPUTE THAT PRODUCT. `airs_holding` carries a quantity, but it also carries\n`current_value_eur`: AIRS's OWN valuation, already in euros, already struck on its own date.\nThat is the number on the client's statement. Re-deriving it from our close and our FX rate\nwould produce a second figure disagreeing with the statement on most rows, with nothing on\nscreen able to say which was right. `E\u1d62` here IS that valuation, folded per issuer.\n\n\u26a0 TRADE DATE vs SETTLEMENT DATE IS AIRS'S CONVENTION AND WE CANNOT VERIFY IT FROM HERE. The\nVermogensoverzicht exposes no flag saying which basis it used, so a book with a very recent\ntrade may differ from a trade-date view by that trade's value with nothing in our data showing\nit. Stated rather than assumed away.",
+        "properties": {
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "benchmark": {
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "book_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Eur"
+          },
+          "currencies": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CurrencyExposure"
+            },
+            "title": "Currencies",
+            "type": "array"
+          },
+          "currency_unknown_pct": {
+            "default": 0.0,
+            "title": "Currency Unknown Pct",
+            "type": "number"
+          },
+          "folded_lines": {
+            "default": 0,
+            "title": "Folded Lines",
+            "type": "integer"
+          },
+          "has_values": {
+            "default": false,
+            "title": "Has Values",
+            "type": "boolean"
+          },
+          "issuers": {
+            "default": 0,
+            "title": "Issuers",
+            "type": "integer"
+          },
+          "lines": {
+            "default": 0,
+            "title": "Lines",
+            "type": "integer"
+          },
+          "other_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Other Eur"
+          },
+          "positions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ExposurePosition"
+            },
+            "title": "Positions",
+            "type": "array"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "sleeve_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sleeve Eur"
+          },
+          "stocks_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stocks Pct"
+          },
+          "unresolved": {
+            "default": 0,
+            "title": "Unresolved",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "benchmark"
+        ],
+        "title": "PortfolioExposure",
         "type": "object"
       },
       "PortfolioFundamentalsJob": {
@@ -10524,6 +11517,292 @@
           }
         },
         "title": "PortfolioUpdate",
+        "type": "object"
+      },
+      "PortfolioVolatility": {
+        "description": "\u03c3 of the stock sleeve's OWN returns \u2014 see `routers/_portfolio_volatility.py`.\n\n\u26a0 SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the\ncorrelation view puts inside `\u03c3\u2090\u00b2 = \u03c3\u209a\u00b2 + \u03c3\u1d47\u00b2 \u2212 2\u03c1\u03c3\u209a\u03c3\u1d47`. Two \u03c3\u209a one click apart that\ndisagreed would tell the reader one of them is wrong and nothing about which.\n\n\u26a0\u26a0 NO CASH-FLOW CONTAMINATION, BY CONSTRUCTION RATHER THAN BY CHAIN-LINKING. This is not an\naccount-value series \u2014 it is a weighted basket of instrument price returns \u2014 so a deposit or a\nwithdrawal is simply not in it. That is what a time-weighted return exists to achieve. The cost\nis the other caveat: the weights are TODAY'S, carried backwards.",
+        "properties": {
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "benchmark": {
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "benchmark_best_period_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Best Period Pct"
+          },
+          "benchmark_downside_dev_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Downside Dev Pct"
+          },
+          "benchmark_negative_periods_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Negative Periods Pct"
+          },
+          "benchmark_return_ann_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Return Ann Pct"
+          },
+          "benchmark_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Sharpe"
+          },
+          "benchmark_sortino": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Sortino"
+          },
+          "benchmark_volatility_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Volatility Pct"
+          },
+          "benchmark_worst_period_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Worst Period Pct"
+          },
+          "best_period_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Period Pct"
+          },
+          "cadence_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cadence Note"
+          },
+          "downside_dev_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downside Dev Pct"
+          },
+          "frequency": {
+            "default": "weekly",
+            "title": "Frequency",
+            "type": "string"
+          },
+          "negative_periods_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Negative Periods Pct"
+          },
+          "observations": {
+            "default": 0,
+            "title": "Observations",
+            "type": "integer"
+          },
+          "periods_per_year": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periods Per Year"
+          },
+          "priced_holdings": {
+            "default": 0,
+            "title": "Priced Holdings",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "return_ann_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Ann Pct"
+          },
+          "risk_free_pct": {
+            "default": 0.0,
+            "title": "Risk Free Pct",
+            "type": "number"
+          },
+          "sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe"
+          },
+          "sortino": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sortino"
+          },
+          "total_holdings": {
+            "default": 0,
+            "title": "Total Holdings",
+            "type": "integer"
+          },
+          "volatility_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volatility Pct"
+          },
+          "window_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window From"
+          },
+          "window_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window To"
+          },
+          "worst_period_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Period Pct"
+          },
+          "years": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years"
+          }
+        },
+        "required": [
+          "benchmark"
+        ],
+        "title": "PortfolioVolatility",
         "type": "object"
       },
       "PricePoint": {
@@ -11495,6 +12774,267 @@
         "title": "ResolveNameResponse",
         "type": "object"
       },
+      "RiskCorrelation": {
+        "description": "\u03c1 as a RISK measure \u2014 see `routers/_portfolio_correlation_risk.py`.\n\n\u26a0\u26a0 NOT ATTRIBUTION, AND THE TWO MUST STAY SEPARATE PANELS. Attribution decomposes the active\nreturn into allocation + selection + interaction, terms that SUM to it exactly. Correlation\nappears nowhere in that decomposition and sums to nothing: it says how far the book CAN diverge,\nwhere attribution says where the divergence came from. A combined view would imply they\nreconcile, and they are not that kind of number.",
+        "properties": {
+          "active_vol_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Vol Pct"
+          },
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "benchmark": {
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "benchmark_corr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Corr"
+          },
+          "benchmark_vol_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Vol Pct"
+          },
+          "cadence_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cadence Note"
+          },
+          "frequency": {
+            "default": "weekly",
+            "title": "Frequency",
+            "type": "string"
+          },
+          "identity_gap_pp": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Gap Pp"
+          },
+          "implied_active_vol_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Implied Active Vol Pct"
+          },
+          "labels": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "least_correlated": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CorrelationPair"
+            },
+            "title": "Least Correlated",
+            "type": "array"
+          },
+          "matrix": {
+            "default": [],
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Matrix",
+            "type": "array"
+          },
+          "mean_pair_corr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Pair Corr"
+          },
+          "min_observations": {
+            "default": 0,
+            "title": "Min Observations",
+            "type": "integer"
+          },
+          "min_pair_observations": {
+            "default": 0,
+            "title": "Min Pair Observations",
+            "type": "integer"
+          },
+          "most_correlated": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CorrelationPair"
+            },
+            "title": "Most Correlated",
+            "type": "array"
+          },
+          "observations": {
+            "default": 0,
+            "title": "Observations",
+            "type": "integer"
+          },
+          "pair_rho_sum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pair Rho Sum"
+          },
+          "pairs_measured": {
+            "default": 0,
+            "title": "Pairs Measured",
+            "type": "integer"
+          },
+          "periods_per_year": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periods Per Year"
+          },
+          "portfolio_vol_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Vol Pct"
+          },
+          "priced_holdings": {
+            "default": 0,
+            "title": "Priced Holdings",
+            "type": "integer"
+          },
+          "r_squared": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "R Squared"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "total_holdings": {
+            "default": 0,
+            "title": "Total Holdings",
+            "type": "integer"
+          },
+          "window_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window From"
+          },
+          "window_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window To"
+          },
+          "years": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years"
+          }
+        },
+        "required": [
+          "benchmark"
+        ],
+        "title": "RiskCorrelation",
+        "type": "object"
+      },
       "SaveBacktestRequest": {
         "properties": {
           "config": {
@@ -12387,6 +13927,177 @@
           "months"
         ],
         "title": "StrategyStats",
+        "type": "object"
+      },
+      "TrackingError": {
+        "description": "Realised (ex-post) tracking error of the stock sleeve \u2014 see `routers/_tracking_error.py`.\n\n\u26a0\u26a0 `TE = \u221a(1/(T\u22121) \u03a3 (a\u209c \u2212 \u0101)\u00b2) \u00b7 \u221af`, WITH \u0101 SUBTRACTED and Bessel applied. The other\nconvention (\u221a(\u03a3a\u209c\u00b2/T)) is also called tracking error and is a different number; this codebase\npicks one and routes it through `annualized_stats`, the same function every other volatility on\nthe screen goes through.\n\n\u26a0 EX-POST, NOT EX-ANTE. There is no covariance-matrix forecast here, and the two routinely\ndisagree \u2014 so every label says \"realised\" rather than leaving the reader to assume.",
+        "properties": {
+          "active_return_ann_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Return Ann Pct"
+          },
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "avg_weight_covered_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Weight Covered Pct"
+          },
+          "benchmark": {
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "benchmark_isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Isin"
+          },
+          "cadence_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cadence Note"
+          },
+          "frequency": {
+            "default": "weekly",
+            "title": "Frequency",
+            "type": "string"
+          },
+          "information_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Information Ratio"
+          },
+          "mean_active_per_period_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Active Per Period Pct"
+          },
+          "observations": {
+            "default": 0,
+            "title": "Observations",
+            "type": "integer"
+          },
+          "periods_per_year": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Periods Per Year"
+          },
+          "priced_holdings": {
+            "default": 0,
+            "title": "Priced Holdings",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "total_holdings": {
+            "default": 0,
+            "title": "Total Holdings",
+            "type": "integer"
+          },
+          "tracking_error_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Error Pct"
+          },
+          "window_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window From"
+          },
+          "window_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window To"
+          },
+          "years": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years"
+          }
+        },
+        "required": [
+          "benchmark"
+        ],
+        "title": "TrackingError",
         "type": "object"
       },
       "UniverseRenameRequest": {
@@ -15284,6 +16995,16 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "prices",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Prices",
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -15830,6 +17551,16 @@
               "title": "Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "prices",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Prices",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -16370,6 +18101,464 @@
           }
         },
         "summary": "Airs Model Portfolio Ytd Explain",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/portfolio/active-share": {
+      "post": {
+        "description": "How much of the book's stock sleeve is NOT the benchmark.\n\n\u26a0 ON DEMAND, NOT PART OF THE ANALYSE PAYLOAD. Answering it needs the index's constituents\n(`_asset_benchmark.members` \u2014 1,700 rows and their caps for ACWI), and the Analyse modal is ONE\nrequest with no partial paint, so folding this in would put that read on the critical path of\nevery open for a panel most opens never look at. Same bargain Attribution already strikes.\n\n\u26a0 THE INDIVIDUAL STOCKS ARE TREATED AS 100% OF THE PORTFOLIO. Funds, cash and bonds are\ndropped and the rest renormalised \u2014 otherwise liquidity counts as an active bet against every\nindex name at once, which is a different (and much less comparable) measure. `stocks_pct` says\nwhat fraction of the book that sleeve actually is.",
+        "operationId": "airs_portfolio_active_share_api_airs_portfolio_active_share_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveShare"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Active Share",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/portfolio/concentration": {
+      "post": {
+        "description": "How much of the book sits in how few issuers, beside the index's own concentration.\n\n\u26a0 SAME ISSUER FOLDING AS ACTIVE SHARE (`build_issuer_weights`), so the two views cannot\ndisagree about how many positions the book has.\n\n\u26a0 NO PRICE SERIES AT ALL \u2014 this is a weights-only measure, so it is much cheaper than the\nother risk views and needs no cadence.",
+        "operationId": "airs_portfolio_concentration_api_airs_portfolio_concentration_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioConcentration"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Concentration",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/portfolio/drawdown": {
+      "post": {
+        "description": "Peak-to-trough falls of the reconstructed stock sleeve, with their dates.\n\n\u26a0 ONE PRICE LOAD SERVES ALL THREE CADENCES \u2014 the load is the expensive part and re-bucketing\nis free, so the frequency comparison costs no extra round trips.",
+        "operationId": "airs_portfolio_drawdown_api_airs_portfolio_drawdown_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "frequency",
+            "required": false,
+            "schema": {
+              "default": "daily",
+              "title": "Frequency",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "years",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "title": "Years",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioDrawdown"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Drawdown",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/portfolio/exposure": {
+      "post": {
+        "description": "The euros behind the weights, per issuer, and the currency split of the sleeve.\n\n\u26a0 SAME ISSUER FOLDING AS ACTIVE SHARE AND CONCENTRATION (`build_issuer_weights`) \u2014 built once\nand read by all three, which is what stops three panels showing three sets of weights for one\nportfolio.",
+        "operationId": "airs_portfolio_exposure_api_airs_portfolio_exposure_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioExposure"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Exposure",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/portfolio/risk-correlation": {
+      "post": {
+        "description": "Correlation to the benchmark, and between the positions \u2014 the Risk panel's third view.\n\n\u26a0 THE SAME BODY AND THE SAME SERIES AS `tracking-error`, so `\u03c3\u2090\u00b2 = \u03c3\u209a\u00b2 + \u03c3\u1d47\u00b2 \u2212 2\u03c1\u03c3\u209a\u03c3\u1d47` holds\nbetween the two views rather than approximately holding. See `build_paired_series`.\n\n\u26a0 SEPARATE FROM ATTRIBUTION BY DESIGN. That lives in its own dialog and decomposes the active\nreturn; this one measures dispersion. Merging them would imply a reconciliation that does not\nexist.",
+        "operationId": "airs_portfolio_risk_correlation_api_airs_portfolio_risk_correlation_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "frequency",
+            "required": false,
+            "schema": {
+              "default": "weekly",
+              "title": "Frequency",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "years",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "title": "Years",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskCorrelation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Risk Correlation",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/portfolio/tracking-error": {
+      "post": {
+        "description": "Volatility of the active return, annualised \u2014 the Risk panel's second view.\n\n\u26a0 THE SAME BODY AS `active-share`, DELIBERATELY. The two views describe ONE portfolio (the\nindividual stocks, renormalised to 100%), and sharing the request model is what stops them\ndrifting into describing two \u2014 an active share over the stock sleeve beside a tracking error\nover the whole book would be two answers to two questions under one heading.\n\n\u26a0 SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for\nevery holding plus the tracker, and most opens of the Risk panel never switch to it.",
+        "operationId": "airs_portfolio_tracking_error_api_airs_portfolio_tracking_error_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "frequency",
+            "required": false,
+            "schema": {
+              "default": "weekly",
+              "title": "Frequency",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "years",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "title": "Years",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackingError"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Tracking Error",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/portfolio/volatility": {
+      "post": {
+        "description": "Standard deviation of the sleeve's own returns, and its downside half.\n\n\u26a0 `benchmark` IS NOT WHAT IS MEASURED HERE \u2014 volatility is a single-series statistic. It is\ncarried so the index's own \u03c3 can sit beside the book's for scale, and so this view uses the\nidentical series the other three do.",
+        "operationId": "airs_portfolio_volatility_api_airs_portfolio_volatility_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "frequency",
+            "required": false,
+            "schema": {
+              "default": "weekly",
+              "title": "Frequency",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "years",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "title": "Years",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioVolatility"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Volatility",
         "tags": [
           "airs"
         ]
@@ -21400,7 +23589,7 @@
     },
     "/api/earnings/benchmark-revenue": {
       "get": {
-        "description": "A benchmark index's revenue (or any `_METRIC_CODES` metric) as a GROWTH INDEX \u2014 its\nconstituents' figures blended the same\nway a portfolio's is (a LEVEL \u2192 each rebased to 100 at its first year, then weighted).\n\n\u26a0 NOT A SUM OF ABSOLUTE REVENUES. AEX constituents report in different currencies (Shell/RELX/\nUnilever in GBP), so a euro total would silently add pounds to euros. The level-blend sidesteps\nthat \u2014 it compares GROWTH, which is what the R\u00b2 read on the /Long Equity tab needs \u2014 and drops\nany year under the 60% coverage floor rather than drawing it thin.\n\nCap-weighted by `market_cap_eur` where known, else equal-weighted (a benchmark growth reference,\nnot a priced index). Returns `{label, series:[{year, value}], members, covered_pct}`.",
+        "description": "A benchmark index's revenue (or any `_METRIC_CODES` metric) as a GROWTH INDEX \u2014 its\nconstituents' figures blended exactly the way a portfolio's is, so the two lines on the\n/Long Equity tab are one construction rather than two.\n\n\u26a0\u26a0 IT **IS** A SUM OF ABSOLUTE REVENUES NOW, IN EUR \u2014 and the objection that used to sit here\n(\"AEX constituents report in different currencies, so a euro total would silently add pounds to\neuros\") was right about the hazard and wrong about the remedy. The hazard is real: Shell, RELX\nand Unilever file in GBP. The remedy is to CONVERT, at each period's own end rate, which is\nwhat `fundamental_totals` does \u2014 not to avoid summing. Avoiding it cost more than it saved:\naveraging per-member growth rates weighted by market cap is the wrong weight for a fundamental\nand is upward-biased, worth ~5pp/yr on ACWI revenue (~9.95% averaged against +4.60% summed).\nSee the aggregate branch in `_fundamental_blend`. Years under the coverage floor are still\ndropped rather than drawn thin.\n\nCap-weighted by `market_cap_eur` where known, else equal-weighted (a benchmark growth reference,\nnot a priced index). Returns `{label, series:[{year, value}], members, covered_pct}`.",
         "operationId": "benchmark_revenue_api_earnings_benchmark_revenue_get",
         "parameters": [
           {
@@ -21445,48 +23634,6 @@
           }
         },
         "summary": "Benchmark Revenue",
-        "tags": [
-          "earnings"
-        ]
-      }
-    },
-    "/api/earnings/benchmark-revenue-matrix": {
-      "get": {
-        "description": "The audit grid behind the benchmark revenue line: every constituent's revenue at every year,\nthe blended footer that reconciles to the line, AND where each series comes from.\n\nSame `blend_matrix` the Forward-P/E \"All periods\" grid uses (revenue is a LEVEL \u2192 each rebased\nto a growth index, weighted), so the cells and footer are built from exactly what the line is.\nEach row (and each excluded constituent) carries a `source` \u2014 `TICKER@EXCHANGE` \u2014 so a reader\nsees which listing's GuruFocus figures fed it. Constituents with no revenue land in `excluded`\n(reason `no_data`): that names the ones we simply have nothing for, which is half the answer.",
-        "operationId": "benchmark_revenue_matrix_api_earnings_benchmark_revenue_matrix_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "label",
-            "required": false,
-            "schema": {
-              "default": "AEX",
-              "title": "Label",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Benchmark Revenue Matrix",
         "tags": [
           "earnings"
         ]
@@ -21869,86 +24016,6 @@
           }
         },
         "summary": "Fundamental Blend",
-        "tags": [
-          "earnings"
-        ]
-      }
-    },
-    "/api/earnings/fundamental-blend-breakdown": {
-      "post": {
-        "description": "The holdings behind ONE point of a blended chart, and the ones missing from it.\n\n\u26a0 IT LOADS ONE METRIC, NOT THE SUITE. The blend endpoint reads every charted code for every\nholding; a drill-down needs one code (plus, for a forecast, the actual it is anchored on), so\nit is a small read on click rather than a large one on open.\n\n\u26a0 IT DECOMPOSES THROUGH `blend_breakdown`, WHICH SHARES `_prepare` WITH THE LINE ITSELF. The\nalternative \u2014 recomputing the members \"the same way\" here \u2014 is a second copy of the\nharmonic/ratio/level rules, and a drill-down that quietly disagrees with the chart above it\nis worse than none: it is checked once and trusted from then on.",
-        "operationId": "fundamental_blend_breakdown_api_earnings_fundamental_blend_breakdown_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FundamentalBreakdownRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Fundamental Blend Breakdown",
-        "tags": [
-          "earnings"
-        ]
-      }
-    },
-    "/api/earnings/fundamental-blend-matrix": {
-      "post": {
-        "description": "The audit grid behind a blended line: every holding's value at every period, plus the\nblended value + coverage per period.\n\n\u26a0 SAME LOADER AND SAME `_prepare` AS THE LINE AND THE PER-POINT DRILL-DOWN. It reads ONE\nmetric's rows per covered holding (+ the actual a forecast is anchored on) and hands them to\n`blend_matrix`, so the grid a reader verifies against is built from exactly what the chart\ndrew \u2014 there is no second computation to disagree with.",
-        "operationId": "fundamental_blend_matrix_api_earnings_fundamental_blend_matrix_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FundamentalMatrixRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Fundamental Blend Matrix",
         "tags": [
           "earnings"
         ]

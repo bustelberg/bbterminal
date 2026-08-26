@@ -202,7 +202,10 @@ def _endpoints() -> list[tuple[str, object]]:
 # What `LongEquityTab.tsx` names on the growth blend. ⚠ IT MUST MATCH THE CLIENT'S LIST EXACTLY:
 # `cache_key` includes the sorted metrics tuple, so a different list warms an entry the tab will
 # never ask for — a prewarm that costs full price and hits nothing, with no symptom but the wait.
-_BLEND_METRICS = ["eps_nri", "eps_nri_estimate", "revenue", "fcf_ps", "shares"]
+# ⚠ `price_ps` IS THE SHARE-PRICE CARD, FIRST ON THE TAB — added with it. Omitting it here does not
+# break the card, which is exactly the problem: the benchmark blend would simply miss the prewarm
+# and the first reader of every index would pay the full rebuild, silently.
+_BLEND_METRICS = ["price_ps", "eps_nri", "eps_nri_estimate", "revenue", "fcf_ps", "shares"]
 
 
 async def _warm_one(label: str, cadence: str, gen: int) -> int:

@@ -56,10 +56,39 @@ export type RefreshScope =
    */
   | { kind: 'universe'; label: string; name: string; feeds?: IndexFeeds };
 
-export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
+export default function PortfolioFundamentalsRefresh({ scope, onDone, label, everything }: {
   scope: RefreshScope;
+  /**
+   * Fetch EVERYTHING the Fundamental modal draws, not just the statements feed.
+   *
+   * ⚠⚠ "Refresh fundamentals" DID NOT REFRESH WHAT THE PAGE UNDER IT SHOWED, and on Quick
+   * Valuation it refreshed almost none of it (reported 2026-08-21). The default fill is
+   * `feeds=statements` — ONE of GuruFocus's three feeds — and prices are not a feed at all:
+   *
+   *     statements (fin)   the reported accounts. This is all the button ever fetched.
+   *     indicators (ind)   `indicator_q_forward_pe_ratio` — the ONLY line left on Quick
+   *                        Valuation's multiple chart, so that chart could never be refreshed.
+   *     estimates  (est)   `annual_eps_nri_estimate` — the dotted consensus leg on Long Equity's
+   *                        EPS card, and the forecast Quick Valuation's calculator projects from.
+   *     prices             `metric_data.close_price` — a SEPARATE ingest. Today's share price and
+   *                        the closes the multiple is priced off were untouched entirely.
+   *
+   * ⚠ SO IT IS THE WHOLE MODAL, NOT ONE TAB. The gap is worst on Quick Valuation but not confined
+   * to it — Long Equity's forecast leg is the `est` feed too. A button whose behaviour depended on
+   * which tab happened to be open would be a different button wearing the same words.
+   *
+   * ⚠ THE COST IS ~4 CALLS PER COMPANY INSTEAD OF 1 (three feeds plus a price fetch), which is why
+   * this is opt-in rather than the default: the drill-down's per-row press and the index fill have
+   * their own, narrower reasons to exist, and a four-figure index spend is not one of them.
+   */
+  everything?: boolean;
   /** Called when the fill ends without failing, so the caller can re-read what it wrote. */
-  onDone: () => void;
+  /** ⚠ OPTIONAL, AND THE CACHE DROP IS NOT. `invalidateReadCache` runs beside every call of
+   *  this, unconditionally — that is what makes the new data reachable. `onDone` is only for a
+   *  caller holding a MOUNTED view it must re-key (the drill-down matrix does). The Fundamental
+   *  modal had one for the Old-charts tab and no longer needs it; a required no-op there would
+   *  read as a caller that forgot to do something. */
+  onDone?: () => void;
   /**
    * What the button says at rest. Default: "Refresh fundamentals" (the tab row, where it is the
    * only such control on screen), or "Fetch missing fundamentals" for an index.
@@ -127,7 +156,7 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
     void watchJob(live.id, `${scope.name} fundamentals`).then((job) => {
       if (job.status !== 'failed') {
         invalidateReadCache(`fundamentals fill finished for ${scope.name}`);
-        onDone();
+        onDone?.();
       }
       setBusy(false);
       setJobId(null);
@@ -141,7 +170,9 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
   const run = async () => {
     setBusy(true);
     try {
-      const q = '?force=true&only_due=true';
+      // ⚠ `feeds=all` NARROWS NOTHING and `prices=true` adds the ingest that is not a feed — see
+      // the `everything` prop for what the four things are and which chart each one was missing.
+      const q = `?force=true&only_due=true${everything ? '&feeds=all&prices=true' : ''}`;
       // A company and a basket post the same body — one holding or many. `/api/airs/basket/…` is
       // already the codebase's shape for "an ad-hoc set of holdings"; a single stock is a set of
       // one, which is exactly how `/api/airs/basket/analysis` treats it.
@@ -230,7 +261,7 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label }: {
       // pre-fill book — a refresh button that visibly does nothing.
       if (job.status !== 'failed') {
         invalidateReadCache(`fundamentals fill finished for ${scope.name}`);
-        onDone();
+        onDone?.();
       }
     } catch (e) {
       traceError('fundamentals', `could not start the fill for ${scope.name}`, e);

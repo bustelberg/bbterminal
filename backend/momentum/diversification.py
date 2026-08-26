@@ -141,6 +141,18 @@ class Stats:
     sortino: float | None
     median_month: float | None = None   # median monthly return (fraction)
     win_rate: float | None = None        # fraction of months with return > 0
+    #: Annualised DOWNSIDE deviation — the denominator of `sortino`, surfaced.
+    #:
+    #: ⚠⚠ IT WAS COMPUTED HERE AND THROWN AWAY, and the Risk panel needed to SHOW it rather than
+    #: only the ratio built from it. Returning it instead of recomputing outside is what keeps one
+    #: definition: a second `√(mean(min(r,0)²))·√ppy` elsewhere would be the place the two disagree.
+    #:
+    #: ⚠ SORTINO'S CONVENTION, NOT THE SEMI-DEVIATION ONE, and they are different numbers. This
+    #: divides by ALL n observations and measures shortfall against the risk-free TARGET; the
+    #: semi-deviation divides by the count of below-MEAN observations and measures against the
+    #: mean. Both are called "downside deviation" in the wild. The one that belongs here is the one
+    #: `sortino` is already built on, or the ratio on screen would not equal its own parts.
+    downside_dev: float | None = None
 
 
 def annualized_stats(
@@ -193,6 +205,10 @@ def annualized_stats(
         sortino=sortino,
         median_month=float(np.median(r)),
         win_rate=float(np.mean(r > 0)),
+        # ⚠ 0.0, NOT None, WHEN NOTHING EVER FELL SHORT — that is a measurement ("this series never
+        # went below the target"), where None means "could not be measured". `sortino` stays None
+        # there because a ratio over zero has no value, which is a different statement again.
+        downside_dev=dd,
     )
 
 

@@ -8,11 +8,11 @@ import { chartTheme } from './chartTheme';
  * rule out before believing anything else on the screen — and a tilt applied to thirteen of fourteen
  * is exactly the kind of near-miss a copy-paste axis produces.
  *
- * ⚠ IT LIVES IN `lib/`, NOT BESIDE THE CARDS, because the Old-charts tab's four charts are in
- * `components/earnings/` and are shared with the /earnings dashboard. Importing a `portfolios/`
- * module from them would run the dependency backwards (`portfolios/FundamentalCharts` already
- * imports all four), and it is the same class of thing as `chartTheme` — chart presentation with no
- * feature attached — so it belongs where `chartTheme` does.
+ * ⚠ IT LIVES IN `lib/`, NOT BESIDE THE CARDS, because the charts that use it span two features:
+ * `components/earnings/` (the /earnings dashboard) and `components/portfolios/` (the Fundamental
+ * modal's cards). Putting it in either would make the other import across a feature boundary, and
+ * it is the same class of thing as `chartTheme` — chart presentation with no feature attached — so
+ * it belongs where `chartTheme` does.
  *
  * ⚠⚠ `angle` AND `textAnchor` MUST BE ON THE **AXIS**, NOT INSIDE `tick`. Recharts renders a tilted
  * label from either (`CartesianAxis` falls back to `tick.angle`), but the code that decides HOW MANY

@@ -939,7 +939,7 @@ def _reclassify_book_rows(rows: list[dict]) -> list[dict]:
     grid = _grid(sorted({r["isin"] for r in rows if r.get("isin")}))
     for r in rows:
         g = grid.get(r["isin"]) if r.get("isin") else None
-        r["is_fund"] = _is_fund(g)
+        r["is_fund"] = _is_fund(g, r.get("holding_name") or "")
         if r.get("bucket"):
             continue
         # An ISIN-less, non-cash row still lands on "Unclassified" — an honest unsure, reached by
@@ -949,10 +949,17 @@ def _reclassify_book_rows(rows: list[dict]) -> list[dict]:
     return rows
 
 
-def _is_fund(grid_row: dict | None) -> bool:
+def _is_fund(grid_row: dict | None, holding_name: str = "") -> bool:
+    """Whether this holding is a fund WRAPPER rather than an operating company.
+
+    ⚠ `holding_name` IS NOT OPTIONAL IN PRACTICE, only in the signature. The grid carries the
+    vendor's abbreviated name (`INVESCO MARKETS II PLC IVZ MSCI`) where the book carries the
+    readable one (`Invesco World Equal Weight ETF Acc`) — and it is the readable one that says what
+    the thing is. See `_is_etf` for the two funds this fixed and the measurement behind it.
+    """
     from routers._airs_holding_isin import _is_etf  # noqa: PLC0415
 
-    return _is_etf(grid_row)
+    return _is_etf(grid_row, holding_name)
 
 
 def book_unavailable_reason(portfolio_id: int) -> str:
@@ -2170,6 +2177,11 @@ def compute_portfolio_analysis(portfolio_id: int,
         _with_start_weights(book["holdings_detail"] if book else [],
                             (basis_axes or {}).get("_start_weights") or {}),
         realised_block, benchmark_label)
+    # ⚠ THE SOLD ROWS GET THE SAME THREE INSTRUMENT COLUMNS AS THE HELD ONES. They had blanks
+    # because a closed-out position carries no ISIN — not because the figures are meaningless for
+    # it. See `_sold_position_isins` for how the identity is recovered and what happens when it
+    # cannot be. In place on `realised_block`, which is the same object the payload ships below.
+    _with_sold_risk(realised_block, benchmark_label)
     _agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])   # [Σ start, Σ result]
     for _h in enriched_holdings:
         _start = _h.get("start_value_eur") or 0.0
@@ -2473,9 +2485,13 @@ def _with_results(holdings: list[dict], realised: dict,
     risk = _holding_risk([r.get("isin") for r in out], benchmark_label)
     for r in out:
         got = risk.get(r.get("isin") or "") or {}
-        r["vol_5y_pct"] = got.get("vol_5y_pct")
-        r["beta_5y"] = got.get("beta_5y")
-        r["mom_12_1_pct"] = got.get("mom_12_1_pct")
+        # ⚠ THE LIST IS NAMED ONCE (`RISK_KEYS`) BECAUSE IT IS COPIED IN TWO PLACES — here and onto
+        # the sold rows. Adding `mom_12_1_from`/`_to` to `_holding_risk` and forgetting one of these
+        # copy loops is exactly what happened first: the figures were computed, cached and thrown
+        # away one line before the payload, so the ⓘ showed a formula it could not substitute and
+        # nothing anywhere errored.
+        for k in RISK_KEYS:
+            r[k] = got.get(k)
     return out
 
 
@@ -2560,6 +2576,110 @@ def _by_week(series: list[tuple[str, float]]) -> dict[tuple[int, int], float]:
     return out
 
 
+#: Everything `_holding_risk` produces that a row carries to the wire.
+#:
+#: ⚠⚠ NAMED ONCE BECAUSE IT IS COPIED TWICE — onto the held rows and onto the closed-out ones. The
+#: two loops were written out by hand, so adding the momentum LEGS to `_holding_risk` populated
+#: them, cached them, and then dropped them one line before the payload: the tooltip that exists to
+#: show `from ÷ to − 1 = result` had no legs to substitute, and nothing failed anywhere. A list is
+#: the difference between adding a figure in one place and adding it in three.
+RISK_KEYS = ("vol_5y_pct", "beta_5y", "mom_12_1_pct", "mom_12_1_from", "mom_12_1_to")
+
+
+def _sold_position_isins(names: list[str]) -> dict[str, str]:
+    """`{holding name: isin}` for positions the book no longer holds.
+
+    ⚠⚠ A CLOSED-OUT POSITION HAS NO ISIN OF ITS OWN, which is why the three risk columns were
+    blank on those rows. It has a NAME — AIRS's `Fonds` — and the instrument behind that name is
+    knowable from anywhere it is still recorded. Two sources, in order:
+
+      1. `airs_holding`, ANY book, ANY snapshot date. The identity of an instrument does not depend
+         on which book holds it or on when — the same argument `airs_holding_isin_override` is keyed
+         by name for. A name this book sold in March may still be held by a sibling book today.
+      2. the hand-supplied pins, for the rest.
+
+    ⚠ COVERAGE IS PARTIAL AND THAT IS STATED RATHER THAN PAPERED OVER. Stored snapshot history
+    began 2026-06-23, so a name sold before then is only findable if another book still holds it or
+    somebody pinned it. Measured on the live fleet: of 87 names that have left a book within stored
+    history, 78 resolve. An unresolved name keeps its blank cells — which is the honest answer, and
+    the same one the Sector and Weight columns already give on these rows.
+
+    ⚠⚠ AN AMBIGUOUS NAME IS REFUSED, NEVER GUESSED. If one `holding_name` maps to more than one
+    ISIN across the table, we cannot say which instrument the row is, and a beta attributed to the
+    wrong instrument is worse on this screen than a dash: it is a plausible number in a column the
+    reader is scanning for outliers.
+    """
+    from routers._airs_holding_isin import _load_isin_overrides  # noqa: PLC0415
+
+    wanted = sorted({(n or "").strip() for n in names if (n or "").strip()})
+    if not wanted:
+        return {}
+
+    # ⚠ CHUNKED AND PAGED, like every other read here — a popular name is held by many books over
+    # many snapshot dates, so this is not one row per name.
+    by_name: dict[str, set[str]] = {}
+    for i in range(0, len(wanted), IN_CHUNK_SIZE):
+        chunk = wanted[i:i + IN_CHUNK_SIZE]
+        off = 0
+        while True:
+            page = (supabase.table("airs_holding").select("holding_name,isin")
+                    .in_("holding_name", chunk).not_.is_("isin", "null")
+                    .order("holding_name").order("isin").order("as_of_date")
+                    .range(off, off + 999).execute().data or [])
+            for r in page:
+                nm = (r.get("holding_name") or "").strip()
+                if nm and r.get("isin"):
+                    by_name.setdefault(nm.casefold(), set()).add(r["isin"])
+            if not page:
+                break
+            off += len(page)
+
+    pins = _load_isin_overrides()
+    out: dict[str, str] = {}
+    for name in wanted:
+        key = name.casefold()
+        found = by_name.get(key) or set()
+        if len(found) == 1:
+            out[name] = next(iter(found))
+        elif len(found) > 1:
+            _log.info("[analysis] %r maps to %d ISINs (%s) — refusing to guess which instrument "
+                      "the sold row is", name, len(found), ", ".join(sorted(found)))
+        elif key in pins:
+            out[name] = pins[key]["isin"]
+    return out
+
+
+def _with_sold_risk(realised: dict, benchmark_label: str) -> None:
+    """Attach the instrument's momentum / vol / beta to every CLOSED-OUT position, in place.
+
+    ⚠ A SEPARATE PASS FROM `_with_results`, AND A SEPARATE `_holding_risk` CALL, DELIBERATELY. That
+    function returns the holdings table; making it also mutate the realised block would hide a side
+    effect behind a name that promises a return value. The second call is nearly free: `_holding_risk`
+    is memoized per (isin, benchmark) and the sold names of a book are usually still held by a
+    sibling — and its miss path is ONE batched read, so the worst case is one extra `COPY`, not one
+    per name.
+
+    ⚠ ONLY THE CLOSED-OUT ONES. A TRIMMED position still has a holdings row, and that row already
+    carries these three columns from the held path; filling them here too would be a second source
+    for the same cell.
+    """
+    positions = (realised or {}).get("positions") or []
+    sold = [p for p in positions if p.get("closed_out")]
+    if not sold:
+        return
+    isin_of = _sold_position_isins([p.get("name") for p in sold])
+    risk = _holding_risk(sorted(set(isin_of.values())), benchmark_label)
+    for p in sold:
+        isin = isin_of.get((p.get("name") or "").strip())
+        got = risk.get(isin or "") or {}
+        # ⚠ THE ISIN GOES OUT EVEN WHEN THE RISK READ FOUND NOTHING. "We know what this is and have
+        # no price series for it" and "we could not tell what this is" are different answers, and
+        # the drill-down needs the first one to be able to offer an ingest.
+        p["isin"] = isin
+        for k in RISK_KEYS:                      # ⚠ the same list as the held rows — see `RISK_KEYS`
+            p[k] = got.get(k)
+
+
 def _holding_risk(isins: list[str], benchmark_label: str,
                   years: int = VOL_YEARS) -> dict[str, dict]:
     """{isin: {"vol_5y_pct", "beta_5y", "mom_12_1_pct"}} from the daily EUR close.
@@ -2606,7 +2726,9 @@ def _holding_risk(isins: list[str], benchmark_label: str,
     import pandas as pd  # noqa: PLC0415
 
     from momentum.diversification import annualized_stats  # noqa: PLC0415
-    from signal_engine.daily import compute_single_company_signals  # noqa: PLC0415
+    from signal_engine.daily import (  # noqa: PLC0415
+        compute_single_company_signals, mom_12_1_legs,
+    )
 
     from routers._asset_financials import _BENCHMARK_RISK_ETF  # noqa: PLC0415
 
@@ -2680,6 +2802,13 @@ def _holding_risk(isins: list[str], benchmark_label: str,
             mom = compute_single_company_signals(ser).get("mom_12_1")
             if mom is not None:
                 row["mom_12_1_pct"] = float(mom)
+                # ⚠ THE TWO PRICES THE FIGURE IS THE RATIO OF, so the ⓘ can print the substitution
+                # rather than assert the result — the shape the Money-weighted column uses.
+                # ⚠ FROM THE SAME HELPER THE SIGNAL READS, never re-derived here: legs from a second
+                # cutoff rule would explain the number with inputs it was not computed from.
+                legs = mom_12_1_legs(ser)
+                if legs is not None:
+                    row["mom_12_1_from"], row["mom_12_1_to"] = legs
         except Exception as e:  # noqa: BLE001 — one column must never cost the modal
             _log.warning("[analysis] momentum failed for %s (%s: %s)", isin, type(e).__name__, e)
 

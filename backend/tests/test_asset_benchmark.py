@@ -101,7 +101,15 @@ class TestTheBridgeIsAJoinNotAColumn:
         # the index; only two cross into the asset world. Taking the denominator from the bridge
         # would report 100% coverage while a third of the index was missing — the loss would
         # vanish into the number that exists to report it.
-        assert coverage == {"universe_members": 3, "priced": 2, "covered_pct": pytest.approx(200 / 3)}
+        #
+        # ⚠ THE THREE COVERAGE KEYS THIS TEST IS ABOUT, NOT THE WHOLE DICT. `coverage` also carries
+        # the cap-stamp range (`caps_from`/`caps_to`/`caps_unstamped`), which is a different report
+        # about a different thing; an exact-dict assertion here went red the day those were added
+        # and said "the bridge is broken", which is the one thing that had not changed. A test
+        # named for a rule asserts that rule.
+        assert coverage["universe_members"] == 3
+        assert coverage["priced"] == 2
+        assert coverage["covered_pct"] == pytest.approx(200 / 3)
 
         # Drop the bridge row and the constituent leaves the index, though its `asset_grid` row is
         # untouched. A stored membership FLAG could not behave this way without being re-synced.

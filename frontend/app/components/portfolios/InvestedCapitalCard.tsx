@@ -13,6 +13,8 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { Stat, pctSince } from './MetricGrowthCard';
+import { benchTileLabel, SpanNote } from './CardStats';
+import { clipPoints, sharedSpan } from './windowStats';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import InvestedCapitalInputsModal from './InvestedCapitalInputsModal';
@@ -92,7 +94,30 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
   const benchByYr = useMemo(
     () => (benchData ? investedCapitalIndexByYear(benchData.rows) : null), [benchData]);
 
-  const fit = useMemo(() => logLinearFit(points), [points]);
+  /**
+   * ⚠⚠ THE WINDOW BOTH TILES ARE MEASURED OVER — see `sharedSpan`/`CardStats`. The R² and CAGR
+   * below now have a benchmark twin beside them, and a fitted rate over one series' 1998–2025
+   * printed next to another's 2015–2025 is not a comparison. ⚠ IT NARROWS THE FIT, SO THE DASHED
+   * TREND MOVES WITH IT — deliberately: the tile is the fit, and a number that describes points the
+   * chart does not draw is the failure this card's siblings already guard against.
+   */
+  const statSpan = useMemo(
+    () => (benchByYr ? sharedSpan(new Map(points.map((p) => [p.year, p.value])), benchByYr) : null),
+    [points, benchByYr]);
+  const ownStat = useMemo(() => clipPoints(points, statSpan), [points, statSpan]);
+  /** ⚠ THE INDEX'S OWN POINTS, over the same span, through the SAME `logLinearFit`. There is no
+   *  second "benchmark trend" implementation for this one to drift from. */
+  const benchStat = useMemo(
+    () => clipPoints(
+      [...(benchByYr ?? new Map<number, number | null>())]
+        .filter((e): e is [number, number] => e[1] != null)
+        .map(([year, value]) => ({ year, value }))
+        .sort((a, b) => a.year - b.year),
+      statSpan),
+    [benchByYr, statSpan]);
+
+  const fit = useMemo(() => logLinearFit(ownStat), [ownStat]);
+  const benchFit = useMemo(() => logLinearFit(benchStat), [benchStat]);
 
   /** ⚠⚠ INDEXED AXIS, ACTUAL HOVER — the same rule as the three growth cards, and for the same
    *  reason: invested capital is a LEVEL, so a company's EUR base and a blended index cannot share
@@ -179,11 +204,28 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
                 where="Computed here — a log-linear regression on the points below."
                 when={`Over the ${fit.n} year(s) shown.`}
                 how="Invested capital = non-current liabilities + total equity — the long-term capital funding the business, and the base the Cash-return card divides FCF by." />} />} />
+            {/* ⚠ THE SAME REGRESSION OVER THE OTHER LINE, over the same years — see `statSpan`. */}
+            {statSpan != null && (
+              <Stat label={benchTileLabel('R²', benchTarget?.label)} color={chartTheme.pos}
+                value={benchFit.r2 == null ? '—' : benchFit.r2.toFixed(2)}
+                info={<InfoTip text={`How tightly ${benchTarget?.label ?? 'the benchmark'} hugs a `
+                  + `constant-growth line, over the ${benchFit.n} year(s) it shares with this one.`} />} />
+            )}
             <Stat label="CAGR" value={cagr(fit.cagr)} color={chartTheme.accent}
               info={<InfoTip content={<AspectCard
                 what="The compound annual growth rate of the fitted trend."
                 where="Computed here from the same fit." when={`Over the ${fit.n} year(s) shown.`}
                 how="e^(slope) − 1 of the log-linear regression. Rising = the business is soaking up more capital over time." />} />} />
+            {statSpan != null && (
+              <Stat label={benchTileLabel('CAGR', benchTarget?.label)} color={chartTheme.pos}
+                value={cagr(benchFit.cagr)}
+                info={<InfoTip text={`${benchTarget?.label ?? 'The benchmark'}'s own fitted rate `
+                  + `over the ${benchFit.n} year(s) it shares with this line — the same regression `
+                  + 'as the tile beside it, so the two are comparable by construction.'} />} />
+            )}
+            {/* ⚠ SILENT UNLESS THE BENCHMARK ACTUALLY SHORTENED THE SPAN. See `SpanNote`. */}
+            <SpanNote span={statSpan} benchLabel={benchTarget?.label}
+              narrowed={statSpan != null && points.length > ownStat.length} />
           </div>
 
           <div>

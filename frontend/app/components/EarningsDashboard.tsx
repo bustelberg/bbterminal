@@ -760,10 +760,10 @@ export default function EarningsDashboard() {
               {/* FCF/share Growth */}
               <div className="bg-page rounded-lg border border-accent-500/20 p-4 space-y-2 overflow-hidden min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">FCF / share</span> <InfoTip text="Free Cash Flow per share — the cash a business throws off after funding its capital spending, divided by shares outstanding; the real fuel for dividends, buybacks and debt paydown. Computed as Free Cash Flow ÷ shares (GuruFocus financials) and converted to EUR at the historical FX rate so companies in different currencies compare directly. A rising line = growing per-share cash generation; negative values (red dots) mean the company burned cash that period." />{(refreshingSources.has('financials') || refreshingSourcesB.has('financials')) && <Spinner size={10} />}</h3>
+                  <h3 className="text-fg-strong text-sm font-medium flex items-center gap-1.5"><span className="truncate">FCF per share</span> <InfoTip text="Free Cash Flow per share — the cash a business throws off after funding its capital spending, divided by shares outstanding; the real fuel for dividends, buybacks and debt paydown. Computed as Free Cash Flow ÷ shares (GuruFocus financials) and converted to EUR at the historical FX rate so companies in different currencies compare directly. A rising line = growing per-share cash generation; negative values (red dots) mean the company burned cash that period." />{(refreshingSources.has('financials') || refreshingSourcesB.has('financials')) && <Spinner size={10} />}</h3>
                   <RefreshButton label="Refresh" running={sse.running} onClick={() => refresh('financials')} />
                 </div>
-                {loadingMetrics ? <SectionLoader label="FCF/share" /> : (
+                {loadingMetrics ? <SectionLoader label="FCF per share" /> : (
                   <FCFShareChart
                     metrics={chartMetrics}
                     metricsB={hasB ? chartCompareMetrics : undefined}
