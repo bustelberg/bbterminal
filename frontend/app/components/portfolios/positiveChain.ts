@@ -9,7 +9,7 @@
  * ⚠⚠ THE RULE IS: WALK BACK TO THE LAST USABLE BASE, THEN ANNUALISE OVER THE SPAN. Skipping the
  * unusable periods and keeping the CLOCK is what makes it honest — the growth really did take three
  * years, and reporting it as a one-year figure would be the same overstatement in a new place. For
- * Lilly the answer becomes `5.085 → 6.632` over 3 years, **+9.2%/yr**, which is the truth.
+ * Lilly the answer becomes `5.085 → 6.632` over 3 years, **+9.3%/yr**, which is the truth.
  *
  * ⚠⚠ "USABLE" IS NOT "POSITIVE". Two rules, and the second is the one that catches the real cases.
  * A base must be positive AND MATERIAL against the series' own typical size. Lilly's 0.458 is
@@ -18,9 +18,21 @@
  * fixes neither. The floor is a tenth of the median |value|, the same constant and the same
  * reasoning as `_MIN_STEP_BASE_FRACTION` on the server.
  *
- * ⚠ IT TELESCOPES, WHICH IS WHY IT CAN BE TRUSTED IN A COLUMN. Chaining the retained steps equals
- * the endpoint ratio exactly, because each step's base is the previous step's end. Nothing is
- * double counted and nothing is lost — only the unusable bases are stepped over.
+ * ⚠⚠ IT TELESCOPES ACROSS THE **USABLE** PERIODS, AND THE WHOLE COLUMN DOES NOT — I claimed the
+ * stronger thing here first and the test caught it (2026-08-25). Take the usable indices in order:
+ * each of their steps is based on the previous usable one, so their product is exactly
+ * `V_last_usable / V_first_usable`. Nothing is double counted along THAT chain.
+ *
+ * A cell at an UNUSABLE period is a different kind of statement and is not a link in it. `4 → −2 →
+ * 0.05 → 6 → 9` (scale 4, floor 0.4) has usable indices 0, 3, 4: the steps at 3 and 4 multiply to
+ * 9/4 exactly, while the cells at 1 and 2 are each measured from index 0 as well — "where is this
+ * against the last solid base", which is the most informative thing available there and OVERLAPS
+ * the step at 3. Multiplying the whole column gives −0.014, not 2.25.
+ *
+ * ⚠ NOTHING COMPUTES ON THAT PRODUCT — the YoY column is read, not chained — so this is a claim
+ * about what the numbers MEAN rather than a defect. But it is the claim a reader would rely on, so
+ * it has to be the true one: every cell states its own base and span in its tooltip precisely
+ * because the column is not a chain.
  *
  * ⚠ AND IT IS DELIBERATELY NOT `asinh`. A signed-log transform also handles zero crossings, but it
  * needs a scale parameter θ that swings the answer three-fold on its own recommended range, it is

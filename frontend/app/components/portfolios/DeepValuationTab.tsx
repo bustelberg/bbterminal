@@ -12,6 +12,14 @@ import { egmSource, reverseDcfSource } from './egmInputs';
 import EgmAssumptionsModal from './EgmAssumptionsModal';
 import ReverseDcfPanel, { type GrowthEstimates } from './ReverseDcfPanel';
 import { type MetricRow } from './quickValuation';
+// ⚠ THE SAME WORKED-FORMULA VOCABULARY THE RISK VIEWS USE, not a second one for this tab. Every
+// ⓘ that states a formula owes the reader the same expression with real operands in it, written
+// the same way — see `workedFormula`'s own ⚠⚠ on the forty-conventions failure this prevents.
+// ⚠ AND THE EXPRESSIONS THEMSELVES LIVE IN A PURE MODULE, not in this JSX: a LaTeX string is
+// testable and a tooltip is not — see `valuationFormulas` and its strict-mode render test.
+import {
+  workedEgmReturn, workedImpliedPrice, workedPriceMove,
+} from './valuationFormulas';
 
 /**
  * The "Deep Valuation" tab — an Earnings Growth Model panel for ONE company.
@@ -342,7 +350,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   const today = new Date().toISOString().slice(0, 10);
   const src = useMemo(() => egmSource(metrics ?? [], today), [metrics, today]);
 
-  const dcfSrc = useMemo(() => reverseDcfSource(metrics ?? []), [metrics]);
+  const dcfSrc = useMemo(() => reverseDcfSource(metrics ?? [], today), [metrics, today]);
 
   // Blank → the measured yield; typed → the reader's. Resolved here so `calculateEGM` only ever
   // sees one number and the panel and the model cannot disagree about which it used.
@@ -650,8 +658,20 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                       what="Annual return these assumptions imply."
                       where="Computed from the three rows above."
                       when={`Per year, over ${assumptions.years} years.`}
+                      worked={r.bridge == null ? ''
+                        : workedEgmReturn(r.bridge, assumptions.years, pct1(r.bridge.rate))}
+                      legend={r.bridge == null ? undefined : [
+                        { sym: 'g', is: 'assumed EPS growth, per year' },
+                        { sym: 'y', is: 'assumed dividend yield, applied every year' },
+                        { sym: String.raw`PE_{\text{exit}}`, is: 'the multiple you assume on sale' },
+                        { sym: String.raw`PE_{\text{fwd}}`, is: 'the forward P/E it rerates FROM' },
+                        { sym: 'n', is: `the forecast horizon (${assumptions.years} years)` },
+                      ]}
+                      // ⚠ THE FORMULA LEFT THIS FIELD AND THE CAVEAT STAYED. `how` is where the
+                      // card says how to READ the figure, and the one thing a reader gets wrong
+                      // here is adding the column up — see `EgmBridge.sumOfRates`.
                       how={r.bridge
-                        ? `(1+growth) × (1+yield) × (exit ÷ forward P/E)^1/${assumptions.years} − 1. The rates compound, so the × column ties and the % column does not: ${pct1(r.bridge.sumOfRates)} added, ${pct1(r.bridge.rate)} compounded.`
+                        ? `The three factors MULTIPLY, so the × column ties and the % column does not: ${pct1(r.bridge.sumOfRates)} added against ${pct1(r.bridge.rate)} compounded.`
                         : src.forwardPE == null || !(src.forwardPE > 0)
                           ? 'No usable forward P/E for this company — nothing to rerate from.'
                           : 'These assumptions have no compounding path — check the exit P/E, growth and hurdle on the left.'} />} />
@@ -774,8 +794,23 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                         what="Share price at the end of the window."
                         where="Computed from the price and the two assumptions."
                         when={`${assumptions.years} years out.`}
-                        how={`Price × (1+growth)^${assumptions.years} × (exit ÷ forward P/E). `
-                          + `Price only — dividends are in the return below. `
+                        // ⚠ OPERANDS OFF `bridge`, LIKE THE RETURN ROW — see `bridgeParts`. The
+                        // implied price and the annual return share `multFactor`, so quoting the
+                        // multiples from `assumptions`/`src` here would be a second route to the
+                        // same pair, free to drift from the one the model actually used.
+                        worked={r.bridge == null ? '' : workedImpliedPrice(
+                          src.price, r.bridge, assumptions.years, r.impliedPrice)}
+                        legend={r.impliedPrice == null || src.price == null ? undefined : [
+                          { sym: 'P_0', is: 'the price now — the row above' },
+                          { sym: 'g', is: 'assumed EPS growth, per year' },
+                          { sym: 'n', is: `the forecast horizon (${assumptions.years} years)` },
+                          { sym: String.raw`\dfrac{PE_{\text{exit}}}{PE_{\text{fwd}}}`,
+                            is: 'the whole rerating, applied once — not per year' },
+                        ]}
+                        // ⚠ NO `y` HERE, AND THAT IS THE POINT OF THE SENTENCE BELOW. This is the
+                        // capital leg alone; a legend row for the dividend yield would imply it
+                        // was in the expression, on the one figure that deliberately excludes it.
+                        how={`Price only — dividends are in the return below. `
                           + `Fair value at the hurdle ${money(r.fairValue)} (${mult(r.maxPE)}).`
                           // ⚠ THE ONE DISCLOSURE NOTHING ELSE CARRIES, kept to a single clause and
                           // shown only when true. This figure reruns from the VENDOR's forward
@@ -819,10 +854,15 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                         what="Total price move over the window."
                         where="Computed from the two rows above."
                         when={`Over ${assumptions.years} years, not annualised.`}
+                        worked={workedPriceMove(r.impliedPrice, src.price, pct1(r.priceReturn))}
+                        legend={r.priceReturn == null ? undefined : [
+                          { sym: 'P_n', is: `the implied price ${assumptions.years} years out` },
+                          { sym: 'P_0', is: 'the price now' },
+                        ]}
                         how={r.totalReturn != null && r.priceReturn != null
                           && Math.abs(r.totalReturn - r.priceReturn) > 0.0001
-                          ? `Implied price ÷ price now − 1. With dividends reinvested: ${pct1(r.totalReturn)}.`
-                          : 'Implied price ÷ price now − 1. No dividend, so this is the whole return.'} />} />
+                          ? `With dividends reinvested the total is ${pct1(r.totalReturn)} — this row is the price leg alone.`
+                          : 'No dividend, so this is the whole return.'} />} />
                     </td>
                   </tr>
                 </tbody>
@@ -843,7 +883,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     {/* The same question from the other end: the EGM asks what a set of assumptions is worth, the
         reverse DCF asks what the price already assumes. */}
     <ReverseDcfPanel src={dcfSrc} currency={currency} metrics={metrics} growthEst={growthEst}
-      name={name} isin={isin} />
+      name={name} isin={isin} today={today} />
     </div>
   );
 }

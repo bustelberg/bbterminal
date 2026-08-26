@@ -1697,7 +1697,7 @@ non-positive base. Two ways that goes wrong, and only the first is obvious:
   crossing is never stated anywhere.
 * A base that is **positive and immaterial** — Eli Lilly's `5.085 → −3.489 → 0.458 → 6.632`
   printed **+1,348%** off the 0.458 recovery year. The company's real three-year growth is
-  **+30.4%, i.e. +9.2%/yr**, and that number appeared in no cell.
+  **+30.4%, i.e. +9.3%/yr**, and that number appeared in no cell.
 
 **The rule**: walk back to the last base that is positive AND at least a tenth of the row's own
 median |value|, then annualise over the span it really took. `positiveChain.ts` (pure, tested);

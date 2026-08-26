@@ -182,8 +182,6 @@ _USER_POST_READ_PATHS: frozenset[str] = frozenset({
     "/api/earnings/dividend-yield-inputs",
     "/api/earnings/fcf-sbc-yield-inputs",
     "/api/earnings/fundamental-blend",
-    "/api/earnings/fundamental-blend-breakdown",
-    "/api/earnings/fundamental-blend-matrix",
     "/api/earnings/fundamental-blend-metrics",
     "/api/earnings/fundamental-blend-metrics/stream",
     "/api/earnings/fundamental-coverage",

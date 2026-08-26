@@ -171,9 +171,9 @@ describe('reverseDcfSource', () => {
     // shows reported, −SBC, +growth capex and the total as four separate rows. If this test ever
     // has to change because `fcf` moved, the adjustment has been folded back in and the whole
     // reason it was ripped out has been undone.
-    expect(reverseDcfSource(rows)).toEqual({
+    expect(reverseDcfSource(rows, TODAY)).toEqual({
       price: 100, sharesOutstanding: 1000, fcf: 10000, wacc: null,
-      sbc: null, capex: null, dep: null,
+      sbc: null, capex: null, dep: null, ocfEstimate: null, ocfEstimateDate: null,
     });
   });
 
@@ -185,39 +185,84 @@ describe('reverseDcfSource', () => {
       m('annuals__Cashflow Statement__Capital Expenditure', '2025-12-31', -1631.2),
       m('annuals__Cashflow Statement__Cash Flow Depreciation, Depletion and Amortization',
         '2025-12-31', 1025.9)];
-    expect(reverseDcfSource(full)).toMatchObject({ sbc: 202.3, capex: -1631.2, dep: 1025.9 });
+    expect(reverseDcfSource(full, TODAY)).toMatchObject({ sbc: 202.3, capex: -1631.2, dep: 1025.9 });
     // ⚠ THE CASH-FLOW DEPRECIATION LINE, NOT THE INCOME STATEMENT'S — capex is a cash figure, so
     // its maintenance proxy has to be one too.
     const wrongDep = [...rows,
       m('annuals__Income Statement__Depreciation, Depletion and Amortization', '2025-12-31', 999)];
-    expect(reverseDcfSource(wrongDep).dep).toBeNull();
+    expect(reverseDcfSource(wrongDep, TODAY).dep).toBeNull();
   });
 
   it('⚠ converts the percent-unit WACC into the decimal the discount rate wants', () => {
     // Filed as 8.2 for 8.2%, like every other `… %` line. Passed through unscaled it is an 820%
     // discount rate, and every company on earth reads as worthless.
     const withWacc = [...rows, m('annuals__Ratios__WACC %', '2025-12-31', 8.2)];
-    expect(reverseDcfSource(withWacc).wacc).toBeCloseTo(0.082, 9);
-    expect(reverseDcfWorking(withWacc).wacc.raw).toBeCloseTo(8.2, 9);   // the vendor's figure
+    expect(reverseDcfSource(withWacc, TODAY).wacc).toBeCloseTo(0.082, 9);
+    expect(reverseDcfWorking(withWacc, TODAY).wacc.raw).toBeCloseTo(8.2, 9);   // the vendor's figure
   });
 
   it('takes the latest fiscal year, and carries its provenance', () => {
-    const w = reverseDcfWorking(rows);
+    const w = reverseDcfWorking(rows, TODAY);
     expect(w.fcf).toMatchObject({ used: 10000, date: '2025-12-31', code: FCF });
     expect(w.price).toMatchObject({ used: 100, date: '2026-07-27', code: 'close_price' });
   });
 
   it('is the one computation `reverseDcfSource` reduces', () => {
-    const w = reverseDcfWorking(rows);
-    const s = reverseDcfSource(rows);
+    const w = reverseDcfWorking(rows, TODAY);
+    const s = reverseDcfSource(rows, TODAY);
     expect([s.price, s.sharesOutstanding, s.fcf])
       .toEqual([w.price.used, w.shares.used, w.fcf.used]);
   });
 
   it('leaves everything null on an empty payload', () => {
-    expect(reverseDcfSource([])).toEqual({
+    expect(reverseDcfSource([], TODAY)).toEqual({
       price: null, sharesOutstanding: null, fcf: null, wacc: null,
-      sbc: null, capex: null, dep: null,
+      sbc: null, capex: null, dep: null, ocfEstimate: null, ocfEstimateDate: null,
+    });
+  });
+
+  /**
+   * ⚠⚠ THE ONE ROW WHOSE PERIOD IS IN THE FUTURE, and the ONLY one not taken with `latestObs`.
+   * The estimate block runs five years out and can also reach into the past (it is stored as
+   * fetched), so "latest" would value the company on a 2030 consensus and "first" on a year it has
+   * already reported. Both mistakes produce a perfectly plausible number.
+   */
+  describe('the FY1 consensus operating cash flow', () => {
+    const OCF_EST = 'annual_operating_cash_flow_estimate';
+    const est = [
+      m(OCF_EST, '2025-12-31', 14000),   // already reported — must be ignored
+      m(OCF_EST, '2026-12-31', 17000),   // FY1
+      m(OCF_EST, '2027-12-31', 19000),
+      m(OCF_EST, '2030-12-31', 26000),
+    ];
+
+    it('takes the EARLIEST future period, not the latest and not the first row', () => {
+      const s = reverseDcfSource([...rows, ...est], TODAY);
+      expect(s.ocfEstimate).toBe(17000);
+      expect(s.ocfEstimateDate).toBe('2026-12-31');
+    });
+
+    it('⚠ is null when every estimate is stale — not the newest stale one', () => {
+      // A company that stopped being covered has no forward base. Falling back to the last
+      // estimate anybody made would date the panel's "next fiscal year" to a year in the past.
+      expect(reverseDcfSource([...rows, m(OCF_EST, '2025-12-31', 14000)], TODAY).ocfEstimate)
+        .toBeNull();
+    });
+
+    it('carries its provenance, and its date is the FUTURE period', () => {
+      const w = reverseDcfWorking([...rows, ...est], TODAY);
+      expect(w.ocfEst).toMatchObject({ used: 17000, date: '2026-12-31', code: OCF_EST });
+      // ⚠ And it has NOT displaced the filed figure — the reported line is still reported.
+      expect(w.fcf).toMatchObject({ used: 10000, date: '2025-12-31' });
+    });
+
+    it('⚠ does not read the PER-SHARE estimate, which is a different quantity', () => {
+      // `annual_operating_cash_flow_per_share_estimate` sits in the same block under a name one
+      // word longer. Read by mistake it is off by the share count — ~1,000x here — and the panel
+      // would solve a mega-cap against a base of seventeen.
+      const perShare = [...rows,
+        m('annual_operating_cash_flow_per_share_estimate', '2026-12-31', 17)];
+      expect(reverseDcfSource(perShare, TODAY).ocfEstimate).toBeNull();
     });
   });
 });

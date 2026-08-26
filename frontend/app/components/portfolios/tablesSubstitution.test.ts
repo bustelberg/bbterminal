@@ -13,9 +13,18 @@ import { describe, expect, it } from 'vitest';
 import { meanSub, rateSub } from './tablesSubstitution';
 import { subDigits, subNum } from './workedFormula';
 
-/** The addends and the divisor out of `(a + b + c) ÷ n = m%`. */
+/**
+ * The addends and the divisor out of `\dfrac{a + b + c}{n} = m\%`.
+ *
+ * ⚠ LaTeX, NOT UNICODE (the builders were typeset 2026-08-22). `workedMean` emits a real `\dfrac`
+ * with an escaped `\%`; it used to emit `(a + b + c) ÷ n = m%`. Only the SPELLING moved — every
+ * assertion below still reads the operands back out and redoes the arithmetic, which is the whole
+ * point of the file. ⚠ The backslashes are DOUBLED: `\d` in a regex is a digit class, so matching
+ * a literal `\dfrac` needs `\\dfrac`. Written singly the regex quietly matches `dfrac` — a pattern
+ * that compiles, never matches, and reports as "not a mean line".
+ */
 function parseMean(line: string) {
-  const m = /\(([^)]*)\) ÷ (\d+) = (-?[\d.]+)%/.exec(line);
+  const m = /\\dfrac\{([^}]*)\}\{(\d+)\} = (-?[\d.]+)\\%/.exec(line);
   if (!m) throw new Error(`not a mean line: ${line}`);
   return {
     addends: m[1].split(' + ').map(Number),
@@ -119,7 +128,12 @@ describe('rateSub', () => {
     const [head, expr] = rateSub('Book', got).split('\n');
     expect(head).toBe('Book');
 
-    const m = /^\((-?[\d.]+) \[(\d+)\] ÷ (-?[\d.]+) \[(\d+)\]\) \^ \(1 ÷ (\d+)\) − 1 = ([+-][\d.]+)%$/
+    // ⚠ LaTeX, NOT UNICODE (2026-08-22). `workedCagr` is typeset by KaTeX now — the endpoints ride
+    // as SUBSCRIPTS on the values they belong to rather than in `[brackets]`, and the division is
+    // a real `\dfrac` rather than a `÷` glyph given the advance width of a comma. This regex is
+    // the same assertion in the new spelling; the RULE it pins (the later period is the numerator,
+    // and the printed pair compounds to the printed rate) has not changed.
+    const m = /^\\left\(\\dfrac\{(-?[\d.]+)_\{\\,(\d+)\}\}\{(-?[\d.]+)_\{\\,(\d+)\}\}\\right\)\^\{1\/(\d+)\} - 1 = ([+-][\d.]+)\\%$/
       .exec(expr);
     expect(m).not.toBeNull();
     const [, to, toP, from, fromP, years, shown] = m!;
@@ -133,7 +147,7 @@ describe('rateSub', () => {
   it('keeps enough digits on a small base to reconcile', () => {
     const got = rate(2.4913, 8.137, '2020', '2025', 5);
     const expr = rateSub('Book', got).split('\n')[1];
-    const nums = [...expr.matchAll(/(-?[\d.]+) \[/g)].map((x) => Number(x[1]));
+    const nums = [...expr.matchAll(/(-?[\d.]+)_\{\\,/g)].map((x) => Number(x[1]));
     const reader = ((nums[0] / nums[1]) ** (1 / 5) - 1) * 100;
     expect(Math.abs(reader - got.pct)).toBeLessThan(0.1);
   });

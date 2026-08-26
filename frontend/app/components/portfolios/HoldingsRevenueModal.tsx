@@ -439,7 +439,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * refuse only the non-positive ones, so Eli Lilly's `5.085 → −3.489 → 0.458 → 6.632` printed a
    * −100%, a blank and then **+1,348%**, and the +30.4% the company actually managed over those
    * three years appeared nowhere. `usableStep` walks back to the last base clearing both tests and
-   * annualises over the span, so Lilly reads **+9.2%/yr** and the column stays comparable row to
+   * annualises over the span, so Lilly reads **+9.3%/yr** and the column stays comparable row to
    * row. See `positiveChain` for why the floor is not optional.
    *
    * ⚠ IT GUARDS THE DIVISOR, NOT THE NUMERATOR, and the difference is worth knowing before reading

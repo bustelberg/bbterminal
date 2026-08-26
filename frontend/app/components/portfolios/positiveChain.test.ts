@@ -51,10 +51,11 @@ describe('usableStep — the skip rule', () => {
     expect(s.base).toBe(5.085);
     expect(s.span).toBe(3);
     expect(s.growth).toBeCloseTo(0.30423, 5);                 // +30.4% in total
-    expect(s.annualised).toBeCloseTo(0.09246, 5);             // +9.2%/yr
+    expect(s.annualised).toBeCloseTo(0.09257, 5);             // +9.3%/yr
 
-    // …and the same base one period earlier is the one that would have been printed instead.
-    expect(1.348).toBeCloseTo(6.632 / 0.458 - 1, 2);
+    // …and 0.458 is the base that would have been used instead: +1,348%, the figure on screen
+    // before the floor existed. (A FRACTION of 13.48, not 1.348 — the percentage is 100x it.)
+    expect(6.632 / 0.458 - 1).toBeCloseTo(13.48, 2);
   });
 
   it('refuses a base orders of magnitude below the series, and says so with null', () => {
@@ -98,15 +99,29 @@ describe('usableStep — the skip rule', () => {
     expect(s.annualised).toBeNull();                          // …but there is no rate. Not NaN.
   });
 
-  it('telescopes — the retained steps multiply back to the endpoint ratio', () => {
+  it('⚠ telescopes across the USABLE periods — and the whole column does NOT', () => {
+    // I asserted the stronger property first and this caught it. `4 → −2 → 0.05 → 6 → 9` at scale 4
+    // (floor 0.4) has usable indices 0, 3, 4.
     const vals = [4, -2, 0.05, 6, 9];
     const scale = medianAbs(vals);                            // 4
-    let product = 1;
+    expect(scale).toBe(4);
+
+    // The steps AT usable periods chain: each is based on the previous usable one.
+    let chain = 1;
+    for (const i of [3, 4]) chain *= 1 + step(vals, i, scale)!.growth;
+    expect(chain).toBeCloseTo(9 / 4, 10);
+    expect(step(vals, 3, scale)!.from).toBe('0');              // …skipping −2 and 0.05
+    expect(step(vals, 4, scale)!.from).toBe('3');              // …then continuing from 6
+
+    // ⚠ AND THE FULL COLUMN OVERLAPS. The cells at 1 and 2 are ALSO measured from index 0, so they
+    // are not links in that chain — they answer "where is this against the last solid base".
+    let all = 1;
     for (let i = 1; i < vals.length; i += 1) {
       const s = step(vals, i, scale);
-      if (s) product *= 1 + s.growth;
+      if (s) all *= 1 + s.growth;
     }
-    expect(product).toBeCloseTo(9 / 4, 10);
+    expect(all).not.toBeCloseTo(9 / 4, 6);
+    expect(all).toBeCloseTo(-0.0140625, 10);
   });
 
   it('pins the floor at a tenth of the series scale', () => {

@@ -184,7 +184,7 @@ class TestManagementDashboardForUsers:
         for path in ("/api/airs/basket/analysis",
                      "/api/asset-pipeline/basket/performance",
                      "/api/earnings/margin-inputs",
-                     "/api/earnings/fundamental-blend-matrix",
+                     "/api/earnings/fundamental-blend-metrics",
                      "/api/earnings/fundamental-coverage"):
             assert _run(monkeypatch, "POST", path, "user") == (200, True), path
 

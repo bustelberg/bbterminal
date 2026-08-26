@@ -202,41 +202,58 @@ class TestTheDecompositionIsAnIdentity:
             == round(big["contribution_pp"], 6) == 0.0
 
 
-class TestAMetricWithAForecastLegIsNotAggregated:
+class TestAMetricIsAggregatableOnlyIfItsForecastLegIs:
     """⚠⚠ THE SEAM BETWEEN TWO `blend_series` CALLS, WHICH NOTHING ELSE ASSERTS ACROSS.
 
     A forecast is a separate metric code, blended separately and rebased on the actual it
-    continues. There are no euros for a year nobody has lived — no filed share count, no FX rate —
-    so aggregating the ACTUAL leg alone puts the two halves of one chart on two different scales.
-    Measured on `eps_nri` (2026-08-25): the line ran to the euro-chain level and the forecast
-    restarted near the per-share one, a vertical jump from LTM to 2026e. Every unit was
-    individually correct and it was caught BY EYE.
+    continues, so aggregating the ACTUAL leg alone puts the two halves of one chart on two
+    different scales. Measured on `eps_nri` (2026-08-25): the line ran to the euro-chain level and
+    the forecast restarted near the per-share one, a vertical jump from LTM to 2026e. Every unit
+    was individually correct and it was caught BY EYE.
+
+    ⚠⚠ THE FIRST FIX WAS TO HOLD THE WHOLE METRIC BACK, and this class asserted that — that a
+    metric WITH a consensus is never aggregated. It was superseded the same day: the euros for a
+    year nobody has lived CAN be built (`estimate × latest filed shares`, see `_shares_at`), so
+    both legs aggregate and `continue_from` joins them at the real euro step —
+    `TestTheForecastLegJoinsTheLineItContinues` below is that behaviour. The old assertions went
+    red on the shipped code and are gone; what survives is the RULE, which never changed: BOTH
+    legs or NEITHER.
     """
 
-    def test_eps_is_held_back_because_it_has_a_consensus_leg(self):
+    def test_a_metric_whose_consensus_can_be_priced_is_aggregated_with_it(self):
         from routers.earnings import (
-            _AGGREGATABLE_PER_SHARE, _AGGREGATABLE_TOTAL, _FORECAST_METRIC, aggregatable_metrics,
+            _AGGREGATABLE_FORECAST, _AGGREGATABLE_PER_SHARE, _FORECAST_METRIC, aggregatable_metrics,
         )
         # ⚠ THE PRECONDITION, ASSERTED — without an actual overlap the rule below is vacuous and
         # this test would pass while proving nothing.
         assert "eps_nri" in _FORECAST_METRIC
         assert "eps_nri" in _AGGREGATABLE_PER_SHARE
 
-        assert "eps_nri" not in aggregatable_metrics([])
-        assert aggregatable_metrics(["eps_nri"]) == []
-        # …and the metrics with no forecast leg are untouched.
-        assert set(aggregatable_metrics([])) == (
-            (_AGGREGATABLE_PER_SHARE | _AGGREGATABLE_TOTAL) - set(_FORECAST_METRIC))
+        assert _FORECAST_METRIC["eps_nri"] in _AGGREGATABLE_FORECAST
+        assert "eps_nri" in aggregatable_metrics([])
+        assert aggregatable_metrics(["eps_nri"]) == ["eps_nri"]
         assert aggregatable_metrics(["revenue", "fcf_ps"]) == ["revenue", "fcf_ps"]
+
+    def test_a_metric_whose_consensus_cannot_be_priced_is_refused_whole(self, monkeypatch):
+        # ⚠ THE RULE ITSELF, WITH THE PRICEABLE SET EMPTIED — this is what `aggregatable_metrics`
+        # is FOR, and with today's data every consensus happens to be priceable, so the branch
+        # would otherwise never be exercised at all.
+        from routers import earnings as e
+        monkeypatch.setattr(e, "_AGGREGATABLE_FORECAST", frozenset())
+        assert "eps_nri" not in e.aggregatable_metrics([])
+        assert e.aggregatable_metrics(["eps_nri"]) == []
+        # …and the metrics with no forecast leg are untouched.
+        assert set(e.aggregatable_metrics([])) == (
+            (e._AGGREGATABLE_PER_SHARE | e._AGGREGATABLE_TOTAL) - set(e._FORECAST_METRIC))
 
     def test_it_is_decided_once_and_not_per_request(self):
         # ⚠ A NARROWED REQUEST AND A FULL ONE MUST AGREE. Keying the rule off "is the forecast code
         # in this payload" would let the same metric draw two different lines depending on which
         # chart asked for it.
         from routers.earnings import aggregatable_metrics
-        assert ("eps_nri" in aggregatable_metrics(["eps_nri"])) is False
-        assert ("eps_nri" in aggregatable_metrics(["eps_nri", "revenue"])) is False
-        assert ("eps_nri" in aggregatable_metrics([])) is False
+        full = set(aggregatable_metrics([]))
+        assert ("eps_nri" in aggregatable_metrics(["eps_nri"])) is ("eps_nri" in full)
+        assert ("eps_nri" in aggregatable_metrics(["eps_nri", "revenue"])) is ("eps_nri" in full)
 
     def test_an_unknown_metric_is_simply_not_aggregatable(self):
         from routers.earnings import aggregatable_metrics

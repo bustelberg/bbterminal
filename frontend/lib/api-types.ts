@@ -4803,33 +4803,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/earnings/benchmark-revenue-matrix": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Benchmark Revenue Matrix
-         * @description The audit grid behind the benchmark revenue line: every constituent's revenue at every year,
-         *     the blended footer that reconciles to the line, AND where each series comes from.
-         *
-         *     Same `blend_matrix` the Forward-P/E "All periods" grid uses (revenue is a LEVEL → each rebased
-         *     to a growth index, weighted), so the cells and footer are built from exactly what the line is.
-         *     Each row (and each excluded constituent) carries a `source` — `TICKER@EXCHANGE` — so a reader
-         *     sees which listing's GuruFocus figures fed it. Constituents with no revenue land in `excluded`
-         *     (reason `no_data`): that names the ones we simply have nothing for, which is half the answer.
-         */
-        get: operations["benchmark_revenue_matrix_api_earnings_benchmark_revenue_matrix_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/earnings/by-isin/{isin}/growth-estimates": {
         parameters: {
             query?: never;
@@ -5094,61 +5067,6 @@ export interface paths {
          *     rather than drawn as a dip.
          */
         post: operations["fundamental_blend_api_earnings_fundamental_blend_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/earnings/fundamental-blend-breakdown": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Fundamental Blend Breakdown
-         * @description The holdings behind ONE point of a blended chart, and the ones missing from it.
-         *
-         *     ⚠ IT LOADS ONE METRIC, NOT THE SUITE. The blend endpoint reads every charted code for every
-         *     holding; a drill-down needs one code (plus, for a forecast, the actual it is anchored on), so
-         *     it is a small read on click rather than a large one on open.
-         *
-         *     ⚠ IT DECOMPOSES THROUGH `blend_breakdown`, WHICH SHARES `_prepare` WITH THE LINE ITSELF. The
-         *     alternative — recomputing the members "the same way" here — is a second copy of the
-         *     harmonic/ratio/level rules, and a drill-down that quietly disagrees with the chart above it
-         *     is worse than none: it is checked once and trusted from then on.
-         */
-        post: operations["fundamental_blend_breakdown_api_earnings_fundamental_blend_breakdown_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/earnings/fundamental-blend-matrix": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Fundamental Blend Matrix
-         * @description The audit grid behind a blended line: every holding's value at every period, plus the
-         *     blended value + coverage per period.
-         *
-         *     ⚠ SAME LOADER AND SAME `_prepare` AS THE LINE AND THE PER-POINT DRILL-DOWN. It reads ONE
-         *     metric's rows per covered holding (+ the actual a forecast is anchored on) and hands them to
-         *     `blend_matrix`, so the grid a reader verifies against is built from exactly what the chart
-         *     drew — there is no second computation to disagree with.
-         */
-        post: operations["fundamental_blend_matrix_api_earnings_fundamental_blend_matrix_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10638,31 +10556,6 @@ export interface components {
             unit?: string;
         };
         /**
-         * FundamentalBreakdownRequest
-         * @description One blended point to take apart: which metric, which fiscal year.
-         */
-        FundamentalBreakdownRequest: {
-            /**
-             * Cadence
-             * @default annual
-             */
-            cadence?: string;
-            /** Holdings */
-            holdings?: {
-                [key: string]: unknown;
-            }[] | null;
-            /** Metric Code */
-            metric_code: string;
-            /** Metrics */
-            metrics?: string[] | null;
-            /** Period */
-            period: string;
-            /** Portfolio Id */
-            portfolio_id?: number | null;
-            /** Universe */
-            universe?: string | null;
-        };
-        /**
          * FundamentalCoverageRequest
          * @description Either a model portfolio's id, or an explicit basket of (isin, weight).
          */
@@ -10825,29 +10718,6 @@ export interface components {
             isin: string;
             /** Name */
             name?: string | null;
-        };
-        /**
-         * FundamentalMatrixRequest
-         * @description The whole blended line taken apart: which metric (every period, every holding).
-         */
-        FundamentalMatrixRequest: {
-            /**
-             * Cadence
-             * @default annual
-             */
-            cadence?: string;
-            /** Holdings */
-            holdings?: {
-                [key: string]: unknown;
-            }[] | null;
-            /** Metric Code */
-            metric_code: string;
-            /** Metrics */
-            metrics?: string[] | null;
-            /** Portfolio Id */
-            portfolio_id?: number | null;
-            /** Universe */
-            universe?: string | null;
         };
         /** FundamentalPoint */
         FundamentalPoint: {
@@ -19404,37 +19274,6 @@ export interface operations {
             };
         };
     };
-    benchmark_revenue_matrix_api_earnings_benchmark_revenue_matrix_get: {
-        parameters: {
-            query?: {
-                label?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     growth_estimates_by_isin_api_earnings_by_isin__isin__growth_estimates_get: {
         parameters: {
             query?: {
@@ -19709,72 +19548,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["FundamentalCoverageRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    fundamental_blend_breakdown_api_earnings_fundamental_blend_breakdown_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FundamentalBreakdownRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    fundamental_blend_matrix_api_earnings_fundamental_blend_matrix_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["FundamentalMatrixRequest"];
             };
         };
         responses: {

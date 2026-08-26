@@ -1108,14 +1108,32 @@ def fundamental_totals(company_ids: list[int], metrics: list[str],
                        ) -> dict[str, dict[int, dict[str, float]]]:
     """`{metric_code: {company_id: {period: EUR}}}` — the euros each member contributes.
 
-    ⚠⚠ NOTHING ON THE REQUEST PATH CALLS THIS. Its only caller is `scripts/acwi_fcf_growth.py`,
-    which is where the corrected ACWI figures come from (FCF +7.56%/yr, revenue +4.60%/yr, on a
-    fixed 1,240-member basket). It was briefly wired into `_blend_rows` and REVERTED 2026-08-25,
-    because only one of the five blend paths was converted: the level line came back as an
-    aggregate while `blend_matrix`, `_level_breakdown` and `benchmark_revenue` kept the growth
-    chain, so the Contribution column decomposed a move the line no longer made. ⚠ THE WIRING IS
-    ALL-OR-NOTHING — a benchmark drawn one way beside a portfolio drawn the other is two answers
-    to one question in the same chart with nothing saying so. Keep it that way, or finish all five.
+    ⚠⚠ THE WIRING IS ALL-OR-NOTHING, AND THAT IS THE ONLY RULE THIS FUNCTION HAS. It was first
+    wired into `_blend_rows` alone and REVERTED the same day (2026-08-25): the level line came back
+    as an aggregate while `blend_matrix`, `_level_breakdown` and `benchmark_revenue` kept the growth
+    chain, so the Contribution column decomposed a move the line no longer made. A benchmark drawn
+    one way beside a portfolio drawn the other is two answers to one question in the same chart
+    with nothing saying so.
+
+    It is now on the request path through ONE decision point, `_totals_for` — FOUR callers (the
+    blend suite, `_blend_rows`, `benchmark_revenue`, `portfolio_revenue_matrix`), every one of them
+    via that helper, and no blend anywhere that is not. ⚠ THE ONE THAT WAS MISSED IS WHY THE STREAM
+    AND THE PLAIN ENDPOINT NOW SHARE `_blend_extras`: `_blend_metrics_events` passed `None` for
+    months while the plain twin aggregated, so a book that loaded over SSE drew the growth chain
+    beside an aggregated index. Add a fifth caller and it goes through `_totals_for` too, or it will
+    be the next one.
+
+    ⚠ THE THREE THAT COULD NOT BE COUNTED ON WERE DELETED, NOT WIRED (2026-08-26):
+    `/fundamental-blend-breakdown`, `/fundamental-blend-matrix` and `/benchmark-revenue-matrix` had
+    no caller anywhere — frontend, scripts or docs — since the Old-charts tab went (2026-08-21), and
+    each still decomposed the growth chain. A dead route answering in a construction the live ones
+    abandoned is a trap for whoever wires it up next; `benchmark-revenue-matrix` even promised a
+    footer that "reconciles to the line", which stopped being true the day that line became an
+    aggregate. ⚠ `_fundamental_blend.blend_matrix` survives them, caller-less, kept only by its
+    tests.
+
+    ⚠ `scripts/acwi_fcf_growth.py` is the fixed-basket answer this is checked against: FCF
+    +7.56%/yr, revenue +4.60%/yr on a fixed 1,240-member ACWI basket, 2015→2025.
 
     ⚠⚠ THE TWO CONVERSIONS, NOT ONE, are what make an aggregate possible at all. A
     GuruFocus per-share figure is in the LISTING's trading currency, so it becomes a company
@@ -1129,13 +1147,41 @@ def fundamental_totals(company_ids: list[int], metrics: list[str],
     in" would be a second thing to keep true.
 
     `weight_by_cid` + `caps` are the PORTFOLIO form: a book's claim on a fundamental is
-    `w_i x F_i / cap_i`, not `F_i`. For an INDEX both are omitted — a cap-weighted index holds the
-    same fraction of every company, so its claim is proportional to the plain sum. ⚠ THE PORTFOLIO
-    FORM IS UNMEASURED: it is derived and implemented but has never been run against a real book,
-    because the caller that would have exercised it is the reverted one above. ⚠ A MEMBER WITH NO
-    CAP FOR A PERIOD IS LEFT OUT OF
-    THAT PERIOD rather than falling back to another one: mixing bases inside one sum is the
-    failure the per-period basis exists to remove.
+    `w_i · F_i(t) / cap_i(T)`, not `F_i(t)`. For an INDEX both are omitted — a cap-weighted index
+    holds the same fraction of every company, so its claim is proportional to the plain sum.
+
+    ⚠⚠ THE CAP IS ONE DATE, NOT THE PERIOD'S OWN, AND THAT IS THE WHOLE OF THE PORTFOLIO FORM.
+    A BOOK'S WEIGHTS ARE MONEY WEIGHTS AND A FUNDAMENTAL IS A PER-SHARE FACT, so exactly one
+    conversion bridges them — the price, i.e. the market cap. Owning `w_i` of a book worth `B`:
+
+        n_i = w_i·B / price_i = w_i·B · shares_i / cap_i(T)
+        claim on the cash flow = n_i · fcf_per_share_i(t) = w_i·B · F_i(t) / cap_i(T)
+
+    and `B` is a constant that cancels in every ratio. ⚠⚠ THE SHARE COUNT IS FIXED WHEN YOU BUY,
+    so the cap that converts it is fixed too. Divided by `cap_i(t)` instead, the sum stops being a
+    portfolio and becomes a fresh purchase at each year's valuation — its growth is then
+    `growth(FCF) − growth(price)`, i.e. a YIELD series. Measured: a company that doubles its cash
+    flow while its cap doubles reads **0%** against the benchmark's **+100%**, in the same chart.
+    Worse, that series is (up to SBC and a constant) the FCF-SBC yield card four rows below, so the
+    tab drew one quantity twice and called one of them growth. Reported 2026-08-26.
+
+    ⚠ WITH ONE CAP PER MEMBER, `w_i / cap_i(T)` IS A CONSTANT `c_i` and the sum is `Σ c_i·F_i(t)` —
+    a fixed-basket euro sum, growing exactly as the index's plain sum does. That is what makes the
+    two lines readable against each other, and it is the same fixed-basket construction
+    `scripts/acwi_fcf_growth.py` uses.
+
+    ⚠ THE LATEST CAP, matching the weights, which are today's. An anchor-period cap would pair
+    today's holding weights with a historical price basis — a split basis, which is the shape of
+    every bug in this file's history.
+
+    ⚠ BUYBACKS DO NOT LIFT IT, deliberately: `F_i(t)` is the company's TOTAL cash flow, so this is
+    the same convention the benchmark follows. A literal per-share book (`n_i · fcf_ps_i(t)`, share
+    count fixed) would add a retiring company's ~3%/yr with no change in the business, and put the
+    book and the index on two different questions in one chart. The share count has its own card.
+
+    ⚠ A MEMBER WITH NO CAP AT ALL IS LEFT OUT ENTIRELY — there is nothing to convert its weight
+    with. It cannot lose SOME periods any more: one basis per member means there is no per-period
+    lookup left to miss, which is what the 2026-08-26 outage turned on.
     """
     from routers._benchmark_index import _fx_to_eur, _rate  # noqa: PLC0415
 
@@ -1259,6 +1305,24 @@ def fundamental_totals(company_ids: list[int], metrics: list[str],
                 cur = ccy.get(cid)
                 if not cur:
                     continue
+                # ⚠⚠ ONE CAP FOR THE WHOLE MEMBER, RESOLVED BEFORE THE PERIODS — see the docstring.
+                # `w_i / cap_i(T)` is the share count you own, and a share count does not change
+                # with the year you are looking at. Resolved HERE rather than inside the loop so
+                # the structure carries the rule: there is no per-period lookup left that could
+                # miss, which is what let the 2026-08-26 outage drop every filed period and leave
+                # a member alive on its LTM point alone.
+                #
+                # ⚠ THE LATEST KEY, and `period_caps_eur` has already carried the newest year
+                # forward once, so this is the current cap rather than the last one filed.
+                # Lexicographic max is chronological for both vocabularies (`2026` / `2026-Q4`).
+                cap = None
+                if weight_by_cid is not None:
+                    per_caps = (caps or {}).get(cid) or {}
+                    cap = per_caps[max(per_caps)] if per_caps else None
+                    # ⚠ NO CAP ⇒ NO CONVERSION ⇒ NO MEMBER. Not a zero, and not a period-by-period
+                    # drop: there is no price at which to turn this book's money weight into shares.
+                    if not cap:
+                        continue
                 got: dict[str, float] = {}
                 for period, v in by_period.items():
                     # ⚠ THE KEY IS ALREADY THE FILING DATE (`target_date`, YYYY-MM-DD), so it
@@ -1291,9 +1355,6 @@ def fundamental_totals(company_ids: list[int], metrics: list[str],
                     # across companies, which is the only place it has ever mattered.
                     eur = (v * n / rate) * 1e6
                     if weight_by_cid is not None:
-                        cap = ((caps or {}).get(cid) or {}).get(period)
-                        if not cap:
-                            continue
                         eur = (weight_by_cid.get(cid) or 0.0) * eur / cap
                     got[period] = eur
                 # ⚠⚠ THE **LTM** PERIOD NEEDS ITS OWN EUROS, AND WITHOUT THEM THE NEWEST POINT ON
@@ -1309,6 +1370,13 @@ def fundamental_totals(company_ids: list[int], metrics: list[str],
                 #
                 # ⚠ SHARES AS-OF, like a forecast — the LTM window ends at the newest QUARTERLY
                 # filing, past the last annual share count. Same `_shares_at`, same reasoning.
+                # ⚠ THE SAME `cap` AS EVERY OTHER PERIOD, which it now is by construction rather
+                # than by a fallback of its own. This branch used to reach for the newest cap where
+                # the filed periods each demanded their own — right on its own terms, and a
+                # trapdoor: when every filed period was being dropped, LTM alone still got through,
+                # and a member carrying ONE period is enough to put `blend_series` on the aggregate
+                # path with no step it can span. A blank chart, out of a fallback meant only to
+                # fill in the last point. One basis per member removes the asymmetry entirely.
                 ltm = ltm_by.get(cid)
                 if ltm is not None:
                     ltm_date, ltm_v = ltm
@@ -1317,13 +1385,8 @@ def fundamental_totals(company_ids: list[int], metrics: list[str],
                     if ltm_rate is not None and ltm_n is not None:
                         ltm_eur = (ltm_v * ltm_n / ltm_rate) * 1e6
                         if weight_by_cid is not None:
-                            per_caps = (caps or {}).get(cid) or {}
-                            cap = per_caps.get("LTM") or (
-                                per_caps[max(per_caps)] if per_caps else None)
-                            ltm_eur = ((weight_by_cid.get(cid) or 0.0) * ltm_eur / cap
-                                       if cap else None)
-                        if ltm_eur is not None:
-                            got["LTM"] = ltm_eur
+                            ltm_eur = (weight_by_cid.get(cid) or 0.0) * ltm_eur / cap
+                        got["LTM"] = ltm_eur
                 if got:
                     per_cid[cid] = got
             if per_cid:
@@ -1579,6 +1642,60 @@ async def _blend_inputs(body: FundamentalCoverageRequest) -> tuple[list[dict], d
     return covered, cov
 
 
+def _blend_extras(body: FundamentalCoverageRequest, covered: list[dict],
+                  metrics: list[str]) -> tuple[dict | None, dict]:
+    """`(caps, totals)` — the weighting basis and the euros, for whichever endpoint is asking.
+
+    ⚠⚠ IT IS A FUNCTION BECAUSE THE STREAM DID NOT HAVE IT, AND THAT PUT TWO CONSTRUCTIONS IN ONE
+    CHART. `_blend_metrics_events` called `_blend_rows(rows, covered, None, cadence)` — no caps and
+    no totals — while the plain endpoint built both. So on /management-dashboard's Long Equity tab
+    the BOOK (loaded SSE-first by `blendMetrics.ts`) drew the averaged growth chain and the ACWI
+    BENCHMARK beside it (a plain POST, narrowed by `metrics`) drew the euro aggregate: the exact
+    all-or-nothing failure `_totals_for` and `fundamental_totals` are written to prevent, with
+    nothing on screen saying so. Measured on ACWI FCF the two constructions differ by ~11.5pp/yr
+    (+19.1% averaged against +7.56% summed), so the gap was large and looked like alpha.
+
+    ⚠ AND IT MADE THE BOOK'S OWN LINE DEPEND ON WHETHER SSE WORKED — the fallback POST aggregates,
+    the stream did not. That is the same defect `_blend_metrics_events`'s `load` line already
+    documents for the cadence, one construction over; a second copy of "what the blend needs"
+    is how it came back.
+
+    ⚠ AN INDEX IS WEIGHTED BY THE CAP IT HAD IN EACH PERIOD; A BOOK BY ITS HOLDING WEIGHT. Only a
+    universe has a market cap history to weight by — and only for a universe is `weight_pct` a cap
+    share in the first place (see `_load_and_expand_members`), so this is the same branch that
+    decides what the weight MEANS, not a new one.
+
+    ⚠ THROUGH `cached_metric_reads`, NOT A BARE CALL. It is the same derived series
+    `period_caps_by_isin` reads under the same key, so the two blend endpoints and the
+    `/universe-period-caps` read collapse to one computation instead of three — measured at 0.95s
+    each on ACWI. It also means `invalidate()` drops it with everything else; a bare call cached
+    nothing and survived nothing.
+
+    ⚠ THE ID SET IS THE KEY, AND THIS ONE IS `covered` (1,509) WHERE THE CARDS' IS THE
+    CANONICAL-ISIN SET (1,514). Those are legitimately different questions, so they are different
+    entries — the sharing this buys is between callers asking about the SAME companies, which is
+    the honest kind.
+
+    ⚠ BLOCKING. Both reads are Supabase round trips, so every caller runs this in a thread.
+    """
+    caps = None
+    if body.universe:
+        ids = [r["company_id"] for r in covered]
+        key = "__period_caps_eur"
+        caps = cached_metric_reads(
+            ids, [key], body.cadence,
+            lambda _ms: {key: period_caps_eur(ids, body.cadence)})[key]
+    # ⚠⚠ `metrics` IS WHAT THE CALLER ACTUALLY READ, NOT `body.metrics`, AND THE TWO DIVERGE ON THE
+    # STREAM — it reads every code regardless of the narrowing, so it asks for every metric's euros
+    # (`[]` = all aggregatable). Handing it `body.metrics` would leave the codes it read but did not
+    # name on the growth chain, in the same response as ones on the aggregate. The rule is: the
+    # totals cover exactly what was read.
+    # ⚠ See `_totals_for` — it takes metric KEYS, and a CODE passed here matches nothing and
+    # silently keeps the growth chain with no error anywhere.
+    totals = _totals_for(covered, metrics, body.universe, body.cadence)
+    return caps, totals
+
+
 @router.post("/api/earnings/fundamental-blend-metrics")
 @cached_blend("fundamental-blend-metrics")
 async def fundamental_blend_metrics(body: FundamentalCoverageRequest, request: Request):
@@ -1600,28 +1717,9 @@ async def fundamental_blend_metrics(body: FundamentalCoverageRequest, request: R
     covered, cov = await _blend_inputs(body)
 
     def _build() -> dict:
-        # ⚠ AN INDEX IS WEIGHTED BY THE CAP IT HAD IN EACH PERIOD; A BOOK BY ITS HOLDING WEIGHT.
-        # Only a universe has a market cap history to weight by — and only for a universe is
-        # `weight_pct` a cap share in the first place (see `_load_and_expand_members`), so this is
-        # the same branch that decides what the weight MEANS, not a new one.
-        # ⚠ THROUGH `cached_metric_reads`, NOT A BARE CALL. It is the same derived series
-        # `period_caps_by_isin` reads under the same key, so the two blend endpoints and the
-        # `/universe-period-caps` read collapse to one computation instead of three — measured at
-        # 0.95s each on ACWI. It also means `invalidate()` drops it with everything else; a bare
-        # call cached nothing and survived nothing.
-        #
-        # ⚠ THE ID SET IS THE KEY, AND THIS ONE IS `covered` (1,509) WHERE THE CARDS' IS THE
-        # CANONICAL-ISIN SET (1,514). Those are legitimately different questions, so they are
-        # different entries — the sharing this buys is between callers asking about the SAME
-        # companies, which is the honest kind.
-        caps = None
-        if body.universe:
-            ids = [r["company_id"] for r in covered]
-            key = "__period_caps_eur"
-            caps = cached_metric_reads(
-                ids, [key], body.cadence,
-                lambda _ms: {key: period_caps_eur(ids, body.cadence)})[key]
-        totals = _totals_for(covered, list(body.metrics or ()), body.universe, body.cadence)
+        # ⚠ THE SAME `(caps, totals)` THE STREAM BUILDS, from the same function — see
+        # `_blend_extras`, which exists because the two paths once disagreed about this.
+        caps, totals = _blend_extras(body, covered, list(body.metrics or ()))
         if body.metrics:
             # ⚠ SAME BLEND, DIFFERENT READ. Only the fetch changes — `_blend_rows` is untouched, so
             # a narrowed request cannot blend by a different rule than a full one.
@@ -1646,9 +1744,13 @@ async def _blend_metrics_events(body: FundamentalCoverageRequest):
     """Per-COMPANY progress, then the same payload the plain endpoint returns.
 
     ⚠ THE UNIT OF PROGRESS IS THE UNIT OF WORK. The blend's cost is three paged reads per holding
-    (`_company_metric_rows`) — a 40-name book is 120 round trips — and everything after them is
-    arithmetic. So "3 of 40 companies" is a real fraction of the wait, not a guess dressed as one.
-    A spinner over that says only "still going", which on a minute-long open reads as broken.
+    (`_company_metric_rows`) — a 40-name book is 120 round trips — and almost everything after them
+    is arithmetic. So "3 of 40 companies" is a real fraction of the wait, not a guess dressed as
+    one. A spinner over that says only "still going", which on a minute-long open reads as broken.
+    ⚠ "ALMOST": `_blend_extras` is a handful of bulk reads after the last holding, so the client
+    sits on "n of n" for a moment rather than on a stale count. It is chunked over the whole book,
+    not per company, so there is no holding to report it against — the same reason `_ltm_blend_rows`
+    is outside the loop.
 
     ⚠ THE ERROR ARRIVES AS AN EVENT, NOT AS A STATUS. The stream's headers are long since sent by
     the time a holding fails, so a raised `HTTPException` here cannot become a 404 the client can
@@ -1677,7 +1779,15 @@ async def _blend_metrics_events(body: FundamentalCoverageRequest):
         # whether SSE worked — the failure this loader's `load` line already documents.
         rows += await asyncio.to_thread(
             _ltm_blend_rows, [r["company_id"] for r in covered], None, body.cadence)
-        built = await asyncio.to_thread(_blend_rows, rows, covered, None, body.cadence)
+        # ⚠⚠ THE CAPS AND THE EUROS, WHICH THIS PATH USED TO PASS AS `None`. Without them
+        # `blend_series` falls back to the averaged growth chain, so the book drew one construction
+        # and the ACWI benchmark beside it drew the other — see `_blend_extras`. Same function as
+        # the plain endpoint, so the payload cannot depend on whether SSE worked.
+        # ⚠ `[]`, NOT `body.metrics` — this path reads every code (see `load` above), so it needs
+        # every aggregatable metric's euros. See `_blend_extras`.
+        caps, totals = await asyncio.to_thread(_blend_extras, body, covered, [])
+        built = await asyncio.to_thread(
+            _blend_rows, rows, covered, caps, body.cadence, totals)
     except Exception as e:  # noqa: BLE001 — see the docstring: there is no status code left to use
         yield _sse({"type": "error", "detail": f"{type(e).__name__}: {e}"})
         return
@@ -1696,65 +1806,6 @@ async def fundamental_blend_metrics_stream(body: FundamentalCoverageRequest):
     from fastapi.responses import StreamingResponse  # noqa: PLC0415
 
     return StreamingResponse(_blend_metrics_events(body), media_type="text/event-stream")
-
-
-class FundamentalBreakdownRequest(FundamentalCoverageRequest):
-    """One blended point to take apart: which metric, which fiscal year."""
-
-    metric_code: str
-    period: str          # the fiscal YEAR, e.g. "2025" — a full date is accepted and truncated
-
-
-@router.post("/api/earnings/fundamental-blend-breakdown")
-async def fundamental_blend_breakdown(body: FundamentalBreakdownRequest):
-    """The holdings behind ONE point of a blended chart, and the ones missing from it.
-
-    ⚠ IT LOADS ONE METRIC, NOT THE SUITE. The blend endpoint reads every charted code for every
-    holding; a drill-down needs one code (plus, for a forecast, the actual it is anchored on), so
-    it is a small read on click rather than a large one on open.
-
-    ⚠ IT DECOMPOSES THROUGH `blend_breakdown`, WHICH SHARES `_prepare` WITH THE LINE ITSELF. The
-    alternative — recomputing the members "the same way" here — is a second copy of the
-    harmonic/ratio/level rules, and a drill-down that quietly disagrees with the chart above it
-    is worse than none: it is checked once and trusted from then on.
-    """
-    from routers._fundamental_blend import blend_breakdown  # noqa: PLC0415
-    from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
-
-    members = await _load_and_expand_members(body)
-    if not members:
-        raise HTTPException(status_code=404, detail="no holdings to blend")
-
-    cov = await coverage_for_async(members)
-    covered = [r for r in cov["rows"] if r["reason"] == "covered" and r.get("company_id")]
-    if not covered:
-        raise HTTPException(status_code=404, detail="no holding has fundamentals to blend")
-
-    code = body.metric_code
-    base_code = _FORECAST_BASE.get(code)
-    period = body.period[:4]
-
-    def _build() -> dict:
-        per_company: dict[int, dict[str, float]] = {}
-        base_by_company: dict[int, dict[str, float]] = {}
-        for r in covered:
-            cid = r["company_id"]
-            for want, sink in ((code, per_company), (base_code, base_by_company)):
-                if not want:
-                    continue
-                pts = {str(m["target_date"])[:10]: float(m["numeric_value"])
-                       for m in _page_metrics(cid, want, exact=True)
-                       if m.get("numeric_value") is not None}
-                sink[cid] = pts
-        return blend_breakdown(
-            [{"isin": r.get("isin"), "name": r.get("name"), "weight": r["weight_pct"],
-              "points": per_company.get(r["company_id"], {}),
-              "base_points": base_by_company.get(r["company_id"], {})}
-             for r in covered], code, period)
-
-    out = await asyncio.to_thread(_build)
-    out["blend_covered_pct"] = cov["covered_pct"]
-    return out
 
 
 # The two level series the Share-Price-vs-Owner-Earnings chart compares.
@@ -1984,10 +2035,6 @@ def _metric_rows(company_id: int, metric: str = "revenue") -> list[dict]:
     for code in _metric_codes(metric):
         out += _page_metrics(company_id, code, exact=True)
     return out
-
-
-def _revenue_rows(company_id: int) -> list[dict]:
-    return _metric_rows(company_id, "revenue")
 
 
 # ⚠ HOW EACH METRIC ROLLS UP TO TRAILING TWELVE MONTHS — DECLARED, NEVER INFERRED, BECAUSE THE
@@ -2934,84 +2981,6 @@ async def benchmark_revenue(label: str = "AEX", metric: str = "revenue"):
                 "covered_pct": blend["covered_pct"],
                 "series": [{"year": int(p["period"]), "value": p["value"]}
                            for p in blend["points"] if str(p["period"]).isdigit()]}
-
-    return await asyncio.to_thread(_run)
-
-
-@router.get("/api/earnings/benchmark-revenue-matrix")
-async def benchmark_revenue_matrix(label: str = "AEX"):
-    """The audit grid behind the benchmark revenue line: every constituent's revenue at every year,
-    the blended footer that reconciles to the line, AND where each series comes from.
-
-    Same `blend_matrix` the Forward-P/E "All periods" grid uses (revenue is a LEVEL → each rebased
-    to a growth index, weighted), so the cells and footer are built from exactly what the line is.
-    Each row (and each excluded constituent) carries a `source` — `TICKER@EXCHANGE` — so a reader
-    sees which listing's GuruFocus figures fed it. Constituents with no revenue land in `excluded`
-    (reason `no_data`): that names the ones we simply have nothing for, which is half the answer.
-    """
-    from routers._fundamental_blend import blend_matrix  # noqa: PLC0415
-
-    def _run() -> dict:
-        uni = (supabase.table("universe").select("universe_id")
-               .eq("label", label).limit(1).execute().data or [])
-        if not uni:
-            raise HTTPException(status_code=404, detail=f"No universe labelled {label!r}")
-        uid = uni[0]["universe_id"]
-        ids = sorted({r["company_id"] for r in
-                      (supabase.table("universe_membership").select("company_id")
-                       .eq("universe_id", uid).execute().data or []) if r.get("company_id")})
-        if not ids:
-            raise HTTPException(status_code=404, detail=f"{label} has no members")
-
-        info: dict[int, dict] = {}
-        for i in range(0, len(ids), IN_CHUNK_SIZE):
-            for c in (supabase.table("company")
-                      .select("company_id,company_name,isin,gurufocus_ticker,market_cap_eur,"
-                              "has_financials,"
-                              "gurufocus_exchange:gurufocus_exchange(exchange_code,currency_code)")
-                      .in_("company_id", ids[i:i + IN_CHUNK_SIZE]).execute().data or []):
-                info[c["company_id"]] = c
-
-        members: list[dict] = []
-        source_by_key: dict[str, str] = {}
-        ccy_by_key: dict[str, str | None] = {}
-        fin_by_key: dict[str, bool | None] = {}
-        for cid in ids:
-            c = info.get(cid, {})
-            name = c.get("company_name") or f"company {cid}"
-            isin = c.get("isin")
-            key = isin or name
-            gx = (c.get("gurufocus_exchange") or {}) or {}
-            exch = gx.get("exchange_code") or "?"
-            source_by_key[key] = f"{c.get('gurufocus_ticker') or '?'}@{exch}"
-            ccy_by_key[key] = gx.get("currency_code")
-            fin_by_key[key] = c.get("has_financials")
-            pts = {str(m["target_date"])[:10]: float(m["numeric_value"])
-                   for m in _revenue_rows(cid)
-                   if m.get("numeric_value") is not None}
-            # Include even the empty ones — blend_matrix routes them to `excluded` as `no_data`,
-            # which is exactly the "which constituents do we have nothing for" answer.
-            members.append({"isin": isin, "name": name,
-                            "weight": c.get("market_cap_eur") or 1.0, "points": pts})
-
-        mx = blend_matrix(members, _REVENUE_CODE)
-        for row in mx["members"]:
-            key = row.get("isin") or row.get("name")
-            row["source"] = source_by_key.get(key)
-            row["currency"] = ccy_by_key.get(key)
-        for row in mx.get("excluded", []):
-            key = row.get("isin") or row.get("name")
-            row["source"] = source_by_key.get(key)
-            row["currency"] = ccy_by_key.get(key)
-            # ⚠ DISTINGUISH "WE NEVER FETCHED IT" FROM "GURUFOCUS HAS NO REVENUE LINE". A member
-            # with financials but no Revenue is a template thing (a bank reports Net Interest
-            # Income); one with no financials at all simply hasn't been ingested — a gap on our
-            # side, fixable, NOT a claim that GuruFocus lacks the data.
-            if row.get("reason") == "no_data":
-                row["detail"] = ("financials ingested, but no Revenue line (e.g. a bank template)"
-                                 if fin_by_key.get(key) else "financials not ingested yet")
-        mx["label"] = label
-        return mx
 
     return await asyncio.to_thread(_run)
 
@@ -4415,59 +4384,6 @@ async def relative_growth_breakdown(body: RelativeGrowthRequest):
             blend_breakdown(_members(_RG_OE_CODE), _RG_OE_CODE, period),
             period,
         )
-
-    out = await asyncio.to_thread(_build)
-    out["blend_covered_pct"] = cov["covered_pct"]
-    return out
-
-
-class FundamentalMatrixRequest(FundamentalCoverageRequest):
-    """The whole blended line taken apart: which metric (every period, every holding)."""
-
-    metric_code: str
-
-
-@router.post("/api/earnings/fundamental-blend-matrix")
-async def fundamental_blend_matrix(body: FundamentalMatrixRequest):
-    """The audit grid behind a blended line: every holding's value at every period, plus the
-    blended value + coverage per period.
-
-    ⚠ SAME LOADER AND SAME `_prepare` AS THE LINE AND THE PER-POINT DRILL-DOWN. It reads ONE
-    metric's rows per covered holding (+ the actual a forecast is anchored on) and hands them to
-    `blend_matrix`, so the grid a reader verifies against is built from exactly what the chart
-    drew — there is no second computation to disagree with.
-    """
-    from routers._fundamental_blend import blend_matrix  # noqa: PLC0415
-    from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
-
-    members = await _load_and_expand_members(body)
-    if not members:
-        raise HTTPException(status_code=404, detail="no holdings to blend")
-
-    cov = await coverage_for_async(members)
-    covered = [r for r in cov["rows"] if r["reason"] == "covered" and r.get("company_id")]
-    if not covered:
-        raise HTTPException(status_code=404, detail="no holding has fundamentals to blend")
-
-    code = body.metric_code
-    base_code = _FORECAST_BASE.get(code)
-
-    def _build() -> dict:
-        per_company: dict[int, dict[str, float]] = {}
-        base_by_company: dict[int, dict[str, float]] = {}
-        for r in covered:
-            cid = r["company_id"]
-            for want, sink in ((code, per_company), (base_code, base_by_company)):
-                if not want:
-                    continue
-                sink[cid] = {str(m["target_date"])[:10]: float(m["numeric_value"])
-                             for m in _page_metrics(cid, want, exact=True)
-                             if m.get("numeric_value") is not None}
-        return blend_matrix(
-            [{"isin": r.get("isin"), "name": r.get("name"), "weight": r["weight_pct"],
-              "points": per_company.get(r["company_id"], {}),
-              "base_points": base_by_company.get(r["company_id"], {})}
-             for r in covered], code)
 
     out = await asyncio.to_thread(_build)
     out["blend_covered_pct"] = cov["covered_pct"]

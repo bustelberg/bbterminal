@@ -14,18 +14,30 @@ import {
 } from './workedFormula';
 import { oneSigmaBand } from './activeBand';
 
+/**
+ * ⚠⚠ THE JOIN IS A LaTeX LINE BREAK, NOT A BLANK LINE — the whole block is typeset now, so `\n\n`
+ * would be whitespace inside one expression rather than a paragraph. Written as the same literal
+ * the module uses, so this assertion cannot be wrong about the escaping while looking right.
+ */
+const BREAK = ' \\\\[4pt] ';
+
 describe('withWorked', () => {
-  it('separates the halves with a blank line', () => {
-    expect(withWorked('a ÷ b', '1 ÷ 2 = 50%')).toBe('a ÷ b\n\n1 ÷ 2 = 50%');
-    expect(withWorked('a ÷ b', '1 ÷ 2 = 50%', 'note')).toBe('a ÷ b\n\n1 ÷ 2 = 50%\n\nnote');
+  it('separates the halves with a LaTeX line break', () => {
+    expect(withWorked('a ÷ b', '1 ÷ 2 = 50%')).toBe(`a ÷ b${BREAK}1 ÷ 2 = 50%`);
   });
 
-  it('collapses rather than leaving an empty paragraph', () => {
+  it('collapses rather than leaving an empty break', () => {
     // ⚠ THE COMMON PATH ON A THIN SERIES, not an edge case — every builder returns '' when an
-    // operand is missing. A blank gap mid-tooltip reads as a rendering bug.
+    // operand is missing. A dangling `\\[4pt]` mid-expression is a KaTeX parse error, not a gap.
     expect(withWorked('a ÷ b', '')).toBe('a ÷ b');
-    expect(withWorked('a ÷ b', '', 'note')).toBe('a ÷ b\n\nnote');
-    expect(withWorked('a ÷ b', '1 ÷ 2 = 50%', '')).toBe('a ÷ b\n\n1 ÷ 2 = 50%');
+    expect(withWorked('', '1 ÷ 2 = 50%')).toBe('1 ÷ 2 = 50%');
+  });
+
+  it('⚠ IGNORES `tail`, which is prose and no longer belongs in a typeset block', () => {
+    // The two callers that passed one now hand it to the card's `how` instead. Asserted rather
+    // than assumed: a parameter that silently does nothing is a trap for the next caller.
+    expect(withWorked('a ÷ b', '1 ÷ 2 = 50%', 'note')).toBe(`a ÷ b${BREAK}1 ÷ 2 = 50%`);
+    expect(withWorked('a ÷ b', '', 'note')).toBe('a ÷ b');
   });
 });
 
@@ -70,7 +82,10 @@ describe('subPct', () => {
 describe('workedMean', () => {
   it('prints addends that average to the printed mean', () => {
     const vals = [55.4, 54.1, 53.3, 56.6, 57.5];
-    const m = /^\(([^)]*)\) ÷ (\d+) = (-?[\d.]+)%$/.exec(workedMean(vals))!;
+    // ⚠ A DISPLAYED FRACTION — `\dfrac{addends}{n}`, not `(a + b) ÷ n`. The addends sit over their
+    // own count instead of trailing off to the right of a division sign; the claim being tested is
+    // unchanged, only the surface it is parsed off.
+    const m = /^\\dfrac\{([^}]*)\}\{(\d+)\} = (-?[\d.]+)\\%$/.exec(workedMean(vals))!;
     expect(m).not.toBeNull();
     const addends = m[1].split(' + ').map(Number);
     expect(addends).toEqual(vals);
@@ -86,19 +101,22 @@ describe('workedMean', () => {
   it('uses one precision for the whole list', () => {
     // ⚠ REGRESSION: `vals.map(subNum)` hands `Array.map`'s INDEX to the digits parameter, so the
     // first addend prints at 0 decimals, the second at 1, and the list stops adding up.
-    const texts = /^\(([^)]*)\)/.exec(workedMean([1.11, 2.22, 3.33, 4.44]))![1].split(' + ');
+    const texts = /^\\dfrac\{([^}]*)\}/
+      .exec(workedMean([1.11, 2.22, 3.33, 4.44]))![1].split(' + ');
     expect(new Set(texts.map((t) => t.split('.')[1]?.length ?? 0)).size).toBe(1);
   });
 
   it('takes its precision from the mean, so a near-zero list survives', () => {
     const out = workedMean([0.11, 0.09, 0.14, 0.08, 0.12]);
     expect(out).toContain('0.110');
-    expect(out.endsWith('= 0.108%')).toBe(true);
+    // ⚠ `\%`, ESCAPED — a bare `%` starts a LaTeX comment and would silently swallow the rest of
+    // the line. `workedFormula.latex.test.ts` pins that separately; this only has to read it.
+    expect(out.endsWith(String.raw`= 0.108\%`)).toBe(true);
   });
 
   it('accepts a different unit, and none at all', () => {
-    expect(workedMean([2, 4], '×')).toBe('(2.00 + 4.00) ÷ 2 = 3.00×');
-    expect(workedMean([2, 4], '')).toBe('(2.00 + 4.00) ÷ 2 = 3.00');
+    expect(workedMean([2, 4], '×')).toBe(String.raw`\dfrac{2.00 + 4.00}{2} = 3.00×`);
+    expect(workedMean([2, 4], '')).toBe(String.raw`\dfrac{2.00 + 4.00}{2} = 3.00`);
   });
 
   it('refuses an empty list rather than printing a division by zero', () => {
@@ -113,7 +131,10 @@ describe('workedCagr', () => {
 
   it('prints endpoints that compound to the printed rate', () => {
     const got = rate(100, 606.34, 10);
-    const m = /^\((-?[\d.]+) \[(\w+)\] ÷ (-?[\d.]+) \[(\w+)\]\) \^ \(1 ÷ (\d+)\) − 1 = ([+-][\d.]+)%$/
+    // ⚠ THE PERIODS ARE SUBSCRIPTS NOW, not bracketed labels — `606.34_{\,2025}`. Same claim: a
+    // subscript cannot be mistaken for another operand, which is what the brackets were for.
+    const m = new RegExp(String.raw`^\\left\(\\dfrac\{(-?[\d.]+)_\{\\,(\w+)\}\}`
+      + String.raw`\{(-?[\d.]+)_\{\\,(\w+)\}\}\\right\)\^\{1/(\d+)\} - 1 = ([+-][\d.]+)\\%$`)
       .exec(workedCagr(got))!;
     expect(m).not.toBeNull();
     // ⚠ THE LATER PERIOD IS THE NUMERATOR. Read upside down a CAGR is a plausible, wrong,
@@ -125,7 +146,7 @@ describe('workedCagr', () => {
 
   it('keeps enough digits on a small base to reconcile', () => {
     const got = { ...rate(2.4913, 8.137, 5), from: '2020' };
-    const nums = [...workedCagr(got).matchAll(/(-?[\d.]+) \[/g)].map((x) => Number(x[1]));
+    const nums = [...workedCagr(got).matchAll(/(-?[\d.]+)_\{/g)].map((x) => Number(x[1]));
     expect(Math.abs(((nums[0] / nums[1]) ** (1 / 5) - 1) * 100 - got.pct)).toBeLessThan(0.1);
   });
 
@@ -142,24 +163,27 @@ describe('workedCagr', () => {
 
 describe('workedRatio', () => {
   it('writes one division out with the callers own formatting of the answer', () => {
-    expect(workedRatio(12.34, 5.6, '+220.4%')).toBe('12.34 ÷ 5.60 = +220.4%');
-    expect(workedRatio(12.34, 5.6, '€220', '', '%')).toBe('12.34 ÷ 5.60% = €220');
+    expect(workedRatio(12.34, 5.6, '+220.4%')).toBe(String.raw`\dfrac{12.34}{5.60} = +220.4\%`);
+    // ⚠ `€` IS NOT A CHARACTER KaTeX KNOWS — it becomes `\text{EUR}\,`. See `tex`.
+    expect(workedRatio(12.34, 5.6, '€220', '', '%'))
+      .toBe(String.raw`\dfrac{12.34}{5.60\%} = \text{EUR}\,220`);
   });
 
   it('gives both operands enough digits to reproduce the answer', () => {
     // ⚠ THE REGRESSION: at plain `subDigits` this printed `12.3 ÷ 5.60`, and a reader dividing
     // those gets 219.6 against a price target of €220 — near enough to look right and to be
     // wrong. Both sides of a lone division are about to be divided, so both get two decimals.
-    expect(workedRatio(12.34, 220.5, '5.6%')).toBe('12.34 ÷ 220.50 = 5.6%');
-    // ⚠ EXCEPT ABOVE 1000, where two decimals print `1234567.00` and buy nothing.
-    expect(workedRatio(1234567, 1000, 'x')).toBe('1234567 ÷ 1000 = x');
+    expect(workedRatio(12.34, 220.5, '5.6%')).toBe(String.raw`\dfrac{12.34}{220.50} = 5.6\%`);
+    // ⚠ EXCEPT AT OR ABOVE 1000, where two decimals print `1234567.00` and buy nothing.
+    expect(workedRatio(1234567, 1000, 'x')).toBe(String.raw`\dfrac{1234567}{1000} = x`);
   });
 
   it('does not recompute the answer', () => {
     // ⚠ THE RESULT IS PASSED IN so it can never disagree with the tile it explains. Asserted
     // because the tempting "improvement" is to compute a / b here, which is a second
     // implementation whose only job is to match the first.
-    expect(workedRatio(1, 2, 'whatever the tile says')).toBe('1.00 ÷ 2.00 = whatever the tile says');
+    expect(workedRatio(1, 2, 'whatever the tile says'))
+      .toBe(String.raw`\dfrac{1.00}{2.00} = whatever the tile says`);
   });
 
   it('refuses a missing or zero denominator', () => {
@@ -196,7 +220,10 @@ describe('workedBand', () => {
     // ⚠ ā·f COMES FIRST rather than being left to be inferred from the interval. The point of the
     // line is that the band is NOT centred on the benchmark; burying the centre inside two
     // endpoints would leave the reader to subtract it back out.
-    expect(workedBand(band)).toMatch(/^\bar\{a\}/);
+    // ⚠ `\\bar`, NOT `\bar` — in a JS regex `\b` is a WORD BOUNDARY, so `/^\bar\{a\}/` asks for a
+    // boundary at position 0 followed by the letters `ar{a}`, which a string starting with a
+    // backslash can never match. It read as correct and could never pass.
+    expect(workedBand(band)).toMatch(/^\\bar\{a\}/);
   });
 
   it('refuses rather than printing half a band', () => {

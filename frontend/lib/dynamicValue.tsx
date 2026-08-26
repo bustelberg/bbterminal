@@ -72,21 +72,39 @@ export function v(value: string | number | null | undefined): string {
  * ⚠ AN UNCLOSED MARK YIELDS PLAIN TEXT, NEVER A SWALLOWED TAIL. The failure mode of a naive
  * `split(OPEN)` pairing is that everything after a stray open becomes one enormous badge — or
  * disappears entirely. Text always survives here; at worst it is not badged.
+ *
+ * ⚠⚠ AND A STRAY **CLOSE** IS DROPPED TOO, WHICH IT WAS NOT. Only the unbalanced OPEN was handled:
+ * a CLOSE with no opener fell through every static branch and was pushed out INSIDE the text, so
+ * an invisible U+2061 landed in rendered prose — measured as `'⁡orphan close'` where
+ * `'orphan close'` was expected. Invisible is the whole problem: it copies, it lands in a title
+ * attribute, it can break a `===` against the same sentence built without marks, and nothing on
+ * screen ever shows it. EVERY run is now stripped — a dynamic one can carry a stray OPEN
+ * (`v(v('x'))`, or a double open), which ends up inside the badge rather than in the prose but is
+ * just as invisible and just as copyable.
  */
 export function splitValues(text: string): { text: string; dynamic: boolean }[] {
   const out: { text: string; dynamic: boolean }[] = [];
+  /** ⚠ AND IT SKIPS AN EMPTY RUN. Stripping can empty a segment (`splitValues(CLOSE)`), and an
+   *  empty static part is a node that renders nothing under a key that suggests it does. */
+  const pushStatic = (s: string) => {
+    const plain = s.split(OPEN).join('').split(CLOSE).join('');
+    if (plain) out.push({ text: plain, dynamic: false });
+  };
   let rest = text;
   while (rest) {
     const open = rest.indexOf(OPEN);
-    if (open < 0) { out.push({ text: rest, dynamic: false }); break; }
+    if (open < 0) { pushStatic(rest); break; }
     const close = rest.indexOf(CLOSE, open + 1);
     if (close < 0) {
       // Unbalanced: the mark itself is dropped, everything else survives as static text.
-      out.push({ text: rest.slice(0, open) + rest.slice(open + 1), dynamic: false });
+      pushStatic(rest.slice(0, open) + rest.slice(open + 1));
       break;
     }
-    if (open > 0) out.push({ text: rest.slice(0, open), dynamic: false });
-    const inner = rest.slice(open + 1, close);
+    if (open > 0) pushStatic(rest.slice(0, open));
+    // ⚠ STRIPPED TOO: the run ends at the first CLOSE, so it cannot hold one of those — but a
+    // second OPEN inside it (a double open, or `v()` around an already-marked value) survives
+    // into the badge, invisibly. See the ⚠⚠ above.
+    const inner = rest.slice(open + 1, close).split(OPEN).join('');
     // ⚠ AN EMPTY VALUE PRODUCES NO BADGE. `v('')` is a real case — a null date formatted away —
     // and an empty chip is a floating grey rectangle that reads as a rendering fault.
     if (inner) out.push({ text: inner, dynamic: true });

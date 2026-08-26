@@ -68,6 +68,24 @@ const DEP_CODES = [
   'annuals__Cashflow Statement__Cash Flow Depreciation, Depletion and Amortization',
   'annuals__cashflow_statement__Cash Flow Depreciation, Depletion and Amortization',
 ];
+/**
+ * The consensus OPERATING cash flow for the next fiscal year — the Reverse DCF's forward base.
+ *
+ * ⚠⚠ THERE IS NO CONSENSUS **FREE** CASH FLOW TO READ, AND THAT IS A FACT ABOUT THE API RATHER
+ * THAN ABOUT OUR INGEST. The GuruFocus Excel add-in publishes `Estimated Free Cash Flow for Next
+ * FY1 End (M)`; the legacy REST endpoint we ingest (`stock/{sym}/analyst_estimate`) does NOT — its
+ * annual block is revenue · ebit · ebitda · net_income · pretax_income · eps_nri · per_share_eps ·
+ * operating_cash_flow(+_per_share) · book_value_per_share · dividend · gross_margin · roa · roe ·
+ * pettm, plus the `future_*_growth` means. The add-in's field catalogue is not the API's, and this
+ * one cannot be probed for: ⚠ THE LEGACY API NEVER 404s, so asking for a field it does not have
+ * returns 200 and a plausible all-zero series. Free cash flow is derived instead — see
+ * `forwardFcf`, which subtracts capex and is EXACT for the figure this panel actually values.
+ *
+ * ⚠ THE INGEST NEEDS NO CHANGE: `_parse_analyst_estimates` stores every list-valued key as
+ * `annual_<key>`, and `load_company_metric_rows` reads every `annual_%` prediction row, so this
+ * code is already in the payload the modal loads.
+ */
+const OCF_EST_CODE = 'annual_operating_cash_flow_estimate';
 
 export type EgmSource = {
   price: number | null;
@@ -114,20 +132,30 @@ function byYear(metrics: MetricRow[], codes: string[]): Map<number, number> {
 }
 
 /**
- * The consensus EPS for the NEXT fiscal year — the earliest estimate dated after `today`.
+ * The consensus figure for the NEXT fiscal year — the earliest estimate dated after `today`.
  *
  * ⚠ NOT THE FIRST ROW IN THE SERIES. The estimate block is stored from whenever it was fetched, so
  * its early periods can already be in the past; taking `[0]` would value the company on a year it
  * has since reported.
+ *
+ * ⚠ ONE RULE FOR EVERY CONSENSUS LINE. The EGM's EPS and the Reverse DCF's operating cash flow are
+ * the same question asked of two codes — "which of these estimates is FY1?" — and answering it
+ * twice is how the two panels would come to disagree about which year they are valuing.
  */
-export function nextFyEps(metrics: MetricRow[], today: string): { date: string; value: number } | null {
+export function nextFyEstimate(metrics: MetricRow[], code: string,
+  today: string): { date: string; value: number } | null {
   let best: { date: string; value: number } | null = null;
   for (const m of metrics) {
-    if (m.metric_code !== EPS_EST_CODE || m.numeric_value == null) continue;
+    if (m.metric_code !== code || m.numeric_value == null) continue;
     if (m.target_date <= today) continue;
     if (!best || m.target_date < best.date) best = { date: m.target_date, value: m.numeric_value };
   }
   return best;
+}
+
+/** The consensus EPS for the next fiscal year. See `nextFyEstimate` for the selection rule. */
+export function nextFyEps(metrics: MetricRow[], today: string): { date: string; value: number } | null {
+  return nextFyEstimate(metrics, EPS_EST_CODE, today);
 }
 
 /**
@@ -231,6 +259,13 @@ export type ReverseDcfSource = {
   sbc: number | null;
   capex: number | null;
   dep: number | null;
+  /** Consensus OPERATING cash flow for FY1, in millions — the forward base's raw leg. ⚠ NOT free
+   *  cash flow: `forwardFcf` takes capex off it. See `OCF_EST_CODE` for why there is no consensus
+   *  FCF line to read instead. */
+  ocfEstimate: number | null;
+  /** WHICH fiscal year that estimate is for. ⚠ The panel states it: a base labelled "next year"
+   *  over a figure whose period nobody named is the same defect `priceDate` fixed for the close. */
+  ocfEstimateDate: string | null;
 };
 
 /**
@@ -254,6 +289,9 @@ export type ReverseDcfWorking = {
   /** The normalisation legs. ⚠ Each may be absent, and an absent one is NOT a zero — see
    *  `normalisedFcf`: a company with no SBC line is not a company that pays none. */
   sbc: SourceObs; capex: SourceObs; dep: SourceObs;
+  /** The FY1 consensus operating cash flow. ⚠ ITS `date` IS A FUTURE PERIOD, unlike every other
+   *  row here — that is what makes it the forward base rather than another filing. */
+  ocfEst: SourceObs;
 };
 
 const NONE: SourceObs = { raw: null, used: null, date: null, code: null };
@@ -278,8 +316,16 @@ function asDecimal(o: SourceObs): SourceObs {
 
 /** Every input the reverse DCF reads, with its provenance — the drill-down's whole content, and
  *  the source `reverseDcfSource` reduces to scalars, so the two cannot disagree. */
-export function reverseDcfWorking(metrics: MetricRow[]): ReverseDcfWorking {
+export function reverseDcfWorking(metrics: MetricRow[], today: string): ReverseDcfWorking {
+  // ⚠ NOT `latestObs`. Every other row here is the newest filing; this one is the EARLIEST period
+  // still in the future. The estimate block runs five years out, so "latest" would value the
+  // company on a consensus for 2030 — and it can also reach into the PAST, because the block is
+  // stored as fetched, which is the trap `nextFyEstimate` exists for.
+  const est = nextFyEstimate(metrics, OCF_EST_CODE, today);
   return {
+    ocfEst: est
+      ? { raw: est.value, used: est.value, date: est.date, code: OCF_EST_CODE }
+      : NONE,
     price: latestObs(metrics, [PRICE_CODE]),
     shares: latestObs(metrics, SHARES_CODES),
     fcf: latestObs(metrics, FCF_CODES),
@@ -295,11 +341,12 @@ export function reverseDcfWorking(metrics: MetricRow[]): ReverseDcfWorking {
   };
 }
 
-export function reverseDcfSource(metrics: MetricRow[]): ReverseDcfSource {
-  const w = reverseDcfWorking(metrics);
+export function reverseDcfSource(metrics: MetricRow[], today: string): ReverseDcfSource {
+  const w = reverseDcfWorking(metrics, today);
   return {
     price: w.price.used, sharesOutstanding: w.shares.used, fcf: w.fcf.used, wacc: w.wacc.used,
     sbc: w.sbc.used, capex: w.capex.used, dep: w.dep.used,
+    ocfEstimate: w.ocfEst.used, ocfEstimateDate: w.ocfEst.date,
   };
 }
 

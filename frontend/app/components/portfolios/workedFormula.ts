@@ -32,20 +32,29 @@ import { type ActiveBand } from './activeBand';
  * percent sign, so this is not an edge case, it is the common path.
  */
 const tex = (s: string) => s
+  // ⚠⚠ ESCAPE FIRST, SUBSTITUTE SECOND — AND THE ORDER IS THE WHOLE OF IT (fixed 2026-08-25).
+  // This pass used to run LAST, so it escaped the braces of the `\text{EUR}` the euro rule below
+  // had just inserted: `\text\{EUR\}\,220`. That PARSES — no throw, even in strict mode, which is
+  // why the LaTeX suite was green — and renders as a literal `{EUR}` with the letters italicised
+  // as a product of three variables. Wrong on screen, silent everywhere else.
+  //
+  // ⚠⚠ `%` STARTS A COMMENT, and that is the escape that matters most because the failure is
+  // INVISIBLE ON SCREEN. `\text{overlap } 20.54% + …` renders as `overlap 20.54` and stops:
+  // measured, not supposed. KaTeX logs a `commentAtEnd` warning under its default strictness and
+  // paints nothing to say the rest is gone, so the reader gets a shorter formula that looks
+  // finished. Everything numeric here carries a percent sign, so this is the common path. Pinned
+  // by `workedFormula.latex.test.ts`, which renders in STRICT mode so it throws instead.
+  //
+  // ⚠ IT ESCAPES THE CALLER'S SPECIALS, NOT OURS. Anything this function ADDS below is LaTeX we
+  // wrote deliberately and must survive intact.
+  .replace(/([%$&#_{}])/g, '\\$1')
   // ⚠⚠ `€` IS NOT A CHARACTER KaTeX KNOWS, in maths mode OR in `\text{}` — verified against
   // 0.18.4 with `strict: 'error'`. Callers hand formatted money in (`€220` from the price-target
   // tile), so this is not hypothetical. Under the app's default strictness it would render as a
   // warning and a fallback glyph rather than throwing, which is the worst outcome: it looks
   // deliberate. The ISO code set upright is unambiguous and typesets cleanly.
   .replace(/€/g, String.raw`\text{EUR}\,`)
-  .replace(/£/g, String.raw`\pounds `)
-  // ⚠⚠ AND `%` STARTS A COMMENT — the escape that matters most, because the failure is INVISIBLE
-  // ON SCREEN. `\text{overlap } 20.54% + …` renders as `overlap 20.54` and stops: measured, not
-  // supposed. KaTeX logs a `commentAtEnd` warning to the console under its default strictness and
-  // paints nothing to say the rest is gone, so what the reader gets is a shorter formula that
-  // looks finished. Everything numeric here carries a percent sign, so this is the common path.
-  // Pinned by `workedFormula.latex.test.ts`, which renders in STRICT mode so it throws instead.
-  .replace(/([%$&#_{}])/g, '\\$1');
+  .replace(/£/g, String.raw`\pounds `);
 
 /** Prose inside an expression — upright, spaced, and not italicised as a product of variables. */
 const words = (s: string) => `\\text{${tex(s)}}`;
