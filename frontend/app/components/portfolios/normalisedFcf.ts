@@ -94,6 +94,60 @@ export function forwardFcf(ocfEstimate: number | null | undefined,
 }
 
 /**
+ * THE FORWARD BASE **AND THE CAPEX/D&A PAIR THAT MUST GO WITH IT**.
+ *
+ * ⚠⚠ ONE RULE, AND IT IS THE WHOLE FUNCTION: THE ADD-BACK USES THE SAME CAPEX THE BASE NETTED.
+ * The corrections only cancel — `(OCF − C) + (C − D) = OCF − D` — while both halves are the same
+ * `C`. Mix them and the total is out by exactly `C_forward − C_trailing`, which on Meta FY2026 is
+ * **39,593**. Measured, all four combinations, in millions:
+ *
+ *     vendor base 5,412 + TRAILING add-back   46,872   ← split basis, ~10.4k short
+ *     vendor base 5,412 + FORWARD  add-back   57,250   ✓
+ *     derived base 45,005 + trailing add-back 86,465   ← consistent, but on the trailing D&A
+ *     OCF_est − D&A_est − SBC                 57,250   ✓ the same answer, by algebra
+ *
+ * ⚠⚠ THIS IS THE DEFECT IN THE SPREADSHEET THIS PANEL PORTS. `=@GURUF(…"Estimated Free Cash Flow
+ * for Next FY1")` nets a FORWARD capex, and the `MAX(−capex − D&A, 0)` beside it reads the TRAILING
+ * lines — so the sheet lands ~39.6bn low on a company whose capex is inflecting, and exactly right
+ * on one whose capex is flat. That is the worst kind of wrong: invisible on most names.
+ *
+ * ⚠ SO THE VENDOR'S FIGURE IS PREFERRED ONLY WHEN THE CORRECTION CAN FOLLOW IT. Forward capex is
+ * `OCF_est − FCF_est` and forward D&A is `EBITDA_est − EBIT_est` — all four from the same
+ * consensus. Without EBITDA/EBIT there is no forward D&A, so taking the vendor base would force
+ * the split; the derivation is used instead, where the trailing capex cancels and the only
+ * trailing input reaching the answer is depreciation.
+ *
+ * ⚠ UNLESS `normalise` IS OFF, where there is no add-back to be inconsistent with. Then the
+ * vendor's forecast is simply the better number and is taken whenever it exists.
+ *
+ * ⚠ `EBITDA − EBIT = D&A` IS INFERRED, NOT PUBLISHED. It assumes the vendor builds EBITDA that
+ * way; the series behaves like D&A (monotone, widening with the capex programme, 51,944 for Meta
+ * FY2026 against 22,729 trailing) but it is a derivation and is named as one.
+ */
+export function forwardLegs(o: {
+  ocfEstimate: number | null; fcfEstimate: number | null;
+  ebitdaEstimate: number | null; ebitEstimate: number | null;
+  capex: number | null; dep: number | null; normalise: boolean;
+}): { fcf: number | null; capex: number | null; dep: number | null; vendor: boolean } {
+  const pair = ok(o.ocfEstimate) && ok(o.fcfEstimate)
+    && ok(o.ebitdaEstimate) && ok(o.ebitEstimate)
+    ? { capex: o.ocfEstimate - o.fcfEstimate, dep: o.ebitdaEstimate - o.ebitEstimate }
+    : null;
+  const vendor = ok(o.fcfEstimate) && (!o.normalise || pair != null);
+  if (!vendor) {
+    return { fcf: forwardFcf(o.ocfEstimate, o.capex), capex: o.capex, dep: o.dep, vendor: false };
+  }
+  // ⚠ WITH `normalise` OFF AND NO PAIR, the trailing legs ride along unused — the panel still
+  // renders them, and they are the honest figures for the rows they label.
+  return {
+    fcf: o.fcfEstimate,
+    capex: pair ? pair.capex : o.capex,
+    dep: pair ? pair.dep : o.dep,
+    vendor: true,
+  };
+}
+
+/**
  * The growth half of capex: spend above what the existing assets consume.
  *
  * ⚠ `Math.abs(capex)` — the vendor files it negative and a reader typing an override will type it

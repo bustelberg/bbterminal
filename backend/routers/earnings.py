@@ -31,7 +31,12 @@ from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 
 from deps import IN_CHUNK_SIZE, supabase
-from ingest.earnings import fetch_analyst_estimates, fetch_financials, fetch_indicators
+from ingest.earnings import (
+    fetch_analyst_estimates,
+    fetch_financials,
+    fetch_indicators,
+    fetch_key_ratios,
+)
 from ingest.prices import ensure_prices_for_company
 
 router = APIRouter(tags=["earnings"])
@@ -99,6 +104,15 @@ async def _earnings_refresh_stream(company_id: int, sources: list[str], force: b
                         supabase, company_id, ticker, exchange,
                         force_refresh=force, on_log=on_log,
                     ))
+            elif source == "key_ratios":
+                # ⚠ AFTER `analyst_estimates` IN ANY `sources` LIST THAT CONTAINS BOTH — the
+                # `keyratios` payload dates its FY1/FY2/FY3 figures off the estimate rows that one
+                # stores. Out of order it stores nothing and says so rather than guessing a year.
+                task = asyncio.get_event_loop().run_in_executor(
+                    None, lambda: fetch_key_ratios(
+                        supabase, company_id, ticker, exchange,
+                        force_refresh=force, on_log=on_log,
+                    ))
             elif source == "indicators":
                 task = asyncio.get_event_loop().run_in_executor(
                     None, lambda: fetch_indicators(
@@ -152,7 +166,7 @@ async def _earnings_refresh_stream(company_id: int, sources: list[str], force: b
 @router.post("/api/earnings/{company_id}/refresh/{source}")
 async def refresh_earnings_source(company_id: int, source: str, force: bool = False):
     """Refresh a single earnings data source. SSE stream."""
-    valid = {"financials", "analyst_estimates", "indicators", "prices"}
+    valid = {"financials", "analyst_estimates", "key_ratios", "indicators", "prices"}
     if source not in valid:
         raise HTTPException(status_code=400, detail=f"source must be one of {valid}")
     return StreamingResponse(
@@ -167,7 +181,11 @@ async def refresh_earnings_all(company_id: int, force: bool = False):
     """Refresh all earnings data sources. SSE stream."""
     return StreamingResponse(
         _earnings_refresh_stream(
-            company_id, ["financials", "analyst_estimates", "indicators", "prices"], force
+            # ⚠ `key_ratios` FOLLOWS `analyst_estimates`, AND THE ORDER IS LOAD-BEARING: the
+            # `keyratios` payload carries no dates of its own and takes FY1/FY2/FY3 from the rows
+            # the estimates fetch stores. Reordered, it stores nothing on a company's first pass.
+            company_id,
+            ["financials", "analyst_estimates", "key_ratios", "indicators", "prices"], force
         ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},

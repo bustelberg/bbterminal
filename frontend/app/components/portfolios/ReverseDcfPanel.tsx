@@ -8,7 +8,7 @@ import {
   PERPETUITY_GROWTH,
 } from './reverseDcf';
 import { type ReverseDcfSource } from './egmInputs';
-import { forwardFcf, normalisedFcf } from './normalisedFcf';
+import { forwardLegs, normalisedFcf } from './normalisedFcf';
 // ⚠ THE SAME VOCABULARY THE RISK VIEWS USE. Every ⓘ stating a formula owes the reader the same
 // expression with this company's operands in it, typeset by the same engine — see `workedFormula`.
 // ⚠ THE EXPRESSIONS LIVE IN A PURE MODULE, not in this JSX: a LaTeX string is testable and a
@@ -253,11 +253,22 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
    * silently stop being deducted would be a second, invisible edit.
    */
   /**
-   * Next year's free cash flow, derived — the spreadsheet's `Estimated Free Cash Flow for Next FY1
-   * End (M)`, which the REST API does not publish. See `forwardFcf`: consensus operating cash flow
-   * minus capex, and the capex cancels out of the figure actually valued.
+   * Next year's free cash flow AND the capex/D&A pair that must accompany it.
+   *
+   * ⚠⚠ ONE CALL FOR BOTH, BECAUSE THEY ARE ONE DECISION. The vendor's consensus FCF nets a FORWARD
+   * capex; our fallback nets the TRAILING one. Take the vendor's base with a trailing add-back and
+   * the correction no longer cancels — Meta FY2026 lands at 46,872 instead of 57,250. See
+   * `forwardLegs`, which owns the rule and the measurements.
    */
-  const fwdFcf = forwardFcf(src.ocfEstimate, src.capex);
+  const fwd = forwardLegs({
+    ocfEstimate: src.ocfEstimate, fcfEstimate: src.fcfEstimate,
+    ebitdaEstimate: src.ebitdaEstimate, ebitEstimate: src.ebitEstimate,
+    capex: src.capex, dep: src.dep, normalise,
+  });
+  const fwdFcf = fwd.fcf;
+  /** ⚠ WHOSE FIGURE IS ON SCREEN. The card has to say which of the two it took rather than leave
+   *  the reader to reconcile a 39.6bn difference against GuruFocus's own page. */
+  const fcfEstDirect = fwd.vendor;
   /** ⚠ THE FORWARD BASE ONLY WHEN THERE IS ONE. Fewer than a fifth of ACWI's members carry a
    *  consensus at all, so "forward by default" has to mean "forward where it exists" or most
    *  companies would open on an n/a where a perfectly good filed figure was sitting. */
@@ -283,9 +294,15 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
     return Number.isFinite(v) ? v : null;
   };
   const baseFcf = num(fcfStr) ?? defFcf;
+  // ⚠⚠ `fwd.capex` / `fwd.dep`, NOT `src.capex` / `src.dep` — on the vendor base these are the
+  // FORWARD pair, and using the trailing lines here is precisely the split basis `forwardLegs`
+  // exists to prevent. On the reported base and on the derived forward base they ARE the trailing
+  // lines, so this is the same call it always was for those.
+  const legCapex = forward ? fwd.capex : src.capex;
+  const legDep = forward ? fwd.dep : src.dep;
   const norm = useMemo(
-    () => normalisedFcf({ fcf: baseFcf, sbc: src.sbc, capex: src.capex, dep: src.dep }),
-    [baseFcf, src.sbc, src.capex, src.dep]);
+    () => normalisedFcf({ fcf: baseFcf, sbc: src.sbc, capex: legCapex, dep: legDep }),
+    [baseFcf, src.sbc, legCapex, legDep]);
   /** The total the rows above add up to. ⚠ `?? baseFcf` covers the case where nothing was
    *  correctable; `normalisedFcf` already returns `used === reported` there, so this is a null
    *  guard only. */
@@ -454,23 +471,33 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
               label={`Free cash flow${forward && estFy ? ` ${estFy}` : forward ? ' next FY' : ''}${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(fcfStr, defFcf)} onChange={setFcfStr}
               info={<InfoTip content={<AspectCard
-                what={forward ? 'Next fiscal year\'s free cash flow, derived.' : 'Latest reported free cash flow.'}
-                where={forward
-                  ? 'GuruFocus — analyst consensus operating cash flow, less the last filed capital expenditure.'
-                  : 'GuruFocus — cashflow statement, as filed.'}
+                what={!forward ? 'Latest reported free cash flow.'
+                  : fcfEstDirect ? 'Next fiscal year\'s free cash flow, as forecast.'
+                    : 'Next fiscal year\'s free cash flow, derived.'}
+                where={!forward ? 'GuruFocus — cashflow statement, as filed.'
+                  : fcfEstDirect
+                    ? 'GuruFocus — the analysts’ own consensus free cash flow (keyratios).'
+                    : 'GuruFocus — analyst consensus operating cash flow, less the last filed capital expenditure.'}
                 when={forward ? (estFy ?? 'Next fiscal year.') : flowWhen}
                 // ⚠ NO WORKED LINE ON THE REPORTED BASE, and that is the rule rather than an
                 // omission: it is a figure the vendor filed, not an arithmetic anybody performed.
                 // A formula over raw data fabricates a derivation — the same reason the four
                 // assumption boxes below carry none.
-                worked={!forward ? '' : workedForwardFcf(src.ocfEstimate, src.capex, fwdFcf)}
-                legend={!forward || fwdFcf == null ? undefined : [
+                // ⚠ NO WORKED LINE ON THE VENDOR'S OWN FIGURE — it is a filing, not an
+                // arithmetic anybody performed here. Same rule as the reported base.
+                worked={!forward || fcfEstDirect ? ''
+                  : workedForwardFcf(src.ocfEstimate, src.capex, fwdFcf)}
+                legend={!forward || fcfEstDirect || fwdFcf == null ? undefined : [
                   { sym: String.raw`OCF_{\text{est}}`,
                     is: `consensus operating cash flow for ${estFy ?? 'the next fiscal year'}` },
                   { sym: 'C', is: 'capital expenditure, LAST FILED — no consensus for it exists' },
                 ]}
                 how={(forward
-                  ? `⚠ DERIVED, BECAUSE THERE IS NO CONSENSUS FREE CASH FLOW TO READ. GuruFocus's spreadsheet add-in publishes one; the API we ingest publishes only operating cash flow. FCF = OCF − capex is the definition of the line, so the only forecast quantity here is the operating cash flow.
+                  ? fcfEstDirect
+                    ? `The analysts' own free cash flow forecast for this year — read, not derived. It nets a FORWARD capital-expenditure estimate, which is the figure GuruFocus's own page shows.
+
+⚠ A CONSENSUS IS A FORECAST AND THE MODEL SOLVES FOR GROWTH ON TOP OF IT. Year 1 is analysts' work; every year after it is the rate this panel is asking you to judge.`
+                    : `⚠ DERIVED, BECAUSE THIS COMPANY HAS NO CONSENSUS FREE CASH FLOW STORED. GuruFocus's spreadsheet add-in publishes one; the API we ingest publishes only operating cash flow. FCF = OCF − capex is the definition of the line, so the only forecast quantity here is the operating cash flow.
 
 ⚠ THE CAPEX LEG IS LAST YEAR'S FILING, not a forecast — nobody publishes one. It very largely cancels: with the growth-capex row below, what the model values is (OCF − capex) − stock comp + (capex − depreciation) = consensus OCF − depreciation − stock comp. The capex figure leaves the answer entirely unless the company is spending BELOW depreciation.
 
@@ -507,7 +534,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 from the cash flow, which is exactly what it is not. */}
             <DerivedRow tone="sub" dim={overridden}
               label="Capital expenditure"
-              value={src.capex == null ? '—' : mn(Math.abs(src.capex))}
+              value={legCapex == null ? '—' : mn(Math.abs(legCapex))}
               info={<InfoTip content={<AspectCard
                 what="Capital expenditure, as the magnitude spent."
                 where="GuruFocus — cashflow statement. ⚠ Filed NEGATIVE; shown here as the spend."
@@ -515,7 +542,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 how={`The first of the two lines the growth-capex row below subtracts.${TTM_NOTE}`} />} />} />
             <DerivedRow tone="sub" dim={overridden}
               label="Depreciation & amortisation"
-              value={src.dep == null ? '—' : mn(src.dep)}
+              value={legDep == null ? '—' : mn(legDep)}
               info={<InfoTip content={<AspectCard
                 what="Cash-flow depreciation, depletion and amortisation."
                 where="GuruFocus — cashflow statement."

@@ -69,23 +69,44 @@ const DEP_CODES = [
   'annuals__cashflow_statement__Cash Flow Depreciation, Depletion and Amortization',
 ];
 /**
- * The consensus OPERATING cash flow for the next fiscal year — the Reverse DCF's forward base.
+ * The consensus OPERATING cash flow for the next fiscal year — the forward base's FALLBACK leg.
  *
- * ⚠⚠ THERE IS NO CONSENSUS **FREE** CASH FLOW TO READ, AND THAT IS A FACT ABOUT THE API RATHER
- * THAN ABOUT OUR INGEST. The GuruFocus Excel add-in publishes `Estimated Free Cash Flow for Next
- * FY1 End (M)`; the legacy REST endpoint we ingest (`stock/{sym}/analyst_estimate`) does NOT — its
- * annual block is revenue · ebit · ebitda · net_income · pretax_income · eps_nri · per_share_eps ·
- * operating_cash_flow(+_per_share) · book_value_per_share · dividend · gross_margin · roa · roe ·
- * pettm, plus the `future_*_growth` means. The add-in's field catalogue is not the API's, and this
- * one cannot be probed for: ⚠ THE LEGACY API NEVER 404s, so asking for a field it does not have
- * returns 200 and a plausible all-zero series. Free cash flow is derived instead — see
- * `forwardFcf`, which subtracts capex and is EXACT for the figure this panel actually values.
+ * ⚠⚠ `analyst_estimate` HAS NO FREE-CASH-FLOW KEY, AND FOR A WHILE THIS FILE CONCLUDED THAT THE
+ * API HAD NONE ANYWHERE. Its annual block is revenue · ebit · ebitda · net_income · pretax_income ·
+ * eps_nri · per_share_eps · operating_cash_flow(+_per_share) · book_value_per_share · dividend ·
+ * gross_margin · roa · roe · pettm, plus the `future_*_growth` means — no FCF, no capex. That is
+ * still true and the conclusion still did not follow: the figure is one endpoint over, in
+ * `keyratios` (see `FCF_EST_CODE`). ⚠ The lesson is the shape of the search, not the field: this
+ * app's catalogue already listed `keyratios` as real, and the ⚠ that the LEGACY API NEVER 404s
+ * had made everyone probe for new PATHS while the answer was inside a payload we already had.
  *
- * ⚠ THE INGEST NEEDS NO CHANGE: `_parse_analyst_estimates` stores every list-valued key as
- * `annual_<key>`, and `load_company_metric_rows` reads every `annual_%` prediction row, so this
- * code is already in the payload the modal loads.
+ * ⚠ THE INGEST NEEDED NO CHANGE FOR THIS ONE: `_parse_analyst_estimates` stores every list-valued
+ * key as `annual_<key>`, and `load_company_metric_rows` reads every `annual_%` prediction row, so
+ * this code is already in the payload the modal loads.
  */
 const OCF_EST_CODE = 'annual_operating_cash_flow_estimate';
+/**
+ * The consensus FREE cash flow — GuruFocus's own figure, not ours.
+ *
+ * ⚠⚠ IT IS REAL AND IT IS UNDOCUMENTED. `stock/{sym}/keyratios` → `Fundamental` →
+ * `Estimated Free Cash Flow for Next FY1 End (M)`, ingested by `ingest/earnings/key_ratios.py`.
+ * The endpoint had been in `gurufocus_api.json` as "real" the whole time; nobody had opened its
+ * 264-key `Fundamental` section, so this app spent a while believing the field was Excel-only.
+ *
+ * ⚠ SAME CONSENSUS AS `OCF_EST_CODE` — AAPL's operating-cash-flow estimate reads 148323.41 in
+ * `analyst_estimate` and 148323.411 here — so the two can be subtracted to get the consensus capex
+ * (Meta FY2026: 134,330.10 − 5,412.45 = 128,917.65).
+ *
+ * ⚠ ABSENT FOR MOST COMPANIES TODAY, because the fetch is ON DEMAND. `forwardFcf` falls back to
+ * `OCF_est − |capex|`; see its docstring for why that approximation is sound for the figure the
+ * model values and where it is not.
+ */
+const FCF_EST_CODE = 'annual_fcf_estimate';
+/** ⚠ FORWARD D&A IS `EBITDA_est − EBIT_est` — inferred, not published, and the only forward
+ *  maintenance-capex proxy available. Both codes come from `analyst_estimate`, same consensus as
+ *  the FCF and OCF estimates. See `normalisedFcf.forwardLegs`. */
+const EBITDA_EST_CODE = 'annual_ebitda_estimate';
+const EBIT_EST_CODE = 'annual_ebit_estimate';
 
 export type EgmSource = {
   price: number | null;
@@ -259,10 +280,18 @@ export type ReverseDcfSource = {
   sbc: number | null;
   capex: number | null;
   dep: number | null;
-  /** Consensus OPERATING cash flow for FY1, in millions — the forward base's raw leg. ⚠ NOT free
-   *  cash flow: `forwardFcf` takes capex off it. See `OCF_EST_CODE` for why there is no consensus
-   *  FCF line to read instead. */
+  /** Consensus OPERATING cash flow for FY1, in millions. ⚠ NOT free cash flow: where `fcfEstimate`
+   *  is absent, `forwardFcf` takes capex off this instead. */
   ocfEstimate: number | null;
+  /** ⚠ THE VENDOR'S OWN CONSENSUS **FREE** CASH FLOW for FY1, when we have it — `keyratios`, fetched
+   *  on demand, so absent for most companies. Preferred over the derivation because it nets a
+   *  FORWARD capex estimate we cannot otherwise see: on Meta FY2026 it is 5,412 against the
+   *  derivation's 45,005, and the whole 39.6bn gap is capex the company has guided to and has not
+   *  yet spent. See `FCF_EST_CODE`. */
+  fcfEstimate: number | null;
+  /** FY1 consensus EBITDA and EBIT — their difference is the forward D&A. See `EBITDA_EST_CODE`. */
+  ebitdaEstimate: number | null;
+  ebitEstimate: number | null;
   /** WHICH fiscal year that estimate is for. ⚠ The panel states it: a base labelled "next year"
    *  over a figure whose period nobody named is the same defect `priceDate` fixed for the close. */
   ocfEstimateDate: string | null;
@@ -345,6 +374,10 @@ export type ReverseDcfWorking = {
   /** The FY1 consensus operating cash flow. ⚠ ITS `date` IS A FUTURE PERIOD, unlike every other
    *  row here — that is what makes it the forward base rather than another filing. */
   ocfEst: SourceObs;
+  /** The FY1 consensus FREE cash flow, where `keyratios` has been fetched for this company. */
+  fcfEst: SourceObs;
+  ebitdaEst: SourceObs;
+  ebitEst: SourceObs;
 };
 
 const NONE: SourceObs = { raw: null, used: null, date: null, code: null };
@@ -396,6 +429,14 @@ function flowLegs(metrics: MetricRow[]): {
   return { ...ttm, sbc: ttm.sbc.used != null ? ttm.sbc : latestObs(metrics, codes.sbc) };
 }
 
+/** One FY1 consensus figure as a `SourceObs`. ⚠ THE SAME `nextFyEstimate` RULE for every code —
+ *  they share one date axis, so a second selection rule here would let two legs of one arithmetic
+ *  land on two different fiscal years. */
+function fy1(metrics: MetricRow[], code: string, today: string): SourceObs {
+  const f = nextFyEstimate(metrics, code, today);
+  return f ? { raw: f.value, used: f.value, date: f.date, code } : NONE;
+}
+
 /** A `… %` observation as the DECIMAL the models want, keeping the vendor's figure in `raw`. */
 function asDecimal(o: SourceObs): SourceObs {
   return o.used == null ? o : { ...o, used: o.used / 100 };
@@ -413,6 +454,10 @@ export function reverseDcfWorking(metrics: MetricRow[], today: string): ReverseD
     ocfEst: est
       ? { raw: est.value, used: est.value, date: est.date, code: OCF_EST_CODE }
       : NONE,
+    // ⚠ THE SAME FY1 RULE, over a different code — one consensus, one date axis.
+    fcfEst: fy1(metrics, FCF_EST_CODE, today),
+    ebitdaEst: fy1(metrics, EBITDA_EST_CODE, today),
+    ebitEst: fy1(metrics, EBIT_EST_CODE, today),
     price: latestObs(metrics, [PRICE_CODE]),
     shares: latestObs(metrics, SHARES_CODES),
     // ⚠⚠ THE FOUR FLOW LEGS ARE TRAILING TWELVE MONTHS, FALLING BACK TO THE LAST FISCAL YEAR —
@@ -439,6 +484,8 @@ export function reverseDcfSource(metrics: MetricRow[], today: string): ReverseDc
     price: w.price.used, sharesOutstanding: w.shares.used, fcf: w.fcf.used, wacc: w.wacc.used,
     sbc: w.sbc.used, capex: w.capex.used, dep: w.dep.used,
     ocfEstimate: w.ocfEst.used, ocfEstimateDate: w.ocfEst.date,
+    fcfEstimate: w.fcfEst.used,
+    ebitdaEstimate: w.ebitdaEst.used, ebitEstimate: w.ebitEst.used,
     // ⚠ TAKEN OFF CAPEX, which is in the quorum — `sbc` is excused from it and could be the one
     // leg on the other window, so reading the basis off that would mislabel the other three.
     flowBasis: { ttm: w.capex.ttm === true, date: w.capex.date },

@@ -3,6 +3,7 @@ import {
   dividendYieldWorking, egmSource, estimateCagr, estimateCagrWorking, medianPE, medianPEWorking,
   nextFyEps, reverseDcfSource, reverseDcfWorking, ttmObs,
 } from './egmInputs';
+import { forwardLegs } from './normalisedFcf';
 import { type MetricRow } from './quickValuation';
 
 const TODAY = '2026-07-28';
@@ -174,6 +175,7 @@ describe('reverseDcfSource', () => {
     expect(reverseDcfSource(rows, TODAY)).toEqual({
       price: 100, sharesOutstanding: 1000, fcf: 10000, wacc: null,
       sbc: null, capex: null, dep: null, ocfEstimate: null, ocfEstimateDate: null,
+      fcfEstimate: null, ebitdaEstimate: null, ebitEstimate: null,
       flowBasis: { ttm: false, date: null },
     });
   });
@@ -219,7 +221,50 @@ describe('reverseDcfSource', () => {
     expect(reverseDcfSource([], TODAY)).toEqual({
       price: null, sharesOutstanding: null, fcf: null, wacc: null,
       sbc: null, capex: null, dep: null, ocfEstimate: null, ocfEstimateDate: null,
+      fcfEstimate: null, ebitdaEstimate: null, ebitEstimate: null,
       flowBasis: { ttm: false, date: null },
+    });
+  });
+
+  /**
+   * ⚠⚠ THE WIRING THE PANEL DEPENDS ON, WITH META'S REAL STORED ROWS. `forwardLegs` was already
+   * pinned on these numbers, but nothing asserted that `reverseDcfSource` EXTRACTS them — which is
+   * exactly where a wiring bug hides: every unit correct, the panel still drawing the derivation.
+   */
+  describe('the FY1 consensus free cash flow reaches the source', () => {
+    const meta = [
+      ...rows,
+      m('annual_fcf_estimate', '2026-12-31', 5412.45),
+      m('annual_fcf_estimate', '2027-12-31', -6211.87),
+      m('annual_operating_cash_flow_estimate', '2026-12-31', 134330.10),
+      m('annual_ebitda_estimate', '2026-12-31', 140801.99),
+      m('annual_ebit_estimate', '2026-12-31', 88857.90),
+    ];
+
+    it('carries the vendor consensus, its EBITDA and its EBIT', () => {
+      const s = reverseDcfSource(meta, TODAY);
+      expect(s.fcfEstimate).toBeCloseTo(5412.45, 6);
+      expect(s.ocfEstimate).toBeCloseTo(134330.10, 6);
+      expect(s.ebitdaEstimate).toBeCloseTo(140801.99, 6);
+      expect(s.ebitEstimate).toBeCloseTo(88857.90, 6);
+    });
+
+    it('⚠ FY1, NOT THE NEGATIVE FY2 — the earliest FUTURE period, same rule as every other leg', () => {
+      expect(reverseDcfSource(meta, TODAY).fcfEstimate).not.toBeCloseTo(-6211.87, 6);
+    });
+
+    it('⚠⚠ and the panel then values the VENDOR base, not the derivation', () => {
+      // The end-to-end assertion: source -> forwardLegs -> the figure on the card.
+      const s = reverseDcfSource(meta, TODAY);
+      const legs = forwardLegs({
+        ocfEstimate: s.ocfEstimate, fcfEstimate: s.fcfEstimate,
+        ebitdaEstimate: s.ebitdaEstimate, ebitEstimate: s.ebitEstimate,
+        capex: s.capex, dep: s.dep, normalise: true,
+      });
+      expect(legs.vendor).toBe(true);
+      expect(legs.fcf).toBeCloseTo(5412.45, 6);      // NOT 45,005 — the derivation
+      expect(legs.capex).toBeCloseTo(128917.65, 4);
+      expect(legs.dep).toBeCloseTo(51944.09, 4);
     });
   });
 
