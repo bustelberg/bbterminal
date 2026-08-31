@@ -885,18 +885,19 @@ export default function PortfolioOverviewPanel() {
                 saying the button was busy — a control that reads "Scanning models…" for minutes
                 with no way to stop it. It is a job of its own now, so `allJob` is whichever half
                 is live and the ✕ means the same thing throughout. */}
-            {allJob ? (modelsJob ? 'Cancel model scan' : 'Cancel scan')
-              : refreshingAll ? (scanningModels ? 'Scanning models…' : 'Refreshing…')
-              : 'Refresh all'}
+            {allJob ? (modelsJob ? t.overview.cancelModelScan : t.overview.cancelScan)
+              : refreshingAll ? (scanningModels ? t.overview.scanningModels
+                                                : t.overview.refreshing)
+              : t.overview.refreshAll}
           </button>
           {/* The POLICY, beside the thing that measures against it. Shown to everyone and editable
               by admins only — a non-admin reading what the bands are supposed to be is exactly the
               use this has for them, and hiding it would leave the numbers on this page with no
               stated target at all. */}
           <button type="button" onClick={() => setShowBands(true)}
-            title="Per risk profile (Offensief / Beperkt Offensief / Neutraal / Defensief), the minimum, default and maximum share each asset class may take."
+            title={t.overview.allocationBandsHint}
             className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors">
-            Asset allocatie
+            {t.overview.allocationBands}
           </button>
           {/* ⚠ ONE BUTTON. It ran as two for a while — accounts here, model portfolios on a second
               control — which put an implementation rule (keep the two scans' error verdicts apart)
