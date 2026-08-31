@@ -1002,6 +1002,28 @@ market cap it was weighted by in that period, and the weight that produced.">
                       reason. The REASON survives in the period cells' tooltips (`blend.excluded`,
                       below) — it is no longer announced, only available. */}
                   <span className="truncate" title={r.name}>{r.name}</span>
+                  {/* ⚠⚠ AND THIS ONE IS BACK, FOR THE OTHER KIND OF EXCLUSION (2026-08-31, on
+                      request). The badge above was removed because it announced the REBASE's drop
+                      — mechanical, unactionable, and true of a quarter of a book. `excludedByRule`
+                      is the metric's own stated member rule: on EPS and FCF/share the line is
+                      drawn only from companies positive in every period, actuals and consensus,
+                      and a company it withheld is otherwise indistinguishable from one it used —
+                      every figure on the row is real, correctly formatted, and counted nowhere.
+                      That is precisely what has to be visible.
+                      ⚠ IT SITS IN THE PINNED NAME CELL for the same reason the other badges do:
+                      when you are asking why a row's weights are empty you are scrolled right, and
+                      a badge in any other column has scrolled away with them.
+                      ⚠ `StateBadge`, NOT A COLOURED WORD OF ITS OWN. This table already speaks
+                      that vocabulary (UNSUBSCRIBED, NO DATA below), and a second hand-rolled badge
+                      is a second thing the reader has to learn to mean "this cell is not a
+                      number". Same component, same tone scale. */}
+                  {blend.excludedByRule.has(r) && (
+                    <span className="shrink-0">
+                      <StateBadge label="Excluded" tone={BADGE_TONE.warn}
+                        title={`Excluded from the ${metricLabel} line: ${blend.excluded.get(r)
+                          ?? 'it does not meet this metric’s member rule'}.`} />
+                    </span>
+                  )}
                   {/* The stated reason, where the `no_data` cell below cannot carry it — this row
                       has figures, so it renders no such cell. One glyph, full text in the tooltip
                       and in the console. */}

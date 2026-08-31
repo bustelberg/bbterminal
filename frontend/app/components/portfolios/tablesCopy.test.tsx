@@ -44,24 +44,46 @@ describe('both languages are complete', () => {
   });
 
   /**
-   * ⚠⚠ NO FORMULA MAY BE SPLIT INTO A BOLD TITLE MID-EXPRESSION. `AboutCard` promotes whatever
-   * precedes the first ' — ' to the card's heading when that fragment is at most 48 characters and
-   * carries no sentence punctuation — and the formula is the FIRST thing in every row tooltip, so
-   * it is the fragment that would be promoted. Half of `Σ(w × ROIC) ÷ Σw` in bold, with the rest
-   * starting mid-expression, is a designed-looking tooltip that reads as nonsense.
+   * ⚠⚠ EVERY FORMULA IS **LaTeX**, BECAUSE THE ⓘ TYPESETS IT (2026-08-31).
    *
-   * The guard in `splitTipTitle` is real, but it is a length coincidence away from not holding, and
-   * a formula is exactly the kind of string somebody shortens later. So: no em dash, ever, and
-   * comfortably past the threshold in both languages and both SBC states.
+   * This replaces a guard that no longer applies: while the tooltip was PROSE, `AboutCard` promoted
+   * whatever preceded the first ' — ' to a bold heading, so a formula could be split mid-expression
+   * — hence the old "no em dash, and comfortably longer than 48 characters" rule. The ⓘ now hands
+   * the formula to `Formula`/KaTeX as the card's `worked`, where neither the em dash nor the length
+   * means anything, and where the LENGTH RULE FOUGHT THE BRIEF: these tooltips are meant to be the
+   * bare minimum.
+   *
+   * ⚠ WHAT REPLACES IT IS THE STRONGER CHECK — that the string really is an expression rather than
+   * prose that would be set as a row of italic variables. `tablesCopy.latex.test.ts` renders every
+   * one of them in STRICT mode, which is the half that catches a silent `%` truncation.
    */
-  it.each(LANGS)('%s formulas cannot be mistaken for a title + body', (lang: Lang) => {
+  it.each(LANGS)('%s formulas are typeset expressions, not prose', (lang: Lang) => {
     const c = COPY[lang];
     for (const k of MEASURE_KEYS) {
       for (const sbc of [false, true]) {
         const f = c.rowFormula[k](sbc);
-        expect(f, `rowFormula.${k}(${sbc}) must not contain ' — '`).not.toContain(' — ');
-        expect(f.length, `rowFormula.${k}(${sbc}) is short enough to be promoted`)
-          .toBeGreaterThan(48);
+        expect(f, `rowFormula.${k}(${sbc}) is LaTeX`).toMatch(/\\\\[a-z]+/);
+        // ⚠ AND NOT THE UNICODE LOOKALIKES IT REPLACED. `Σ(w × x) ÷ Σw` in the UI font is a
+        // row of glyphs that resembles an expression: a summation with no limits, and `Σ`
+        // given the advance width of a comma. Same rule as `lib/tipCard`'s `Worked`.
+        for (const glyph of ['÷', '×', 'Σ', '^ (']) {
+          expect(f, `rowFormula.${k}(${sbc}) still spells ${glyph} as a glyph`)
+            .not.toContain(glyph);
+        }
+      }
+    }
+  });
+
+  /**
+   * ⚠ AND THE NOTE IS ONE SHORT SENTENCE. It is the card's TITLE (`AspectCard`'s `what`), read
+   * beside a typeset formula; the essays that used to sit here were the reason nobody read either.
+   * Asked for 2026-08-31: "the info icon text should be very short with bare minimum info".
+   */
+  it.each(LANGS)('%s row notes stay short enough to read at a glance', (lang: Lang) => {
+    const c = COPY[lang];
+    for (const k of MEASURE_KEYS) {
+      for (const sbc of [false, true]) {
+        expect(c.rowNote[k](sbc).length, `rowNote.${k}(${sbc})`).toBeLessThanOrEqual(150);
       }
     }
   });

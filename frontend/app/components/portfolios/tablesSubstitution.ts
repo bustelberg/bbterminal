@@ -18,9 +18,21 @@
  * to work it for, and how to name the span.
  */
 import { type Cagr } from './lineCagr';
-import { xToPeriod } from './marginData';
 import { windowMean } from './windowStats';
-import { subDigits, subNum, workedCagr, workedMean } from './workedFormula';
+import {
+  subDigits, subNum, workedCagr, workedMean,
+} from './workedFormula';
+
+/**
+ * ⚠⚠ EVERYTHING THIS MODULE RETURNS IS **LaTeX**, AND THE LINES ARE JOINED THE WAY KaTeX
+ * BREAKS THEM. It used to return the expression with a plain-text caption on a newline, which
+ * was fine while the ⓘ printed prose — and the day `workedCagr` was typeset (2026-08-22) the
+ * Tables tooltips began showing the reader `\\left(\\dfrac{...}` verbatim, backslashes and
+ * all, because `InfoTip text=` renders a string as text. Reported 2026-08-31 as "the latex in
+ * the info icons in Tables is not rendering properly". So the caption is `\\text{}` too and the
+ * separator is a LaTeX line break: the whole return value goes into ONE `Formula`.
+ */
+const LINE = ' \\\\[4pt] ';
 
 /**
  * ⚠⚠ THE MEAN IS TAKEN FIRST AND TRANSFORMED SECOND, WHICH IS THE WHOLE REASON THIS EXISTS.
@@ -55,13 +67,18 @@ export type MeanTransform = (mean: number) => number | null;
 // ⚠ THE `Cagr` CARRIES ITS OWN OPERANDS — this used to take the `Blend` too and look the endpoints
 // up again by period. It cannot any more, which removes the failure that lookup allowed: printing
 // the right rate beside the wrong pair of numbers. See `Cagr.fromValue`.
-export function rateSub(name: string, got: Cagr | null): string {
+//
+// ⚠⚠ NO CAPTION. The book's name used to head this line, on the reasoning that the ⓘ belongs to a
+// row with a book column and an index column. It was WRONG WHERE IT SAT: `withWorked` joins the
+// symbolic formula and this line into one display, so the name landed between the two halves of a
+// single expression and read as a term in it (reported 2026-08-31, "why is the portfolio name in
+// the middle of the equation?"). The two halves are the formula and the formula with numbers in
+// it, and nothing else belongs between them. ⚠ The endpoints carry their own periods as
+// subscripts, so nothing is lost — the caption was the only part of the line that was not
+// arithmetic.
+export function rateSub(got: Cagr | null): string {
   if (!got || got.pct == null) return '';
-  const expr = workedCagr(got);
-  // ⚠ THE BOOK'S NAME IS THE CAPTION, and it is what makes the line readable without one. The
-  // ⓘ belongs to a row that has a book column and an index column; an unlabelled expression
-  // under it is a worked example of an unstated one of the two.
-  return expr ? `${name}\n${expr}` : '';
+  return workedCagr(got);
 }
 
 /**
@@ -78,7 +95,7 @@ export function rateSub(name: string, got: Cagr | null): string {
  * `(9/10)` badge used to hide. See `coverageFromBurden`.
  */
 export function meanSub(
-  name: string, m: Map<number, number | null>, endX: number | null, years: number,
+  m: Map<number, number | null>, endX: number | null, years: number,
   transform?: MeanTransform,
 ): string {
   if (endX == null) return '';
@@ -94,13 +111,17 @@ export function meanSub(
   }
   if (!vals.length) return '';
   const mean = workedMean(vals);
-  const head = `${name}, ${xToPeriod(got.fromX)}–${xToPeriod(got.toX)}`;
-  if (!transform) return `${head}\n${mean}`;
+  // ⚠⚠ NO CAPTION AND NO SPAN — see `rateSub`. This line sits INSIDE one display expression,
+  // between the symbolic formula and nothing else; a name and a year range there read as
+  // terms in the arithmetic. The window is already on the column header and in the cell's own
+  // hover (`meanTip`), which is where a reader asks what it was measured over.
+  if (!transform) return mean;
   const t = transform(got.mean);
   // ⚠ THE INVERSION IS ITS OWN LINE, because that is where its whole argument lives: the reader
   // sees the burdens averaged and only THEN inverted, which is exactly the ordering the `(9/10)`
   // badge used to hide. ⚠ And it re-prints the mean at the SAME precision `workedMean` chose, so
   // the operand on this line is visibly the answer on the line above it.
-  return t == null ? `${head}\n${mean}`
-    : `${head}\n${mean}\n100 ÷ ${subNum(got.mean, subDigits(got.mean))}% = ${t.toFixed(1)}×`;
+  return t == null ? mean
+    : `${mean}${LINE}`
+      + `100 \\div ${subNum(got.mean, subDigits(got.mean))}\\% = ${t.toFixed(1)}\\times`;
 }

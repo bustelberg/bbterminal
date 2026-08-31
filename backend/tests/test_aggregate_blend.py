@@ -220,19 +220,37 @@ class TestAMetricIsAggregatableOnlyIfItsForecastLegIs:
     legs or NEITHER.
     """
 
-    def test_a_metric_whose_consensus_can_be_priced_is_aggregated_with_it(self):
-        from routers.earnings import (
-            _AGGREGATABLE_FORECAST, _AGGREGATABLE_PER_SHARE, _FORECAST_METRIC, aggregatable_metrics,
-        )
-        # ⚠ THE PRECONDITION, ASSERTED — without an actual overlap the rule below is vacuous and
-        # this test would pass while proving nothing.
-        assert "eps_nri" in _FORECAST_METRIC
-        assert "eps_nri" in _AGGREGATABLE_PER_SHARE
+    def test_a_metric_whose_consensus_can_be_priced_is_aggregated_with_it(self, monkeypatch):
+        """⚠⚠ THE ONLY LIVE SUBJECT LEFT THE SET ON 2026-08-31, so this drives the rule against a
+        DECLARED pairing rather than against today's configuration. `eps_nri` was the one metric
+        that both aggregated and carried a consensus; it is now positives-only
+        (`_POSITIVE_ONLY_METRICS`) and `_AGGREGATABLE_PER_SHARE` is empty, which would leave the
+        rule asserted only by its negative case — green forever, proving nothing, and silently
+        unprotected the day a per-share metric is added back."""
+        from routers import earnings as e
+        monkeypatch.setattr(e, "_AGGREGATABLE_PER_SHARE", frozenset({"eps_nri"}))
+        monkeypatch.setattr(e, "_AGGREGATABLE_FORECAST", frozenset({"eps_nri_estimate"}))
+        # ⚠ THE PRECONDITION, ASSERTED — without an actual overlap the rule below is vacuous.
+        assert e._FORECAST_METRIC["eps_nri"] == "eps_nri_estimate"
 
-        assert _FORECAST_METRIC["eps_nri"] in _AGGREGATABLE_FORECAST
-        assert "eps_nri" in aggregatable_metrics([])
-        assert aggregatable_metrics(["eps_nri"]) == ["eps_nri"]
-        assert aggregatable_metrics(["revenue", "fcf_ps"]) == ["revenue", "fcf_ps"]
+        assert "eps_nri" in e.aggregatable_metrics([])
+        assert e.aggregatable_metrics(["eps_nri"]) == ["eps_nri"]
+        assert e.aggregatable_metrics(["revenue", "fcf_ps"]) == ["revenue", "fcf_ps"]
+
+    def test_todays_configuration_aggregates_neither_per_share_line(self):
+        """⚠ WHERE THE TWO SETS ACTUALLY STAND, pinned so the trade is a decision rather than a
+        drift. `fcf_ps` (2026-08-26) and `eps_nri` (2026-08-31) are both drawn as weighted averages
+        of per-member growth over members positive in every period — see `_POSITIVE_ONLY_METRICS`
+        for what that costs — so neither has euros anywhere, and `revenue` is the only summed line
+        left. ⚠ A metric in BOTH sets would be a survivorship-filtered SUM, which is the one
+        combination nothing wants: the sum needs no filter and the filter only adds bias."""
+        from routers import earnings as e
+        assert e._AGGREGATABLE_PER_SHARE == frozenset()
+        assert e._AGGREGATABLE_FORECAST == frozenset()
+        assert set(e.aggregatable_metrics([])) == {"revenue"}
+        assert e.aggregatable_metrics(["eps_nri"]) == []
+        assert not (e._POSITIVE_ONLY_METRICS
+                    & (e._AGGREGATABLE_PER_SHARE | e._AGGREGATABLE_TOTAL))
 
     def test_a_metric_whose_consensus_cannot_be_priced_is_refused_whole(self, monkeypatch):
         # ⚠ THE RULE ITSELF, WITH THE PRICEABLE SET EMPTIED — this is what `aggregatable_metrics`

@@ -176,103 +176,35 @@ const en: TablesCopy = {
     epsFwd: 'EPS (excl. NRI) expected, 3y',
   },
   rowFormula: {
-    revCagr: () => '(revenue index at the end ÷ at the start) ^ (1 ÷ years) − 1',
-    epsCagr: () => '(EPS index at the end ÷ at the start) ^ (1 ÷ years) − 1',
-    fcfCagr: () => '(FCF-per-share index at the end ÷ at the start) ^ (1 ÷ years) − 1',
-    priceCagr: () => '(price index at the end ÷ at the start) ^ (1 ÷ years) − 1',
-    invCapCagr: () => '(invested-capital index at the end ÷ at the start) ^ (1 ÷ years) − 1',
-    sharesCagr: () => '(share-count index at the end ÷ at the start) ^ (1 ÷ years) − 1',
-    grossMargin: () =>
-      'per year: Σ(w × gross profit ÷ revenue) ÷ Σw, then the mean of those years',
-    fcfMargin: (sbc) =>
-      `per year: Σ(w × (FCF${sbc ? ' − SBC' : ''}) ÷ revenue) ÷ Σw, then the mean of those years`,
-    roic: () => 'per year: Σ(w × ROIC) ÷ Σw, then the mean of those years',
-    cashConv: (sbc) =>
-      `per year: Σ(w × (FCF${sbc ? ' − SBC' : ''}) ÷ net income) ÷ Σw, then the mean of those `
-      + 'years',
-    // ⚠ THE BRACKETS ARE THE CLAIM: the inversion is OUTSIDE the mean. See `coverageFromBurden`.
-    intCover: () =>
-      '100 ÷ [ per year: Σ(w × interest ÷ operating profit) ÷ Σw, then the mean of those years ]',
-    epsFwd: () => '(consensus EPS ÷ the latest reported EPS) ^ (1 ÷ years) − 1',
+    revCagr: () => `\\left(\\dfrac{\\text{revenue}_{\\text{end}}}{\\text{revenue}_{\\text{start}}}\\right)^{1/n} - 1`,
+    epsCagr: () => `\\left(\\dfrac{\\text{EPS}_{\\text{end}}}{\\text{EPS}_{\\text{start}}}\\right)^{1/n} - 1`,
+    fcfCagr: () => `\\left(\\dfrac{\\text{FCF/share}_{\\text{end}}}{\\text{FCF/share}_{\\text{start}}}\\right)^{1/n} - 1`,
+    priceCagr: () => `\\left(\\dfrac{\\text{price}_{\\text{end}}}{\\text{price}_{\\text{start}}}\\right)^{1/n} - 1`,
+    invCapCagr: () => `\\left(\\dfrac{\\text{capital}_{\\text{end}}}{\\text{capital}_{\\text{start}}}\\right)^{1/n} - 1`,
+    sharesCagr: () => `\\left(\\dfrac{\\text{shares}_{\\text{end}}}{\\text{shares}_{\\text{start}}}\\right)^{1/n} - 1`,
+    grossMargin: () => `\\text{mean}_{\\text{years}}\\left(\\dfrac{\\sum w \\cdot (\\text{gross profit} / \\text{revenue})}{\\sum w}\\right)`,
+    fcfMargin: (sbc) => `\\text{mean}_{\\text{years}}\\left(\\dfrac{\\sum w \\cdot (\\text{FCF}${sbc ? ' - \\text{SBC}' : ''}) / \\text{revenue}}{\\sum w}\\right)`,
+    roic: () => `\\text{mean}_{\\text{years}}\\left(\\dfrac{\\sum w \\cdot \\text{ROIC}}{\\sum w}\\right)`,
+    cashConv: (sbc) => `\\text{mean}_{\\text{years}}\\left(\\dfrac{\\sum w \\cdot (\\text{FCF}${sbc ? ' - \\text{SBC}' : ''}) / \\text{net income}}{\\sum w}\\right)`,
+    intCover: () => `\\dfrac{100}{\\text{mean}_{\\text{years}}\\left(\\dfrac{\\sum w \\cdot (\\text{interest} / \\text{operating profit})}{\\sum w}\\right)}`,
+    epsFwd: () => `\\left(\\dfrac{\\text{EPS}_{\\text{consensus}}}{\\text{EPS}_{\\text{latest}}}\\right)^{1/n} - 1`,
   },
   rowNote: {
-    revCagr: () =>
-      'Compound annual growth of the weighted REVENUE line, point to point — the same chaining, '
-      + 'per-period cap weighting and coverage floor as the other rate rows. '
-      + '⚠ A LEVEL, SO IT IS CHAINED FROM WEIGHTED GROWTH, never averaged from rebased revenues: '
-      + 'the constituents report in different currencies, so their euros and dollars cannot be '
-      + 'summed, but what each of them GREW by can be averaged.',
-    grossMargin: () =>
-      'Gross profit ÷ revenue, weighted across the holdings each year and averaged over the '
-      + 'window. The cleanest read on pricing power. '
-      + '⚠ A BANK HAS NO GROSS PROFIT LINE AT ALL — GuruFocus’s bank template reports net interest '
-      + 'income instead — so a book with banks in it is averaged over the rest, and the coverage '
-      + 'floor decides whether a year is drawn at all.',
+    revCagr: () => 'Weighted revenue line, point to point.',
+    epsCagr: () => 'Weighted EPS line, point to point. History, not the expectation below.',
+    fcfCagr: () => 'Weighted FCF-per-share line, point to point. The card fits a trend instead.',
+    priceCagr: () => 'Weighted share-price line, point to point. Price only, in local currency.',
+    invCapCagr: () => 'Weighted invested-capital line, point to point. The ROIC row’s denominator.',
+    sharesCagr: () => 'Weighted share-count line, point to point. Negative is buybacks.',
+    grossMargin: () => 'Gross profit over revenue. A bank has no gross profit line.',
+    fcfMargin: (sbc) => `Free cash flow${sbc ? ' net of stock comp' : ''} over revenue.`,
+    roic: () => 'GuruFocus’s own return on invested capital. Not touched by the SBC box.',
     cashConv: (sbc) =>
-      `Free cash flow ${sbc ? 'net of stock comp ' : ''}÷ net income, weighted per year and `
-      + 'averaged over the window — whether the reported profit turns into money. '
-      + '⚠ 100% IS BREAK-EVEN, NOT A CEILING: above it the business converts more cash than it '
-      + 'books as profit, which is a compliment. ⚠ The numerator is whole-company cash while the '
-      + 'denominator is the SHAREHOLDERS’ line, so a group with large minorities reads high. '
-      + 'Follows the SBC checkbox.',
+      `Free cash flow${sbc ? ' net of stock comp' : ''} over net income. 100% is break-even.`,
     intCover: () =>
-      'Operating profit ÷ interest expense — how many times over the book covers its interest, '
-      + 'averaged over the window. '
-      + '⚠⚠ IT IS ONE OVER THE WEIGHTED INTEREST BURDEN, AND THAT IS THE CORRECT AGGREGATE rather '
-      + 'than a shortcut: the burden (interest as a share of profit) is the additive quantity, '
-      + 'exactly as an earnings yield is where a P/E is not, so its reciprocal is the weighted '
-      + 'HARMONIC mean of the holdings’ coverages. Averaging coverage directly would let one '
-      + 'debt-free name scoring in the thousands set the book’s figure. '
-      + '⚠ A year the book pays no interest at all has no coverage to state — it is a dash, not '
-      + '∞, and not a zero.',
-    fcfCagr: () =>
-      'Compound annual growth of the weighted FCF-per-share line, point to point. '
-      + '⚠ The Long Equity growth card fits a log-linear TREND through every year instead '
-      + '(that is what its R² is about), so the two will differ — most where one endpoint '
-      + 'year is unrepresentative, which is when the gap is worth seeing.',
-    epsCagr: () =>
-      'Compound annual growth of the weighted EPS (excl. non-recurring) line, point to point. '
-      + '⚠ THIS IS THE HISTORY, NOT THE EXPECTATION — the row at the bottom of this table is the '
-      + 'analysts’ 3-year consensus off the latest reported year, and the two answer different '
-      + 'questions. Read them together: a book compounding at 8% behind a consensus of 15% is a '
-      + 'claim someone has to justify.',
-    invCapCagr: () =>
-      'Compound annual growth of the weighted INVESTED-CAPITAL line, point to point — how fast '
-      + 'the capital the business runs on is growing. '
-      + '⚠ IT IS THE DENOMINATOR OF THE ROIC ROW ABOVE, which is what makes the pair worth '
-      + 'reading in one glance: capital growing faster than returns is a book buying its growth, '
-      + 'and neither row says that on its own.',
-    sharesCagr: () =>
-      'Compound annual growth of the weighted SHARE-COUNT line, point to point. '
-      + '⚠⚠ NEGATIVE IS USUALLY THE GOOD DIRECTION HERE, and it is the one row on this table '
-      + 'where that is true: a falling share count is net buybacks, so it is the wedge between '
-      + 'the Revenue row and the EPS and FCF-per-share rows beside it. A book whose per-share '
-      + 'lines outrun its revenue is either widening margins or retiring stock, and this row is '
-      + 'which. ⚠ The cell is coloured by SIGN like every other rate, so read the sign, not '
-      + 'the colour.',
-    priceCagr: () =>
-      'Compound annual growth of the weighted SHARE-PRICE line, point to point — the same '
-      + 'weighting, chaining and coverage floor as the rows around it, run over each holding’s '
-      + 'fiscal-year-end share price. What the market did with the same basket. '
-      + '⚠ PRICE ONLY: dividends are not in it, on either side, so a high-yielding book reads '
-      + 'lower here than its total return. '
-      + '⚠ AND IT CARRIES NO FX LEG. Each holding’s price is in its own currency and the line '
-      + 'chains per-holding growth, so this is a local-currency price return — NOT the book’s EUR '
-      + 'return, which is what the Analyse modal reports.',
-    fcfMargin: (sbc) =>
-      `Free cash flow ${sbc ? 'net of stock comp ' : ''}÷ revenue, averaged over `
-      + 'the window. A ratio does not compound, so this is a mean and not a rate — it is '
-      + 'the Long Equity margin chart, averaged. Follows the SBC checkbox.',
-    roic: () =>
-      'GuruFocus’s own published return on invested capital, weight-weighted per year '
-      + 'and averaged over the window. ⚠ Unaffected by the SBC checkbox — there is no '
-      + 'numerator of ours to adjust.',
-    epsFwd: () =>
-      'Compound annual growth from the latest REPORTED EPS excluding non-recurring items '
-      + 'to the analyst consensus three years out. ⚠ NOT A MEASUREMENT — it is what '
-      + 'analysts expect today, and only the constituents they cover are in it. The base '
-      + 'is an actual on purpose: measuring 2026e → 2029e would be the consensus’s own '
-      + 'internal slope, with no contact with anything that happened.',
+      'Times over the book covers its interest. One over the weighted burden, so a debt-free '
+      + 'name cannot run away with it.',
+    epsFwd: () => 'Latest reported EPS to the 3-year consensus. An expectation, not a measurement.',
   },
   rateTip: (from, to, years) => `${from} → ${to}, ${years} years, compounded annually.`,
   meanTip: (n, from, to, of) =>
@@ -377,108 +309,39 @@ const nl: TablesCopy = {
     epsFwd: 'Winst per aandeel (excl. bijzondere posten) verwacht, 3j',
   },
   rowFormula: {
-    revCagr: () => '(omzetindex aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
-    epsCagr: () =>
-      '(index winst per aandeel aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
-    fcfCagr: () =>
-      '(index vrije kasstroom per aandeel aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
-    priceCagr: () => '(koersindex aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
-    invCapCagr: () =>
-      '(index geïnvesteerd vermogen aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
-    sharesCagr: () =>
-      '(index aantal aandelen aan het eind ÷ aan het begin) ^ (1 ÷ jaren) − 1',
-    grossMargin: () =>
-      'per jaar: Σ(w × brutowinst ÷ omzet) ÷ Σw, daarna het gemiddelde van die jaren',
-    fcfMargin: (sbc) =>
-      `per jaar: Σ(w × (vrije kasstroom${sbc ? ' − SBC' : ''}) ÷ omzet) ÷ Σw, daarna het `
-      + 'gemiddelde van die jaren',
-    roic: () => 'per jaar: Σ(w × ROIC) ÷ Σw, daarna het gemiddelde van die jaren',
-    cashConv: (sbc) =>
-      `per jaar: Σ(w × (vrije kasstroom${sbc ? ' − SBC' : ''}) ÷ nettowinst) ÷ Σw, daarna het `
-      + 'gemiddelde van die jaren',
-    intCover: () =>
-      '100 ÷ [ per jaar: Σ(w × rente ÷ bedrijfsresultaat) ÷ Σw, daarna het gemiddelde van die '
-      + 'jaren ]',
-    epsFwd: () =>
-      '(verwachte winst per aandeel ÷ de laatst gerapporteerde) ^ (1 ÷ jaren) − 1',
+    revCagr: () => `\\left(\\dfrac{\\text{omzet}_{\\text{eind}}}{\\text{omzet}_{\\text{begin}}}\\right)^{1/n} - 1`,
+    epsCagr: () => `\\left(\\dfrac{\\text{WPA}_{\\text{eind}}}{\\text{WPA}_{\\text{begin}}}\\right)^{1/n} - 1`,
+    fcfCagr: () => `\\left(\\dfrac{\\text{VKS/aandeel}_{\\text{eind}}}{\\text{VKS/aandeel}_{\\text{begin}}}\\right)^{1/n} - 1`,
+    priceCagr: () => `\\left(\\dfrac{\\text{koers}_{\\text{eind}}}{\\text{koers}_{\\text{begin}}}\\right)^{1/n} - 1`,
+    invCapCagr: () => `\\left(\\dfrac{\\text{vermogen}_{\\text{eind}}}{\\text{vermogen}_{\\text{begin}}}\\right)^{1/n} - 1`,
+    sharesCagr: () => `\\left(\\dfrac{\\text{aandelen}_{\\text{eind}}}{\\text{aandelen}_{\\text{begin}}}\\right)^{1/n} - 1`,
+    grossMargin: () => `\\text{gem.}_{\\text{jaren}}\\left(\\dfrac{\\sum w \\cdot (\\text{brutowinst} / \\text{omzet})}{\\sum w}\\right)`,
+    fcfMargin: (sbc) => `\\text{gem.}_{\\text{jaren}}\\left(\\dfrac{\\sum w \\cdot (\\text{VKS}${sbc ? ' - \\text{SBC}' : ''}) / \\text{omzet}}{\\sum w}\\right)`,
+    roic: () => `\\text{gem.}_{\\text{jaren}}\\left(\\dfrac{\\sum w \\cdot \\text{ROIC}}{\\sum w}\\right)`,
+    cashConv: (sbc) => `\\text{gem.}_{\\text{jaren}}\\left(\\dfrac{\\sum w \\cdot (\\text{VKS}${sbc ? ' - \\text{SBC}' : ''}) / \\text{nettowinst}}{\\sum w}\\right)`,
+    intCover: () => `\\dfrac{100}{\\text{gem.}_{\\text{jaren}}\\left(\\dfrac{\\sum w \\cdot (\\text{rente} / \\text{bedrijfsresultaat})}{\\sum w}\\right)}`,
+    epsFwd: () => `\\left(\\dfrac{\\text{WPA}_{\\text{consensus}}}{\\text{WPA}_{\\text{laatste}}}\\right)^{1/n} - 1`,
   },
   rowNote: {
-    revCagr: () =>
-      'Samengestelde jaarlijkse groei van de gewogen OMZETLIJN, van punt tot punt — dezelfde '
-      + 'ketening, weging per periode en dekkingsdrempel als de andere groeiregels. '
-      + '⚠ EEN NIVEAU, DUS GEKETEND UIT GEWOGEN GROEI, nooit gemiddeld uit herbasiseerde omzetten: '
-      + 'de deelnemingen rapporteren in verschillende valuta, dus hun euro’s en dollars kunnen niet '
-      + 'worden opgeteld — waarmee ze GEGROEID zijn wel.',
-    grossMargin: () =>
-      'Brutowinst ÷ omzet, per jaar gewogen over de posities en gemiddeld over de periode. De '
-      + 'zuiverste maatstaf voor prijszettingsmacht. '
-      + '⚠ EEN BANK HEEFT GEEN BRUTOWINSTREGEL — GuruFocus rapporteert daar netto rentebaten — dus '
-      + 'een boek met banken wordt over de rest gemiddeld.',
-    cashConv: (sbc) =>
-      `Vrije kasstroom ${sbc ? 'na aandelenbeloning ' : ''}÷ nettowinst, per jaar gewogen en `
-      + 'gemiddeld over de periode — of de gerapporteerde winst ook geld wordt. '
-      + '⚠ 100% IS HET BREEKPUNT, GEEN PLAFOND: daarboven zet de onderneming meer kasstroom om dan '
-      + 'zij als winst boekt, wat een compliment is. Volgt het SBC-vinkje.',
-    intCover: () =>
-      'Bedrijfsresultaat ÷ rentelasten — hoe vaak het boek zijn rente dekt, gemiddeld over de '
-      + 'periode. '
-      + '⚠⚠ HET IS ÉÉN GEDEELD DOOR DE GEWOGEN RENTELAST, en dat is de juiste aggregatie: de '
-      + 'rentelast (rente als aandeel van de winst) is de optelbare grootheid, net zoals een '
-      + 'winstrendement dat is waar een koers-winstverhouding dat niet is. Rechtstreeks middelen '
-      + 'zou één schuldenvrije naam met een dekking in de duizenden het cijfer laten bepalen. '
-      + '⚠ Een jaar zonder rentelasten heeft geen dekking om te tonen — dat is een streepje, geen '
-      + 'oneindig en geen nul.',
+    revCagr: () => 'Gewogen omzetlijn, punt tot punt.',
+    epsCagr: () => 'Gewogen WPA-lijn, punt tot punt. Historie, niet de verwachting hieronder.',
     fcfCagr: () =>
-      'Samengestelde jaarlijkse groei van de gewogen lijn van de vrije kasstroom per aandeel, van '
-      + 'eindpunt tot eindpunt. ⚠ De groeikaart in Long Equity legt in plaats daarvan een '
-      + 'log-lineaire TREND '
-      + 'door alle jaren (dáár gaat de R² over), dus de twee zullen verschillen — het meest '
-      + 'wanneer één eindjaar niet representatief is, en juist dan is het verschil de moeite waard.',
-    epsCagr: () =>
-      'Samengestelde jaarlijkse groei van de gewogen lijn van de winst per aandeel (excl. '
-      + 'bijzondere posten), van eindpunt tot eindpunt. '
-      + '⚠ DIT IS DE HISTORIE, NIET DE VERWACHTING — de onderste rij van deze tabel is de '
-      + '3-jaars consensus van analisten vanaf het laatst gerapporteerde jaar, en de twee '
-      + 'beantwoorden verschillende vragen. Lees ze samen: een boek dat op 8% groeit achter een '
-      + 'consensus van 15% is een claim die iemand moet onderbouwen.',
-    invCapCagr: () =>
-      'Samengestelde jaarlijkse groei van de gewogen lijn van het GEÏNVESTEERD VERMOGEN, van '
-      + 'eindpunt tot eindpunt: hoe snel het kapitaal groeit waarop de onderneming draait. '
-      + '⚠ HET IS DE NOEMER VAN DE RENDEMENTSRIJ hieronder, en dat maakt het paar in één oogopslag '
-      + 'de moeite waard: kapitaal dat sneller groeit dan het rendement is een boek dat zijn groei '
-      + 'koopt, en geen van beide rijen zegt dat op zichzelf.',
-    sharesCagr: () =>
-      'Samengestelde jaarlijkse groei van de gewogen lijn van het AANTAL AANDELEN, van eindpunt '
-      + 'tot eindpunt. '
-      + '⚠⚠ NEGATIEF IS HIER MEESTAL DE GOEDE RICHTING, en dit is de enige rij in deze tabel waar '
-      + 'dat geldt: een dalend aantal aandelen is netto inkoop, en daarmee is dit de wig tussen de '
-      + 'omzetrij en de rijen per aandeel ernaast. Een boek waarvan de cijfers per aandeel harder '
-      + 'lopen dan de omzet verbreedt zijn marges óf koopt aandelen in, en deze rij zegt welke van '
-      + 'de twee. ⚠ De cel wordt op TEKEN gekleurd zoals elke andere groeirij, dus lees het teken, '
-      + 'niet de kleur.',
-    priceCagr: () =>
-      'Samengestelde jaarlijkse groei van de gewogen KOERSLIJN, van eindpunt tot eindpunt — '
-      + 'dezelfde weging, kettingberekening en dekkingsdrempel als de rijen eromheen, toegepast op '
-      + 'de slotkoers per aandeel aan het einde van elk boekjaar. Wat de markt met dezelfde mand '
-      + 'heeft gedaan. ⚠ ALLEEN KOERS: dividenden zitten er niet in, aan geen van beide zijden, '
-      + 'dus een boek met veel dividend leest hier lager dan zijn totaalrendement. '
-      + '⚠ EN ER ZIT GEEN VALUTA-EFFECT IN. Elke positie noteert in haar eigen valuta en de lijn '
-      + 'ketent de groei per positie, dus dit is een koersrendement in lokale valuta — NIET het '
-      + 'eurorendement van het boek, dat de Analyse-modal rapporteert.',
-    fcfMargin: (sbc) =>
-      `Vrije kasstroom ${sbc ? 'na aandelenbeloning ' : ''}÷ omzet, gemiddeld over het venster. `
-      + 'Een verhouding groeit niet samengesteld, dus dit is een gemiddelde en geen groeivoet — '
-      + 'het is de margegrafiek uit Long Equity, gemiddeld. Volgt het SBC-vinkje.',
+      'Gewogen lijn vrije kasstroom per aandeel, punt tot punt. De kaart fit een trend.',
+    priceCagr: () => 'Gewogen koerslijn, punt tot punt. Alleen koers, in lokale valuta.',
+    invCapCagr: () => 'Gewogen lijn geïnvesteerd vermogen, punt tot punt. De noemer van ROIC.',
+    sharesCagr: () => 'Gewogen lijn aantal aandelen, punt tot punt. Negatief is inkoop.',
+    grossMargin: () => 'Brutowinst gedeeld door omzet. Een bank heeft geen brutowinstregel.',
+    fcfMargin: (sbc) => `Vrije kasstroom${sbc ? ' na aandelenbeloning' : ''} gedeeld door omzet.`,
     roic: () =>
-      'Het door GuruFocus zelf gepubliceerde rendement op geïnvesteerd vermogen, per jaar gewogen '
-      + 'en gemiddeld over het venster. ⚠ Niet beïnvloed door het SBC-vinkje — er is geen teller '
-      + 'van onszelf om aan te passen.',
+      'Het rendement op geïnvesteerd vermogen van GuruFocus zelf. Los van het SBC-vinkje.',
+    cashConv: (sbc) =>
+      `Vrije kasstroom${sbc ? ' na aandelenbeloning' : ''} gedeeld door nettowinst. 100% is `
+      + 'break-even.',
+    intCover: () =>
+      'Hoe vaak het boek zijn rente dekt. Eén gedeeld door de gewogen rentelast, zodat een '
+      + 'schuldenvrije naam het niet overneemt.',
     epsFwd: () =>
-      'Samengestelde jaarlijkse groei van de laatst GERAPPORTEERDE winst per aandeel exclusief '
-      + 'bijzondere posten naar de analistenconsensus over drie jaar. ⚠ GEEN METING — dit is wat '
-      + 'analisten vandaag verwachten, en alleen de bestanddelen die zij volgen zitten erin. De '
-      + 'basis is bewust een realisatie: 2026e → 2029e meten zou de interne helling van de '
-      + 'consensus zelf zijn, zonder enig contact met wat er werkelijk gebeurd is.',
+      'Laatst gerapporteerde WPA naar de consensus over drie jaar. Een verwachting, geen meting.',
   },
   rateTip: (from, to, years) =>
     `${from} → ${to}, ${years} jaar, jaarlijks samengesteld.`,

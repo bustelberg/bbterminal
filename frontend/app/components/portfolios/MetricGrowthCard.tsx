@@ -16,6 +16,7 @@ import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
 import HoldingsIngestPanel from './HoldingsIngestPanel';
 import { LegendItem } from './ChartLegend';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
+import { countFor, memberCountHow, memberCountLine, type MemberCount } from './memberCounts';
 import { paddedLogDomain, periodTick, stepChanges, type Step } from './marginData';
 import { atSharedX, ltmWindowsDiffer, ltmYearX, sharedLtmX, type LtmPoint } from './ltmAxis';
 import { endpointCagr } from './lineCagr';
@@ -263,8 +264,8 @@ export default function MetricGrowthCard({
    * ⚠ BOTH SIDES, SEPARATELY. The book and the index are two blends over two sets of companies and
    * drop different numbers; one count standing for both would be wrong on whichever it was not.
    */
-  memberCounts?: Record<string, { considered: number; total: number }>;
-  benchCounts?: Record<string, { considered: number; total: number }>;
+  memberCounts?: Record<string, MemberCount>;
+  benchCounts?: Record<string, MemberCount>;
 }) {
   // ⚠ The heading only — see `longEquityCopy` for why the rest of the card
   // (tiles, legend, tooltips) is deliberately not in scope.
@@ -561,30 +562,15 @@ export default function MetricGrowthCard({
   // Present only when the blend saw this metric and still drew nothing — the one case where
   // "not ingested" would be false.
   const blendNote = noteFor(blendNotes, cfg.codes);
-  /**
-   * "142 of 1,514 companies" — or nothing at all when none were withheld.
-   *
-   * ⚠ THE COUNTS ARE KEYED BY METRIC CODE and a card knows several (`cfg.codes` carries both
-   * section spellings), so it takes the first that answered rather than assuming which spelling
-   * this company files under — the same reason `noteFor` exists one line above.
-   */
-  const countFor = (
-    m?: Record<string, { considered: number; total: number }>,
-  ) => (m ? cfg.codes.map((c) => m[c]).find(Boolean) : undefined);
-  const countLine = useMemo(() => {
-    const own = countFor(memberCounts);
-    const bench = countFor(benchCounts);
-    const parts: string[] = [];
-    // ⚠ ONLY WHEN SOMETHING WAS WITHHELD. `considered === total` is every other card, every day.
-    if (isAgg && own && own.considered < own.total) {
-      parts.push(`${ownLabel}: ${own.considered} of ${own.total} companies`);
-    }
-    if (bench && benchLabel && bench.considered < bench.total) {
-      parts.push(`${benchLabel}: ${bench.considered.toLocaleString('en-US')} of ${bench.total.toLocaleString('en-US')}`);
-    }
-    return parts.join(' · ');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [memberCounts, benchCounts, cfg.codes, isAgg, ownLabel, benchLabel]);
+  /** "36 of 42 companies" AND THE REASON BEHIND IT — or nothing when both lines used every holding
+   *  they had. Both live in `memberCounts`: the two constructions withhold members for entirely
+   *  different reasons, the copy that explains them follows the rule the server applied, and
+   *  neither decision belongs in a chart component. */
+  const countLine = useMemo(() => memberCountLine({
+    own: countFor(cfg.codes, memberCounts),
+    bench: countFor(cfg.codes, benchCounts),
+    isAgg, ownLabel, benchLabel,
+  }), [memberCounts, benchCounts, cfg.codes, isAgg, ownLabel, benchLabel]);
   /**
    * Why the INDEX has no forecast leg, in one short clause.
    *
@@ -801,14 +787,15 @@ export default function MetricGrowthCard({
           and a line saying so is noise on thirteen charts to make one honest. */}
       {countLine && (
         <p className="text-[11px] text-fg-faint -mt-2">
-          {countLine}
+          {countLine.text}
+          {/* ⚠ THE PROSE FOLLOWS THE SERVER'S `rule`, not this card's identity — a survivorship
+              filter and an unbuildable euro figure are different facts about the reader's book, and
+              the card would state the wrong one the day a metric changed construction. */}
           <InfoTip className="ml-1" content={<AspectCard
             what="How many companies this line is drawn from."
             where="The blend, after the metric's own member rule."
             when="The window on the chart."
-            how={'Free cash flow per share is drawn from the companies positive in every period, so a weighted year-on-year growth can be taken over figures that are all positive.\n\n'
-              + 'The cost is survivorship, and it runs one way: cash-burners, recoveries and banks are excluded, and averaging growth rates is upward-biased on top of that. Read it as how the survivors grew.\n\n'
-              + 'The excluded companies are still in the per-holding table behind the chart.'} />} />
+            how={memberCountHow(countLine.rule)} />} />
         </p>
       )}
 

@@ -23,6 +23,8 @@ import CashReturnInputsModal from './CashReturnInputsModal';
 import CashConversionInputsModal from './CashConversionInputsModal';
 import InterestBurdenInputsModal from './InterestBurdenInputsModal';
 import { COPY, MEASURE_KEYS, RATE_KEYS, type MeasureKey, type TablesCopy } from './tablesCopy';
+import { AspectCard } from '../../../lib/tipCard';
+import { withWorked } from './workedFormula';
 import { latestCommonX, meanExcess, windowMean, type WindowMean } from './windowStats';
 import {
   meanSub, rateSub, type MeanTransform,
@@ -455,8 +457,15 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   const grossEnd = latestCommonX(book.grossMargin, index.grossMargin);
   const convEnd = latestCommonX(book.cashConv, index.cashConv);
   const coverEnd = latestCommonX(book.intBurden, index.intBurden);
-  const bookBlend = useMemo(() => (book.fcfPs ? buildBlend(book.fcfPs) : null), [book.fcfPs]);
-  const idxBlend = useMemo(() => (index.fcfPs ? buildBlend(index.fcfPs) : null), [index.fcfPs]);
+  /** ⚠⚠ THE METRIC KEY IS PASSED, AND IT IS NOT DECORATION. `buildBlend` applies the positives-only
+   *  member rule (`POSITIVE_ONLY_METRICS`) only when it is told which metric it is holding — so
+   *  omitting it draws this row over a DIFFERENT set of companies from the card that charts the
+   *  same series, and the only symptom is two CAGRs for one book that disagree by a few points.
+   *  That exact shape has cost this tab a wrong number before (`_metric_codes`, +19.0% vs +28.0%). */
+  const bookBlend = useMemo(() => (book.fcfPs ? buildBlend(book.fcfPs, 'fcf_ps') : null),
+    [book.fcfPs]);
+  const idxBlend = useMemo(() => (index.fcfPs ? buildBlend(index.fcfPs, 'fcf_ps') : null),
+    [index.fcfPs]);
   const fcfEnd = bookBlend && idxBlend ? commonEndPeriod(bookBlend.level, idxBlend.level) : null;
   /** ⚠ THE SAME `buildBlend` AS EVERY OTHER ROW, ON A DIFFERENT PAYLOAD — which is the whole of
    *  "weighted like the others". A price line assembled any other way (summing values, averaging
@@ -468,8 +477,8 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   const idxPrice = useMemo(() => (bPricePs ? buildBlend(bPricePs) : null), [bPricePs]);
   const priceEnd = bookPrice && idxPrice
     ? commonEndPeriod(bookPrice.level, idxPrice.level) : null;
-  const bookEps = useMemo(() => (epsNri ? buildBlend(epsNri) : null), [epsNri]);
-  const idxEps = useMemo(() => (bEpsNri ? buildBlend(bEpsNri) : null), [bEpsNri]);
+  const bookEps = useMemo(() => (epsNri ? buildBlend(epsNri, 'eps_nri') : null), [epsNri]);
+  const idxEps = useMemo(() => (bEpsNri ? buildBlend(bEpsNri, 'eps_nri') : null), [bEpsNri]);
   /** ⚠ THE SHARED BASE IS AN **ACTUAL** — `commonEndPeriod` only ever returns a reported period, so
    *  the expectation is always measured from something that happened. See `forwardCagr`. */
   const epsBase = bookEps && idxEps ? commonEndPeriod(bookEps.level, idxEps.level) : null;
@@ -514,12 +523,10 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
    * a click sticks it open and the expression can be selected and pasted into whatever the reader
    * checks numbers in. See `InfoTip`.
    */
-  const tipFor = (k: MeasureKey, sub: string): string => {
-    const parts = [copy.rowFormula[k](sbcCorrection)];
-    if (sub) parts.push(sub);
-    parts.push(copy.rowNote[k](sbcCorrection));
-    return parts.join('\n\n');
-  };
+  const tipFor = (k: MeasureKey, sub: string) => (
+    <AspectCard what={copy.rowNote[k](sbcCorrection)}
+      worked={withWorked(copy.rowFormula[k](sbcCorrection), sub)} />
+  );
 
   /**
    * A row of RATES — one `Cagr` per side per window, plus the excess.
@@ -546,7 +553,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
         </button>
         {/* ⚠ THE BOOK'S SIDE, NOT THE INDEX'S — see `rateSub`. `windows` is ascending, so its
             last entry is the longest one on screen; the forward row overrides it with its own. */}
-        <InfoTip className="ml-1" text={tipFor(k, rateSub(holdingsName,
+        <InfoTip className="ml-1" content={tipFor(k, rateSub(
           a && windows.length ? rate(a.level, windows[windows.length - 1]) : null))} />
       </td>
       {windows.map((y) => (
@@ -608,8 +615,8 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
           {copy.rowLabel[k]}
         </button>
         {/* ⚠ THE BOOK'S SIDE, NOT THE INDEX'S — see `meanSub`. */}
-        <InfoTip className="ml-1" text={tipFor(k, meanSub(
-          holdingsName, a, endX, shown[shown.length - 1] ?? 0, transform,
+        <InfoTip className="ml-1" content={tipFor(k, meanSub(
+          a, endX, shown[shown.length - 1] ?? 0, transform,
         ))} />
       </td>
       {shown.map((y) => (

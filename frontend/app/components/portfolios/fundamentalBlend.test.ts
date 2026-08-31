@@ -328,3 +328,77 @@ describe('buildBlend — the euro sum', () => {
     expect(b.level['2024'].value).toBeCloseTo(100, 10);        // back to 1000/1000
   });
 });
+
+/**
+ * THE POSITIVES-ONLY MEMBER RULE, WHICH THE FOOTER MUST APPLY OR IT EXPLAINS A LINE IT CANNOT
+ * REACH.
+ *
+ * ⚠⚠ AND FOR `eps_nri` IT SPANS THE FORECAST COLUMNS. Eligibility is "positive in every period,
+ * actuals AND consensus" (the server's `_positive_only_groups`), because a chart whose solid line
+ * continues into a dotted one is ONE line: a company in the first half and out of the second steps
+ * the composition exactly at the join, where neither half can show it. The drill-down carries the
+ * `…e` columns in the same map as the filed years, so reading the whole row IS the joint rule.
+ */
+describe('buildBlend positives-only members', () => {
+  const rows = () => [
+    row('A', 50, { 2023: 1, 2024: 2, '2026e': 4 }),
+    row('B', 50, { 2023: 1, 2024: 2, '2026e': -1 }),   // profitable, forecast to lose money
+  ];
+
+  it('takes every member when the metric is not in the set', () => {
+    const b = buildBlend(resp(['2023', '2024', '2026e'], rows()), 'revenue');
+    expect(b.excluded.size).toBe(0);
+  });
+
+  it('drops a company on a negative CONSENSUS even though every filed year is positive', () => {
+    const r = rows();
+    const b = buildBlend(resp(['2023', '2024', '2026e'], r), 'eps_nri');
+    expect(b.contrib.get(r[1])).toBeUndefined();
+    // ⚠ WITH A REASON. A row the footer drops without one is a blank the reader cannot account
+    // for, and every cell on this row looks perfectly fine.
+    expect(b.excluded.get(r[1])).toMatch(/negative figure in at least one period/);
+    // ⚠ AND THE SURVIVOR CARRIES THE WHOLE LINE — if B were still in the denominator the step
+    // would be right by luck here (both grew +100%) and wrong the moment they differ.
+    expect(b.contrib.get(r[0])!['2024'].pp).toBeCloseTo(b.step['2024'].growthPct, 10);
+  });
+
+  it('names it as withheld BY THE RULE, apart from the rebase’s own drops', () => {
+    /**
+     * ⚠⚠ THE DISTINCTION THE DRILL-DOWN'S BADGE DEPENDS ON. The `NOT IN LINE` badge was removed on
+     * request (2026-08-12) because it announced `_prepare`'s non-positive-BASE drop — mechanical,
+     * unactionable, true of a quarter of a book. A member the METRIC'S RULE withheld is a stated
+     * policy the reader asked to see. One set for each, or marking the first re-announces the
+     * second and undoes that request.
+     */
+    // ⚠ C IS THE CASE THAT SEPARATES THEM, and it has to be built deliberately: zero clears the
+    // rule (only a NEGATIVE fails it) while a series with no positive period at all has no base to
+    // rebase on, so C is excluded by the rebase and by nothing else.
+    const r = [...rows(), row('C', 50, { 2023: 0, 2024: 0, '2026e': 0 })];
+    const b = buildBlend(resp(['2023', '2024', '2026e'], r), 'eps_nri');
+    expect(b.excludedByRule.has(r[1])).toBe(true);          // negative consensus — the rule
+    expect(b.excluded.has(r[1])).toBe(true);                // …and it carries a reason
+    expect(b.excluded.has(r[2])).toBe(true);                // the rebase dropped C…
+    expect(b.excludedByRule.has(r[2])).toBe(false);         // …and it must NOT be badged
+    expect(b.excludedByRule.has(r[0])).toBe(false);
+  });
+
+  it('drops it from the FILED periods too, not only from the forecast ones', () => {
+    // ⚠ THE POINT OF THE JOINT RULE: one member set for the whole line, not one per leg.
+    const r = rows();
+    const b = buildBlend(resp(['2023', '2024', '2026e'], r), 'eps_nri');
+    expect(b.contrib.get(r[1])?.['2024']).toBeUndefined();
+  });
+
+  it('keeps a company whose consensus is positive', () => {
+    const r = [row('A', 50, { 2023: 1, 2024: 2, '2026e': 4 }),
+      row('B', 50, { 2023: 1, 2024: 2, '2026e': 3 })];
+    const b = buildBlend(resp(['2023', '2024', '2026e'], r), 'eps_nri');
+    expect(b.contrib.get(r[1])!['2024'].growthPct).toBeCloseTo(100, 10);
+  });
+
+  it('still applies to fcf_ps, whose group is just its own filed years', () => {
+    const r = [row('A', 50, { 2023: 1, 2024: 2 }), row('B', 50, { 2023: 1, 2024: -2 })];
+    const b = buildBlend(resp(['2023', '2024'], r), 'fcf_ps');
+    expect(b.contrib.get(r[1])).toBeUndefined();
+  });
+});

@@ -35,17 +35,17 @@ export function TipCard({ label, labelSuffix, title, subtitle, children }: {
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-2 min-w-[13rem]">
-      <div>
-        <div className="flex items-center gap-1.5 mb-0.5">
+    <span className="block space-y-2 min-w-[13rem]">
+      <span className="block">
+        <span className="flex items-center gap-1.5 mb-0.5">
           <span className="text-[10px] uppercase tracking-wider text-fg-faint">{label}</span>
           {labelSuffix}
-        </div>
-        {title && <div className="text-fg-strong font-semibold leading-tight">{title}</div>}
-        {subtitle && <div className="text-fg-muted text-[12px] mt-0.5">{subtitle}</div>}
-      </div>
-      <div className="border-t border-neutral-800/40 pt-2 space-y-1.5">{children}</div>
-    </div>
+        </span>
+        {title && <span className="block text-fg-strong font-semibold leading-tight">{title}</span>}
+        {subtitle && <span className="block text-fg-muted text-[12px] mt-0.5">{subtitle}</span>}
+      </span>
+      <span className="block border-t border-neutral-800/40 pt-2 space-y-1.5">{children}</span>
+    </span>
   );
 }
 
@@ -54,10 +54,10 @@ export function TipCard({ label, labelSuffix, title, subtitle, children }: {
  *  the same way, whatever fills it. */
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-baseline gap-2">
+    <span className="flex items-baseline gap-2">
       <span className="text-[10px] uppercase tracking-wider text-fg-faint w-11 shrink-0 pt-px">{label}</span>
       <span className="min-w-0 text-[12px]">{children}</span>
-    </div>
+    </span>
   );
 }
 
@@ -154,11 +154,11 @@ export function AspectCard({ what, where, when, how, worked, legend }: {
           key to that maths are the How section, and spacing them like separate fields would put
           the legend as far from its formula as from the sentence above it. */}
       {(how != null && how !== '') || worked || legend?.length ? (
-        <div className="space-y-1.5">
+        <span className="block space-y-1.5">
           {how != null && how !== '' && <Field label="How">{prose(how)}</Field>}
           {worked ? <Worked text={worked} /> : null}
           {legend?.length ? <Legend items={legend} /> : null}
-        </div>
+        </span>
       ) : null}
     </TipCard>
   );

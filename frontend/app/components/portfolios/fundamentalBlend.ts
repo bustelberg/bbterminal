@@ -119,13 +119,20 @@ export type Blend = ReturnType<typeof buildBlend>;
  * has already done once (it dropped rows `_prepare` KEEPS, and the comment claimed they matched),
  * so the failure mode is documented rather than hypothetical.
  */
-const POSITIVE_ONLY_METRICS = new Set(['fcf_ps']);
+const POSITIVE_ONLY_METRICS = new Set(['fcf_ps', 'eps_nri']);
 
 export function buildBlend(data: Resp, metric?: string) {
     /**
      * ⚠ THE SAME FILTER THE SERVER APPLIES, over the same window. A member with any negative value
      * is out of the line entirely — see `POSITIVE_ONLY_METRICS`. It stays in `data.rows`, so the
      * table still LISTS it; what it loses is its vote in the footer.
+     *
+     * ⚠⚠ AND IT SPANS THE FORECAST COLUMNS, WHICH IS WHY IT READS THE WHOLE ROW RATHER THAN THE
+     * FILED PERIODS. `eps_nri` is eligible only where the actuals AND the consensus are positive
+     * (the server's `_positive_only_groups`), and `portfolio-revenue-matrix` splices the estimate
+     * periods into this same map — so "every value in the row" IS the joint rule, and narrowing
+     * this to filed years would silently make the footer a different member set from the line
+     * above it exactly for the companies analysts expect to lose money.
      */
     const eligible = (r: Row): boolean => {
       if (!metric || !POSITIVE_ONLY_METRICS.has(metric)) return true;
@@ -172,6 +179,13 @@ export function buildBlend(data: Resp, metric?: string) {
      * re-ingest data that is already there.
      */
     const excluded = new Map<Row, string>();
+    /**
+     * The rows the metric's own MEMBER RULE withheld — `POSITIVE_ONLY_METRICS`, not the rebase.
+     *
+     * ⚠ A SUBSET OF `excluded`, kept apart so a surface can mark THESE without re-announcing the
+     * mechanical drops. See the note at the `eligible` gate below.
+     */
+    const byRule = new Set<Row>();
     const parts: { r: Row; idx: Record<string, number> }[] = [];
     // ⚠ KEYED ON THE ROW OBJECT, NOT ON THE ISIN. A payload can carry the same ISIN twice (a model
     // listing one instrument at two weights — VTopSelectie holds CapitaLand at 2% and 3%), and an
@@ -203,7 +217,25 @@ export function buildBlend(data: Resp, metric?: string) {
       // handed, so its drops belong in the coverage denominator. This filter runs one level up, in
       // `_blend_rows`, BEFORE `blend_series` is called at all: an excluded member was never handed
       // over, so counting it here would report a coverage the server never computed.
-      if (!eligible(r)) continue;
+      if (!eligible(r)) {
+        // ⚠⚠ RECORDED SEPARATELY FROM THE REBASE'S DROPS, AND THE DISTINCTION IS THE WHOLE REASON
+        // THIS SET EXISTS. The `NOT IN LINE` badge was removed from the drill-down on request
+        // (2026-08-12) because it announced `_prepare`'s non-positive-BASE drop — a mechanical
+        // consequence of indexing to 100 that the reader can do nothing about. A member the
+        // METRIC'S OWN RULE withheld is the opposite: it is a stated policy about which companies
+        // the line speaks for, the reader asked for it, and it is the one exclusion that must be
+        // visible on the row. Marking both again would undo that request.
+        byRule.add(r);
+        // ⚠⚠ WITH A REASON, BECAUSE A ROW THE FOOTER SILENTLY IGNORES IS A BLANK THE READER
+        // CANNOT ACCOUNT FOR — the same failure the base-test exclusion below was given a reason
+        // for. It matters more since `eps_nri` joined the rule: a profitable holding forecast to
+        // lose money in one year vanishes from the line while every cell on its row looks fine.
+        // ⚠ IT POINTS AT THE CELLS RATHER THAN NAMING THE PERIOD — the negative one is on screen,
+        // estimates included, and naming it here would be a second place to keep true.
+        excluded.set(r, 'it reports a negative figure in at least one period below, and this line '
+          + 'is drawn only from companies positive in every one');
+        continue;
+      }
       const periods = Object.keys(r.revenue).filter((p) => r.revenue[p] != null).sort(periodOrder);
       if (!periods.length) {
         // Nothing filed at all — the row already says so via `status`, so no second badge.
@@ -585,7 +617,8 @@ export function buildBlend(data: Resp, metric?: string) {
     // which is exactly why it is worth printing.
     const weightSum: Record<string, number> = {};
     for (const y of Object.keys(denom)) weightSum[y] = 100;
-    return { level, denom, partOf, wAt, excluded, from, weightSum, step, contrib,
+    return { level, denom, partOf, wAt, excluded, excludedByRule: byRule,
+      from, weightSum, step, contrib,
              contributors: parts.length,
              coveredNames: Object.fromEntries(data.years.map(
                (y) => [y, 100 * (coverN[y] ?? 0) / (parts.length || 1)])) };

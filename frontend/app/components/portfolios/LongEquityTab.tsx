@@ -17,6 +17,7 @@ import CashConversionCard from './CashConversionCard';
 import FcfSbcYieldCard from './FcfSbcYieldCard';
 import DividendYieldCard from './DividendYieldCard';
 import { type BlendNote } from './blendNotes';
+import { type MemberCount } from './memberCounts';
 import { benchBody, type BenchTarget } from './benchSeries';
 
 /**
@@ -32,10 +33,12 @@ type MetricsResponse = {
   // Portfolio only: per metric_code, why a code the holdings DO carry produced no blended line.
   // See `blendNotes` / the backend's `explain_empty`.
   blend_notes?: Record<string, BlendNote>;
-  /** Per metric code, how many members the line was drawn from and how many were on offer.
-   *  ⚠ DIFFERENT FROM `coverage`, which answers "how many hold this metric at all" — for a metric
-   *  filtered to positives-only the two are different numbers on purpose. */
-  member_counts?: Record<string, { considered: number; total: number }>;
+  /** Per metric code, how many members the line was drawn from, how many were on offer, and the
+   *  `rule` that explains the gap.
+   *  ⚠ DIFFERENT FROM `coverage`, which answers "how many hold this metric at all" — a positives-
+   *  only metric withholds members deliberately, and a euro-summed one leaves out any member whose
+   *  euros could not be built. See `memberCounts`. */
+  member_counts?: Record<string, MemberCount>;
 };
 
 // Each card is one metric. `codes` carries BOTH GuruFocus section spellings (see the backend's
@@ -374,7 +377,7 @@ export default function LongEquityTab({
    *  `benchNotes`, because the benchmark is a SEPARATE blend: on a positives-only metric the index
    *  and the book drop different numbers of members and the card names both. */
   const [benchCounts, setBenchCounts] =
-    useState<Record<string, { considered: number; total: number }> | undefined>();
+    useState<Record<string, MemberCount> | undefined>();
   const [benchErr, setBenchErr] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;

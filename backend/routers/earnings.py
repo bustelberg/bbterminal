@@ -1094,7 +1094,20 @@ def _drop_superseded_forecasts(by_metric: dict[str, dict[int, dict[str, float]]]
 #: the cost live. Removing it here is the single lever that puts it on the growth chain in all
 #: five blend paths at once, so the line, the drill-down, the matrix and the benchmark cannot end
 #: up on two constructions.
-_AGGREGATABLE_PER_SHARE = frozenset({"eps_nri"})
+#: ⚠⚠ AND `eps_nri` LEFT IT TOO 2026-08-31, THE SAME WAY AND FOR THE SAME REASON — asked for
+#: directly: earnings per share is now drawn from the companies whose EPS is positive in every
+#: period, actuals AND consensus, so its every step is a weighted year-on-year growth of positive
+#: figures that can be checked by hand against one holding. The costs are the ones recorded under
+#: `_POSITIVE_ONLY_METRICS`, and they are LARGER here than for `fcf_ps` because this metric has a
+#: FORECAST leg: the growth path's continuation only approximates where the actual line stopped
+#: (`tests/test_aggregate_blend.py` measures 127.78 against a true 110.0 on its fixture), where the
+#: euro join was the real step across the boundary.
+#:
+#: ⚠ THE SET IS NOW EMPTY AND MUST NOT BE DELETED. Every mechanism behind it — `_shares_at`, the
+#: per-share × share-count conversion in `fundamental_totals`, `_AGGREGATABLE_FORECAST`,
+#: `aggregatable_metrics` — is still correct, still tested, and is what any future per-share metric
+#: joins. Emptying it is a decision about EPS, not about the machinery.
+_AGGREGATABLE_PER_SHARE: frozenset[str] = frozenset()
 
 #: Metrics drawn from members POSITIVE IN EVERY PERIOD, and from nobody else.
 #:
@@ -1115,7 +1128,13 @@ _AGGREGATABLE_PER_SHARE = frozenset({"eps_nri"})
 #:
 #: ⚠ THE FILTER IS OVER THE WINDOW ACTUALLY DRAWN (`_BLEND_START` onwards), not over all history —
 #: a company that lost money in 2003 is not excluded from a 2015→2025 chart.
-_POSITIVE_ONLY_METRICS = frozenset({"fcf_ps"})
+#: ⚠⚠ `eps_nri` JOINED IT 2026-08-31, AND ITS ELIGIBILITY SPANS THE CONSENSUS TOO — "all positive
+#: for their historical AND analyst estimates", which is a stricter rule than the one `fcf_ps` needs
+#: and could not be expressed per code. A chart whose actual leg continues into a forecast leg is
+#: ONE line, so a member positive through its actuals and negative in a consensus year would be in
+#: the first half and out of the second — composition changing at the seam, which is exactly where
+#: nobody looks for it. See `_positive_only_groups`.
+_POSITIVE_ONLY_METRICS = frozenset({"fcf_ps", "eps_nri"})
 
 #: Levels that are ALREADY a company total — no share count involved.
 _AGGREGATABLE_TOTAL = frozenset({"revenue"})
@@ -1539,18 +1558,71 @@ def _totals_for(covered: list[dict], metrics: list[str], universe: str | None,
         cadence=cadence)
 
 
-def _metric_key_of(code: str) -> str | None:
-    """The metric KEY a stored code belongs to — the reverse of `_metric_codes`.
+def _positive_only_groups() -> dict[str, tuple[str, ...]]:
+    """`{metric_code: every code that decides eligibility}` for the positives-only metrics.
 
-    ⚠ `_POSITIVE_ONLY_METRICS` IS DECLARED IN KEYS (`fcf_ps`) AND `_blend_rows` WALKS CODES
-    (`annuals__Per Share Data__Free Cash Flow per Share`, and its lowercase twin). Comparing the
-    two directly matches nothing and the filter silently never runs — the same key-versus-code trap
-    `_totals_for` records for the euros.
+    ⚠⚠ A CHART WITH A FORECAST LEG IS **ONE LINE**, SO ITS MEMBER SET IS ONE SET. The actual and the
+    consensus are separate metric codes blended by separate `blend_series` calls, and filtering each
+    on its own values — which is what this did before EPS joined the set — lets a company positive
+    through every filed year and negative in one consensus year be IN the solid half of the line and
+    OUT of the dotted half. A sum changes when its members change, and so does a weighted average:
+    the composition would step at the join, which is precisely the seam nobody inspects. So both
+    codes point at the SAME tuple and the same set of companies clears or fails it.
+
+    ⚠⚠ AND IT IS THE **ONLY** WAY TO ASK THE QUESTION. `_POSITIVE_ONLY_METRICS` is declared in
+    metric KEYS while the blend walks CODES, so a direct comparison matches nothing and the filter
+    silently never fires — the trap `_totals_for` records for the euros, and what the deleted
+    `_metric_key_of` existed to bridge. That bridge was not enough once EPS joined: a consensus has
+    its own metric key (`eps_nri_estimate`), so keying off it left the forecast leg UNFILTERED while
+    the actual beside it was filtered — measured on a two-company fixture, 1 of 2 against 2 of 2,
+    with the composition changing at the join. Membership in this map is the question.
+
+    ⚠ IT IS BUILT FROM `_METRIC_CODES` AND `_FORECAST_METRIC`, NEVER LISTED. Both spellings of a
+    section come along automatically, and a metric that later gains a consensus gains the joint rule
+    with it — a hand-written list would be a second declaration that goes stale silently, and the
+    symptom would be a filter that quietly stops covering half its own chart.
+
+    ⚠ COMPUTED PER CALL, NOT CACHED AT IMPORT. `_METRIC_CODES` and `_FORECAST_METRIC` are defined
+    BELOW this function (module-level code runs top-down), so a module-level constant here would
+    read them before they exist. It is a handful of dict lookups against two frozen sets.
     """
-    for key, codes in _METRIC_CODES.items():
-        if code in codes:
-            return key
-    return None
+    out: dict[str, tuple[str, ...]] = {}
+    for key in _POSITIVE_ONLY_METRICS:
+        codes = tuple(_METRIC_CODES.get(key, ()))
+        forecast = _FORECAST_METRIC.get(key)
+        if forecast:
+            codes += tuple(_METRIC_CODES.get(forecast, ()))
+        for code in codes:
+            out[code] = codes
+    return out
+
+
+def _positive_only_members(by_metric: dict[str, dict[int, dict[str, float]]],
+                           ) -> dict[str, set[int]]:
+    """`{metric_code: the companies eligible to draw it}` — everyone this payload reports as
+    NEVER NEGATIVE across the metric's whole group (see `_positive_only_groups`).
+
+    ⚠ ZERO IS ELIGIBLE, ONLY A NEGATIVE IS NOT. The rule exists so a year-on-year growth can be
+    taken over positive figures; a company at exactly 0.00 breaks no arithmetic the growth path does
+    not already refuse per step, and excluding it would drop a member on a rounding artefact.
+
+    ⚠ IT IS A PROPERTY OF THE COMPANY, NOT OF THE LEG. A company negative anywhere in the group is
+    out of EVERY code in it — that is the whole point — so the returned set is the same for the
+    actual code and its consensus.
+    """
+    out: dict[str, set[int]] = {}
+    for code, group in _positive_only_groups().items():
+        if code not in by_metric:
+            continue
+        seen: set[int] = set()
+        negative: set[int] = set()
+        for c in group:
+            for cid, points in by_metric.get(c, {}).items():
+                seen.add(cid)
+                if any(v < 0 for v in points.values()):
+                    negative.add(cid)
+        out[code] = seen - negative
+    return out
 
 
 def _blend_rows(rows: list[dict], covered: list[dict],
@@ -1602,9 +1674,16 @@ def _blend_rows(rows: list[dict], covered: list[dict],
 
     out: list[dict] = []
     notes: dict[str, dict] = {}
-    #: `{metric_code: {"considered": n, "total": m}}` — how many members the line was drawn from.
+    #: `{metric_code: {"considered": n, "total": m, "rule": …}}` — how many members the line was
+    #: drawn from, out of the holdings that report this metric at all, and WHY any are missing.
     #: ⚠ POPULATED FOR EVERY CODE, not only the filtered ones, so a card never has to know whether
     #: its metric happens to be in `_POSITIVE_ONLY_METRICS` to render "n of m".
+    #: ⚠⚠ AND BOTH CONSTRUCTIONS ANSWER IT, WHICH THE FIRST VERSION DID NOT. A survivorship filter
+    #: is not the only way a line ends up speaking for fewer companies than the card names — the
+    #: euro sum drops a member with no share count and one `_prepare` refuses — and those drops were
+    #: measured inside `blend_series`, returned as `fund_members`, and then discarded here. So the
+    #: EPS card said nothing while the FCF one said "36 of 42", and the difference read as "EPS uses
+    #: everything" rather than "nobody counted". See the `counts[code]` assignment below.
     counts: dict[str, dict] = {}
     # ⚠⚠ BASES BEFORE FORECASTS, AND THE ORDER IS LOAD-BEARING ON THE AGGREGATE PATH. A forecast
     # leg joins the line its actual reached (`continue_from`), so the actual has to have been
@@ -1617,8 +1696,25 @@ def _blend_rows(rows: list[dict], covered: list[dict],
     ordered = sorted(by_metric, key=lambda c: 1 if c in _FORECAST_BASE else 0)
     # `{base metric code: {"level": …, "period": …}}` — where each actual leg's line ended.
     joins: dict[str, dict] = {}
+    # ⚠ ONE PASS OVER THE WHOLE PAYLOAD, BEFORE ANY LEG IS BUILT. Eligibility is a fact about a
+    # company across every code of its metric, so it cannot be decided inside a per-code loop that
+    # has only seen one of them.
+    #
+    # ⚠⚠ AND **AFTER** `_drop_superseded_forecasts`, WHICH IS NOT AN ACCIDENT OF LINE ORDER. The
+    # vendor keeps a pre-announcement consensus for a year the company has since reported, and that
+    # stale row is not drawn anywhere. Read before the drop, a negative superseded estimate would
+    # throw the company off BOTH legs of a chart that never showed the number — a member vanishing
+    # on the strength of a figure the reader cannot see.
+    eligible = _positive_only_members(by_metric)
     for code in ordered:
         per_company = by_metric[code]
+        # ⚠⚠ ASKED OF THE GROUP, NOT OF THE CODE'S OWN METRIC KEY, AND THE OBVIOUS VERSION IS
+        # WRONG. A consensus is its own metric (`eps_nri_estimate`, not `eps_nri`), so
+        # `_metric_key_of(code) in _POSITIVE_ONLY_METRICS` is FALSE for the forecast leg — the
+        # actual line came back filtered to 1 of 2 while the forecast beside it drew 2 of 2, one
+        # composition change hidden exactly at the join. `eligible` carries an entry for every code
+        # in a positives-only group, so membership in it IS the question being asked.
+        positive_only = code in eligible
         # ⚠ A FORECAST INHERITS THE ANCHOR OF THE ACTUAL IT CONTINUES. Both are the same quantity
         # and the chart indexes them off ONE base, so rebasing them independently draws the forecast
         # restarting at 100 beside an actual that has run to 1,808 — a ~94% earnings collapse that
@@ -1632,6 +1728,19 @@ def _blend_rows(rows: list[dict], covered: list[dict],
         # ⚠ THE ACTUAL'S EUROS TRAVEL WITH THE FORECAST, so the aggregate can measure the real step
         # across the boundary rather than restarting the chain. The euro twin of `base_points`.
         fund_base_for = (totals or {}).get(base_code, {}) if base_code else {}
+        # ⚠⚠ POSITIVES-ONLY, AND THE MEMBER SET IS DECIDED BEFORE THE LEGS ARE BUILT. Eligibility
+        # spans the metric's WHOLE group — the filed years and the consensus that continues them —
+        # so both legs of one chart are drawn over the same companies. See `_positive_only_groups`.
+        #
+        # ⚠ AND THE MEMBER MUST ALSO REPORT **THIS** CODE. A company eligible on the group but with
+        # no row under this spelling contributes nothing to this series, and counting it would
+        # inflate the "n of m" the card prints — the one number this whole rule exists to make
+        # truthful.
+        rows_for = covered
+        if positive_only:
+            ok = eligible.get(code, set())
+            rows_for = [r for r in covered
+                        if r["company_id"] in ok and per_company.get(r["company_id"])]
         blend_members = [{"weight": r["weight_pct"],
                           # Absent for a portfolio — see the `caps` note on this function.
                           **({"weights": caps.get(r["company_id"], {})} if caps else {}),
@@ -1639,24 +1748,44 @@ def _blend_rows(rows: list[dict], covered: list[dict],
                           "fund_points": fund_for.get(r["company_id"], {}),
                           "fund_base_points": fund_base_for.get(r["company_id"], {}),
                           "base_points": base_by_company.get(r["company_id"], {})}
-                         for r in covered]
-        # ⚠⚠ POSITIVES-ONLY, AND THE SAME FILTER ON BOTH SIDES OF THE CHART. `_blend_rows` is the
-        # ONE place a book and an index build their members, so filtering here is what guarantees
-        # the benchmark drops the same kind of company the portfolio does. Applied per CODE, so a
-        # forecast leg is filtered on its own values and the base on its own — a member positive
-        # throughout its actuals and negative in a consensus year is in one leg and out of the
-        # other, which is correct: they are different series.
-        #
-        # ⚠ THE COUNT IS THE POINT. Anything dropped here is invisible on the line, so `considered`
-        # / `total` ride out to the card — see `_POSITIVE_ONLY_METRICS`.
+                         for r in rows_for]
+        # ⚠ THE COUNT IS THE POINT. Anything dropped above is invisible on the line, so
+        # `considered` / `total` ride out to the card — see `_POSITIVE_ONLY_METRICS`.
         considered = len(blend_members)
-        if _metric_key_of(code) in _POSITIVE_ONLY_METRICS:
-            blend_members = [m for m in blend_members
-                             if m["points"] and all(v >= 0 for v in m["points"].values())]
-            considered = len(blend_members)
-        counts[code] = {"considered": considered, "total": len(covered)}
         s = blend_series(blend_members, code, bucket,
                          continue_from=joins.get(base_code) if base_code else None)
+        # ⚠⚠ THE AGGREGATE COUNTS ITS OWN MEMBERS, AND ONLY IT KNOWS THE NUMBER. A summed metric is
+        # never a positives-only one (the two sets are the two sides of one lever), so nothing is
+        # withheld above on that path — the count there is `len(covered)` and would print nothing,
+        # while the sum itself can
+        # quietly speak for fewer holdings than the card claims: a member with no share count has
+        # no euros, a member `_prepare` drops as `non_positive_base` never reaches the sum at all.
+        # `blend_series` already returns `fund_members` for exactly this reason and it was being
+        # discarded one level up, which is the shape of the hazard `_POSITIVE_ONLY_METRICS` records:
+        # a line drawn from fewer companies than it looks like, with nothing on screen to say so.
+        #
+        # ⚠ `total` STAYS `len(covered)` ON BOTH PATHS. It is the book's holdings that report this
+        # metric at all — the same denominator whichever construction drew the line — so "n of m"
+        # means one thing on every card. `blend_series`' own `members` is a THIRD number (the
+        # members that survived `_prepare`) and using it here would silently shrink the denominator
+        # to hide the very drops this is meant to surface.
+        #
+        # ⚠ IT DOES NOT MOVE A SINGLE LINE. This is a disclosure: `blend_members` is unchanged and
+        # the aggregate is drawn from whatever it was always drawn from.
+        counts[code] = {"considered": s.get("fund_members", considered),
+                        "total": len(covered),
+                        # ⚠⚠ WHY THEY ARE MISSING, DECIDED WHERE THEY ARE DROPPED. The card has to
+                        # explain the count it prints, and the two constructions withhold members
+                        # for entirely different reasons — one is a chosen survivorship filter, the
+                        # other is an absent share count. A client that guessed from the metric name
+                        # would be a second copy of this decision, and the first time the two
+                        # disagreed the card would print a confident wrong explanation of a number
+                        # that was right. ⚠ THE SETS ARE DISJOINT BY CONSTRUCTION — a metric in
+                        # `_POSITIVE_ONLY_METRICS` is not in `_AGGREGATABLE_*` (that is the single
+                        # lever that moves it between the two) — and the filter is reported first
+                        # if that ever stops being true, because it is the one a reader must know.
+                        "rule": ("positive_only" if positive_only
+                                 else "aggregate" if s.get("aggregate") else "all")}
         # ⚠ WHERE THIS LEG'S LINE ENDED, for the forecast that continues it. Recorded only on the
         # AGGREGATE path: the growth path joins per member through `base_points` and would be
         # double-continued by this.
@@ -1705,8 +1834,11 @@ def _blend_envelope(built: dict, covered: list[dict], cov: dict) -> dict:
         # nothing appear; a code nobody reports is absent (that one IS "not ingested").
         "blend_notes": built["blend_notes"],
         # ⚠ HOW MANY MEMBERS EACH LINE WAS ACTUALLY DRAWN FROM. `coverage` answers "how much of the
-        # book has this metric at all"; this answers "how many of those the line used", and for a
-        # metric in `_POSITIVE_ONLY_METRICS` the two are different numbers on purpose.
+        # book has this metric at all"; this answers "how many of those the line used", and they are
+        # different numbers on purpose — for a metric in `_POSITIVE_ONLY_METRICS` because members
+        # were deliberately withheld, and on the aggregate path because a member with no euros
+        # contributes nothing to a sum. `rule` says which, so the card's ⓘ explains the count it is
+        # actually showing rather than the one it was written for.
         "member_counts": built.get("member_counts") or {},
         "coverage": cov,
     }

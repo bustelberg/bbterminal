@@ -82,6 +82,17 @@ _log = logging.getLogger(__name__)
 # go faster than. More threads would queue on that lock instead of on the database.
 FILL_WORKERS = 3
 
+#: The substring `fetch_financials` puts in its error when the vendor answers with a full template
+#: and no periods, and how many of those in a row end the run. See `vendor_down` in
+#: `fill_company_ids` for the measurement behind both.
+#:
+#: ⚠ MATCHED ON THE MESSAGE, WHICH IS A SEAM — the alternative is a status code threaded through
+#: `ingest_company`'s dict, three layers that have no other reason to know about it. The string is
+#: written once in `ingest/earnings/financials.py` and asserted from both ends by
+#: `tests/test_financials_empty_payload.py`, so it cannot drift silently.
+VENDOR_EMPTY_MARKER = "no periods"
+VENDOR_EMPTY_LIMIT = 10
+
 
 #: The ONE quarterly line the due detector reads the fiscal-period axis off.
 #:
@@ -413,6 +424,22 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
 
     counter = itertools.count(1)
     tally_lock = threading.Lock()
+    #: ⚠⚠ THE VENDOR-DOWN BREAKER. Measured 2026-08-31: GuruFocus's `financials` endpoint answered
+    #: EVERY symbol with its full template and no values — AAPL and ASML included — while `summary`,
+    #: `keyratios` and `price` stayed healthy and the quota was half spent, so nothing upstream
+    #: said anything was wrong. `fetch_financials` now refuses such a payload, which protects the
+    #: cache; it does not stop a fill from walking the whole index to collect 2,526 identical
+    #: refusals. On the quarterly benchmark fill that is a call per constituent — roughly half a
+    #: region's monthly budget — spent to learn one fact.
+    #:
+    #: ⚠ CONSECUTIVE, AND RESET BY ANY COMPANY THAT ANSWERS. A handful of genuinely empty companies
+    #: is ordinary; ten in a row across different regions is the vendor, not the data.
+    #:
+    #: ⚠ IT STOPS THE RUN, IT DOES NOT FAIL IT. Everything unattempted is exactly what `only_due`
+    #: picks up next time, so the cost of a false positive is a deferred fill and the cost of a
+    #: miss is the budget.
+    vendor_down = threading.Event()
+    empty_streak = 0
     ok = failed = rows = calls = 0
     # Rows the vendor returned that were already stored, so nothing was written for them. Reported
     # separately in the summary — see `ingest.metric_upsert.changed_rows` for why it is usually the
@@ -451,7 +478,11 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
             _one_inner(c)
 
     def _one_inner(c: dict) -> None:
-        nonlocal ok, failed, rows, unchanged, calls
+        nonlocal ok, failed, rows, unchanged, calls, empty_streak
+        # ⚠ NOTHING IS SPENT ONCE THE BREAKER IS SET — see `vendor_down`. The remaining futures
+        # return immediately, which is what makes the run END rather than merely stop writing.
+        if vendor_down.is_set():
+            return
         # ⚠ THE FIRST CANCEL BOUNDARY. Everything still queued raises here the moment Cancel is
         # pressed — but on its own this only ever bounded the wait by a WHOLE COMPANY; see
         # `should_stop` below for the one that makes the press feel immediate.
@@ -501,6 +532,18 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
             rows += r["rows"]
             unchanged += r.get("unchanged", 0)
             calls += r.get("calls", 0)
+            # ⚠ THE STREAK IS COUNTED ON THE VENDOR'S OWN SIGNAL, not on "wrote nothing" — an
+            # up-to-date company writes nothing every day and that is the healthy outcome.
+            if r["error"] and VENDOR_EMPTY_MARKER in r["error"]:
+                empty_streak += 1
+                if empty_streak >= VENDOR_EMPTY_LIMIT and not vendor_down.is_set():
+                    vendor_down.set()
+                    ctx.emit("info",
+                             f"Stopping: {empty_streak} companies in a row came back with no "
+                             "periods at all. That is the vendor, not this data — the rest are "
+                             "left for the next run.")
+            elif not r["error"]:
+                empty_streak = 0
             if r["error"]:
                 failed += 1
             elif not r.get("stopped"):
