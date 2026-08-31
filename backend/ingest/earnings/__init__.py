@@ -25,6 +25,7 @@ from ._api_client import ApiResult, _api_request, _build_api_url, _mask_url
 from ._common import INDICATOR_KEYS, US_EXCHANGES, EarningsResult
 from .analyst_estimates import _parse_analyst_estimates, fetch_analyst_estimates
 from .financials import _parse_financials, fetch_financials
+from .key_ratios import _parse_key_ratios, fetch_key_ratios
 from .indicators import (
     _extract_indicator_series,
     _parse_single_indicator,
@@ -37,8 +38,8 @@ __all__ = [
     # API client
     "ApiResult", "_api_request", "_build_api_url", "_mask_url",
     # Public fetchers
-    "fetch_financials", "fetch_analyst_estimates", "fetch_indicators",
+    "fetch_financials", "fetch_analyst_estimates", "fetch_indicators", "fetch_key_ratios",
     # Parsers (used by tests / debugging)
-    "_parse_financials", "_parse_analyst_estimates",
+    "_parse_financials", "_parse_analyst_estimates", "_parse_key_ratios",
     "_parse_single_indicator", "_extract_indicator_series",
 ]

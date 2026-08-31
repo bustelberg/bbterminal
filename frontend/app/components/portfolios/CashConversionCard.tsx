@@ -12,7 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
-import { workedMean } from './workedFormula';
+import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import CashConversionInputsModal from './CashConversionInputsModal';
@@ -42,6 +42,10 @@ import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type
  * the drill-down are one computation. Aggregation is a weight-weighted average of per-company
  * ratios — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./SbcOcfCard}.
  */
+
+/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+ *  sees it. */
+const R = String.raw;
 
 export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
@@ -115,11 +119,13 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
             avgInfo={<InfoTip content={<AspectCard
-              what="Average FCF ÷ Net Income over the years shown — how much of the reported profit turned into cash."
-              where="Computed here — Free Cash Flow ÷ Net Income per year, weight-averaged across holdings. ⚠ FCF is whole-company cash while Net Income is the SHAREHOLDERS' line, so a group with large minorities reads high."
+              what="How much of the reported profit turned into cash, averaged over the years shown."
+              where="Computed here, per year, then weight-averaged across holdings."
               when="The years on the chart."
-              worked={workedMean(stats.own.values)}
-              how="⚠ 100% IS BREAK-EVEN, NOT A CEILING — above it the business converts more cash than it books as profit (depreciation ahead of capex), which is a compliment. Persistently below it means the earnings are not turning into money. A LOSS has no conversion at all, so that year is a hole rather than a negative percentage." />} />} />
+              worked={withWorked(
+                R`\text{conversion} = \dfrac{\text{free cash flow}}{\text{net income}}`,
+                workedMean(stats.own.values))}
+              how="100% is break-even, not a ceiling. A loss-making year has no conversion at all, so it is a hole rather than a negative." />} />} />
 
           <div>
             <ResponsiveContainer width="100%" height={320}>

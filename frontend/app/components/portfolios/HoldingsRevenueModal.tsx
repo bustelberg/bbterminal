@@ -237,8 +237,12 @@ const VIEWS: [View, string, string][] = [
     + 'detractors at the bottom. This is the one view whose sort does NOT rank on the figure.'],
 ];
 
-function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRefresh }: {
+function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRefresh,
+  metric }: {
   data: Resp;
+  /** ⚠ THE METRIC KEY, ONLY SO THE FOOTER CAN APPLY THE SAME MEMBER RULE THE LINE DID —
+   *  `fcf_ps` is drawn from the positives-only set. See `fundamentalBlend`. */
+  metric?: string;
   fmt: (v: number | null | undefined) => string;
   noun: string;
   /** The chart's own name — 'Revenue', 'FCF per share', 'ROIC'. Names the FIRST line of every period
@@ -311,7 +315,10 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * would put SP500's 264 contributors over its 489 listed rows and every coverage figure — and
    * the floor decision that rides on it — would be wrong by that ratio.
    */
-  const blend = useMemo(() => buildBlend(data), [data]);
+  // ⚠ THE METRIC IS PASSED so the footer applies the same member rule the server's line did —
+  // `fcf_ps` is drawn from the positives-only set. Without it the table reconciles to a line
+  // nobody is looking at. See `fundamentalBlend.POSITIVE_ONLY_METRICS`.
+  const blend = useMemo(() => buildBlend(data, metric), [data, metric]);
 
   /**
    * Per-row facts that every one of that row's period cells would otherwise re-derive.
@@ -995,6 +1002,28 @@ market cap it was weighted by in that period, and the weight that produced.">
                       reason. The REASON survives in the period cells' tooltips (`blend.excluded`,
                       below) — it is no longer announced, only available. */}
                   <span className="truncate" title={r.name}>{r.name}</span>
+                  {/* ⚠⚠ AND THIS ONE IS BACK, FOR THE OTHER KIND OF EXCLUSION (2026-08-31, on
+                      request). The badge above was removed because it announced the REBASE's drop
+                      — mechanical, unactionable, and true of a quarter of a book. `excludedByRule`
+                      is the metric's own stated member rule: on EPS and FCF/share the line is
+                      drawn only from companies positive in every period, actuals and consensus,
+                      and a company it withheld is otherwise indistinguishable from one it used —
+                      every figure on the row is real, correctly formatted, and counted nowhere.
+                      That is precisely what has to be visible.
+                      ⚠ IT SITS IN THE PINNED NAME CELL for the same reason the other badges do:
+                      when you are asking why a row's weights are empty you are scrolled right, and
+                      a badge in any other column has scrolled away with them.
+                      ⚠ `StateBadge`, NOT A COLOURED WORD OF ITS OWN. This table already speaks
+                      that vocabulary (UNSUBSCRIBED, NO DATA below), and a second hand-rolled badge
+                      is a second thing the reader has to learn to mean "this cell is not a
+                      number". Same component, same tone scale. */}
+                  {blend.excludedByRule.has(r) && (
+                    <span className="shrink-0">
+                      <StateBadge label="Excluded" tone={BADGE_TONE.warn}
+                        title={`Excluded from the ${metricLabel} line: ${blend.excluded.get(r)
+                          ?? 'it does not meet this metric’s member rule'}.`} />
+                    </span>
+                  )}
                   {/* The stated reason, where the `no_data` cell below cannot carry it — this row
                       has figures, so it renders no such cell. One glyph, full text in the tooltip
                       and in the console. */}
@@ -1865,7 +1894,7 @@ export default function HoldingsRevenueModal({
             )}
             {data && data.rows.length > 0 && (
               <MatrixTable data={data} fmt={fmtM} noun={noun} metricLabel={seriesLabel ?? noun}
-                valueIsCurrency={valueIsCurrency} view={view}
+                valueIsCurrency={valueIsCurrency} view={view} metric={metric}
                 onRefresh={refreshRow(target, setData)} />
             )}
           </div>
@@ -1940,7 +1969,7 @@ export default function HoldingsRevenueModal({
                       removed from `_benchmark_index.weight_basis` — so a compact form (a count, with
                       the names in a tooltip) can be put back without touching the backend. */}
                   <MatrixTable data={bench} fmt={fmtM} noun={noun} metricLabel={seriesLabel ?? noun}
-                valueIsCurrency={valueIsCurrency} view={view}
+                valueIsCurrency={valueIsCurrency} view={view} metric={metric}
                 onRefresh={refreshRow(benchTarget!, setBench)} />
                 </>
               )}

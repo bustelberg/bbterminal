@@ -122,6 +122,9 @@ export type PortfolioVolatility = components['schemas']['PortfolioVolatility'];
  *  from the AIRS returns. ⚠ Defaults to DAILY — unlike the other risk views, which default to
  *  weekly to dodge a two-series closing-time bias that a drawdown cannot have. */
 export type PortfolioDrawdown = components['schemas']['PortfolioDrawdown'];
+/** The paired book's value on every date we hold a snapshot for — see `BookValueChart`.
+ *  ⚠ VALUE, NOT RETURN: `flows` rides along so a funding cannot be drawn as performance. */
+export type BookValueSeries = components['schemas']['BookValueSeries'];
 /** `C₁₀ = Σ w₍ᵢ₎` and `HHI = Σ wᵢ²`, with `N_eff = 1/HHI`.
  *  ⚠ ON ISSUERS, not lines — the same folding `ActiveShare` uses, so the two views cannot
  *  disagree about how many positions the book holds. ⚠ BOTH denominators are returned (of the

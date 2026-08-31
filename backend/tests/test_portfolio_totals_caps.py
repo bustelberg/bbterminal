@@ -31,15 +31,25 @@ import pytest
 
 from tests._fake_supabase import FakeSupabase
 
-FCF_PS = "annuals__Per Share Data__Free Cash Flow per Share"
+#: ⚠⚠ AND NOW THERE IS NO LIVE PER-SHARE METRIC AT ALL, so the fixture DECLARES one. `fcf_ps` left
+#: `_AGGREGATABLE_PER_SHARE` on 2026-08-26 and `eps_nri` followed on 2026-08-31 — both are drawn
+#: from a positives-only growth chain and neither has euros anywhere. The set is empty, which makes
+#: the cap-basis arithmetic below unreachable from real configuration and NOT untrue: every line of
+#: it is what a per-share metric added back would run through. So the fixture patches `eps_nri` into
+#: the set, exactly as `test_aggregate_blend` patches a pairing to keep the both-legs rule alive.
+#:
+#: ⚠ THE ALTERNATIVE WAS DELETING THE FILE, and that is the trade being made deliberately: the code
+#: is still here (`fundamental_totals`' per-share branch, `_shares_at`, the one-cap conversion), so
+#: it is still capable of the 2026-08-26 outage this file was written for.
+EPS = "annuals__Per Share Data__EPS without NRI"
 SHARES = "annuals__Income Statement__Shares Outstanding (Diluted Average)"
 
 #: ⚠ THE SHAPE THAT TELLS THE TWO CONSTRUCTIONS APART, and the one a real book has: cash flow
 #: DOUBLES (1.0 → 2.0 per share on a flat share count) and so does the market cap. On the euro sum
 #: that is +100%; on a per-period cap it is 0%, because the yield never moved.
 _ROWS = [
-    {"company_id": 1, "metric_code": FCF_PS, "target_date": "2024-12-31", "numeric_value": 1.0},
-    {"company_id": 1, "metric_code": FCF_PS, "target_date": "2025-12-31", "numeric_value": 2.0},
+    {"company_id": 1, "metric_code": EPS, "target_date": "2024-12-31", "numeric_value": 1.0},
+    {"company_id": 1, "metric_code": EPS, "target_date": "2025-12-31", "numeric_value": 2.0},
     {"company_id": 1, "metric_code": SHARES, "target_date": "2024-12-31", "numeric_value": 100.0},
     {"company_id": 1, "metric_code": SHARES, "target_date": "2025-12-31", "numeric_value": 100.0},
 ]
@@ -60,6 +70,10 @@ def earnings(monkeypatch):
         "asset_grid": [{"isin": "US0000000001", "sector": "Technology"}],
     })
     monkeypatch.setattr(e, "supabase", fake)
+    # ⚠ THE SET IS EMPTY IN REAL CONFIGURATION — see the note on `EPS` above. Without this,
+    # `fundamental_totals` filters every metric out and each assertion below fails on an absent
+    # key rather than on the arithmetic it is about.
+    monkeypatch.setattr(e, "_AGGREGATABLE_PER_SHARE", frozenset({"eps_nri"}))
     # ⚠ FX OUT OF THE WAY: 1.0 EUR per EUR, so every figure below is exact.
     import routers._benchmark_index as bi
 
@@ -69,7 +83,7 @@ def earnings(monkeypatch):
     return e
 
 
-def _series(out: dict, code: str = FCF_PS) -> dict[str, float]:
+def _series(out: dict, code: str = EPS) -> dict[str, float]:
     return (out.get(code) or {}).get(1) or {}
 
 
@@ -82,25 +96,25 @@ class TestTheCapIsOneDate:
         """⚠⚠ THE INVARIANT. With one member, `w·F/cap(T)` and `F` differ by a CONSTANT, so the two
         constructions must agree to the last bit. They did not before: the book read 0% where the
         index read +100%. Verified on eight live companies at 8.9e-16."""
-        index = _series(earnings.fundamental_totals([1], ["fcf_ps"]))
+        index = _series(earnings.fundamental_totals([1], ["eps_nri"]))
         book = _series(earnings.fundamental_totals(
-            [1], ["fcf_ps"], weight_by_cid={1: 5.0}, caps=_CAPS_DOUBLING))
+            [1], ["eps_nri"], weight_by_cid={1: 5.0}, caps=_CAPS_DOUBLING))
         assert _growth(index) == pytest.approx(1.0)          # cash flow doubled
         assert _growth(book) == pytest.approx(_growth(index))
 
     def test_the_period_s_own_cap_would_have_read_zero(self, earnings):
         """The defect, stated as the number it produced — a rerating cancelling the growth."""
         book = _series(earnings.fundamental_totals(
-            [1], ["fcf_ps"], weight_by_cid={1: 5.0}, caps=_CAPS_DOUBLING))
+            [1], ["eps_nri"], weight_by_cid={1: 5.0}, caps=_CAPS_DOUBLING))
         per_period = {p: 5.0 * v / _CAPS_DOUBLING[1][p[:4]]
-                      for p, v in _series(earnings.fundamental_totals([1], ["fcf_ps"])).items()}
+                      for p, v in _series(earnings.fundamental_totals([1], ["eps_nri"])).items()}
         assert _growth(per_period) == pytest.approx(0.0)     # what the tab drew
         assert _growth(book) == pytest.approx(1.0)           # what it draws now
 
     def test_the_level_is_the_weight_times_the_fundamental_per_euro_of_cap(self, earnings):
         # w · F / cap(T) = 5 × (2.0 × 100 × 1e6) / 2_000 — the LATEST cap, both years.
         book = _series(earnings.fundamental_totals(
-            [1], ["fcf_ps"], weight_by_cid={1: 5.0}, caps=_CAPS_DOUBLING))
+            [1], ["eps_nri"], weight_by_cid={1: 5.0}, caps=_CAPS_DOUBLING))
         assert book["2025-12-31"] == pytest.approx(5.0 * (2.0 * 100 * 1e6) / 2_000.0)
         assert book["2024-12-31"] == pytest.approx(5.0 * (1.0 * 100 * 1e6) / 2_000.0)
 
@@ -109,14 +123,14 @@ class TestTheCapIsOneDate:
         PERIOD misses every time. There is no such lookup left, on either vocabulary."""
         for caps, cadence in ((_CAPS_DOUBLING, "annual"), (_CAPS_QUARTERLY, "quarterly")):
             book = _series(earnings.fundamental_totals(
-                [1], ["fcf_ps"], weight_by_cid={1: 5.0}, caps=caps, cadence=cadence))
+                [1], ["eps_nri"], weight_by_cid={1: 5.0}, caps=caps, cadence=cadence))
             assert sorted(book) == ["2024-12-31", "2025-12-31"], cadence
 
     def test_a_member_with_no_cap_at_all_is_left_out_entirely(self, earnings):
         # ⚠ NOT A ZERO, and no longer a period-by-period drop: there is no price at which to turn
         # this book's money weight into shares, so the member has no claim to contribute.
         assert _series(earnings.fundamental_totals(
-            [1], ["fcf_ps"], weight_by_cid={1: 5.0}, caps={})) == {}
+            [1], ["eps_nri"], weight_by_cid={1: 5.0}, caps={})) == {}
 
 
 class TestLtmRidesOnTheSameBasis:
@@ -131,7 +145,7 @@ class TestLtmRidesOnTheSameBasis:
 
     def test_ltm_uses_the_member_s_one_cap_like_every_other_period(self, with_ltm):
         book = _series(with_ltm.fundamental_totals(
-            [1], ["fcf_ps"], weight_by_cid={1: 5.0}, caps=_CAPS_DOUBLING))
+            [1], ["eps_nri"], weight_by_cid={1: 5.0}, caps=_CAPS_DOUBLING))
         assert book["LTM"] == pytest.approx(5.0 * (3.0 * 100 * 1e6) / 2_000.0)
 
     def test_it_cannot_be_the_only_surviving_period(self, with_ltm):
@@ -139,7 +153,7 @@ class TestLtmRidesOnTheSameBasis:
         # back to the growth chain — rather than one member on one period, which puts
         # `blend_series` on the aggregate path with no step it can span.
         assert _series(with_ltm.fundamental_totals(
-            [1], ["fcf_ps"], weight_by_cid={1: 5.0}, caps={})) == {}
+            [1], ["eps_nri"], weight_by_cid={1: 5.0}, caps={})) == {}
 
     def test_and_an_index_keeps_its_LTM_with_no_caps_at_all(self, with_ltm):
-        assert "LTM" in _series(with_ltm.fundamental_totals([1], ["fcf_ps"]))
+        assert "LTM" in _series(with_ltm.fundamental_totals([1], ["eps_nri"]))

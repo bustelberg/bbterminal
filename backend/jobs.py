@@ -51,6 +51,30 @@ _log = logging.getLogger(__name__)
 # stepped away still sees how it ended; short enough that the registry cannot grow without bound.
 RETAIN_SECONDS = 15 * 60
 
+#: How long a RUNNING job may go without emitting anything before it is written off.
+#:
+#: ⚠⚠ WITHOUT THIS A HUNG WORKER POISONS THE APP UNTIL THE NEXT DEPLOY, and it did (2026-08-31,
+#: production). `Refresh all portfolios` blocked inside a Playwright call, so it never reached a
+#: `ctx.check()` — Cancel could only ever SET the flag, leaving the card reading "cancelling…" with
+#: "starting…" as its last line. Nothing could clear it:
+#:
+#:   * `_prune` drops TERMINAL jobs only, so the corpse stayed in the registry;
+#:   * `attachRunningJobs` adopts every `running` job on page load, so the toast came back on
+#:     EVERY visit to /management-dashboard, and only a terminal job ever gets the linger-and-
+#:     dismiss countdown — so it could not be got rid of;
+#:   * `find_running` matched it, so pressing the button again ATTACHED TO THE CORPSE instead of
+#:     starting a run. That is why the card never got past "starting…": there was no new run.
+#:
+#: ⚠ THIRTY MINUTES, AND THE UNIT IS SILENCE, NOT AGE. A long job is fine — the fleet scan takes
+#: many minutes — but every one of them narrates: the AIRS refresh emits per account, a fill emits
+#: per company. Half an hour with nothing at all is a worker that is not coming back.
+#:
+#: ⚠⚠ IT CANNOT KILL THE THREAD, AND THE SUMMARY SAYS SO. Cancellation here is cooperative by
+#: design (see the module note); a thread blocked in a vendor call cannot be interrupted from
+#: outside. What this reclaims is the REGISTRY — the card can finish, and the next press starts a
+#: real run instead of adopting a dead one. The thread, if it ever wakes, finds `_cancel` set.
+STALE_SECONDS = 30 * 60
+
 TERMINAL = ("done", "failed", "cancelled")
 
 
@@ -75,6 +99,9 @@ class Job:
     ended_at: float | None = None
     done: int = 0
     total: int = 0
+    #: When this job last said anything. ⚠ THE HEARTBEAT, and it starts at creation rather than at
+    #: 0 so a job that dies before its first `emit` still ages out instead of living forever.
+    last_event_at: float = field(default_factory=time.time)
     summary: str | None = None
     # ⚠ EXTERNAL, METERED CALLS — NOT A REQUEST COUNT. Our own database reads are free and
     # unlimited; a GuruFocus call comes out of a finite monthly quota, and a reader deciding
@@ -141,6 +168,10 @@ class JobCtx:
             if "total" in data:
                 j.total = int(data["total"] or 0)
             j.events.append({"seq": seq, "kind": kind, "message": message, **data})
+            # ⚠ THE HEARTBEAT IS EVERY LINE, not a separate call a worker must remember to make.
+            # Every job on this registry already narrates; asking for a second signal would mean
+            # the ones that forgot it get reaped while running.
+            j.last_event_at = time.time()
 
     def progress(self, done: int, total: int, message: str, **data: Any) -> None:
         self.emit("progress", message, done=done, total=total, **data)
@@ -160,9 +191,53 @@ _JOBS: dict[str, Job] = {}
 _REGISTRY_LOCK = threading.Lock()
 
 
+def reap_stalled() -> None:
+    """Write off a running job that has gone silent for `STALE_SECONDS` — see that constant.
+
+    ⚠ IT IS A STATUS CHANGE, NOT A KILL. The thread may still be blocked in a vendor call; nothing
+    here can interrupt it and the summary does not pretend otherwise. What is reclaimed is the
+    registry entry, so the card can reach a terminal state and the next press starts a real run.
+
+    ⚠ `failed`, NOT `cancelled`. Nobody asked for this to stop; it stopped answering. Filing it as
+    a cancellation would put a worker's crash in the same column as a reader's decision.
+
+    ⚠ AND `_cancel` IS SET ON THE WAY OUT, so a worker that does eventually wake up unwinds at its
+    next `ctx.check()` rather than carrying on writing under a job the registry has written off.
+
+    ⚠ PUBLIC BECAUSE THE SSE STREAM CALLS IT TOO. `_prune` runs on start and on list — neither of
+    which a tab that is already WATCHING a hung job will do — so without a tick-level call that
+    reader keeps their card forever while everyone else's is reaped. It is a timestamp compare over
+    a handful of jobs.
+    """
+    cutoff = time.time() - STALE_SECONDS
+    stalled: list[Job] = []
+    with _REGISTRY_LOCK:
+        for j in _JOBS.values():
+            if not j.terminal and j.last_event_at < cutoff:
+                stalled.append(j)
+    for j in stalled:
+        quiet = int((time.time() - j.last_event_at) / 60)
+        j._cancel.set()  # noqa: SLF001
+        j.status = "failed"
+        j.summary = (f"No progress for {quiet} minutes — abandoned. The worker may still be "
+                     "running; nothing here can stop a thread that is not asking to be stopped.")
+        j.ended_at = time.time()
+        _log.warning("[job] %s (%s) abandoned after %s minutes of silence", j.label, j.kind, quiet)
+        # ⚠ AN EVENT, SO A WATCHING TAB LEARNS WHY. A card that flips to `failed` with no line
+        # explaining it is the same dead end from the reader's side.
+        JobCtx(j).emit("error", j.summary)
+
+
 def _prune() -> None:
-    """Drop finished jobs past `RETAIN_SECONDS`. Called on every start and list, so the registry
-    is tidied by use rather than by a timer nobody would remember exists."""
+    """Reap the stalled, then drop finished jobs past `RETAIN_SECONDS`. Called on every start and
+    list, so the registry is tidied by use rather than by a timer nobody would remember exists.
+
+    ⚠ THE ORDER MATTERS: reaping makes a job terminal, and the drop below only ever removes
+    terminal ones — so a stalled job leaves in two steps rather than being stuck for another
+    `RETAIN_SECONDS`. It stays readable for the retention window like any other outcome, which is
+    what puts one explaining card in front of the reader instead of silence.
+    """
+    reap_stalled()
     cutoff = time.time() - RETAIN_SECONDS
     with _REGISTRY_LOCK:
         for jid in [j.id for j in _JOBS.values()
@@ -171,7 +246,14 @@ def _prune() -> None:
 
 
 def find_running(kind: str, label: str) -> Job | None:
-    """The live job for this exact piece of work, if there is one."""
+    """The live job for this exact piece of work, if there is one.
+
+    ⚠⚠ IT REAPS FIRST, AND WITHOUT THAT THE IDEMPOTENCE BELOW BECOMES A TRAP. `start` attaches to
+    whatever this returns instead of launching — right for a run in flight, and fatal for a hung
+    one: every press adopts the corpse and nothing new ever starts. Measured in production on
+    `Refresh all portfolios`, whose card sat on "starting…" through press after press.
+    """
+    reap_stalled()
     with _REGISTRY_LOCK:
         for j in _JOBS.values():
             if j.kind == kind and j.label == label and not j.terminal:
@@ -205,8 +287,8 @@ def start(kind: str, label: str, fn: Callable[[JobCtx], str | None]) -> tuple[Jo
     genuinely needs concurrent same-label runs would need a distinguishing label, which is the honest
     way to express it.
     """
+    existing = find_running(kind, label)          # reaps stalled jobs on the way — see above
     _prune()
-    existing = find_running(kind, label)
     if existing is not None:
         _log.info("[job] %s (%s) is already running as %s — attaching", label, kind, existing.id)
         return existing, True

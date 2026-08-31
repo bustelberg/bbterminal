@@ -27,6 +27,23 @@
  * New York — a date that moves with who is looking at it is worse than no date. The stamps are
  * already ISO-8601 and their first ten characters ARE the day they name.
  */
+/**
+ * `2026-07-31` → `31 July 2026`, for a card's `When`.
+ *
+ * ⚠ IT LIVES HERE BECAUSE TWO PANELS NEED IT. It was a closure inside `DeepValuationTab`, and the
+ * Reverse DCF beside it could only say "latest close" and "latest fiscal year" — descriptions of a
+ * SELECTION RULE, not moments, which leave a two-year-old WACC looking current. Copying it would
+ * have been two date formats one card apart.
+ *
+ * ⚠ UTC, LIKE EVERY OTHER DATE IN THIS APP. A bare `new Date('2026-07-31')` is parsed as UTC and
+ * then FORMATTED in the viewer's zone, so anyone west of Greenwich reads the previous day.
+ */
+export function onDate(iso: string | null | undefined): string {
+  if (!iso) return 'n/a';
+  return new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-GB',
+    { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
 export function dayOf(ts: string | null | undefined): string | null {
   if (typeof ts !== 'string') return null;
   const day = ts.slice(0, 10);

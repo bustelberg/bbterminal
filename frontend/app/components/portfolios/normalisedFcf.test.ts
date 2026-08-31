@@ -16,7 +16,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { forwardFcf, growthCapex, normalisedFcf } from './normalisedFcf';
+import { forwardFcf, forwardLegs, growthCapex, normalisedFcf } from './normalisedFcf';
 
 /** ASML's latest filed year, in millions — the row the sign convention was verified against. */
 const ASML = { fcf: 11027.3, sbc: 202.3, capex: -1631.2, dep: 1025.9 };
@@ -108,13 +108,11 @@ describe('normalised FCF', () => {
 });
 
 /**
- * ⚠⚠ THE FORWARD BASE — next year's free cash flow, DERIVED, because GuruFocus's REST API has no
- * consensus FCF line (only the Excel add-in does, and the legacy API never 404s, so asking it for
- * one returns 200 and a plausible all-zero series).
+ * ⚠⚠ THE FORWARD BASE, DERIVED — the fallback for a company whose consensus free cash flow we do
+ * not hold. GuruFocus does publish one (`keyratios` → `Fundamental`, undocumented) but the fetch is
+ * on demand, so most companies arrive without it and this is what they get.
  *
- * The spreadsheet this ports is `Estimated FCF FY1 + MAX(−capex − D&A, 0) − SBC`. Only the base
- * differs here, and the identity below is what makes the substitution sound rather than merely
- * convenient.
+ * The identity below is what makes the substitution sound rather than merely convenient.
  */
 describe('forward FCF', () => {
   it('is the consensus operating cash flow less capex', () => {
@@ -164,5 +162,82 @@ describe('forward FCF', () => {
     // under a label reading "next fiscal year".
     expect(forwardFcf(null, ASML.capex)).toBeNull();
     expect(normalisedFcf({ ...ASML, fcf: forwardFcf(null, ASML.capex) }).used).toBeNull();
+  });
+});
+
+/**
+ * ⚠⚠ THE ADD-BACK MUST USE THE SAME CAPEX THE BASE NETTED — the one rule `forwardLegs` exists for,
+ * and the defect in the spreadsheet this panel ports.
+ *
+ * `=@GURUF(…"Estimated Free Cash Flow for Next FY1")` nets a FORWARD capex; the `MAX(−capex − D&A,
+ * 0)` beside it reads the TRAILING lines. On a company whose capex is flat the two agree and the
+ * sheet is right; on one mid-buildout they do not, and it is short by exactly the step-up.
+ *
+ * Meta FY2026, real figures throughout.
+ */
+describe('forward legs', () => {
+  const META = {
+    ocfEstimate: 134330.10, fcfEstimate: 5412.45,
+    ebitdaEstimate: 140802, ebitEstimate: 88858,
+    capex: -89325, dep: 22729,        // trailing twelve months
+  };
+  const SBC = 25136;
+  const valued = (l: ReturnType<typeof forwardLegs>) =>
+    normalisedFcf({ fcf: l.fcf, sbc: SBC, capex: l.capex, dep: l.dep }).used;
+
+  it('takes the vendor base WITH the forward pair, and the correction still cancels', () => {
+    const l = forwardLegs({ ...META, normalise: true });
+    expect(l.vendor).toBe(true);
+    expect(l.fcf).toBeCloseTo(5412.45, 6);
+    expect(l.capex).toBeCloseTo(128917.65, 6);          // OCF_est − FCF_est
+    expect(l.dep).toBeCloseTo(51944, 6);                // EBITDA_est − EBIT_est
+    // …and the whole thing lands on OCF_est − D&A_est − SBC, by algebra.
+    expect(valued(l)).toBeCloseTo(META.ocfEstimate - 51944 - SBC, 4);
+    expect(valued(l)).toBeCloseTo(57250.10, 2);
+  });
+
+  it('⚠⚠ the vendor base with a TRAILING add-back is short, by an amount nobody would guess', () => {
+    // 46,872 against 57,250 — the split basis, stated as the number it produces.
+    //
+    // ⚠ THE SHORTFALL IS THE CAPEX STEP-UP **NET OF** THE D&A STEP-UP, because the mixed version
+    // takes BOTH legs trailing:
+    //     correct − split = (C_fwd − C_ttm) − (D_fwd − D_ttm)
+    //                     = (128,917.65 − 89,325) − (51,944 − 22,729) = 10,377.65
+    // Not the 39.6bn capex gap on its own — which is exactly why an eyeball reconciliation against
+    // GuruFocus does not find it: the number is wrong by neither of the two differences on screen.
+    const split = normalisedFcf({ fcf: META.fcfEstimate, sbc: SBC,
+      capex: META.capex, dep: META.dep }).used;
+    expect(split).toBeCloseTo(46872.45, 2);
+    expect(57250.10 - split!).toBeCloseTo((128917.65 - 89325) - (51944 - 22729), 1);
+    expect(57250.10 - split!).toBeCloseTo(10377.65, 2);
+  });
+
+  it('⚠ refuses the vendor base when the correction cannot follow it', () => {
+    // No EBITDA/EBIT ⇒ no forward D&A ⇒ taking the vendor figure would FORCE the split above. The
+    // derivation is used instead, where the trailing capex cancels.
+    const l = forwardLegs({ ...META, ebitdaEstimate: null, ebitEstimate: null, normalise: true });
+    expect(l.vendor).toBe(false);
+    expect(l.fcf).toBeCloseTo(45005.10, 6);              // OCF_est − |capex_ttm|
+    expect(l.capex).toBe(META.capex);
+    expect(valued(l)).toBeCloseTo(META.ocfEstimate - META.dep - SBC, 4);
+  });
+
+  it('⚠ but takes it with Normalise OFF, where there is no add-back to be inconsistent with', () => {
+    const l = forwardLegs({ ...META, ebitdaEstimate: null, ebitEstimate: null, normalise: false });
+    expect(l.vendor).toBe(true);
+    expect(l.fcf).toBeCloseTo(5412.45, 6);
+  });
+
+  it('falls back to the derivation when there is no consensus free cash flow at all', () => {
+    const l = forwardLegs({ ...META, fcfEstimate: null, normalise: true });
+    expect(l.vendor).toBe(false);
+    expect(l.fcf).toBeCloseTo(45005.10, 6);
+  });
+
+  it('has no forward base at all when neither route has its inputs', () => {
+    expect(forwardLegs({
+      ocfEstimate: null, fcfEstimate: null, ebitdaEstimate: null, ebitEstimate: null,
+      capex: null, dep: null, normalise: true,
+    })).toEqual({ fcf: null, capex: null, dep: null, vendor: false });
   });
 });

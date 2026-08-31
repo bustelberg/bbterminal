@@ -35,6 +35,15 @@ function parseMean(line: string) {
   };
 }
 
+/**
+ * ⚠⚠ THE LINES ARE JOINED BY A **LaTeX** BREAK, NOT A NEWLINE (2026-08-31). These builders emit one
+ * typeset expression that the ⓘ hands to KaTeX whole; a newline-separated string was what made the
+ * Tables tooltips print `\\left(\\dfrac{...}` at the reader, backslashes and all, once the
+ * expressions themselves were typeset. Splitting on it here is how these tests still read one line
+ * at a time.
+ */
+const LINE = ' \\\\[4pt] ';
+
 const COVER = (burden: number) => (burden > 0 ? 100 / burden : null);
 const seriesOf = (from: number, vals: (number | null)[]) =>
   new Map(vals.map((v, i) => [from + i, v]));
@@ -42,11 +51,9 @@ const seriesOf = (from: number, vals: (number | null)[]) =>
 describe('meanSub', () => {
   it('prints operands that average to the printed mean', () => {
     const m = seriesOf(2021, [55.4, 54.1, 53.3, 56.6, 57.5]);
-    const out = meanSub('Book', m, 2025, 5);
-    const [head, line] = out.split('\n');
-    expect(head).toBe('Book, 2021–2025');
-
-    const { addends, n, printed } = parseMean(line);
+    // ⚠ NO CAPTION LINE (2026-08-31): the worked half sits inside ONE display expression with the
+    // symbolic formula, and a name or a year range between the two reads as a term in it.
+    const { addends, n, printed } = parseMean(meanSub(m, 2025, 5));
     expect(addends).toEqual([55.4, 54.1, 53.3, 56.6, 57.5]);
     expect(n).toBe(5);
     // The reader's own arithmetic, on what is actually on screen — at whatever precision is
@@ -62,14 +69,15 @@ describe('meanSub', () => {
     // ⚠ REAL SHAPE: a burden near 1% is where one decimal loses the digit the division needs.
     const burdens = [0, 2.15, 1.84, 1.12, 0.93, 1.41, 0.88, 0.76, 1.05, 1.66];
     const m = seriesOf(2016, burdens);
-    const [head, meanLine, coverLine] = meanSub('Book', m, 2025, 10, COVER).split('\n');
-    expect(head).toBe('Book, 2016–2025');
+    const [meanLine, coverLine] = meanSub(m, 2025, 10, COVER).split(LINE);
 
     const { addends, n, printed } = parseMean(meanLine);
     expect(n).toBe(10);
     expect(Number((addends.reduce((a, b) => a + b, 0) / n).toFixed(2))).toBe(printed);
 
-    const cov = /^100 ÷ (-?[\d.]+)% = (-?[\d.]+)×$/.exec(coverLine);
+    // ⚠ `\\div`, `\\%` and `\\times` — the same line, typeset. The arithmetic asserted
+    // below is unchanged; only the spelling of the operators moved.
+    const cov = /^100 \\div (-?[\d.]+)\\% = (-?[\d.]+)\\times$/.exec(coverLine);
     expect(cov).not.toBeNull();
     // The operand on the coverage line IS the mean printed on the line above it.
     expect(Number(cov![1])).toBe(printed);
@@ -80,8 +88,8 @@ describe('meanSub', () => {
   it('widens precision for small operands and keeps one precision per list', () => {
     // A near-zero burden: at one decimal every addend would collapse to 0.1 and the mean with it.
     const m = seriesOf(2021, [0.11, 0.09, 0.14, 0.08, 0.12]);
-    const { texts, addends, n, printed } = parseMean(meanSub('Book', m, 2025, 5, COVER)
-      .split('\n')[1]);
+    const { texts, addends, n, printed } = parseMean(meanSub(m, 2025, 5, COVER)
+      .split(LINE)[0]);
     expect(new Set(texts.map((t) => t.split('.')[1]?.length ?? 0)).size).toBe(1);
     expect(Number((addends.reduce((a, b) => a + b, 0) / n).toFixed(3))).toBe(printed);
     expect(printed).toBeGreaterThan(0);
@@ -92,7 +100,7 @@ describe('meanSub', () => {
     // decimals, the second at 1, and a reader adding them up got a different mean than the one
     // printed beside them. The list must be uniform whatever its length.
     const m = seriesOf(2016, [1.11, 2.22, 3.33, 4.44, 5.55, 6.66, 7.77, 8.88, 9.99, 1.01]);
-    const { texts } = parseMean(meanSub('Book', m, 2025, 10).split('\n')[1]);
+    const { texts } = parseMean(meanSub(m, 2025, 10));
     expect(texts.every((t) => t.split('.')[1]?.length === texts[0].split('.')[1]?.length))
       .toBe(true);
   });
@@ -101,19 +109,17 @@ describe('meanSub', () => {
     // ⚠ A SHORT WINDOW MUST NOT PAD. The `n of 10` badge already says the window is short; a list
     // of ten addends under it would contradict the badge in the same tooltip.
     const m = seriesOf(2016, [null, null, 12, 14, null, 16, 18, 20, 22, 24]);
-    const [head, line] = meanSub('Book', m, 2025, 10).split('\n');
-    expect(head).toBe('Book, 2018–2025');
-    const { addends, n } = parseMean(line);
+    const { addends, n } = parseMean(meanSub(m, 2025, 10));
     expect(addends).toEqual([12, 14, 16, 18, 20, 22, 24]);
     expect(n).toBe(7);
   });
 
   it('refuses rather than guessing when there is nothing to work through', () => {
-    expect(meanSub('Book', seriesOf(2021, [1, 2]), null, 5)).toBe('');
-    expect(meanSub('Book', new Map(), 2025, 5)).toBe('');
+    expect(meanSub(seriesOf(2021, [1, 2]), null, 5)).toBe('');
+    expect(meanSub(new Map(), 2025, 5)).toBe('');
     // An all-zero burden has no coverage — the mean line still stands, the inversion does not.
-    const flat = meanSub('Book', seriesOf(2021, [0, 0, 0]), 2023, 5, COVER);
-    expect(flat.split('\n')).toHaveLength(2);
+    const flat = meanSub(seriesOf(2021, [0, 0, 0]), 2023, 5, COVER);
+    expect(flat.split(LINE)).toHaveLength(1);
   });
 });
 
@@ -125,8 +131,7 @@ describe('rateSub', () => {
 
   it('prints endpoints that compound to the printed rate', () => {
     const got = rate(100, 606.34, '2015', '2025', 10);
-    const [head, expr] = rateSub('Book', got).split('\n');
-    expect(head).toBe('Book');
+    const expr = rateSub(got);
 
     // ⚠ LaTeX, NOT UNICODE (2026-08-22). `workedCagr` is typeset by KaTeX now — the endpoints ride
     // as SUBSCRIPTS on the values they belong to rather than in `[brackets]`, and the division is
@@ -146,19 +151,19 @@ describe('rateSub', () => {
 
   it('keeps enough digits on a small base to reconcile', () => {
     const got = rate(2.4913, 8.137, '2020', '2025', 5);
-    const expr = rateSub('Book', got).split('\n')[1];
+    const expr = rateSub(got);
     const nums = [...expr.matchAll(/(-?[\d.]+)_\{\\,/g)].map((x) => Number(x[1]));
     const reader = ((nums[0] / nums[1]) ** (1 / 5) - 1) * 100;
     expect(Math.abs(reader - got.pct)).toBeLessThan(0.1);
   });
 
   it('refuses a rate it cannot show the endpoints of', () => {
-    expect(rateSub('Book', null)).toBe('');
-    expect(rateSub('Book', { pct: null, reason: 'no line' })).toBe('');
+    expect(rateSub(null)).toBe('');
+    expect(rateSub({ pct: null, reason: 'no line' })).toBe('');
     // ⚠ A NON-POSITIVE BASE. Every producer refuses one, so this cannot arrive from the app — but
     // `(606 ÷ -3) ^ …` printed beside a positive rate would be a worked example of something
     // impossible, so the guard is asserted rather than assumed.
-    expect(rateSub('Book', { pct: 10, from: '2015', to: '2025', years: 10,
+    expect(rateSub({ pct: 10, from: '2015', to: '2025', years: 10,
       fromValue: -3, toValue: 606 })).toBe('');
   });
 });

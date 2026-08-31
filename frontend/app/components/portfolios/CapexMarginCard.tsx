@@ -12,7 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
-import { workedMean } from './workedFormula';
+import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import CapexMarginInputsModal from './CapexMarginInputsModal';
@@ -30,6 +30,10 @@ import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type
  * the drill-down are one computation. Aggregation is a weight-weighted average of per-company
  * ratios — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./SbcOcfCard}.
  */
+
+/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+ *  sees it. */
+const R = String.raw;
 
 export default function CapexMarginCard({ holdingsTarget, holdingsName, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
@@ -101,9 +105,11 @@ export default function CapexMarginCard({ holdingsTarget, holdingsName, benchTar
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
             avgInfo={<InfoTip content={<AspectCard
               what="Average capex margin (capital intensity) over the years shown."
-              where="Computed here — |Capex| ÷ Revenue per year, weight-averaged across holdings."
+              where="Computed here, per year, then weight-averaged across holdings."
               when="The years on the chart."
-              worked={workedMean(stats.own.values)}
+              worked={withWorked(
+                R`\text{capex margin} = \dfrac{|\text{capex}|}{\text{revenue}}`,
+                workedMean(stats.own.values))}
               how="The share of each sales-euro reinvested in property, plant & intangibles. Lower = more capital-light (asset-heavy businesses read high)." />} />} />
 
           <div>

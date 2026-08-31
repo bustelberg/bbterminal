@@ -7,8 +7,8 @@ import {
   defaultDiscountRate, FORECAST_YEARS, impliedGrowth, marketCapOf,
   PERPETUITY_GROWTH,
 } from './reverseDcf';
-import { type ReverseDcfSource } from './egmInputs';
-import { forwardFcf, normalisedFcf } from './normalisedFcf';
+import { SOURCE_CODES, vendorName, type ReverseDcfSource } from './egmInputs';
+import { forwardLegs, normalisedFcf } from './normalisedFcf';
 // ⚠ THE SAME VOCABULARY THE RISK VIEWS USE. Every ⓘ stating a formula owes the reader the same
 // expression with this company's operands in it, typeset by the same engine — see `workedFormula`.
 // ⚠ THE EXPRESSIONS LIVE IN A PURE MODULE, not in this JSX: a LaTeX string is testable and a
@@ -19,6 +19,9 @@ import {
 } from './valuationFormulas';
 import ReverseDcfInputsModal from './ReverseDcfInputsModal';
 import { type MetricRow } from './quickValuation';
+// ⚠ RENDERED ONLY BY `AspectCard`/`Legend` — see `dynamicValue.v`. Every use below is in a card.
+import { v } from '../../../lib/dynamicValue';
+import { onDate } from './asOfLine';
 
 /**
  * Reverse DCF — a plain DCF run backwards. Grow free cash flow at `g` for `n` years, discount it,
@@ -154,9 +157,7 @@ function DerivedRow({ label, value, info, tone = 'step', dim }: {
  */
 const NOT_LIKE_FOR_LIKE = `
 
-⚠ NOT LIKE FOR LIKE with the implied rate, in three ways. METRIC: the model compounds free cash flow, these forecast earnings and operating cash flow. HORIZON: the model compounds for the full forecast period and then for ever at the perpetuity rate; these are 3-5 year rates. BASIS: the model grows TOTAL cash flow against the TOTAL market cap, while both consensus rows are PER SHARE — buybacks alone lift a per-share rate above a total one, by roughly the share-retirement rate, with no change in the business.
-
-Read them as a sanity check on the order of magnitude, not as an equality.`;
+Not like for like with the implied rate: different metric (free cash flow vs earnings and operating cash flow), different horizon (full forecast plus perpetuity vs 3-5 years), and different basis (total vs per share, so buybacks lift these). A sanity check on the order of magnitude, not an equality.`;
 
 /** Appended to both correction cards — one sentence, one place. */
 const NORM_OFF = `
@@ -174,7 +175,7 @@ Untick Normalise to value the reported figure instead.`;
  */
 const TTM_NOTE = `
 
-⚠ Trailing twelve months where the company has filed four quarters, its last full fiscal year otherwise — the same window for all four cash-flow lines, so the corrections cannot mix bases. The header row says which one is in use.`;
+Trailing twelve months where four quarters exist, the last full fiscal year otherwise — one window for all four cash-flow lines.`;
 
 export default function ReverseDcfPanel({ src, currency, metrics, name, isin, growthEst, today }: {
   src: ReverseDcfSource; currency?: string | null;
@@ -253,11 +254,22 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
    * silently stop being deducted would be a second, invisible edit.
    */
   /**
-   * Next year's free cash flow, derived — the spreadsheet's `Estimated Free Cash Flow for Next FY1
-   * End (M)`, which the REST API does not publish. See `forwardFcf`: consensus operating cash flow
-   * minus capex, and the capex cancels out of the figure actually valued.
+   * Next year's free cash flow AND the capex/D&A pair that must accompany it.
+   *
+   * ⚠⚠ ONE CALL FOR BOTH, BECAUSE THEY ARE ONE DECISION. The vendor's consensus FCF nets a FORWARD
+   * capex; our fallback nets the TRAILING one. Take the vendor's base with a trailing add-back and
+   * the correction no longer cancels — Meta FY2026 lands at 46,872 instead of 57,250. See
+   * `forwardLegs`, which owns the rule and the measurements.
    */
-  const fwdFcf = forwardFcf(src.ocfEstimate, src.capex);
+  const fwd = forwardLegs({
+    ocfEstimate: src.ocfEstimate, fcfEstimate: src.fcfEstimate,
+    ebitdaEstimate: src.ebitdaEstimate, ebitEstimate: src.ebitEstimate,
+    capex: src.capex, dep: src.dep, normalise,
+  });
+  const fwdFcf = fwd.fcf;
+  /** ⚠ WHOSE FIGURE IS ON SCREEN. The card has to say which of the two it took rather than leave
+   *  the reader to reconcile a 39.6bn difference against GuruFocus's own page. */
+  const fcfEstDirect = fwd.vendor;
   /** ⚠ THE FORWARD BASE ONLY WHEN THERE IS ONE. Fewer than a fifth of ACWI's members carry a
    *  consensus at all, so "forward by default" has to mean "forward where it exists" or most
    *  companies would open on an n/a where a perfectly good filed figure was sitting. */
@@ -269,8 +281,8 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
    *  true the day the flow legs went trailing — a `when` that states the wrong period is worse
    *  than none, because it is checkable and wrong. See `TTM_NOTE`. */
   const flowWhen = src.flowBasis.ttm
-    ? `Trailing twelve months to ${src.flowBasis.date ?? 'the latest quarter'}.`
-    : `Most recent fiscal year${src.flowBasis.date ? ` (${src.flowBasis.date})` : ''}.`;
+    ? `Trailing twelve months to ${v(src.flowBasis.date ?? 'the latest quarter')}.`
+    : `Most recent fiscal year${src.flowBasis.date ? `, ${v(src.flowBasis.date)}` : ''}.`;
   const defFcf = forward ? fwdFcf : src.fcf;
   const defTarget = marketCapOf(src);
   const defPerp = PERPETUITY_GROWTH;
@@ -283,9 +295,15 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
     return Number.isFinite(v) ? v : null;
   };
   const baseFcf = num(fcfStr) ?? defFcf;
+  // ⚠⚠ `fwd.capex` / `fwd.dep`, NOT `src.capex` / `src.dep` — on the vendor base these are the
+  // FORWARD pair, and using the trailing lines here is precisely the split basis `forwardLegs`
+  // exists to prevent. On the reported base and on the derived forward base they ARE the trailing
+  // lines, so this is the same call it always was for those.
+  const legCapex = forward ? fwd.capex : src.capex;
+  const legDep = forward ? fwd.dep : src.dep;
   const norm = useMemo(
-    () => normalisedFcf({ fcf: baseFcf, sbc: src.sbc, capex: src.capex, dep: src.dep }),
-    [baseFcf, src.sbc, src.capex, src.dep]);
+    () => normalisedFcf({ fcf: baseFcf, sbc: src.sbc, capex: legCapex, dep: legDep }),
+    [baseFcf, src.sbc, legCapex, legDep]);
   /** The total the rows above add up to. ⚠ `?? baseFcf` covers the case where nothing was
    *  correctable; `normalisedFcf` already returns `used === reported` there, so this is a null
    *  guard only. */
@@ -365,11 +383,11 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
       'Analysts’ 3–5 year EPS growth consensus (GuruFocus “Future 3-5Y EPS Growth Rate Estimate”). A forecast, not a solve.'
       + NOT_LIKE_FOR_LIKE],
     ['OCF/sh 3-5y', ocf35,
-      'Analysts’ 3–5 year operating-cash-flow-per-share growth consensus. ⚠ OCF, not free cash flow — it runs ahead of FCF by whatever capex the company spends, and the model compounds FCF.'
+      'Analysts’ 3–5 year operating-cash-flow-per-share growth consensus. OCF, not free cash flow: it runs ahead by whatever capex the company spends.'
       + NOT_LIKE_FOR_LIKE],
     ['Avg', avg35,
-      'The plain mean of the two consensus rates to the left. ⚠ Blank unless BOTH are present — an average of one number is that number, and labelling it an average would hide which.'
-      + '\n\n⚠ IT AVERAGES TWO DIFFERENT METRICS — an earnings rate and a cash-flow-per-share rate. It is a rough centre of what analysts expect, not a consensus for any one line.'
+      'The plain mean of the two rates to the left. Blank unless both are present.'
+      + '\n\nIt averages two different metrics — an earnings rate and a cash-flow-per-share rate — so it is a rough centre of what analysts expect, not a consensus for any one line.'
       + NOT_LIKE_FOR_LIKE],
   ];
   const hasAnalysts = analysts.some(([, v]) => v != null);
@@ -454,29 +472,32 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
               label={`Free cash flow${forward && estFy ? ` ${estFy}` : forward ? ' next FY' : ''}${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(fcfStr, defFcf)} onChange={setFcfStr}
               info={<InfoTip content={<AspectCard
-                what={forward ? 'Next fiscal year\'s free cash flow, derived.' : 'Latest reported free cash flow.'}
-                where={forward
-                  ? 'GuruFocus — analyst consensus operating cash flow, less the last filed capital expenditure.'
-                  : 'GuruFocus — cashflow statement, as filed.'}
-                when={forward ? (estFy ?? 'Next fiscal year.') : flowWhen}
+                what={!forward ? 'Latest reported free cash flow.'
+                  : fcfEstDirect ? 'Next fiscal year\'s free cash flow, as forecast.'
+                    : 'Next fiscal year\'s free cash flow, derived.'}
+                where={!forward ? `GuruFocus, ${v(vendorName(SOURCE_CODES.fcf))}.`
+                  : fcfEstDirect ? `GuruFocus, ${v(vendorName(SOURCE_CODES.fcfEstimate))}.`
+                    : `GuruFocus, ${v(vendorName(SOURCE_CODES.ocfEstimate))} less ${v(vendorName(SOURCE_CODES.capex))}.`}
+                when={forward ? v(estFy ?? 'Next fiscal year.') : flowWhen}
                 // ⚠ NO WORKED LINE ON THE REPORTED BASE, and that is the rule rather than an
                 // omission: it is a figure the vendor filed, not an arithmetic anybody performed.
                 // A formula over raw data fabricates a derivation — the same reason the four
                 // assumption boxes below carry none.
-                worked={!forward ? '' : workedForwardFcf(src.ocfEstimate, src.capex, fwdFcf)}
-                legend={!forward || fwdFcf == null ? undefined : [
+                // ⚠ NO WORKED LINE ON THE VENDOR'S OWN FIGURE — it is a filing, not an
+                // arithmetic anybody performed here. Same rule as the reported base.
+                worked={!forward || fcfEstDirect ? ''
+                  : workedForwardFcf(src.ocfEstimate, src.capex, fwdFcf)}
+                legend={!forward || fcfEstDirect || fwdFcf == null ? undefined : [
                   { sym: String.raw`OCF_{\text{est}}`,
-                    is: `consensus operating cash flow for ${estFy ?? 'the next fiscal year'}` },
-                  { sym: 'C', is: 'capital expenditure, LAST FILED — no consensus for it exists' },
+                    is: `consensus operating cash flow for ${v(estFy ?? 'the next fiscal year')}` },
+                  { sym: 'C', is: 'capital expenditure, last filed' },
                 ]}
                 how={(forward
-                  ? `⚠ DERIVED, BECAUSE THERE IS NO CONSENSUS FREE CASH FLOW TO READ. GuruFocus's spreadsheet add-in publishes one; the API we ingest publishes only operating cash flow. FCF = OCF − capex is the definition of the line, so the only forecast quantity here is the operating cash flow.
-
-⚠ THE CAPEX LEG IS LAST YEAR'S FILING, not a forecast — nobody publishes one. It very largely cancels: with the growth-capex row below, what the model values is (OCF − capex) − stock comp + (capex − depreciation) = consensus OCF − depreciation − stock comp. The capex figure leaves the answer entirely unless the company is spending BELOW depreciation.
-
-⚠ A CONSENSUS IS A FORECAST AND THE MODEL SOLVES FOR GROWTH ON TOP OF IT. Year 1 is analysts' work; every year after it is the rate this panel is asking you to judge.`
-                  : 'Raw data, no formula. Operating cash flow minus TOTAL capital expenditure — which is why the growth-capex row below ADDS back rather than subtracting.')
-                  + (defFcf != null ? ` The box holds MILLIONS — ${mn(defFcf)} is ${scaled(defFcf)}.` : ' The box holds MILLIONS.')} />} />} />
+                  ? fcfEstDirect
+                    ? 'The analysts\' own forecast, read not derived — it nets a forward capex estimate, which is what GuruFocus\'s page shows. Year 1 is their work; every year after it is the rate this panel solves for.'
+                    : 'Derived: no consensus free cash flow is stored for this company, so it is the consensus operating cash flow less the last filed capex. That capex leg largely cancels against the growth-capex row below.'
+                  : 'Operating cash flow minus TOTAL capex, which is why the growth-capex row below adds back rather than subtracting.')
+                  + (defFcf != null ? ` In millions: ${v(mn(defFcf))} is ${v(scaled(defFcf))}.` : ' In millions.')} />} />} />
 
             {/* ⚠⚠ THE CORRECTIONS ARE ROWS, NOT A TOOLTIP. They were both folded into the figure
                 above with the working hidden behind an ⓘ, which meant the one number on screen
@@ -491,11 +512,11 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
               value={normalise && !overridden && norm.applied.sbc ? mn(norm.sbc) : '—'}
               info={<InfoTip content={<AspectCard
                 what="Stock-based compensation, subtracted."
-                where="GuruFocus — cashflow statement."
+                where={`GuruFocus, ${v(vendorName(SOURCE_CODES.sbc))}.`}
                 when={flowWhen}
                 how={norm.applied.sbc
-                  ? `A real cost that never leaves the cash flow statement: it is added back into operating cash flow as a non-cash charge, so reported FCF flatters every company that pays people in equity. The shares are issued and the holder bears the dilution.${NORM_OFF}`
-                  : 'Not reported for this company, so nothing is subtracted. ⚠ An absent line is not a zero — this is not a company that pays no stock compensation, it is one we have no figure for.'} />} />} />
+                  ? `A real cost that never leaves the cash flow statement: added back into operating cash flow as a non-cash charge, so reported free cash flow flatters anyone paying in equity.${NORM_OFF}`
+                  : 'Not reported for this company, so nothing is subtracted — an absent line is not a zero.'} />} />} />
             {/* ⚠⚠ THE TWO DIRECT FIGURES, ABOVE THE CORRECTION THEY MAKE. `+ Growth capex` alone is
                 one number a reader cannot check against anything: it is a subtraction of two
                 vendor lines, and the only way to reconcile it with GuruFocus's own page was to
@@ -507,26 +528,26 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 from the cash flow, which is exactly what it is not. */}
             <DerivedRow tone="sub" dim={overridden}
               label="Capital expenditure"
-              value={src.capex == null ? '—' : mn(Math.abs(src.capex))}
+              value={legCapex == null ? '—' : mn(Math.abs(legCapex))}
               info={<InfoTip content={<AspectCard
                 what="Capital expenditure, as the magnitude spent."
-                where="GuruFocus — cashflow statement. ⚠ Filed NEGATIVE; shown here as the spend."
+                where={`GuruFocus, ${v(vendorName(SOURCE_CODES.capex))}.`}
                 when={flowWhen}
                 how={`The first of the two lines the growth-capex row below subtracts.${TTM_NOTE}`} />} />} />
             <DerivedRow tone="sub" dim={overridden}
               label="Depreciation & amortisation"
-              value={src.dep == null ? '—' : mn(src.dep)}
+              value={legDep == null ? '—' : mn(legDep)}
               info={<InfoTip content={<AspectCard
                 what="Cash-flow depreciation, depletion and amortisation."
-                where="GuruFocus — cashflow statement."
+                where={`GuruFocus, ${v(vendorName(SOURCE_CODES.dep))}.`}
                 when={flowWhen}
-                how={'⚠ THE CASH-FLOW LINE, NOT THE INCOME STATEMENT\'S. GuruFocus files both and they are not always equal; capex is a cash figure, so its maintenance proxy has to be one too — comparing a cash figure with an accrual one is a difference in basis dressed up as growth spend.'
+                how={'The cash-flow line, not the income statement\'S. GuruFocus files both and they differ; capex is a cash figure, so its maintenance proxy has to be one too.'
                   + TTM_NOTE} />} />} />
             <DerivedRow label="+ Growth capex" dim={overridden}
               value={normalise && !overridden && norm.applied.growthCapex ? mn(norm.growthCapex) : '—'}
               info={<InfoTip content={<AspectCard
                 what="Capital spending above depreciation, added back."
-                where="GuruFocus — cashflow statement: capital expenditure and cash-flow depreciation."
+                where="Computed from the two rows above."
                 when={flowWhen}
                 // ⚠ GATED ON `normalise` LIKE THE ROW ITSELF. With it off the row reads `—` because
                 // the correction did not run; a tooltip still showing its arithmetic would be a
@@ -537,16 +558,14 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                   // ⚠ THE BARS ARE IN THE FORMULA BECAUSE THE SIGN IS THE TRAP. The vendor files
                   // capex negative; written `C − D` the expression is always negative, always
                   // clamps to zero, and the add-back silently never happens on any company.
-                  { sym: 'C', is: 'capital expenditure, as filed — a NEGATIVE outflow' },
+                  { sym: 'C', is: 'capital expenditure, as filed — a negative outflow' },
                   { sym: 'D', is: 'cash-flow depreciation, the maintenance-capex proxy' },
                 ]}
                 how={norm.applied.growthCapex
-                  ? `⚠ ADDED, NOT SUBTRACTED, because the base above already took ALL capex out.${forward ? ' On the forward base it cancels almost exactly: (OCF − capex) + (capex − depreciation) = OCF − depreciation.' : ''} What sustains the business is maintenance capex; the excess buys the growth this model is solving for, so leaving it in charges the same expansion twice — once as a cost and again as the thing to explain.
+                  ? `Added, not subtracted: the base above already took all capex out. Maintenance capex sustains the business; the excess buys the growth this model solves for, so leaving it in charges the same expansion twice.
 
-⚠ Depreciation is a PROXY for maintenance capex, not a measurement, and it is weakest for a company building an asset base for the first time: new plant depreciates far less than it costs to build, so nearly all of its capex reads as growth.
-
-⚠ Floored at zero: spending BELOW depreciation is under-investment, and treating that shortfall as a windfall would reward exactly what hollows a business out.${NORM_OFF}`
-                  : 'Capital expenditure or cash-flow depreciation is not reported for this company, so nothing is added back. ⚠ An absent line is not a zero.'} />} />} />
+Depreciation is a proxy for maintenance capex, weakest for a company building an asset base for the first time. Floored at zero, so under-investment is not read as a windfall.${NORM_OFF}`
+                  : 'Capex or cash-flow depreciation is not reported for this company, so nothing is added back — an absent line is not a zero.'} />} />} />
             {/* ⚠⚠ EDITABLE, AND IT OVERRIDES THE THREE ROWS ABOVE IT. The base box answers "the
                 cash flow was really X, now correct it"; this one answers "value X, whatever the
                 workings say" — a normalised year you do not believe, a restructuring, a figure
@@ -560,10 +579,9 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
               info={<InfoTip content={<AspectCard
                 what={overridden ? 'The figure the model discounts — YOURS.'
                   : 'The figure the model actually discounts.'}
-                where={overridden ? 'Typed here. The three rows above are no longer feeding it.'
-                  : 'Computed here from the three rows above.'}
+                where={overridden ? 'Yours, typed here.' : 'Computed from the rows above.'}
                 when={overridden ? 'Whatever period you mean it to be.'
-                  : forward ? (estFy ?? 'Next fiscal year.') : flowWhen}
+                  : forward ? v(estFy ?? 'Next fiscal year.') : flowWhen}
                 // ⚠ THE SYMBOLIC HALF CARRIES ONLY THE CORRECTIONS THAT RAN. A formula printing
                 // `− S` over a company with no stock-comp line states an arithmetic that did not
                 // happen — the same "an absent line is not a zero" rule the rows themselves keep,
@@ -572,7 +590,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                   baseFcf, norm.applied.sbc ? norm.sbc : null,
                   norm.applied.growthCapex ? norm.growthCapex : null, fcf)}
                 legend={!normalise || overridden || baseFcf == null ? undefined : [
-                  { sym: 'F', is: forward ? `the derived ${estFy ?? 'next-FY'} free cash flow` : 'free cash flow as filed' },
+                  { sym: 'F', is: forward ? `free cash flow for ${v(estFy ?? 'next FY')}` : 'free cash flow as filed' },
                   ...(norm.applied.sbc
                     ? [{ sym: 'S', is: 'stock-based compensation' as React.ReactNode }] : []),
                   ...(norm.applied.growthCapex
@@ -582,15 +600,15 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                   // ⚠ IT STATES WHAT IT REPLACED, IN NUMBERS. "Overridden" alone leaves the reader
                   // to remember what the panel would have said, which is the whole thing they are
                   // deciding against — and the row that held it is now dimmed and reads `—`.
-                  ? `Overridden. Base, corrections and Normalise are all bypassed: the model discounts exactly ${mn(fcf)}.
+                  ? `Base, corrections and Normalise all bypassed: the model discounts exactly ${v(mn(fcf))}.
 
-The workings would have given ${computedFcf == null ? 'no figure' : mn(computedFcf)}. Clear the box to go back to them.`
+The workings would have given ${v(computedFcf == null ? 'no figure' : mn(computedFcf))}. Clear the box to go back to them.`
                   : normalise
                     ? `${!norm.applied.sbc || !norm.applied.growthCapex
-                      ? `⚠ ${[!norm.applied.sbc ? 'Stock compensation' : null, !norm.applied.growthCapex ? 'Capex or depreciation' : null].filter(Boolean).join(' and ')} not reported, so that correction did not run — and an absent line is not a zero.`
-                      : 'Every correction ran; the three rows above are the whole of it.'}
+                      ? `${v([!norm.applied.sbc ? 'Stock compensation' : null, !norm.applied.growthCapex ? 'Capex or depreciation' : null].filter(Boolean).join(' and '))} not reported, so that correction did not run — an absent line is not a zero.`
+                      : 'Every correction ran; the rows above are the whole of it.'}
 
-Type a figure here to bypass all three and value it directly.`
+Type a figure here to bypass them and value it directly.`
                     : 'Normalise is off, so this is the base free cash flow unchanged — stock compensation is not deducted and growth capex is not added back.'} />} />} />
 
             {/* ⚠⚠ THE BASE **NOT** TAKEN, ON SCREEN RATHER THAN IN A TOOLTIP. Switching base moves
@@ -607,56 +625,57 @@ Type a figure here to bypass all three and value it directly.`
                 : (fwdFcf == null ? 'n/a' : mn(fwdFcf))}
               info={<InfoTip content={<AspectCard
                 what="The base this panel is NOT using."
-                where={forward
-                  ? 'GuruFocus — cashflow statement, as filed.'
-                  : 'GuruFocus — analyst consensus operating cash flow, less the last filed capex.'}
-                when={forward ? flowWhen : (estFy ?? 'Next fiscal year.')}
+                where={forward ? `GuruFocus, ${v(vendorName(SOURCE_CODES.fcf))}.`
+                  : `GuruFocus, ${v(vendorName(SOURCE_CODES.ocfEstimate))} less ${v(vendorName(SOURCE_CODES.capex))}.`}
+                when={forward ? flowWhen : v(estFy ?? 'Next fiscal year.')}
                 how={(forward ? src.fcf : fwdFcf) == null
                   ? (forward
                     ? 'No free cash flow line is ingested for this company.'
-                    : 'No consensus operating cash flow, or no capex to net off it, so no forward base can be derived. ⚠ Fewer than a fifth of a broad index\'s members carry a consensus at all — an absent one is ordinary, not a gap to fix.')
-                  : `Shown for comparison only — nothing on this panel is computed from it. Switch the Base control above to value it instead.
-
-⚠ A LARGE GAP BETWEEN THE TWO IS INFORMATION, NOT AN ERROR: it is the year analysts expect, sitting next to the year the company had.`} />} />} />
+                    : 'No consensus operating cash flow, or no capex to net off it, so no forward base can be derived. Fewer than a fifth of a broad index\'s members carry a consensus at all.')
+                  : 'For comparison only; nothing here is computed from it. Switch the Base control above to value it instead. A large gap is the year analysts expect beside the year the company had.'} />} />} />
 
             <Field label={`Target market cap${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(targetStr, defTarget)} onChange={setTargetStr}
               info={<InfoTip content={<AspectCard
                 what="The valuation solved against."
                 where="Computed from the price and the share count."
-                when="Latest close, latest reported share count."
+                // ⚠ TWO DATES, BECAUSE IT IS A PRODUCT OF TWO OBSERVATIONS and they are rarely
+                // the same day: a close is daily, a diluted share count is a filing. One date over
+                // both would date the market cap to whichever leg the label happened to name.
+                when={[src.priceDate ? `close ${v(onDate(src.priceDate))}` : null,
+                  src.sharesDate ? `shares ${v(onDate(src.sharesDate))}` : null,
+                ].filter(Boolean).join(', ') || 'No dates stored.'}
                 worked={workedMarketCap(src.price, src.sharesOutstanding, defTarget)}
                 legend={src.price == null || src.sharesOutstanding == null ? undefined : [
                   { sym: 'P_0', is: 'the latest close' },
                   // ⚠ IN MILLIONS, WHICH IS WHY THE PRODUCT IS TOO. GuruFocus files the share
                   // count in millions, so price × shares lands in the same unit as the cash flow
                   // above it and no scaling happens anywhere in this panel.
-                  { sym: 'N', is: 'diluted shares outstanding, in MILLIONS' },
+                  { sym: 'N', is: 'diluted shares outstanding, in millions' },
                 ]}
-                how="The box holds MILLIONS, like the cash flow above. Override it to ask what a different valuation would have to assume." />} />} />
+                how="In millions, like the cash flow above. Override it to ask what a different valuation would have to assume." />} />} />
             <Field label="Discount rate" value={show(rateStr, defRate * 100, 1)} onChange={setRateStr}
               suffix="%"
               info={<InfoTip content={<AspectCard
                 what="Rate the cash flows are discounted at."
                 where={src.wacc != null && defRate === src.wacc
-                  ? 'GuruFocus — this company\'s own WACC.'
-                  : src.wacc != null
-                    ? `House default. Its WACC of ${(src.wacc * 100).toFixed(1)}% is too close to the perpetuity growth to use.`
-                    : 'House default — no WACC is reported for this company.'}
-                when="Latest fiscal year."
-                how="Percent per year. Raw data; must exceed the perpetuity growth." />} />} />
+                  ? `GuruFocus, ${v(vendorName(SOURCE_CODES.wacc))}.`
+                  : 'House default.'}
+                when={src.waccDate == null ? 'House default — no WACC stored.'
+                  : v(onDate(src.waccDate))}
+                how="Percent per year; must exceed the perpetuity growth." />} />} />
             <Field label="Perpetuity growth" value={show(perpStr, defPerp * 100, 1)} onChange={setPerpStr}
               suffix="%"
               info={<InfoTip content={<AspectCard
                 what="Growth after the forecast years."
-                where="House convention — no company version of it exists."
-                when={`Year ${defYears + 1} onwards, for ever.`}
+                where="House convention."
+                when={`Year ${v(defYears + 1)} onwards, for ever.`}
                 how="Percent per year. Raw input, no formula." />} />} />
             <Field label="Forecast years" value={show(yearsStr, defYears)} onChange={setYearsStr}
               info={<InfoTip content={<AspectCard
                 what="Length of the explicit growth phase."
-                where="House convention — no company has its own horizon."
-                when={`Years 1 to ${years}.`}
+                where="House convention."
+                when={`Years 1 to ${v(years)}.`}
                 how="A count of years. Raw input, no formula." />} />} />
           </div>
 
@@ -685,11 +704,14 @@ Type a figure here to bypass all three and value it directly.`
               */}
             <table className="w-full table-fixed text-[12px]">
               {/* The last column is the ⓘ slot — see `Field`. Empty on every row with no
-                  explanation, which is what holds the ones that have to a single line. */}
+                  explanation, which is what holds the ones that have to a single line.
+                  ⚠ IT IS WIDER THAN THE ICON AND THE ICON IS PADDED BY THE DIFFERENCE: the figures
+                  move left, the icons stay on the line they already sat on. Same pair as the EGM
+                  tables above; see the ⚠⚠ there. */}
               <colgroup>
                 <col />
                 <col className="w-[5rem]" />
-                <col className="w-9" />
+                <col className="w-[3.25rem]" />
               </colgroup>
               <tbody>
                 <tr>
@@ -701,11 +723,11 @@ Type a figure here to bypass all three and value it directly.`
                     {fcf != null && fcf > 0 && growth != null
                       ? `${(growth * 100).toFixed(1)}%` : 'n/a'}
                   </td>
-                  <td className="py-0.5">
+                  <td className="py-0.5 pl-4">
                     <InfoTip content={<AspectCard
                       what="FCF growth the market cap already assumes."
-                      where="Computed — solved, not forecast."
-                      when={`Years 1 to ${years}, then the perpetuity growth.`}
+                      where="Computed here."
+                      when={`Years 1 to ${v(years)}, then the perpetuity growth.`}
                       // ⚠⚠ THE EQUATION IS WRITTEN AS AN EQUALITY, NOT AS A VALUE, because that is
                       // what a REVERSE DCF is: everything but `g` is known and `g` is what makes
                       // the two sides meet. Printed as `PV = …` it would read as a valuation the
@@ -719,17 +741,17 @@ Type a figure here to bypass all three and value it directly.`
                           // reading), and the `t-1` exponent is the only other place it shows.
                           { sym: 'F',
                             is: 'the cash flow valued — paid in full in year 1, then grown' },
-                          { sym: 'g', is: 'THE UNKNOWN: the rate this solves for' },
+                          { sym: 'g', is: 'the unknown — the rate this solves for' },
                           { sym: 'r', is: 'the discount rate' },
                           { sym: String.raw`g_\infty`, is: 'perpetuity growth, after year n' },
                           { sym: 'M', is: 'the target market cap' },
                         ]}
                       how={fcf != null && fcf > 0 && growth != null
-                        ? `Bisected on demand rather than solved algebraically — there is no closed form for g. Not a valuation: what you would have to believe.${NOT_LIKE_FOR_LIKE}`
+                        ? `Bisected on demand; there is no closed form for g. Not a valuation — what you would have to believe.${NOT_LIKE_FOR_LIKE}`
                         : fcf != null && fcf <= 0
-                          ? `Free cash flow of ${mn(fcf)} is at or below zero, so no growth rate works. A fact about the company, not an error.`
+                          ? `Free cash flow of ${v(mn(fcf))} is at or below zero, so no growth rate works — a fact about the company, not an error.`
                           : missing.length > 0
-                            ? `Not enough inputs — no ${missing.join(', ')} ingested.`
+                            ? `Not enough inputs: no ${v(missing.join(', '))} ingested.`
                             : !(rate > perpetuityGrowth)
                               ? 'The discount rate must exceed the perpetuity growth — the terminal value divides by the gap.'
                               : 'No rate between −99% and 1000% a year reconciles that market cap with this cash flow.'} />} />

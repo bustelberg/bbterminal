@@ -16,6 +16,7 @@ import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
 import HoldingsIngestPanel from './HoldingsIngestPanel';
 import { LegendItem } from './ChartLegend';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
+import { countFor, memberCountHow, memberCountLine, type MemberCount } from './memberCounts';
 import { paddedLogDomain, periodTick, stepChanges, type Step } from './marginData';
 import { atSharedX, ltmWindowsDiffer, ltmYearX, sharedLtmX, type LtmPoint } from './ltmAxis';
 import { endpointCagr } from './lineCagr';
@@ -203,7 +204,7 @@ export { Stat } from './CardStats';
 export default function MetricGrowthCard({
   cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin, onIngested,
   blendNotes, onReloadMetrics, cadence = 'annual', benchMetrics, benchLabel, benchTarget, benchErr,
-  benchNotes,
+  benchNotes, memberCounts, benchCounts,
 }: {
   cfg: MetricCfg;
   /** 'annual' = one point per fiscal year. 'quarterly' = one TRAILING-TWELVE-MONTH point per
@@ -251,6 +252,20 @@ export default function MetricGrowthCard({
   /** Why the blend failed, if it did — so a missing overlay states its reason instead of looking
    *  like an index that happens to track this book exactly. See `benchNote`. */
   benchErr?: string | null;
+  /**
+   * How many members each line was drawn from, per metric code — the book's, then the index's.
+   *
+   * ⚠⚠ IT IS RENDERED BECAUSE A FILTER NOBODY CAN SEE IS THE WHOLE HAZARD. `fcf_ps` is drawn from
+   * the companies POSITIVE IN EVERY PERIOD (`earnings._POSITIVE_ONLY_METRICS`) — which silently
+   * deletes the cash-burners, the recoveries and every bank whose free cash flow swings on deposit
+   * flows, leaving a line that looks exactly like an index line. "142 of 1,514 companies" is what
+   * turns a survivorship filter back into a fact the reader can weigh.
+   *
+   * ⚠ BOTH SIDES, SEPARATELY. The book and the index are two blends over two sets of companies and
+   * drop different numbers; one count standing for both would be wrong on whichever it was not.
+   */
+  memberCounts?: Record<string, MemberCount>;
+  benchCounts?: Record<string, MemberCount>;
 }) {
   // ⚠ The heading only — see `longEquityCopy` for why the rest of the card
   // (tiles, legend, tooltips) is deliberately not in scope.
@@ -547,6 +562,15 @@ export default function MetricGrowthCard({
   // Present only when the blend saw this metric and still drew nothing — the one case where
   // "not ingested" would be false.
   const blendNote = noteFor(blendNotes, cfg.codes);
+  /** "36 of 42 companies" AND THE REASON BEHIND IT — or nothing when both lines used every holding
+   *  they had. Both live in `memberCounts`: the two constructions withhold members for entirely
+   *  different reasons, the copy that explains them follows the rule the server applied, and
+   *  neither decision belongs in a chart component. */
+  const countLine = useMemo(() => memberCountLine({
+    own: countFor(cfg.codes, memberCounts),
+    bench: countFor(cfg.codes, benchCounts),
+    isAgg, ownLabel, benchLabel,
+  }), [memberCounts, benchCounts, cfg.codes, isAgg, ownLabel, benchLabel]);
   /**
    * Why the INDEX has no forecast leg, in one short clause.
    *
@@ -759,6 +783,21 @@ export default function MetricGrowthCard({
       <h4 className="text-base font-semibold text-fg-strong">
         {cfg.titleKey ? chartTitle(lang, cfg.titleKey) : cfg.title}
       </h4>
+      {/* ⚠ ONLY WHERE MEMBERS WERE ACTUALLY WITHHELD. On every other card `considered === total`
+          and a line saying so is noise on thirteen charts to make one honest. */}
+      {countLine && (
+        <p className="text-[11px] text-fg-faint -mt-2">
+          {countLine.text}
+          {/* ⚠ THE PROSE FOLLOWS THE SERVER'S `rule`, not this card's identity — a survivorship
+              filter and an unbuildable euro figure are different facts about the reader's book, and
+              the card would state the wrong one the day a metric changed construction. */}
+          <InfoTip className="ml-1" content={<AspectCard
+            what="How many companies this line is drawn from."
+            where="The blend, after the metric's own member rule."
+            when="The window on the chart."
+            how={memberCountHow(countLine.rule)} />} />
+        </p>
+      )}
 
       {metrics == null ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>

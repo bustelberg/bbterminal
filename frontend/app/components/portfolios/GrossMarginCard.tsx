@@ -12,7 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
-import { workedMean } from './workedFormula';
+import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import GrossMarginInputsModal from './GrossMarginInputsModal';
@@ -40,6 +40,10 @@ import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type
  * the drill-down are one computation. Aggregation is a weight-weighted average of per-company
  * ratios — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./SbcOcfCard}.
  */
+
+/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+ *  sees it. */
+const R = String.raw;
 
 export default function GrossMarginCard({ holdingsTarget, holdingsName, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
@@ -111,15 +115,17 @@ export default function GrossMarginCard({ holdingsTarget, holdingsName, benchTar
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
             avgInfo={<InfoTip content={<AspectCard
               what="Average gross margin over the years shown — what is left of each sale after the direct cost of making it."
-              where="Computed here — Gross Profit ÷ Revenue per year, weight-averaged across holdings. Reproduces GuruFocus's own `Gross Margin %` exactly, but leaves the two lines visible in the drill-down."
+              where="Computed here, per year, then weight-averaged across holdings."
               when="The years on the chart."
-              worked={workedMean(stats.own.values)}
+              worked={withWorked(
+                R`\text{gross margin} = \dfrac{\text{gross profit}}{\text{revenue}}`,
+                workedMean(stats.own.values))}
               // ⚠ THIS LINE USED TO BE THE CAPEX CARD'S, PASTED IN — "the share of each sales-euro
               // reinvested in property, plant & intangibles. Lower = more capital-light". That is
               // capital intensity, and it reads the metric BACKWARDS: on gross margin, higher is
               // better. It survived because the sentence is fluent and plausible, which is exactly
               // how a wrong tooltip survives.
-              how="Higher = more pricing power, or a mix tilted towards software and services; a commoditised or resale-heavy business reads low. ⚠ A BANK HAS NO GROSS PROFIT LINE AT ALL — GuruFocus's bank template reports net interest income instead — so a book with banks in it is averaged over the rest." />} />} />
+              how="Higher = more pricing power. A bank has no gross profit line, so a book with banks is averaged over the rest." />} />} />
 
           <div>
             <ResponsiveContainer width="100%" height={320}>

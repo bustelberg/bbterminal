@@ -4424,6 +4424,28 @@
             ],
             "title": "Current Value Eur"
           },
+          "fund_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Result Eur"
+          },
+          "fx_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Result Eur"
+          },
           "income_eur": {
             "anyOf": [
               {
@@ -4657,6 +4679,17 @@
             ],
             "title": "Unrealised Eur"
           },
+          "unsplit_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unsplit Result Eur"
+          },
           "via_avg_capital_eur": {
             "anyOf": [
               {
@@ -4749,6 +4782,143 @@
           "bucket"
         ],
         "title": "BookHoldingDetail",
+        "type": "object"
+      },
+      "BookValueFlow": {
+        "description": "Money in or out on one date \u2014 never a result. See `_airs_value_series`.",
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "deposits_eur": {
+            "default": 0.0,
+            "title": "Deposits Eur",
+            "type": "number"
+          },
+          "withdrawals_eur": {
+            "default": 0.0,
+            "title": "Withdrawals Eur",
+            "type": "number"
+          }
+        },
+        "required": [
+          "date"
+        ],
+        "title": "BookValueFlow",
+        "type": "object"
+      },
+      "BookValuePoint": {
+        "description": "The book's value on one date.",
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "holdings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings"
+          },
+          "source": {
+            "default": "holdings",
+            "title": "Source",
+            "type": "string"
+          },
+          "value_eur": {
+            "title": "Value Eur",
+            "type": "number"
+          }
+        },
+        "required": [
+          "date",
+          "value_eur"
+        ],
+        "title": "BookValuePoint",
+        "type": "object"
+      },
+      "BookValueSeries": {
+        "description": "\u26a0\u26a0 VALUE, NOT RETURN. A funding is a step in this line and is not performance \u2014 the flows\nride along so the chart can mark it. The book's return is\n`airs_performance.cumulatief_rendement`, assembled in `_airs_accounts`.",
+        "properties": {
+          "first_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Date"
+          },
+          "flows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BookValueFlow"
+            },
+            "title": "Flows",
+            "type": "array"
+          },
+          "last_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Date"
+          },
+          "own_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Own From"
+          },
+          "points": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BookValuePoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "portefeuille": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portefeuille"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "title": "BookValueSeries",
         "type": "object"
       },
       "BuildUniverseRequest": {
@@ -8215,6 +8385,28 @@
             ],
             "title": "First Sale"
           },
+          "fund_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Result Eur"
+          },
+          "fx_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fx Result Eur"
+          },
           "held": {
             "default": false,
             "title": "Held",
@@ -8330,6 +8522,17 @@
             "default": 0,
             "title": "Sales",
             "type": "integer"
+          },
+          "unsplit_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unsplit Result Eur"
           },
           "vol_5y_pct": {
             "anyOf": [
@@ -18044,6 +18247,49 @@
           }
         },
         "summary": "Airs Model Portfolio Risk Windows",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/model-portfolios/{portfolio_id}/value-series": {
+      "get": {
+        "description": "The paired book's value on every date we hold a snapshot for, summed from `airs_holding`.\n\n\u26a0\u26a0 OUR OWN SERIES, NOT AIRS'S RENDEMENTEN. It reproduces AIRS's `eindvermogen` to the euro on 21\nof AzTopSelectie's 24 snapshots, holds two dates AIRS has no row for, and starts 2026-06-23 \u2014\nwhen we began keeping snapshots. See `routers/_airs_value_series`.\n\n\u26a0 ITS OWN REQUEST, DELIBERATELY. The Analyse modal is ONE payload with no partial paint, so its\nwall clock is the reader's wait; a series nobody has scrolled to yet does not belong in it. The\nchart fetches this itself, exactly as the Risk panels do.",
+        "operationId": "airs_model_portfolio_value_series_api_airs_model_portfolios__portfolio_id__value_series_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookValueSeries"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Portfolio Value Series",
         "tags": [
           "airs"
         ]

@@ -12,7 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
-import { workedMean } from './workedFormula';
+import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import SbcOcfInputsModal from './SbcOcfInputsModal';
@@ -30,6 +30,10 @@ import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type
  * drill-down are one computation. Aggregation is a weight-weighted average of per-company ratios —
  * currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./DebtRatioCard}.
  */
+
+/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+ *  sees it. */
+const R = String.raw;
 
 export default function SbcOcfCard({ holdingsTarget, holdingsName, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
@@ -100,10 +104,12 @@ export default function SbcOcfCard({ holdingsTarget, holdingsName, benchTarget }
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
             avgInfo={<InfoTip content={<AspectCard
-              what="Average Stock-Based Compensation ÷ Operating Cash Flow over the years shown."
+              what="Average share of operating cash flow paid in stock, over the years shown."
               where="Computed here — the ratio per year, weight-averaged across holdings."
               when="The years on the chart."
-              worked={workedMean(stats.own.values)}
+              worked={withWorked(
+                R`\dfrac{\text{stock-based compensation}}{\text{operating cash flow}}`,
+                workedMean(stats.own.values))}
               how="SBC is a non-cash expense added back into operating cash flow. A high share means much of the reported cash generation is really stock dilution. Lower = better." />} />} />
 
           <div>

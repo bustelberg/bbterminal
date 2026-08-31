@@ -12,7 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
-import { workedMean } from './workedFormula';
+import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import { fcfLabel } from './sbcCorrection';
@@ -33,6 +33,10 @@ import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type
  * the drill-down are one computation. Aggregation is a weight-weighted average of per-company
  * yields — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./MarginCard}.
  */
+
+/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+ *  sees it. */
+const R = String.raw;
 
 export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
@@ -101,7 +105,7 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
         <h4 className="text-base font-semibold text-fg-strong">{chartTitle(lang, 'fcfYield', sbcCorrection)}</h4>
         <DailyToggle on={daily} onChange={setDaily}
           note={'Daily: FCF − SBC stays flat between fiscal periods while the market cap moves '
-            + 'every trading day — rebuilt as the day’s close × shares outstanding, since '
+            + 'every trading day — rebuilt from the day’s close and the share count, since '
             + 'GuruFocus publishes a market cap only per fiscal period. Off, it follows the tab.'} />
       </div>
 
@@ -115,10 +119,12 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
             avgInfo={<InfoTip content={<AspectCard
-              what="Average (FCF − SBC) ÷ Market Cap over the years shown."
+              what="Average cash yield after stock comp, over the years shown."
               where="Computed here — the yield per year, weight-averaged across holdings."
               when="The years on the chart."
-              worked={workedMean(stats.own.values)}
+              worked={withWorked(
+                R`\text{yield} = \dfrac{\text{FCF} - \text{SBC}}{\text{market cap}}`,
+                workedMean(stats.own.values))}
               how="The cash a buyer earns per euro of price, after removing non-cash stock comp from FCF. Higher = cheaper for the cash it generates." />} />} />
 
           <div>

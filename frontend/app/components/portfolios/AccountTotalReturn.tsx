@@ -187,11 +187,11 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
               <Stat label="Total YTD return" value={d.total_return_pct != null ? pct(d.total_return_pct) : '—'}
                 tone={d.total_return_pct != null ? tone(d.total_return_pct) : 'text-fg-faint'}
                 note={d.return_basis === 'opening_capital'
-                  ? `total result ÷ the year's opening capital ${eur(d.book_start_eur)}`
+                  ? `total result over the year's opening capital ${eur(d.book_start_eur)}`
                   /* ⚠⚠ A RESULT OVER AN OPENING CAPITAL IS ONLY A RETURN WHEN NOTHING WAS PAID IN
                      OR OUT. Refused rather than fudged — AIRS's own figure is flow-aware. */
                   : d.return_basis === 'flows'
-                    ? `refused: ${eur(d.deposits_eur)} in / ${eur(d.withdrawals_eur)} out this year, so the opening capital is not what the result was earned on. AIRS’s flow-aware figure is the one to read.`
+                    ? `refused: ${eur(d.deposits_eur)} in / ${eur(d.withdrawals_eur)} out this year — read AIRS’s flow-aware figure instead`
                     : 'not available'} />
               <Stat label="AIRS’s own YTD" value={d.book_return_pct != null ? pct(d.book_return_pct) : '—'}
                 tone={d.book_return_pct != null ? tone(d.book_return_pct) : 'text-fg-faint'}

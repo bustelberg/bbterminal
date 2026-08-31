@@ -13,7 +13,7 @@ import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { Stat } from './MetricGrowthCard';
 import { pairedSpan, RatioStats } from './CardStats';
-import { workedMean } from './workedFormula';
+import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import DividendYieldInputsModal from './DividendYieldInputsModal';
@@ -36,6 +36,10 @@ import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type
  * book's yield (these are value weights), and a non-payer contributes a true 0 instead of being
  * dropped. Mirrors {@link ./FcfSbcYieldCard}.
  */
+
+/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+ *  sees it. */
+const R = String.raw;
 
 export default function DividendYieldCard({ holdingsTarget, holdingsName, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
@@ -132,9 +136,11 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
             avgInfo={<InfoTip content={<AspectCard
               what="Average dividend yield over the years shown."
-              where="Computed here — dividends per share ÷ that fiscal year's end price, per holding, then weight-averaged."
+              where="Computed here, per holding per year, then weight-averaged."
               when="The years on the chart."
-              worked={workedMean(stats.own.values)}
+              worked={withWorked(
+                R`\text{yield} = \dfrac{\text{dividends per share}}{\text{year-end price}}`,
+                workedMean(stats.own.values))}
               how="A yield is currency-free, so the weighted average IS the book's yield (the weights are value weights). A company that pays nothing counts as 0%; one we have no dividend line for is left out and the year renormalises over the rest." />} />}>
             {/* ⚠ THE BOOK'S COVERAGE, AND ONLY THE BOOK'S — passed as a child so it lands after
                 both pairs. The index has its own (very different) coverage; showing one figure
