@@ -63,7 +63,7 @@ describe('both languages are complete', () => {
     for (const k of MEASURE_KEYS) {
       for (const sbc of [false, true]) {
         const f = c.rowFormula[k](sbc);
-        expect(f, `rowFormula.${k}(${sbc}) is LaTeX`).toMatch(/\\\\[a-z]+/);
+        expect(f, `rowFormula.${k}(${sbc}) is LaTeX`).toMatch(/\\[a-z]+/);
         // ⚠ AND NOT THE UNICODE LOOKALIKES IT REPLACED. `Σ(w × x) ÷ Σw` in the UI font is a
         // row of glyphs that resembles an expression: a summation with no limits, and `Σ`
         // given the advance width of a comma. Same rule as `lib/tipCard`'s `Worked`.

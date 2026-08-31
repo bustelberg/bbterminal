@@ -51,11 +51,9 @@ const seriesOf = (from: number, vals: (number | null)[]) =>
 describe('meanSub', () => {
   it('prints operands that average to the printed mean', () => {
     const m = seriesOf(2021, [55.4, 54.1, 53.3, 56.6, 57.5]);
-    const out = meanSub(m, 2025, 5);
-    const [head, line] = out.split(LINE);
-    expect(head).toBe(String.raw`\text{Book, 2021-2025}`);
-
-    const { addends, n, printed } = parseMean(line);
+    // ⚠ NO CAPTION LINE (2026-08-31): the worked half sits inside ONE display expression with the
+    // symbolic formula, and a name or a year range between the two reads as a term in it.
+    const { addends, n, printed } = parseMean(meanSub(m, 2025, 5));
     expect(addends).toEqual([55.4, 54.1, 53.3, 56.6, 57.5]);
     expect(n).toBe(5);
     // The reader's own arithmetic, on what is actually on screen — at whatever precision is
@@ -71,8 +69,7 @@ describe('meanSub', () => {
     // ⚠ REAL SHAPE: a burden near 1% is where one decimal loses the digit the division needs.
     const burdens = [0, 2.15, 1.84, 1.12, 0.93, 1.41, 0.88, 0.76, 1.05, 1.66];
     const m = seriesOf(2016, burdens);
-    const [head, meanLine, coverLine] = meanSub(m, 2025, 10, COVER).split(LINE);
-    expect(head).toBe(String.raw`\text{Book, 2016-2025}`);
+    const [meanLine, coverLine] = meanSub(m, 2025, 10, COVER).split(LINE);
 
     const { addends, n, printed } = parseMean(meanLine);
     expect(n).toBe(10);
@@ -112,9 +109,7 @@ describe('meanSub', () => {
     // ⚠ A SHORT WINDOW MUST NOT PAD. The `n of 10` badge already says the window is short; a list
     // of ten addends under it would contradict the badge in the same tooltip.
     const m = seriesOf(2016, [null, null, 12, 14, null, 16, 18, 20, 22, 24]);
-    const [head, line] = meanSub(m, 2025, 10).split(LINE);
-    expect(head).toBe(String.raw`\text{Book, 2018-2025}`);
-    const { addends, n } = parseMean(line);
+    const { addends, n } = parseMean(meanSub(m, 2025, 10));
     expect(addends).toEqual([12, 14, 16, 18, 20, 22, 24]);
     expect(n).toBe(7);
   });
@@ -136,8 +131,7 @@ describe('rateSub', () => {
 
   it('prints endpoints that compound to the printed rate', () => {
     const got = rate(100, 606.34, '2015', '2025', 10);
-    const [head, expr] = rateSub(got).split(LINE);
-    expect(head).toBe(String.raw`\text{Book}`);
+    const expr = rateSub(got);
 
     // ⚠ LaTeX, NOT UNICODE (2026-08-22). `workedCagr` is typeset by KaTeX now — the endpoints ride
     // as SUBSCRIPTS on the values they belong to rather than in `[brackets]`, and the division is

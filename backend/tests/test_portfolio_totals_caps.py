@@ -31,10 +31,16 @@ import pytest
 
 from tests._fake_supabase import FakeSupabase
 
-#: ⚠ `eps_nri`, NOT `fcf_ps`. This file is about the CAP BASIS, which is the same
-#: arithmetic for any per-share line — and `fcf_ps` left `_AGGREGATABLE_PER_SHARE`
-#: on 2026-08-26 (it is drawn from a positives-only growth chain now, so it has no
-#: euros at all). Pinning a rule on a metric that no longer exercises it proves nothing.
+#: ⚠⚠ AND NOW THERE IS NO LIVE PER-SHARE METRIC AT ALL, so the fixture DECLARES one. `fcf_ps` left
+#: `_AGGREGATABLE_PER_SHARE` on 2026-08-26 and `eps_nri` followed on 2026-08-31 — both are drawn
+#: from a positives-only growth chain and neither has euros anywhere. The set is empty, which makes
+#: the cap-basis arithmetic below unreachable from real configuration and NOT untrue: every line of
+#: it is what a per-share metric added back would run through. So the fixture patches `eps_nri` into
+#: the set, exactly as `test_aggregate_blend` patches a pairing to keep the both-legs rule alive.
+#:
+#: ⚠ THE ALTERNATIVE WAS DELETING THE FILE, and that is the trade being made deliberately: the code
+#: is still here (`fundamental_totals`' per-share branch, `_shares_at`, the one-cap conversion), so
+#: it is still capable of the 2026-08-26 outage this file was written for.
 EPS = "annuals__Per Share Data__EPS without NRI"
 SHARES = "annuals__Income Statement__Shares Outstanding (Diluted Average)"
 
@@ -64,6 +70,10 @@ def earnings(monkeypatch):
         "asset_grid": [{"isin": "US0000000001", "sector": "Technology"}],
     })
     monkeypatch.setattr(e, "supabase", fake)
+    # ⚠ THE SET IS EMPTY IN REAL CONFIGURATION — see the note on `EPS` above. Without this,
+    # `fundamental_totals` filters every metric out and each assertion below fails on an absent
+    # key rather than on the arithmetic it is about.
+    monkeypatch.setattr(e, "_AGGREGATABLE_PER_SHARE", frozenset({"eps_nri"}))
     # ⚠ FX OUT OF THE WAY: 1.0 EUR per EUR, so every figure below is exact.
     import routers._benchmark_index as bi
 
