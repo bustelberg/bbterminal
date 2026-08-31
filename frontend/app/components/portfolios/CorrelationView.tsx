@@ -292,6 +292,33 @@ export default function CorrelationView({
               {/* ⚠ ITS OWN horizontal scroll — a 49-name matrix must never widen the dialog. */}
               <div className="overflow-auto">
                 <table className="border-separate" style={{ borderSpacing: 0 }}>
+                  {/* ⚠⚠ THE COLUMN NAMES, ROTATED — added on request 2026-08-31. A cell is 16px
+                      wide, so horizontal labels were never an option and the matrix shipped with
+                      one axis unlabelled: every column had to be counted off against the rows to
+                      be identified, which on a 49-name book is not something anybody does.
+                      ⚠ `vertical-rl` + `rotate-180` READS BOTTOM-TO-TOP, the axis-label convention,
+                      and it needs no geometry — the label occupies exactly its own 16px column, so
+                      nothing can overlap its neighbour however long the name is.
+                      ⚠ CAPPED AND CLIPPED rather than allowed to set the header's height: one
+                      40-character holding name would otherwise push the matrix a third of a screen
+                      down. The full name is on the cell's own `title`, as it already was. */}
+                  <thead>
+                    <tr>
+                      {/* The corner. ⚠ Sticky like the row labels AND above them (`z-20`), or it
+                          slides under them the moment the matrix is scrolled sideways. */}
+                      <th className="sticky left-0 z-20 bg-card" />
+                      {labels.map((name) => (
+                        <th key={name} scope="col" title={name}
+                          className="p-0 align-bottom h-[5.5rem] w-4 min-w-4">
+                          <span className="inline-block max-h-[5.5rem] overflow-hidden
+                                           [writing-mode:vertical-rl] rotate-180
+                                           text-[10px] font-normal text-fg-muted whitespace-nowrap">
+                            {name}
+                          </span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
                   <tbody>
                     {matrix.map((row, i) => (
                       <tr key={labels[i]}>

@@ -1804,6 +1804,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/{portfolio_id}/value-series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Value Series
+         * @description The paired book's value on every date we hold a snapshot for, summed from `airs_holding`.
+         *
+         *     ⚠⚠ OUR OWN SERIES, NOT AIRS'S RENDEMENTEN. It reproduces AIRS's `eindvermogen` to the euro on 21
+         *     of AzTopSelectie's 24 snapshots, holds two dates AIRS has no row for, and starts 2026-06-23 —
+         *     when we began keeping snapshots. See `routers/_airs_value_series`.
+         *
+         *     ⚠ ITS OWN REQUEST, DELIBERATELY. The Analyse modal is ONE payload with no partial paint, so its
+         *     wall clock is the reader's wait; a series nobody has scrolled to yet does not belong in it. The
+         *     chart fetches this itself, exactly as the Risk panels do.
+         */
+        get: operations["airs_model_portfolio_value_series_api_airs_model_portfolios__portfolio_id__value_series_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios/{portfolio_id}/ytd-explain": {
         parameters: {
             query?: never;
@@ -9744,6 +9772,10 @@ export interface components {
             currency?: string | null;
             /** Current Value Eur */
             current_value_eur?: number | null;
+            /** Fund Result Eur */
+            fund_result_eur?: number | null;
+            /** Fx Result Eur */
+            fx_result_eur?: number | null;
             /** Income Eur */
             income_eur?: number | null;
             /** Is Fund */
@@ -9794,6 +9826,8 @@ export interface components {
             start_value_eur?: number | null;
             /** Unrealised Eur */
             unrealised_eur?: number | null;
+            /** Unsplit Result Eur */
+            unsplit_result_eur?: number | null;
             /** Via Avg Capital Eur */
             via_avg_capital_eur?: number | null;
             /** Via Holding Name */
@@ -9821,6 +9855,69 @@ export interface components {
             weight_pct?: number | null;
             /** Weight Start Pct */
             weight_start_pct?: number | null;
+        };
+        /**
+         * BookValueFlow
+         * @description Money in or out on one date — never a result. See `_airs_value_series`.
+         */
+        BookValueFlow: {
+            /** Date */
+            date: string;
+            /**
+             * Deposits Eur
+             * @default 0
+             */
+            deposits_eur?: number;
+            /**
+             * Withdrawals Eur
+             * @default 0
+             */
+            withdrawals_eur?: number;
+        };
+        /**
+         * BookValuePoint
+         * @description The book's value on one date.
+         */
+        BookValuePoint: {
+            /** Date */
+            date: string;
+            /** Holdings */
+            holdings?: number | null;
+            /**
+             * Source
+             * @default holdings
+             */
+            source?: string;
+            /** Value Eur */
+            value_eur: number;
+        };
+        /**
+         * BookValueSeries
+         * @description ⚠⚠ VALUE, NOT RETURN. A funding is a step in this line and is not performance — the flows
+         *     ride along so the chart can mark it. The book's return is
+         *     `airs_performance.cumulatief_rendement`, assembled in `_airs_accounts`.
+         */
+        BookValueSeries: {
+            /** First Date */
+            first_date?: string | null;
+            /**
+             * Flows
+             * @default []
+             */
+            flows?: components["schemas"]["BookValueFlow"][];
+            /** Last Date */
+            last_date?: string | null;
+            /** Own From */
+            own_from?: string | null;
+            /**
+             * Points
+             * @default []
+             */
+            points?: components["schemas"]["BookValuePoint"][];
+            /** Portefeuille */
+            portefeuille?: string | null;
+            /** Reason */
+            reason?: string | null;
         };
         /** BuildUniverseRequest */
         BuildUniverseRequest: {
@@ -11231,6 +11328,10 @@ export interface components {
             contribution_pct?: number | null;
             /** First Sale */
             first_sale?: string | null;
+            /** Fund Result Eur */
+            fund_result_eur?: number | null;
+            /** Fx Result Eur */
+            fx_result_eur?: number | null;
             /**
              * Held
              * @default false
@@ -11282,6 +11383,8 @@ export interface components {
              * @default 0
              */
             sales?: number;
+            /** Unsplit Result Eur */
+            unsplit_result_eur?: number | null;
             /** Vol 5Y Pct */
             vol_5y_pct?: number | null;
             /** Weight Pct */
@@ -15716,6 +15819,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PerformanceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_value_series_api_airs_model_portfolios__portfolio_id__value_series_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookValueSeries"];
                 };
             };
             /** @description Validation Error */

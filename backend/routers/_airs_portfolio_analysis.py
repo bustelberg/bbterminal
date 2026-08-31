@@ -1785,7 +1785,10 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
                         rows=rows[0].get("rows") or [])
 
     volk = (supabase.table("airs_holding")
-            .select("holding_name,quantity,start_value_eur,current_value_eur")
+            # ⚠ `fund_result_eur`/`fx_result_eur` ARE AIRS's OWN price/currency split of the held
+            # result — see `airs_capital.Position`. Read here rather than derived anywhere.
+            .select("holding_name,quantity,start_value_eur,current_value_eur,"
+                    "fund_result_eur,fx_result_eur")
             .eq("portefeuille", portefeuille)
             .eq("as_of_date", _book_snapshot_date(portefeuille) or "").execute().data or [])
 
@@ -1859,6 +1862,11 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
             "realised_result_eur": p.realised_result_eur,
             "income_eur": p.income_eur,
             "result_eur": p.result_eur,
+            # AIRS's own split of the HELD leg, plus what it does not reach. Null together on a
+            # snapshot older than 2026-07-18 and on cash. See `Position.unsplit_result_eur`.
+            "fund_result_eur": p.fund_result_eur,
+            "fx_result_eur": p.fx_result_eur,
+            "unsplit_result_eur": p.unsplit_result_eur,
             "contribution_pct": contribution_pct(p, led.basis_eur),
             "return_pct": money_weighted_return_pct(p),
             "sales": p.sales,
@@ -2455,6 +2463,19 @@ def _with_results(holdings: list[dict], realised: dict,
                     # because more of it was bought later at higher prices.
                     "avg_capital_eur": avg_cap,
                     "money_weighted_return_pct": led.get("return_pct"),
+                    # ── AIRS's OWN SPLIT of the held leg into price and currency, both in EUR.
+                    # ⚠⚠ IT DECOMPOSES `unrealised_eur` AND NOTHING ELSE. `Fondsresultaat` +
+                    # `Valutaresultaat` IS `current_value_eur - start_value_eur` on AIRS's own
+                    # sheet, so the realised leg and the dividends in `result_eur` are outside it —
+                    # `unsplit_result_eur` is what is left, reported rather than folded into
+                    # either column. See `airs_capital.Position`.
+                    # ⚠ NULL FOR A LOOKED-THROUGH LEG, like every other ledger field here: `led` is
+                    # empty for it, and AIRS's split belongs to the CERTIFICATE, not to the stock
+                    # inside it. A wrapper's currency leg spread over its legs would be one
+                    # measurement copied N times, exactly as its return would be.
+                    "fund_result_eur": led.get("fund_result_eur"),
+                    "fx_result_eur": led.get("fx_result_eur"),
+                    "unsplit_result_eur": led.get("unsplit_result_eur"),
                     # ⚠ WHICH OF THE TWO REASONS THE CELL IS BLANK. Both produce a `None`, and they
                     # are not the same fact: a leg inside a certificate has no flows because AIRS
                     # trades the wrapper, while a directly-held position with a `D` (Deponering)

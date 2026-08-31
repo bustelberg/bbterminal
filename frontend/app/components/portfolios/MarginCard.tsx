@@ -12,7 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
-import { workedMean } from './workedFormula';
+import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import { fcfLabel } from './sbcCorrection';
@@ -31,6 +31,10 @@ import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type
  * drill-down are the same computation. Aggregation is a weight-weighted average of per-company
  * margins — currency-safe, unlike summing mixed-currency amounts.
  */
+
+/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+ *  sees it. */
+const R = String.raw;
 
 export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
@@ -105,9 +109,12 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
             avgLabel="Avg margin"
             avgInfo={<InfoTip content={<AspectCard
               what={`Average ${fcfLabel(sbcCorrection)} margin over the years shown.`}
-              where="Computed here — (FCF − SBC) ÷ Revenue per year, weight-averaged across holdings."
+              where="Computed here, per year, then weight-averaged across holdings."
               when="The years on the chart."
-              worked={workedMean(stats.own.values)}
+              worked={withWorked(sbcCorrection
+                ? R`\text{margin} = \dfrac{\text{FCF} - \text{SBC}}{\text{revenue}}`
+                : R`\text{margin} = \dfrac{\text{FCF}}{\text{revenue}}`,
+              workedMean(stats.own.values))}
               how="SBC is a non-cash add-back to FCF, so subtracting it gives a truer cash margin." />} />} />
 
           <div>

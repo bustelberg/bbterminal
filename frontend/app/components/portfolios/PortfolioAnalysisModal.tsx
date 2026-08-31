@@ -19,6 +19,7 @@ import AttributionPanel from './AttributionPanel';
 import ActiveSharePanel, { type ActiveShareHolding } from './ActiveSharePanel';
 import PanelDialog from './PanelDialog';
 import HoldingTimingModal from './HoldingTimingModal';
+import BookValueChart from './BookValueChart';
 import BucketDetailPanel from './BucketDetailPanel';
 import OwnerEarningsModal from './OwnerEarningsModal';
 import { type Basket } from './types';
@@ -518,6 +519,37 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   // which is a finding, not an empty row. See `composition.ts`.
   const sorted = visibleBuckets([...rows].sort((a, b) =>
     (b.portfolio_pct ?? 0) - (a.portfolio_pct ?? 0) || (b.benchmark_pct ?? 0) - (a.benchmark_pct ?? 0)));
+  /**
+   * THE COLUMN TOTALS, SO THE READER CAN CHECK THEM.
+   *
+   * ⚠⚠ SUMMED FROM THE **DISPLAYED**, ROUNDED FIGURES — the same rule the scorecard's equation
+   * follows. Every value below is printed at two decimals, so summing the raw ones can land on
+   * 100.00 while the reader's own addition of what is on screen lands on 99.99. A total that
+   * disagrees with the column above it is worse than no total: it is the one number here whose
+   * entire job is to be checkable by hand.
+   *
+   * ⚠ OVER THE ROWS THAT ARE DRAWN, not over `rows`. A bucket `visibleBuckets` withholds (nothing
+   * on either side) contributes nothing anyway — but if that ever stops being true, this total is
+   * the thing that should show it rather than quietly absorbing it.
+   *
+   * ⚠ BOTH SIDES. The portfolio column is renormalised over the attributable holdings and must
+   * reach 100; the index column is renormalised over the constituents we could price and must too.
+   * Printing only ours would hide the half that is more likely to be short.
+   */
+  const round2 = (v: number | null | undefined) => Math.round((v ?? 0) * 100) / 100;
+  const totalP = sorted.reduce((acc, r) => acc + round2(r.portfolio_pct), 0);
+  const totalB = sorted.reduce((acc, r) => acc + round2(r.benchmark_pct), 0);
+  /**
+   * How far from 100 the sum of the PRINTED figures may legitimately land.
+   *
+   * ⚠⚠ IT SCALES WITH THE ROW COUNT, AND A FIXED HUNDREDTH WOULD HAVE CRIED WOLF ON THE FIRST
+   * BOOK I TRIED. Each row is rounded to two decimals, so each can move the sum by up to half a
+   * hundredth and n of them by n × 0.005. Measured on BUS_Offensief_Dyn: the raw weights sum to
+   * 100.0000000000 on all three axes, and the PRINTED ones to 99.98 on Sector (8 buckets), 100.00
+   * on Region (3) and Currency (7). Flagging that 99.98 would put a warning on arithmetic that is
+   * exactly right — which is how a warning stops being read.
+   */
+  const slack = Math.max(0.01, sorted.length * 0.005);
 
   return (
     <section className={`bg-card border rounded-xl p-4 ${
@@ -566,7 +598,10 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
       ) : (<>
       {/* Legend (two series ⇒ mandatory — identity is never colour-alone): a filled bar is the
           model, a tick is the benchmark. Blue + amber is the CVD-separated pair (ΔE 103) — see
-          the file header; text wears text tokens, the swatches carry the colour. */}
+          the file header; text wears text tokens, the swatches carry the colour.
+          ⚠ THE TOTALS RIDE ON THE LEGEND, which is where the two columns are already named — a
+          separate row would repeat "Portfolio" and the index's name a second time, three cards
+          over. They sit at the right, above the column each one sums. */}
       <div className="chart-legend flex items-center gap-4 text-[11px] text-fg-faint mt-2 mb-2">
         <span className="flex items-center gap-1.5">
           <span className="inline-block w-3.5 h-2 rounded-sm" style={{ background: SERIES.portfolio }} />
@@ -575,6 +610,21 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
         <span className="flex items-center gap-1.5">
           <span className="inline-block w-[4px] h-3 rounded-sm" style={{ background: SERIES.benchmark }} />
           {benchmark}
+        </span>
+        {/* ⚠ TONED ONLY WHEN IT IS WRONG. A total that is always coloured is decoration; one that
+            turns amber the day a column does not add up is a check. The band is a hundredth either
+            side — the columns are printed at two decimals and 0.01 is what rounding can move. */}
+        <span className="ml-auto flex items-center gap-2 font-mono tabular-nums"
+          title={'Each column, summed exactly as printed — so adding the rows by hand gives this '
+            + 'number. Both sides are renormalised over what they can place, so both should read '
+            + `100%; a hundredth or two either way is the rows' own rounding (${sorted.length} of `
+            + 'them here, each ±0.005). Anything larger is a bucket missing from the chart.'}>
+          <span className={Math.abs(totalP - 100) > slack ? 'text-warn-300' : ''}>
+            Σ {totalP.toFixed(2)}%
+          </span>
+          <span className={Math.abs(totalB - 100) > slack ? 'text-warn-300' : ''}>
+            Σ {totalB.toFixed(2)}%
+          </span>
         </span>
       </div>
       {/* Inline bullet rows: label on ONE line (truncated, never wrapped), a filled bar for the
@@ -766,6 +816,28 @@ const COLUMN_GROUPS = [
     cols: ['result', 'avgcapital'],
   },
   {
+    key: 'fxsplit',
+    label: 'Price vs currency (AIRS)',
+    hint: 'Koers + Valuta + Rest = Result',
+    /**
+     * ⚠⚠ AIRS'S OWN ARITHMETIC, NOT OURS. `Fondsresultaat` and `Valutaresultaat` come off the
+     * Vermogensoverzicht already split, in EUR, and they sum to `current − Beginwaarde` exactly
+     * (measured on the 2026-08-26 fleet snapshot: the identity holds on 494 of 518 holdings, the
+     * 24 exceptions being the cash rows, where AIRS reports both legs as 0). Deriving a currency
+     * leg from a price series and an FX series would be a second answer to a question the source
+     * already answers, and the two would part company on the day a holding traded.
+     *
+     * ⚠ SO `Rest` IS NOT DECORATION. The split covers the HELD leg only — the transacties sheet
+     * has no currency column and a dividend is booked in EUR — so a book that trimmed has a
+     * remainder. Without it the two columns sit beside a larger Result and read as an error.
+     *
+     * ⚠ OFF BY DEFAULT, like every other group: `readSavedGroups` starts empty. Currency is
+     * 4.8% of the fleet's gross move and near-zero on a euro book, so it is a question a reader
+     * asks rather than one the table should answer unprompted.
+     */
+    cols: ['koers', 'valuta', 'unsplit'],
+  },
+  {
     key: 'contribution',
     label: 'How the Contribution is built',
     hint: 'Result ÷ the book’s opening capital',
@@ -878,6 +950,28 @@ function ColumnPicker({ groups, toggle }: {
   );
 }
 
+/**
+ * A EURO LEG AS PERCENTAGE POINTS OF THE MONEY-WEIGHTED RETURN — the same denominator that return
+ * uses, so the legs ADD UP to it exactly.
+ *
+ * ⚠⚠ POINTS, NOT "SHARE OF THE RETURN", AND THE DIFFERENCE IS NOT PRESENTATIONAL. A share
+ * (`leg ÷ result`) is unbounded and flips sign the moment the two legs oppose each other, which is
+ * exactly when the split is worth reading: measured on AzTopSelectie, Samsung's -7.01% on the money
+ * is -14.70pp of price and +7.69pp of currency — as shares that reads **210% price and -110%
+ * currency**, and SK Hynix reads 126% / -26%. Both are arithmetically correct and neither can be
+ * put in a column. Points are additive, bounded by the figure beside them, and answer the question
+ * a reader actually has: without the won, Samsung would have been -14.7%.
+ *
+ * ⚠ NULL WITHOUT A CAPITAL TO DIVIDE BY — a leg inside a certificate has no flows of its own, so
+ * it has no money-weighted return either and no leg of one.
+ */
+const ppOf = (eur: number | null | undefined, cap: number | null | undefined) =>
+  (eur == null || !cap || cap <= 0 ? null : (eur / cap) * 100);
+
+/** `-14.70pp`, the second line under a euro leg. ⚠ Two decimals like the return it decomposes. */
+const ppText = (v: number | null) =>
+  (v == null ? null : `${v >= 0 ? '+' : ''}${v.toFixed(2)}pp`);
+
 /** The four euro/point columns, summed. ⚠ A SUM OF NULLS IS NULL, NOT ZERO: a class in which
  *  nothing could be valued has an undefined result, and a €0 subtotal would say it broke even. */
 function sumResults(rows: BookHolding[]) {
@@ -893,6 +987,18 @@ function sumResults(rows: BookHolding[]) {
   const priced = rows.filter((h) => (h.avg_capital_eur ?? 0) > 0);
   const cap = priced.reduce((s, h) => s + h.avg_capital_eur!, 0);
   return {
+    // ⚠ SUMMED LIKE EVERY OTHER EURO COLUMN, AND NULL WHERE NOBODY HAS ONE — a group of holdings
+    // AIRS published no split for has an undefined currency leg, not a zero one.
+    koers: add((h) => h.fund_result_eur),
+    valuta: add((h) => h.fx_result_eur),
+    unsplit: add((h) => h.unsplit_result_eur),
+    // ⚠⚠ MAY THIS GROUP SHOW POINTS AT ALL? The identity `koers pp + valuta pp + rest pp = the
+    // money-weighted return` is exact per ROW; over a group it holds only while EVERY row has both
+    // a split and a capital to divide by. One certificate leg (no flows) or one pre-2026-07-18
+    // holding (no split) and the numerator covers a different set of rows from the denominator —
+    // points that no longer add to the return beside them, which is worse than none.
+    splitComplete: rows.length > 0 && rows.every(
+      (h) => h.fund_result_eur != null && (h.avg_capital_eur ?? 0) > 0),
     opening: add((h) => h.start_value_eur),
     valuenow: add((h) => h.current_value_eur),
     // ⚠ Over the rows that HAVE one — a leg inside a certificate has no flows, so it contributes
@@ -1413,6 +1519,14 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   const heldSum = sumResults(holdings);
   const heldCap = holdings.reduce((s, h) => s + (h.avg_capital_eur ?? 0), 0);
   const grand = {
+    // ⚠ THE HELD SIDE ONLY, AND NOT `add2(…, soldSum.…)` LIKE ITS NEIGHBOURS. AIRS's split lives
+    // on the Vermogensoverzicht, which lists what is HELD — a sold-out position has no split at
+    // all, so there is nothing on the other side to add. The sold rows' `Rest` cells are blank for
+    // the same reason, and the three columns therefore sum to the HELD result rather than to this
+    // row's Result. Adding a null-as-zero here would make the shortfall look like arithmetic.
+    koers: heldSum.koers,
+    valuta: heldSum.valuta,
+    unsplit: heldSum.unsplit,
     opening: add2(heldSum.opening, soldSum.opening),
     valuenow: heldSum.valuenow,
     avgcapital: add2(heldSum.avgcapital, soldCap),
@@ -1782,6 +1896,55 @@ ${eur0n(grand.valuenow)} − ${eur0n(grand.opening)} = ${eur0n(grand.unrealised)
 ${eur0n(grand.unrealised)} + ${eur0n(grand.realised)} + ${eur0n(grand.income)} = ${eur0n(grand.result)}`} />
               </th>
 )}
+{show('koers') && (
+              <th className="text-right w-[8.4rem] py-2 font-medium">
+                Koers
+                <Provenance source="airs_volk" asOf={asOf} kind="copied" column
+                  what="How much of the result is the instrument's own price move, with the currency taken out."
+                  note="AIRS's Fondsresultaat, in EUR"
+                  how={`AIRS splits every HELD position's value change into a price leg and a currency leg, both in euros, and publishes both. This column is its Fondsresultaat as reported — nothing here re-derives it.
+
+Σ = ${eur0n(grand.koers)}
+
+⚠ IT COVERS THE HELD LEG ONLY. Fondsresultaat + Valutaresultaat = Value now − Beginwaarde, so anything realised on a sale and any dividend sits outside the pair — that is the Rest column.
+
+⚠ THE SECOND LINE IS THE SAME EUROS AS POINTS OF THIS ROW'S MONEY-WEIGHTED RETURN — divided by the same average invested capital, so Koers + Valuta + Rest add up to that return exactly. Measured on AzTopSelectie: Samsung is −7.01% on the money = −14.70pp price + 7.69pp currency, i.e. without the won it would have been −14.7%.
+
+⚠ POINTS RATHER THAN A SHARE OF THE RETURN, because the two legs routinely oppose each other and a share is then unbounded: the same Samsung row reads 210% price and −110% currency, which is correct and unreadable.
+
+⚠ NO POINTS ON A SUBTOTAL UNLESS EVERY ROW UNDER IT HAS BOTH A SPLIT AND A CAPITAL. One certificate leg or one pre-2026-07-18 holding and the numerator covers a different set of rows from the denominator, so the points would stop adding to the return beside them. The grand total never shows them: its Result includes sold positions, which have no split at all.`} />
+              </th>
+)}
+{show('valuta') && (
+              <th className="text-right w-[8.4rem] py-2 font-medium">
+                Valuta
+                <Provenance source="airs_volk" asOf={asOf} kind="copied" column
+                  what="How much of the result is the exchange rate moving, with the price taken out."
+                  note="AIRS's Valutaresultaat, in EUR"
+                  how={`AIRS's Valutaresultaat as reported.
+
+Σ = ${eur0n(grand.valuta)}
+
+⚠ A EURO HOLDING READS 0 AND THAT IS A MEASUREMENT, not a gap. A blank means AIRS published no split for the row: cash, a leg inside a certificate, or a snapshot from before 2026-07-18, when the two columns first appeared.
+
+⚠ THE TWO LEGS ROUTINELY PULL AGAINST EACH OTHER. Measured on AzTopSelectie: AIA Group made +729 on price and lost −873 on the yen-to-euro move, netting −145.`} />
+              </th>
+)}
+{show('unsplit') && (
+              <th className="text-right w-[7.2rem] py-2 font-medium">
+                Rest
+                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
+                  what="The part of the result AIRS's price/currency split does not reach."
+                  note="result − koers − valuta"
+                  how={`Result − Koers − Valuta
+
+= ${eur0n(grand.unsplit)}
+
+⚠ IN PRACTICE THIS IS THE REALISED LEG AND THE DIVIDENDS. AIRS splits what is HELD; the transacties sheet it realises through has no currency column, and a dividend is booked in EUR. So a book that trimmed has a remainder here, and a book that only held has none.
+
+⚠ IT IS DERIVED BY SUBTRACTION, so it also absorbs any gap between AIRS's split and our own held figure — which is the point. Three columns that sum to the Result beside them can be checked; two that fall short of it look like an error.`} />
+              </th>
+)}
               <th className="text-right w-[9.6rem] py-2 font-medium">
                 Money-weighted
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
@@ -1890,6 +2053,9 @@ ${num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}
                 {show('realised') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.realised)}`}>{eur0n(g.sum.realised)}</td>}
                 {show('income') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.income)}`}>{eur0n(g.sum.income)}</td>}
                 {show('result') && <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.result)}`}>{eur0n(g.sum.result)}</td>}
+                {show('koers') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.koers)}`}>{eur0n(g.sum.koers)}{g.sum.splitComplete ? g.sum.avgcapital : null != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(g.sum.koers, g.sum.splitComplete ? g.sum.avgcapital : null))}</span>}</td>}
+                {show('valuta') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.valuta)}`}>{eur0n(g.sum.valuta)}{g.sum.splitComplete ? g.sum.avgcapital : null != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(g.sum.valuta, g.sum.splitComplete ? g.sum.avgcapital : null))}</span>}</td>}
+                {show('unsplit') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.unsplit)}`}>{eur0n(g.sum.unsplit)}{g.sum.splitComplete ? g.sum.avgcapital : null != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(g.sum.unsplit, g.sum.splitComplete ? g.sum.avgcapital : null))}</span>}</td>}
                 <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.mwr)}`}>
                   {fmtRet(g.sum.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -2147,6 +2313,12 @@ Weekly EUR returns over the trailing 5 years, on the weeks both series have — 
                   {show('realised') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.realised_result_eur)}`}>{eur0n(h.realised_result_eur)}</td>}
                   {show('income') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.income_eur)}`}>{eur0n(h.income_eur)}</td>}
                   {show('result') && <td className={`py-1.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(h.result_eur)}`}>{eur0n(h.result_eur)}</td>}
+                  {/* ⚠ THE SECOND LINE IS THE SAME LEG AS POINTS OF THIS ROW'S MONEY-WEIGHTED
+                      RETURN — same denominator, so the three add up to the figure four columns
+                      right. See `ppOf` for why points and not a share of the return. */}
+                  {show('koers') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.fund_result_eur)}`}>{eur0n(h.fund_result_eur)}{h.avg_capital_eur != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(h.fund_result_eur, h.avg_capital_eur))}</span>}</td>}
+                  {show('valuta') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.fx_result_eur)}`}>{eur0n(h.fx_result_eur)}{h.avg_capital_eur != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(h.fx_result_eur, h.avg_capital_eur))}</span>}</td>}
+                  {show('unsplit') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.unsplit_result_eur)}`}>{eur0n(h.unsplit_result_eur)}{h.avg_capital_eur != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(h.unsplit_result_eur, h.avg_capital_eur))}</span>}</td>}
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.money_weighted_return_pct)}`}>
                     {fmtRet(h.money_weighted_return_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -2344,6 +2516,9 @@ no result — this position could not be valued at both ends of the window, so t
                 {show('realised') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.realised)}`}>{eur0n(soldSum.realised)}</td>}
                 {show('income') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.income)}`}>{eur0n(soldSum.income)}</td>}
                 {show('result') && <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.result)}`}>{eur0n(soldSum.result)}</td>}
+                {show('koers') && <td />}
+                {show('valuta') && <td />}
+                {show('unsplit') && <td />}
                 <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.mwr)}`}>
                   {fmtRet(soldSum.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -2432,6 +2607,9 @@ ${eur0n(soldSum.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(soldSum.contri
                   {show('realised') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.realised_result_eur)}`}>{eur0n(p.realised_result_eur)}</td>}
                   {show('income') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.income_eur)}`}>{eur0n(p.income_eur)}</td>}
                   {show('result') && <td className={`py-1.5 text-right font-mono font-semibold tabular-nums ${retTone(p.result_eur)}`}>{eur0n(p.result_eur)}</td>}
+                  {show('koers') && <td />}
+                  {show('valuta') && <td />}
+                  {show('unsplit') && <td />}
                   <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.return_pct)}`}>
                     {fmtRet(p.return_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -2493,6 +2671,9 @@ ${eur0n(p.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(p.contribution_p
                 {show('realised') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.realised)}`}>{eur0n(grand.realised)}</td>}
                 {show('income') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.income)}`}>{eur0n(grand.income)}</td>}
                 {show('result') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.result)}`}>{eur0n(grand.result)}</td>}
+                {show('koers') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.koers)}`}>{eur0n(grand.koers)}</td>}
+                {show('valuta') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.valuta)}`}>{eur0n(grand.valuta)}</td>}
+                {show('unsplit') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.unsplit)}`}>{eur0n(grand.unsplit)}</td>}
                 <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.mwr)}`}>
                   {fmtRet(grand.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -3169,6 +3350,33 @@ export default function PortfolioAnalysisModal({
                    hardcoded 'SP500' here would print one index's name over another's numbers —
                    invisible, and it survived the default changing to ACWI at exactly four sites. */
                 : <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark} />}
+              {/* ⚠⚠ IN THE TOP ROW, RIGHT OF THE EXCESS TILE — the row is where it belongs:
+                  those three chips are what the book RETURNED and this is what it was WORTH, which
+                  is the same question with a clock on it. Under the row it read as a third section
+                  between the header and the holdings.
+                  ⚠ AFTER THE WHOLE EQUATION, NEVER INSIDE IT. `Return − Benchmark = Excess` is
+                  written as an equation and reads as one; a chart dropped between the `=` and the
+                  Excess chip would break the only row on this screen that is meant to be read left
+                  to right. So it follows the last chip rather than interrupting the three.
+                  ⚠ ONLY FOR A REAL PORTFOLIO WITH A PAIRED BOOK — an ad-hoc basket has no account,
+                  so there are no snapshots to sum and nothing to draw.
+                  ⚠⚠ NOT WHILE **ANY** CLASS IS SELECTED, `Stocks` INCLUDED — gated on `selected`,
+                  not on `sleeve`. `sleeve` deliberately excludes Equity (the Stocks view keeps the
+                  charts and the Attribution/Risk buttons), so this rode along with it and drew the
+                  WHOLE BOOK's value beside a stocks-only tile: €1,245,548 over figures describing
+                  one class of it. The snapshots value the book, not a slice, and there is no
+                  per-class series to fall back on — a class's value through time would need every
+                  snapshot re-bucketed, which is a different feature.
+                  ⚠ IT FETCHES ITSELF — see `BookValueChart`. The modal is one payload with no
+                  partial paint, and its wall clock is the reader's wait.
+                  ⚠ A FIXED WIDTH, because it shares a `flex-wrap` row: left to itself the chart's
+                  own responsive container would take the whole line and push the scorecard onto the
+                  next one at every width. */}
+              {!isBasket && !selected && id != null && (
+                <div className="w-[24rem] max-w-full">
+                  <BookValueChart portfolioId={id} />
+                </div>
+              )}
             </div>
             {/* ⚠ How much of the INDEX we could price — shown whenever a benchmark number is on
                 screen (the whole-portfolio scorecard, or the Stocks charts). ACWI's missing names

@@ -12,7 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
-import { workedMean } from './workedFormula';
+import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import InterestBurdenInputsModal from './InterestBurdenInputsModal';
@@ -42,6 +42,10 @@ import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type
  * ALONE would still be wrong — the two lines on this chart would then be computed under different
  * rules, the one thing this whole overlay refuses to do; see `benchSeries`.
  */
+
+/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+ *  sees it. */
+const R = String.raw;
 
 export default function InterestBurdenCard({ holdingsTarget, holdingsName, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
@@ -113,9 +117,11 @@ export default function InterestBurdenCard({ holdingsTarget, holdingsName, bench
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
             avgInfo={<InfoTip content={<AspectCard
               what="Average share of operating profit spent on interest, over the years shown."
-              where="Computed here — |Interest expense| ÷ Operating income per year, weight-averaged across holdings."
+              where="Computed here, per year, then weight-averaged across holdings."
               when="The years on the chart."
-              worked={workedMean(stats.own.values)}
+              worked={withWorked(
+                R`\text{burden} = \dfrac{|\text{interest expense}|}{\text{operating income}}`,
+                workedMean(stats.own.values))}
               how="Operating profit is GuruFocus's Operating Income line. Lower = less of profit going to service debt; a heavily-levered company reads high." />} />} />
 
           <div>

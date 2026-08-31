@@ -12,7 +12,7 @@ import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
-import { workedMean } from './workedFormula';
+import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import DebtRatioInputsModal from './DebtRatioInputsModal';
@@ -30,6 +30,10 @@ import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type
  * drill-down are one computation. Aggregation is a weight-weighted average of per-company ratios —
  * currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./MarginCard}.
  */
+
+/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+ *  sees it. */
+const R = String.raw;
 
 export default function DebtRatioCard({ holdingsTarget, holdingsName, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
@@ -100,10 +104,12 @@ export default function DebtRatioCard({ holdingsTarget, holdingsName, benchTarge
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
             avgInfo={<InfoTip content={<AspectCard
-              what="Average Long-Term Debt ÷ (Total Assets − Goodwill) over the years shown."
+              what="Average long-term debt against tangible assets, over the years shown."
               where="Computed here — the ratio per year, weight-averaged across holdings."
               when="The years on the chart."
-              worked={workedMean(stats.own.values)}
+              worked={withWorked(
+                R`\dfrac{\text{long-term debt}}{\text{total assets} - \text{goodwill}}`,
+                workedMean(stats.own.values))}
               how="Goodwill is stripped from assets so leverage is measured against tangible, fundable assets. Lower = less levered." />} />} />
 
           <div>

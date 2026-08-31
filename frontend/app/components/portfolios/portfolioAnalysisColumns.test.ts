@@ -95,3 +95,39 @@ describe('the Analyse modal holdings table', () => {
     expect(leadingCells('<td /><td /><td /><td /><td /><td /><td /><td />')).toBe(8);
   });
 });
+
+/**
+ * EVERY GATED MONEY COLUMN APPEARS IN EVERY ROW OF THE TABLE — the same invariant one column to
+ * the right of the one above, and the one the leading-block check cannot see.
+ *
+ * ⚠⚠ A COLUMN ADDED TO FIVE ROWS OUT OF SIX SHIFTS EVERY FIGURE AFTER IT, in exactly the rows it
+ * was forgotten in, and only while the reader has that group ticked. The header, the class
+ * subtotal, the held row, the `No longer held` subtotal, the sold detail row and the grand total
+ * each render the money block by hand; the file's own ⚠ has said "counted by hand in SIX places"
+ * since 2026-08-21, and the leading-block test below it only guards what comes BEFORE the block.
+ *
+ * ⚠ IT COUNTS `show('k')` OCCURRENCES rather than parsing the rows, because that is the whole
+ * claim: six renders per column, no more and no less. A column that legitimately has nothing to
+ * show in a row still renders `<td />` — an empty cell occupies the column, a missing one does not.
+ *
+ * Pure — reads a file, no DOM.
+ */
+describe('every money column is rendered in every row', () => {
+  it('six renders each, from the header to the grand total', () => {
+    const s = source();
+    const keys = [...new Set([...s.matchAll(/show\('([a-z]+)'\)/g)].map((m) => m[1]))];
+    // ⚠ THE SET IS READ OFF THE FILE, not listed here — a new column joins this check by existing.
+    expect(keys.length).toBeGreaterThanOrEqual(7);
+    // ⚠⚠ `String.raw`, OR THE BACKSLASHES VANISH AND THE TEST PASSES ON NOTHING. In a plain
+    // template literal `\(` is just `(`, so the pattern becomes a capture group, matches no line
+    // in the file, and every count comes out 0 — all equal, assertion green, invariant unchecked.
+    const counts = Object.fromEntries(
+      keys.map((k) => [k, [...s.matchAll(new RegExp(String.raw`show\('${k}'\)`, 'g'))].length]));
+    const rows = Math.max(...Object.values(counts));
+    // ⚠ AND A FLOOR ON THE COUNT ITSELF, for the same reason: six is the number of rows that render
+    // the block, so anything less means this test stopped finding them rather than that they agree.
+    expect(rows).toBeGreaterThanOrEqual(6);
+    expect(counts, `every column must render in all ${rows} rows`).toEqual(
+      Object.fromEntries(keys.map((k) => [k, rows])));
+  });
+});

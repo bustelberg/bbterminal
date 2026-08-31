@@ -80,6 +80,23 @@ class Position:
     realised_result_eur: float = 0.0
     # Net dividend (gross + tax; the tax is already negative as AIRS books it).
     income_eur: float = 0.0
+    # ── AIRS's OWN SPLIT of the held result into price and currency, both in EUR.
+    #
+    # ⚠⚠ THEY DECOMPOSE `held_result_eur` AND NOTHING ELSE, EXACTLY. `Fondsresultaat` +
+    # `Valutaresultaat` = `current_value_eur - start_value_eur` on the Vermogensoverzicht, which is
+    # the same subtraction `held_result_eur` is (measured 2026-08-31: the identity holds on 494 of
+    # 518 holdings of the newest fleet snapshot, and the 24 exceptions are the `Effectenrekening`
+    # cash rows, where AIRS reports both legs as 0 and the delta is deposits and withdrawals).
+    #
+    # ⚠ SO THE REALISED AND INCOME LEGS HAVE NO SPLIT AND NEVER WILL FROM HERE. The transacties
+    # sheet has no currency column, and a dividend is booked in EUR. Anything reading these must
+    # report the remainder rather than fold it into either leg — see `unsplit_result_eur`.
+    #
+    # ⚠ NONE, NOT 0.0. AIRS only began publishing the two columns on 2026-07-18 (the last snapshot
+    # without them is 2026-07-16), so an older book has no split at all — and a 0 there would say
+    # "the currency did nothing", which is a claim about a position rather than about our data.
+    fund_result_eur: float | None = None
+    fx_result_eur: float | None = None
 
     bought_eur: float = 0.0
     sold_eur: float = 0.0
@@ -94,6 +111,23 @@ class Position:
     @property
     def result_eur(self) -> float:
         return round(self.held_result_eur + self.realised_result_eur + self.income_eur, 2)
+
+    @property
+    def unsplit_result_eur(self) -> float | None:
+        """The part of `result_eur` AIRS's price/currency split does NOT cover — in practice the
+        realised leg and the dividends.
+
+        ⚠ IT IS DERIVED BY SUBTRACTION, not by adding the two legs it names, so it also absorbs any
+        gap between AIRS's own split and our held result. A table showing `koers + valuta` beside a
+        larger `Result` invites the reader to conclude one of them is wrong; showing what is left
+        over answers it, and the three columns then sum to the figure beside them.
+
+        ⚠ None WHEN THERE IS NO SPLIT AT ALL — a remainder is only meaningful against something.
+        """
+        if self.fund_result_eur is None and self.fx_result_eur is None:
+            return None
+        return round(self.result_eur - (self.fund_result_eur or 0.0)
+                     - (self.fx_result_eur or 0.0), 2)
 
     @property
     def closed_out(self) -> bool:
@@ -252,6 +286,12 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
         cur = _f(r.get("current_value_eur"))
         if start and cur is not None:
             p.held_result_eur = round(cur - start, 2)
+        # ⚠ CARRIED, NOT COMPUTED. This is AIRS's own arithmetic on its own figures; deriving a
+        # currency leg from a price series and an FX series would be a second answer to a question
+        # the source already answers, and the two would differ on the day a holding traded.
+        if r.get("fund_result_eur") is not None or r.get("fx_result_eur") is not None:
+            p.fund_result_eur = _f(r.get("fund_result_eur"))
+            p.fx_result_eur = _f(r.get("fx_result_eur"))
         # ⚠ RESCALE, THEN DE-RESTATE. A proven split means every quantity traded BEFORE it is in
         # the old basis; multiplying those by the ratio puts the whole position on today's basis,
         # after which the ordinary de-restatement below is valid again. The EUR flows are untouched

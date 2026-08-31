@@ -105,6 +105,10 @@ async def stream_job(job_id: str, request: Request, after: int = 0):
                 # which it got from whichever keys happen to be present is how a new field
                 # silently changes the branch taken.
                 yield sse_event({"type": "event", **e})
+            # ⚠ THE REAPER RUNS ON THIS TICK TOO. `_prune` fires on start and on list, and a tab
+            # already watching a hung job does neither — so this is the only thing that lets an
+            # OPEN card finish. See `jobs.STALE_SECONDS` for the production failure behind it.
+            job_registry.reap_stalled()
             if job.terminal:
                 # ⚠ THE TERMINAL CHECK COMES *AFTER* THE DRAIN, or the last event — the one that
                 # says how it ended — is the one the client never receives.

@@ -1043,6 +1043,14 @@ class BookHoldingDetail(BaseModel):
     realised_result_eur: float | None = None
     income_eur: float | None = None
     result_eur: float | None = None
+    # ── AIRS's OWN split of the HELD leg: `Fondsresultaat` (price) and `Valutaresultaat` (FX),
+    # both in EUR, plus what the split does not reach (the realised leg and the dividends).
+    # ⚠ NULL TOGETHER on a snapshot older than 2026-07-18 (AIRS published neither column before
+    # then), on cash, and on a leg inside a certificate. Never 0 in those cases: "the currency did
+    # nothing" is a claim about the position, and this is an absence in our data.
+    fund_result_eur: float | None = None
+    fx_result_eur: float | None = None
+    unsplit_result_eur: float | None = None
     contribution_pct: float | None = None
     # ── WHAT THE MONEY MADE, as against what the instrument did.
     # ⚠ `return_pct` / `own_return_pct` divide by AIRS's RESTATED `Beginwaarde` — today's quantity
@@ -1245,6 +1253,12 @@ class LedgerPosition(BaseModel):
     realised_result_eur: float = 0.0
     income_eur: float = 0.0
     result_eur: float = 0.0
+    # ⚠ ALWAYS NULL ON A SOLD-OUT POSITION, and declared anyway so the column renders a blank
+    # rather than vanishing from these rows: AIRS's split lives on the Vermogensoverzicht, which
+    # lists what is HELD, and the transacties sheet it was realised through has no currency column.
+    fund_result_eur: float | None = None
+    fx_result_eur: float | None = None
+    unsplit_result_eur: float | None = None
     contribution_pct: float | None = None
     return_pct: float | None = None
     sales: int = 0
@@ -1569,6 +1583,70 @@ async def airs_model_portfolio_risk_windows(portfolio_id: int):
     )
 
     return await compute_portfolio_risk_windows_async(portfolio_id)
+
+
+class BookValuePoint(BaseModel):
+    """The book's value on one date."""
+
+    date: str
+    value_eur: float
+    #: How many lines were summed. ⚠ ON THE POINT, because a day the scrape only half-completed
+    #: would otherwise be a dip in the line with nothing to explain it. NULL on an `airs` point:
+    #: AIRS reports a total, and inventing a count for it would be the one thing this field is for.
+    holdings: int | None = None
+    #: `holdings` = summed from our own snapshot. `airs` = AIRS's own month-end `eindvermogen`,
+    #: used only for the stretch BEFORE our first snapshot. ⚠ ON EVERY POINT rather than as one
+    #: cutover date on the envelope, so a chart cannot draw a segment under the wrong provenance.
+    source: str = "holdings"
+
+
+class BookValueFlow(BaseModel):
+    """Money in or out on one date — never a result. See `_airs_value_series`."""
+
+    date: str
+    deposits_eur: float = 0.0
+    withdrawals_eur: float = 0.0
+
+
+class BookValueSeries(BaseModel):
+    """⚠⚠ VALUE, NOT RETURN. A funding is a step in this line and is not performance — the flows
+    ride along so the chart can mark it. The book's return is
+    `airs_performance.cumulatief_rendement`, assembled in `_airs_accounts`."""
+
+    portefeuille: str | None = None
+    points: list[BookValuePoint] = []
+    flows: list[BookValueFlow] = []
+    first_date: str | None = None
+    last_date: str | None = None
+    #: The first date we hold a snapshot for — where the series stops being AIRS's and becomes ours.
+    #: None when we hold none at all.
+    own_from: str | None = None
+    #: Why there is nothing, when there is nothing — an unpaired model has no book to value.
+    reason: str | None = None
+
+
+@router.get("/api/airs/model-portfolios/{portfolio_id}/value-series",
+            response_model=BookValueSeries)
+async def airs_model_portfolio_value_series(portfolio_id: int):
+    """The paired book's value on every date we hold a snapshot for, summed from `airs_holding`.
+
+    ⚠⚠ OUR OWN SERIES, NOT AIRS'S RENDEMENTEN. It reproduces AIRS's `eindvermogen` to the euro on 21
+    of AzTopSelectie's 24 snapshots, holds two dates AIRS has no row for, and starts 2026-06-23 —
+    when we began keeping snapshots. See `routers/_airs_value_series`.
+
+    ⚠ ITS OWN REQUEST, DELIBERATELY. The Analyse modal is ONE payload with no partial paint, so its
+    wall clock is the reader's wait; a series nobody has scrolled to yet does not belong in it. The
+    chart fetches this itself, exactly as the Risk panels do.
+    """
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+    from routers._airs_value_series import value_series  # noqa: PLC0415
+
+    link = await asyncio.to_thread(
+        lambda: next((a for a in list_account_links()["accounts"]
+                      if a.get("model_portfolio_id") == portfolio_id), None))
+    if not link:
+        return BookValueSeries(reason="No Dynamic portfolio is paired with this one.")
+    return BookValueSeries(**await asyncio.to_thread(value_series, link["portefeuille"]))
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/price-series",

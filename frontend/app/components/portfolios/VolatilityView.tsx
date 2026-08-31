@@ -34,9 +34,14 @@ import { withWorked, subNum } from './workedFormula';
 import type { PortfolioVolatility } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 
+/**
+ * ⚠ MONTHLY FIRST, AND THE ORDER IS THE RECOMMENDATION — the same convention `DrawdownView` uses
+ * for putting Daily first. It is also the default; the two are kept together so the control cannot
+ * open on its second option.
+ */
 const FREQS = [
-  { key: 'weekly', label: 'Weekly' },
   { key: 'monthly', label: 'Monthly' },
+  { key: 'weekly', label: 'Weekly' },
   { key: 'daily', label: 'Daily' },
 ] as const;
 
@@ -80,7 +85,8 @@ export default function VolatilityView({
 }) {
   const [data, setData] = useState<PortfolioVolatility | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [freq, setFreq] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
+  /** ⚠ MONTHLY, ON REQUEST (2026-08-31) — see `FREQS`, whose first entry this must stay. */
+  const [freq, setFreq] = useState<'daily' | 'weekly' | 'monthly'>(FREQS[0].key);
 
   const key = `${benchmark}|${freq}|${holdings.length}`
     + `|${holdings.reduce((s, h) => s + h.weight_pct, 0).toFixed(4)}`;
@@ -290,7 +296,7 @@ export default function VolatilityView({
         ))}
         {/* ⚠⚠ ANNUALISED IS MARKED ONCE, FOR THE WHOLE VIEW, and that is why the tiles no longer
             carry "(ann.)". It applies to σ, downside deviation, the return and both ratios — but
-            only ONE tile ever said so, which left the other four looking like weekly numbers next
+            only ONE tile ever said so, which left the other four looking like raw-period numbers next
             to a "Weekly" control. A per-tile marker also could not survive naming the tiles after
             the book and the index: "BUSTELBERG OFFENSIEF VOLATILITY (ANN.)" wraps to three lines
             at 9px and breaks the row it is supposed to line up with. */}

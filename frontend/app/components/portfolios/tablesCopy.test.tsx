@@ -26,7 +26,8 @@ const SHARED = new Set<string>([]);
 
 const foot = (c: TablesCopy, o: Partial<Parameters<TablesCopy['footnote']>[0]> = {}) =>
   renderToStaticMarkup(<>{c.footnote({
-    windows: [5, 10], showEps: true, showFcf: true, showPrice: true, whyLink: 'WHYLINK', ...o,
+    windows: [5, 10], showEps: true, showFcf: true, showPrice: true, showFiltered: true,
+    whyLink: 'WHYLINK', ...o,
   })}</>);
 
 describe('both languages are complete', () => {
@@ -206,6 +207,28 @@ describe('the footnote follows the chips', () => {
     const c = COPY[lang];
     expect(foot(c, { showPrice: false }).length)
       .toBeLessThan(foot(c, { showPrice: true }).length);
+  });
+
+  /**
+   * ⚠⚠ THE MEMBER RULE HAS TO BE SAID IN THE PROSE, IN BOTH LANGUAGES. `fcf_ps` and `eps_nri` are
+   * drawn only from the companies positive in every period — a filter that DELETES COMPANIES and
+   * leaves a line looking exactly like an ordinary one. The cards print their own "n of m"; a
+   * table of rates has nowhere to put one per row, so this sentence is the only place a reader of
+   * this tab can learn it. A translation that quietly loses a conditional clause is exactly how it
+   * would go missing for half the users.
+   */
+  it.each(LANGS)('%s states the positives-only member rule when those rows are on', (lang: Lang) => {
+    const c = COPY[lang];
+    // ⚠ ASSERTED ON LENGTH, NOT ON A TOKEN — the same reason the price-clause test below is:
+    // this clause is prose in both languages and names its rows the way each table labels them
+    // ("EPS" / "Winst per aandeel"), so an English phrase to grep for would pass a Dutch footnote
+    // that had quietly lost the clause. What it must not do is disappear.
+    expect(foot(c, { showFiltered: true }).length)
+      .toBeGreaterThan(foot(c, { showFiltered: false }).length);
+    // ⚠ AND IT MUST NAME BOTH FILTERED ROWS, not just the one the reader happened to open. Two
+    // `<strong>` runs is the shape that says so without pinning either language's wording.
+    expect((foot(c, { showFiltered: true }).match(/<strong>/g) ?? []).length)
+      .toBeGreaterThan((foot(c, { showFiltered: false }).match(/<strong>/g) ?? []).length + 1);
   });
 
   it.each(LANGS)('%s only claims the figure is centred when two columns are shown', (lang: Lang) => {

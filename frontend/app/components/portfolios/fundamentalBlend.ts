@@ -119,7 +119,9 @@ export type Blend = ReturnType<typeof buildBlend>;
  * has already done once (it dropped rows `_prepare` KEEPS, and the comment claimed they matched),
  * so the failure mode is documented rather than hypothetical.
  */
-const POSITIVE_ONLY_METRICS = new Set(['fcf_ps', 'eps_nri']);
+/** ⚠ EXPORTED so a surface can SAY which rows it filtered without keeping a second list of
+ *  them — `TablesTab`'s footnote names the affected rows off this set. */
+export const POSITIVE_ONLY_METRICS = new Set(['fcf_ps', 'eps_nri']);
 
 export function buildBlend(data: Resp, metric?: string) {
     /**

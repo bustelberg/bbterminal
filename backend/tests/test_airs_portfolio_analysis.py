@@ -397,7 +397,10 @@ class TestTheBarsAreTheAttributionWeights:
         axes = pa._basis_axes(1, "book", None, None)
         assert axes["sector"]["attributable_pct"] == pytest.approx(70.0)
         reasons = {e["isin"]: e["reason"] for e in axes["sector"]["excluded"]}
-        assert reasons == {"IE9": "unclassified", None: "cash"}
+        # ⚠ `fund`, NOT `unclassified` (2026-08-31). It reads as a FACT about the instrument rather
+        # than as a failure of ours, and it is what keeps a fund out of the unpriceable warning —
+        # see `TestAFundIsExcludedAsAFund`.
+        assert reasons == {"IE9": "fund", None: "cash"}
 
     def test_a_fund_or_a_cash_line_is_NOT_counted_as_a_gap(self, monkeypatch):
         """⚠ THE DISTINCTION THAT KEEPS THE WARNING MEANINGFUL. A fund has no sector BY DEFINITION
@@ -422,6 +425,45 @@ class TestTheBarsAreTheAttributionWeights:
         axes = pa._basis_axes(1, "book", None, None)
         # The 15% fund is an answer; only the 25% unpriced equity is a hole.
         assert axes["sector"]["unpriced_pct"] == pytest.approx(25.0)
+        assert axes["sector"]["attributable_pct"] == pytest.approx(60.0)
+
+    def test_a_fund_with_no_price_series_is_a_FUND_not_an_unpriceable_hole(self, monkeypatch):
+        """⚠⚠ THE STOCKS DRILL-DOWN WAS WARNING ABOUT A FUND. `Letko Bross Global EM Equity Fund`
+        is an unlisted mutual fund: OpenFIGI types it `Open-End Fund`, Yahoo has no series, so its
+        `return_pct` is None and it landed under `unpriced` — printing "⚠ 1.5% held but
+        unpriceable — missing from these bars" on a book whose stocks are all priced. That reads as
+        a data-quality problem somebody could fix, and it is not one: a fund has no sector of its
+        own, this app does not look through funds, and it already has its own `Stock ETFs` section
+        in the holdings table.
+
+        ⚠ THE ORDER IS THE TEST. `fund` has to be decided BEFORE `unpriced`, or the missing price
+        wins and the warning comes back.
+        """
+        legs = [{"isin": "US1", "weight_pct": 70.0, "return_pct": 10.0, "airs_name": "Alpha",
+                 "is_cash": False},
+                # No return AND a fund — the two reasons collide on this row.
+                {"isin": "IE9", "weight_pct": 30.0, "return_pct": None, "is_cash": False,
+                 "airs_name": "Letko Bross Global EM Equity Fund", "asset_class": "Equity"}]
+        self._patch(monkeypatch, legs)
+        axes = pa._basis_axes(1, "book", None, None)
+        assert [e["reason"] for e in axes["sector"]["excluded"]] == ["fund"]
+        # ⚠ AND THE WARNING IS SILENT. The weight is still reported — as funds, by the line beside
+        # the chart — but `unpriced_pct` is what raises an alarm, and there is nothing to alarm at.
+        assert axes["sector"]["unpriced_pct"] == pytest.approx(0.0)
+        assert axes["sector"]["attributable_pct"] == pytest.approx(70.0)
+
+    def test_it_is_the_WRAPPER_test_so_membership_does_not_move(self, monkeypatch):
+        """⚠ A LABEL CHANGE, NOT AN EXCLUSION. A fund was already out of the bars either way —
+        `unpriced` without a series, `unclassified` with one — so no bar height may move. Measured
+        on BUS_Offensief_Dyn when this shipped: 44 attributable and 7 excluded before and after,
+        Technology 39.66%, Financials 19.24%."""
+        legs = [{"isin": "US1", "weight_pct": 60.0, "return_pct": 10.0, "airs_name": "Alpha",
+                 "is_cash": False},
+                {"isin": "IE9", "weight_pct": 40.0, "return_pct": 3.0, "airs_name": "Tracker",
+                 "is_cash": False, "asset_class": "Equity"}]
+        self._patch(monkeypatch, legs)
+        axes = pa._basis_axes(1, "book", None, None)
+        assert axes["sector"]["weights"] == {"Technology": pytest.approx(100.0)}
         assert axes["sector"]["attributable_pct"] == pytest.approx(60.0)
 
     def test_the_excluded_rows_carry_the_class_we_already_store(self, monkeypatch):

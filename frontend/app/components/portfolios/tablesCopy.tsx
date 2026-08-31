@@ -130,6 +130,10 @@ export type TablesCopy = {
   whyDifferLabel: string;
   footnote: (o: {
     windows: readonly number[]; showEps: boolean; showFcf: boolean; showPrice: boolean;
+    /** Is a row on whose series is drawn from a FILTERED set of companies — FCF/share or EPS?
+     *  ⚠ A member rule nobody can see is the whole hazard (see `_POSITIVE_ONLY_METRICS`), and a
+     *  tooltip on one row is not where a reader comparing two columns will find it. */
+    showFiltered: boolean;
     whyLink: ReactNode;
   }) => ReactNode;
 };
@@ -225,7 +229,7 @@ const en: TablesCopy = {
     + 'well they line up. Neither is wrong; a wide gap between them means the endpoints are '
     + 'unrepresentative.',
   whyDifferLabel: 'why they differ',
-  footnote: ({ windows, showEps, showFcf, showPrice, whyLink }) => (
+  footnote: ({ windows, showEps, showFcf, showPrice, showFiltered, whyLink }) => (
     <>
       Both sides are measured over the <strong>same</strong> window per row — the latest year they
       share — so the Excess column subtracts like from like. A dash means one side has nothing
@@ -253,6 +257,17 @@ const en: TablesCopy = {
       {showFcf && <>
         {' '}The rate rows are point-to-point and will not match the growth cards on the Long
         Equity tab, which fit a trend through every year ({whyLink}).
+      </>}
+      {/* ⚠⚠ THE MEMBER RULE, IN THE PROSE. Every series on this table is the one the Long Equity
+          chart of the same name draws — same holdings, same weighting, same coverage floor — and
+          that includes a rule which DELETES COMPANIES. A filter nobody can see is the whole
+          hazard: what is left looks exactly like an ordinary line. The cards print their own
+          "n of m"; a table of rates has nowhere to put one per row, so it is said once, here. */}
+      {showFiltered && <>
+        {' '}The <strong>FCF per share</strong> and <strong>EPS</strong> rows are drawn from the
+        same series as the Long Equity charts — and, like them, only from the companies whose
+        figure is <strong>positive in every period</strong>, analyst estimates included. The rest
+        are excluded outright, so read those two rows as how the survivors grew.
       </>}
     </>
   ),
@@ -363,7 +378,7 @@ const nl: TablesCopy = {
     + 'gebruikt ze allemaal en rapporteert R² voor hoe goed ze op één lijn liggen. Geen van beide '
     + 'is fout; een groot verschil betekent dat de eindpunten niet representatief zijn.',
   whyDifferLabel: 'waarom ze verschillen',
-  footnote: ({ windows, showEps, showFcf, showPrice, whyLink }) => (
+  footnote: ({ windows, showEps, showFcf, showPrice, showFiltered, whyLink }) => (
     <>
       Beide zijden worden per rij over <strong>hetzelfde</strong> venster gemeten — het laatste jaar
       dat ze delen — zodat de kolom Verschil gelijk van gelijk aftrekt. Een streepje betekent dat
@@ -386,6 +401,12 @@ const nl: TablesCopy = {
         {' '}De groeirijen lopen van eindpunt tot eindpunt en zullen niet overeenkomen met de
         groeikaarten op het Long Equity-tabblad, die een trend door alle jaren leggen
         ({whyLink}).
+      </>}
+      {showFiltered && <>
+        {' '}De rijen <strong>Vrije kasstroom per aandeel</strong> en <strong>Winst per
+        aandeel</strong> gebruiken dezelfde reeks als de Long Equity-grafieken — en net als daar alleen de bedrijven waarvan
+        het cijfer in <strong>elke periode positief</strong> is, analistenramingen inbegrepen. De
+        overige vallen er volledig uit; lees die twee rijen dus als de groei van de overblijvers.
       </>}
     </>
   ),

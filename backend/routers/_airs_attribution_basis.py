@@ -247,6 +247,8 @@ def split_legs(legs: list[dict], idx: int, grid: dict | None = None,
     two sides match BY CONSTRUCTION rather than by the two rules happening to agree.
     """
     grid = _grid(sorted({leg["isin"] for leg in legs if leg.get("isin")})) if grid is None else grid
+    from ._airs_holding_isin import _is_etf  # noqa: PLC0415,PLC2701  (cycle at import)
+
     codes = _country_by_code() if codes is None else codes
 
     attributable: list[dict] = []
@@ -266,9 +268,31 @@ def split_legs(legs: list[dict], idx: int, grid: dict | None = None,
         bucket = _buckets(row, is_cash=is_cash, isin=isin, codes=codes)[idx]
         # Cash returns a flat 0% — its drag is a FACT, so it is carried, not invented.
         ret = 0.0 if is_cash else h.get("return_pct")
+        # ⚠⚠ A FUND IS EXCLUDED AS A FUND, BEFORE ANYTHING ELSE CAN CALL IT SOMETHING WORSE.
+        # `Letko Bross Global EM Equity Fund` is an unlisted mutual fund: OpenFIGI types it
+        # `Open-End Fund`, Yahoo has no series for it, so `return_pct` is None and it was landing
+        # under `unpriced` — which the Stocks drill-down warns about as "1.5% held but unpriceable,
+        # missing from these bars". That reads as a data-quality problem we could fix, and it is
+        # not one: a fund has no sector of its own, this app does not look through funds, and it
+        # already has its own `Stock ETFs` section in the holdings table. The weight belongs in the
+        # ordinary "excludes X% in funds, bonds and cash" line beside the chart, which is where
+        # this label puts it.
+        #
+        # ⚠ IT CHANGES THE LABEL, NEVER THE MEMBERSHIP — verified on BUS_Offensief_Dyn: 44
+        # attributable and 7 excluded both before and after, and every sector bar to the second
+        # decimal (Technology 39.66%, Financials 19.24%). A fund was already out of the bars either
+        # way — `unpriced` for the two with no series, `unclassified` for the four ETFs that have
+        # one and no sector of their own. What moves is which sentence reports it: the Stocks
+        # drill-down's unpriceable warning goes from 1.54% to nothing, and the ordinary "excludes
+        # 17.8% in funds, bonds and cash" line takes the whole of it.
+        #
+        # ⚠ AND IT IS THE **WRAPPER** TEST, NOT THE CLASS ONE: a bond fund stays in Bonds, exactly
+        # as `_is_etf`'s own note says. `reason` only decides which line reports the exclusion.
+        is_fund = _is_etf(row, str(h.get("airs_name") or h.get("name") or ""))
         reason = ("cash" if bucket == CASH_BUCKET
+                  else "fund" if is_fund
                   else "unpriced" if ret is None
-                  else "unclassified" if bucket == UNKNOWN_BUCKET   # funds fold in here
+                  else "unclassified" if bucket == UNKNOWN_BUCKET
                   else None)
         item = {**h, "return_pct": ret, "bucket": bucket, "reason": reason, "grid_row": row}
         (excluded if reason else attributable).append(item)
