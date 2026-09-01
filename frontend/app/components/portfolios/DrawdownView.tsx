@@ -26,6 +26,7 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { useRiskCopy } from './riskCopy';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf } from './asOfLine';
 import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
@@ -84,6 +85,7 @@ export default function DrawdownView({
   portfolioFetchedAt?: string | null;
   portfolioSource: SourceKey;
 }) {
+  const t = useRiskCopy();
   const [data, setData] = useState<PortfolioDrawdown | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [freq, setFreq] = useState<'daily' | 'weekly' | 'monthly'>('daily');
@@ -160,7 +162,7 @@ export default function DrawdownView({
       </div>
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
-      {!data && !error && <p className="text-xs text-fg-subtle">Computing drawdowns…</p>}
+      {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing}</p>}
       {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
 
       {data?.available && (
@@ -177,10 +179,10 @@ export default function DrawdownView({
           </p>
 
           <div className="flex flex-wrap gap-2">
-            <Tile label={`Max drawdown (${data.frequency})`} value={pct2(data.max_drawdown_pct)}
+            <Tile label={t.dd.maxDrawdown(data.frequency)} value={pct2(data.max_drawdown_pct)}
               tone="text-neg-300"
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="The deepest peak-to-trough fall in the window."
+                what={t.dd.cards.maxDrawdown.what}
                 where={where}
                 when={when}
                 worked={data.max_drawdown_pct == null ? '' : withWorked(
@@ -201,7 +203,7 @@ export default function DrawdownView({
                    and the comparison table below measures it on this book rather than asserting
                    it. A fourth statement in a tooltip was the only one nobody could act on. */
                 />} />} />
-            <Tile label={`${data.benchmark} max drawdown`}
+            <Tile label={t.dd.benchMax(data.benchmark)}
               value={pct2(data.benchmark_max_drawdown_pct)} tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={`The same measurement run over ${data.benchmark}'s own tracker instead of `
@@ -216,7 +218,7 @@ export default function DrawdownView({
                 every peak-to-recovery cycle including a bad afternoon that came back the next
                 session — 68 of them here against 6 real falls. A heading that names a
                 threshold the number does not apply is worse than no threshold. */}
-            <Tile label={`Falls over ${Math.abs(data.episode_threshold_pct ?? 5).toFixed(0)}%`}
+            <Tile label={t.dd.episodes(Math.abs(data.episode_threshold_pct ?? 5).toFixed(0))}
               value={`${data.episodes_over_threshold ?? 0}`} tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={`How many distinct falls of at least `
@@ -278,9 +280,9 @@ export default function DrawdownView({
                     )
                     /* ⚠ NOT A DASH. "Still underwater" is a fact about the book; a dash reads as
                        a missing figure. */
-                    : <span className="text-warn-300">still underwater</span>}
+                    : <span className="text-warn-300">{t.dd.stillUnderwater}</span>}
                 </div>
-                <div><span className="text-fg-faint">Peak to peak</span>{' '}
+                <div><span className="text-fg-faint">{t.dd.peakToPeak}</span>{' '}
                   <span className="text-fg-soft">
                     {worst.total_periods == null ? '—' : `${worst.total_periods} ${unit}`}
                   </span></div>

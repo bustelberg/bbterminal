@@ -1,9 +1,9 @@
 """Database growth, measured in BYTES ON DISK rather than rows written.
 
 ⚠⚠ THE MEASUREMENT THIS REPLACES WOULD HAVE INVERTED THE RANKING. The intuitive instrumentation is
-"have each job count what it inserts" — and `crm_relaties_refresh` OVERWRITES its whole table
-(thousands of rows written, zero growth) while several others are delete-then-insert snapshots or
-upserts. A row count is also blind to indexes and bloat, which on this database's 18 GB
+"have each job count what it inserts" — and the AIRS model scan delete-then-inserts every
+portfolio's positions (thousands of rows written, zero growth) while several others are
+delete-then-insert snapshots or upserts. A row count is also blind to indexes and bloat, which on this database's 18 GB
 `metric_data` are most of the disk. `pg_total_relation_size` is exact and is what the hosting bills.
 
 Measured 2026-08-13 on the local database: 59 tables, 22.4 GB, of which `metric_data` is 18.7 GB and

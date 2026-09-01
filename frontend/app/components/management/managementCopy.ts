@@ -469,12 +469,19 @@ export function useMgmtCopy(): ManagementCopy {
  * order of magnitude, which is why the numbers below come from `scripts`-style counting rather than
  * from reading. Sizing a translation by eye is how it gets promised in one sitting.
  *
- *   Risk panel (7 views)       `riskCopy.ts` — the TABLE IS COMPLETE in both languages, including
- *                              the ⓘ cards. `ActiveSharePanel` is fully wired; the six sibling
- *                              views (Tracking error, Correlation, Volatility, Drawdown,
- *                              Concentration, Positions) still render the English literals and
- *                              need wiring only — no further translation.
- *   PortfolioAnalysisModal     253 strings / 3,342 words. The big one.
+ *   Risk panel (7 views)       DONE (2026-09-01). `riskCopy.ts` was already complete in both
+ *                              languages and NOTHING RENDERED IT: `ActiveSharePanel` was wired and
+ *                              the five sibling views (Tracking error, Correlation, Volatility,
+ *                              Drawdown, Concentration) still held the English literals. All five
+ *                              are wired now. ⚠ It was NOT wiring only, as this note claimed —
+ *                              `TrackingErrorView` kept its symbol definitions in a view-local
+ *                              `LEGEND` the copy had no section for, and four operand-bearing
+ *                              strings (`pairsMeasured`, `shownAnnualised`, `episodes(pct)`,
+ *                              `freqNote(f)`, `pricedFrom`) existed on screen and not in the copy.
+ *                              A translation sized by reading the copy module misses exactly the
+ *                              strings that never reached it.
+ *   PortfolioAnalysisModal     primary view + holdings table translated (`analyseCopy`); its
+ *                              separately opened child panels remain listed below.
  *   AttributionPanel           97 / 872
  *   BucketDetailPanel          20 / 188
  *   PortfoliosPanel            the /portfolios table this page embeds (~27 strings)
@@ -482,8 +489,14 @@ export function useMgmtCopy(): ManagementCopy {
  *   AccountTransactions        the transactions list
  *   HoldingTimingModal         the "why the trading mattered" popup (~12)
  *   AllocationBandsModal       the band editor
- *   the Fundamental modal      Long Equity + Tables are done (`longEquityCopy`, `tablesCopy`);
- *                              Quick Valuation, Deep Valuation and the drill-downs are not
+ *   the Fundamental modal      Long Equity + Tables (`longEquityCopy`, `tablesCopy`) and DEEP
+ *                              VALUATION (2026-09-01, `deepValuationCopy` — the EGM panel, the
+ *                              Reverse DCF and both raw-data modals, ⓘ cards included) are done.
+ *                              Quick Valuation and the ratio drill-downs are not. ⚠ Deep Valuation
+ *                              measured 4 files / 86 visible strings by scan and needed ~170 keys:
+ *                              the scan sees JSX text and attributes, not the interpolated `how=`
+ *                              prose, which is most of a ⓘ card. Scan to SIZE a batch, read to
+ *                              finish one.
  *
  * ⚠⚠ THE ⓘ CARDS ARE NOW IN SCOPE, REVERSING THE BOUNDARY THIS NOTE USED TO DRAW (2026-08-22, on
  * request). They are not decoration: they carry the definition, the convention chosen and the
@@ -497,8 +510,8 @@ export function useMgmtCopy(): ManagementCopy {
  * concentratie, rendement, gewicht, positie, emittent.
  */
 export const UNTRANSLATED_SURFACES = [
-  'PortfolioAnalysisModal', 'AttributionPanel', 'BucketDetailPanel',
+  'AttributionPanel', 'BucketDetailPanel',
   'AccountTransactions', 'HoldingTimingModal', 'AllocationBandsModal',
-  'QuickValuationTab', 'DeepValuationTab', 'ReverseDcfPanel', 'PriceTargetCalculator',
-  'EgmAssumptionsModal', 'PortfolioOverviewPanel (partly — the holdings table is done)',
+  'QuickValuationTab', 'PriceTargetCalculator',
+  'PortfolioOverviewPanel (partly — the holdings table is done)',
 ] as const;

@@ -1279,7 +1279,7 @@ async def admin_run_scheduled_job(job_id: str, authorization: str = Header(...))
 
     ⚠⚠ CANCELLATION IS COOPERATIVE, AND ITS LATENCY DIFFERS PER JOB. The AIRS scan stops between
     ACCOUNTS (an account's four reports are stored as a unit); the drift probe stops between
-    COMPANIES; the FX, CRM and size jobs are seconds long and have no useful boundary at all.
+    COMPANIES; the FX and size jobs are seconds long and have no useful boundary at all.
     "Stops immediately" is not on offer for a scraper mid-download, and a Cancel that claimed it
     would be the decorative control this codebase has already removed once. The UI says which is
     which rather than implying they are the same.
@@ -1308,8 +1308,8 @@ async def admin_db_growth(days: int = 7, authorization: str = Header(...)):
     """HOW FAST THE DATABASE IS GROWING, PER TABLE — bytes on disk, over a window.
 
     ⚠⚠ BYTES, NOT ROWS WRITTEN, AND THE DIFFERENCE INVERTS THE RANKING. Asking each job to count
-    its own inserts would put `crm_relaties_refresh` — which OVERWRITES its table, thousands of rows
-    written and zero growth — above the month-end price refresh. Several jobs here are
+    its own inserts would put the AIRS model scan — which delete-then-inserts every portfolio's
+    positions, thousands of rows written and zero growth — above the month-end price refresh. Several jobs here are
     delete-then-insert snapshots or upserts. A row count is also blind to INDEXES and BLOAT, which
     on an 18 GB table are most of the disk.
 

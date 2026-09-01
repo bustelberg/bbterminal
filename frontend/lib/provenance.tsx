@@ -15,7 +15,7 @@
 import { createContext, useContext } from 'react';
 import InfoTip from '../app/components/InfoTip';
 import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
-import { Field, TipCard } from './tipCard';
+import { Field, Legend, TipCard, Worked, type FormulaSymbol } from './tipCard';
 import { ValueBadge } from './dynamicValue';
 import { BADGE_NEUTRAL, BADGE_PILL, BADGE_WARN } from './badgeChrome';
 import { trimStop } from './provenanceText';
@@ -211,9 +211,11 @@ export type ProvKind = 'copied' | 'formula';
  * it is the same shell with a different field promoted, and it keeps every call site that has not
  * been given a `what` yet rendering correctly rather than showing an empty heading.
  */
-function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what, fresh }: {
+function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what, fresh,
+  worked, legend }: {
   source: SourceKey; asOf?: string | null; fetchedAt?: string | null;
   note?: string; how?: string; kind?: ProvKind;
+  worked?: string; legend?: readonly FormulaSymbol[];
   column?: boolean; what?: string;
   /** The one verdict — see `provenanceFreshness`. Passed so the card cannot differ from the icon. */
   fresh: { stale: boolean; label: string };
@@ -285,11 +287,31 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
             <span className="text-fg-soft leading-relaxed">{whoseLag.text}</span>
           </Field>
         )}
-        {(kind || how) && (
+        {/* ⚠⚠ THE MATHS IS TYPESET HERE TOO, NOT ONLY IN `AspectCard` (2026-09-01). The house
+            style says every ⓘ on this dashboard states its arithmetic through `worked` + `legend`
+            — and half the dashboard's cards are PROVENANCE cards, which had no way to. So the
+            files still on `tooltipStyle`'s `UNCONVERTED` ratchet were writing formulas as prose
+            with Unicode operators (`Σ(wᵢ × rᵢ) ÷ Σwᵢ`), which is the exact thing that rule exists
+            to forbid — they had no alternative. Same two components as `AspectCard`, so the two
+            card families cannot drift into two ways of setting one formula.
+            ⚠ THE THREE ARE ONE GROUP — prose, the maths it describes, and the key to that maths.
+            Spaced as siblings the legend sits as far from its formula as from the sentence. */}
+        {(kind || how || worked || legend?.length) && (
+          <span className="block space-y-1.5">
           <Field label="How">
             <span className="text-fg-soft leading-relaxed">
               {kind === 'copied'
-                ? <>Copied straight from {s.label}{asOf ? ` (${asOf})` : ''}, as reported — not computed here.</>
+                /* ⚠⚠ IT MAY CARRY A CAVEAT, AND IT COULD NOT BEFORE. This branch ignored `how`
+                   entirely, on the reasoning that a copied figure has no arithmetic to explain —
+                   true, and it left nowhere to say the things a reader still has to know about a
+                   number we did not compute: that AIRS's `cumulatief_rendement` is flow-aware and
+                   includes income, that a deposit therefore does not flatter it. The only way to
+                   surface that was to mis-tag the field as a `formula`, which is what the Return
+                   tile did: "A formula on the data: AIRS's own cumulatief_rendement…" over a figure
+                   read straight off the source. The tag now tells the truth and the caveat still
+                   fits. */
+                ? <>Copied straight from {s.label}{asOf ? ` (${asOf})` : ''}, as reported — not
+                  computed here{how ? <>. <span className="text-fg whitespace-pre-wrap">{trimStop(how)}</span></> : null}.</>
                 : kind === 'formula'
                   /* ⚠ `whitespace-pre-wrap` SO A FORMULA CAN BREATHE. The best formula cards state
                      the rule and then the same rule with this row's own numbers under it — and a
@@ -301,6 +323,9 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
                   : how}
             </span>
           </Field>
+          {worked ? <Worked text={worked} /> : null}
+          {legend?.length ? <Legend items={legend} /> : null}
+          </span>
         )}
       </>
     </TipCard>
@@ -347,8 +372,13 @@ export function ProvenanceFetchedAt({ at, children }: {
   return <FetchedAtContext.Provider value={at}>{children}</FetchedAtContext.Provider>;
 }
 
-export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = false, what }: {
+export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = false, what,
+  worked, legend }: {
   source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
+  /** The formula, then the same formula with this row's numbers in it. See `Worked`. */
+  worked?: string;
+  /** What each symbol in `worked` stands for. */
+  legend?: readonly FormulaSymbol[];
   /** When WE last read the source, if the caller knows it. Turns an amber badge from a dead end
    *  into an answer — see `whoseLag` in the card. Optional everywhere. */
   fetchedAt?: string | null;
@@ -386,6 +416,7 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
   const fresh = provenanceFreshness(asOf, fetched, column);
   return (
     <InfoTip content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note}
+      worked={worked} legend={legend}
       how={how} kind={kind} column={column} what={what} fresh={fresh} />}>
       <span
         className={`ml-1 ${fresh.stale ? INFO_ICON_WARN : INFO_ICON}`}

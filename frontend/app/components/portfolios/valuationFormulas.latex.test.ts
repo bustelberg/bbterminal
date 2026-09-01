@@ -19,8 +19,9 @@ import katex from 'katex';
 
 import { type EgmBridge } from './egm';
 import {
-  bridgeParts, workedCashFlowValued, workedEgmReturn, workedForwardFcf, workedGrowthCapex,
-  workedImpliedGrowth, workedImpliedPrice, workedMarketCap, workedPriceMove,
+  bridgeParts, workedCashFlowValued, workedEgmReturn, workedFairValue, workedForwardFcf,
+  workedGrowthCapex, workedImpliedGrowth, workedImpliedPrice, workedMarketCap, workedMaxPE,
+  workedPriceMove,
 } from './valuationFormulas';
 
 /** Render as `lib/formula` does, but refusing anything KaTeX would only WARN about. */
@@ -185,5 +186,33 @@ describe('the operands are the bridge\'s own', () => {
     expect(tex).toContain('20.00');
     expect(tex).toContain('0.1000');
     expect(tex).toContain('0.0030');
+  });
+});
+
+
+describe('the hurdle block — a second model on the same inputs', () => {
+  /**
+   * ⚠⚠ THESE TWO ARE THE ONLY EXPRESSIONS ON THE PANEL CONTAINING `h`, and they were unreachable
+   * from the screen until 2026-09-01: `Fair value` had been demoted to a tooltip and the hurdle
+   * input drove nothing a reader could find. Promoted back under their own caption, they are
+   * rendered — so they have to parse like everything else here.
+   */
+  it('max P/E and fair value parse in strict mode', () => {
+    expect(() => render(workedMaxPE(20, 0.10, 0.003, 0.10, 10, 20.608))).not.toThrow();
+    expect(() => render(workedFairValue(11.46, 20.608, 236.17))).not.toThrow();
+  });
+
+  it('the operands survive to the screen', () => {
+    const seen = shown(workedMaxPE(20, 0.10, 0.003, 0.10, 10, 20.608));
+    expect(seen).toContain('20.61');          // the answer
+    expect(seen).toContain('0.1000');         // ⚠ FOUR DECIMALS on the rates — see workedEgmReturn
+    expect(shown(workedFairValue(11.46, 20.608, 236.17))).toContain('236.17');
+  });
+
+  it('a missing operand yields no line rather than half a formula', () => {
+    expect(workedMaxPE(null, 0.1, 0, 0.1, 10, 20)).toBe('');
+    expect(workedMaxPE(20, 0.1, 0, 0.1, 10, null)).toBe('');
+    expect(workedFairValue(null, 20, 100)).toBe('');
+    expect(workedFairValue(11, null, 100)).toBe('');
   });
 });

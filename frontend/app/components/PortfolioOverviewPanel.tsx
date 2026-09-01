@@ -402,10 +402,11 @@ export default function PortfolioOverviewPanel() {
       if (job.status === 'failed') logDetail('model scan failed', job.summary);
       else console.warn(`[AIRS models] ${job.status} — ${job.summary ?? ''}`);
     } catch (e) {
-      // ⚠ REPORTED, NEVER RAISED INTO THE ACCOUNT SCAN'S RESULT. This is the CRM lesson: a failure
-      // in a scan of DIFFERENT objects must not appear in the account refresh's error summary, or
-      // a portfolio refresh reports a fault in a report it was never asked to fetch. One button,
-      // two subjects, two verdicts.
+      // ⚠ REPORTED, NEVER RAISED INTO THE ACCOUNT SCAN'S RESULT. A failure in a scan of DIFFERENT
+      // objects must not appear in the account refresh's error summary, or a portfolio refresh
+      // reports a fault in something it was never asked to fetch. One button, two subjects, two
+      // verdicts. (The case that taught this was the CRM export, folded into the account scrape
+      // until 2026-07; the feature is gone and the rule is not.)
       console.warn('[AIRS models] scan failed — the accounts are unaffected', e);
     } finally {
       setScanningModels(false);
@@ -425,7 +426,7 @@ export default function PortfolioOverviewPanel() {
       `Delete every scraped row for ${portefeuille}?\n\n`
       + 'Removes its returns, holdings, mutations, model weights, roster entry and model pairing. '
       + 'A refresh rebuilds them — but only from 1 January, so any earlier month is lost for good.\n\n'
-      + 'CRM records and the hidden-account decision are not touched.',
+      + 'The hidden-account decision is not touched.',
     );
     if (!ok) return;
     setDeletingRows((s) => new Set(s).add(portefeuille));

@@ -1,9 +1,9 @@
 """HOW FAST THE DATABASE IS GROWING, AND WHICH TABLES ARE DOING IT.
 
 ⚠⚠ IT MEASURES BYTES ON DISK, NOT ROWS WRITTEN, AND THAT CHOICE INVERTS THE ANSWER. The intuitive
-    instrumentation is "have each job count what it inserts", and it would rank `crm_relaties_refresh`
-    — which OVERWRITES its whole table, thousands of rows written and zero growth — above the
-    month-end price refresh. Several of these jobs are delete-then-insert snapshots or upserts, so
+    instrumentation is "have each job count what it inserts", and it would rank the AIRS model
+    scan — which delete-then-inserts every portfolio's positions, thousands of rows written and
+    zero growth — above the month-end price refresh. Several of these jobs are delete-then-insert snapshots or upserts, so
     rows written and disk used are different quantities. A row count also cannot see INDEXES or
     BLOAT, which on an 18 GB table are most of the cost.
 

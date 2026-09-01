@@ -26,6 +26,7 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { useRiskCopy } from './riskCopy';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf } from './asOfLine';
 import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
@@ -83,6 +84,7 @@ export default function VolatilityView({
   portfolioFetchedAt?: string | null;
   portfolioSource: SourceKey;
 }) {
+  const t = useRiskCopy();
   const [data, setData] = useState<PortfolioVolatility | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** ⚠ MONTHLY, ON REQUEST (2026-08-31) — see `FREQS`, whose first entry this must stay. */
@@ -203,7 +205,7 @@ export default function VolatilityView({
       ownTone: 'text-neg-300',
       bench: signed2(data.benchmark_worst_period_pct),
       info: <InfoTip className="ml-0.5" content={<AspectCard
-        what={`The single worst ${period} in the window, for each side.`}
+        what={t.vol.cards.worst.what}
         where={`Best was ${v(signed2(data.best_period_pct))} against `
           + `${v(signed2(data.benchmark_best_period_pct))}; `
           + `${v(`${data.negative_periods_pct?.toFixed(2)}%`)} of ${period}s were negative against `
@@ -220,7 +222,7 @@ export default function VolatilityView({
       ownTone: (data.return_ann_pct ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300',
       bench: signed2(data.benchmark_return_ann_pct),
       info: <InfoTip className="ml-0.5" content={<AspectCard
-        what={`What ${portfolioName} compounded at over the window, against what ${data.benchmark} did.`}
+        what={t.vol.cards.ret.what}
         where={where}
         when={when}
         worked={data.return_ann_pct == null ? '' : withWorked(
@@ -243,7 +245,7 @@ export default function VolatilityView({
       own: num2(data.sharpe),
       bench: num2(data.benchmark_sharpe),
       info: <InfoTip className="ml-0.5" content={<AspectCard
-        what="Return per unit of total volatility, up and down alike."
+        what={t.vol.cards.sharpe.what}
         where={where}
         when={when}
         worked={data.sharpe == null ? '' : withWorked(
@@ -264,7 +266,7 @@ export default function VolatilityView({
       own: num2(data.sortino),
       bench: num2(data.benchmark_sortino),
       info: <InfoTip className="ml-0.5" content={<AspectCard
-        what="The same ratio, over downside deviation instead of total volatility."
+        what={t.vol.cards.sortino.what}
         where={where}
         when={when}
         worked={data.sortino == null ? '' : withWorked(
@@ -300,11 +302,11 @@ export default function VolatilityView({
             to a "Weekly" control. A per-tile marker also could not survive naming the tiles after
             the book and the index: "BUSTELBERG OFFENSIEF VOLATILITY (ANN.)" wraps to three lines
             at 9px and breaks the row it is supposed to line up with. */}
-        <span className="text-[11px] text-fg-faint">· shown annualised</span>
+        <span className="text-[11px] text-fg-faint">{t.vol.shownAnnualised}</span>
       </div>
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
-      {!data && !error && <p className="text-xs text-fg-subtle">Computing volatility…</p>}
+      {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing}</p>}
       {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
 
       {data?.available && (

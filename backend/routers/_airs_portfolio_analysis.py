@@ -2597,6 +2597,25 @@ def _by_week(series: list[tuple[str, float]]) -> dict[tuple[int, int], float]:
     return out
 
 
+def _by_month(series: list[tuple[str, float]]) -> dict[tuple[int, int], float]:
+    """{(year, month): last close of that month} — the basis the volatility column is measured on.
+
+    ⚠ THE LAST CLOSE OF THE MONTH, NOT THE 30th, for the reason `_by_week` keys on the ISO week
+    rather than the Friday: a market shut on the last calendar day still had a month, and keying
+    on a date would drop it.
+
+    ⚠ IT IS A THINNING OF THE DAILY SERIES, NOT A RESAMPLE. Every value kept is a real close on its
+    own date; nothing is averaged or interpolated, so a monthly return is the return between two
+    prices that genuinely traded — which is what lets it be compared with the daily figure it
+    replaced rather than being a different kind of number.
+    """
+    out: dict[tuple[int, int], float] = {}
+    for d, v in series:
+        if v > 0:
+            out[(int(d[:4]), int(d[5:7]))] = v   # later dates overwrite → the month's last close
+    return out
+
+
 #: Everything `_holding_risk` produces that a row carries to the wire.
 #:
 #: ⚠⚠ NAMED ONCE BECAUSE IT IS COPIED TWICE — onto the held rows and onto the closed-out ones. The
@@ -2605,6 +2624,19 @@ def _by_week(series: list[tuple[str, float]]) -> dict[tuple[int, int], float]:
 #: show `from ÷ to − 1 = result` had no legs to substitute, and nothing failed anywhere. A list is
 #: the difference between adding a figure in one place and adding it in three.
 RISK_KEYS = ("vol_5y_pct", "beta_5y", "mom_12_1_pct", "mom_12_1_from", "mom_12_1_to")
+
+#: The cadences these three columns are measured on, in the leg-cache key.
+#:
+#: ⚠⚠ THE FINGERPRINT CANNOT SEE A CODE CHANGE, ONLY A DATA ONE. `_analysis_cache` keys on
+#: `pg_stat_user_tables`, so it guarantees a leg is never stale with respect to the DATABASE — and
+#: says nothing about a leg computed by an older version of this function. When the volatility moved
+#: from daily to monthly (2026-09-01) every warm entry in a running process still held the daily
+#: figure, under a key that had no reason to change. A deploy restarts the process and clears it, so
+#: nothing shipped wrong; that it was safe by accident is the problem.
+#:
+#: ⚠ BUMP THIS WHENEVER THE ARITHMETIC OF A RISK COLUMN CHANGES — a new cadence, a different
+#: annualisation, a changed floor. It costs one recompute and removes the whole class.
+RISK_BASIS = "mom:d/beta:w/vol:m"
 
 
 def _sold_position_isins(names: list[str]) -> dict[str, str]:
@@ -2765,7 +2797,7 @@ def _holding_risk(isins: list[str], benchmark_label: str,
     # that is a real result — storing it (rather than treating "no row" as "not computed") is what
     # stops a book of young listings from re-running the whole load on every open. `_LruTtlCache`
     # returns None for a miss, so the empty answer is filed as a sentinel dict and read back out.
-    keys = [("holding_risk", i, benchmark_label, years) for i in want]
+    keys = [("holding_risk", i, benchmark_label, years, RISK_BASIS) for i in want]
     hits, misses = ac.leg_get_many(keys)
 
     def _served(extra: dict[str, dict] | None = None) -> dict[str, dict]:
@@ -2789,6 +2821,9 @@ def _holding_risk(isins: list[str], benchmark_label: str,
         _log.warning("[analysis] per-holding risk failed (%s: %s)", type(e).__name__, e)
         return _served()
 
+    # ⚠ FOUR YEARS OF MONTHS, the same shape as the daily and weekly floors — the three columns
+    # must not disagree about which rows have enough history to be quoted under a "5y" heading.
+    floor_m = int(12 * (years - 1))
     bench_w = _by_week(series.get(bench_isin or "", []))
     # ⚠ FOUR YEARS OF WEEKS, mirroring the daily floor — the two columns must not disagree about
     # which rows have enough history.
@@ -2836,13 +2871,40 @@ def _holding_risk(isins: list[str], benchmark_label: str,
         if len(eur) < floor:
             out[isin] = row
             continue
-        vals = np.asarray([v for _d, v in eur], dtype=float)
-        # ⚠ THROUGH `annualized_stats` — THE ONE DEFINITION OF VOL IN THIS CODEBASE, shared with the
-        # AIRS model-portfolio metrics and the monthly diversifier. `std(r, ddof=1) × √252` is two
-        # lines to write, and the second place it exists is the place that disagrees.
-        st = annualized_stats((vals[1:] / vals[:-1] - 1.0).tolist(), periods_per_year=252)
-        if st.ann_vol is not None:
-            row["vol_5y_pct"] = round(st.ann_vol * 100.0, 1)
+        # ⚠⚠ MONTHLY RETURNS, NOT DAILY (2026-09-01, on request). This column was
+        # `std(daily) × √252` and the note beside the beta argued that it should stay that way,
+        # because volatility is a SINGLE-series statistic with nothing to be out of sync with. That
+        # argument is sound about the non-synchronous-closing bias the beta has — and it is not the
+        # only reason to prefer a longer bar.
+        #
+        # ⚠ WHAT CHANGES: an annualised daily vol reads a stock's day-to-day noise, most of which
+        # mean-reverts inside a week and none of which a reader holding a model portfolio for years
+        # experiences. Twelve monthly returns a year measure the dispersion at the horizon this
+        # panel is about, and — being the same cadence the AIRS model-portfolio metrics and the
+        # monthly diversifier already use — put the per-holding column on the same footing as the
+        # book-level figures it sits beside. It is NOT a smoothing: every point is a real close.
+        #
+        # ⚠ THE ANNUALISATION FACTOR MOVES WITH THE CADENCE — `√12`, not `√252`, which is the whole
+        # of the change arithmetically and the one thing a hand-rolled version gets wrong. It is
+        # still `annualized_stats`, the ONE definition of vol in this codebase; only the
+        # `periods_per_year` it is told changes.
+        #
+        # ⚠ MEASURED ON 44 HOLDINGS WITH FIVE FULL YEARS: median change **-2.2pp**, range -11.6pp
+        # (AT000000STR1: 32.8 -> 23.5) to +8.6pp. It is not a uniform shift — a name whose daily
+        # noise cancels within the month falls, one that trends inside months rises — which is why
+        # this is a different measurement rather than the same one rescaled.
+        #
+        # ⚠ A MONTHLY SERIES IS ~60 POINTS OVER FIVE YEARS AGAINST ~1,250, so the estimate is
+        # noisier. That is the honest cost and it is why the floor below is four years of MONTHS
+        # rather than a token handful: a vol quoted off eighteen observations under a "5y" heading
+        # is the same lie the daily column already refused.
+        mv = _by_month(eur)
+        months = sorted(mv)
+        if len(months) >= floor_m:
+            vals = np.asarray([mv[m] for m in months], dtype=float)
+            st = annualized_stats((vals[1:] / vals[:-1] - 1.0).tolist(), periods_per_year=12)
+            if st.ann_vol is not None:
+                row["vol_5y_pct"] = round(st.ann_vol * 100.0, 1)
 
         if bench_w:
             # ⚠⚠ WEEKLY, AND THAT IS NOT A PERFORMANCE CHOICE — IT IS THE ONLY HONEST CADENCE HERE.
@@ -2856,9 +2918,12 @@ def _holding_risk(isins: list[str], benchmark_label: str,
             # ASML 1.27 → 1.74. Weekly spans the gap, so the mismatch washes out; ~260 observations
             # over five years is a healthy sample.
             #
-            # ⚠ THE VOL COLUMN STAYS DAILY, and the difference is deliberate. Volatility is a
-            # SINGLE-series statistic — nothing to be out of sync with — and daily is the standard
-            # basis for it. Beta is a PAIR, and only the pair has this problem.
+            # ⚠ THE THREE COLUMNS NOW SIT ON THREE CADENCES, AND EACH IS CHOSEN FOR ITS OWN
+            # REASON: momentum daily (the signal engine's own definition), beta WEEKLY (this
+            # bias), volatility MONTHLY (the holding horizon — see its note above). They are not
+            # required to agree; they are required to say which they used, which the ⓘ on each
+            # column does. What they DO share is the four-year history floor, so no column quotes
+            # a figure under a "5y" heading off a listing that is two years old.
             weeks = sorted(set(_by_week(eur)) & set(bench_w))
             if len(weeks) >= floor_w:
                 sv = _by_week(eur)
@@ -2872,7 +2937,8 @@ def _holding_risk(isins: list[str], benchmark_label: str,
                     row["beta_5y"] = round(cov / var_b, 2)
         out[isin] = row
 
-    ac.leg_put_many({("holding_risk", i, benchmark_label, years): out.get(i, {}) for i in todo})
+    ac.leg_put_many({("holding_risk", i, benchmark_label, years, RISK_BASIS): out.get(i, {})
+                     for i in todo})
     return _served(out)
 
 

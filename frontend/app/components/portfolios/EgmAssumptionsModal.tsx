@@ -5,6 +5,7 @@ import {
   dividendYieldWorking, estimateCagrWorking, medianPEWorking,
 } from './egmInputs';
 import { type MetricRow } from './quickValuation';
+import { useDeepValuationCopy } from './deepValuationCopy';
 
 /**
  * The raw data behind the assumption hints — the consensus EPS series the "analysts" CAGR is taken
@@ -37,13 +38,15 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
   const n2 = (v: number | null) => (v == null ? '—' : v.toFixed(2));
   const n1 = (v: number | null) => (v == null ? '—' : v.toFixed(1));
 
+  const t = useDeepValuationCopy();
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"
       onClick={onClose} role="presentation">
       <div className="bg-card rounded-xl border border-neutral-800/40 shadow-xl w-full max-w-4xl h-[84vh] flex flex-col"
         onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="flex items-baseline gap-3 px-6 py-4 border-b border-neutral-800/40">
-          <h2 className="text-fg-strong font-medium">Assumptions — the data behind the defaults</h2>
+          <h2 className="text-fg-strong font-medium">{t.egmModal.title}</h2>
           {name && <span className="text-sm text-fg-soft truncate max-w-[28ch]" title={name}>{name}</span>}
           <span className="text-[12px] font-mono text-fg-faint">{isin}</span>
           <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
@@ -56,26 +59,24 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
           {/* ── Growth rate ─────────────────────────────────────────────────────────── */}
           <section className="space-y-2 min-w-0">
             <div className="flex items-baseline gap-2 flex-wrap">
-              <h3 className="text-sm font-semibold text-fg-strong">Growth rate — “analysts”</h3>
+              <h3 className="text-sm font-semibold text-fg-strong">{t.egmModal.growthSection}</h3>
               <span className="font-mono text-sm text-accent-400">
                 {cagr.cagr == null ? 'n/a' : `${(cagr.cagr * 100).toFixed(1)}%`}
               </span>
             </div>
             <p className="text-[12px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
-              The growth the consensus EPS estimates imply, first future period to last.
-              ⚠ Not a published long-term rate — GuruFocus files that as a single number with no
-              date, so it never reaches our database.
+              {t.egmModal.growthNote}
             </p>
             {cagr.points.length === 0 ? (
-              <p className="text-xs text-warn-300 break-words whitespace-normal max-w-[80ch]">No consensus EPS estimates ingested.</p>
+              <p className="text-xs text-warn-300 break-words whitespace-normal max-w-[80ch]">{t.egmModal.noEstimates}</p>
             ) : (
               <>
                 <div className="overflow-auto rounded-lg border border-neutral-800/40 max-w-full">
                   <table className="w-full text-xs">
                     <thead className="bg-page">
                       <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
-                        <th className="px-3 py-1.5 font-medium text-left">Fiscal period</th>
-                        <th className="px-3 py-1.5 font-medium text-right">EPS estimate{ccy && ` (${currency})`}</th>
+                        <th className="px-3 py-1.5 font-medium text-left">{t.egmModal.colFiscalPeriod}</th>
+                        <th className="px-3 py-1.5 font-medium text-right">{t.egmModal.colEpsEstimate}{ccy && ` (${currency})`}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -87,7 +88,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                               {p.date.slice(0, 7)}
                               {anchor && cagr.cagr != null && (
                                 <span className="text-fg-faint font-normal ml-2">
-                                  {i === 0 ? 'from' : 'to'}
+                                  {i === 0 ? t.egmModal.from : t.egmModal.to}
                                 </span>
                               )}
                             </td>
@@ -110,9 +111,9 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                   // Two points are needed, and neither may be a loss — the root of a negative
                   // ratio is not a number.
                   <p className="text-[12px] text-warn-300 break-words whitespace-normal max-w-[80ch]">
-                    No CAGR: {cagr.points.length < 2
-                      ? 'only one future estimate is ingested.'
-                      : 'the first or last estimate is not positive, so there is nothing to compound out of.'}
+                    {t.egmModal.noCagrPrefix}{cagr.points.length < 2
+                      ? t.egmModal.noCagrOnePoint
+                      : t.egmModal.noCagrNonPositive}
                   </p>
                 )}
               </>
@@ -122,26 +123,25 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
           {/* ── Exit P/E ────────────────────────────────────────────────────────────── */}
           <section className="space-y-2 min-w-0">
             <div className="flex items-baseline gap-2 flex-wrap">
-              <h3 className="text-sm font-semibold text-fg-strong">Exit P/E — “5y median P/E”</h3>
+              <h3 className="text-sm font-semibold text-fg-strong">{t.egmModal.peSection}</h3>
               <span className="font-mono text-sm text-accent-400">
                 {pe.median == null ? 'n/a' : `${pe.median.toFixed(1)}x`}
               </span>
             </div>
             <p className="text-[12px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
-              Each year’s closing price over that year’s EPS excluding non-recurring items, then the
-              median. Derived — GuruFocus’s own P/E line isn’t ingested.
+              {t.egmModal.peNote}
             </p>
             {pe.rows.length === 0 ? (
-              <p className="text-xs text-warn-300 break-words whitespace-normal max-w-[80ch]">No price / EPS history ingested.</p>
+              <p className="text-xs text-warn-300 break-words whitespace-normal max-w-[80ch]">{t.egmModal.noPriceHistory}</p>
             ) : (
               <div className="overflow-auto rounded-lg border border-neutral-800/40 max-w-full">
                 <table className="w-full text-xs">
                   <thead className="bg-page">
                     <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
-                      <th className="px-3 py-1.5 font-medium text-left">Fiscal year</th>
-                      <th className="px-3 py-1.5 font-medium text-right">Year-end price{ccy && ` (${currency})`}</th>
-                      <th className="px-3 py-1.5 font-medium text-right">EPS w/o NRI</th>
-                      <th className="px-3 py-1.5 font-medium text-right">P/E</th>
+                      <th className="px-3 py-1.5 font-medium text-left">{t.egmModal.colFiscalYear}</th>
+                      <th className="px-3 py-1.5 font-medium text-right">{t.egmModal.colYearEndPrice}{ccy && ` (${currency})`}</th>
+                      <th className="px-3 py-1.5 font-medium text-right">{t.egmModal.colEpsNri}</th>
+                      <th className="px-3 py-1.5 font-medium text-right">{t.egmModal.colPE}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -156,7 +156,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                           {/* ⚠ A loss year is SHOWN and excluded, not hidden: its negative multiple
                               would drag the median down and read as "historically cheap". */}
                           {r.pe == null
-                            ? <span className="text-fg-faint" title="Excluded — no positive EPS, so no meaningful multiple.">excluded</span>
+                            ? <span className="text-fg-faint" title={t.egmModal.excludedTitle}>{t.egmModal.excluded}</span>
                             : `${n1(r.pe)}x`}
                         </td>
                       </tr>
@@ -165,7 +165,8 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                   <tfoot>
                     <tr className="border-t border-neutral-800/40 bg-page font-semibold text-fg-strong">
                       <td className="px-3 py-1.5" colSpan={3}>
-                        Median of {pe.rows.filter((r) => r.used).length} usable year(s)
+                        {t.egmModal.medianOfUsable(
+                          String(pe.rows.filter((r) => r.used).length))}
                       </td>
                       <td className="px-3 py-1.5 text-right font-mono">
                         {pe.median == null ? '—' : `${n1(pe.median)}x`}
@@ -180,27 +181,25 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
           {/* ── Dividend yield ──────────────────────────────────────────────────────── */}
           <section className="space-y-2 min-w-0">
             <div className="flex items-baseline gap-2 flex-wrap">
-              <h3 className="text-sm font-semibold text-fg-strong">Dividend yield — “reported”</h3>
+              <h3 className="text-sm font-semibold text-fg-strong">{t.egmModal.yieldSection}</h3>
               <span className="font-mono text-sm text-accent-400">
                 {dy.chosen == null ? 'n/a' : `${dy.chosen.pct.toFixed(2)}%`}
               </span>
             </div>
             <p className="text-[12px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
-              ⚠ Not an average — the single most recent observation, picked by date across the
-              annual and quarterly rows (both carry the same annualised measure). It is trailing
-              dividends over the price at that period end, so it ages as the price moves.
+              {t.egmModal.yieldNote}
             </p>
             {dy.rows.length === 0 ? (
-              <p className="text-xs text-warn-300 break-words whitespace-normal max-w-[80ch]">No dividend-yield line ingested — the model assumes a non-payer at 0%.</p>
+              <p className="text-xs text-warn-300 break-words whitespace-normal max-w-[80ch]">{t.egmModal.noYieldLine}</p>
             ) : (
               <>
                 <div className="overflow-auto rounded-lg border border-neutral-800/40 max-w-full">
                   <table className="w-full text-xs">
                     <thead className="bg-page">
                       <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
-                        <th className="px-3 py-1.5 font-medium text-left">Period end</th>
-                        <th className="px-3 py-1.5 font-medium text-left">Cadence</th>
-                        <th className="px-3 py-1.5 font-medium text-right">Dividend yield %</th>
+                        <th className="px-3 py-1.5 font-medium text-left">{t.egmModal.colPeriodEnd}</th>
+                        <th className="px-3 py-1.5 font-medium text-left">{t.egmModal.colCadence}</th>
+                        <th className="px-3 py-1.5 font-medium text-right">{t.egmModal.colDividendYield}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -208,10 +207,11 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                         <tr key={`${r.code}-${r.date}`}
                           className={`border-t border-neutral-800/40 ${r.chosen ? 'bg-overlay/5' : ''}`}>
                           <td className={`px-3 py-1 ${r.chosen ? 'text-fg-strong font-medium' : 'text-fg-soft'}`}>
-                            {r.date.slice(0, 10)}{r.chosen && <span className="text-accent-400 ml-2">← in use</span>}
+                            {r.date.slice(0, 10)}{r.chosen && <span className="text-accent-400 ml-2">{t.egmModal.inUse}</span>}
                           </td>
                           <td className="px-3 py-1 text-fg-muted">
-                            {r.code.startsWith('quarterly') ? 'quarterly' : 'annual'}
+                            {r.code.startsWith('quarterly')
+                              ? t.egmModal.quarterly : t.egmModal.annual}
                           </td>
                           <td className={`px-3 py-1 text-right font-mono ${r.chosen ? 'text-fg-strong font-medium' : 'text-fg-soft'}`}>
                             {r.pct.toFixed(2)}%
@@ -225,7 +225,8 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                   // ⚠ Said, not silently truncated — a table that stops at eight without saying so
                   // reads as the whole record.
                   <p className="text-[11px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
-                    Showing the {MAX_YIELD_ROWS} most recent of {dy.rows.length} observations.
+                    {t.egmModal.showingMostRecent(String(MAX_YIELD_ROWS),
+                      String(dy.rows.length))}
                   </p>
                 )}
               </>

@@ -271,16 +271,6 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              "valuation — if holdings read a day behind, this time is the first thing to check.",
     ),
     JobSpec(
-        id="crm_relaties_refresh",
-        label="CRM 'Alle relaties' refresh",
-        fills="airs_crm_relatie (full table replace, not an accumulation)",
-        cadence="Every day, 11:00 Amsterdam",
-        trigger={"day_of_week": "mon-sun", "hour": 11, "minute": 0,
-                 "timezone": "Europe/Amsterdam"},
-        options={"coalesce": True, "misfire_grace_time": 3600},
-        max_age_hours=30,
-    ),
-    JobSpec(
         id="table_size_sample",
         label="Database size snapshot",
         fills="table_size_sample — one row per public table",

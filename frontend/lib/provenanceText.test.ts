@@ -28,3 +28,27 @@ describe('trimStop', () => {
     expect(trimStop('')).toBe('');
   });
 });
+
+
+/**
+ * ⚠⚠ THE `copied` BRANCH SUPPLIES ITS OWN PERIOD TOO, SINCE 2026-09-01. It used to ignore `how`
+ * entirely — a copied figure has no arithmetic to explain — which left nowhere to put the caveat a
+ * reader still needs about a number we did NOT compute, and the only way to surface one was to
+ * mis-tag the field as a formula. The Return tile did exactly that: "A formula on the data: AIRS's
+ * own cumulatief_rendement…" over a figure read straight off the sheet.
+ *
+ * Now it reads "…not computed here. {how}." — so a `how` carrying its own full stop renders "..",
+ * the same invisible defect this file already guards on the formula branch.
+ */
+describe('a copied caveat obeys the same full-stop rule', () => {
+  it('the Return tile’s own string is punctuation-safe', () => {
+    const how = 'Flow-aware and includes income, over the calendar year — a deposit does not flatter it.';
+    expect(trimStop(how)).toBe(
+      'Flow-aware and includes income, over the calendar year — a deposit does not flatter it');
+  });
+
+  it('an em dash before the stop is left alone', () => {
+    expect(trimStop('read as reported — nothing is recomputed.'))
+      .toBe('read as reported — nothing is recomputed');
+  });
+});

@@ -210,11 +210,6 @@ class TestManagementDashboardForUsers:
         assert _run(monkeypatch, "POST", "/api/airs/vermogen/refresh", "user") == (403, False)
         assert _run(monkeypatch, "POST", "/api/airs/portfolios/BUS_X/refresh", "user") == (403, False)
 
-    def test_client_crm_records_stay_admin_only(self, monkeypatch):
-        """A genuine read, but of relations — a different subject from the portfolios page, and it
-        sits inside the now-readable /api/airs/ prefix."""
-        assert _run(monkeypatch, "GET", "/api/airs/crm-relaties", "user") == (403, False)
-
     def test_deleting_an_account_is_admin_only(self, monkeypatch):
         assert _run(monkeypatch, "DELETE", "/api/airs/portfolios/BUS_X", "user") == (403, False)
 

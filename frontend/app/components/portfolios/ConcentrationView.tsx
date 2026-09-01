@@ -27,6 +27,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { useRiskCopy } from './riskCopy';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf, dayRange } from './asOfLine';
 import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
@@ -89,6 +90,7 @@ export default function ConcentrationView({
   portfolioFetchedAt?: string | null;
   portfolioSource: SourceKey;
 }) {
+  const t = useRiskCopy();
   const [data, setData] = useState<PortfolioConcentration | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -154,17 +156,17 @@ export default function ConcentrationView({
   return (
     <div className="space-y-3">
       {error && <p className="text-xs text-neg-300">{error}</p>}
-      {!data && !error && <p className="text-xs text-fg-subtle">Computing concentration…</p>}
+      {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing}</p>}
       {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
 
       {data?.available && (
         <>
           <div className="flex flex-wrap gap-2">
-            <Tile label="Effective positions"
+            <Tile label={t.conc.effective}
               value={data.effective_positions == null ? '—' : data.effective_positions.toFixed(2)}
               sub={`of ${data.issuers} companies held`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="How many equally-sized positions this book behaves like."
+                what={t.conc.cards.effective.what}
                 where={where}
                 when={whenBook}
                 worked={data.hhi == null || data.effective_positions == null ? '' : withWorked(
@@ -183,7 +185,7 @@ export default function ConcentrationView({
             <Tile label="Top 10" value={pct2(data.top10_pct)}
               sub={`${pct2(data.top10_of_book_pct)} of the whole book`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="The share of the stock sleeve in its ten largest companies."
+                what={t.conc.cards.top10.what}
                 where={where}
                 when={whenBook}
                 worked={data.top10_pct == null ? '' : withWorked(
@@ -201,10 +203,10 @@ export default function ConcentrationView({
                   + 'what compares across books; the line beneath is of the whole book including '
                   + `cash and funds (the sleeve is ${pct2(data.stocks_pct)} of it). A book that is `
                   + '30% cash really is less concentrated in absolute terms.'} />} />} />
-            <Tile label="Largest position" value={pct2(data.top1_pct)} tone="text-fg-strong"
+            <Tile label={t.conc.largest} value={pct2(data.top1_pct)} tone="text-fg-strong"
               sub={rows[0]?.name}
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="The single biggest company, as a share of the sleeve."
+                what={t.conc.cards.largest.what}
                 where={rows[0]
                   ? `${v(rows[0].name)} — ${v(data.benchmark)} holds ${v(pct2(rows[0].benchmark_pct))} of the same company. Weights from ${v(sourceLabel(portfolioSource))}.`
                   : where}

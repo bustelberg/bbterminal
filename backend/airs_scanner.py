@@ -530,17 +530,6 @@ def download_model_sync(portfolio_name: str, datum_van: str, datum_tot: str) -> 
     return _download_report_sync(portfolio_name, datum_van, datum_tot, code)
 
 
-# CRM → Relaties → Alle relaties Excel export. There is NO direct export URL —
-# the "Naar XLS" button runs an onclick that sets a hidden `toXls=1` field on the
-# `editForm` and submits it (a POST). So we open the list page and click that
-# link, capturing the download (see `_AirsSession.download_via_form`).
-#   - AIRS_CRM_RELATIES_URL overrides the list page to open.
-#   - AIRS_CRM_XLS_SELECTOR overrides the export-link selector (default matches
-#     the <a> whose <img src=".../xls.gif"> is the "Naar XLS" icon).
-CRM_RELATIES_PATH = "/CRM_nawList.php?sql=all"
-CRM_XLS_LINK_SELECTOR = "a:has(img[src*='xls'])"
-
-
 def _html_title(text: str) -> str:
     """Best-effort <title> extraction from an HTML string."""
     import re  # noqa: PLC0415
@@ -559,16 +548,11 @@ def _classify_html_page(text: str) -> str:
             or 'id="password"' in low or "login.php" in low):
         return ("the LOGIN page — the session expired and the silent re-login also "
                 "failed (check BROKER_USERNAME / BROKER_PASSWORD)")
-    if "crm_nawlist" in low or "relatie" in low or "nawlist" in low:
-        return ("the CRM relaties LIST page (HTML) — the 'Naar XLS' export click "
-                "didn't yield a file download. The export link selector may not "
-                "match (override AIRS_CRM_XLS_SELECTOR) or the form submit didn't "
-                "trigger a download")
     return "an unrecognised HTML page (not the Excel export)"
 
 
 def _describe_non_excel(resp: "AirsHttpResponse") -> str:
-    """Build an expressive, single-line diagnostic for a CRM reply that wasn't
+    """Build an expressive, single-line diagnostic for a download reply that wasn't
     the expected .xls — what URL we hit, the HTTP status / content-type, the page
     title, our best guess at what the page is, and a body excerpt."""
     text = resp.body.decode("utf-8", "replace")
@@ -581,32 +565,6 @@ def _describe_non_excel(resp: "AirsHttpResponse") -> str:
         f"content_type={resp.content_type!r} bytes={len(resp.body)} "
         f"page_title={title!r} — looks like {kind}. body_excerpt={excerpt!r}"
     )
-
-
-def download_crm_relaties_sync() -> bytes:
-    """Download the CRM 'Alle relaties' Excel export via the persistent session.
-    Opens the list page and clicks its "Naar XLS" button (a form submit — there's
-    no fetchable export URL), then returns the raw file bytes (stored unparsed).
-    Raises with an expressive diagnostic if the result isn't Excel (login bounce /
-    IP block / page changed) or is too small — so the failure says *where* it
-    went wrong."""
-    path = (os.environ.get("AIRS_CRM_RELATIES_URL", "").strip() or CRM_RELATIES_PATH)
-    if not path.startswith(("http://", "https://")):
-        path = f"{BASE_URL}/{path.lstrip('/')}"
-    selector = os.environ.get("AIRS_CRM_XLS_SELECTOR", "").strip() or CRM_XLS_LINK_SELECTOR
-    resp = _session.download_via_form(path, selector)
-    content = resp.body
-
-    if len(content) < 100:
-        raise RuntimeError(
-            f"CRM relaties response too small ({len(content)} bytes) — "
-            f"{_describe_non_excel(resp)}"
-        )
-    if _looks_like_html(content):
-        raise RuntimeError(
-            "CRM relaties returned HTML, not Excel. " + _describe_non_excel(resp)
-        )
-    return content
 
 
 # ── The Front-Office client selection, and the three filters that define WHICH portfolios ──────
@@ -952,7 +910,8 @@ def parse_portfolio_full_name(edit_html: str) -> str | None:
 # just to un-truncate the names the list clips.
 #
 # It is a FORM SUBMIT (the link's onclick sets a hidden `toXls=1` and submits `editForm`),
-# not a fetchable URL — hence `download_via_form`, the same path the CRM export uses.
+# not a fetchable URL — hence `download_via_form`, which since the CRM export was retired
+# (2026-09-01) exists for this one caller.
 MODEL_PORTFOLIO_XLS_SELECTOR = 'a[onclick*="toXls"]'
 
 
