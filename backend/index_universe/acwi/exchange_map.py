@@ -14,7 +14,12 @@ import os
 from dataclasses import dataclass
 
 
-_US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE BZX"}
+# ⚠ `CBOE` AND `CBOE BZX` ARE BOTH HERE BECAUSE BOTH SPELLINGS REACH THIS MODULE. `_build_symbol`
+# in `ingest/earnings/_common.py` and `_gf_listing`'s own US set both say `CBOE`; this one said
+# only `CBOE BZX`, so a Cboe-listed company was US enough to be addressed as a bare ticker and not
+# US enough to be considered covered. No company in the database carries either code today, which
+# is the only reason that never showed.
+_US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE", "CBOE BZX"}
 
 # Map iShares exchange names → GuruFocus exchange prefixes
 _ISHARES_TO_GF: dict[str, str] = {
@@ -387,14 +392,33 @@ FEASIBLE_GF_EXCHANGES = frozenset([
 ])
 
 
+#: Exchange codes GuruFocus's own `isin/{ISIN}` endpoint returns that differ from the codes used
+#: everywhere else here (`gurufocus_exchange.exchange_code`, `_build_symbol`, this file's own set).
+#:
+#: ⚠⚠ IT LIVES HERE NOW, WITH THE COVERAGE SET IT HAS TO AGREE WITH (moved 2026-09-01). It used to
+#: sit in `routers/_gf_listing.py`, whose docstring already warned it "is the first place to look
+#: when a US listing mysteriously reads as out-of-coverage" — and then
+#: `is_gf_subscribed_exchange`, one module away, did not apply it. `NAS` therefore answered False:
+#: harmless while only the listing picker asked (it normalises first), and a live hazard the moment
+#: `ingest.earnings.refuse_unsubscribed` started gating vendor calls on this function, because a
+#: NASDAQ company addressed by the vendor's own spelling would have been refused as unsubscribed.
+GF_EXCHANGE_ALIASES = {"NAS": "NASDAQ"}
+
+
 def is_gf_subscribed_exchange(exchange_code: str | None) -> bool:
     """True if our GuruFocus subscription covers this exchange — so a missing
     market cap (or price) is a data gap, NOT a coverage gap. US exchanges are
     represented as '' inside FEASIBLE_GF_EXCHANGES, so they're checked against
     `_US_EXCHANGES`; every other exchange is matched by its code directly.
-    Unknown/empty exchange → False (we can't claim coverage)."""
+    Unknown/empty exchange → False (we can't claim coverage).
+
+    ⚠ IT NORMALISES FIRST. The same venue reaches this by several spellings — `NAS` from the
+    vendor's `isin/` payload, `NASDAQ` from our own `gurufocus_exchange` row — and a coverage
+    answer that depends on which caller spelled it is not an answer. See `GF_EXCHANGE_ALIASES`.
+    """
     if not exchange_code:
         return False
-    if exchange_code in _US_EXCHANGES:
+    code = GF_EXCHANGE_ALIASES.get(exchange_code.strip().upper(), exchange_code.strip().upper())
+    if code in _US_EXCHANGES:
         return True
-    return exchange_code in FEASIBLE_GF_EXCHANGES
+    return code in FEASIBLE_GF_EXCHANGES

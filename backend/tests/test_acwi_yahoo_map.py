@@ -41,9 +41,14 @@ class TestTheThreeThatAreNotObvious:
         """⚠⚠ `Nasdaq Omx Nordic` covers Stockholm, Helsinki and Copenhagen — three Yahoo suffixes
         behind one exchange string. The row's country is what separates them, and guessing would
         put a Swedish bank on a Danish ticker that may well exist."""
-        assert yahoo_symbol("VOLV B", "Nasdaq Omx Nordic", "Sweden") == "VOLV B.ST"
+        # ⚠⚠ THE SHARE CLASS IS A HYPHEN, AND THIS TEST ASSERTED A SPACE UNTIL 2026-09-01. It
+        # expected `VOLV B.ST` and `NOVO B.CO` — symbols that exist nowhere. Checked against
+        # `asset_execution`: `VOLV-B.ST` is AB Volvo and `NOVO-B.CO` is Novo Nordisk, both held and
+        # priced, while the spaced spellings match no row at all. The test was green because it
+        # pinned the builder's output rather than anything the output has to join to.
+        assert yahoo_symbol("VOLV B", "Nasdaq Omx Nordic", "Sweden") == "VOLV-B.ST"
         assert yahoo_symbol("NOKIA", "Nasdaq Omx Nordic", "Finland") == "NOKIA.HE"
-        assert yahoo_symbol("NOVO B", "Nasdaq Omx Nordic", "Denmark") == "NOVO B.CO"
+        assert yahoo_symbol("NOVO B", "Nasdaq Omx Nordic", "Denmark") == "NOVO-B.CO"
 
     def test_a_nordic_row_with_no_country_is_refused(self):
         assert yahoo_symbol("NOKIA", "Nasdaq Omx Nordic", "") is None

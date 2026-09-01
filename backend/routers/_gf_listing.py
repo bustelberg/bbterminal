@@ -58,7 +58,12 @@ from typing import NamedTuple
 # `FEASIBLE_GF_EXCHANGES`). Confirmed by probing: the endpoint returns NAS for
 # Nasdaq, while symbols are built as bare tickers for NASDAQ and the exchange row
 # is keyed NASDAQ. NYSE / AMEX / OTCPK / XTER / MIL / TSE / XSWX already agree.
-GF_EXCHANGE_ALIASES = {"NAS": "NASDAQ"}
+#
+# ⚠⚠ RE-EXPORTED, NOT DEFINED (2026-09-01). It now lives beside `FEASIBLE_GF_EXCHANGES`, which is
+# the set it exists to reconcile with — `is_gf_subscribed_exchange` needs the same aliasing and did
+# not have it, so `NAS` read as out-of-coverage there while reading fine here. Two copies of a
+# bridge is how the two sides of it drift.
+from index_universe.acwi.exchange_map import GF_EXCHANGE_ALIASES  # noqa: E402
 
 # GuruFocus's USA region, straight from its own `exchange_list`:
 #     NAS  NYSE  OTCPK  OTCBB  AMEX  ARCA  IEXG  BATS  GREY

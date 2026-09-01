@@ -174,8 +174,11 @@ class TestPickListing:
         assert pick(list(reversed(cands)), "XYZ", "EUR").listing == pick(cands, "XYZ", "EUR").listing
 
     def test_only_unsubscribed_listings(self):
-        # LSE + Vienna: real listings, but GuruFocus will 403 both.
-        cands = [{"symbol": "TYT", "exchange": "LSE"}, {"symbol": "TOM", "exchange": "WBO"}]
+        # ⚠ WAS `LSE + WBO` UNTIL 2026-09-01, on the belief GuruFocus would 403 both. Vienna turned
+        # out to be covered — VERBUND's vendor price history agrees with our own independent series
+        # on 75 of 75 periods — so `WBO` joined `FEASIBLE_GF_EXCHANGES` and this pair stopped being
+        # an example of the thing it was testing. LSE and India are the genuinely refused ones.
+        cands = [{"symbol": "TYT", "exchange": "LSE"}, {"symbol": "TOM", "exchange": "NSE"}]
         assert pick(cands, "TYT", "GBP").status == "unsubscribed"
 
     def test_empty_is_not_found(self):

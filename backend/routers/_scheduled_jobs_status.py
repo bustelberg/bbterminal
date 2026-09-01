@@ -140,7 +140,12 @@ def build_rows(
             status, why = "missing", "the scheduler is not running in this process"
         elif not r:
             status, why = "missing", "declared, but not registered on the running scheduler"
-        elif not names:
+        # ⚠⚠ GATED ON OBSERVABILITY, NOT ON `names` — the same conflation as the `observable` field
+        # below, and it has to move with it. `names` widened to carry the job's own id for anything
+        # the gap scan can record, so a job that publishes NO evidence and records NOTHING stopped
+        # reaching this branch and fell through to the one under it, which tells the reader the job
+        # "DOES write a durable row" — the opposite of true, stated confidently.
+        elif not (spec.evidence or spec.records):
             status, why = ("unknown",
                            "this job leaves no durable record — its outcome is only in the logs")
         elif run is None:
@@ -239,7 +244,14 @@ def build_rows(
             # only ok/error would render them identically.
             "last_detail": (run.get("detail") or run.get("error_summary")) if run else None,
             "last_summary": run.get("summary") if run else None,
-            "observable": bool(names),
+            # ⚠⚠ "CAN WE SEE THIS JOB **RUN**", WHICH IS NOT "is there a name to look under".
+            # It read `bool(names)`, and that was the same question until `names` widened to carry
+            # the job's own id for anything the gap scan can record (see the ⚠⚠ above). A MISSED
+            # row is evidence a tick did NOT happen; it makes absences visible, not runs. So a job
+            # that records nothing and publishes no evidence became `observable: True` on the
+            # strength of a row that can only ever say "this did not run" — which reads on the page
+            # as instrumentation it does not have.
+            "observable": bool(spec.evidence or spec.records),
             # ⚠ WHETHER "Run now" EXISTS FOR THIS ROW, from the body registry rather than assumed.
             # A button rendered for a job with no body is a control that 404s on press, which is
             # worse than no button — so the absence is data, not an oversight.
