@@ -361,6 +361,20 @@ FEASIBLE_GF_EXCHANGES = frozenset([
     # exchange), same as India. Continental Europe is covered.
     "XTER", "XPAR", "XAMS", "XBRU", "XLIS", "MIL", "XMAD", "XSWX",
     "OSTO", "OCSE", "OSL", "OHEL", "WAR", "XPRA", "ATH", "BUD", "IST",
+    # ⚠⚠ VIENNA AND FRANKFURT WERE MISSING, AND THE OMISSION COST DATA (added 2026-09-01).
+    # Every other continental venue was here, so these two read as "unsubscribed" — which meant
+    # three companies holding a total of **53,879** `metric_data` rows were treated as outside the
+    # subscription: VERBUND AG (39,523), Erste Group Bank (13,894) and Verisure (462). The
+    # `refuse_unsubscribed` gate added the same day would have stopped refreshing all three.
+    # ⚠ THE EVIDENCE IS VERBUND: its GuruFocus price history and our own independent yfinance
+    # series **agree on 75 of 75 periods** (`ingest.earnings.price_sanity`). A region GuruFocus does
+    # not sell us cannot produce that — Diploma, genuinely unsubscribed on the LSE, disagreed on 10
+    # of 25. So the vendor does cover these; this map did not.
+    # ⚠ NOT PROBED LIKE THE ORIGINALS. The rest of this set was built by calling every exchange and
+    # reading the 403s; these two are inferred from data we already hold, which costs no quota but
+    # is one step weaker. If either ever starts returning "unsubscribed", that is the thing to
+    # re-check first.
+    "WBO", "FRA",
     # Asia (East / SE / South)
     # NOTE: India (NSE, BOM) is NOT here — GuruFocus returns
     # "403 unsubscribed region [India]" for it, so we have no price/mktcap/ISIN

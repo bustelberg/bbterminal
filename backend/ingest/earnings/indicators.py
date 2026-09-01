@@ -21,8 +21,8 @@ from ingest.staleness import is_cache_fresh
 
 from ._api_client import _api_request, _build_api_url, _mask_url
 from ._common import (
-    INDICATOR_KEYS,
     EarningsResult,
+    INDICATOR_KEYS,
     _build_symbol,
     _coerce_float,
     _ensure_bucket,
@@ -32,6 +32,7 @@ from ._common import (
     _upload_to_storage,
     _upsert_metric_rows,
     _yyyy_mm_to_month_end,
+    refuse_unsubscribed,
 )
 
 
@@ -166,6 +167,14 @@ def fetch_indicators(
 
     keys = indicator_keys or INDICATOR_KEYS
     result = EarningsResult(source="indicators")
+
+    # ⚠ BEFORE ANYTHING ELSE, INCLUDING THE CACHE READ. An unsubscribed exchange must not
+    # reach the vendor, and must not resurrect a payload an earlier unguarded run cached.
+    refusal = refuse_unsubscribed(exchange, "indicators")
+    if refusal is not None:
+        if on_log:
+            on_log(refusal.error)
+        return refusal
     _ensure_bucket(supabase)
     symbol = _build_symbol(ticker, exchange)
 

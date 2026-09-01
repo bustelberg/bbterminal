@@ -27,6 +27,7 @@ from ._common import (
     _upload_to_storage,
     _upsert_metric_rows,
     _yyyy_mm_to_month_end,
+    refuse_unsubscribed,
 )
 
 
@@ -91,6 +92,14 @@ def fetch_analyst_estimates(
             on_log(msg)
 
     result = EarningsResult(source="analyst_estimates")
+
+    # ⚠ BEFORE ANYTHING ELSE, INCLUDING THE CACHE READ. An unsubscribed exchange must not
+    # reach the vendor, and must not resurrect a payload an earlier unguarded run cached.
+    refusal = refuse_unsubscribed(exchange, "analyst_estimates")
+    if refusal is not None:
+        if on_log:
+            on_log(refusal.error)
+        return refusal
     _ensure_bucket(supabase)
     path = _storage_path(ticker, exchange, "analyst_estimate")
     symbol = _build_symbol(ticker, exchange)

@@ -61,6 +61,55 @@ def _build_symbol(ticker: str, exchange: str) -> str:
     return f"{exchange}:{ticker}"
 
 
+def refuse_unsubscribed(exchange: str, source: str) -> EarningsResult | None:
+    """The refusal for an exchange our GuruFocus subscription does not cover, or None to proceed.
+
+    ⚠⚠ IT LIVES IN THE FETCHERS BECAUSE THE VENDOR DOES NOT RELIABLY REFUSE. The 403 path below
+    each caller (`api.is_forbidden`) assumes an unsubscribed region answers with an error. Diploma
+    plc, `LSE:DPLM`, proves it does not: GuruFocus returned a full statements payload — 53 quarterly
+    periods across hundreds of section keys — whose price column is **0 for 1998-2013** and then
+    **frozen at 11.1 for seven years** (2016-09 to 2023-03) while the real share price went £8.79 to
+    £28.10, before stepping 3.81x in a single period. `Market Cap` carries the identical step. All
+    of it plausible, none of it true, and nothing downstream could tell.
+
+    ⚠⚠ SO THE GATE IS THE EXCHANGE, NOT THE VALUES — and that is a measured conclusion, not a
+    preference. A payload-shape heuristic was tried first and rejected: over the 1,782 companies
+    holding a price series, "mostly zeros" fires on Alphabet (46%), CRH (52%) and NetEase (77%),
+    because GuruFocus zero-fills quarters it does not publish; and "frozen for many periods" cannot
+    be separated from a genuine trading halt — the same rule that catches Diploma also refuses
+    Nebius Group, whose price is legitimately frozen through its ~2.5-year suspension. What we KNOW
+    is untrustworthy is the subscription, and that is a fact about the request rather than a guess
+    about the answer.
+
+    ⚠ IT IS HERE AND NOT AT THE CALLERS. `routers/_fundamental_backfill.eligible` already applies
+    this rule, so the /benchmarks and Long-Equity fills were never the leak; the per-company SSE
+    refresh (`/api/earnings/{id}/refresh/{source}`) and the universe bulk fetch both called the
+    fetchers directly and were not covered. Two known callers meant two places to forget, and the
+    next caller would have been a third.
+
+    ⚠ NO CALL IS SPENT. The refusal is pre-flight, so an unsubscribed name costs nothing rather
+    than costing a request that returns junk — which also means a region's monthly quota is no
+    longer drained by names we cannot use.
+
+    ⚠ OTC PINK IS SUBSCRIBED, so a foreign company with a US OTC line still resolves through it —
+    the usual fix for exactly these names. See `FEASIBLE_GF_EXCHANGES`.
+    """
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+
+    if is_gf_subscribed_exchange(exchange):
+        return None
+    r = EarningsResult(source=source)
+    # ⚠ `is_forbidden`, THE SAME FLAG THE REAL 403 SETS. Callers already count and report that
+    # ("skipped_region"); a new status word would need every one of them to learn it, and this is
+    # the same fact arrived at one step earlier.
+    r.is_forbidden = True
+    r.cache_status = "unsubscribed"
+    r.error = (f"{exchange or 'unknown exchange'} is outside the GuruFocus subscription — "
+               f"not requested (the vendor answers some of these with plausible wrong data)")
+    r.logs.append(r.error)
+    return r
+
+
 def _storage_path(ticker: str, exchange: str, endpoint: str) -> str:
     from ingest.prices import normalize_gurufocus_ticker  # noqa: PLC0415
     ticker = normalize_gurufocus_ticker(ticker, exchange)

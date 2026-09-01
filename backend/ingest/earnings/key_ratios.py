@@ -44,6 +44,7 @@ from ._common import (
     _storage_path,
     _upload_to_storage,
     _upsert_metric_rows,
+    refuse_unsubscribed,
 )
 
 #: The `Fundamental` keys worth storing, and the metric code each becomes.
@@ -143,6 +144,14 @@ def fetch_key_ratios(
             on_log(msg)
 
     result = EarningsResult(source="key_ratios")
+
+    # ⚠ BEFORE ANYTHING ELSE, INCLUDING THE CACHE READ. An unsubscribed exchange must not
+    # reach the vendor, and must not resurrect a payload an earlier unguarded run cached.
+    refusal = refuse_unsubscribed(exchange, "key_ratios")
+    if refusal is not None:
+        if on_log:
+            on_log(refusal.error)
+        return refusal
     _ensure_bucket(supabase)
     path = _storage_path(ticker, exchange, "keyratios")
     symbol = _build_symbol(ticker, exchange)
