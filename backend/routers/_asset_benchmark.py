@@ -292,6 +292,37 @@ def _universe_analysis_ids(label: str) -> list[int]:
     return sorted(out)
 
 
+def file_member_count(label: str) -> int:
+    """How many constituents the PROVIDER'S FILE authorises for this universe.
+
+    ⚠⚠ THIS NUMBER EXISTS BECAUSE MEMBERSHIP IS NO LONGER AUTHORED IN ONE PLACE (2026-09-01).
+    `universe_asset_membership` now unions `index_file_membership` — ACWI constituents resolved
+    straight from the iShares holdings file by ticker+exchange — precisely so a name outside the
+    GuruFocus subscription can be a member. 129 of ACWI's are: Constellation Software, Royal Bank
+    of Canada, BHP, Commonwealth Bank. They have no `company` row at all.
+
+    ⚠ IT IS NOT A DENOMINATOR AND MUST NOT BECOME ONE. Most of these rows ARE also reachable
+    through the company world (1,409 of 1,540 on ACWI), so adding this to `universe_members` would
+    double-count. It is reported beside that count so a reader can see the second source exists;
+    the ratio it sits next to is still company-side and still says so.
+    """
+    uni = (supabase.table("universe").select("universe_id")
+           .eq("label", label).limit(1).execute().data or [])
+    if not uni:
+        return 0
+    out: set[int] = set()
+    off = 0
+    while True:
+        rows = (supabase.table("index_file_membership").select("analysis_id")
+                .eq("universe_id", uni[0]["universe_id"])
+                .order("analysis_id").range(off, off + 999).execute().data or [])
+        if not rows:
+            break
+        out.update(r["analysis_id"] for r in rows)
+        off += len(rows)
+    return len(out)
+
+
 def cap_stamp_range(rows: list[dict]) -> tuple[str | None, str | None, int]:
     """`(oldest, newest, how_many_unstamped)` over `market_cap_checked_at`.
 
@@ -326,12 +357,17 @@ def members(label: str) -> tuple[list[dict], dict]:
     largest cap, exactly as `_benchmark_index._members` does.
     """
     # ⚠⚠ TWO DIFFERENT COUNTS, AND CONFLATING THEM WOULD HIDE THE THING COVERAGE EXISTS TO SHOW.
-    #   `universe_members` is the size of the INDEX and still comes from the company world, because
-    #   that is where membership is authored. `universe_asset_membership` is what we could bridge
-    #   into the asset world — smaller by construction (ACWI 1,723 of 1,982; the gap is India and
-    #   the UK, where GuruFocus can supply no ISIN). Taking the denominator from the asset table
-    #   would make `covered_pct` read ~100% while a fifth of ACWI was missing: the bridge loss
-    #   would vanish into the number designed to report exactly that kind of loss.
+    #   `universe_members` is the size of the INDEX; the priced count is what we could bridge into
+    #   the asset world and price. Taking the denominator from the asset side would make
+    #   `covered_pct` read ~100% while a fifth of ACWI was missing: the bridge loss would vanish
+    #   into the number designed to report exactly that kind of loss.
+    #
+    # ⚠⚠ THE DENOMINATOR IS NO LONGER THE COMPANY WORLD ALONE (2026-09-01). It used to be, and the
+    #   note here said so, "because that is where membership is authored" — which stopped being
+    #   true when `universe_asset_membership` began unioning `index_file_membership`. ACWI gained
+    #   129 constituents with NO company row (Constellation Software, RBC, BHP, Commonwealth Bank),
+    #   so the numerator could exceed what the old denominator was able to contain: `1807/1998`,
+    #   with 129 of the 1,807 not among the 1,998. See `_file_only_count`.
     ids = _universe_company_ids(label)
     if not ids:
         return [], {"universe_members": 0, "priced": 0, "covered_pct": None}
@@ -418,7 +454,19 @@ def members(label: str) -> tuple[list[dict], dict]:
     out = list(by_name.values())
     caps_from, caps_to, caps_unstamped = cap_stamp_range(out)
     coverage = {
+        # ⚠⚠ STILL THE COMPANY WORLD, AND `priced` CAN NOW EXCEED IT. Since 2026-09-01
+        # `universe_asset_membership` unions `index_file_membership`, so ACWI has 129 constituents
+        # with no `company` row at all — Constellation Software, RBC, BHP, Commonwealth Bank. They
+        # are priced and they are in the index; they are not in this denominator.
+        #
+        # ⚠ REPORTED AS TWO NUMBERS RATHER THAN ONE WIDER ONE, deliberately. Adding them together
+        # needs the count of file members the company world ALSO reaches, and that is the bridge
+        # this module deleted a query for — re-deriving it to make one ratio prettier would put a
+        # round trip back on the benchmark path. Two honest numbers beat one invented denominator,
+        # and `covered_pct` keeps meaning exactly what it meant: how much of the COMPANY universe
+        # we could price. See `_file_only_count` for what the second number is.
         "universe_members": len(ids),
+        "file_only_members": file_member_count(label),
         "priced": len(out),
         "caps_from": caps_from,
         "caps_to": caps_to,

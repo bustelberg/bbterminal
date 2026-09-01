@@ -19,10 +19,11 @@ import AttributionPanel from './AttributionPanel';
 import ActiveSharePanel, { type ActiveShareHolding } from './ActiveSharePanel';
 import PanelDialog from './PanelDialog';
 import HoldingTimingModal from './HoldingTimingModal';
-import BookValueChart from './BookValueChart';
+import BookReturnChart from './BookReturnChart';
 import BucketDetailPanel from './BucketDetailPanel';
 import OwnerEarningsModal from './OwnerEarningsModal';
 import { type Basket } from './types';
+import { useAnalyseCopy } from './analyseCopy';
 
 /**
  * A model portfolio's composition — sector / region / currency — beside a benchmark index's
@@ -47,23 +48,11 @@ const SERIES = {
   benchmark: chartTheme.warn,     // #c0891a — CVD-separated from it (ΔE 103), not violet (4.9)
 };
 
-const AXIS_LABEL: Record<string, string> = {
-  sector: 'Sector',
-  region: 'Region',
-  currency: 'Currency',
-};
-
 /** ⚠ THE BASIS CHANGED (2026-07-31) AND SO DID THESE. The bars are weighted by each position's
  *  value when the window OPENED, over the holdings that can be attributed — the same weights the
  *  Attribution table shows, so a bar equals its own Brinson row. They are no longer "what we hold
  *  now": a stock bought mid-window has no start value and is absent. The `Data` button states the
  *  denominator and names everything the basis leaves out. */
-const AXIS_NOTE: Record<string, string> = {
-  sector: 'Start-of-window weights. Cash, funds and unpriced holdings have no sector.',
-  region: "The issuer's domicile, else its ISIN country. Not the listing venue.",
-  currency: 'The reporting currency of the company. Not the listing currency.',
-};
-
 /** A bar's own value, direct-labelled.
  *
  * ⚠ IT COMES FROM `composition.ts`, WHICH ALSO DECIDES WHICH BUCKETS ARE SHOWN. A local formatter
@@ -83,6 +72,7 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive }: {
   onAttribution?: () => void;      // launches the YTD Brinson attribution; omitted for a basket
   attributionActive?: boolean;
 }) {
+  const copy = useAnalyseCopy();
   const r = returns;
   const sp = (v: number | null | undefined) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
   // The excess is a DIFFERENCE of two returns, so it is in percentage POINTS (pp), not percent.
@@ -117,7 +107,7 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive }: {
     openPrice: r?.benchmark_ytd_open_price, closePrice: r?.benchmark_ytd_close_price,
     openFx: r?.benchmark_ytd_open_fx, closeFx: r?.benchmark_ytd_close_fx,
     eurPct: r?.benchmark_ytd_pct,
-  });
+  }, copy.lang as 'en' | 'nl');
   // The portfolio leg's own source follows the Book/Strategy toggle — AIRS's flow-aware account
   // return, or our yfinance reconstruction of the model.
   const pSrc: SourceKey = r?.source === 'book' ? 'airs_att' : 'yfinance';
@@ -125,22 +115,28 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive }: {
   // rather than hanging off one edge of it.
   const op = 'text-base font-mono text-fg-faint shrink-0';
   return (
-    <div className="flex items-center gap-2 self-center flex-wrap">
+    // ⚠ `self-center` LIVES ON THE WRAPPER NOW, not here. This is stacked above the book's return
+    // chart in a column that takes ITS width from this row, so centring this row inside that
+    // column would leave the equation and the chart under it on two different left edges.
+    <div className="flex items-center gap-2 flex-wrap">
       {/* ⚠ THE € IS ON BOTH RETURN CHIPS, NOT JUST THE BENCHMARK'S. Marking one side of a
           subtraction with a currency implies the other side is in something else; the row is an
           equation and both legs are EUR (which is the return basis everywhere in this app —
           including the FX leg, and including AIRS's book number in `source=book`). The Excess
           carries no € because it is percentage POINTS, not a return. */}
-      <Chip label="Return (YTD) €" value={sp(r?.portfolio_ytd_pct)} valueClass={tone(r?.portfolio_ytd_pct)}
-        prov={<Provenance source={pSrc} asOf={r?.portfolio_as_of} kind="formula"
-          what="What this portfolio returned year to date, in EUR."
-          note="the portfolio's return, year to date"
+      {/* ⚠⚠ THE TAG FOLLOWS THE SOURCE, AND IT WAS HARDCODED `formula` FOR BOTH. On the Book
+          side this figure is AIRS's own `cumulatief_rendement` READ STRAIGHT OFF THE SHEET — we
+          compute nothing — and the card announced "A formula on the data:" over it, which claims
+          an arithmetic nobody performed and invites the reader to look for a step that does not
+          exist. The Strategy side genuinely IS a formula (Σ weightᵢ × returnᵢ over our own
+          yfinance closes), so the two cannot share a tag. */}
+      <Chip label={copy.score.returnYtd} value={sp(r?.portfolio_ytd_pct)} valueClass={tone(r?.portfolio_ytd_pct)}
+        prov={<Provenance source={pSrc} asOf={r?.portfolio_as_of}
+          kind={r?.source === 'book' ? 'copied' : 'formula'}
+          what={copy.score.portfolioWhat}
+          note={copy.score.portfolioNote}
           how={r?.source === 'book'
-            ? "AIRS's own cumulatief_rendement for the paired account — flow-aware and including "
-              + 'income, over the calendar year.'
-            : 'Σ(weightᵢ × returnᵢ) over the model’s holdings, each priced from its yfinance '
-              + 'closes and converted to EUR at each date’s own rate, so the currency leg is '
-              + 'included. Price return: dividends are not.'} />} />
+            ? copy.score.portfolioHowBook : copy.score.portfolioHowModel} />} />
       <span className={op} aria-hidden>−</span>
       {/* ⚠ `at={undefined}` SO THIS BADGE DOES NOT INHERIT THE HOLDINGS' SCAN TIME. The subtree is
           wrapped in `ProvenanceFetchedAt at={holdings_fetched_at}` — which is when we last read
@@ -148,22 +144,22 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive }: {
           price. Handing one object's fetch time to another is the exact hazard that provider
           documents; `fetchedAt={null}` cannot express it, because `??` treats null as "inherit". */}
       <ProvenanceFetchedAt at={undefined}>
-        <Chip label={`vs ${benchmark} return €`} value={sp(r?.benchmark_ytd_pct)}
+        <Chip label={copy.score.versusReturn(benchmark)} value={sp(r?.benchmark_ytd_pct)}
           valueClass={tone(r?.benchmark_ytd_pct)}
           prov={<Provenance source={bp.sourceKey} asOf={r?.benchmark_ytd_as_of} kind="formula"
             what={bp.what} note={bp.note} how={bp.how} />} />
       </ProvenanceFetchedAt>
       <span className={op} aria-hidden>=</span>
-      <Chip label="Excess" value={spp(excess)} valueClass={tone(excess)}
-        hint="The portfolio's return minus the benchmark's, in percentage POINTS — the two figures to the left, subtracted. ⚠ It does NOT equal the Attribution table's total: that decomposes the index constituent by constituent, so it reconciles to the rebuilt index rather than to the ETF figure shown here." />
+      <Chip label={copy.score.excess} value={spp(excess)} valueClass={tone(excess)}
+        hint={copy.score.excessHint} />
       {onAttribution && (
         <button type="button" onClick={onAttribution}
-          title="Why? — break the excess into allocation vs selection (Brinson-Fachler attribution)."
+          title={copy.score.attributionTitle}
           className={`ml-1 cursor-pointer rounded-lg border px-3 py-1.5 min-w-[6rem] text-xs font-medium transition-colors flex items-center justify-center ${
             attributionActive
               ? 'bg-accent-600 text-white border-transparent'
               : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300 hover:border-accent-500/50'}`}>
-          Attribution
+          {copy.actions.attribution}
         </button>
       )}
     </div>
@@ -220,6 +216,7 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
   /** The policy for that profile — the band each class is SUPPOSED to sit in. */
   bands?: Band[];
 }) {
+  const copy = useAnalyseCopy();
   // ⚠⚠ THE PAYLOAD'S ORDER, NOT LARGEST-FIRST. These bars were sorted by size, which reads well
   // on ONE portfolio and badly on the job this modal is for: comparing books. Stocks, Bonds,
   // Alternatives and Cash then sit at a different height per portfolio — and worse, at a different
@@ -253,22 +250,40 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
     // is laid out from the same fixed columns so the two cannot drift apart.
     <div className="shrink-0 w-[41rem] max-w-full">
       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-        <span className="text-[11px] uppercase tracking-wide text-fg-faint">Allocation</span>
+        <span className="text-[11px] uppercase tracking-wide text-fg-faint">{copy.allocation.title}</span>
         {/* The profile read off AIRS's own portfolio name — the same classifier the correlation
             matrix filters by. Shown because the bands below are only meaningful once the reader
             knows WHICH policy is being drawn. */}
         {variant && (
           <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-overlay/5 text-fg-muted"
-            title={`Read from this model's own AIRS name. The bands drawn over the bars are the ${variant} allocation policy.`}>
+            title={copy.allocation.policyTitle(variant)}>
             {variant}
           </span>
         )}
+        {/* ⚠⚠ THE HINT IS THE ONLY THING THAT SAYS THE BARS ARE CLICKABLE, and it used to be the
+            faintest text on the panel (`text-[11px] text-fg-faint`) tucked between the section
+            label and the policy pill — the styling of a caption, on the one line that is an
+            instruction. Reported 2026-09-01: "this should be bigger and more obvious." It is now
+            13px in `accent-400`, the token this app uses for interactive text, with a ↓ pointing
+            at the bars it is talking about.
+            ⚠⚠ BOTH STATES CARRY THE SAME TYPE SIZE AND WEIGHT because they SHARE THE SLOT: the
+            hint is replaced by the active-filter button on click, and a size change there would
+            reflow the header row under the cursor at the moment of pressing.
+            ⚠ IT IS NOT A BUTTON AND MUST NOT LOOK LIKE ONE — a pill or a border here would be a
+            false affordance, since the clickable things are the bars below, not this line. Colour
+            and an arrow say "interactive nearby"; a chrome would say "press me". */}
         {onSelect && (selected
           ? <button type="button" onClick={() => onSelect(null)}
-              className="cursor-pointer text-[11px] text-accent-400 hover:text-accent-300">
-              filtering to {bucketLabel(selected)} — show all ✕
+              className="cursor-pointer text-[13px] font-medium text-accent-400 hover:text-accent-300">
+              {copy.allocation.filtering} {copy.bucket(bucketLabel(selected))} {copy.allocation.showAll}
             </button>
-          : <span className="text-[11px] text-fg-faint">click a class to filter the charts</span>)}
+          : <span className="text-[13px] font-medium text-accent-400">
+              {/* ⚠ ONLY THE ARROW IS HIDDEN FROM ASSISTIVE TECH. The rows below are real
+                  `<button>`s (see `Row`), so their affordance is already announced; the glyph
+                  points at them visually and would read as "down arrow" out loud. The sentence
+                  itself stays — it names WHAT the press does, which the buttons do not. */}
+              <span aria-hidden="true">↓ </span>{copy.allocation.filterHint}
+            </span>)}
       </div>
       {/* ⚠ A SECOND THING IS ON THE CHART, SO IT IS NAMED. The bar is what the portfolio holds;
           the three stripes are what the policy permits. Without this line they read as gridlines
@@ -288,15 +303,15 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
               which goes amber with the crossed bound named in its tooltip. */}
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-0.5 h-3 bg-neutral-500/70" />
-            minimal
+            {copy.allocation.minimum}
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-[4px] h-3 rounded-sm bg-neutral-800/85" />
-            target
+            {copy.allocation.target}
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-0.5 h-3 bg-neutral-500/70" />
-            maximal
+            {copy.allocation.maximum}
           </span>
         </div>
       )}
@@ -318,7 +333,6 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
           ))}
         </span>
         <span className="w-12 shrink-0 text-[10px] text-fg-faint text-right leading-none">%</span>
-        <span className="w-7 shrink-0" />
         <span className="w-14 shrink-0 text-[10px] text-fg-faint text-right leading-none">YTD</span>
       </div>
       {/* ⚠ NO LEGEND. One series, and every bar is directly labelled with the class it belongs to —
@@ -330,9 +344,8 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
           const Row = toggle ? 'button' : 'div';
           return (
             <Row key={s.bucket} {...(toggle ? { type: 'button' as const, onClick: () => toggle(s.bucket) } : {})}
-              title={`${bucketLabel(s.bucket)} — ${s.pct.toFixed(2)}% of the portfolio`
-                + `${s.holdings ? `, ${s.holdings} holding${s.holdings === 1 ? '' : 's'}` : ''}`
-                + `${s.return_pct == null ? '' : `, ${fmtRet(s.return_pct)} YTD`}`
+              title={copy.allocation.rowTitle(copy.bucket(bucketLabel(s.bucket)), s.pct.toFixed(2), s.holdings ?? 0,
+                s.return_pct == null ? null : fmtRet(s.return_pct))
                 + ((): string => {
                   const b = bandOf.get(s.bucket);
                   if (!b) return '';
@@ -349,7 +362,7 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
                 active ? 'bg-accent-500/10' : 'hover:bg-overlay/[0.03]'} ${
                 selected && !active ? 'opacity-45' : ''}`}>
               <span className={`w-[6.5rem] shrink-0 truncate text-[12px] ${
-                active ? 'font-medium text-fg-strong' : 'text-fg-muted'}`}>{bucketLabel(s.bucket)}</span>
+                active ? 'font-medium text-fg-strong' : 'text-fg-muted'}`}>{copy.bucket(bucketLabel(s.bucket))}</span>
               {/* ⚠ THIS IS A BULLET CHART, AND ITS ONE RULE IS THAT THE MEASURE IS THINNER THAN
                   THE RANGE. The policy marks run the FULL height of the track while the bar is a
                   slimmer ribbon down the middle, so a stripe stays visible straight THROUGH the
@@ -423,14 +436,15 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
                 breach(s) ? 'text-warn-500 font-semibold' : 'text-fg-soft'}`}>
                 {s.pct.toFixed(2)}%
               </span>
-              {/* ⚠ HOW MANY NAMES CARRY THAT WEIGHT. Counted after the certificates are looked
-                  through, so a bar reads as the companies actually behind it rather than the lines
-                  AIRS stores. "66% in one bond ETF" and "66% across sixty names" draw an identical
-                  bar and are not the same portfolio; the count is the only thing here that
-                  separates them. */}
-              <span className="w-7 shrink-0 text-right text-[11px] text-fg-faint tabular-nums">
-                {(s.holdings ?? 0) > 0 ? `(${s.holdings})` : ''}
-              </span>
+              {/* ⚠ THE HOLDING COUNT CAME OFF THIS ROW, 2026-09-01 ON REQUEST, AND IT IS STILL ON
+                  THE ROW'S `title` — see `rowTitle`, which prints "…, 60 holdings". It read as a
+                  bare `(60)` in the narrowest column on the panel, which is a parenthetical whose
+                  unit has to be inferred; the reason it was here is worth keeping in reach, since
+                  "66% in one bond ETF" and "66% across sixty names" draw an identical bar and are
+                  not the same portfolio. Hover carries it, and the holdings table below states it
+                  outright. ⚠ THE HEADER'S MATCHING `w-7` SPACER WENT WITH IT — that row is laid
+                  out from the same fixed widths, so leaving it would slide YTD off its own
+                  heading. */}
               {/* ⚠ POINTS, NOT PERCENT, AND THE FIGURE CHANGED WITH THE UNIT. This showed the
                   class's RETURN (its Result over its own opening value) — a rate, which cannot
                   wear "pp" because pp means points OF something. Relabelling alone would have been
@@ -438,9 +452,7 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
                   capital, which is the thing that legitimately adds. Its own return is still in
                   the Holdings table below, in the column labelled Return. */}
               <span className={`w-16 shrink-0 text-right font-mono text-[12px] tabular-nums ${retTone(s.contribution_pct)}`}
-                title={`${bucketLabel(s.bucket)} added ${ppt(s.contribution_pct)} to the book’s year.`
-                  + ` Its own return was ${fmtRet(s.return_pct)} — a rate on its own opening value,`
-                  + ' which is why the two differ and why only this one adds up.'}>
+                title={copy.allocation.contributionTitle(copy.bucket(bucketLabel(s.bucket)), ppt(s.contribution_pct), fmtRet(s.return_pct))}>
                 {ppt(s.contribution_pct)}
               </span>
             </Row>
@@ -454,7 +466,7 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
             remainder, so a book that sold nothing does not carry a permanent 0.00pp footnote. */}
         {soldContribution != null && Math.abs(soldContribution) >= 0.005 && (
           <div className="flex items-center gap-2 pt-1 mt-1 border-t border-neutral-800/40 text-[11px]">
-            <span className="text-fg-faint">Sold during the year — no longer a holding</span>
+            <span className="text-fg-faint">{copy.allocation.sold}</span>
             <span className={`ml-auto font-mono tabular-nums ${retTone(soldContribution)}`}>
               {ppt(soldContribution)}
             </span>
@@ -504,6 +516,9 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   onBucket: (axis: string, bucket: string) => void;
   selected: string | null;
 }) {
+  const copy = useAnalyseCopy();
+  const axisLabel = axis === 'sector' ? copy.axes.sector : axis === 'region' ? copy.axes.region : copy.axes.currency;
+  const axisNote = axis === 'sector' ? copy.axes.sectorNote : axis === 'region' ? copy.axes.regionNote : copy.axes.currencyNote;
   // Sector is an EQUITY-only view; a non-equity selection leaves it with no portfolio side, so say
   // so rather than draw the benchmark's sectors beside an empty portfolio.
   const sectorEmpty = axis === 'sector' && rows.every((r) => (r.portfolio_pct ?? 0) === 0);
@@ -558,9 +573,9 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           them — one per axis — each opened a table of the same holdings under a different grouping,
           beside a chart whose bars are already the click target for the per-bucket attribution. */}
       <div className="flex items-baseline gap-2">
-        <h4 className="text-sm font-semibold text-fg-strong">{AXIS_LABEL[axis] ?? axis}</h4>
+        <h4 className="text-sm font-semibold text-fg-strong">{axisLabel}</h4>
       </div>
-      <p className="text-[12px] text-fg-faint mt-0.5">{AXIS_NOTE[axis]}</p>
+      <p className="text-[12px] text-fg-faint mt-0.5">{axisNote}</p>
       {/* ⚠ ONLY THE UNPRICED HOLDINGS GET A WARNING, AND THIS IS THE WHOLE DISTINCTION. A fund, a
           bond and a cash line have no sector by definition — they are not Stocks in our own
           classification and have their own slice of the allocation chart, so counting them as
@@ -573,8 +588,8 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           request — a caveat that appears and then vanishes on its own, which is worse than none. */}
       {!stale && (unpricedPct ?? 0) > 0.005 && (
         <p className="text-[12px] text-warn-300 mt-0.5"
-          title="Real holdings, in real buckets, that we have no price series for. They are absent from the bars, so the buckets they belong to read lower than they are. The holdings table below names them, and the Resolved column on the portfolio row counts them.">
-          ⚠ {unpricedPct!.toFixed(1)}% held but unpriceable — missing from these bars
+          title={copy.allocation.unpricedTitle}>
+          ⚠ {copy.allocation.unpriceable(unpricedPct!.toFixed(1))}
         </p>
       )}
       {/* ⚠ NAME WHAT THE REMAINDER *IS*, NEVER WHAT IT LACKS. This read "87% of the book has a
@@ -586,14 +601,13 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           about the bars, and during a class change the bars are the previous selection's. */}
       {!stale && excludedWeight > 0.005 && (
         <p className="text-[12px] text-fg-faint mt-0.5"
-          title="Funds, bonds and cash have no sector of their own — they are their own slices of the allocation chart above, and the holdings table below names them.">
-          Excludes {excludedWeight.toFixed(1)}% in funds, bonds and cash — no{' '}
-          {AXIS_LABEL[axis]?.toLowerCase() ?? axis} to place
+          title={copy.allocation.excludedTitle}>
+          {copy.allocation.excludes(excludedWeight.toFixed(1), axisLabel)}
         </p>
       )}
       {sectorEmpty ? (
         <p className="text-[12px] text-fg-subtle py-8 text-center">
-          Nothing to show — the current selection holds no equity, and sector is an equity-only view.
+          {copy.allocation.nothing}
         </p>
       ) : (<>
       {/* Legend (two series ⇒ mandatory — identity is never colour-alone): a filled bar is the
@@ -605,7 +619,7 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
       <div className="chart-legend flex items-center gap-4 text-[11px] text-fg-faint mt-2 mb-2">
         <span className="flex items-center gap-1.5">
           <span className="inline-block w-3.5 h-2 rounded-sm" style={{ background: SERIES.portfolio }} />
-          Portfolio
+          {copy.allocation.portfolio}
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block w-[4px] h-3 rounded-sm" style={{ background: SERIES.benchmark }} />
@@ -615,10 +629,7 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
             turns amber the day a column does not add up is a check. The band is a hundredth either
             side — the columns are printed at two decimals and 0.01 is what rounding can move. */}
         <span className="ml-auto flex items-center gap-2 font-mono tabular-nums"
-          title={'Each column, summed exactly as printed — so adding the rows by hand gives this '
-            + 'number. Both sides are renormalised over what they can place, so both should read '
-            + `100%; a hundredth or two either way is the rows' own rounding (${sorted.length} of `
-            + 'them here, each ±0.005). Anything larger is a bucket missing from the chart.'}>
+          title={copy.allocation.totalsTitle}>
           <span className={Math.abs(totalP - 100) > slack ? 'text-warn-300' : ''}>
             Σ {totalP.toFixed(2)}%
           </span>
@@ -639,7 +650,7 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           return (
             <button type="button" key={r.bucket}
               onClick={() => onBucket(axis, r.bucket)}
-              title={`${r.bucket}  ·  Portfolio ${p.toFixed(2)}%  vs  ${benchmark} ${b.toFixed(2)}%  ·  tilt ${tilt >= 0 ? '+' : ''}${tilt.toFixed(2)}pp`}
+              title={copy.allocation.chartRowTitle(r.bucket, p.toFixed(2), benchmark, b.toFixed(2), `${tilt >= 0 ? '+' : ''}${tilt.toFixed(2)}`)}
               className={`group flex cursor-pointer items-center gap-2.5 rounded-md -mx-1.5 px-1.5 py-1 text-left transition-colors ${
                 active ? 'bg-accent-500/10' : 'hover:bg-overlay/[0.03]'}`}>
               <span className={`w-[6.5rem] shrink-0 truncate text-[12px] ${
@@ -800,16 +811,12 @@ type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution' |
 const COLUMN_GROUPS = [
   {
     key: 'return',
-    label: 'How the Instrument return is built',
-    hint: '(Value now − Beginwaarde) + Realised + Income = Result, ÷ Beginwaarde',
     // ⚠ `Return` itself is NOT here: it is always on. This group supplies the chain BEHIND it, so
     // ticking it puts the whole derivation on screen beside the answer already showing.
     cols: ['opening', 'valuenow', 'unrealised', 'realised', 'income', 'result'],
   },
   {
     key: 'onmoney',
-    label: 'How Money-weighted is built',
-    hint: 'Result ÷ Avg capital invested',
     // ⚠ `moneyweighted` itself is NOT here — like `Return`, that column is always on, and this
     // group supplies the chain BEHIND it. Listing it would put a key in the union that nothing
     // reads: harmless at runtime and a lie in the data, which is how the next reader gets misled.
@@ -817,8 +824,6 @@ const COLUMN_GROUPS = [
   },
   {
     key: 'fxsplit',
-    label: 'Price vs currency (AIRS)',
-    hint: 'Koers + Valuta + Rest = Result',
     /**
      * ⚠⚠ AIRS'S OWN ARITHMETIC, NOT OURS. `Fondsresultaat` and `Valutaresultaat` come off the
      * Vermogensoverzicht already split, in EUR, and they sum to `current − Beginwaarde` exactly
@@ -839,8 +844,6 @@ const COLUMN_GROUPS = [
   },
   {
     key: 'contribution',
-    label: 'How the Contribution is built',
-    hint: 'Result ÷ the book’s opening capital',
     // ⚠ `Contribution` ITSELF IS NOT HERE — like `Instrument return` and `Money-weighted` it is
     // always on, and this group supplies only the chain BEHIND it. Listing it would put a key in
     // the union that nothing reads: harmless at runtime and a lie in the data.
@@ -915,16 +918,17 @@ function useColumnGroups() {
 function ColumnPicker({ groups, toggle }: {
   groups: Set<ColumnGroup>; toggle: (k: ColumnGroup) => void;
 }) {
+  const copy = useAnalyseCopy();
   const [open, setOpen] = useState(false);
   return (
     <span className="relative inline-flex">
       <button type="button" onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        title="Show the columns behind each figure"
+        title={copy.actions.columnsTitle}
         className={`cursor-pointer text-[11px] leading-none px-1.5 py-1 rounded border transition-colors ${
           open ? 'border-accent-500/50 text-accent-300 bg-overlay/5'
             : 'border-neutral-800/40 text-fg-subtle hover:text-accent-300 hover:bg-overlay/5'}`}>
-        + columns
+        {copy.actions.columns}
       </button>
       {open && (
         <>
@@ -936,10 +940,10 @@ function ColumnPicker({ groups, toggle }: {
                 <input type="checkbox" checked={groups.has(g.key)} onChange={() => toggle(g.key)}
                   className="accent-accent-600 mt-0.5" />
                 <span className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-[12px] text-fg-soft">{g.label}</span>
+                  <span className="text-[12px] text-fg-soft">{copy.columnGroups[g.key].label}</span>
                   {/* ⚠ THE CHAIN ITSELF, not a description of it. It is what the reader is about
                       to put on screen, and it says in one line why these columns come together. */}
-                  <span className="text-[11px] font-mono text-fg-faint">{g.hint}</span>
+                  <span className="text-[11px] font-mono text-fg-faint">{copy.columnGroups[g.key].hint}</span>
                 </span>
               </label>
             ))}
@@ -1064,13 +1068,13 @@ const blendLegs = (h: BookHolding) =>
  *  `(€68,769 + €0) ÷ €58,669 − 1`. A percentage with no numerator or denominator on screen cannot
  *  be checked against the book it claims to come from — and being checkable against that book is
  *  the whole reason it is preferred over our price series. Null when the book sent no figures. */
-function bookMath(h: BookHolding): string | null {
+function bookMath(h: BookHolding, netDividend = 'net dividend'): string | null {
   const s = (h.sources ?? []).find((x) => x.blend_weight_pct != null);
   if (!s?.book_start_value_eur || s.book_current_value_eur == null) return null;
   // Brackets only when there is something to bracket — "(€68,769) ÷ …" reads as a formula with a
   // term missing.
   const now = s.book_income_eur
-    ? `(${eur0(s.book_current_value_eur)} + ${eur0(s.book_income_eur)} net dividend)`
+    ? `(${eur0(s.book_current_value_eur)} + ${eur0(s.book_income_eur)} ${netDividend})`
     : eur0(s.book_current_value_eur);
   return `${now} ÷ ${eur0(s.book_start_value_eur)} − 1`;
 }
@@ -1084,12 +1088,12 @@ function bookMath(h: BookHolding): string | null {
  *  ⚠ THE WEIGHTS ARE SHARES OF THE POSITION'S OPENING VALUE, not of the book — those are in the
  *  Via column and add to the Weight. Two denominators for two questions, and the card says which
  *  it is using rather than leaving a reader to assume they match. */
-function blendHow(h: BookHolding): string | null {
+function blendHow(h: BookHolding, heldDirectly = 'held directly', atOpen = 'at the open'): string | null {
   const legs = blendLegs(h);
   if (legs.length < 2) return null;
   const parts = legs.map((s, i) =>
-    `${s.label ?? 'held directly'} ${num2(s.blend_weight_pct!)}% × ${fmtRet(s.return_pct)}`
-    + ` (${eur0(s.start_value_eur ?? 0)}${i === 0 ? ' at the open' : ''}, ${s.book})`);
+    `${s.label ?? heldDirectly} ${num2(s.blend_weight_pct!)}% × ${fmtRet(s.return_pct)}`
+    + ` (${eur0(s.start_value_eur ?? 0)}${i === 0 ? ` ${atOpen}` : ''}, ${s.book})`);
   return `${parts.join(' + ')} = ${fmtRet(h.own_return_pct)}`;
 }
 
@@ -1103,12 +1107,13 @@ function blendHow(h: BookHolding): string | null {
 function FundamentalButton({ onOpen, title, className = '' }: {
   onOpen: () => void; title: string; className?: string;
 }) {
+  const copy = useAnalyseCopy();
   return (
     <button type="button"
       onClick={(e) => { e.stopPropagation(); onOpen(); }}
       title={title}
       className={`cursor-pointer text-[11px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap transition-colors ${className}`}>
-      Fundamental
+      {copy.actions.fundamental}
     </button>
   );
 }
@@ -1281,7 +1286,7 @@ const momExample = (rows: BookHolding[]): string => {
  * header's arithmetic is the row's. An unnamed example is indistinguishable from an invented one.
  *
  * ⚠ VOL AND BETA SHOW ONLY THE ANSWER, and that is the honest limit rather than an oversight: the
- * operands are 1,260 daily returns and a covariance over 260 weekly pairs. There is no expression
+ * operands are ~60 monthly returns and a covariance over 260 weekly pairs. There is no expression
  * to write out, so these two say what came out and where it came from, and the drill-down is the
  * price series itself. Padding them with invented intermediate figures would be worse than symbols.
  */
@@ -1297,9 +1302,9 @@ const betaExample = (rows: BookHolding[]): string => {
 
 /** ⚠ `bookMath` IS THE ROW'S OWN BUILDER — the header does not re-derive the expression, it uses
  *  the one the row below it will print, so the two cannot disagree. */
-const bookReturnExample = (rows: BookHolding[]): string => {
-  const h = rows.find((r) => bookMath(r) != null && r.own_return_pct != null);
-  return h ? `\n\n${bookMath(h)} = ${fmtRet(h.own_return_pct)}   (${h.name ?? ''})` : '';
+const bookReturnExample = (rows: BookHolding[], netDividend = 'net dividend'): string => {
+  const h = rows.find((r) => bookMath(r, netDividend) != null && r.own_return_pct != null);
+  return h ? `\n\n${bookMath(h, netDividend)} = ${fmtRet(h.own_return_pct)}   (${h.name ?? ''})` : '';
 };
 
 function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
@@ -1359,16 +1364,6 @@ function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
   return [...kept, ...folded];
 }
 
-/** Why a sold row's three instrument columns are blank — and the two cases are different work.
- *
- *  ⚠ "WE COULD NOT TELL WHAT THIS IS" vs "WE HAVE NO PRICES FOR IT". The first is fixed by pinning
- *  the name to an ISIN (`airs_holding_isin_override`); the second by ingesting the instrument. A
- *  single "no data" would send an operator to the wrong one half the time. */
-const soldRiskWhy = (p: { isin?: string | null; name?: string | null }): string => (p.isin
-  ? `No price series stored for ${p.isin}, so this instrument's risk figures cannot be computed.`
-  : `Could not resolve "${p.name}" to an ISIN — it is no longer held by any book we have a `
-    + 'snapshot for, and it has no hand-pinned identity, so there is no instrument to measure.');
-
 function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised,
   onTiming, onFundamental }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
@@ -1412,6 +1407,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
    * handful of positions this book actually chose, and "what do I hold" is answered better by one
    * line naming the strategy.
    */
+  const copy = useAnalyseCopy();
   const [lookThrough, setLookThrough] = useState(true);
   /** How many rows the fold would remove — 0 when nothing is reached through a certificate, which
    *  is what hides the toggle rather than offering a control that does nothing. */
@@ -1440,8 +1436,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   // shows the rows, because THAT view reads the account directly and needs no pairing.
   if (!holdings.length) return (
     <div className="py-8 px-6 text-center space-y-1">
-      <p className="text-[12px] text-fg-subtle">No valued positions to show here.</p>
-      {note && <p className="text-[12px] text-fg-faint max-w-xl mx-auto">{note}</p>}
+      <p className="text-[12px] text-fg-subtle">{copy.holdings.noValues}</p>
+      {note && <p className="text-[12px] text-fg-faint max-w-xl mx-auto">{copy.serverText(note)}</p>}
     </div>
   );
 
@@ -1595,14 +1591,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
     <div className="bg-card border border-neutral-800/40 rounded-xl overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-neutral-800/40">
         <h4 className="text-xs font-medium text-fg-strong">
-          Holdings
+          {copy.holdings.title}
           <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-            what={'Every instrument the portfolio holds, grouped by asset class. A position held '
-              + 'through a certificate is listed as the instruments behind it, not as the '
-              + 'certificate.'}
-            how={`one row per ISIN, after the certificates are looked through
-
-${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).length} of them reached through a certificate`} />
+            what={copy.info.holdingsWhat}
+            how={copy.info.holdingsHow(holdings.length, holdings.filter((h) => (h.via_names ?? []).length).length)} />
         </h4>
         <span className="flex items-center gap-2">
           {/* ⚠ HIDDEN WHEN NOTHING WOULD FOLD, rather than offered and inert. A book that holds no
@@ -1612,13 +1604,10 @@ ${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).le
               the reader to press it to find out; naming the rows makes it a decision. */}
           {foldable > 0 && (
             <label className="flex items-center gap-1.5 text-[11px] text-fg-muted cursor-pointer"
-              title={'A holding that is itself another portfolio is listed as the instruments '
-                + 'behind it. Untick to fold each one back into a single row naming the strategy '
-                + '— the class subtotals, the chart and the total are identical either way, '
-                + 'because the fold happens inside a class and never across one.'}>
+              title={copy.actions.lookThroughTitle}>
               <input type="checkbox" checked={lookThrough}
                 onChange={() => setLookThrough((v) => !v)} className="accent-accent-600" />
-              Look through certificates
+              {copy.actions.lookThrough}
               <span className="font-mono text-fg-faint">({foldable})</span>
             </label>
           )}
@@ -1636,7 +1625,7 @@ ${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).le
           would be a second source of truth for one fact, and it is the copy that goes stale. */}
       {realised && !realised.available && realised.note && (
         <p className="mb-2 text-[12px] text-warn-500">
-          “Money-weighted” is blank for every row here — {realised.note}
+          “{copy.holdings.moneyWeighted}” — {copy.serverText(realised.note)}
         </p>
       )}
       {/* ⚠⚠ `overflow-auto` + a HEIGHT, because `sticky` needs a scrollport with room to scroll.
@@ -1722,31 +1711,34 @@ ${holdings.length} rows, ${holdings.filter((h) => (h.via_names ?? []).length).le
                   twelve columns there was none left: on a book whose Via column carries certificate
                   chips, Name collapsed to a single letter per row. `min-w` is the only thing
                   standing between "truncates gracefully" and "shows nothing". */}
-              <th className={`text-left min-w-[15.6rem] ${th}`} onClick={() => click('name')}>Name{caret('name')}</th>
+              <th className={`text-left min-w-[15.6rem] ${th}`} onClick={() => click('name')}>{copy.holdings.name}{caret('name')}</th>
               {/* ⚠ CAPPED. The chips truncate INDIVIDUALLY (max-w-[9rem] each) but the column
                   itself had no bound, so a row with three routes in was free to demand 30rem —
                   taken straight out of Name. Bounded here, the chips wrap within the column
                   instead of eating the table. */}
               <th className="text-left w-48 max-w-[12rem] py-2 font-medium">
-                Via
+                {copy.holdings.via}
+                {/* ⚠ THE LIVE COUNT IS A `note`, WHICH RENDERS ON THE **Where** LINE — see
+                    `viaNote`. It was a second paragraph inside `how`, so the field explaining how
+                    the number is made carried a measurement of this particular book. */}
                 <Provenance source="airs_model" asOf={asOf} kind="formula" column
-                  what={'How the portfolio got into this instrument — its own shares, a strategy '
-                    + 'whose certificate was looked through to reach it, or both.'}
-                  how={`each route in, as a share of the whole book — they sum to that row’s Weight
-
-${holdings.filter((h) => (h.via_names ?? []).length).length} of ${holdings.length} rows arrive through a certificate, the rest are held outright`} />
+                  what={copy.info.viaWhat}
+                  note={copy.info.viaNote(
+                    holdings.filter((h) => (h.via_names ?? []).length).length, holdings.length)}
+                  how={copy.info.viaHow} />
               </th>
               {/* ⚠ THE SECTOR CHART'S OWN BUCKET, WHICH IS WHY IT IS WORTH A COLUMN — sorting by
                   it lists the rows behind a bar, in the bar's own vocabulary. A raw
                   `asset_grid.sector` here would say "Financial Services" under a bar saying
                   "Financials" and read as two different exposures. */}
               <th className={`text-left w-[10.8rem] ${th}`} onClick={() => click('sector')}>
-                Sector{caret('sector')}
+                {copy.holdings.sector}{caret('sector')}
                 <Provenance source="yfinance" asOf={asOf} kind="formula" column
-                  what={'The sector this instrument is counted in on the Sector chart above.'}
-                  how={`Yahoo’s sector for the ISIN, canonicalised so one sector has one name
-
-${new Set(holdings.map((h) => h.sector).filter((s) => s && s !== 'Unclassified')).size} sectors across ${holdings.filter((h) => sectorLabel(h.sector)).length} rows; ${holdings.filter((h) => !sectorLabel(h.sector)).length} have none (a fund, or unclassifiable)`} />
+                  what={copy.info.sectorWhat}
+                  how={copy.info.sectorHow(
+                    new Set(holdings.map((h) => h.sector).filter((s) => s && s !== 'Unclassified')).size,
+                    holdings.filter((h) => sectorLabel(h.sector)).length,
+                    holdings.filter((h) => !sectorLabel(h.sector)).length)} />
               </th>
               {/* ⚠ BESIDE SECTOR AND WEIGHT — with the columns that DESCRIBE the instrument
                   rather than the ones that measure this book's year. Sector says what it is, this
@@ -1755,7 +1747,7 @@ ${new Set(holdings.map((h) => h.sector).filter((s) => s && s !== 'Unclassified')
               {/* ⚠ FIRST OF THE THREE INSTRUMENT COLUMNS — momentum, risk, exposure. It is the
                   only one of the three that is SIGNED, so it is the only one that carries colour. */}
               <th className={`text-right w-24 ${th}`} onClick={() => click('mom')}>
-                Momentum{caret('mom')}
+                {copy.holdings.momentum}{caret('mom')}
 {/* ⚠ FORMULA, BLANK LINE, THE SAME FORMULA SUBSTITUTED — the shape the Money-weighted column
                     uses, and the reason it is worth copying: a reader can CHECK the arithmetic instead
                     of being told the answer. The three ⚠ paragraphs that used to live here (why the
@@ -1766,49 +1758,44 @@ ${new Set(holdings.map((h) => h.sector).filter((s) => s && s !== 'Unclassified')
                     substituted are one this table is actually showing. No row with legs → the formula
                     alone, never a made-up illustration. */}
                 <Provenance source="benchmark" asOf={null} kind="formula" column
-                  what="12-1 momentum: the last 12 months' EUR return, excluding the most recent month."
-                  note="signal_engine mom_12_1 — the same one /signal-lab charts"
-                  how={`Price one month ago ÷ price twelve months ago − 1${momExample(holdings)}`} />
+                  what={copy.info.momentumWhat}
+                  note={copy.info.momentumNote}
+                  how={copy.info.momentumHow(momExample(holdings))} />
               </th>
-              <th className={`text-right w-24 ${th}`} onClick={() => click('vol')}>
-                5y vol{caret('vol')}
+              {/* ⚠ `w-28`, ONE STEP WIDER THAN ITS TWO NEIGHBOURS, BECAUSE THE HEADER IS A WORD
+                  NOW. It read `5y vol` — six characters, and "vol" in a table of holdings is read
+                  as VOLUME at least as readily as volatility. Spelt out it is `Volatility` (10)
+                  and `Volatiliteit` (12), which with the sort caret and the ⓘ does not fit 6rem;
+                  `whitespace-nowrap` means it would not wrap, it would PUSH. The window moved into
+                  the ⓘ, which already opens "Five-year annualised volatility…" — and that also puts
+                  this header in the same shape as `Momentum` and `Beta` beside it, both of which
+                  are bare nouns whose window lives in their card.
+                  ⚠ THE 1rem COMES OUT OF `Name`, which is the column an auto-layout table takes
+                  slack from first — see its `min-w` note above. That floor is what stops this
+                  being a trade against legibility. */}
+              <th className={`text-right w-28 ${th}`} onClick={() => click('vol')}>
+                {copy.holdings.vol}{caret('vol')}
                 {/* ⚠ `benchmark`, NOT `airs_volk`. Every other number in this table is AIRS's own
                     valuation; this one is computed here from OUR daily EUR price series, and a
                     column whose card names the wrong source is how a reader comes to trust a
                     figure's provenance wrongly. */}
                 <Provenance source="benchmark" asOf={null} kind="formula" column
-                  what="How much this instrument's price moves, annualised, over the last 5 years."
-                  note="annualised standard deviation of daily EUR returns"
-                  how={'std(daily return, ddof=1) × √252, over the trailing 5 years of our own '
-                    + 'yfinance closes converted to EUR at each date\'s rate.'
-                    + `${volExample(holdings)}\n\n`
-                    + '⚠ IN EUR, like every figure on this screen — a euro holder bears the '
-                    + 'currency move, so a dollar stock\'s volatility to them includes it.\n\n'
-                    + '⚠ A DASH IS NOT A ZERO. An instrument with under four years of history has '
-                    + 'no five-year figure; 0.0 would read as remarkably stable.'} />
+                  what={copy.info.volWhat}
+                  note={copy.info.volNote}
+                  how={copy.info.volHeaderHow(volExample(holdings))} />
               </th>
               <th className={`text-right w-20 ${th}`} onClick={() => click('beta')}>
-                Beta{caret('beta')}
+                {copy.holdings.beta}{caret('beta')}
                 <Provenance source="benchmark" asOf={null} kind="formula" column
-                  what={`How much this instrument moves for each 1% of ${benchmark}, over 5 years.`}
-                  note={`weekly EUR returns, regressed on ${benchmark}`}
-                  how={`cov(instrument, ${benchmark}) ÷ var(${benchmark}), on WEEKLY EUR returns over the trailing 5 years — against ${benchmark}'s investable tracker, priced the same way as the holdings.${betaExample(holdings)}
-
-⚠ WEEKLY, WHILE THE VOL COLUMN IS DAILY, AND THAT IS DELIBERATE. The trackers are London-listed and close at 16:30 London; a US holding closes at 21:00, so half its day lands in the next benchmark bar and the daily correlation is mechanically halved — every beta biased downward. Measured on this book: Microsoft vs ACWI read 0.72 daily against a true ~1.05, and 1.04 weekly. Volatility is a single-series statistic with nothing to be out of sync with, so it stays daily.
-
-⚠ IT MOVES WITH THE BENCHMARK PICKER above. A beta is meaningless without naming what it is against, so this is not a property of the instrument.
-
-⚠ ALIGNED ON THE DATES BOTH SERIES HAVE. A Stockholm listing and a London-traded ETF do not share a calendar, and pairing the two by position would offset them from the first mismatched holiday onward.
-
-⚠ A DASH IS NOT A ZERO — 0 would claim the stock moves independently of the market, which is a strong statement about something we could not measure.`} />
+                  what={copy.info.betaWhat(benchmark)}
+                  note={copy.info.betaNote(benchmark)}
+                  how={copy.info.betaHeaderHow(benchmark, betaExample(holdings))} />
               </th>
               <th className={`text-right w-[7.2rem] ${th}`} onClick={() => click('weight')}>
-                Weight (now){caret('weight')}
+                {copy.holdings.weightNow}{caret('weight')}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={'The share of the portfolio held in this instrument, right now.'}
-                  how={`Huidige waarde ÷ the book’s total Huidige waarde
-
-the ${holdings.length} rows below sum to ${eur0n(grand.valuenow)} = 100.00%`} />
+                  what={copy.info.weightWhat}
+                  how={copy.info.weightHow(holdings.length, eur0n(grand.valuenow))} />
               </th>
               {/* ⚠ THE THREE COMPONENTS, THEN THEIR SUM — the whole point of merging the ledger
                   into this table. A reader who wants to know what a position MADE should not have
@@ -1824,140 +1811,100 @@ the ${holdings.length} rows below sum to ${eur0n(grand.valuenow)} = 100.00%`} />
                   them — the only way to check it without a DOM, which this repo does not test. */}
 {show('opening') && (
               <th className="text-right w-[9.6rem] py-2 font-medium">
-                Beginwaarde (1 Jan)
+                {copy.holdings.opening}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what="What this position was worth at the start of the year, on AIRS’s own basis."
-                  how={`Σ (quantity held today × its price on 1 January)
-
-= ${eur0n(grand.opening)}`} />
+                  what={copy.info.openingWhat}
+                  how={copy.info.openingHow(eur0n(grand.opening))} />
               </th>
 )}
 {show('valuenow') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
-                Value now
+                {copy.holdings.valueNow}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what="What this position is worth today."
-                  how={`Σ (AIRS’s current valuation)
-
-= ${eur0n(grand.valuenow)}`} />
+                  what={copy.info.valueNowWhat}
+                  how={copy.info.valueNowHow(eur0n(grand.valuenow))} />
               </th>
 )}
 {show('avgcapital') && (
               <th className="text-right w-[9.6rem] py-2 font-medium">
-                Avg capital invested
+                {copy.holdings.avgCapital}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what="The money actually tied up in this position over the year."
-                  how={`Σ (value at the open + each flow × the share of the year still to run)
-
-= ${eur0n(grand.avgcapital)}`} />
+                  what={copy.info.avgCapitalWhat}
+                  how={copy.info.avgCapitalHow(eur0n(grand.avgcapital))} />
               </th>
 )}
 {show('unrealised') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
-                Unrealised
+                {copy.holdings.unrealised}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what="What this position has gained or lost while the book has held it — on paper, not banked."
-                  note="value now − value when the year opened"
-                  how={`Value now − Beginwaarde
-
-${eur0n(grand.valuenow)} − ${eur0n(grand.opening)} = ${eur0n(grand.unrealised)}`} />
+                  what={copy.info.unrealisedWhat}
+                  note={copy.info.unrealisedNote}
+                  how={copy.info.unrealisedHow(eur0n(grand.valuenow), eur0n(grand.opening), eur0n(grand.unrealised))} />
               </th>
 )}
 {show('realised') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
-                Realised
+                {copy.holdings.realised}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what="What was banked by actually selling — this year’s part of it."
-                  note="AIRS’s Res. YtD, summed over the year’s sales"
-                  how={`Σ Res. YtD over the year’s sales
-
-= ${eur0n(grand.realised)}`} />
+                  what={copy.info.realisedWhat}
+                  note={copy.info.realisedNote}
+                  how={copy.info.realisedHow(eur0n(grand.realised))} />
               </th>
 )}
 {show('income') && (
               <th className="text-right w-[7.2rem] py-2 font-medium">
-                Income
+                {copy.holdings.income}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what="The dividends and coupons this position paid the book this year."
-                  note="net — gross less withholding tax"
-                  how={`Σ (dividend + withholding tax)
-
-= ${eur0n(grand.income)}`} />
+                  what={copy.info.incomeWhat}
+                  note={copy.info.incomeNote}
+                  how={copy.info.incomeHow(eur0n(grand.income))} />
               </th>
 )}
 {show('result') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
-                Result
+                {copy.holdings.result}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what="What the book actually made on this position this year, in euros."
-                  note="unrealised + realised + income"
-                  how={`Unrealised + Realised + Income
-
-${eur0n(grand.unrealised)} + ${eur0n(grand.realised)} + ${eur0n(grand.income)} = ${eur0n(grand.result)}`} />
+                  what={copy.info.resultWhat}
+                  note={copy.info.resultNote}
+                  how={copy.info.resultHow(eur0n(grand.unrealised), eur0n(grand.realised), eur0n(grand.income), eur0n(grand.result))} />
               </th>
 )}
 {show('koers') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
-                Koers
+                {copy.holdings.price}
                 <Provenance source="airs_volk" asOf={asOf} kind="copied" column
-                  what="How much of the result is the instrument's own price move, with the currency taken out."
-                  note="AIRS's Fondsresultaat, in EUR"
-                  how={`AIRS splits every HELD position's value change into a price leg and a currency leg, both in euros, and publishes both. This column is its Fondsresultaat as reported — nothing here re-derives it.
-
-Σ = ${eur0n(grand.koers)}
-
-⚠ IT COVERS THE HELD LEG ONLY. Fondsresultaat + Valutaresultaat = Value now − Beginwaarde, so anything realised on a sale and any dividend sits outside the pair — that is the Rest column.
-
-⚠ THE SECOND LINE IS THE SAME EUROS AS POINTS OF THIS ROW'S MONEY-WEIGHTED RETURN — divided by the same average invested capital, so Koers + Valuta + Rest add up to that return exactly. Measured on AzTopSelectie: Samsung is −7.01% on the money = −14.70pp price + 7.69pp currency, i.e. without the won it would have been −14.7%.
-
-⚠ POINTS RATHER THAN A SHARE OF THE RETURN, because the two legs routinely oppose each other and a share is then unbounded: the same Samsung row reads 210% price and −110% currency, which is correct and unreadable.
-
-⚠ NO POINTS ON A SUBTOTAL UNLESS EVERY ROW UNDER IT HAS BOTH A SPLIT AND A CAPITAL. One certificate leg or one pre-2026-07-18 holding and the numerator covers a different set of rows from the denominator, so the points would stop adding to the return beside them. The grand total never shows them: its Result includes sold positions, which have no split at all.`} />
+                  what={copy.info.priceWhat}
+                  note={copy.info.priceNote}
+                  how={copy.info.priceHow(eur0n(grand.koers))} />
               </th>
 )}
 {show('valuta') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
-                Valuta
+                {copy.holdings.currency}
                 <Provenance source="airs_volk" asOf={asOf} kind="copied" column
-                  what="How much of the result is the exchange rate moving, with the price taken out."
-                  note="AIRS's Valutaresultaat, in EUR"
-                  how={`AIRS's Valutaresultaat as reported.
-
-Σ = ${eur0n(grand.valuta)}
-
-⚠ A EURO HOLDING READS 0 AND THAT IS A MEASUREMENT, not a gap. A blank means AIRS published no split for the row: cash, a leg inside a certificate, or a snapshot from before 2026-07-18, when the two columns first appeared.
-
-⚠ THE TWO LEGS ROUTINELY PULL AGAINST EACH OTHER. Measured on AzTopSelectie: AIA Group made +729 on price and lost −873 on the yen-to-euro move, netting −145.`} />
+                  what={copy.info.currencyWhat}
+                  note={copy.info.currencyNote}
+                  how={copy.info.currencyHow(eur0n(grand.valuta))} />
               </th>
 )}
 {show('unsplit') && (
               <th className="text-right w-[7.2rem] py-2 font-medium">
-                Rest
+                {copy.holdings.rest}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what="The part of the result AIRS's price/currency split does not reach."
-                  note="result − koers − valuta"
-                  how={`Result − Koers − Valuta
-
-= ${eur0n(grand.unsplit)}
-
-⚠ IN PRACTICE THIS IS THE REALISED LEG AND THE DIVIDENDS. AIRS splits what is HELD; the transacties sheet it realises through has no currency column, and a dividend is booked in EUR. So a book that trimmed has a remainder here, and a book that only held has none.
-
-⚠ IT IS DERIVED BY SUBTRACTION, so it also absorbs any gap between AIRS's split and our own held figure — which is the point. Three columns that sum to the Result beside them can be checked; two that fall short of it look like an error.`} />
+                  what={copy.info.restWhat}
+                  note={copy.info.restNote}
+                  how={copy.info.restHow(eur0n(grand.unsplit))} />
               </th>
 )}
               <th className="text-right w-[9.6rem] py-2 font-medium">
-                Money-weighted
+                {copy.holdings.moneyWeighted}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={'What this position returned on the money actually put into it — a '
-                    + 'money-weighted return (Modified Dietz), so WHEN you bought and sold is '
-                    + 'part of the answer.'}
-                  note="result ÷ average invested capital"
-                  how={`Result ÷ Avg capital invested
-
-${eur0n(grand.result)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`} />
+                  what={copy.info.moneyWhat}
+                  note={copy.info.moneyNote}
+                  how={copy.info.moneyHow(eur0n(grand.result), eur0n(grand.avgcapital), fmtRet(grand.mwr))} />
               </th>
               <th className={`text-right w-32 pr-4 ${th}`} onClick={() => click('return')}>
-                Instrument return{caret('return')}
+                {copy.holdings.instrumentReturn}{caret('return')}
                 {/* ⚠ `airs_volk`, NOT `yfinance`. This header claimed yfinance while the rows
                     beneath it are AIRS's own valuation — each row's card names its actual source
                     correctly, so the column header disagreed with almost every cell under it. The
@@ -1968,23 +1915,15 @@ ${eur0n(grand.result)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`} />
                     A header that explains a formula the table no longer uses is worse than one
                     that explains nothing. */}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={'What this instrument itself returned in euros since '
-                    + `${anchor ?? 'the year opened'} — independent of how much of it the book `
-                    + 'holds, and independent of when you traded it.'}
-                  how={`(Huidige waarde + net income) ÷ Beginwaarde − 1, per row${bookReturnExample(holdings)}
-
-Beginwaarde prices TODAY’s share count at its 1 January price, which is what erases your timing — so this is NOT a chained time-weighted return: a share bought in June is still measured from January. Money-weighted, beside it, is the same Result over the capital actually tied up.
-
-a row marked ƒ is priced off our own EUR series instead; the class rows below divide their own Result by their own Beginwaarde`} />
+                  what={copy.info.instrumentWhat(anchor ?? copy.info.yearOpened)}
+                  how={copy.info.instrumentHow(bookReturnExample(holdings, copy.row.netDividend))} />
               </th>
               <th className={`text-right w-28 ${th}`} onClick={() => click('contribution')}>
-                Contribution{caret('contribution')}
+                {copy.holdings.contribution}{caret('contribution')}
                 <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what="What this position added to, or took off, the book’s return for the year."
-                  note="result ÷ the book’s opening capital"
-                  how={`Result ÷ the book’s opening capital
-
-${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contribution)}`} />
+                  what={copy.info.contributionWhat}
+                  note={copy.info.contributionNote}
+                  how={copy.info.contributionHow(eur0n(grand.result), eur0n(realised?.basis_eur), ppt(grand.contribution))} />
               </th>
             </tr>
           </thead>
@@ -2003,7 +1942,7 @@ ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contributi
                 <td className="py-2 font-medium text-fg-strong" colSpan={3}>
                   <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 align-middle"
                     style={{ background: allocColor(g.bucket) }} />
-                  {bucketLabel(g.bucket)}
+                  {copy.bucket(bucketLabel(g.bucket))}
                   <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[11px] font-normal text-fg-muted">
                     {g.rows.length}
                   </span>
@@ -2021,7 +1960,7 @@ ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contributi
                       thing `FundamentalButton`'s own docstring says not to do. */}
                   {g.bucket === EQUITY_BUCKET && g.basket.holdings.length > 0 && (
                     <FundamentalButton className="ml-2 align-middle"
-                      title={`Blended owner earnings and price steadiness across the ${g.basket.holdings.length} priced name${g.basket.holdings.length === 1 ? '' : 's'} in ${bucketLabel(g.bucket)}, weighted by what the book holds today.`}
+                      title={copy.classRow.fundamentalTitle(g.basket.holdings.length, copy.bucket(bucketLabel(g.bucket)))}
                       onOpen={() => onFundamental({
                         name: g.basket.label, basket: g.basket, weightPct: g.slice?.pct })} />
                   )}
@@ -2037,12 +1976,9 @@ ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contributi
                 <td className="py-2 text-right font-mono font-semibold text-fg-strong whitespace-nowrap">
                   {num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}%
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={`${g.bucket}'s share of the book TODAY.`}
-                    note={g.slice ? 'the allocation chart’s own figure — cash included'
-                      : 'summed from the rows below'}
-                    how={`Σ Huidige waarde of this class ÷ the book’s total
-
-${num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}% — the same figure the Allocation bar above is drawn from`} />
+                    what={copy.classRow.weightWhat(copy.bucket(bucketLabel(g.bucket)))}
+                    note={g.slice ? copy.classRow.chartWeightNote : copy.classRow.rowsWeightNote}
+                    how={copy.classRow.weightHow(`${num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}%`)} />
                 </td>
                 {/* The class's own four euro columns, summed — so a reader can see which CLASS
                     made the money, not only which position. */}
@@ -2059,11 +1995,9 @@ ${num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}
                 <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.mwr)}`}>
                   {fmtRet(g.sum.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={`What ${bucketLabel(g.bucket)} returned on the money actually put into it.`}
-                    note="result ÷ average invested capital"
-                    how={`Result ÷ Avg capital invested
-
-${eur0n(g.sum.mwrResult)} ÷ ${eur0n(g.sum.avgcapital)} = ${fmtRet(g.sum.mwr)}${g.sum.mwrRows < g.rows.length ? ` (over the ${g.sum.mwrRows} of ${g.rows.length} holdings the book buys and sells itself — the rest sit inside certificates and have no flows of their own)` : ''}`} />
+                    what={copy.classRow.moneyWhat(copy.bucket(bucketLabel(g.bucket)))}
+                    note={copy.info.moneyNote}
+                    how={copy.classRow.moneyHow(eur0n(g.sum.mwrResult), eur0n(g.sum.avgcapital), fmtRet(g.sum.mwr), g.sum.mwrRows, g.rows.length)} />
                 </td>
                 {/* ⚠ THE COLUMN BELOW, AGGREGATED — NOT THE BOOK'S VALUE CHANGE, and not the
                     Weight (now) column times the returns. A dash where nothing in the class had
@@ -2077,18 +2011,16 @@ ${eur0n(g.sum.mwrResult)} ÷ ${eur0n(g.sum.avgcapital)} = ${fmtRet(g.sum.mwr)}${
                       0.5pp of slack absorbs float noise without hiding a real gap. */}
                   {g.ret.pct != null && g.ret.coveredPct < 99.5 && (
                     <span className="ml-1 text-warn-400"
-                      title={`This rate covers ${num2(g.ret.coveredPct)}% of what ${bucketLabel(g.bucket)} made — ${g.ret.rows - g.ret.legs} position(s) had no value when the year opened (bought since, or a cash line), so there is nothing to measure their result against. Their euros are still in the Result column.`}>⚠</span>
+                      title={copy.classRow.coverageTitle(num2(g.ret.coveredPct), copy.bucket(bucketLabel(g.bucket)), g.ret.rows - g.ret.legs)}>⚠</span>
                   )}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={g.ret.pct == null
-                      ? `Nothing in ${bucketLabel(g.bucket)} was held when the year opened, so it has no return to measure.`
-                      : `What ${bucketLabel(g.bucket)} made this year, against what it was worth when the year opened.`}
+                      ? copy.classRow.noReturn(copy.bucket(bucketLabel(g.bucket)))
+                      : copy.classRow.returnWhat(copy.bucket(bucketLabel(g.bucket)))}
                     note={g.ret.pct == null
-                      ? 'a dash, never a 0% — “no starting money to measure against” and “went nowhere” are different facts'
-                      : `${eur0n(g.ret.resultEur)} ÷ ${eur0n(g.ret.startEur)}`
-                        + (g.ret.coveredPct < 99.5
-                          ? ` · covers ${num2(g.ret.coveredPct)}% of what this class made`
-                          : '')}
+                      ? copy.classRow.dashNote
+                      : copy.classRow.returnNote(eur0n(g.ret.resultEur), eur0n(g.ret.startEur),
+                        g.ret.coveredPct < 99.5 ? num2(g.ret.coveredPct) : undefined)}
                     /* ⚠ THE DIFFERENCE FROM THE BOOK'S OWN RETURN IS NAMED HERE, because a reader
                        who spots a class at 99.9% of the book returning a point less than the book
                        will otherwise go looking for it in the cash line — where it is not. */
@@ -2102,9 +2034,7 @@ ${eur0n(g.sum.mwrResult)} ÷ ${eur0n(g.sum.avgcapital)} = ${fmtRet(g.sum.mwr)}${
                        and deployed it on 5 January. On those true weights it composes exactly:
                        4.03% × 1102.77% + 95.97% × 0% = 44.4624%, AIRS's own figure. Which is
                        precisely why none of the three may be multiplied by another. */
-                    how={`Result ÷ what this class was worth when the year opened
-
-${eur0n(g.ret.resultEur)} ÷ ${eur0n(g.ret.startEur)} = ${fmtRet(g.ret.pct)}`} />
+                    how={copy.classRow.returnHow(eur0n(g.ret.resultEur), eur0n(g.ret.startEur), fmtRet(g.ret.pct))} />
                 </td>
                 <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.contribution)}`}>
                   {ppt(g.sum.contribution)}
@@ -2113,17 +2043,16 @@ ${eur0n(g.ret.resultEur)} ÷ ${eur0n(g.ret.startEur)} = ${fmtRet(g.ret.pct)}`} /
                       look like one of them is wrong. They share a NUMERATOR and differ only in
                       what they divide by — so the card prints both divisions, side by side. */}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={`What ${bucketLabel(g.bucket)} added to, or took off, the book’s return for the year.`}
-                    note={`${eur0n(g.sum.result)} ÷ the book’s opening capital`}
+                    what={copy.classRow.contributionWhat(copy.bucket(bucketLabel(g.bucket)))}
+                    note={copy.classRow.contributionNote(eur0n(g.sum.result))}
                     /* ⚠ THE MULTIPLICATION IS THE WHOLE EXPLANATION, so it goes on screen rather
                        than in prose. Contribution and Return differ by exactly one term — the
                        class's share of the book's OPENING capital — and that term is nowhere else
                        in the table: the Weight column is today's share (85.38% where the opening
                        share is 82.98%), which is why nobody could reconstruct it. Verified on
                        every class of both measured books, to the third decimal. */
-                    how={`Return × this class’s share of the book’s opening capital
-
-${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%'} (${eur0n(g.ret.startEur)} of ${eur0n(realised?.basis_eur)}) = ${ppt(g.sum.contribution)}`} />
+                    how={copy.classRow.contributionHow(fmtRet(g.ret.pct), openingShare == null ? '—' : num2(openingShare) + '%',
+                      eur0n(g.ret.startEur), eur0n(realised?.basis_eur), ppt(g.sum.contribution))} />
                 </td>
               </tr>
               {/* ⚠⚠ THE ROUTE IS PART OF THE ROW KEY BELOW, AND THE BACKEND'S `merge_by_isin`
@@ -2181,7 +2110,7 @@ ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%
                           everything" is a different one the Weight column already answers. */}
                       {part.classPct != null && (
                         <span className="ml-2 normal-case tracking-normal text-fg-faint">
-                          {part.classPct.toFixed(1)}% of {bucketLabel(g.bucket)}
+                          {part.classPct.toFixed(1)}% {copy.allocation.of} {copy.bucket(bucketLabel(g.bucket))}
                         </span>
                       )}
                     </td>
@@ -2192,7 +2121,7 @@ ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%
                   (h.via_names ?? []).join(',')].join('|')}
                   onClick={onTiming && h.name && !isSynthetic(h) ? () => onTiming(h.name!) : undefined}
                   title={onTiming && h.name && !isSynthetic(h)
-                    ? `Why the trading mattered for ${h.name}`
+                    ? copy.row.timingTitle(h.name)
                     : isSynthetic(h)
                       ? `${h.name} — the positions this book holds through that strategy, added up`
                       : undefined}
@@ -2219,7 +2148,7 @@ ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%
                       {h.isin && h.bucket === EQUITY_BUCKET && !h.is_fund && (
                         <FundamentalButton
                           className="opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0"
-                          title={`Fundamental — is ${h.name ?? h.isin} fundamentally good? (owner earnings + price steadiness)`}
+                          title={copy.row.fundamentalTitle(h.name ?? h.isin ?? copy.row.thisPosition)}
                           onOpen={() => onFundamental({ name: h.name ?? h.isin!, isin: h.isin! })} />
                       )}
                     </span>
@@ -2240,7 +2169,7 @@ ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%
                       zero-width column in an auto-layout table fights it for the slack. Sector
                       names are short and known; they get to stay on one line. */}
                   <td className="py-1.5 pr-3 text-fg-muted whitespace-nowrap"
-                    title={sectorLabel(h.sector) || 'No sector — a fund, or not classifiable'}>
+                    title={sectorLabel(h.sector) || copy.row.noSector}>
                     {sectorLabel(h.sector) || <span className="text-fg-faint">—</span>}
                   </td>
                   {/* ⚠ THE ONE COLOURED COLUMN OF THE THREE. Momentum has a SIGN — up or down is
@@ -2250,17 +2179,12 @@ ${fmtRet(g.ret.pct)} × ${openingShare == null ? '—' : num2(openingShare) + '%
                     {h.mom_12_1_pct == null ? '—' : `${h.mom_12_1_pct >= 0 ? '+' : ''}${h.mom_12_1_pct.toFixed(1)}%`}
                     <Provenance source="benchmark" asOf={null} kind="formula"
                       what={h.mom_12_1_pct == null
-                        ? `${h.name ?? 'This position'} has under ~13 months of price history, so it has no 12-1 momentum.`
-                        : `What ${h.name ?? 'this position'} returned over the 12 months ending one month ago.`}
-                      note={h.mom_12_1_pct == null ? undefined : 'signal_engine mom_12_1, EUR'}
+                        ? copy.row.momentumMissingWhat(h.name ?? copy.row.thisPosition)
+                        : copy.row.momentumWhat(h.name ?? copy.row.thisPosition)}
+                      note={h.mom_12_1_pct == null ? undefined : copy.row.momentumNote}
                       how={h.mom_12_1_pct == null
-                        ? 'A dash is not a zero — 0% would claim it went nowhere. Needs ~13 months of '
-                          + 'price history; the two risk columns beside it need four years, which is '
-                          + 'why a young listing can show momentum and a dash for volatility.'
-                        : `Price one month ago ÷ price twelve months ago − 1${
-                          momSub(h.mom_12_1_to, h.mom_12_1_from, h.mom_12_1_pct)}
-
-The most recent month is excluded on purpose: it mean-reverts, and including it is what makes a raw 12-month return a poor momentum signal.`} />
+                        ? copy.row.momentumMissing
+                        : copy.row.momentumHow(momSub(h.mom_12_1_to, h.mom_12_1_from, h.mom_12_1_pct))} />
                   </td>
                   {/* ⚠ NO TONE. Volatility is not good or bad — 45% is what a growth stock does,
                       and colouring it red would make "risky" read as "losing". The signed columns
@@ -2269,15 +2193,12 @@ The most recent month is excluded on purpose: it mean-reverts, and including it 
                     {h.vol_5y_pct == null ? '—' : `${h.vol_5y_pct.toFixed(1)}%`}
                     <Provenance source="benchmark" asOf={null} kind="formula"
                       what={h.vol_5y_pct == null
-                        ? `${h.name ?? 'This position'} has under four years of price history, so it has no five-year volatility.`
-                        : `How much ${h.name ?? 'this position'}'s price moves, annualised, over the last 5 years.`}
-                      note={h.vol_5y_pct == null ? undefined
-                        : 'annualised standard deviation of daily EUR returns'}
+                        ? copy.row.volMissingWhat(h.name ?? copy.row.thisPosition)
+                        : copy.row.volWhat(h.name ?? copy.row.thisPosition)}
+                      note={h.vol_5y_pct == null ? undefined : copy.row.volNote}
                       how={h.vol_5y_pct == null
-                        ? 'A dash is not a zero — 0.0% would read as remarkably stable.'
-                        : `std(daily return, ddof=1) × √252 = ${h.vol_5y_pct.toFixed(1)}%
-
-Our own yfinance closes, converted to EUR at each date's rate — so the currency move is in it, which is what a euro holder actually bears.`} />
+                        ? copy.row.volMissing
+                        : copy.row.volHow(`${h.vol_5y_pct.toFixed(1)}%`)} />
                   </td>
                   {/* ⚠ NO TONE, same as the vol column beside it — a beta of 1.4 is not worse
                       than 0.7, it is a different exposure, and colour would make it a verdict. */}
@@ -2285,23 +2206,19 @@ Our own yfinance closes, converted to EUR at each date's rate — so the currenc
                     {h.beta_5y == null ? '—' : h.beta_5y.toFixed(2)}
                     <Provenance source="benchmark" asOf={null} kind="formula"
                       what={h.beta_5y == null
-                        ? `${h.name ?? 'This position'} has too little overlapping history with ${benchmark} to measure a beta.`
-                        : `How much ${h.name ?? 'this position'} moves for each 1% of ${benchmark}.`}
-                      note={h.beta_5y == null ? undefined : `weekly EUR returns vs ${benchmark}, 5 years`}
+                        ? copy.row.betaMissingWhat(h.name ?? copy.row.thisPosition, benchmark)
+                        : copy.row.betaWhat(h.name ?? copy.row.thisPosition, benchmark)}
+                      note={h.beta_5y == null ? undefined : copy.row.betaNote(benchmark)}
                       how={h.beta_5y == null
-                        ? 'A dash is not a zero — 0 would claim it moves independently of the market.'
-                        : `cov(instrument, ${benchmark}) ÷ var(${benchmark}) = ${h.beta_5y.toFixed(2)}
-
-Weekly EUR returns over the trailing 5 years, on the weeks both series have — weekly because the benchmark tracker and a US listing close five hours apart, which halves a daily correlation.`} />
+                        ? copy.row.betaMissing
+                        : copy.row.betaHow(benchmark, h.beta_5y.toFixed(2))} />
                   </td>
                   <td className="py-1.5 text-right font-mono text-fg tabular-nums whitespace-nowrap">
                     {num2(h.weight_now_pct ?? 0)}%
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                      what={`${h.name ?? 'This holding'}'s share of the book TODAY.`}
-                      note="Huidige waarde ÷ the book’s total Huidige waarde"
-                      how={`Huidige waarde ÷ the book’s total Huidige waarde\n\n`
-                        + `${eur0n(h.current_value_eur)} ÷ ${eur0n(grand.valuenow)} = `
-                        + `${num2(h.weight_now_pct ?? 0)}%`} />
+                      what={copy.row.weightWhat(h.name ?? copy.row.thisHolding)}
+                      note={copy.row.weightNote}
+                      how={copy.row.weightHow(eur0n(h.current_value_eur), eur0n(grand.valuenow), `${num2(h.weight_now_pct ?? 0)}%`)} />
                   </td>
                   {/* ⚠ EVERY ONE A DASH WHERE THERE IS NOTHING, NEVER A €0. "Nothing was sold" and
                       "the sale broke even" are different facts, and on a money column the second
@@ -2323,66 +2240,51 @@ Weekly EUR returns over the trailing 5 years, on the weeks both series have — 
                     {fmtRet(h.money_weighted_return_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
                       what={h.capital_source === 'lookthrough'
-                        ? `What ${h.capital_book ?? 'the strategy behind the certificate'} made on the money it put into ${h.name ?? 'this position'} — this book holds it through a certificate.`
+                        ? copy.row.moneyLookthroughWhat(h.capital_book ?? copy.row.strategyBehindCertificate, h.name ?? copy.row.thisPosition)
                         : h.money_weighted_return_pct != null
-                        ? `What ${h.name ?? 'this position'} returned on the money actually put into it.`
+                        ? copy.row.moneyDirectWhat(h.name ?? copy.row.thisPosition)
                         /* Lead with the cause, not with the absence — "cannot be worked out" for
                            every blank sends a reader to open the card just to learn which of five
                            things happened. */
                         : h.via_money_weighted_return_pct != null
-                          ? `Held through ${h.via_holding_name ?? 'a certificate'}, which has the purchases — this leg has none of its own.`
+                          ? copy.row.moneyViaWhat(h.via_holding_name ?? copy.row.certificate)
                           : h.bucket === CASH_BUCKET
-                            ? 'Cash is not bought and sold, so there is no invested capital to measure against.'
-                            : `What ${h.name ?? 'this position'} returned on the money put into it cannot be worked out.`}
-                      note={h.money_weighted_return_pct == null ? undefined : 'result ÷ average invested capital'}
+                            ? copy.row.moneyCashWhat
+                            : copy.row.moneyUnknownWhat(h.name ?? copy.row.thisPosition)}
+                      note={h.money_weighted_return_pct == null ? undefined : copy.info.moneyNote}
                       how={/* ⚠ A LOOKED-THROUGH FIGURE MUST NAME THE BOOK IT WAS MEASURED IN.
                               This book never bought the stock — it bought the certificate — so the
                               rate is the STRATEGY's on its own money, and the arithmetic behind it
                               belongs to the child book, not to the `Result` euros in this row. */
                         h.capital_source === 'lookthrough'
-                        ? `Result ÷ Avg capital invested, measured in ${h.capital_book ?? 'the child book'}
-
-${eur0n(h.via_avg_capital_eur)} of average invested capital there → ${fmtRet(h.money_weighted_return_pct)}
-
-This book never bought ${h.name ?? 'this stock'} — it bought ${h.via_holding_name ?? 'the certificate'}. So this is what ${h.capital_book ?? 'the strategy'} made on the money IT put in, which is the only per-stock figure the flows can support. Your own timing into the certificate is not in it. The ${eur0n(h.avg_capital_eur)} beside it is your slice of that position; scaling both sides leaves the rate unchanged.`
+                        ? copy.row.lookthroughHow(h.capital_book ?? copy.row.childBook, eur0n(h.via_avg_capital_eur),
+                          fmtRet(h.money_weighted_return_pct), h.name ?? copy.row.thisPosition,
+                          h.via_holding_name ?? copy.row.theCertificate, eur0n(h.avg_capital_eur))
                         : h.money_weighted_return_pct != null
-                        ? `Result ÷ Avg capital invested
-
-${eur0n(h.result_eur)} ÷ ${eur0n(h.avg_capital_eur)} = ${fmtRet(h.money_weighted_return_pct)}`
+                        ? copy.info.moneyHow(eur0n(h.result_eur), eur0n(h.avg_capital_eur), fmtRet(h.money_weighted_return_pct))
                         /* ⚠ THE BOOK-LEVEL CAUSE IS TESTED FIRST AND MUST STAY FIRST. With no
                            transactions loaded, `capital_unknown` is false for EVERY row, so the
                            certificate branch would win by default and tell a reader that an
                            outright holding sits inside a wrapper. Three causes, one blank. */
                         : realised && !realised.available
-                          ? `Result ÷ Avg capital invested
-
-no denominator — ${realised.note ?? 'this book has no readable transactions, so there are no flows to weigh the capital by.'} Nothing is wrong with this position; every other column is unaffected.`
+                          ? copy.row.noTransactionsHow(copy.serverText(realised.note ?? copy.row.noTransactions))
                           : h.capital_unknown
-                            ? `Result ÷ Avg capital invested
-
-refused — shares were DEPOSITED into this position during the year (AIRS books it Tt = D, Deponering: a split, a bonus issue or a transfer in), so its trade quantities and its holding quantity sit on different bases and the capital it tied up cannot be worked out. Its euro columns are unaffected.`
+                            ? copy.row.depositedHow
                             /* ⚠ THE WRAPPER'S NUMBER, ATTRIBUTED — NEVER ASSERTED AS THIS ROW'S.
                                AIRS bought one certificate, so this figure is identical for all of
                                its legs: it measures the certificate, not the stock. Stated as the
                                certificate's, it answers "why is this blank"; put in the cell it
                                would be 22 copies of one number wearing 22 different names. */
                             : h.via_money_weighted_return_pct != null
-                              ? `Result ÷ Avg capital invested
-
-no denominator for ${h.name ?? 'this position'} — it is reached through ${h.via_holding_name ?? 'a certificate'}${(h.via_names ?? []).length ? ` (${h.via_names!.join(', ')})` : ''}, and AIRS trades the certificate rather than what is inside it, so this leg has no purchases of its own.
-
-What CAN be measured is the certificate: it returned ${fmtRet(h.via_money_weighted_return_pct)} on ${eur0n(h.via_avg_capital_eur)} of average invested capital. That is one figure for the whole wrapper — every stock inside it shares the same purchases, so it is not this stock's own.`
+                              ? copy.row.viaHow(h.name ?? copy.row.thisPosition, h.via_holding_name ?? copy.row.certificate,
+                                (h.via_names ?? []).length ? ` (${h.via_names!.join(', ')})` : '',
+                                fmtRet(h.via_money_weighted_return_pct), eur0n(h.via_avg_capital_eur))
                               /* Cash is not bought and sold, so "capital invested" has no meaning
                                  for it — a different fact from a missing measurement, and the
                                  certificate wording would be plainly false for the book's own
                                  Effectenrekening line. */
                               : h.bucket === CASH_BUCKET
-                                ? `Result ÷ Avg capital invested
-
-does not apply — cash is not bought and sold, so there is no invested capital to weigh a return against. Its return is 0% by construction and its drag is already carried in the class and book totals.`
-                                : `Result ÷ Avg capital invested
-
-no denominator — this position is reached through a certificate, and AIRS trades the certificate rather than what is inside it, so it has no purchases of its own.`} />
+                                ? copy.row.cashHow : copy.row.genericNoCapitalHow} />
                   </td>
                   {/* An unpriced position shows a dash, never 0% — "we could not price this over
                       the window" and "it did not move" are different facts and a 0 states the
@@ -2395,7 +2297,7 @@ no denominator — this position is reached through a certificate, and AIRS trad
                         arbitrate — same rule as the ≈ beside an interpolated mark. */}
                     {h.own_return_pct != null && h.own_return_source === 'yfinance' && (
                       <span className="ml-1 text-fg-faint"
-                        title="yfinance, not AIRS — no AIRS book values this row (its wrapped model has no paired account, or it has no opening value anywhere), so there is no book figure to show.">ƒ</span>
+                        title={copy.row.yfFallback}>ƒ</span>
                     )}
                     {/* ⚠ AND SO DOES THE OTHER BOOK. Two AIRS figures in one column measured on
                         two different books is the same unarbitrable pair as two vendors — and
@@ -2411,7 +2313,7 @@ no denominator — this position is reached through a certificate, and AIRS trad
                         the ⓘ carries the arithmetic. The ƒ above stays, because "no AIRS book
                         values this at all" is NOT visible anywhere else on the row. */}
                     {h.own_return_estimated && (
-                      <span className="ml-1 text-warn-400" title="Opening price interpolated — no close near the window's start">≈</span>
+                      <span className="ml-1 text-warn-400" title={copy.row.interpolated}>≈</span>
                     )}
                     {/* ⚠ THE CARD'S *SOURCE* CHANGES PER ROW, WHICH IS THE WHOLE REASON IT IS ON
                         THE CELL. Most rows are AIRS's own valuation; a row inside a certificate
@@ -2427,48 +2329,43 @@ no denominator — this position is reached through a certificate, and AIRS trad
                       asOf={h.own_return_as_of ?? (h.own_return_source === 'yfinance' ? undefined : asOf)}
                       kind="formula"
                       what={h.own_return_pct == null
-                        ? `${h.name ?? 'This holding'} could not be priced over this window.`
-                        : `What ${h.name ?? 'this holding'} returned since ${h.own_return_from ?? 'the window opened'}, in EUR.`}
+                        ? copy.row.returnMissingWhat(h.name ?? copy.row.thisHolding)
+                        : copy.row.returnWhat(h.name ?? copy.row.thisHolding, h.own_return_from ?? copy.info.yearOpened)}
                       note={h.own_return_pct == null
-                        ? 'no valuation at one end of the window — a dash, never a 0%, because “could not price” and “did not move” are different facts'
+                        ? copy.row.noEndValue
                         : h.own_return_source === 'yfinance'
-                          ? 'our own EUR close series — no AIRS book values this row'
-                          : blendHow(h)
-                            ? `${blendLegs(h).length} routes in, each valued by the book that holds it, weighted by opening value`
+                          ? copy.row.yfReturnNote
+                          : blendHow(h, copy.row.heldDirectly, copy.row.atOpen)
+                            ? copy.row.blendNote(blendLegs(h).length)
                             /* The division in the valuing book's own euros — same line whether
                                that is this book or the one behind a certificate, so the two read
                                as one measure taken twice rather than two different measures. */
                             : `${h.own_return_book && h.own_return_book !== bookName
-                              ? `${h.own_return_book}: ` : ''}${bookMath(h)
+                              ? `${h.own_return_book}: ` : ''}${bookMath(h, copy.row.netDividend)
                               ?? (h.own_income_eur
                                 ? `(Huidige waarde + ${eur0(h.own_income_eur)} net dividend) ÷ Beginwaarde − 1`
                                 : 'Huidige waarde ÷ Beginwaarde − 1')}`}
-                      how={blendHow(h)
-                        ? `Σ (each route’s share of this position × that route’s own return)
-
-${blendHow(h)}`
+                      how={blendHow(h, copy.row.heldDirectly, copy.row.atOpen)
+                        ? copy.row.blendHow(blendHow(h, copy.row.heldDirectly, copy.row.atOpen)!)
                         : h.own_return_source === 'yfinance'
-                          ? `our own EUR close series — no AIRS book values this row
-
-${fmtRet(h.own_return_pct)} since ${h.own_return_from ?? 'the year opened'}`
-                          : `(Huidige waarde + net income) ÷ Beginwaarde − 1${h.own_return_book && h.own_return_book !== bookName ? `, as valued by ${h.own_return_book}` : ''}
-
-${bookMath(h) ?? (h.own_income_eur ? `(Huidige waarde + ${eur0(h.own_income_eur)} net dividend) ÷ Beginwaarde − 1` : 'Huidige waarde ÷ Beginwaarde − 1')} = ${fmtRet(h.own_return_pct)}`} />
+                          ? copy.row.yfReturnHow(fmtRet(h.own_return_pct), h.own_return_from ?? copy.info.yearOpened)
+                          : copy.row.bookReturnHow(
+                            bookMath(h, copy.row.netDividend) ?? (h.own_income_eur
+                              ? `(Huidige waarde + ${eur0(h.own_income_eur)} ${copy.row.netDividend}) ÷ Beginwaarde − 1`
+                              : 'Huidige waarde ÷ Beginwaarde − 1'),
+                            fmtRet(h.own_return_pct),
+                            h.own_return_book && h.own_return_book !== bookName ? h.own_return_book : undefined)} />
                   </td>
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.contribution_pct)}`}>
                     {ppt(h.contribution_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
                       what={h.contribution_pct == null
-                        ? `${h.name ?? 'This position'} has no result to contribute — it could not be valued over the window.`
-                        : `What ${h.name ?? 'this position'} added to, or took off, the book’s return for the year.`}
-                      note={h.contribution_pct == null ? undefined : 'result ÷ the book’s opening capital'}
+                        ? copy.row.contributionMissingWhat(h.name ?? copy.row.thisPosition)
+                        : copy.row.contributionWhat(h.name ?? copy.row.thisPosition)}
+                      note={h.contribution_pct == null ? undefined : copy.info.contributionNote}
                       how={h.contribution_pct != null
-                        ? `Result ÷ the book’s opening capital
-
-${eur0n(h.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(h.contribution_pct)}`
-                        : `Result ÷ the book’s opening capital
-
-no result — this position could not be valued at both ends of the window, so there is nothing to divide`} />
+                        ? copy.info.contributionHow(eur0n(h.result_eur), eur0n(realised?.basis_eur), ppt(h.contribution_pct))
+                        : copy.row.noContributionHow} />
                   </td>
                 </tr>
                 ); })}
@@ -2488,12 +2385,12 @@ no result — this position could not be valued at both ends of the window, so t
                 <td className="pl-4" />
                 <td className="py-2 font-medium text-fg-strong" colSpan={3}>
                   <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 align-middle bg-neutral-600" />
-                  No longer held
+                  {copy.holdings.noLongerHeld}
                   <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[11px] font-normal text-fg-muted">
                     {sold.length}
                   </span>
                   <span className="ml-2 text-[11px] font-normal text-fg-faint">
-                    sold out during the year
+                    {copy.sold.soldOut}
                   </span>
                 </td>
                 {/* ⚠ TWO EMPTY CELLS, NOT TWO NUMBERS — vol and beta. A class's volatility is
@@ -2522,21 +2419,17 @@ no result — this position could not be valued at both ends of the window, so t
                 <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.mwr)}`}>
                   {fmtRet(soldSum.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={'What the positions sold out during the year returned on the money put into them.'}
-                    note="result ÷ average invested capital"
-                    how={`Result ÷ Avg capital invested
-
-${eur0n(soldSum.mwrResult)} ÷ ${eur0n(soldCap)} = ${fmtRet(soldSum.mwr)}`} />
+                    what={copy.info.soldMoneyWhat}
+                    note={copy.info.moneyNote}
+                    how={copy.info.moneyHow(eur0n(soldSum.mwrResult), eur0n(soldCap), fmtRet(soldSum.mwr))} />
                 </td>
                 <td className="pr-4" />
                 <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.contribution)}`}>
                   {ppt(soldSum.contribution)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={'What the positions sold out during the year added to, or took off, the book’s return.'}
-                    note="result ÷ the book’s opening capital"
-                    how={`Result ÷ the book’s opening capital
-
-${eur0n(soldSum.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(soldSum.contribution)}`} />
+                    what={copy.info.soldContributionWhat}
+                    note={copy.info.contributionNote}
+                    how={copy.info.contributionHow(eur0n(soldSum.result), eur0n(realised?.basis_eur), ppt(soldSum.contribution))} />
                 </td>
               </tr>
               {sold.map((p, i) => (
@@ -2551,8 +2444,8 @@ ${eur0n(soldSum.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(soldSum.contri
                         part of this gain was made in earlier years and is correctly not counted. */}
                     {!!p.prior_year_eur && (
                       <span className="ml-2 text-[10px] text-warn-500"
-                        title={`${eur0n(p.prior_year_eur)} of this position's realised result was earned in EARLIER years and is correctly not in this year's figure.`}>
-                        {eur0n(p.prior_year_eur)} prior yr
+                        title={copy.row.priorYear(eur0n(p.prior_year_eur))}>
+                        {eur0n(p.prior_year_eur)} {copy.sold.priorYear}
                       </span>
                     )}
                   </td>
@@ -2578,21 +2471,20 @@ ${eur0n(soldSum.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(soldSum.contri
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${
                     retTone(p.mom_12_1_pct)}`}
                     title={p.mom_12_1_pct != null
-                      ? `12-1 momentum for ${p.name}, as of TODAY — not as of the sale. The same `
-                        + 'basis as every held row above, which is what makes the column comparable.'
-                      : soldRiskWhy(p)}>
+                      ? copy.sold.momentumTitle(p.name ?? copy.row.thisPosition)
+                      : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}>
                     {p.mom_12_1_pct != null ? fmtRet(p.mom_12_1_pct) : '—'}
                   </td>
                   <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft"
                     title={p.vol_5y_pct != null
-                      ? `5-year annualised volatility of ${p.name} in EUR, as of today.`
-                      : soldRiskWhy(p)}>
+                      ? copy.sold.volTitle(p.name ?? copy.row.thisPosition)
+                      : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}>
                     {p.vol_5y_pct != null ? `${p.vol_5y_pct.toFixed(1)}%` : '—'}
                   </td>
                   <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft"
                     title={p.beta_5y != null
-                      ? `5-year beta of ${p.name} against ${benchmark}, on weekly EUR returns.`
-                      : soldRiskWhy(p)}>
+                      ? copy.sold.betaTitle(p.name ?? copy.row.thisPosition, benchmark)
+                      : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}>
                     {p.beta_5y != null ? p.beta_5y.toFixed(2) : '—'}
                   </td>
                   {/* Weight (now) — a dash, exactly as the group row above shows it: the position is
@@ -2613,21 +2505,17 @@ ${eur0n(soldSum.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(soldSum.contri
                   <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.return_pct)}`}>
                     {fmtRet(p.return_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                      what={`What ${p.name ?? 'this position'} returned on the money put into it, over the part of the year it was held.`}
-                      note="result ÷ average invested capital"
-                      how={`Result ÷ Avg capital invested
-
-${eur0n(p.result_eur)} ÷ ${eur0n(p.avg_capital_eur)} = ${fmtRet(p.return_pct)}`} />
+                      what={copy.sold.moneyWhat(p.name ?? copy.row.thisPosition)}
+                      note={copy.info.moneyNote}
+                      how={copy.info.moneyHow(eur0n(p.result_eur), eur0n(p.avg_capital_eur), fmtRet(p.return_pct))} />
                   </td>
                   <td className="pr-4" />
                   <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.contribution_pct)}`}>
                     {ppt(p.contribution_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                      what={`What ${p.name ?? 'this position'} added to, or took off, the book’s return before it was sold.`}
-                      note="result ÷ the book’s opening capital"
-                      how={`Result ÷ the book’s opening capital
-
-${eur0n(p.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(p.contribution_pct)}`} />
+                      what={copy.sold.contributionWhat(p.name ?? copy.row.thisPosition)}
+                      note={copy.info.contributionNote}
+                      how={copy.info.contributionHow(eur0n(p.result_eur), eur0n(realised?.basis_eur), ppt(p.contribution_pct))} />
                   </td>
                 </tr>
               ))}
@@ -2650,9 +2538,9 @@ ${eur0n(p.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(p.contribution_p
               <tr className="[&_td]:bg-elevated border-t-2 border-neutral-800/40 font-semibold">
                 <td className="pl-4" />
                 <td className="py-2 text-fg-strong" colSpan={3}>
-                  The book’s year
+                  {copy.holdings.bookYear}
                   <span className="ml-2 font-normal text-[11px] text-fg-faint">
-                    {holdings.length + sold.length} positions, everything it held or sold
+                    {copy.reconciliation.positions(holdings.length + sold.length)}
                   </span>
                 </td>
                 {/* ⚠ TWO EMPTY CELLS, NOT TWO NUMBERS — vol and beta. A class's volatility is
@@ -2677,29 +2565,23 @@ ${eur0n(p.result_eur)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(p.contribution_p
                 <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.mwr)}`}>
                   {fmtRet(grand.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={'What the book returned on the money it actually had at work — over the positions whose purchases and sales we can see.'}
-                    note="result ÷ average invested capital"
-                    how={`Result ÷ Avg capital invested
-
-${eur0n(grand.mwrResult)} ÷ ${eur0n(grand.avgcapital)} = ${fmtRet(grand.mwr)}`} />
+                    what={copy.info.bookMoneyWhat}
+                    note={copy.info.moneyNote}
+                    how={copy.info.moneyHow(eur0n(grand.mwrResult), eur0n(grand.avgcapital), fmtRet(grand.mwr))} />
                 </td>
                 <td className={`py-2 pr-4 text-right font-mono tabular-nums ${retTone(realised?.book_ytd_pct)}`}>
                   {fmtRet(realised?.book_ytd_pct)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what="The book’s own return for the year, from AIRS."
-                    note="cumulatief_rendement — flow-aware, the system of record"
-                    how={`AIRS’s own cumulatief_rendement, set against the Contribution total to its left
-
-${ppt(grand.contribution)} from these rows vs ${fmtRet(realised?.book_ytd_pct)} from AIRS${reconciled ? ' — they agree' : ' — they do NOT agree'}`} />
+                    what={copy.info.bookReturnWhat}
+                    note={copy.info.bookReturnNote}
+                    how={copy.reconciliation.compareHow(ppt(grand.contribution), fmtRet(realised?.book_ytd_pct), reconciled)} />
                 </td>
                 <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.contribution)}`}>
                   {ppt(grand.contribution)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={'What every position in this table, held and sold, added up to for the book’s year.'}
-                    note="result ÷ the book’s opening capital"
-                    how={`Result ÷ the book’s opening capital
-
-${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contribution)}`} />
+                    what={copy.info.bookContributionWhat}
+                    note={copy.info.contributionNote}
+                    how={copy.info.contributionHow(eur0n(grand.result), eur0n(realised?.basis_eur), ppt(grand.contribution))} />
                 </td>
               </tr>
             </tfoot>
@@ -2715,16 +2597,12 @@ ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contributi
       {grand.contribution != null && realised?.book_ytd_pct != null && (
         <div className="px-4 py-2 border-t border-neutral-800/40 text-[11px]">
           {reconciled ? (
-            <span className="text-pos-400">
-              ✓ These positions account for the whole year — the Contribution column adds to
-              AIRS’s own {fmtRet(realised.book_ytd_pct)} exactly.
-            </span>
+            <span className="text-pos-400">{copy.reconciliation.success(fmtRet(realised.book_ytd_pct))}</span>
           ) : (
             <span className="text-warn-500">
-              ⚠ The Contribution column adds to {ppt(grand.contribution)} against AIRS’s own
-              {' '}{fmtRet(realised.book_ytd_pct)} — {ppt(grand.contribution - realised.book_ytd_pct)}
-              {' '}of the year is not explained by these rows.
-              {realised.residual_reason ? ` ${realised.residual_reason}` : ''}
+              {copy.reconciliation.mismatch(ppt(grand.contribution), fmtRet(realised.book_ytd_pct),
+                ppt(grand.contribution - realised.book_ytd_pct))}
+              {realised.residual_reason ? ` ${copy.serverText(realised.residual_reason)}` : ''}
             </span>
           )}
         </div>
@@ -2745,12 +2623,13 @@ ${eur0n(grand.result)} ÷ ${eur0n(realised?.basis_eur)} = ${ppt(grand.contributi
  *  ("3.8% of this position") answers a different question and ties to nothing else on screen, so
  *  it rides in the tooltip. */
 function ViaChips({ names, sources }: { names: string[]; sources?: BookHolding['sources'] }) {
+  const copy = useAnalyseCopy();
   const routes = sources ?? [];
   const rowTotal = routes.reduce((s, r) => s + (r.weight_now_pct ?? 0), 0);
   const title = routes.length
-    ? routes.map((r) => `${r.label ?? 'Held directly'}: ${r.weight_now_pct.toFixed(2)}% of the book`
-      + ` · €${Math.round(r.value_eur).toLocaleString('en-US')}`
-      + (rowTotal > 0 ? ` · ${(100 * r.weight_now_pct / rowTotal).toFixed(1)}% of this position` : ''))
+    ? routes.map((r) => copy.row.routeTitle(r.label ?? copy.row.heldDirectly, r.weight_now_pct.toFixed(2),
+      `€${Math.round(r.value_eur).toLocaleString('en-US')}`,
+      rowTotal > 0 ? (100 * r.weight_now_pct / rowTotal).toFixed(1) : undefined))
       .join('\n')
     : names.join(' · ');
 
@@ -2762,7 +2641,7 @@ function ViaChips({ names, sources }: { names: string[]; sources?: BookHolding['
           <span key={r.label ?? '__direct'}
             className={`px-1.5 py-0.5 rounded-md text-[11px] whitespace-nowrap flex items-baseline gap-1 ${
               r.label ? 'bg-accent-500/10 text-accent-400' : 'bg-overlay/5 text-fg-muted'}`}>
-            <span className="max-w-[9rem] truncate">{r.label ?? 'direct'}</span>
+            <span className="max-w-[9rem] truncate">{r.label ?? copy.holdings.direct}</span>
             <span className="font-mono opacity-80">{num2(r.weight_now_pct)}%</span>
           </span>
         ))}
@@ -2770,7 +2649,7 @@ function ViaChips({ names, sources }: { names: string[]; sources?: BookHolding['
     );
   }
 
-  if (!names.length) return <span className="text-[11px] text-fg-faint" title={title || undefined}>direct</span>;
+  if (!names.length) return <span className="text-[11px] text-fg-faint" title={title || undefined}>{copy.holdings.direct}</span>;
   const shown = names.slice(0, 2);
   return (
     <span className="flex flex-wrap items-center gap-1" title={title}>
@@ -2806,6 +2685,7 @@ function SleeveTile({ bucket, slices }: { bucket: string; slices?: AllocSlice[] 
 type SleeveSortKey = 'name' | 'weight' | 'return' | 'contrib';
 
 function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket: string }) {
+  const copy = useAnalyseCopy();
   // Sortable table — click a header to toggle direction. Default: weight, largest first.
   const [sortKey, setSortKey] = useState<SleeveSortKey>('weight');
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
@@ -2862,7 +2742,7 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
 
   if (!rows.length) return (
     <p className="text-[12px] text-fg-subtle py-8 text-center">
-      No priced holdings in {bucketLabel(bucket)}.
+      {copy.sleeve.noPrices(copy.bucket(bucketLabel(bucket)))}.
     </p>
   );
 
@@ -2870,15 +2750,15 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
     <div className="grid gap-4 lg:grid-cols-3">
       {/* Contribution breakdown — the always-honest "what's in here and what drove it". */}
       <section className="bg-card border border-neutral-800/40 rounded-xl p-4 lg:col-span-2">
-        <h4 className="text-sm font-semibold text-fg-strong">Performance</h4>
+        <h4 className="text-sm font-semibold text-fg-strong">{copy.sleeve.performance}</h4>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-[12px]">
             <thead>
               <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
-                <th className={`${th} pr-2 text-left`} onClick={() => click('name')}>Name{caret('name')}</th>
-                <th className={`${th} px-2 text-right`} onClick={() => click('weight')}>Weight{caret('weight')}</th>
-                <th className={`${th} px-2 text-right`} onClick={() => click('return')}>Return{caret('return')}</th>
-                <th className={`${th} pl-2 text-right`} onClick={() => click('contrib')}>Contribution{caret('contrib')}</th>
+                <th className={`${th} pr-2 text-left`} onClick={() => click('name')}>{copy.holdings.name}{caret('name')}</th>
+                <th className={`${th} px-2 text-right`} onClick={() => click('weight')}>{copy.holdings.weightNow}{caret('weight')}</th>
+                <th className={`${th} px-2 text-right`} onClick={() => click('return')}>{copy.holdings.instrumentReturn}{caret('return')}</th>
+                <th className={`${th} pl-2 text-right`} onClick={() => click('contrib')}>{copy.holdings.contribution}{caret('contrib')}</th>
               </tr>
             </thead>
             <tbody>
@@ -2901,7 +2781,7 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
       </section>
       {/* Currency exposure — the one compositional cut that survives off the equity book. */}
       <section className="bg-card border border-neutral-800/40 rounded-xl p-4">
-        <h4 className="text-sm font-semibold text-fg-strong">Currency</h4>
+        <h4 className="text-sm font-semibold text-fg-strong">{copy.sleeve.currency}</h4>
         <div className="mt-3 flex flex-col gap-1.5">
           {ccy.map((c) => (
             <div key={c.ccy} className="flex items-center gap-2 text-[12px]">
@@ -3041,6 +2921,7 @@ export default function PortfolioAnalysisModal({
    */
   refreshSeq?: number;
 }) {
+  const copy = useAnalyseCopy();
   // A basket (a single stock, a group) is treated as a portfolio-of-N: same view, but yfinance-only
   // (no AIRS book) and no id-based drill-downs (attribution / bucket detail are portfolio-only).
   const isBasket = !!basket;
@@ -3195,7 +3076,7 @@ export default function PortfolioAnalysisModal({
           <div className="min-w-0">
             <h3 className="text-base font-mono font-semibold text-fg-strong">{name}</h3>
             {data?.weight_note && (
-              <p className="text-[12px] text-warn-300 mt-0.5">⚠ {data.weight_note}</p>
+              <p className="text-[12px] text-warn-300 mt-0.5">⚠ {copy.serverText(data.weight_note)}</p>
             )}
           </div>
           {/* ⚠ ORDER IS REFRESH · BENCHMARK · CLOSE. Refresh sits leftmost of the three because it
@@ -3222,16 +3103,16 @@ export default function PortfolioAnalysisModal({
                 // to ask for. It is never a live "Refresh" over work already running: that window
                 // is exactly how a second job and a second progress toast used to appear.
                 disabled={inert}
-                title={stopping ? 'Cancelling — the account being downloaded finishes first.'
+                title={stopping ? copy.actions.cancellingTitle
                   : cancellable ? cancelTitle : refreshTitle}
-                aria-label={stopping ? 'Cancelling this refresh'
-                  : cancellable ? 'Cancel this refresh' : 'Refresh this portfolio'}
+                aria-label={stopping ? copy.actions.cancelling
+                  : cancellable ? copy.actions.cancelRefresh : copy.actions.refreshPortfolio}
                 className={`${refreshing && canStop ? HEADER_CTL_STOP : HEADER_CTL} inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-wait`}>
                 {refreshing && canStop
                   ? <span className="text-[10px] leading-none">✕</span>
                   : <RefreshIcon spinning={refreshing} size={12} />}
-                {stopping ? 'Cancelling…' : cancellable ? 'Cancel'
-                  : refreshing ? 'Refreshing…' : 'Refresh'}
+                {stopping ? copy.actions.cancelling : cancellable ? copy.actions.cancel
+                  : refreshing ? copy.actions.refreshing : copy.actions.refresh}
               </button>
             )}
             {/* ⚠ THE CAPTION SITS OUTSIDE THE CONTROL, which is what lets the select match the two
@@ -3239,15 +3120,15 @@ export default function PortfolioAnalysisModal({
                 control wider and taller than its neighbours for no gain, and the select still has
                 its `aria-label` for anyone not reading the caption. */}
             <label className="flex items-center gap-1.5 text-[12px] text-fg-muted">
-              Benchmark
-              <select value={benchmark} aria-label="Benchmark"
+              {copy.chrome.benchmark}
+              <select value={benchmark} aria-label={copy.chrome.benchmark}
                 onChange={(e) => { setData(null); setError(null); setBucket(null); setBenchmark(e.target.value); }}
                 className={`${HEADER_CTL} font-mono w-[7rem] focus:border-accent-500`}>
                 {BENCHMARKS.map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
             </label>
             <button type="button" onClick={onClose} className={HEADER_CTL}>
-              Close
+              {copy.actions.close}
             </button>
           </div>
         </div>
@@ -3264,10 +3145,10 @@ export default function PortfolioAnalysisModal({
 
         {error && (
           <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">
-            {error}
+            {copy.lang === 'nl' ? copy.chrome.loadError : error}
           </div>
         )}
-        {!data && !error && <p className="text-xs text-fg-subtle">Loading composition…</p>}
+        {!data && !error && <p className="text-xs text-fg-subtle">{copy.chrome.loading}</p>}
 
         {data && (
           <>
@@ -3314,12 +3195,12 @@ export default function PortfolioAnalysisModal({
                     {selected === EQUITY_BUCKET && (
                       <button type="button"
                         onClick={() => { setBucket(null); setRisk(false); setWhy(why === 'ytd' ? null : 'ytd'); }}
-                        title="Why? — break the excess into allocation vs selection (Brinson-Fachler attribution)."
+                        title={copy.score.attributionTitle}
                         className={`cursor-pointer rounded-lg border px-4 py-3 min-w-[10rem] min-h-[4.25rem] flex items-center justify-center text-xs font-medium transition-colors ${
                           why === 'ytd'
                             ? 'bg-accent-600 text-white border-transparent'
                             : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300 hover:border-accent-500/50'}`}>
-                        Attribution
+                        {copy.actions.attribution}
                       </button>
                     )}
                     {/* ⚠⚠ A STRUCTURAL MEASURE BESIDE A RETURN ONE, AND THE LABEL HAS TO CARRY
@@ -3334,12 +3215,12 @@ export default function PortfolioAnalysisModal({
                     {selected === EQUITY_BUCKET && (
                       <button type="button"
                         onClick={() => { setBucket(null); setWhy(null); setRisk(!risk); }}
-                        title="Risk — how far the stock sleeve sits from the benchmark (active share), and how much that difference has actually moved (realised tracking error)."
+                        title={copy.score.riskTitle}
                         className={`cursor-pointer rounded-lg border px-4 py-3 min-w-[10rem] min-h-[4.25rem] flex items-center justify-center text-xs font-medium transition-colors ${
                           risk
                             ? 'bg-accent-600 text-white border-transparent'
                             : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300 hover:border-accent-500/50'}`}>
-                        Risk
+                        {copy.actions.risk}
                       </button>
                     )}
                   </div>
@@ -3349,34 +3230,55 @@ export default function PortfolioAnalysisModal({
                    if the server ever omits the echo the label still names what was asked for. A
                    hardcoded 'SP500' here would print one index's name over another's numbers —
                    invisible, and it survived the default changing to ACWI at exactly four sites. */
-                : <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark} />}
-              {/* ⚠⚠ IN THE TOP ROW, RIGHT OF THE EXCESS TILE — the row is where it belongs:
-                  those three chips are what the book RETURNED and this is what it was WORTH, which
-                  is the same question with a clock on it. Under the row it read as a third section
-                  between the header and the holdings.
-                  ⚠ AFTER THE WHOLE EQUATION, NEVER INSIDE IT. `Return − Benchmark = Excess` is
-                  written as an equation and reads as one; a chart dropped between the `=` and the
-                  Excess chip would break the only row on this screen that is meant to be read left
-                  to right. So it follows the last chip rather than interrupting the three.
-                  ⚠ ONLY FOR A REAL PORTFOLIO WITH A PAIRED BOOK — an ad-hoc basket has no account,
-                  so there are no snapshots to sum and nothing to draw.
-                  ⚠⚠ NOT WHILE **ANY** CLASS IS SELECTED, `Stocks` INCLUDED — gated on `selected`,
-                  not on `sleeve`. `sleeve` deliberately excludes Equity (the Stocks view keeps the
-                  charts and the Attribution/Risk buttons), so this rode along with it and drew the
-                  WHOLE BOOK's value beside a stocks-only tile: €1,245,548 over figures describing
-                  one class of it. The snapshots value the book, not a slice, and there is no
-                  per-class series to fall back on — a class's value through time would need every
-                  snapshot re-bucketed, which is a different feature.
-                  ⚠ IT FETCHES ITSELF — see `BookValueChart`. The modal is one payload with no
-                  partial paint, and its wall clock is the reader's wait.
-                  ⚠ A FIXED WIDTH, because it shares a `flex-wrap` row: left to itself the chart's
-                  own responsive container would take the whole line and push the scorecard onto the
-                  next one at every width. */}
-              {!isBasket && !selected && id != null && (
-                <div className="w-[24rem] max-w-full">
-                  <BookValueChart portfolioId={id} />
-                </div>
-              )}
+                /* ⚠⚠ THE SCORECARD AND THE BOOK'S RETURN CHART ARE ONE COLUMN, AND THE EQUATION
+                    SETS THE WIDTH — moved here 2026-09-01 on request ("put the return − vs acwi
+                    return = excess tiles above the return ytd plot, so it's nicely aligned, same
+                    total width"). The chart used to sit to the RIGHT of the Excess chip at a
+                    hardcoded `w-[24rem]`, a number that matched the three chips beside it only by
+                    coincidence and stopped matching the moment a benchmark's name changed the
+                    middle chip's width.
+                    ⚠⚠ SO THERE IS NO WIDTH HERE AT ALL, AND THAT IS THE POINT. A column shrink-
+                    wraps to its widest child; the chips are that child, and the chart stretches to
+                    them. Re-introducing a fixed width would restore the drift this removes.
+                    ⚠⚠ AND THE CHART IS `w-0 min-w-full`, WHICH IS THE WHOLE MECHANISM. A column
+                    shrink-wraps to the WIDEST child, so left at `auto` the chart's card — its
+                    header row of "Return YTD / +35.36% / Monthly / ⓘ" — competes with the equation
+                    to set the width, and the alignment would hold or not depending on how long a
+                    percentage happened to be. `width: 0` is a DEFINITE width, so this child
+                    contributes nothing to that calculation and the chips alone decide; `min-width:
+                    100%` then resolves against the width they set and stretches the chart back
+                    across it. Both halves are needed: `w-0` alone leaves a zero-width chart,
+                    because a definite cross-size opts out of the column's default `stretch`. */
+                : (
+                  <div className="flex flex-col gap-2 self-center min-w-0">
+                    <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark} />
+                    {/* ⚠⚠ ITS LAST POINT IS THE `Return` CHIP ABOVE IT, BY CONSTRUCTION. Both read
+                        AIRS's own `cumulatief_rendement` — the chart through `value-series`, the
+                        chip through `_airs_accounts._year_perf` — so the curve lands on the number
+                        directly above it. A curve derived from our own value snapshots would not,
+                        and two YTD figures disagreeing in one block is the failure this modal
+                        already pays for once at the benchmark tile.
+                        ⚠ BELOW THE WHOLE EQUATION, NEVER INSIDE IT. `Return − Benchmark = Excess`
+                        is written as an equation and reads as one; the chart follows all three
+                        chips rather than interrupting them.
+                        ⚠ ONLY FOR A REAL PORTFOLIO WITH A PAIRED BOOK — an ad-hoc basket has no
+                        account, so AIRS has published no return for it and nothing to draw.
+                        ⚠⚠ NOT WHILE **ANY** CLASS IS SELECTED, `Stocks` INCLUDED. That gate is now
+                        structural: this branch is the `!selected` arm of the ternary, so the chart
+                        cannot outlive the scorecard it belongs to. It used to be a sibling with
+                        its own `!selected` test — a second copy of the same condition, and the
+                        first version of it was gated on `sleeve` instead, which excludes Equity by
+                        design and so drew the WHOLE BOOK's line beside a stocks-only tile. AIRS
+                        reports a return for the account, not a slice.
+                        ⚠ IT FETCHES ITSELF — see `BookReturnChart`. The modal is one payload with
+                        no partial paint, and its wall clock is the reader's wait. */}
+                    {!isBasket && id != null && (
+                      <div className="w-0 min-w-full">
+                        <BookReturnChart portfolioId={id} />
+                      </div>
+                    )}
+                  </div>
+                )}
             </div>
             {/* ⚠ How much of the INDEX we could price — shown whenever a benchmark number is on
                 screen (the whole-portfolio scorecard, or the Stocks charts). ACWI's missing names
@@ -3388,15 +3290,8 @@ export default function PortfolioAnalysisModal({
                 anyone reading the API. It is simply not announced on screen. */}
             {!sleeve && (data.benchmark_coverage_pct ?? 100) < 97 && (
               <p className="text-[12px] text-warn-300 mb-3">
-                {'⚠ This index is rebuilt from '}
-                <span className="font-mono">{data.benchmark_priced}</span>
-                {' of its '}
-                <span className="font-mono">{data.benchmark_universe_members}</span>
-                {' constituents ('}
-                <span className="font-mono">{(data.benchmark_coverage_pct ?? 0).toFixed(0)}%</span>
-                {`) — the rest have no price series yet. The weights are renormalised over what `}
-                {'remains, so the missing names are not dropped, they are redistributed into the '}
-                {'others. Treat the tilts as indicative.'}
+                {copy.coverageWarning(data.benchmark_priced ?? 0, data.benchmark_universe_members ?? 0,
+                  `${(data.benchmark_coverage_pct ?? 0).toFixed(0)}%`)}
               </p>
             )}
             {selected == null ? (

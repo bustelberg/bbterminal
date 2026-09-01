@@ -21,23 +21,42 @@ import { oneSigmaBand } from './activeBand';
  */
 const BREAK = ' \\\\[4pt] ';
 
+/**
+ * ⚠⚠ THE TWO HALVES ARE WRAPPED IN `\begin{gathered}` (2026-09-01), AND THE REASON IS A WARNING
+ * NO TEST HERE COULD SEE. A bare `\\` does nothing in LaTeX display mode — KaTeX said so on every
+ * render ("In LaTeX, \\ or \newline does nothing in display mode [newLineInDisplayMode]") while
+ * every `*.latex.test.ts` in this directory stayed green, because they assert `strict: 'error'`
+ * does not THROW and this is a warning, not a strict violation. `noKatexWarnings.test.ts` renders
+ * with the app's own options and captures `console.warn`, which is the test that catches it.
+ */
+const GATHERED = (...lines: string[]) => `\\begin{gathered} ${lines.join(BREAK)} \\end{gathered}`;
+
 describe('withWorked', () => {
-  it('separates the halves with a LaTeX line break', () => {
-    expect(withWorked('a ÷ b', '1 ÷ 2 = 50%')).toBe(`a ÷ b${BREAK}1 ÷ 2 = 50%`);
+  it('separates the halves with a LaTeX line break, inside a display-safe environment', () => {
+    expect(withWorked('a ÷ b', '1 ÷ 2 = 50%')).toBe(GATHERED('a ÷ b', '1 ÷ 2 = 50%'));
   });
 
   it('collapses rather than leaving an empty break', () => {
     // ⚠ THE COMMON PATH ON A THIN SERIES, not an edge case — every builder returns '' when an
     // operand is missing. A dangling `\\[4pt]` mid-expression is a KaTeX parse error, not a gap.
+    //
+    // ⚠ AND A SINGLE LINE IS NOT WRAPPED. `gathered` around one row is legal and pointless, and it
+    // would put the whole app's one-line formulas inside an environment for no reason.
     expect(withWorked('a ÷ b', '')).toBe('a ÷ b');
     expect(withWorked('', '1 ÷ 2 = 50%')).toBe('1 ÷ 2 = 50%');
   });
 
-  it('⚠ IGNORES `tail`, which is prose and no longer belongs in a typeset block', () => {
-    // The two callers that passed one now hand it to the card's `how` instead. Asserted rather
-    // than assumed: a parameter that silently does nothing is a trap for the next caller.
-    expect(withWorked('a ÷ b', '1 ÷ 2 = 50%', 'note')).toBe(`a ÷ b${BREAK}1 ÷ 2 = 50%`);
-    expect(withWorked('a ÷ b', '', 'note')).toBe('a ÷ b');
+  /**
+   * ⚠⚠ `tail` IS GONE FROM THE SIGNATURE, AND THIS TEST USED TO ASSERT IT WAS IGNORED. It said, in
+   * as many words, that "a parameter that silently does nothing is a trap for the next caller" —
+   * and there WAS a next caller: `MetricGrowthCard`'s benchmark-CAGR tile passed a sentence that
+   * never rendered. Removing the parameter is what found it; the compiler named the file.
+   *
+   * Kept as a compile-time guard rather than deleted: if the parameter is ever reintroduced, this
+   * stops being a type error and somebody has to read the note above.
+   */
+  it('takes exactly two arguments', () => {
+    expect(withWorked.length).toBe(2);
   });
 });
 

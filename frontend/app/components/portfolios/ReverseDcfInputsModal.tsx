@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { reverseDcfWorking, type SourceObs } from './egmInputs';
 import { marketCapOf, type ReverseDcfInputs } from './reverseDcf';
 import { type MetricRow } from './quickValuation';
+import { useDeepValuationCopy } from './deepValuationCopy';
 
 /**
  * The three company figures the reverse DCF reads, with where each came from — the value, the
@@ -30,6 +31,7 @@ export default function ReverseDcfInputsModal({
   perpetuityGrowth: number;
   onClose: () => void;
 }) {
+  const t = useDeepValuationCopy();
   const w = useMemo(() => reverseDcfWorking(metrics, today), [metrics, today]);
   const src = useMemo<ReverseDcfInputs>(() => ({
     price: w.price.used, sharesOutstanding: w.shares.used, fcf: w.fcf.used,
@@ -43,15 +45,15 @@ export default function ReverseDcfInputsModal({
   const n2 = (v: number | null | undefined) => (v == null ? 'n/a' : v.toFixed(2));
 
   const ROWS: [string, SourceObs, 'money' | 'plain'][] = [
-    ['Share price', w.price, 'plain'],
-    ['Shares outstanding (m)', w.shares, 'plain'],
-    ['Free cash flow', w.fcf, 'money'],
+    [t.dcfModal.rowSharePrice, w.price, 'plain'],
+    [t.dcfModal.rowShares, w.shares, 'plain'],
+    [t.dcfModal.rowFcf, w.fcf, 'money'],
     // ⚠ THE ONE ROW WHOSE PERIOD IS IN THE FUTURE. Everything else in this table is a filing; this
     // is the consensus the forward base is derived from (`forwardFcf` nets capex off it), and its
     // `when` column is what makes the difference visible — the section's own caption says "as
     // filed, nothing forecast", which stopped being true the day the base could be a forecast.
-    ['Operating cash flow (next FY, est.)', w.ocfEst, 'money'],
-    ['WACC (%)', w.wacc, 'plain'],
+    [t.dcfModal.rowOcfEst, w.ocfEst, 'money'],
+    [t.dcfModal.rowWacc, w.wacc, 'plain'],
   ];
 
   return (
@@ -60,7 +62,7 @@ export default function ReverseDcfInputsModal({
       <div className="bg-card rounded-xl border border-neutral-800/40 shadow-xl w-full max-w-4xl h-[84vh] flex flex-col"
         onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="flex items-baseline gap-3 px-6 py-4 border-b border-neutral-800/40">
-          <h2 className="text-fg-strong font-medium">Reverse DCF — the data it reads</h2>
+          <h2 className="text-fg-strong font-medium">{t.dcfModal.title}</h2>
           {name && <span className="text-sm text-fg-soft truncate max-w-[28ch]" title={name}>{name}</span>}
           <span className="text-[12px] font-mono text-fg-faint">{isin}</span>
           <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
@@ -68,19 +70,18 @@ export default function ReverseDcfInputsModal({
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-4 space-y-6 min-w-0">
           <section className="space-y-2 min-w-0">
-            <h3 className="text-sm font-semibold text-fg-strong">Company figures</h3>
+            <h3 className="text-sm font-semibold text-fg-strong">{t.dcfModal.companyFigures}</h3>
             <p className="text-[12px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
-              The latest observation of each line, as filed and unadjusted — except the last
-              estimate row, whose period is in the FUTURE and which is a consensus, not a filing.
+              {t.dcfModal.asFiled}
             </p>
             <div className="overflow-auto rounded-lg border border-neutral-800/40 max-w-full">
               <table className="w-full text-xs">
                 <thead className="bg-page">
                   <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
-                    <th className="px-3 py-1.5 font-medium text-left">Input</th>
-                    <th className="px-3 py-1.5 font-medium text-right">Value</th>
-                    <th className="px-3 py-1.5 font-medium text-left">Period</th>
-                    <th className="px-3 py-1.5 font-medium text-left">Metric code</th>
+                    <th className="px-3 py-1.5 font-medium text-left">{t.dcfModal.colInput}</th>
+                    <th className="px-3 py-1.5 font-medium text-right">{t.dcfModal.colValue}</th>
+                    <th className="px-3 py-1.5 font-medium text-left">{t.dcfModal.colPeriod}</th>
+                    <th className="px-3 py-1.5 font-medium text-left">{t.dcfModal.colMetricCode}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -97,7 +98,7 @@ export default function ReverseDcfInputsModal({
                           from. See `egmInputs.ttmObs`. */}
                       <td className="px-3 py-1 text-fg-muted whitespace-nowrap">
                         {obs.date == null ? '—'
-                          : obs.ttm ? `TTM to ${obs.date.slice(0, 10)}` : obs.date.slice(0, 10)}
+                          : obs.ttm ? t.dcfModal.ttmTo(obs.date.slice(0, 10)) : obs.date.slice(0, 10)}
                       </td>
                       <td className="px-3 py-1 font-mono text-[11px] text-fg-faint">{obs.code ?? '—'}</td>
                     </tr>
@@ -108,38 +109,38 @@ export default function ReverseDcfInputsModal({
           </section>
 
           <section className="space-y-2 min-w-0">
-            <h3 className="text-sm font-semibold text-fg-strong">What they add up to</h3>
+            <h3 className="text-sm font-semibold text-fg-strong">{t.dcfModal.whatTheyAddUpTo}</h3>
             <dl className="text-[12px] space-y-1 max-w-[80ch]">
               <div className="flex gap-2 flex-wrap">
-                <dt className="text-fg-muted w-56 shrink-0">Market cap</dt>
+                <dt className="text-fg-muted w-56 shrink-0">{t.dcfModal.marketCap}</dt>
                 <dd className="font-mono text-fg-soft break-words">
                   {n2(src.price)} × {src.sharesOutstanding == null ? 'n/a'
                     : Math.round(src.sharesOutstanding).toLocaleString('en-US')}M = {mn(marketCap)}
                 </dd>
               </div>
               <div className="flex gap-2 flex-wrap">
-                <dt className="text-fg-muted w-56 shrink-0">Cash flow compounded</dt>
+                <dt className="text-fg-muted w-56 shrink-0">{t.dcfModal.cashFlowCompounded}</dt>
                 <dd className="font-mono text-fg-soft break-words">{mn(src.fcf)}</dd>
               </div>
               {/* Any assumption the reader has moved off its default is called out, so a figure in
                   the panel can be traced to a choice rather than to the data. */}
               {fcf != null && src.fcf != null && Math.abs(fcf - src.fcf) > 0.5 && (
                 <div className="flex gap-2 flex-wrap">
-                  <dt className="text-warn-300 w-56 shrink-0">Cash flow overridden to</dt>
+                  <dt className="text-warn-300 w-56 shrink-0">{t.dcfModal.cashFlowOverridden}</dt>
                   <dd className="font-mono text-warn-300">{mn(fcf)}</dd>
                 </div>
               )}
               {target != null && marketCap != null && Math.abs(target - marketCap) > 0.5 && (
                 <div className="flex gap-2 flex-wrap">
-                  <dt className="text-warn-300 w-56 shrink-0">Solving against</dt>
+                  <dt className="text-warn-300 w-56 shrink-0">{t.dcfModal.solvingAgainst}</dt>
                   <dd className="font-mono text-warn-300">{mn(target)}</dd>
                 </div>
               )}
               <div className="flex gap-2 flex-wrap">
-                <dt className="text-fg-muted w-56 shrink-0">Model</dt>
+                <dt className="text-fg-muted w-56 shrink-0">{t.dcfModal.model}</dt>
                 <dd className="font-mono text-fg-soft break-words">
-                  {years}y at g, discounted {(discountRate * 100).toFixed(1)}%,
-                  then {(perpetuityGrowth * 100).toFixed(0)}% in perpetuity
+                  {t.dcfModal.modelLine(String(years), `${(discountRate * 100).toFixed(1)}%`,
+                    `${(perpetuityGrowth * 100).toFixed(0)}%`)}
                 </dd>
               </div>
             </dl>

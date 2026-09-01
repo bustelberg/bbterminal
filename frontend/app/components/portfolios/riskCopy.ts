@@ -60,6 +60,11 @@ export type RiskCopy = {
     measured: string;
     daily: string; weekly: string; monthly: string;
     dailyNote: string;
+    /** ⚠ THE NON-DAILY CADENCES' HOVER. `f` is an operand, not a word — a translation places it. */
+    freqNote: (f: number) => string;
+    /** ⚠ THE PRICE PROVENANCE, one sentence. The field and the vendor are operands — they come
+     *  from `lib/provenance` and are names, never translated. */
+    pricedFrom: (field: string, vendor: string) => string;
     computing: string;
     /** `x of y priced`, and the sentence that frames every synthetic series. */
     synthetic: (years: number, priced: number, total: number) => string;
@@ -157,14 +162,47 @@ export type RiskCopy = {
      * second rounding convention, and the band's ends would stop matching the worked line above
      * them in the same card.
      */
-    bandReading: (lo: string, hi: string, centre: string, bench: string) => string;
+    /** ⚠ `bench` IS NULLABLE because the payload's is — `v()` renders the absence, and an
+     *  empty-string fallback at the call site would print "against " with nothing after it. */
+    bandReading: (lo: string, hi: string, centre: string,
+                  bench: string | null | undefined) => string;
     cards: { te: Card; activeReturn: Card; infoRatio: Card; observations: Card };
+    /**
+     * ⚠⚠ FOUR CARDS SHARE `aₜ`, `T` AND `f`, WHICH IS WHY THE LEGEND IS ONE OBJECT AND NOT FOUR.
+     * Written per tile the definitions drift on the first edit, and a view where `T` means "paired
+     * periods" in one tooltip and "observations" in the next has taught the reader that the symbol
+     * is decorative. It moved out of the view unchanged; the English is what was there.
+     *
+     * ⚠ THE "the answer:" PREFIX MARKS THE SYMBOL THE TILE ACTUALLY PRINTS, so a reader scanning a
+     * six-row legend can find the one that is the number in front of them. It is part of the
+     * translated string, not glued on at the call site, or the Dutch card would read "the answer:
+     * het antwoord".
+     */
+    legend: {
+      a: string;
+      R: (book: string, bench: string | null | undefined) => string;
+      aBar: string;
+      T: (n: number | null | undefined) => string;
+      f: (n: number | null | undefined) => string;
+      te: string; teAnswer: string;
+      prod: string;
+      Ra: string; IR: string;
+    };
+    /** ⚠ THE FREQUENCY IS AN OPERAND, so the card names the cadence it actually measured.
+     *  ⚠ NULLABLE, matching the payload: `v()` renders the absence, where a `?? ''` at the call
+     *  site would print "The T in the formula —  periods" and read as a rendering fault. */
+    observationsWhat: (freq: string | null | undefined) => string;
+    /** The sentence under the tiles: the book, then the window, then `note`. */
+    sleeve: (book: string, from: string, to: string) => string;
     note: string;
   };
 
   corr: {
     rhoVs: (bench: string) => string; rSquared: string; meanPair: string; activeVol: string;
     betweenPositions: string; legend: string;
+    /** ⚠ THE COVERAGE SENTENCE, distinct from `thinPairs`: that one explains why a CELL is blank,
+     *  this one says how much of the matrix was measurable at all. */
+    pairsMeasured: (measured: string, possible: string, minObs: string, holdings: string) => string;
     leastTitle: string; mostTitle: string;
     identityBroken: (pp: string) => string;
     thinPairs: (n: number) => string;
@@ -172,6 +210,10 @@ export type RiskCopy = {
   };
 
   vol: {
+    /** ⚠ THE TOOLBAR'S TRAILING NOTE. Every figure in this view is annualised and the cadence
+     *  buttons beside it choose the sampling, not the unit — which is the confusion it exists to
+     *  head off. */
+    shownAnnualised: string;
     volatility: string; downside: string; benchVol: (bench: string) => string;
     worst: (period: string) => string;
     ret: string; sharpe: string; sortino: string;
@@ -184,8 +226,14 @@ export type RiskCopy = {
   };
 
   dd: {
-    maxDrawdown: (freq: string) => string; benchMax: (bench: string) => string;
-    today: string; episodes: string;
+    /** ⚠ BOTH OPERANDS ARE NULLABLE, matching the payload — `v()` renders the absence, where a
+     *  `?? ''` at the call site would print "Max drawdown ()" and read as a rendering fault. */
+    maxDrawdown: (freq: string | null | undefined) => string;
+    benchMax: (bench: string | null | undefined) => string;
+    today: string;
+    /** ⚠ THE THRESHOLD IS AN OPERAND — it is configurable, so a hardcoded "5%" would be a label
+     *  that silently stops matching the rows under it. */
+    episodes: (pct: string) => string;
     provenance: string;
     threeWays: string; threeWaysNote: string;
     worstInFull: string;
@@ -223,6 +271,8 @@ const en: RiskCopy = {
     daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly',
     dailyNote: 'Daily closes are not synchronous — the tracker closes at 16:30 London, a US holding '
       + 'at 21:00 — which lowers the measured covariance.',
+    freqNote: (f) => `f = ${f} observations per year.`,
+    pricedFrom: (field, vendor) => `Prices from ${v(field)} at ${v(vendor)}.`,
     computing: 'Computing…',
     synthetic: (y, p, t) => `Today's stock sleeve at today's weights over ${y} years `
       + `(${p} of ${t} priced).`,
@@ -350,6 +400,24 @@ const en: RiskCopy = {
           + 'measured against the wrong days.',
       },
     },
+    legend: {
+      a: 'the active return in period t — what the sleeve did that period, minus what the tracker '
+        + 'did',
+      R: (book, bench) => `${v(book)}'s and ${v(bench)}'s own returns in that period, both in EUR`,
+      aBar: 'the mean active return over the window — the band above is centred on it, not on zero',
+      T: (n) => `the number of paired periods (${v(n)} here) — the intersection of the two calendars`,
+      f: (n) => `periods per year (${v(n)}), the annualisation factor`,
+      te: 'one standard deviation of the active return, per year',
+      teAnswer: 'the answer: one standard deviation of the active return, per year',
+      prod: 'the periods CHAINED, not averaged — this is what the gap compounded to, which is why '
+        + 'it sits slightly below the arithmetic mean the band on the tracking-error tile is '
+        + 'centred on',
+      Ra: 'the active return from the tile beside this one, annualised',
+      IR: 'the answer: active return per unit of the tracking error taken to earn it',
+    },
+    observationsWhat: (freq) => `The T in the formula — ${v(freq)} periods both series had.`,
+    sleeve: (book, from, to) =>
+      `${book}'s stock sleeve at its current weights, priced from ${from} to ${to} — `,
     note: "not the book's realised history, so a name bought in March contributes its January "
       + 'return. It is the same portfolio the Active share view describes.',
   },
@@ -363,6 +431,9 @@ const en: RiskCopy = {
     mostTitle: 'Most correlated — one bet held twice',
     identityBroken: (pp) => `⚠ σₐ measured and σₐ implied by ρ differ by ${pp}pp — the two series `
       + 'are no longer identical. This is a bug, not a market fact.',
+    pairsMeasured: (measured, possible, minObs, holdings) =>
+      `${v(measured)} of ${v(possible)} possible pairs — the ones with at least ${v(minObs)} `
+      + `overlapping returns, across ${v(holdings)} holdings.`,
     thinPairs: (n) => `A pair with fewer than ${n} overlapping returns is left blank rather than `
       + 'tinted — over ten weeks a correlation is noise with a sign, and a coloured cell looks '
       + 'exactly as authoritative as one measured over five years.',
@@ -395,6 +466,7 @@ const en: RiskCopy = {
   },
 
   vol: {
+    shownAnnualised: '· shown annualised',
     volatility: 'Volatility (ann.)', downside: 'Downside deviation',
     benchVol: (b) => `${b} volatility`, worst: (p) => `Worst ${p}`,
     ret: 'Return (ann.)', sharpe: 'Sharpe', sortino: 'Sortino',
@@ -453,7 +525,7 @@ const en: RiskCopy = {
 
   dd: {
     maxDrawdown: (f) => `Max drawdown (${f})`, benchMax: (b) => `${b} max drawdown`,
-    today: 'Today', episodes: 'Falls over 5%',
+    today: 'Today', episodes: (pct) => `Falls over ${pct}%`,
     provenance: "⚠ Reconstructed from today's holdings, not the client's realised experience. "
       + "Names since sold are absent and today's weights were chosen with hindsight, so this reads "
       + "shallower than what was actually lived through. The client's own figure comes from the "
@@ -553,6 +625,8 @@ const nl: RiskCopy = {
     daily: 'Dagelijks', weekly: 'Wekelijks', monthly: 'Maandelijks',
     dailyNote: 'Dagslotkoersen lopen niet gelijk — de tracker sluit om 16:30 Londen, een Amerikaanse '
       + 'positie om 21:00 — waardoor de gemeten covariantie lager uitvalt.',
+    freqNote: (f) => `f = ${f} waarnemingen per jaar.`,
+    pricedFrom: (field, vendor) => `Koersen uit ${v(field)} bij ${v(vendor)}.`,
     computing: 'Berekenen…',
     synthetic: (y, p, t) => `De huidige aandelenselectie tegen de huidige gewichten over ${y} jaar `
       + `(${p} van ${t} geprijsd).`,
@@ -681,6 +755,26 @@ const nl: RiskCopy = {
           + 'geloofwaardig cijfer op dat tegen de verkeerde dagen is gemeten.',
       },
     },
+    legend: {
+      a: 'het actieve rendement in periode t — wat de selectie die periode deed, min wat de tracker '
+        + 'deed',
+      R: (book, bench) => `het eigen rendement van ${v(book)} en van ${v(bench)} in die periode, `
+        + 'beide in EUR',
+      aBar: 'het gemiddelde actieve rendement over het venster — de band hierboven ligt daaromheen, '
+        + 'niet om nul',
+      T: (n) => `het aantal gepaarde perioden (${v(n)} hier) — de doorsnede van de twee kalenders`,
+      f: (n) => `perioden per jaar (${v(n)}), de annualiseringsfactor`,
+      te: 'één standaarddeviatie van het actieve rendement, per jaar',
+      teAnswer: 'het antwoord: één standaarddeviatie van het actieve rendement, per jaar',
+      prod: 'de perioden GEKETEND, niet gemiddeld — dit is waar het verschil naartoe is '
+        + 'samengesteld, en daarom ligt het iets onder het rekenkundig gemiddelde waaromheen de '
+        + 'band op de tracking-errortegel is gecentreerd',
+      Ra: 'het actieve rendement van de tegel hiernaast, geannualiseerd',
+      IR: 'het antwoord: actief rendement per eenheid tracking error die daarvoor is genomen',
+    },
+    observationsWhat: (freq) => `De T in de formule — ${v(freq)} perioden die beide reeksen hadden.`,
+    sleeve: (book, from, to) =>
+      `De aandelenselectie van ${book} tegen de huidige gewichten, geprijsd van ${from} tot ${to} — `,
     note: 'niet de werkelijke historie van het boek, dus een naam die in maart is gekocht draagt '
       + 'hier zijn januarirendement bij. Het is dezelfde portefeuille die de Active share-weergave '
       + 'beschrijft.',
@@ -695,6 +789,9 @@ const nl: RiskCopy = {
     mostTitle: 'Hoogst gecorreleerd — één positie, twee keer gehouden',
     identityBroken: (pp) => `⚠ De gemeten σₐ en de uit ρ afgeleide σₐ verschillen ${pp}pp — de twee `
       + 'reeksen zijn niet langer identiek. Dit is een fout in de software, geen marktfeit.',
+    pairsMeasured: (measured, possible, minObs, holdings) =>
+      `${v(measured)} van ${v(possible)} mogelijke paren — die met minstens ${v(minObs)} `
+      + `overlappende rendementen, over ${v(holdings)} posities.`,
     thinPairs: (n) => `Een paar met minder dan ${n} overlappende rendementen blijft leeg in plaats `
       + 'van gekleurd — over tien weken is een correlatie ruis met een teken, en een gekleurde cel '
       + 'oogt even gezaghebbend als een die over vijf jaar is gemeten.',
@@ -729,6 +826,7 @@ const nl: RiskCopy = {
   },
 
   vol: {
+    shownAnnualised: '· geannualiseerd weergegeven',
     volatility: 'Volatiliteit (geann.)', downside: 'Neerwaartse deviatie',
     benchVol: (b) => `Volatiliteit ${b}`, worst: (p) => `Slechtste ${p}`,
     ret: 'Rendement (geann.)', sharpe: 'Sharpe', sortino: 'Sortino',
@@ -790,7 +888,7 @@ const nl: RiskCopy = {
 
   dd: {
     maxDrawdown: (f) => `Maximale drawdown (${f})`, benchMax: (b) => `Maximale drawdown ${b}`,
-    today: 'Vandaag', episodes: 'Dalingen boven 5%',
+    today: 'Vandaag', episodes: (pct) => `Dalingen boven ${pct}%`,
     provenance: '⚠ Gereconstrueerd uit de huidige posities, niet de werkelijke ervaring van de '
       + 'klant. Namen die inmiddels zijn verkocht ontbreken en de huidige gewichten zijn met kennis '
       + 'achteraf gekozen, dus dit valt ondieper uit dan wat werkelijk is meegemaakt. Het eigen '

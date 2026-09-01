@@ -402,10 +402,11 @@ export default function PortfolioOverviewPanel() {
       if (job.status === 'failed') logDetail('model scan failed', job.summary);
       else console.warn(`[AIRS models] ${job.status} — ${job.summary ?? ''}`);
     } catch (e) {
-      // ⚠ REPORTED, NEVER RAISED INTO THE ACCOUNT SCAN'S RESULT. This is the CRM lesson: a failure
-      // in a scan of DIFFERENT objects must not appear in the account refresh's error summary, or
-      // a portfolio refresh reports a fault in a report it was never asked to fetch. One button,
-      // two subjects, two verdicts.
+      // ⚠ REPORTED, NEVER RAISED INTO THE ACCOUNT SCAN'S RESULT. A failure in a scan of DIFFERENT
+      // objects must not appear in the account refresh's error summary, or a portfolio refresh
+      // reports a fault in something it was never asked to fetch. One button, two subjects, two
+      // verdicts. (The case that taught this was the CRM export, folded into the account scrape
+      // until 2026-07; the feature is gone and the rule is not.)
       console.warn('[AIRS models] scan failed — the accounts are unaffected', e);
     } finally {
       setScanningModels(false);
@@ -425,7 +426,7 @@ export default function PortfolioOverviewPanel() {
       `Delete every scraped row for ${portefeuille}?\n\n`
       + 'Removes its returns, holdings, mutations, model weights, roster entry and model pairing. '
       + 'A refresh rebuilds them — but only from 1 January, so any earlier month is lost for good.\n\n'
-      + 'CRM records and the hidden-account decision are not touched.',
+      + 'The hidden-account decision is not touched.',
     );
     if (!ok) return;
     setDeletingRows((s) => new Set(s).add(portefeuille));
@@ -885,18 +886,19 @@ export default function PortfolioOverviewPanel() {
                 saying the button was busy — a control that reads "Scanning models…" for minutes
                 with no way to stop it. It is a job of its own now, so `allJob` is whichever half
                 is live and the ✕ means the same thing throughout. */}
-            {allJob ? (modelsJob ? 'Cancel model scan' : 'Cancel scan')
-              : refreshingAll ? (scanningModels ? 'Scanning models…' : 'Refreshing…')
-              : 'Refresh all'}
+            {allJob ? (modelsJob ? t.overview.cancelModelScan : t.overview.cancelScan)
+              : refreshingAll ? (scanningModels ? t.overview.scanningModels
+                                                : t.overview.refreshing)
+              : t.overview.refreshAll}
           </button>
           {/* The POLICY, beside the thing that measures against it. Shown to everyone and editable
               by admins only — a non-admin reading what the bands are supposed to be is exactly the
               use this has for them, and hiding it would leave the numbers on this page with no
               stated target at all. */}
           <button type="button" onClick={() => setShowBands(true)}
-            title="Per risk profile (Offensief / Beperkt Offensief / Neutraal / Defensief), the minimum, default and maximum share each asset class may take."
+            title={t.overview.allocationBandsHint}
             className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors">
-            Asset allocatie
+            {t.overview.allocationBands}
           </button>
           {/* ⚠ ONE BUTTON. It ran as two for a while — accounts here, model portfolios on a second
               control — which put an implementation rule (keep the two scans' error verdicts apart)

@@ -1,4 +1,5 @@
 import type { SourceKey } from '../../../lib/provenance';
+import type { Lang } from '../../../lib/i18n';
 
 /**
  * What the headline benchmark figure actually is, as the ⓘ card's four fields.
@@ -72,10 +73,12 @@ const pc = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
  */
 function etfFormula(
   { ticker, label, from, asOf, openPrice, closePrice, openFx, closeFx, eurPct }: BenchmarkProvenance,
+  lang: Lang,
 ): string {
   const sym = ticker ?? label;
-  const rule = `(close ÷ FX_close) ÷ (open ÷ FX_open) − 1  —  close/open are ${sym}'s USD prices, `
-    + 'FX is USD per EUR on that same day';
+  const rule = lang === 'nl'
+    ? `(slot ÷ FX_slot) ÷ (begin ÷ FX_begin) − 1 — slot/begin zijn de USD-koersen van ${sym}; FX is USD per EUR op dezelfde dag`
+    : `(close ÷ FX_close) ÷ (open ÷ FX_open) − 1  —  close/open are ${sym}'s USD prices, FX is USD per EUR on that same day`;
   const marks = [openPrice, closePrice, openFx, closeFx];
   if (marks.some((v) => typeof v !== 'number' || !Number.isFinite(v) || v === 0)) return rule;
   const worked = `(${px(closePrice as number)} ÷ ${fx(closeFx as number)}) `
@@ -87,15 +90,15 @@ function etfFormula(
   return `${rule}\n\n${dated ? `${dated}\n` : ''}${worked}`;
 }
 
-export function benchmarkProvenance(p: BenchmarkProvenance): BenchmarkProvenanceCard {
+export function benchmarkProvenance(p: BenchmarkProvenance, lang: Lang = 'en'): BenchmarkProvenanceCard {
   const { source, label } = p;
   if (source === 'etf') {
     return {
       sourceKey: 'benchmark_etf',
-      what: `What ${label} itself returned over the same window, in EUR — a price return, so `
-        + 'distributions are not included.',
-      note: `${label}'s return, year to date`,
-      how: etfFormula(p),
+      what: lang === 'nl' ? `Het eigen EUR-rendement van ${label} over dezelfde periode — koersrendement, dus zonder uitkeringen.`
+        : `What ${label} itself returned over the same window, in EUR — a price return, so distributions are not included.`,
+      note: lang === 'nl' ? `rendement van ${label} sinds jaarbegin` : `${label}'s return, year to date`,
+      how: etfFormula(p, lang),
     };
   }
   // ⚠ THE FALLBACK IS NAMED, NOT LEFT BLANK. The AEX has no reachable ETF and a window opening
@@ -105,11 +108,11 @@ export function benchmarkProvenance(p: BenchmarkProvenance): BenchmarkProvenance
   // because there is no pair of numbers to work: there are 1,678 of them.
   return {
     sourceKey: 'benchmark',
-    what: `What ${label} itself returned over the same window, in EUR — a price return, so `
-      + 'dividends are not included.',
-    note: `${label}'s return, year to date`,
-    how: 'Σ(start-of-window cap weight × constituent EUR return) over the index’s '
-      + 'constituents, cap-weighted on FULL market cap (the real index float-adjusts). Used where '
-      + 'no index ETF is reachable (the AEX), or where the window opens before the ETF existed.',
+    what: lang === 'nl' ? `Het eigen EUR-rendement van ${label} over dezelfde periode — koersrendement, dus zonder dividenden.`
+      : `What ${label} itself returned over the same window, in EUR — a price return, so dividends are not included.`,
+    note: lang === 'nl' ? `rendement van ${label} sinds jaarbegin` : `${label}'s return, year to date`,
+    how: lang === 'nl'
+      ? 'Σ(weging naar marktkapitalisatie aan het begin × EUR-rendement constituent) over de indexconstituenten, gewogen naar VOLLEDIGE marktkapitalisatie (de echte index corrigeert voor free float). Gebruikt wanneer geen index-ETF bereikbaar is of de periode vóór de start van de ETF begint.'
+      : 'Σ(start-of-window cap weight × constituent EUR return) over the index’s constituents, cap-weighted on FULL market cap (the real index float-adjusts). Used where no index ETF is reachable (the AEX), or where the window opens before the ETF existed.',
   };
 }

@@ -44,7 +44,6 @@ const UNICODE_MATHS = ['÷', '×', 'Σ', '√'];
  */
 const UNCONVERTED = new Set([
   'AccountTotalReturn.tsx',
-  'AttributionPanel.tsx',
   'CagrTable.tsx',
   'ConcentrationView.tsx',
   'CorrelationView.tsx',
@@ -57,7 +56,6 @@ const UNCONVERTED = new Set([
   'QuickValuationTab.tsx',
   'ReverseDcfPanel.tsx',
   'TablesTab.tsx',
-  'TrackingErrorView.tsx',
   'VolatilityView.tsx',
 ]);
 

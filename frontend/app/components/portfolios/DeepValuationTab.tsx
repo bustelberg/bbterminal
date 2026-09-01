@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
+import { runSSE } from '../../../lib/stream';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { cancelJob, jobsStore, startLocalJob } from '../../../lib/stores/jobs';
 import { API_URL } from '../../../lib/apiUrl';
@@ -25,8 +26,9 @@ import { onDate } from './asOfLine';
 // ⚠ AND THE EXPRESSIONS THEMSELVES LIVE IN A PURE MODULE, not in this JSX: a LaTeX string is
 // testable and a tooltip is not — see `valuationFormulas` and its strict-mode render test.
 import {
-  workedEgmReturn, workedImpliedPrice, workedPriceMove,
+  workedEgmReturn, workedFairValue, workedImpliedPrice, workedMaxPE, workedPriceMove,
 } from './valuationFormulas';
+import { useDeepValuationCopy } from './deepValuationCopy';
 
 /**
  * The "Deep Valuation" tab — an Earnings Growth Model panel for ONE company.
@@ -89,6 +91,7 @@ function loadSaved(isin: string): Partial<EgmAssumptions> {
  */
 function Field({
   label, value, onChange, suffix, step = '0.1', placeholder, info, hint, hintTitle, onUseHint,
+  action,
 }: {
   label: string; value: string; onChange: (v: string) => void;
   suffix?: string; step?: string; placeholder?: string;
@@ -109,6 +112,15 @@ function Field({
    *  never use. */
   hintTitle?: string;
   onUseHint?: () => void;
+  /**
+   * A control that goes and gets this field's default again — today only the Forward P/E's ↻.
+   *
+   * ⚠⚠ THE SLOT IS RENDERED FOR EVERY FIELD, EMPTY OR NOT, for the same reason the hint chip is
+   * always a `<button>`: these six rows are one column and anything that appears on some of them
+   * moves the ⓘ on those and not the others. An empty fixed-width span costs nothing and keeps the
+   * six ⓘ icons on the single vertical line the note below is about.
+   */
+  action?: React.ReactNode;
 }) {
   return (
     <label className="flex items-center gap-2 py-1">
@@ -135,6 +147,7 @@ function Field({
           </button>
         )}
       </span>
+      <span className="flex w-4 shrink-0 items-center justify-center">{action}</span>
       {/* ⚠⚠ THE ⓘ IS A TRAILING SLOT, NOT A SUFFIX ON THE LABEL. Beside the label its x landed
           wherever that label happened to end — `Growth rate ⓘ` and `Dividend yield ⓘ` are forty
           pixels apart, so a column of four explanations read as scattered punctuation. Last slot,
@@ -153,6 +166,7 @@ type LatestClose = {
 };
 
 export default function DeepValuationTab({ isin, name }: { isin: string; name?: string | null }) {
+  const t = useDeepValuationCopy();
   const [metrics, setMetrics] = useState<MetricRow[] | null>(null);
   const [currency, setCurrency] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -184,13 +198,39 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
    * arriving.
    */
   const [live, setLive] = useState<LatestClose | null | undefined>(undefined);
+  /**
+   * The GuruFocus company behind this ISIN, from the metrics payload.
+   *
+   * ⚠ IT WAS ALREADY ON THE WIRE AND WAS BEING THROWN AWAY. `/by-isin/{isin}/metrics` answers
+   * `{company_id, company_name, currency, metrics}` (Bridge A) and this panel kept only the last
+   * two — so refreshing anything GuruFocus files, which is keyed by `company_id`, looked like it
+   * needed a second lookup. It does not.
+   */
+  const [companyId, setCompanyId] = useState<number | null>(null);
+  /**
+   * The forward P/E observation date the last `load` saw.
+   *
+   * ⚠⚠ A REF, NOT STATE, BECAUSE THE REFRESH READS IT IMMEDIATELY AFTER AWAITING `load` — state
+   * set inside that call is not visible to the same tick, so a `useState` here would always report
+   * the PREVIOUS date and the toast would say "unchanged" on the one run that moved it.
+   */
+  const fwdPeDateRef = useRef<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
+  /**
+   * ⚠ ITS OWN HANDLE, NOT A SHARED ONE. Both buttons are cancellable, and cancelling needs the
+   * job id — sharing one would make pressing ↻ on the forward P/E show the share price's spinner,
+   * and Cancel on either stop whichever ran last.
+   */
+  const [peJobId, setPeJobId] = useState<string | null>(null);
   // ⚠ THE SAME SUBSCRIPTION `JobToaster` USES — `store.use` with a selector, so this re-renders
   // on the job frames and nothing else.
   const jobs = jobsStore.use((st) => st.jobs);
   const job = jobId == null ? null : jobs.find((j) => j.id === jobId) ?? null;
   const refreshing = job?.status === 'running';
   const cancelling = refreshing && job.cancelRequested;
+  const peJob = peJobId == null ? null : jobs.find((j) => j.id === peJobId) ?? null;
+  const peRefreshing = peJob?.status === 'running';
+  const peCancelling = peRefreshing && peJob.cancelRequested;
 
   // Held as strings so a half-typed value stays on screen; parsed on every render for the model.
   //
@@ -237,6 +277,10 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
    * flash and, worse, collapses its height, which is exactly what everything else here was fixed
    * to stop doing.
    */
+  // ⚠ HOISTED ABOVE `load`, which now needs it: the panel dates its own reads so `egmSource`
+  // resolves "the latest observation" against one clock rather than two.
+  const today = new Date().toISOString().slice(0, 10);
+
   const load = useCallback(async (blank: boolean, signal?: AbortSignal) => {
     if (blank) { setMetrics(null); setCurrency(null); }
     setErr(null);
@@ -255,8 +299,11 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     if (signal?.aborted) return 'cancelled';
     setMetrics((b?.metrics ?? []) as MetricRow[]);
     setCurrency(b?.currency ?? null);
+    setCompanyId(typeof b?.company_id === 'number' ? b.company_id : null);
+    fwdPeDateRef.current = egmSource(
+      (b?.metrics ?? []) as MetricRow[], today).forwardPEDate ?? null;
     return undefined;
-  }, [isin]);
+  }, [isin, today]);
 
   // ⚠ THE MOUNT LOAD KEEPS ITS OWN try/catch — it is not a job, it is the panel appearing, and a
   // toast for "this tab opened" is noise. `startLocalJob` handles the refresh path's failures.
@@ -327,6 +374,63 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   }, [name, isin, currency]);
 
   /**
+   * Ask GuruFocus for this company's forward P/E again, then re-read the panel.
+   *
+   * ⚠⚠ A DIFFERENT VENDOR AND A DIFFERENT TRANSPORT FROM THE SHARE PRICE ↻ BESIDE IT, which is why
+   * this is a second button and not a reuse of that one. The price is `asset_price`, filed by
+   * YFINANCE, keyed by `analysis_id`, refreshed by a plain POST that RETURNS the new close. The
+   * forward P/E is `metric_data`, filed by GURUFOCUS, keyed by `company_id`, and its refresher is
+   * an SSE stream that returns a log rather than a value. Two price worlds — the pair
+   * `timeseries.resolve()` refuses to mix — and a single button over both would have to lie about
+   * one of them.
+   *
+   * ⚠⚠ SO THE ANSWER IS NOT THE RESPONSE HERE, AND THE RE-READ MUST DROP THE CACHE FIRST. The
+   * share-price button carries a ⚠⚠ saying the answer IS its response, because an earlier version
+   * re-requested a cached payload and the figure never moved. The same trap is live on this path
+   * and cannot be dodged the same way: the stream carries progress lines, not a P/E. The metrics
+   * payload is on `readCache`'s allowlist with a ten-minute TTL, so `invalidateReadCache` runs
+   * BETWEEN the write and the re-read — without it the fetch succeeds, the toast goes green and
+   * the number on screen is the one we just replaced.
+   *
+   * ⚠ `force=true`. The unforced path skips a source GuruFocus already answered today, which is
+   * exactly the case somebody presses this button in: the stored figure looks wrong and they want
+   * it fetched again, not a no-op with a green toast.
+   *
+   * ⚠ `indicators` ALONE, NOT `refresh-all`. It is one vendor call for the one figure this button
+   * is under; `refresh-all` is five, spends the monthly quota four times over for nothing, and
+   * would move three other fields the reader did not ask about.
+   */
+  const refreshForwardPE = useCallback(() => {
+    if (companyId == null) return;
+    setPeJobId(startLocalJob(
+      `${name ?? isin} — forward P/E`, 'valuation.forwardpe',
+      async (signal) => {
+        await runSSE(
+          `${API_URL}/api/earnings/${companyId}/refresh/indicators?force=true`,
+          // ⚠ THE STREAM'S LINES ARE DISCARDED ON PURPOSE. They are the fetcher's own log
+          // ("forward_pe_ratio: calling …", "… rows parsed"), useful in the Earnings dashboard's
+          // console and noise in a one-line toast — and counting them told the reader nothing
+          // about whether the FIGURE moved, which is the only question here.
+          { method: 'POST' }, () => {}, signal);
+        if (signal.aborted) return 'cancelled';
+        const before = fwdPeDateRef.current;
+        invalidateReadCache('refreshed the forward P/E on the Deep Valuation tab');
+        await load(false, signal);
+        const after = fwdPeDateRef.current;
+        // ⚠⚠ THE TOAST REPORTS THE DATE, NOT "done". This button was shipped saying
+        // "forward P/E re-read" whatever happened, and the first thing it produced was a bug report
+        // — "I refreshed it but it's still old" — because a green toast over an unmoved date is
+        // indistinguishable from a fetch that failed. GuruFocus publishes this quarterly-ish, so
+        // "nothing newer" is the COMMON and CORRECT outcome and has to be sayable. Same rule as the
+        // share price's `close of {date}`: report a fact the reader can check against the panel.
+        if (after == null) return t.egm.forwardPENone;
+        return after !== before
+          ? t.egm.forwardPEMoved(onDate(after))
+          : t.egm.forwardPEUnchanged(onDate(after));
+      }));
+  }, [companyId, name, isin, load, t.egm]);
+
+  /**
    * ⚠ NOT FETCHED UNTIL THE REPORTING CURRENCY IS KNOWN. The close is converted server-side into
    * the currency the EPS and cash-flow series are filed in; asking before we know it would get a
    * price in the listing's own currency, and a price divided into a figure filed in another is a
@@ -368,7 +472,6 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     return () => { alive = false; };
   }, [isin]);
 
-  const today = new Date().toISOString().slice(0, 10);
   const src = useMemo(() => egmSource(metrics ?? [], today), [metrics, today]);
 
   const dcfSrc = useMemo(() => reverseDcfSource(metrics ?? [], today), [metrics, today]);
@@ -547,7 +650,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                 geometry and still removes it from the tab order and the accessibility tree, which
                 a `disabled` button would not. */}
             <button type="button" onClick={reset} aria-hidden={isDefault} tabIndex={isDefault ? -1 : 0}
-              title="Put every assumption back to its default"
+              title={t.egm.reset}
               className={`ml-auto rounded border border-neutral-700 px-1.5 py-0.5 text-[11px] text-fg-soft hover:bg-overlay/5 ${
                 isDefault ? 'invisible' : ''}`}>
               Reset
@@ -555,88 +658,153 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
           </div>
 
           <div className="flex flex-col divide-y divide-neutral-800/30">
-            <Field label="Growth rate" value={growthStr} onChange={setGrowthStr} suffix="%"
-              info={<InfoTip content={<AspectCard
-                what="Assumed growth in earnings per share."
-                where="Yours, or the house default when blank."
-                when={`Every year, for ${v(assumptions.years)} years.`}
-                how={`Percent per year. Default ${v(`${(EGM_DEFAULTS.growthRate * 100).toFixed(0)}%`)}, a house figure${src.analystGrowth5Y != null ? `; analysts imply ${v(`${(src.analystGrowth5Y * 100).toFixed(1)}%`)}` : ''}.`} />} />}
-              hint={src.analystGrowth5Y != null
-                ? `${(src.analystGrowth5Y * 100).toFixed(1)}%` : null}
-              hintTitle={'Analysts’ implied growth — the CAGR of the consensus EPS estimates, not '
-                + 'a published long-term rate. Click to use it.'}
-              onUseHint={src.analystGrowth5Y != null
-                ? () => setGrowthStr(((src.analystGrowth5Y as number) * 100).toFixed(1)) : undefined} />
-            {/* ⚠ THE CHIP IS THE FIGURE, NOT A SENTENCE ABOUT IT. `5y median P/E: 57.3` under a
-                field labelled `Exit P/E` repeated the label an inch above it and named a source
-                the hover can carry. */}
-            <Field label="Exit P/E" value={exitStr} onChange={setExitStr} step="0.5"
-              info={<InfoTip content={<AspectCard
-                what="Assumed P/E when you sell."
-                where="Yours, or the house default when blank."
-                when={`End of year ${v(assumptions.years)}.`}
-                how={`A multiple, not a percent. Default ${v(`${EGM_DEFAULTS.exitPE}x`)}, a house figure${src.medianPE5Y != null ? `; its 5-year median is ${v(`${src.medianPE5Y.toFixed(1)}x`)}` : ''}.${forwardPE != null && forwardPE > 0 ? ` The rerating leg runs ${v(`${forwardPE.toFixed(1)}x`)} to ${v(`${assumptions.exitPE.toFixed(1)}x`)}.` : ''}`} />} />}
-              hint={src.medianPE5Y != null ? src.medianPE5Y.toFixed(1) : null}
-              hintTitle="This company’s own median P/E over the last five years. Click to use it."
-              onUseHint={src.medianPE5Y != null
-                ? () => setExitStr((src.medianPE5Y as number).toFixed(1)) : undefined} />
-            {/* ⚠⚠ THE TWO MEASURED INPUTS, AND THEY SIT WITH THE ASSUMPTIONS BECAUSE THEY FEED
-                THE SAME MODEL. Both were read-only facts printed in the OUTPUT table, which made
-                the one number the whole rerating leg is measured from unchallengeable: the vendor's
-                forward P/E and `price ÷ consensus EPS` routinely disagree, and a reader who could
-                see that had no way to act on it. Now they are the panel's first two rows and a
-                typed value reaches `calculateEGM`. */}
-            <Field label={`Share price now${currency ? ` (${currency})` : ''}`}
+          {/**
+            * ⚠⚠ THE ORDER IS AN ARGUMENT, NOT A LAYOUT (2026-09-01, on request). It reads
+            * MEASURED → REQUIRED → ASSUMED:
+            *
+            *   Share price now, Forward P/E   what the market is doing — both vendor facts, both
+            *                                  overridable, and the two the ↻ buttons refresh.
+            *   Hurdle rate                    what YOU require. The only input on this panel that
+            *                                  describes the reader rather than the company, and the
+            *                                  only one that feeds the hurdle block instead of the
+            *                                  return — see `atYourHurdle`.
+            *   Growth rate, Dividend yield,   what you ASSUME about the company. Three claims about
+            *   Exit P/E                       the next ten years; the exit multiple is last because
+            *                                  it is the one the rerating leg lands on.
+            *
+            * ⚠ THE PREVIOUS ORDER PUT THE ASSUMPTIONS FIRST and the two measured facts third and
+            * fourth, on the reasoning that the panel is about the assumptions. That is true of the
+            * MODEL and wrong about READING it: the price and the forward P/E are where the answer
+            * starts, and a reader checking whether a figure is current had to look past three
+            * house constants to find the two that are not.
+            */}
+            {/* ⚠⚠ THE TWO MEASURED INPUTS, AND THEY ARE INPUTS AT ALL BECAUSE THEY WERE
+                UNCHALLENGEABLE AS OUTPUTS. Both were read-only figures printed in the OUTPUT
+                table, which made the one number the whole rerating leg is measured from something
+                a reader could see and not act on: the vendor's forward P/E and
+                `price ÷ consensus EPS` routinely disagree — five weeks apart on argenx as this was
+                written, 42.0x against 38.2x — and the chip beside each is the way to take the
+                other. A typed value reaches `calculateEGM`.
+                ⚠ THEY LEAD THE COLUMN — see the ⚠⚠ on the order above. This note used to end
+                "now they are the panel's first two rows", which stopped being true the moment
+                anything was inserted above them and stayed in the file saying so. */}
+            <Field label={`${t.egm.sharePriceNow}${currency ? ` (${currency})` : ''}`}
               value={priceStr} onChange={setPriceStr} step="0.01"
               placeholder={measuredPrice == null ? '' : measuredPrice.toFixed(2)}
               info={<InfoTip content={<AspectCard
-                what="The price every return on this panel is measured from."
-                where={priceOverride != null ? 'Yours, typed here.'
-                  : priceFromYahoo ? `Yahoo Finance${live?.symbol ? `, ${v(live.symbol)}` : ''}.`
-                    : `GuruFocus, ${v(vendorName(SOURCE_CODES.price))}.`}
-                when={priceOverride != null ? 'Whatever moment you mean it to be.'
-                  : v(onDate(priceDate)) + (priceStale ? `, ${v(`${priceAgeDays} days old`)}` : '')}
-                how="Blank uses the stored close. Every return on the panel moves with this." />} />}
+                what={t.egm.cards.price.what}
+                where={priceOverride != null ? t.egm.yoursTypedHere
+                  : priceFromYahoo ? t.egm.yahooFinance(live?.symbol ?? '')
+                    : t.common.guruFocus(vendorName(SOURCE_CODES.price))}
+                when={priceOverride != null ? t.egm.whateverMoment
+                  : v(onDate(priceDate)) + (priceStale ? `, ${v(t.egm.daysOld(String(priceAgeDays)))}` : '')}
+                how={t.egm.cards.price.how} />} />}
               hint={measuredPrice == null ? null : measuredPrice.toFixed(2)}
               hintTitle={priceOverride != null
-                ? 'The stored close. Click to go back to it.'
-                : 'The stored close — in use.'}
+                ? t.egm.storedCloseBack : t.egm.storedCloseInUse}
               onUseHint={priceOverride != null ? () => setPriceStr('') : undefined} />
-            <Field label="Forward P/E now" value={fwdPeStr} onChange={setFwdPeStr}
+            <Field label={t.egm.forwardPE} value={fwdPeStr} onChange={setFwdPeStr}
               placeholder={src.forwardPE == null ? '' : src.forwardPE.toFixed(1)}
               info={<InfoTip content={<AspectCard
-                what="The multiple the rerating leg starts FROM."
-                where={numOrNull(fwdPeStr) != null ? 'Yours, typed here.'
-                  : `GuruFocus, ${v(vendorName(SOURCE_CODES.forwardPE))}.`}
-                when={src.forwardPEDate == null ? 'No observation stored.'
-                  : v(onDate(src.forwardPEDate))}
-                how={`Forward, not trailing — it matches the growth rate above, which runs from FY1. The multiple leg is (exit ÷ this) ^ (1/${v(assumptions.years)}) per year.${
-                  impliedPE != null && src.forwardPE != null
+                what={t.egm.cards.forwardPE.what}
+                where={numOrNull(fwdPeStr) != null ? t.egm.yoursTypedHere
+                  : t.common.guruFocus(vendorName(SOURCE_CODES.forwardPE))}
+                /* ⚠⚠ AN OVERRIDDEN FORWARD P/E HAS NO VENDOR DATE, and saying otherwise is worse
+                   than saying nothing — the exact ⚠⚠ the share-price card already carries. `where`
+                   branched on the override from the start and `when` did not, so a typed multiple
+                   produced a card reading "Yours, typed here" above "24 July 2026": two answers
+                   about two different numbers, one of which is not on screen. Reported as "I
+                   refreshed it but it's still old", which is what that card invites. */
+                when={numOrNull(fwdPeStr) != null ? t.egm.forwardPEWhenTyped
+                  : src.forwardPEDate == null ? t.egm.noObservationStored
+                    : v(onDate(src.forwardPEDate))}
+                how={(numOrNull(fwdPeStr) != null && src.forwardPEDate != null
+                  // ⚠ THE WAY BACK, NAMED. With a typed value the useful sentence is not how the
+                  // leg is computed — it is that a vendor figure exists behind it and how to get
+                  // back to it, which is what the share-price card says in the same state.
+                  ? `${t.egm.forwardPEHowTyped(vendorName(SOURCE_CODES.forwardPE),
+                    onDate(src.forwardPEDate))} `
+                  : '')
+                  + t.egm.forwardPEHow(String(assumptions.years))
+                  + (impliedPE != null && src.forwardPE != null
                     && Math.abs(impliedPE / src.forwardPE - 1) > 0.02
-                    ? `
-
-Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor's ${v(`${src.forwardPE.toFixed(1)}x`)}. The chip puts the market's own figure in.`
-                    : ''}`} />} />}
+                    ? `\n\n${t.egm.forwardPEDisagrees(`${impliedPE.toFixed(1)}x`,
+                      `${src.forwardPE.toFixed(1)}x`)}`
+                    : '')} />} />}
               hint={impliedPE != null ? `${impliedPE.toFixed(1)}` : null}
-              hintTitle={'Price ÷ next-year consensus EPS — the multiple the market is actually '
-                + 'paying, computed here rather than read from the vendor. Click to use it.'}
-              onUseHint={impliedPE != null ? () => setFwdPeStr(impliedPE.toFixed(1)) : undefined} />
-            <Field label="Hurdle rate" value={hurdleStr} onChange={setHurdleStr} suffix="%"
+              hintTitle={t.egm.impliedPEHint}
+              onUseHint={impliedPE != null ? () => setFwdPeStr(impliedPE.toFixed(1)) : undefined}
+              /**
+               * ⚠⚠ THE ONE MEASURED FIGURE ON THIS PANEL WITH NO WAY TO GO AND GET IT AGAIN, until
+               * now. Three of the six inputs are house constants and the share price has had its ↻
+               * since 2026-08 — but the forward P/E is a vendor observation like the price, it
+               * drives the entire rerating leg, and a reader who thought it stale could only wait
+               * for the quarterly `benchmark_fundamentals_fill` or refresh every source of the
+               * company from another page.
+               *
+               * ⚠ SAME THREE STATES AND THE SAME GLYPHS AS THE SHARE PRICE'S ↻ — see the long note
+               * at that button. Two controls on one panel that both re-read a vendor figure must
+               * not have two vocabularies; the only difference here is which vendor and which
+               * transport, and that is in `refreshForwardPE`.
+               *
+               * ⚠ DISABLED, NOT ABSENT, WITH NO COMPANY. `/by-isin/{isin}/metrics` answers 404 for
+               * an instrument GuruFocus has no company row for, and the button would then have
+               * nothing to call — but a control that vanishes takes its column with it, which is
+               * the geometry rule the whole `Field` row is built on.
+               */
+              action={(
+                <button type="button"
+                  onClick={() => (peRefreshing && peJobId
+                    ? void cancelJob(peJobId) : refreshForwardPE())}
+                  disabled={peCancelling || companyId == null}
+                  aria-label={peRefreshing ? t.egm.reReadCancel : t.egm.reReadForwardPE}
+                  // ⚠ IT STILL WORKS WITH AN OVERRIDE IN PLACE AND WOULD LOOK BROKEN WITHOUT
+                  // SAYING SO — the same sentence the share price's ↻ carries, for the same
+                  // reason: the fetch updates the STORED figure, which a typed value is hiding,
+                  // so nothing in the box moves and the result lands on the chip beside it.
+                  title={peCancelling ? t.egm.cancelling
+                    : peRefreshing ? t.egm.reReading
+                      : companyId == null ? t.egm.reReadNoCompany
+                        : numOrNull(fwdPeStr) != null ? t.egm.reReadForwardPEOverridden
+                          : t.egm.reReadForwardPE}
+                  className={`inline-block w-3.5 text-center align-middle text-[11px] leading-none ${
+                    peCancelling ? 'cursor-wait text-fg-faint'
+                      : peRefreshing ? 'text-warn-400 hover:text-neg-400'
+                        : companyId == null ? 'cursor-default text-fg-faint/40'
+                          : 'text-fg-faint hover:text-accent-400'}`}>
+                  {peCancelling ? '⋯' : peRefreshing ? '✕' : '↻'}
+                </button>
+              )} />
+            <Field label={t.egm.hurdleRate} value={hurdleStr} onChange={setHurdleStr} suffix="%"
               info={<InfoTip content={<AspectCard
-                what="The return you require."
-                where="Yours, or the house default when blank."
-                when="Per year."
-                how={`Sets the fair value, not the expected return. Default ${v(`${(EGM_DEFAULTS.hurdleRate * 100).toFixed(0)}%`)}, a house figure.`} />} />} />
+                what={t.egm.cards.hurdle.what}
+                where={t.egm.yoursOrDefault}
+                when={t.egm.cards.hurdle.when}
+                how={t.egm.hurdleHow(
+                  t.egm.houseDefault(`${(EGM_DEFAULTS.hurdleRate * 100).toFixed(0)}%`))} />} />} />
+            <Field label={t.egm.growthRate} value={growthStr} onChange={setGrowthStr} suffix="%"
+              info={<InfoTip content={<AspectCard
+                what={t.egm.cards.growth.what}
+                where={t.egm.cards.growth.where}
+                when={t.egm.everyYearFor(String(assumptions.years))}
+                how={t.egm.growthHow(t.egm.houseDefault(`${(EGM_DEFAULTS.growthRate * 100).toFixed(0)}%`)
+                  + (src.analystGrowth5Y != null
+                    ? t.egm.analystsImply(`${(src.analystGrowth5Y * 100).toFixed(1)}%`) : '') + '.')} />} />}
+              hint={src.analystGrowth5Y != null
+                ? `${(src.analystGrowth5Y * 100).toFixed(1)}%` : null}
+              hintTitle={t.egm.analystHint}
+              onUseHint={src.analystGrowth5Y != null
+                ? () => setGrowthStr(((src.analystGrowth5Y as number) * 100).toFixed(1)) : undefined} />
             {/* ⚠ AN ASSUMPTION, NOT A READING. The model applies this yield in EVERY one of the
                 ten years, so it is a claim about the next decade; the measured figure is only its
                 default. Blank = use what GuruFocus reports. */}
-            <Field label="Dividend yield" value={divStr} onChange={setDivStr} suffix="%"
+            <Field label={t.egm.dividendYield} value={divStr} onChange={setDivStr} suffix="%"
               info={<InfoTip content={<AspectCard
-                what="Assumed dividend yield."
-                where={divOverride != null ? 'Yours, typed here.'
-                  : `GuruFocus, ${v(vendorName(SOURCE_CODES.dividendYield))}.`}
-                when={`Every year, for ${v(assumptions.years)} years.`}
-                how="Percent per year. Raw data, no formula." />} />}
+                what={t.egm.cards.dividend.what}
+                where={divOverride != null ? t.egm.yoursTypedHere
+                  : t.common.guruFocus(vendorName(SOURCE_CODES.dividendYield))}
+                when={t.egm.everyYearFor(String(assumptions.years))}
+                how={t.egm.cards.dividend.how} />} />}
               placeholder={src.dividendYield == null ? '0.00' : (src.dividendYield * 100).toFixed(2)}
               hint={src.dividendYield == null ? null
                 : `${(src.dividendYield * 100).toFixed(2)}%`}
@@ -653,20 +821,35 @@ Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor
                * hazard `loadSaved` warns about is persisting the measured value SILENTLY, which
                * this is not.
                */
-              hintTitle={divOverride != null
-                ? 'The yield GuruFocus reports. Click to go back to it.'
-                : 'The yield GuruFocus reports — in use. Click to put it in the box and edit from it.'}
+              hintTitle={divOverride != null ? t.egm.dividendBack : t.egm.dividendInUse}
               onUseHint={src.dividendYield == null ? undefined
                 : divOverride != null
                   ? () => setDivStr('')
                   : () => setDivStr((src.dividendYield as number * 100).toFixed(2))} />
+            {/* ⚠ THE CHIP IS THE FIGURE, NOT A SENTENCE ABOUT IT. `5y median P/E: 57.3` under a
+                field labelled `Exit P/E` repeated the label an inch above it and named a source
+                the hover can carry. */}
+            <Field label={t.egm.exitPE} value={exitStr} onChange={setExitStr} step="0.5"
+              info={<InfoTip content={<AspectCard
+                what={t.egm.cards.exitPE.what}
+                where={t.egm.cards.exitPE.where}
+                when={t.egm.endOfYear(String(assumptions.years))}
+                how={t.egm.exitPEHow(t.egm.houseDefault(`${EGM_DEFAULTS.exitPE}x`)
+                  + (src.medianPE5Y != null ? t.egm.medianIs(`${src.medianPE5Y.toFixed(1)}x`) : '') + '.')
+                  + (forwardPE != null && forwardPE > 0
+                    ? t.egm.reratingRuns(`${forwardPE.toFixed(1)}x`,
+                      `${assumptions.exitPE.toFixed(1)}x`) : '')} />} />}
+              hint={src.medianPE5Y != null ? src.medianPE5Y.toFixed(1) : null}
+              hintTitle={t.egm.medianPEHint}
+              onUseHint={src.medianPE5Y != null
+                ? () => setExitStr((src.medianPE5Y as number).toFixed(1)) : undefined} />
           </div>
 
           {/* ⚠ ONE CONTROL, NOT A LABEL PLUS AN AFFORDANCE BESIDE IT. It read `Assumptions`
               (a dotted-underlined button) followed by `raw data ↗` (a static span) — two pieces of
               text for one click, and the half that looked like the link was not the button. */}
           <button type="button" onClick={() => setShowWorking(true)}
-            title="Show the raw data behind these defaults"
+            title={t.egm.showRawData}
             className="mt-1.5 self-start text-[11px] text-fg-faint underline decoration-dotted underline-offset-2 hover:text-fg-strong">
             raw data ↗
           </button>
@@ -711,14 +894,14 @@ Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor
                   return (
                     <tr key={leg.key}>
                       <td className="truncate py-0.5 text-fg-muted">
-                        {leg.key === 'growth' ? 'Earnings growth'
-                          : leg.key === 'yield' ? 'Dividend yield'
+                        {leg.key === 'growth' ? t.egm.legEarningsGrowth
+                          : leg.key === 'yield' ? t.egm.dividendYield
                             // ⚠ THE ENDPOINTS COME OFF THE LEG WHERE THERE IS ONE — they travel with
                             // the arithmetic (see `EgmLeg`), so a label can never name a different
                             // pair than the figure beside it was computed from. With no bridge
                             // nothing was computed, so the fields themselves are the only source.
                             : (
-                              <>Multiple <span className="font-mono text-fg-soft">
+                              <>{t.egm.legMultipleWord} <span className="font-mono text-fg-soft">
                                 {mult('from' in leg ? leg.from ?? null : src.forwardPE)}
                                 {' → '}
                                 {mult('to' in leg ? leg.to ?? null : assumptions.exitPE)}
@@ -740,7 +923,7 @@ Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor
                   );
                 })}
                 <tr className="border-t border-neutral-700/60">
-                  <td className="truncate pt-1 font-medium text-fg-strong">Expected return</td>
+                  <td className="truncate pt-1 font-medium text-fg-strong">{t.egm.expectedReturn}</td>
 
                   <td className={`pt-1 pl-2 text-right font-mono tabular-nums font-semibold ${
                     (r.bridge?.rate ?? 0) >= 0 ? 'text-pos-500' : 'text-neg-500'}`}>
@@ -759,17 +942,17 @@ Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor
                         the proof; the hover carries the warning — and, when the model refuses, the
                         reason, which is the only place left for it now the rows never change. */}
                     <InfoTip content={<AspectCard
-                      what="Annual TOTAL return these assumptions imply — dividends included."
-                      where="Computed from the three rows above."
-                      when={`Per year, over ${v(assumptions.years)} years.`}
+                      what={t.egm.cards.expectedReturn.what}
+                      where={t.egm.cards.expectedReturn.where}
+                      when={t.egm.perYearOver(String(assumptions.years))}
                       worked={r.bridge == null ? ''
                         : workedEgmReturn(r.bridge, assumptions.years, pct1(r.bridge.rate))}
                       legend={r.bridge == null ? undefined : [
-                        { sym: 'g', is: 'assumed EPS growth, per year' },
-                        { sym: 'y', is: 'assumed dividend yield, applied every year' },
-                        { sym: String.raw`PE_{\text{exit}}`, is: 'the multiple you assume on sale' },
-                        { sym: String.raw`PE_{\text{fwd}}`, is: 'the forward P/E it rerates FROM' },
-                        { sym: 'n', is: `the forecast horizon, ${v(assumptions.years)} years` },
+                        { sym: 'g', is: t.egm.legend.g },
+                        { sym: 'y', is: t.egm.legend.y },
+                        { sym: String.raw`PE_{\text{exit}}`, is: t.egm.legend.peExit },
+                        { sym: String.raw`PE_{\text{fwd}}`, is: t.egm.legend.peFwd },
+                        { sym: 'n', is: t.egm.legend.n(String(assumptions.years)) },
                       ]}
                       // ⚠ THE FORMULA LEFT THIS FIELD AND THE CAVEAT STAYED. `how` is where the
                       // card says how to READ the figure, and the one thing a reader gets wrong
@@ -779,10 +962,10 @@ Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor
                       // this figure move and the implied price sit still with no card explaining
                       // the pair. Dividends are cash paid, not price you can sell at.
                       how={r.bridge
-                        ? `The factors MULTIPLY, so the × column ties and the % column does not: ${v(pct1(r.bridge.sumOfRates))} added against ${v(pct1(r.bridge.rate))} compounded. The yield lifts this figure but not the implied price below, which is the capital leg alone.`
+                        ? t.egm.factorsMultiply(pct1(r.bridge.sumOfRates), pct1(r.bridge.rate))
                         : forwardPE == null || !(forwardPE > 0)
-                          ? 'No usable forward P/E, so there is nothing to rerate from.'
-                          : 'These assumptions have no compounding path. Check the exit P/E, growth and hurdle.'} />} />
+                          ? t.egm.noForwardPE
+                          : t.egm.noCompoundingPath} />} />
                   </td>
                 </tr>
               </tbody>
@@ -830,7 +1013,7 @@ Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor
                         about the NUMBER — where it came from, and how to re-read it — and after
                         the label they were separated from it by the whole width of the column.
                         In the trailing slot they also line up with every other ⓘ on the page. */}
-                    <td className="truncate pt-1.5 text-fg-muted">Share price now</td>
+                    <td className="truncate pt-1.5 text-fg-muted">{t.egm.sharePriceNow}</td>
 
                     <td className="pt-1.5 pl-2 text-right font-mono tabular-nums text-fg-soft">
                       {money(price)}
@@ -838,29 +1021,26 @@ Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor
                     <td />
                     <td className="flex items-center gap-0.5 pt-1.5 pl-4">
                       <InfoTip content={<AspectCard
-                        what={priceOverride != null ? 'The price you typed, not a close.'
-                          : `Closing stock price of ${name ?? isin}.`}
+                        what={priceOverride != null ? t.egm.priceTyped
+                          : t.egm.priceClosingOf(name ?? isin)}
                         // ⚠⚠ AN OVERRIDDEN PRICE HAS NO VENDOR AND NO DATE, and saying otherwise is
                         // worse than saying nothing: this card would name Yahoo, print a staleness
                         // badge and offer a ↻ over a figure the reader typed thirty seconds ago —
                         // three claims about provenance the number does not have.
-                        where={priceOverride != null ? 'Yours, typed into the Share price box.'
-                          : live === undefined ? 'Loading…'
+                        where={priceOverride != null ? t.egm.priceWhereTyped
+                          : live === undefined ? t.egm.loading
                             : priceFromYahoo
-                              ? `Yahoo Finance${live?.symbol ? `, ${v(live.symbol)}` : ''}.`
+                              ? t.egm.yahooFinance(live?.symbol ?? '')
                               // ⚠ NAMED, NOT HIDDEN. Without a priced Yahoo listing the figure is
                               // GuruFocus's own close, which ↻ cannot move — and a card claiming
                               // Yahoo over it is how a button gets blamed for a missing instrument.
-                              : `GuruFocus, ${v(vendorName(SOURCE_CODES.price))}.`}
-                        when={priceOverride != null ? 'Whatever moment you mean it to be.'
-                          : priceDate == null ? 'None stored.'
-                            : v(onDate(priceDate)) + (priceStale ? `, ${v(`${priceAgeDays} days old`)}` : '')}
+                              : t.common.guruFocus(vendorName(SOURCE_CODES.price))}
+                        when={priceOverride != null ? t.egm.whateverMoment
+                          : priceDate == null ? t.egm.noneStored
+                            : v(onDate(priceDate)) + (priceStale ? `, ${v(t.egm.daysOld(String(priceAgeDays)))}` : '')}
                         how={priceOverride != null
-                          ? `Clear the Share price box to go back to the stored close${
-                            measuredPrice == null ? '' : `, ${v(money(measuredPrice))}`}.`
-                          : priceFromYahoo
-                            ? 'Raw data. ↻ fetches the newest closes from Yahoo.'
-                            : 'Raw data. ↻ cannot refresh this one.'} />} />
+                          ? t.egm.clearBoxToGoBack(measuredPrice == null ? '' : money(measuredPrice))
+                          : priceFromYahoo ? t.egm.rawDataYahoo : t.egm.rawDataNoRefresh} />} />
                       {/* ⚠⚠ RENDERED ALWAYS, AND THE SAME SIZE IN ALL THREE STATES. Showing it only
                           when the price is stale would move the row the moment a refresh cleared
                           the staleness — the reader would press a button and watch it vanish along
@@ -887,18 +1067,18 @@ Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor
                       <button type="button"
                         onClick={() => (refreshing && jobId ? void cancelJob(jobId) : refreshPrice())}
                         disabled={cancelling}
-                        aria-label={refreshing ? 'Cancel the re-read' : 'Re-read the stored close'}
+                        aria-label={refreshing ? t.egm.reReadCancel : t.egm.reReadClose}
                         // ⚠ IT STILL WORKS WITH AN OVERRIDE IN PLACE, AND WOULD LOOK BROKEN WITHOUT
                         // SAYING SO: the fetch updates the STORED close, which a typed price is
                         // hiding, so the figure on screen does not move. The refreshed value lands
                         // on the chip beside the Share price box, one click from being used.
-                        title={cancelling ? 'Cancelling…'
-                          : refreshing ? 'Re-reading — press to cancel'
+                        title={cancelling ? t.egm.cancelling
+                          : refreshing ? t.egm.reReading
                             : priceOverride != null
-                              ? 'Re-read the stored close — the Share price box is overriding it, '
+                              ? t.egm.reReadOverridden
                                 + 'so the new figure appears on that box’s chip'
-                              : priceStale ? 'This close is over a week old — re-read it'
-                                : 'Re-read the stored close'}
+                              : priceStale ? t.egm.reReadStale
+                                : t.egm.reReadClose}
                         className={`ml-1 inline-block w-3.5 text-center align-middle text-[11px] leading-none ${
                           cancelling ? 'cursor-wait text-fg-faint'
                             : refreshing ? 'text-warn-400 hover:text-neg-400'
@@ -909,7 +1089,7 @@ Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor
                     </td>
                   </tr>
                   <tr>
-                    <td className="truncate py-0.5 text-fg-muted">Implied in {assumptions.years}y</td>
+                    <td className="truncate py-0.5 text-fg-muted">{t.egm.impliedIn(String(assumptions.years))}</td>
 
                     <td className="py-0.5 pl-2 text-right font-mono tabular-nums text-fg-strong font-semibold">
                       {money(r.impliedPrice)}
@@ -917,9 +1097,9 @@ Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor
                     <td />
                     <td className="py-0.5 pl-4">
                       <InfoTip content={<AspectCard
-                        what="Share price at the end of the window."
-                        where="Computed from the price and the two assumptions."
-                        when={`${v(assumptions.years)} years out.`}
+                        what={t.egm.cards.priceTarget.what}
+                        where={t.egm.cards.priceTarget.where}
+                        when={t.egm.yearsOut(String(assumptions.years))}
                         // ⚠ OPERANDS OFF `bridge`, LIKE THE RETURN ROW — see `bridgeParts`. The
                         // implied price and the annual return share `multFactor`, so quoting the
                         // multiples from `assumptions`/`src` here would be a second route to the
@@ -927,17 +1107,16 @@ Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor
                         worked={r.bridge == null ? '' : workedImpliedPrice(
                           src.price, r.bridge, assumptions.years, r.impliedPrice)}
                         legend={r.impliedPrice == null || src.price == null ? undefined : [
-                          { sym: 'P_0', is: 'the price now — the row above' },
-                          { sym: 'g', is: 'assumed EPS growth, per year' },
-                          { sym: 'n', is: `the forecast horizon, ${v(assumptions.years)} years` },
+                          { sym: 'P_0', is: t.egm.legend.p0Row },
+                          { sym: 'g', is: t.egm.legend.g },
+                          { sym: 'n', is: t.egm.legend.n(String(assumptions.years)) },
                           { sym: String.raw`\dfrac{PE_{\text{exit}}}{PE_{\text{fwd}}}`,
-                            is: 'the whole rerating, applied once — not per year' },
+                            is: t.egm.legend.rerating },
                         ]}
                         // ⚠ NO `y` HERE, AND THAT IS THE POINT OF THE SENTENCE BELOW. This is the
                         // capital leg alone; a legend row for the dividend yield would imply it
                         // was in the expression, on the one figure that deliberately excludes it.
-                        how={`Price only; dividends are in the return below. `
-                          + `Fair value at the hurdle is ${v(money(r.fairValue))} (${v(mult(r.maxPE))}).`
+                        how={t.egm.priceOnlyFairValue(money(r.fairValue), mult(r.maxPE))
                           // ⚠ THE ONE DISCLOSURE NOTHING ELSE CARRIES, kept to a single clause and
                           // shown only when true. This figure reruns from the VENDOR's forward
                           // P/E; when the price does not actually imply that multiple on the
@@ -946,8 +1125,8 @@ Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor
                           // the fair-value line) — losing it in a copy edit is the live risk.
                           + (impliedPE != null && forwardPE != null
                             && Math.abs(impliedPE / forwardPE - 1) > 0.02
-                            ? ` Price ÷ EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the `
-                              + `${v(`${forwardPE.toFixed(1)}x`)} the rerating starts from.`
+                            ? t.egm.priceVsRerating(`${impliedPE.toFixed(1)}x`,
+                              `${forwardPE.toFixed(1)}x`)
                             : '')} />} />
                     </td>
                   </tr>
@@ -977,23 +1156,105 @@ Price ÷ consensus EPS reads ${v(`${impliedPE.toFixed(1)}x`)} against the vendor
                     </td>
                     <td className="pt-1 pl-4">
                       <InfoTip content={<AspectCard
-                        what="Total price move over the window."
-                        where="Computed from the two rows above."
-                        when={`Over ${v(assumptions.years)} years, not annualised.`}
+                        what={t.egm.cards.priceMove.what}
+                        where={t.egm.cards.priceMove.where}
+                        when={t.egm.overYearsNotAnnualised(String(assumptions.years))}
                         worked={workedPriceMove(r.impliedPrice, src.price, pct1(r.priceReturn))}
                         legend={r.priceReturn == null ? undefined : [
-                          { sym: 'P_n', is: `the implied price, ${v(assumptions.years)} years out` },
-                          { sym: 'P_0', is: 'the price now' },
+                          { sym: 'P_n', is: t.egm.legend.pn(String(assumptions.years)) },
+                          { sym: 'P_0', is: t.egm.legend.p0 },
                         ]}
                         how={r.totalReturn != null && r.priceReturn != null
                           && Math.abs(r.totalReturn - r.priceReturn) > 0.0001
-                          ? `Price leg only. With dividends reinvested the total is ${v(pct1(r.totalReturn))}.`
-                          : 'No dividend, so this is the whole return.'} />} />
+                          ? t.egm.priceLegOnly(pct1(r.totalReturn))
+                          : t.egm.noDividend} />} />
                     </td>
                   </tr>
                 </tbody>
               </table>
             )}
+
+            {/**
+              * ⚠⚠ A SECOND MODEL, UNDER ITS OWN CAPTION, AND THE CAPTION IS THE WHOLE FIX.
+              * `Fair value` was a bare row beside the expected return once and was demoted into a
+              * tooltip because the two "sat one above the other as competing verdicts" — a
+              * reader could not tell which question each answered. The demotion solved that and
+              * created a worse problem: a `Hurdle rate` input whose every visible effect had
+              * disappeared, so the box looked ornamental and its arithmetic unfindable.
+              *
+              * ⚠ THE ANSWER IS SEPARATION, NOT SUPPRESSION. Everything above asks what today's
+              * price EARNS you; these two ask what you may PAY to earn your hurdle. Named, they
+              * are two answers to two questions; unnamed, they were two answers to one.
+              *
+              * ⚠ `h` IS THE ONLY INPUT ON THIS PANEL THAT DESCRIBES THE READER rather than the
+              * company, and it appears in no expression above — which is why it belongs here and
+              * nowhere else. See `workedMaxPE`.
+              */}
+            <p className="mt-3 border-t border-neutral-800/40 pt-1.5 text-[11px] uppercase tracking-wider text-fg-faint">
+              {t.egm.atYourHurdle}
+            </p>
+            <table className="w-full table-fixed text-[12px]">
+              {/* The same four columns as the two tables above, so all three blocks share one
+                  rhythm and every ⓘ lands on the one vertical line. ⚠ THE THIRD COLUMN STAYS
+                  EMPTY HERE: it means "per year" everywhere on this panel, and neither of these
+                  two figures is a rate. */}
+              <colgroup>
+                <col />
+                <col className="w-[6rem]" />
+                <col className="w-[3.75rem]" />
+                <col className="w-[3.25rem]" />
+              </colgroup>
+              <tbody>
+                <tr>
+                  <td className="truncate py-0.5 text-fg-muted">{t.egm.maxPE}</td>
+                  <td className="py-0.5 pl-2 text-right font-mono tabular-nums text-fg-soft">
+                    {mult(r.maxPE)}
+                  </td>
+                  <td />
+                  <td className="py-0.5 pl-4">
+                    <InfoTip content={<AspectCard
+                      what={t.egm.cards.maxPE.what}
+                      where={t.egm.cards.maxPE.where}
+                      when={t.egm.endOfYear(String(assumptions.years))}
+                      worked={workedMaxPE(assumptions.exitPE, assumptions.growthRate,
+                        yieldUsed ?? 0, assumptions.hurdleRate, assumptions.years, r.maxPE)}
+                      legend={r.maxPE == null ? undefined : [
+                        { sym: String.raw`PE_{\text{exit}}`, is: t.egm.legend.peExit },
+                        { sym: 'g', is: t.egm.legend.g },
+                        { sym: 'y', is: t.egm.legend.y },
+                        { sym: 'h', is: t.egm.legend.h },
+                        { sym: 'n', is: t.egm.legend.n(String(assumptions.years)) },
+                      ]}
+                      how={t.egm.cards.maxPE.how} />} />
+                  </td>
+                </tr>
+                <tr>
+                  <td className="truncate py-0.5 text-fg-muted">{t.egm.fairValue}</td>
+                  <td className="py-0.5 pl-2 text-right font-mono tabular-nums text-fg-soft">
+                    {money(r.fairValue)}
+                  </td>
+                  <td />
+                  <td className="py-0.5 pl-4">
+                    <InfoTip content={<AspectCard
+                      what={t.egm.cards.fairValue.what}
+                      where={t.egm.cards.fairValue.where}
+                      when={t.egm.endOfYear(String(assumptions.years))}
+                      worked={workedFairValue(src.epsNextFY, r.maxPE, r.fairValue)}
+                      legend={r.fairValue == null ? undefined : [
+                        { sym: String.raw`EPS_{\text{FY1}}`, is: t.egm.legend.epsFY1 },
+                        { sym: String.raw`PE_{\max}`, is: t.egm.legend.maxPE },
+                      ]}
+                      /* ⚠⚠ THE COMPARISON, WHICH `upside` HAS BEEN COMPUTING AND NOBODY HAS BEEN
+                         READING. A fair value printed beside nothing invites the reader to do the
+                         subtraction against a price two rows up; it was already in the result and
+                         had no consumer in the app at all. */
+                      how={r.fairValue == null ? t.egm.fairValueNoEps
+                        : r.upside == null ? undefined
+                          : t.egm.fairValueVsPrice(pct1(r.upside))} />} />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

@@ -4784,6 +4784,47 @@
         "title": "BookHoldingDetail",
         "type": "object"
       },
+      "BookReturnPoint": {
+        "description": "AIRS's own year-to-date return on one date, and what the book was worth that day.\n\n\u26a0\u26a0 `cum_pct` IS READ FROM `airs_performance.cumulatief_rendement`, NEVER DERIVED FROM\n`value_eur`. It is FLOW-AWARE and the value is not: AzTopSelectie's 0 \u2192 EUR 1,000,000 on\n2026-06-30 is a funding, and this series correctly stays at 0.00% straight through it. Two\nvalues cannot tell that apart from a gain.",
+        "properties": {
+          "cum_pct": {
+            "title": "Cum Pct",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "holdings": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings"
+          },
+          "value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Eur"
+          }
+        },
+        "required": [
+          "date",
+          "cum_pct"
+        ],
+        "title": "BookReturnPoint",
+        "type": "object"
+      },
       "BookValueFlow": {
         "description": "Money in or out on one date \u2014 never a result. See `_airs_value_series`.",
         "properties": {
@@ -4844,7 +4885,7 @@
         "type": "object"
       },
       "BookValueSeries": {
-        "description": "\u26a0\u26a0 VALUE, NOT RETURN. A funding is a step in this line and is not performance \u2014 the flows\nride along so the chart can mark it. The book's return is\n`airs_performance.cumulatief_rendement`, assembled in `_airs_accounts`.",
+        "description": "The book's value through time, and the return that value earned.\n\n\u26a0\u26a0 TWO DIFFERENT QUANTITIES, AND ONLY ONE OF THEM IS PERFORMANCE. `points` is VALUE: a funding\nis a step in it and is not a gain, which is why the flows ride along. `returns` is AIRS's own\nflow-aware `cumulatief_rendement`, the same column `_airs_accounts._year_perf` reads for the\nScorecard \u2014 so the chart and the tile beside it cannot disagree.",
         "properties": {
           "first_date": {
             "anyOf": [
@@ -4916,6 +4957,36 @@
               }
             ],
             "title": "Reason"
+          },
+          "return_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return From"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
+          "returns": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BookReturnPoint"
+            },
+            "title": "Returns",
+            "type": "array"
           }
         },
         "title": "BookValueSeries",
@@ -15661,7 +15732,7 @@
     },
     "/api/admin/db-growth": {
       "get": {
-        "description": "HOW FAST THE DATABASE IS GROWING, PER TABLE \u2014 bytes on disk, over a window.\n\n\u26a0\u26a0 BYTES, NOT ROWS WRITTEN, AND THE DIFFERENCE INVERTS THE RANKING. Asking each job to count\nits own inserts would put `crm_relaties_refresh` \u2014 which OVERWRITES its table, thousands of rows\nwritten and zero growth \u2014 above the month-end price refresh. Several jobs here are\ndelete-then-insert snapshots or upserts. A row count is also blind to INDEXES and BLOAT, which\non an 18 GB table are most of the disk.\n\n\u26a0 IT ANSWERS \"WHAT GREW\", NEVER \"WHO GREW IT\". The measurement is taken from outside every job,\nwhich is what makes it impossible for a job to forget to report or to drift \u2014 and is exactly\nwhy it cannot attribute. Per-job attribution is a separate, lossier measurement.\n\n\u26a0 `delta` IS NULL, NOT 0, UNTIL THE HISTORY REACHES BACK `days`. A fresh install has sizes and\nno growth; rendering that as \"0 MB added\" would present an unmeasured database as a static one.\n`has_baseline` says which of the two you are looking at.\n\n\u26a0 SUPABASE STORAGE IS NOT COUNTED \u2014 the `gurufocus-raw` bucket of cached vendor JSON is not in\nPostgres. Reconciling this against the hosting's disk figure will show a gap; that is the gap.",
+        "description": "HOW FAST THE DATABASE IS GROWING, PER TABLE \u2014 bytes on disk, over a window.\n\n\u26a0\u26a0 BYTES, NOT ROWS WRITTEN, AND THE DIFFERENCE INVERTS THE RANKING. Asking each job to count\nits own inserts would put the AIRS model scan \u2014 which delete-then-inserts every portfolio's\npositions, thousands of rows written and zero growth \u2014 above the month-end price refresh. Several jobs here are\ndelete-then-insert snapshots or upserts. A row count is also blind to INDEXES and BLOAT, which\non an 18 GB table are most of the disk.\n\n\u26a0 IT ANSWERS \"WHAT GREW\", NEVER \"WHO GREW IT\". The measurement is taken from outside every job,\nwhich is what makes it impossible for a job to forget to report or to drift \u2014 and is exactly\nwhy it cannot attribute. Per-job attribution is a separate, lossier measurement.\n\n\u26a0 `delta` IS NULL, NOT 0, UNTIL THE HISTORY REACHES BACK `days`. A fresh install has sizes and\nno growth; rendering that as \"0 MB added\" would present an unmeasured database as a static one.\n`has_baseline` says which of the two you are looking at.\n\n\u26a0 SUPABASE STORAGE IS NOT COUNTED \u2014 the `gurufocus-raw` bucket of cached vendor JSON is not in\nPostgres. Reconciling this against the hosting's disk figure will show a gap; that is the gap.",
         "operationId": "admin_db_growth_api_admin_db_growth_get",
         "parameters": [
           {
@@ -16090,7 +16161,7 @@
     },
     "/api/admin/scheduled-jobs/{job_id}/run": {
       "post": {
-        "description": "Kick one declared job off NOW, as a cancellable registry job with a progress toast.\n\n\u26a0 THE SAME BODY THE SCHEDULER TICK RUNS (`scheduler.JOB_BODIES`), never a second copy \u2014 a\nbutton that ran its own implementation would drift from the thing the schedule does, and the\ndrift would only ever surface as the button disagreeing with the nightly result.\n\n\u26a0\u26a0 CANCELLATION IS COOPERATIVE, AND ITS LATENCY DIFFERS PER JOB. The AIRS scan stops between\nACCOUNTS (an account's four reports are stored as a unit); the drift probe stops between\nCOMPANIES; the FX, CRM and size jobs are seconds long and have no useful boundary at all.\n\"Stops immediately\" is not on offer for a scraper mid-download, and a Cancel that claimed it\nwould be the decorative control this codebase has already removed once. The UI says which is\nwhich rather than implying they are the same.\n\n\u26a0 A JOB WITH NO BODY IS 404, WHICH IS AN ANSWER. The 20-second queue worker has nothing worth\ntriggering, and the two pipeline jobs already own a richer Run-now with a live console tail \u2014\n`runnable` on `/api/admin/scheduled-jobs` says so per row, so the button is simply absent\nrather than present-and-failing.",
+        "description": "Kick one declared job off NOW, as a cancellable registry job with a progress toast.\n\n\u26a0 THE SAME BODY THE SCHEDULER TICK RUNS (`scheduler.JOB_BODIES`), never a second copy \u2014 a\nbutton that ran its own implementation would drift from the thing the schedule does, and the\ndrift would only ever surface as the button disagreeing with the nightly result.\n\n\u26a0\u26a0 CANCELLATION IS COOPERATIVE, AND ITS LATENCY DIFFERS PER JOB. The AIRS scan stops between\nACCOUNTS (an account's four reports are stored as a unit); the drift probe stops between\nCOMPANIES; the FX and size jobs are seconds long and have no useful boundary at all.\n\"Stops immediately\" is not on offer for a scraper mid-download, and a Cancel that claimed it\nwould be the decorative control this codebase has already removed once. The UI says which is\nwhich rather than implying they are the same.\n\n\u26a0 A JOB WITH NO BODY IS 404, WHICH IS AN ANSWER. The 20-second queue worker has nothing worth\ntriggering, and the two pipeline jobs already own a richer Run-now with a live console tail \u2014\n`runnable` on `/api/admin/scheduled-jobs` says so per row, so the button is simply absent\nrather than present-and-failing.",
         "operationId": "admin_run_scheduled_job_api_admin_scheduled_jobs__job_id__run_post",
         "parameters": [
           {
@@ -17248,26 +17319,6 @@
         ]
       }
     },
-    "/api/airs/crm-relaties": {
-      "get": {
-        "description": "The latest stored CRM 'Alle relaties' export, parsed on the fly from the\nraw .xls in `airs_crm_relaties_raw` into a generic `{columns, rows}` table\n(whatever columns the export has). Empty until the daily job has run it.",
-        "operationId": "airs_crm_relaties_api_airs_crm_relaties_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Airs Crm Relaties",
-        "tags": [
-          "airs"
-        ]
-      }
-    },
     "/api/airs/holding-isin-override": {
       "post": {
         "description": "Pin (or clear) the ISIN of an account holding the model has no position for.\n\nKeyed by holding NAME, so one entry fixes every book that holds it (the measured case appears\nin four). \u26a0 It decides IDENTITY ONLY: the pinned ISIN is price-checked like any other, so a\nwrong one comes back `price_mismatch` rather than being trusted because a human typed it.",
@@ -18254,7 +18305,7 @@
     },
     "/api/airs/model-portfolios/{portfolio_id}/value-series": {
       "get": {
-        "description": "The paired book's value on every date we hold a snapshot for, summed from `airs_holding`.\n\n\u26a0\u26a0 OUR OWN SERIES, NOT AIRS'S RENDEMENTEN. It reproduces AIRS's `eindvermogen` to the euro on 21\nof AzTopSelectie's 24 snapshots, holds two dates AIRS has no row for, and starts 2026-06-23 \u2014\nwhen we began keeping snapshots. See `routers/_airs_value_series`.\n\n\u26a0 ITS OWN REQUEST, DELIBERATELY. The Analyse modal is ONE payload with no partial paint, so its\nwall clock is the reader's wait; a series nobody has scrolled to yet does not belong in it. The\nchart fetches this itself, exactly as the Risk panels do.",
+        "description": "The paired book's cumulative return through the year, and its value on every date we hold.\n\n\u26a0\u26a0 THE RETURN IS AIRS'S OWN `cumulatief_rendement`, READ AND NOT RECOMPUTED \u2014 it is flow-aware,\nand that is what lets a curve be drawn at all: AzTopSelectie is funded EUR 1,000,000 on\n2026-06-30 and its return line stays at 0.00% straight through it, where a value line has a\nvertical. It is the same column the Scorecard's YTD tile reads.\n\n\u26a0 THE VALUE IS OURS, summed from `airs_holding`. It reproduces AIRS's `eindvermogen` to the euro\non 21 of AzTopSelectie's 24 snapshots, holds two dates AIRS has no row for, and starts\n2026-06-23 \u2014 when we began keeping snapshots. See `routers/_airs_value_series`.\n\n\u26a0 ITS OWN REQUEST, DELIBERATELY. The Analyse modal is ONE payload with no partial paint, so its\nwall clock is the reader's wait; a series nobody has scrolled to yet does not belong in it. The\nchart fetches this itself, exactly as the Risk panels do.",
         "operationId": "airs_model_portfolio_value_series_api_airs_model_portfolios__portfolio_id__value_series_get",
         "parameters": [
           {
@@ -18941,7 +18992,7 @@
     },
     "/api/airs/portfolios/{portefeuille}": {
       "delete": {
-        "description": "Delete ONE account's scraped rows \u2014 returns, holdings, mutations, model weights, its roster\nentry and its model pairing \u2014 so a refresh can be watched rebuilding them.\n\n\u26a0 NOT THE WAY TO REMOVE AN UNWANTED ACCOUNT. The next scrape re-creates everything it can see,\nso a delete achieves nothing there and costs history; `airs_account_hidden` records that\ndecision instead. This exists to prove the refresh refills a gap.\n\n\u26a0 IT LOSES ANYTHING OLDER THAN 1 JANUARY. A scan fetches `1 Jan \u2192 today`, so `airs_performance`\nmonths before that are gone permanently \u2014 the UI says so before asking. CRM records and the\nhidden-account decision are deliberately NOT touched (see `_DELETABLE_TABLES`).",
+        "description": "Delete ONE account's scraped rows \u2014 returns, holdings, mutations, model weights, its roster\nentry and its model pairing \u2014 so a refresh can be watched rebuilding them.\n\n\u26a0 NOT THE WAY TO REMOVE AN UNWANTED ACCOUNT. The next scrape re-creates everything it can see,\nso a delete achieves nothing there and costs history; `airs_account_hidden` records that\ndecision instead. This exists to prove the refresh refills a gap.\n\n\u26a0 IT LOSES ANYTHING OLDER THAN 1 JANUARY. A scan fetches `1 Jan \u2192 today`, so `airs_performance`\nmonths before that are gone permanently \u2014 the UI says so before asking. The hidden-account\ndecision is deliberately NOT touched (see `_DELETABLE_TABLES`).",
         "operationId": "airs_portfolio_delete_api_airs_portfolios__portefeuille__delete",
         "parameters": [
           {

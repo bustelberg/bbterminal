@@ -13,6 +13,7 @@ import type {
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 import FundamentalsModal from './portfolios/FundamentalsModal';
 import { logYtdExplain, type ExplainTrace } from './portfolios/ytdExplain';
+import { useMgmtCopy } from './management/managementCopy';
 
 type StoredPortfolio = StoredModelPortfolio;
 
@@ -132,6 +133,8 @@ const NUMERIC: Record<string, (p: Portfolio) => number | null> = {
  * portfolios is a couple of minutes of authenticated round-trips, so it streams progress
  * instead of hanging a request. */
 export default function PortfoliosPanel() {
+  const t = useMgmtCopy().models;
+  const tc = useMgmtCopy().common;
   const [rows, setRows] = useState<Portfolio[] | null>(null);
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -474,12 +477,12 @@ export default function PortfoliosPanel() {
             </label>
           )}
           {rows && (
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name / description…"
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t.searchPlaceholder}
               className="bg-page border border-neutral-700 rounded-lg px-3 py-1.5 text-xs text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 w-60" />
           )}
           <button type="button" onClick={() => void scan()} disabled={scanning}
             className="text-sm px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-            {scanning ? 'Scanning…' : rows ? 'Refresh from AIRS' : 'Scan AIRS'}
+            {scanning ? tc.scanning : rows ? tc.refreshFromAirs : t.scanAirs}
           </button>
         </div>
       </div>
@@ -490,11 +493,11 @@ export default function PortfoliosPanel() {
         <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">{error}</div>
       )}
 
-      {loading && !rows && <p className="text-xs text-fg-subtle">Loading stored portfolios…</p>}
+      {loading && !rows && <p className="text-xs text-fg-subtle">{t.loading}</p>}
 
       {!loading && !rows && !scanning && !error && (
         <p className="text-xs text-fg-subtle">
-          Nothing stored yet — hit <span className="text-accent-300">Scan AIRS</span>. It walks the
+          {t.emptyBefore} <span className="text-accent-300">{t.scanAirs}</span>. It walks the
           paginated list, then downloads each portfolio&apos;s XLS to count its holdings, and
           saves both. After that this page is an instant DB read.
         </p>
@@ -506,7 +509,7 @@ export default function PortfoliosPanel() {
             <thead className="bg-card sticky top-0 z-10">
               <tr className="group text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                 <th className="px-3 py-1.5 font-medium text-left w-[5.5rem]"
-                  title="Composition of this model — sector, region and currency — beside the SP500 benchmark, on one set of groups.">
+                  title={t.hintComposition}>
                   Analyse
                 </th>
                 {th('name', 'Portfolio')}
@@ -531,8 +534,8 @@ export default function PortfoliosPanel() {
                 {th('years', 'Years', 'text-right',
                   'How long this model has been running: its fixed date to today, in calendar years. The unit the ratios to the left have to be read against — and why a CAGR can be missing (under 1.00, there is none).')}
                 {th('fixed', 'Type')}
-                <th className="px-3 py-1.5 font-medium text-left" title="The model's own effective date — when this composition took effect. It is the inception the three columns to the left are measured from.">
-                  Fixed date
+                <th className="px-3 py-1.5 font-medium text-left" title={t.hintEffectiveDate}>
+                  {t.colFixedDate}
                 </th>
                 {th('id', 'AIRS id', 'text-right')}
               </tr>
@@ -562,7 +565,7 @@ export default function PortfoliosPanel() {
                         this row failed, and the value shown is the CLIPPED one. Say so
                         rather than presenting a half-name as if it were the real one. */}
                     {r.truncated && (
-                      <span title="The list page truncates this name and its edit page could not be read — this value is CLIPPED, not the real portfolio name."
+                      <span title={t.hintClippedName}
                         className="ml-2 text-[10px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-warn-500/15 text-warn-300 border-warn-500/25">
                         clipped
                       </span>
@@ -662,6 +665,7 @@ export default function PortfoliosPanel() {
  *                 return, over the full year.
  */
 function YtdCell({ p }: { p: Portfolio }) {
+  const t = useMgmtCopy().models;
   const f = p.perf;
   if (!f) return <NoNumber p={p} />;
 
@@ -692,12 +696,12 @@ function YtdCell({ p }: { p: Portfolio }) {
 
   return (
     <span title={hint + cov + estWhy} className="inline-flex items-center gap-1">
-      {isPartialYear(f) && <span className="text-warn-400" aria-label="partial year">⚠</span>}
+      {isPartialYear(f) && <span className="text-warn-400" aria-label={t.partialYear}>⚠</span>}
       {approx && <span className="text-warn-400" aria-label="approximate">≈</span>}
       <span className={colour}>{v >= 0 ? '+' : ''}{v.toFixed(2)}%</span>
       <Provenance source="yfinance" asOf={f.sources?.yf_close}
-        what="What this model has returned so far this year, holding its current weights."
-        note="asset_price close, EUR via fx_rate"
+        what={t.hintYtd}
+        note={t.hintYtdSource}
         how="Buy-and-hold EUR return of the composition from the YTD start date (max of 1 Jan and the model's inception) to the latest close, weighted by the model's percentages." />
     </span>
   );
@@ -766,6 +770,7 @@ function Pct({ v }: { v: number }) {
 const noComposition = (p: Portfolio) => p.holdings === null;
 
 function NoNumber({ p }: { p: Portfolio }) {
+  const t = useMgmtCopy().models;
   return noComposition(p)
     ? (
       <span className="text-fg-faint"
@@ -773,7 +778,7 @@ function NoNumber({ p }: { p: Portfolio }) {
         —
       </span>
     )
-    : <span className="text-fg-faint" title="Not computed yet.">…</span>;
+    : <span className="text-fg-faint" title={t.notComputed}>…</span>;
 }
 
 /** Trading days of daily return the backend needs before it will report a ratio at all
@@ -811,6 +816,7 @@ function absentSince(f: Perf): string | null {
  * chosen, which is the hindsight bug this whole module exists to refuse. The Fixed date cell
  * shows the model date underneath itself wherever the two differ. */
 function SinceCell({ p }: { p: Portfolio }) {
+  const t = useMgmtCopy().models;
   const f = p.perf;
   if (!f) return <NoNumber p={p} />;
 
@@ -822,8 +828,8 @@ function SinceCell({ p }: { p: Portfolio }) {
     <span title={`EUR return since this composition took effect on ${f.model_effective} — ${statDays(f)} trading day(s) ago. Realized, not backtested: these are the weights it has held for that whole window.`}>
       <Pct v={f.since_model_pct} />
       <Provenance source="yfinance" asOf={f.sources?.yf_close}
-        what="What this model has returned since the day its composition took effect."
-        note="asset_price close, EUR via fx_rate"
+        what={t.hintSinceInception}
+        note={t.hintYtdSource}
         how="Same buy-and-hold EUR return, measured from the composition's own inception (model_effective) to the latest close." />
     </span>
   );
@@ -838,6 +844,7 @@ function SinceCell({ p }: { p: Portfolio }) {
  *           downside deviation. Rendering that as a big number would be a lie about its risk.
  */
 function RatioCell({ p, kind }: { p: Portfolio; kind: 'sharpe' | 'sortino' }) {
+  const t = useMgmtCopy().models;
   const f = p.perf;
   if (!f) return <NoNumber p={p} />;
 
@@ -868,7 +875,7 @@ function RatioCell({ p, kind }: { p: Portfolio; kind: 'sharpe' | 'sortino' }) {
         what={kind === 'sharpe'
           ? 'Return measured against how much the model bounced around, up or down, to earn it.'
           : 'Return measured against the FALLS only — a rise is not a risk.'}
-        note="asset_price daily EUR curve"
+        note={t.hintInceptionSource}
         how={kind === 'sharpe'
           ? 'Mean ÷ standard deviation of the daily EUR return series since inception, annualized ×√252, risk-free = 0.'
           : 'Mean ÷ downside deviation (negative days only) of the daily EUR returns since inception, annualized ×√252, risk-free = 0.'} />
@@ -885,6 +892,7 @@ function RatioCell({ p, kind }: { p: Portfolio; kind: 'sharpe' | 'sortino' }) {
  *  Fund reporting does not annualize a sub-year period for exactly this reason; it shows the
  *  cumulative return, which is the `Since incep.` column and is always there. */
 function CagrCell({ p }: { p: Portfolio }) {
+  const t = useMgmtCopy().models;
   const f = p.perf;
   if (!f) return <NoNumber p={p} />;
 
@@ -903,8 +911,8 @@ function CagrCell({ p }: { p: Portfolio }) {
     <span title={`Geometric annualized return since ${f.model_effective}, over ${f.years_running?.toFixed(2)} years. Compounding this rate for that long reproduces the ${f.since_model_pct?.toFixed(2)}% in Since incep.`}>
       <Pct v={f.cagr_pct} />
       <Provenance source="yfinance" asOf={f.sources?.yf_close}
-        what="The model's return restated as a per-year rate, so different ages compare."
-        note="asset_price daily EUR curve"
+        what={t.hintAnnualised}
+        note={t.hintInceptionSource}
         how="Geometric annualized return: (1 + since-inception return) ^ (365.25 / days held) − 1." />
     </span>
   );
@@ -960,6 +968,7 @@ function FixedDateCell({ p }: { p: Portfolio }) {
  *   …/failed    — we didn't learn the answer. Writing 0 here would be a fabricated fact.
  */
 function HoldingsCell({ p }: { p: Portfolio }) {
+  const t = useMgmtCopy().models;
   if (p.holdings_error) {
     return (
       <span title={p.holdings_error}
@@ -980,15 +989,15 @@ function HoldingsCell({ p }: { p: Portfolio }) {
     return (
       <span title="AIRS has no dated composition for this portfolio — its snapshot dropdown held nothing but the empty 'today' placeholder. So we do not know what it holds; that is NOT the same as holding nothing."
         className="text-[10px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-warn-500/15 text-warn-300 border-warn-500/25">
-        no snapshot
+        {t.noSnapshot}
       </span>
     );
   }
   if (p.holdings === undefined) {
-    return <span className="text-fg-faint" title="Not counted yet — the scan is still walking the portfolios.">…</span>;
+    return <span className="text-fg-faint" title={t.notCounted}>…</span>;
   }
   if (p.holdings === 0) {
-    return <span className="text-warn-300" title="A fixed model that contains no instruments — genuinely empty, not un-counted. Currently observed on none.">0</span>;
+    return <span className="text-warn-300" title={t.hintEmptyFixed}>0</span>;
   }
   return <span className="text-fg">{p.holdings}</span>;
 }
@@ -1013,6 +1022,7 @@ type Position = ModelPortfolioPositions['rows'][number];
 function MarkCells({ p, ytdFrom, source }: {
   p: Position; ytdFrom?: string | null; source: 'model' | 'book';
 }) {
+  const t = useMgmtCopy().models;
   const eur = (v: number) => v.toLocaleString('en-GB', {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   });
@@ -1089,7 +1099,7 @@ function MarkCells({ p, ytdFrom, source }: {
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
         <span className={startClass} title={startTitle}>
           {est && <span aria-label="interpolated" className="text-warn-400 mr-1">⚠</span>}
-          {lt && <span aria-label="priced via the linked model portfolio" className="text-accent-400 mr-1">↳</span>}
+          {lt && <span aria-label={t.viaLinkedModel} className="text-accent-400 mr-1">↳</span>}
           {eur(p.start_price_eur)}
         </span>
         <Provenance source={markSrc} asOf={p.start_date} note={startNote} how={startHow}
@@ -1132,6 +1142,7 @@ function MarkCells({ p, ytdFrom, source }: {
  * batch: one field, one row, one call.
  */
 function DisplayNameCell({ p, onSaved }: { p: Portfolio; onSaved: (v: string) => void }) {
+  const t = useMgmtCopy().models;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(p.display_name);
   const [busy, setBusy] = useState(false);
@@ -1172,7 +1183,7 @@ function DisplayNameCell({ p, onSaved }: { p: Portfolio; onSaved: (v: string) =>
           if (e.key === 'Enter') void commit();
           if (e.key === 'Escape') { setDraft(p.display_name); setEditing(false); }
         }}
-        placeholder="a name you choose…"
+        placeholder={t.namePlaceholder}
         className="bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-xs text-fg w-44 focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />
     );
   }
@@ -1183,7 +1194,7 @@ function DisplayNameCell({ p, onSaved }: { p: Portfolio; onSaved: (v: string) =>
       className={`text-left rounded px-1 -mx-1 hover:bg-overlay/5 transition-colors ${
         p.display_name ? 'text-fg' : 'text-fg-faint'}`}>
       {p.display_name || '—'}
-      {err && <span className="ml-1.5 text-[11px] text-neg-400" title="Save failed — not stored.">failed</span>}
+      {err && <span className="ml-1.5 text-[11px] text-neg-400" title={t.saveFailed}>failed</span>}
     </button>
   );
 }
@@ -1207,13 +1218,14 @@ function SoundnessCell({ p, onOpen }: {
   p: PositionRow;
   onOpen: (v: { isin: string; fonds: string }) => void;
 }) {
+  const t = useMgmtCopy().models;
   if (!p.isin) {
-    return <span className="text-fg-faint" title="Cash has no accounts to read.">—</span>;
+    return <span className="text-fg-faint" title={t.cashNoAccounts}>—</span>;
   }
   if (!p.known_instrument) {
     return (
       <span className="text-fg-faint"
-        title="This ISIN is not an instrument in our grid — usually an in-house fund, which has no listing to resolve and therefore no financials to read.">
+        title={t.notAnInstrument}>
         —
       </span>
     );
@@ -1278,6 +1290,7 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
    *  column exists — as text, rather than a dropdown that 403s on change. */
   readOnly?: boolean;
 }) {
+  const t = useMgmtCopy().models;
   const [busy, setBusy] = useState(false);
 
   // Cash is not a holding, so it cannot be a portfolio.
@@ -1349,7 +1362,7 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
         <span className="inline-flex items-center gap-1.5">
           {linkedLabel
             ? <span className="text-[12px] text-accent-400" title={linkedLabel}>{linkedLabel}</span>
-            : <span className="text-[12px] text-fg-faint">— not a portfolio —</span>}
+            : <span className="text-[12px] text-fg-faint">{t.notAPortfolio}</span>}
           {isGuess && (
             <span title={`Automatic guess — ${(conf * 100).toFixed(0)}% confidence.${p.link_reason ? ` ${p.link_reason}` : ''}`}
               className={`text-[10px] font-mono px-1 py-0.5 rounded border ${
@@ -1380,7 +1393,7 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
               : 'border-neutral-800/40 text-fg-faint'
           }`}
         >
-          <option value="">— not a portfolio —</option>
+          <option value="">{t.notAPortfolio}</option>
           {shown.map((o) => (
             <option key={o.id} value={o.id}
               title={o.code && o.code !== o.name ? `${o.name} — AIRS: ${o.code}` : undefined}>
@@ -1410,7 +1423,7 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
             type="button"
             onClick={() => void reset()}
             disabled={busy}
-            title="Forget this manual choice and fall back to the automatic guess."
+            title={t.forgetChoice}
             className="text-[11px] text-fg-faint hover:text-accent-400 transition-colors"
           >
             ↺
@@ -1443,6 +1456,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
   onExplainYtd: () => void;
   explaining: boolean;
 }) {
+  const t = useMgmtCopy().models;
   const isBook = source === 'book';
   const pid = state?.data?.portfolio_id;
   const [linkCtx, setLinkCtx] = useState<LinkCtx | null>(null);
@@ -1480,7 +1494,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
     <label className="flex items-center gap-1.5 text-[12px] text-fg-muted"
       title="Source: Model = this portfolio's composition, priced from yfinance (per-share closes). Book (AIRS) = the paired AIRS book's ACTUAL holdings, valued by AIRS itself (Beginwaarde / Huidige waarde in EUR, over the calendar year). Different rows — a book holds a different set than the composition it tracks.">
       Source
-      <select value={source} aria-label="Positions source"
+      <select value={source} aria-label={t.positionsSource}
         onChange={(e) => onSource(e.target.value as 'model' | 'book')}
         className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[12px] text-fg focus:border-accent-500">
         <option value="model">Model</option>
@@ -1495,7 +1509,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
         <div className="flex items-center gap-3 text-[12px]">{sourceToggle}</div>
         <p className="text-[12px] text-fg-faint">
           {isBook ? (
-            <>No AIRS book is paired with this model, so there are no book holdings to value.
+            <>{t.hintNoBook}
             Pair one on this page, or switch Source back to <span className="font-mono">Model</span>.</>
           ) : (
             <>No fixed-model rows for any of its {d.dates.length} snapshot date(s). AIRS only stores a
@@ -1553,7 +1567,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
         {isBook ? (
           <span className="ml-auto text-accent-400"
             title="These holdings and values come from the paired AIRS book (airs_holding), read from our DB.">
-            AIRS book
+            {t.colAirsBook}
           </span>
         ) : (
           <span className="flex items-center gap-1.5 ml-auto">
@@ -1562,7 +1576,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
                 cached <span className="font-mono">{new Date(d.cached_at).toLocaleDateString()}</span>
               </span>
             ) : (
-              <span className="text-pos-400" title="Fetched live from AirSPMS just now.">live</span>
+              <span className="text-pos-400" title={t.fetchedLive}>live</span>
             )}
             {/* ⚠ NOT "Refresh from AIRS" ANY MORE, AND THE LABEL MATTERS. That button re-read
                 the composition and nothing else, so a return that was wrong because of a stale
@@ -1631,7 +1645,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
               <th className="px-3 py-1.5 font-medium text-left" title={isBook
                 ? "The start of AIRS's calendar-year window (1 Jan)."
                 : "The date of that close. It can sit a day or two before the window opened (a weekend, a holiday) — it is the last price at which the position was actually marked."}>
-                Start date
+                {t.colStartDate}
               </th>
               <th className="px-3 py-1.5 font-medium text-right" title={isBook
                 ? "The POSITION's value in EUR at the snapshot (AIRS Huidige waarde) — not a per-share price."
@@ -1661,13 +1675,13 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
                       {!p.known_instrument && (
                         <span title="This ISIN is not an instrument in our grid — usually an in-house fund (e.g. High Income Quality fund), which has no listing to resolve."
                           className="ml-2 text-[10px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-warn-500/15 text-warn-300 border-warn-500/25">
-                          not in grid
+                          {t.notInGrid}
                         </span>
                       )}
                     </span>
                   ) : (
                     // Cash has no ISIN, and that is correct — not a missing value.
-                    <span className="text-fg-faint" title="Cash — no ISIN exists for it.">—</span>
+                    <span className="text-fg-faint" title={t.cashNoIsin}>—</span>
                   )}
                 </td>
                 <td className="px-3 py-1.5 text-fg-soft">{p.fonds ?? '—'}</td>

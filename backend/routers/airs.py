@@ -1608,14 +1608,44 @@ class BookValueFlow(BaseModel):
     withdrawals_eur: float = 0.0
 
 
+class BookReturnPoint(BaseModel):
+    """AIRS's own year-to-date return on one date, and what the book was worth that day.
+
+    ⚠⚠ `cum_pct` IS READ FROM `airs_performance.cumulatief_rendement`, NEVER DERIVED FROM
+    `value_eur`. It is FLOW-AWARE and the value is not: AzTopSelectie's 0 → EUR 1,000,000 on
+    2026-06-30 is a funding, and this series correctly stays at 0.00% straight through it. Two
+    values cannot tell that apart from a gain.
+    """
+
+    date: str
+    #: Percent, AIRS's own scale (`35.3619` = +35.36%), 0.0 exactly on the anchor.
+    cum_pct: float
+    #: The book's value that day where we hold a snapshot for it — NULL where we do not, which is
+    #: every month before we began scraping. It rides along so one hover answers both questions.
+    value_eur: float | None = None
+    holdings: int | None = None
+
+
 class BookValueSeries(BaseModel):
-    """⚠⚠ VALUE, NOT RETURN. A funding is a step in this line and is not performance — the flows
-    ride along so the chart can mark it. The book's return is
-    `airs_performance.cumulatief_rendement`, assembled in `_airs_accounts`."""
+    """The book's value through time, and the return that value earned.
+
+    ⚠⚠ TWO DIFFERENT QUANTITIES, AND ONLY ONE OF THEM IS PERFORMANCE. `points` is VALUE: a funding
+    is a step in it and is not a gain, which is why the flows ride along. `returns` is AIRS's own
+    flow-aware `cumulatief_rendement`, the same column `_airs_accounts._year_perf` reads for the
+    Scorecard — so the chart and the tile beside it cannot disagree.
+    """
 
     portefeuille: str | None = None
     points: list[BookValuePoint] = []
     flows: list[BookValueFlow] = []
+    #: The cumulative-return curve, starting at exactly 0.0% on `return_from`.
+    returns: list[BookReturnPoint] = []
+    #: The curve's origin — the opening of the first period AIRS has published a return for, which
+    #: is the start of the year on a book funded before it. ⚠ REPORTED rather than left to the
+    #: caller to spot, because it is the one date on the series nobody measured.
+    return_from: str | None = None
+    #: The last point of the FULL curve, so a display resolution cannot move a reported figure.
+    return_pct: float | None = None
     first_date: str | None = None
     last_date: str | None = None
     #: The first date we hold a snapshot for — where the series stops being AIRS's and becomes ours.
@@ -1628,11 +1658,16 @@ class BookValueSeries(BaseModel):
 @router.get("/api/airs/model-portfolios/{portfolio_id}/value-series",
             response_model=BookValueSeries)
 async def airs_model_portfolio_value_series(portfolio_id: int):
-    """The paired book's value on every date we hold a snapshot for, summed from `airs_holding`.
+    """The paired book's cumulative return through the year, and its value on every date we hold.
 
-    ⚠⚠ OUR OWN SERIES, NOT AIRS'S RENDEMENTEN. It reproduces AIRS's `eindvermogen` to the euro on 21
-    of AzTopSelectie's 24 snapshots, holds two dates AIRS has no row for, and starts 2026-06-23 —
-    when we began keeping snapshots. See `routers/_airs_value_series`.
+    ⚠⚠ THE RETURN IS AIRS'S OWN `cumulatief_rendement`, READ AND NOT RECOMPUTED — it is flow-aware,
+    and that is what lets a curve be drawn at all: AzTopSelectie is funded EUR 1,000,000 on
+    2026-06-30 and its return line stays at 0.00% straight through it, where a value line has a
+    vertical. It is the same column the Scorecard's YTD tile reads.
+
+    ⚠ THE VALUE IS OURS, summed from `airs_holding`. It reproduces AIRS's `eindvermogen` to the euro
+    on 21 of AzTopSelectie's 24 snapshots, holds two dates AIRS has no row for, and starts
+    2026-06-23 — when we began keeping snapshots. See `routers/_airs_value_series`.
 
     ⚠ ITS OWN REQUEST, DELIBERATELY. The Analyse modal is ONE payload with no partial paint, so its
     wall clock is the reader's wait; a series nobody has scrolled to yet does not belong in it. The
@@ -3045,8 +3080,8 @@ async def airs_portfolio_delete(portefeuille: str):
     decision instead. This exists to prove the refresh refills a gap.
 
     ⚠ IT LOSES ANYTHING OLDER THAN 1 JANUARY. A scan fetches `1 Jan → today`, so `airs_performance`
-    months before that are gone permanently — the UI says so before asking. CRM records and the
-    hidden-account decision are deliberately NOT touched (see `_DELETABLE_TABLES`).
+    months before that are gone permanently — the UI says so before asking. The hidden-account
+    decision is deliberately NOT touched (see `_DELETABLE_TABLES`).
     """
     from airs_vermogen import delete_account  # noqa: PLC0415
 
@@ -3242,46 +3277,6 @@ async def airs_vermogen_holdings(portfolio_name: str, as_of: str | None = None):
         return {"portfolio_name": portfolio_name, "as_of_date": date_q, "holdings": rows}
 
     return await asyncio.to_thread(_q)
-
-
-@router.get("/api/airs/crm-relaties")
-async def airs_crm_relaties():
-    """The latest stored CRM 'Alle relaties' export, parsed on the fly from the
-    raw .xls in `airs_crm_relaties_raw` into a generic `{columns, rows}` table
-    (whatever columns the export has). Empty until the daily job has run it."""
-    import base64 as _b64  # noqa: PLC0415
-
-    def _q() -> dict:
-        latest = (
-            supabase.table("airs_crm_relaties_raw")
-            .select("as_of_date, filename, content_base64, byte_size, retrieved_at")
-            .order("as_of_date", desc=True).limit(1).execute()
-        ).data
-        if not latest:
-            return {"as_of_date": None, "columns": [], "rows": [], "row_count": 0}
-        r = latest[0]
-        raw = _b64.b64decode(r["content_base64"])
-        try:
-            df = pd.read_excel(io.BytesIO(raw), engine="xlrd")  # AIRS exports .xls (BIFF)
-        except Exception:
-            df = pd.read_excel(io.BytesIO(raw))  # fall back to pandas auto-detect (.xlsx)
-        columns = [str(c) for c in df.columns]
-        # to_json handles NaN→null, dates→iso, numpy→native; round-trip to plain dicts.
-        import json as _json  # noqa: PLC0415
-        rows = _json.loads(df.to_json(orient="records", date_format="iso"))
-        return {
-            "as_of_date": r["as_of_date"],
-            "retrieved_at": r.get("retrieved_at"),
-            "byte_size": r.get("byte_size"),
-            "columns": columns,
-            "rows": rows,
-            "row_count": len(rows),
-        }
-
-    try:
-        return await asyncio.to_thread(_q)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse CRM relaties: {e}")
 
 
 @router.post("/api/portfolios/parse")

@@ -57,10 +57,13 @@ describe('⚠ the Dutch is actually Dutch', () => {
    *     expects them; "ijkpunt" for benchmark is a translation nobody in this domain writes.
    *   · `YTD (€)` — an abbreviation and a currency symbol, with nothing to translate.
    *   · `Benchmarks` (the tab and the panel heading) — same word, same reason.
+   *   · `Scan AIRS` — a verb Dutch borrows unchanged, plus the vendor's own name. "AIRS
+   *     doorzoeken" reads as a description of the button rather than as its label, and the
+   *     button beside it ("Vernieuwen vanuit AIRS") IS translated, so the pair is not lazy.
    */
   const SAME_BY_DESIGN = new Set([
     'page.tabs.benchmarks.label', 'benchmarks.title', 'benchmarks.colBenchmark',
-    'benchmarks.colYtdEur', 'overview.colSector', 'overview.colIsin',
+    'benchmarks.colYtdEur', 'overview.colSector', 'overview.colIsin', 'models.scanAirs',
   ]);
 
   it('translates every string that is not a term Dutch borrows', () => {
@@ -82,8 +85,16 @@ describe("⚠ AIRS's own field names are not in the copy tree", () => {
     // correct — a reader reconciling this screen against AIRS matches them by eye. Pulling one in
     // here would invite "translating" it in English (breaking the link) or renaming it in Dutch
     // (implying we renamed a field AIRS owns).
+    // ⚠⚠ IT GUARDS THE KEYS THAT LABEL AIRS **COLUMNS**, not every string that coincides with
+    // one. `overview.allocationBands` is OUR name for the bands policy — the button opens our own
+    // min/default/max table per risk profile — and its Dutch is legitimately "Asset allocatie",
+    // the same two words AIRS uses for a different thing. Checked over every value, that
+    // collision was indistinguishable from importing a source column, which is the thing this
+    // actually forbids. Scoped, not relaxed: a `col*` key still may not carry an AIRS name.
     const airs = ['Beginwaarde', 'Huidige waarde', 'Werkelijk', 'Asset allocatie', 'Res. YtD'];
-    const all = [...Object.values(EN), ...Object.values(NL)];
+    const columnKeys = Object.keys(EN).filter((k) => /\.col[A-Z]/.test(k));
+    expect(columnKeys.length, 'no column keys found — the filter has drifted').toBeGreaterThan(8);
+    const all = columnKeys.flatMap((k) => [EN[k], NL[k]]);
     for (const name of airs) {
       expect(all.filter((v) => v === name), name).toEqual([]);
     }

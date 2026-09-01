@@ -29,6 +29,7 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { useRiskCopy } from './riskCopy';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf } from './asOfLine';
 import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
@@ -120,6 +121,7 @@ export default function CorrelationView({
   portfolioFetchedAt?: string | null;
   portfolioSource: SourceKey;
 }) {
+  const t = useRiskCopy();
   const [data, setData] = useState<RiskCorrelation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [freq, setFreq] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
@@ -199,7 +201,7 @@ export default function CorrelationView({
       </div>
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
-      {!data && !error && <p className="text-xs text-fg-subtle">Computing correlations…</p>}
+      {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing}</p>}
       {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
 
       {data?.available && (
@@ -207,7 +209,7 @@ export default function CorrelationView({
           <div className="flex flex-wrap gap-2">
             <Tile label={`ρ vs ${data.benchmark}`} value={rho2(data.benchmark_corr)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="How closely the stock sleeve has moved with the benchmark."
+                what={t.corr.cards.rho.what}
                 where={where}
                 when={when}
                 worked={data.benchmark_corr == null ? '' : withWorked(
@@ -228,7 +230,7 @@ export default function CorrelationView({
             <Tile label="R²" value={data.r_squared == null ? '—' : data.r_squared.toFixed(2)}
               tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="The share of the book's movement the index explains."
+                what={t.corr.cards.rSquared.what}
                 where={where}
                 when={when}
                 worked={data.r_squared == null || data.benchmark_corr == null ? '' : withWorked(
@@ -240,11 +242,11 @@ export default function CorrelationView({
                 ]}
                 how={'ρ = 0.90 and "81% of the movement" are the same fact and land very '
                   + 'differently, which is why both are on screen.'} />} />} />
-            <Tile label="Mean ρ between positions"
+            <Tile label={t.corr.meanPair}
               value={rho2(data.mean_pair_corr)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="How alike the holdings are to each other — the diversification check."
-                where={`${v(data.pairs_measured)} of ${v(pairsPossible)} possible pairs — the ones with at least ${v(data.min_pair_observations)} overlapping returns, across ${v(labels.length)} holdings. Prices from ${v(sourceField('yfinance'))} at ${v(sourceVendor('yfinance'))}.`}
+                what={t.corr.cards.meanPair.what}
+                where={`${t.corr.pairsMeasured(String(data.pairs_measured), String(pairsPossible), String(data.min_pair_observations), String(labels.length))} ${t.common.pricedFrom(sourceField('yfinance'), sourceVendor('yfinance'))}`}
                 when={when}
                 /* ⚠⚠ THE SUM IS THE NUMERATOR IN BOTH HALVES. Written as `(1/m) Σ` the symbolic
                    line has a coefficient beside a sum while the substituted line is one
@@ -284,24 +286,47 @@ export default function CorrelationView({
           {labels.length > 1 && (
             <>
               <div className="flex items-baseline gap-3 flex-wrap pt-1">
-                <h5 className="text-xs font-medium text-fg-strong">Between the positions</h5>
+                <h5 className="text-xs font-medium text-fg-strong">{t.corr.betweenPositions}</h5>
                 <span className="text-[11px] text-fg-faint">
                   Blue = diverging, amber = moving together. Ordered by weight.
                 </span>
               </div>
-              {/* ⚠ ITS OWN horizontal scroll — a 49-name matrix must never widen the dialog. */}
-              <div className="overflow-auto">
+              {/* ⚠ ITS OWN horizontal scroll — a 49-name matrix must never widen the dialog.
+                  ⚠ THE RIGHT PADDING IS THE TILT'S OVERHANG, not spacing. A 45° label anchored to
+                  the LAST column extends up and to the RIGHT of the table box; without room for it
+                  the scroll container clips the final holding's name, which is the one a reader is
+                  most likely to be hunting for. 7.5rem of text at 45° projects ~5.3rem across. */}
+              <div className="overflow-auto pr-[5.5rem]">
                 <table className="border-separate" style={{ borderSpacing: 0 }}>
                   {/* ⚠⚠ THE COLUMN NAMES, ROTATED — added on request 2026-08-31. A cell is 16px
                       wide, so horizontal labels were never an option and the matrix shipped with
                       one axis unlabelled: every column had to be counted off against the rows to
                       be identified, which on a 49-name book is not something anybody does.
-                      ⚠ `vertical-rl` + `rotate-180` READS BOTTOM-TO-TOP, the axis-label convention,
-                      and it needs no geometry — the label occupies exactly its own 16px column, so
-                      nothing can overlap its neighbour however long the name is.
-                      ⚠ CAPPED AND CLIPPED rather than allowed to set the header's height: one
-                      40-character holding name would otherwise push the matrix a third of a screen
-                      down. The full name is on the cell's own `title`, as it already was. */}
+                      ⚠⚠ TILTED 45°, NOT VERTICAL — changed on request 2026-09-01 ("tilt the names a
+                      little so we can read those better"). They were `vertical-rl` + `rotate-180`,
+                      i.e. a full 90°, which is legible only one word at a time: the eye has no
+                      baseline to run along, so reading a column meant tilting your head. 45° is the
+                      angle the rest of the app already tilts at (`lib/chartAxis.ts`, where it was
+                      measured as the point at which returns stop), so this is the house angle
+                      rather than a new one.
+                      ⚠⚠ AND THE TILT COSTS THE OLD GEOMETRIC GUARANTEE, which is why the cap
+                      matters more now than it did. At 90° a label occupied exactly its own 16px
+                      column and could never touch its neighbour however long the name was. At 45°
+                      the labels are parallel lines 16·sin45° = 11.3px apart — clear of one another
+                      at 10px type, but each one now extends beyond its own column, so the length
+                      has to be bounded in CSS instead of by the geometry.
+                      ⚠ `max-w-[7.5rem]` + `truncate` IS THAT BOUND, and it is set FROM the header
+                      height: 5.5rem of height admits 5.5/sin45° = 7.8rem of text, so a longer name
+                      would be clipped by the header box at an arbitrary point rather than
+                      ellipsised at a deliberate one. It shows ~40% more of each name than the
+                      vertical version did in the same height. The full name stays on `title`.
+                      ⚠ THE PIVOT IS THE CELL'S OWN CENTRE (`left-1/2` + `origin-bottom-left`), so a
+                      name starts at the column it belongs to and rises away from it. Anchoring the
+                      END of the text at the column instead would put the first characters — the
+                      ones that identify a holding — furthest from it, AND would tilt the names out
+                      over the LEFT edge, where the sticky row-label column and the sticky corner
+                      already sit at `z-10`/`z-20` and would slide across them on any sideways
+                      scroll. Leaning right is the only side of this table that is free. */}
                   <thead>
                     <tr>
                       {/* The corner. ⚠ Sticky like the row labels AND above them (`z-20`), or it
@@ -309,10 +334,10 @@ export default function CorrelationView({
                       <th className="sticky left-0 z-20 bg-card" />
                       {labels.map((name) => (
                         <th key={name} scope="col" title={name}
-                          className="p-0 align-bottom h-[5.5rem] w-4 min-w-4">
-                          <span className="inline-block max-h-[5.5rem] overflow-hidden
-                                           [writing-mode:vertical-rl] rotate-180
-                                           text-[10px] font-normal text-fg-muted whitespace-nowrap">
+                          className="relative p-0 align-bottom h-[5.5rem] w-4 min-w-4">
+                          <span className="absolute bottom-1 left-1/2 block origin-bottom-left
+                                           -rotate-45 max-w-[7.5rem] truncate text-left
+                                           text-[10px] font-normal text-fg-muted">
                             {name}
                           </span>
                         </th>

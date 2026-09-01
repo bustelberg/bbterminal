@@ -8,7 +8,7 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { logLinearFit } from '../../../lib/trendFit';
-import { AspectCard } from '../../../lib/tipCard';
+import { AboutCard, AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { useLang } from '../../../lib/i18n';
 import { chartTitle, type ChartKey } from './longEquityCopy';
@@ -947,22 +947,36 @@ export default function MetricGrowthCard({
                 {/* ⚠⚠ THE INDEX'S RATE OVER **THE SAME TWO PERIODS**. A CAGR is the one figure here
                     that is meaningless across mismatched windows — `(end/start)^(1/n)` divides by a
                     span — so this is the tile `statSpan` exists for. Both sides refuse for their
-                    own reasons and each says which. */}
+                    own reasons and each says which.
+                    ⚠⚠ ITS ⓘ IS AN `AspectCard`, NOT `InfoTip text=` — FIXED 2026-09-01, AND IT
+                    HAD BEEN PRINTING ITS OWN SOURCE. `text` renders a string as PROSE and this tile
+                    handed it `withWorked(...)`, which is LaTeX: readers saw
+                    `\left(\dfrac{606.30_{\,2025}}…` verbatim. Identical to the defect `tablesCopy`
+                    was fixed for on 2026-08-31 ("a typeset builder handed to a text tooltip prints
+                    its own source"); this was the second instance, and it survived because the tile
+                    BESIDE it — which is correct — already uses `AspectCard`.
+                    ⚠ THE TRAILING SENTENCE MOVED TO `how`, WHERE IT RENDERS. It used to be
+                    `withWorked`'s third argument: a parameter that accepted prose and discarded it,
+                    asserted as discarded by that helper's own test. The parameter is gone; this was
+                    its last caller. */}
                 {statSpan != null && (
-                  <Stat label={benchTileLabel('CAGR', benchLabel)} color={chartTheme.pos}
+                                    <Stat label={benchTileLabel('CAGR', benchLabel)} color={chartTheme.pos}
                     value={benchCrossesZero || benchPtp.pct == null ? '—'
                       : `${benchPtp.pct >= 0 ? '+' : ''}${benchPtp.pct.toFixed(1)}%`}
-                    info={<InfoTip text={benchCrossesZero
-                      ? `${benchLabel ?? 'The benchmark'}'s line changes sign; growth from a `
-                        + 'non-positive base is not a percentage.'
-                      : benchPtp.pct == null ? benchPtp.reason
+                    info={<InfoTip content={benchCrossesZero
+                      ? <AboutCard text={`${benchLabel ?? 'The benchmark'}'s line changes sign; `
+                        + 'growth from a non-positive base is not a percentage.'} />
+                      : benchPtp.pct == null ? <AboutCard text={benchPtp.reason ?? ''} />
                         // ⚠ THE SAME SHAPE AS THE TILE BESIDE IT, on the index's own two points.
                         // Two tiles under one heading that explain themselves differently invite
                         // the reading that they were computed differently — and the whole claim
                         // here is that they were not.
-                        : withWorked('(end ÷ start) ^ (1 ÷ years) − 1', workedCagr(benchPtp),
-                          `${benchLabel ?? 'The benchmark'} — the same endpoints, the same `
-                          + 'function and the same window as the tile beside it.')} />} />
+                        : <AspectCard
+                          what={`${benchLabel ?? 'The benchmark'}'s own rate over the same window.`}
+                          how={`${benchLabel ?? 'The benchmark'} — the same endpoints, the same `
+                            + 'function and the same window as the tile beside it.'}
+                          worked={withWorked('(end ÷ start) ^ (1 ÷ years) − 1',
+                            workedCagr(benchPtp))} />} />} />
                 )}
               </>
             )}

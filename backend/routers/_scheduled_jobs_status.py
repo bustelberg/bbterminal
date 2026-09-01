@@ -27,6 +27,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+# ⚠ A PURE SIBLING, AND THE ONLY IMPORT THIS MODULE GAINS. `should_scan` is two boolean
+# field reads with no clock and no database — see `names` in `build_rows`.
+import job_misses
 from scheduled_jobs import ORPHAN_MARKER, JobSpec
 
 #: Ordered worst-first, which is the order the page sorts by. `unknown` outranks `ok` because a job
@@ -102,7 +105,26 @@ def build_rows(
         # `ingest_run` rows by a pipeline `job_name`; the caller normalises both onto `job_name`, so
         # this looks the job up under its own id AND under every extra name it writes. Keeping them
         # apart would mean two "last run" values per row and a rule for which one wins.
-        names = spec.evidence + ((spec.id,) if spec.records else ())
+        # ⚠⚠ THE ID IS A NAME WHENEVER A ROW COULD EXIST UNDER IT — which is no longer just
+        # `records`. It was `records` alone, on the sound reasoning that a job proving itself
+        # through `ingest_run` must not ALSO be judged by a `scheduled_job_run` row: two records of
+        # one event, free to disagree. A MISSED tick broke that symmetry, because it is only ever
+        # recorded under the job's own id — there is no phase history for work that never started —
+        # so under the old rule the gap scan's evidence for `daily_pipeline`, the very job measured
+        # 20.9 days stale, would have been written and then never read.
+        #
+        # ⚠ NOTHING CAN DISAGREE: a run and a miss are different events, `_latest_run` takes the
+        # newest across every name, so a real `ingest_run` after a miss still wins (and does — it
+        # is pinned below).
+        #
+        # ⚠⚠ BUT `should_scan` GATES IT, OR THE QUEUE WORKER GETS ACCUSED OF A GAP IT CANNOT HAVE.
+        # `asset_ingest_queue` is `records=False` with no evidence — genuinely unobservable, and
+        # correctly `unknown` — and the gap scan skips it too (an interval job is DESIGNED to be
+        # absent whenever the process is). Adding its id unconditionally would move it from
+        # "leaves no durable record" to "never recorded — a real gap", which is a fabricated
+        # accusation about the one job that can never answer it.
+        may_be_missed = job_misses.should_scan(spec)
+        names = spec.evidence + ((spec.id,) if (spec.records or may_be_missed) else ())
         run = _latest_run(runs, names) if names else None
         last_at = _parse(run.get("started_at")) if run else None
         age_h = (now - last_at).total_seconds() / 3600 if last_at else None
@@ -118,7 +140,12 @@ def build_rows(
             status, why = "missing", "the scheduler is not running in this process"
         elif not r:
             status, why = "missing", "declared, but not registered on the running scheduler"
-        elif not names:
+        # ⚠⚠ GATED ON OBSERVABILITY, NOT ON `names` — the same conflation as the `observable` field
+        # below, and it has to move with it. `names` widened to carry the job's own id for anything
+        # the gap scan can record, so a job that publishes NO evidence and records NOTHING stopped
+        # reaching this branch and fell through to the one under it, which tells the reader the job
+        # "DOES write a durable row" — the opposite of true, stated confidently.
+        elif not (spec.evidence or spec.records):
             status, why = ("unknown",
                            "this job leaves no durable record — its outcome is only in the logs")
         elif run is None:
@@ -145,6 +172,26 @@ def build_rows(
                    "failed, but the work did not finish, so run it again"
                    + (f"; that was {age_h / 24:.1f} days ago and nothing has completed since"
                       if stale and age_h is not None else ""))
+        elif run.get("status") == "missed":
+            # ⚠⚠ THE TICK NEVER RAN, AND THIS IS THE FIRST STATE THAT CAN SAY WHY. Every other
+            # branch here reasons about a job that STARTED; `missed` is written by an observer —
+            # the APScheduler misfire listener, or the boot-time gap scan — precisely so that
+            # "overdue" stops being a verdict with nothing under it. Until 2026-09-01 a tick that
+            # never fired left no row at all, so this page could only report the silence.
+            #
+            # ⚠ IT CANNOT SATISFY THE FRESHNESS CHECK, same as `interrupted` and `cancelled`: no
+            # work happened. What it changes is the SENTENCE, not the verdict.
+            #
+            # ⚠ THE ROW'S OWN `detail` IS THE REASON, NEVER A STRING BUILT HERE. It names the fire
+            # time and, for the commonest cause, the moment this process actually started — facts
+            # only the writer had. Re-deriving a reason here would be a second, poorer answer.
+            stale = (spec.max_age_hours is not None and age_h is not None
+                     and age_h > spec.max_age_hours)
+            status = "overdue" if stale else "missed"
+            why = (run.get("detail")
+                   or "the scheduled tick never ran, and no reason was recorded")
+            if stale and age_h is not None:
+                why += f"; nothing has completed in {age_h / 24:.1f} days"
         elif run.get("status") == "cancelled":
             # ⚠ SOMEBODY PRESSED STOP — not a fault, but the work did NOT finish, so it must not
             # satisfy the freshness check either. Same shape as an interrupted run, different
@@ -192,12 +239,19 @@ def build_rows(
             "last_age_hours": round(age_h, 2) if age_h is not None else None,
             "max_age_hours": spec.max_age_hours,
             # ⚠ WHAT IT DID, in the job's own terms — the reason `summary` is free-form JSON. "0
-            # currencies updated" is healthy for an idempotent sync and "0 relations" is a wiped
-            # CRM table; no shared column could carry both, and a page showing only ok/error would
-            # render them identically.
+            # currencies updated" is healthy for an idempotent sync and "0 accounts scanned" is a
+            # scrape that reached nothing; no shared column could carry both, and a page showing
+            # only ok/error would render them identically.
             "last_detail": (run.get("detail") or run.get("error_summary")) if run else None,
             "last_summary": run.get("summary") if run else None,
-            "observable": bool(names),
+            # ⚠⚠ "CAN WE SEE THIS JOB **RUN**", WHICH IS NOT "is there a name to look under".
+            # It read `bool(names)`, and that was the same question until `names` widened to carry
+            # the job's own id for anything the gap scan can record (see the ⚠⚠ above). A MISSED
+            # row is evidence a tick did NOT happen; it makes absences visible, not runs. So a job
+            # that records nothing and publishes no evidence became `observable: True` on the
+            # strength of a row that can only ever say "this did not run" — which reads on the page
+            # as instrumentation it does not have.
+            "observable": bool(spec.evidence or spec.records),
             # ⚠ WHETHER "Run now" EXISTS FOR THIS ROW, from the body registry rather than assumed.
             # A button rendered for a job with no body is a control that 404s on press, which is
             # worse than no button — so the absence is data, not an oversight.

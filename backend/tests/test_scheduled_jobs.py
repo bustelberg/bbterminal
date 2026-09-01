@@ -334,3 +334,72 @@ class TestTimestamps:
         rows = build_rows([_spec()], [_reg("j", None)], [], NOW, scheduler_running=True)
         assert rows[0]["registered"] is True
         assert rows[0]["next_run_at"] is None
+
+
+class TestATickThatNeverRanIsItsOwnVerdict:
+    """⚠⚠ THE STATE THAT DID NOT EXIST UNTIL 2026-09-01, AND ITS ABSENCE IS WHY A PRODUCTION JOB
+    COULD SIT 20.9 DAYS STALE WITH NOTHING TO READ. Every other status here reasons about a job
+    that STARTED — `record_run` is a context manager around real work, so it cannot speak for work
+    that never began. A tick lost to a misfire, or to a process that was not alive at the fire
+    time, left no row at all, and this page could only report the silence as `overdue` and offer no
+    cause. `missed` is written by an OBSERVER instead (`job_runlog.record_missed`) and carries the
+    sentence the page used to have to guess at."""
+
+    def test_it_renders_as_missed_and_repeats_the_recorded_reason(self):
+        """⚠ THE ROW'S OWN `detail`, NEVER A STRING BUILT HERE. It names the fire time and the
+        moment the process actually started — facts only the writer had. Re-deriving a reason at
+        render time would be a second, poorer answer to a question already answered."""
+        why = ("no run recorded for the 2026-09-01 05:00 UTC tick — this process did not start "
+               "until 2026-09-01 07:12 UTC, so the scheduler was not alive to fire it")
+        row = _run("j", 1, "missed")
+        row["detail"] = why
+        rows = build_rows([_spec(evidence=("j",))], [_reg("j")], [row], NOW,
+                          scheduler_running=True)
+        assert rows[0]["status"] == "missed"
+        assert rows[0]["reason"] == why
+
+    def test_a_missed_tick_cannot_satisfy_the_freshness_check(self):
+        """⚠ NO WORK HAPPENED, so past its own allowance the job is genuinely late and says so —
+        the same rule `interrupted` and `cancelled` follow. A `missed` row counted as a run would
+        turn the evidence of an outage into proof there wasn't one."""
+        fresh = build_rows([_spec(evidence=("j",), max_age_hours=30)], [_reg("j")],
+                           [_run("j", 5, "missed")], NOW, scheduler_running=True)
+        assert fresh[0]["status"] == "missed"      # inside its allowance: named, not yet late
+        late = build_rows([_spec(evidence=("j",), max_age_hours=30)], [_reg("j")],
+                          [_run("j", 40, "missed")], NOW, scheduler_running=True)
+        assert late[0]["status"] == "overdue"
+        assert "nothing has completed in 1.7 days" in late[0]["reason"]
+
+    def test_a_real_run_after_a_miss_wins(self):
+        """⚠ `_latest_run` TAKES THE NEWEST ACROSS EVERY NAME, which is what makes it safe for a
+        job's id to be a lookup name even when it proves itself through `ingest_run`. A run and a
+        miss are different events, not two accounts of one."""
+        miss = _run("j", 6, "missed")
+        rows = build_rows([_spec(evidence=("j",))], [_reg("j")], [miss, _run("j", 1)], NOW,
+                          scheduler_running=True)
+        assert rows[0]["status"] == "ok"
+
+    def test_a_pipeline_job_is_looked_up_under_its_OWN_id_as_well(self):
+        """⚠⚠ THE HALF THAT WOULD HAVE MADE THE WHOLE FEATURE A NO-OP ON THE JOB THAT NEEDED IT.
+        `daily_pipeline` is `records=False` — it proves itself through `ingest_run` — so `names`
+        used to exclude its id entirely. But a missed tick can only ever be recorded under the id
+        (there is no phase history for work that never started), so the gap scan's evidence for the
+        very job measured 20.9 days stale would have been written and then never read."""
+        s = _spec(records=False, evidence=("price_update",))
+        row = _run(s.id, 1, "missed")
+        row["detail"] = "the 05:00 tick never ran"
+        rows = build_rows([s], [_reg("j")], [row], NOW, scheduler_running=True)
+        assert rows[0]["status"] == "missed"
+        assert rows[0]["reason"] == "the 05:00 tick never ran"
+
+    def test_but_the_queue_worker_is_still_UNOBSERVABLE_rather_than_accused(self):
+        """⚠⚠ THE GATE ON THAT WIDENING. `asset_ingest_queue` is `records=False` with no evidence
+        AND an interval trigger — genuinely unobservable, and the gap scan skips it because a job
+        that fires every 20 seconds is DESIGNED to be absent whenever the process is. Adding its id
+        unconditionally would move it from "leaves no durable record" to "never recorded — a real
+        gap": a fabricated accusation against the one job that can never answer it."""
+        rows = build_rows([_spec(records=False, trigger=None, interval_seconds=20)], [_reg("j")], [], NOW,
+                          scheduler_running=True)
+        assert rows[0]["status"] == "unknown"
+        assert rows[0]["observable"] is False
+        assert "only in the logs" in rows[0]["reason"]

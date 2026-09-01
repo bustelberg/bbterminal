@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import type { AirsAccountReconciliation } from '../../../lib/types/api';
+import { useMgmtCopy } from '../management/managementCopy';
 
 /**
  * THE YEAR, BUILT FROM THE POSITIONS — held AND sold — and set against the book's own figure.
@@ -30,6 +31,9 @@ import type { AirsAccountReconciliation } from '../../../lib/types/api';
  * `gap_pp` is in POINTS for the same reason.
  */
 export default function AccountTotalReturn({ portefeuille }: { portefeuille: string }) {
+  // ⚠ THE COPY MODULE, NOT LITERALS — see `managementCopy`. A missing Dutch string is a
+  // compile error there, which is what keeps this panel from rendering half-translated.
+  const t = useMgmtCopy().accountReturn;
   const [open, setOpen] = useState(false);
   const [d, setD] = useState<AirsAccountReconciliation | null>(null);
   const [loading, setLoading] = useState(false);
@@ -83,13 +87,13 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
         className="w-full flex items-center gap-2 text-left text-[12px] px-2 py-1.5 rounded-lg border border-neutral-800/40 bg-card hover:bg-overlay/5 transition-colors">
         <span className={`text-[9px] text-fg-faint transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
-        <span className="font-medium text-fg-strong">Total return</span>
+        <span className="font-medium text-fg-strong">{t.title}</span>
         <span className="text-fg-faint">
           {loading ? 'loading…'
-            : err && !d ? <span className="text-neg-400">could not load</span>
-              : !d ? 'held + sold, against the book’s own'
-                : needsTx ? 'load the transactions above first'
-                  : `${d.realised_names} sold · ${d.open_priced} held`}
+            : err && !d ? <span className="text-neg-400">{t.couldNotLoad}</span>
+              : !d ? t.heldPlusSold
+                : needsTx ? t.loadTxFirst
+                  : t.soldHeld(d.realised_names ?? 0, d.open_priced ?? 0)}
         </span>
         {d && (
           <span className="ml-auto flex items-center gap-3 font-mono">
@@ -117,16 +121,15 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
           {needsTx && (
             <div className="flex items-start gap-2 px-1">
               <p className="text-[12px] text-warn-500">
-                This book’s transactions have not been fetched, so what it realised on sales is
-                unknown — and the positions it still holds are only part of the year. Open
-                <strong> Transactions</strong> above to load them, then reload here.
+                {t.needsTx}
+                <strong> {t.openTransactions}</strong>{' '}{t.needsTxTail}
               </p>
               {/* ⚠ A CONTROL, NOT JUST AN INSTRUCTION. Re-opening now re-fetches too, but a reader
                   who has just loaded the transactions in the panel above should not have to
                   discover that by collapsing this one. */}
               <button type="button" disabled={loading} onClick={() => void load()}
                 className="shrink-0 px-2 py-1 rounded-md border border-neutral-800/40 text-[11px] text-fg-subtle hover:bg-overlay/5 disabled:opacity-50 transition-colors">
-                {loading ? 'Reloading…' : 'Reload'}
+                {loading ? t.reloading : t.reload}
               </button>
             </div>
           )}
@@ -136,18 +139,18 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
             <div className="rounded-lg border border-neutral-800/40 overflow-hidden">
               <table className="w-full text-xs">
                 <tbody className="divide-y divide-neutral-800/20">
-                  <Row label="Positions still held" sub={`${d.open_priced} priced${d.open_unpriced ? `, ${d.open_unpriced} without an opening value` : ''}`}
+                  <Row label={t.rowHeld} sub={t.subPriced(d.open_priced ?? 0, d.open_unpriced ?? 0)}
                     eur={d.open_result_eur} />
-                  <Row label="Realised on sales this year" sub={`${d.realised_names} instrument${d.realised_names === 1 ? '' : 's'} · AIRS’s own Res. YtD, so a gain made in an earlier year is not counted here`}
+                  <Row label={t.rowRealised} sub={t.subRealised(d.realised_names ?? 0)}
                     eur={d.realised_ytd_eur} />
-                  <Row label="Income from names no longer held"
-                    sub={d.sold_funds?.length ? d.sold_funds.join(', ') : 'none'}
+                  <Row label={t.rowIncomeSold}
+                    sub={d.sold_funds?.length ? d.sold_funds.join(', ') : t.subNone}
                     eur={d.sold_income_eur} />
                   <tr className="bg-overlay/[0.04] font-semibold">
                     <td className="px-3 py-2 text-fg-strong">
-                      Total result
+                      {t.totalResult}
                       <span className="ml-2 font-normal text-[11px] text-fg-faint">
-                        the year, from the positions
+                        {t.totalResultSub}
                       </span>
                     </td>
                     <td className={`px-3 py-2 text-right font-mono tabular-nums ${tone(d.total_result_eur)}`}>
@@ -156,9 +159,9 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                   </tr>
                   <tr className="border-t border-neutral-800/40">
                     <td className="px-3 py-2 text-fg-soft">
-                      AIRS’s own result
+                      {t.airsResult}
                       <span className="ml-2 text-[11px] text-fg-faint">
-                        beleggingsresultaat — the system of record
+                        {t.airsResultSub}
                       </span>
                     </td>
                     <td className={`px-3 py-2 text-right font-mono tabular-nums ${tone(d.book_result_eur)}`}>
@@ -184,7 +187,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
 
           {d && !needsTx && (
             <div className="grid gap-2 sm:grid-cols-2 text-[12px]">
-              <Stat label="Total YTD return" value={d.total_return_pct != null ? pct(d.total_return_pct) : '—'}
+              <Stat label={t.totalYtd} value={d.total_return_pct != null ? pct(d.total_return_pct) : '—'}
                 tone={d.total_return_pct != null ? tone(d.total_return_pct) : 'text-fg-faint'}
                 note={d.return_basis === 'opening_capital'
                   ? `total result over the year's opening capital ${eur(d.book_start_eur)}`
@@ -193,7 +196,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                   : d.return_basis === 'flows'
                     ? `refused: ${eur(d.deposits_eur)} in / ${eur(d.withdrawals_eur)} out this year — read AIRS’s flow-aware figure instead`
                     : 'not available'} />
-              <Stat label="AIRS’s own YTD" value={d.book_return_pct != null ? pct(d.book_return_pct) : '—'}
+              <Stat label={t.airsYtd} value={d.book_return_pct != null ? pct(d.book_return_pct) : '—'}
                 tone={d.book_return_pct != null ? tone(d.book_return_pct) : 'text-fg-faint'}
                 note={`cumulatief_rendement, flow-aware${d.months ? `, ${d.months} month${d.months === 1 ? '' : 's'}` : ''}`} />
             </div>
@@ -238,7 +241,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                             is genuinely out, and that is what this badge means. */}
                         {l.closed_out && (
                           <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[10px] text-fg-muted"
-                            title="No longer in the positions table — this position was closed out.">
+                            title={t.closedOut}>
                             closed
                           </span>
                         )}

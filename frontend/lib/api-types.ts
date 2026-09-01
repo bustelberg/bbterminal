@@ -348,8 +348,8 @@ export interface paths {
          * @description HOW FAST THE DATABASE IS GROWING, PER TABLE — bytes on disk, over a window.
          *
          *     ⚠⚠ BYTES, NOT ROWS WRITTEN, AND THE DIFFERENCE INVERTS THE RANKING. Asking each job to count
-         *     its own inserts would put `crm_relaties_refresh` — which OVERWRITES its table, thousands of rows
-         *     written and zero growth — above the month-end price refresh. Several jobs here are
+         *     its own inserts would put the AIRS model scan — which delete-then-inserts every portfolio's
+         *     positions, thousands of rows written and zero growth — above the month-end price refresh. Several jobs here are
          *     delete-then-insert snapshots or upserts. A row count is also blind to INDEXES and BLOAT, which
          *     on an 18 GB table are most of the disk.
          *
@@ -650,7 +650,7 @@ export interface paths {
          *
          *     ⚠⚠ CANCELLATION IS COOPERATIVE, AND ITS LATENCY DIFFERS PER JOB. The AIRS scan stops between
          *     ACCOUNTS (an account's four reports are stored as a unit); the drift probe stops between
-         *     COMPANIES; the FX, CRM and size jobs are seconds long and have no useful boundary at all.
+         *     COMPANIES; the FX and size jobs are seconds long and have no useful boundary at all.
          *     "Stops immediately" is not on offer for a scraper mid-download, and a Cancel that claimed it
          *     would be the decorative control this codebase has already removed once. The UI says which is
          *     which rather than implying they are the same.
@@ -1275,28 +1275,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/airs/crm-relaties": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Airs Crm Relaties
-         * @description The latest stored CRM 'Alle relaties' export, parsed on the fly from the
-         *     raw .xls in `airs_crm_relaties_raw` into a generic `{columns, rows}` table
-         *     (whatever columns the export has). Empty until the daily job has run it.
-         */
-        get: operations["airs_crm_relaties_api_airs_crm_relaties_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/airs/holding-isin-override": {
         parameters: {
             query?: never;
@@ -1813,11 +1791,16 @@ export interface paths {
         };
         /**
          * Airs Model Portfolio Value Series
-         * @description The paired book's value on every date we hold a snapshot for, summed from `airs_holding`.
+         * @description The paired book's cumulative return through the year, and its value on every date we hold.
          *
-         *     ⚠⚠ OUR OWN SERIES, NOT AIRS'S RENDEMENTEN. It reproduces AIRS's `eindvermogen` to the euro on 21
-         *     of AzTopSelectie's 24 snapshots, holds two dates AIRS has no row for, and starts 2026-06-23 —
-         *     when we began keeping snapshots. See `routers/_airs_value_series`.
+         *     ⚠⚠ THE RETURN IS AIRS'S OWN `cumulatief_rendement`, READ AND NOT RECOMPUTED — it is flow-aware,
+         *     and that is what lets a curve be drawn at all: AzTopSelectie is funded EUR 1,000,000 on
+         *     2026-06-30 and its return line stays at 0.00% straight through it, where a value line has a
+         *     vertical. It is the same column the Scorecard's YTD tile reads.
+         *
+         *     ⚠ THE VALUE IS OURS, summed from `airs_holding`. It reproduces AIRS's `eindvermogen` to the euro
+         *     on 21 of AzTopSelectie's 24 snapshots, holds two dates AIRS has no row for, and starts
+         *     2026-06-23 — when we began keeping snapshots. See `routers/_airs_value_series`.
          *
          *     ⚠ ITS OWN REQUEST, DELIBERATELY. The Analyse modal is ONE payload with no partial paint, so its
          *     wall clock is the reader's wait; a series nobody has scrolled to yet does not belong in it. The
@@ -2135,8 +2118,8 @@ export interface paths {
          *     decision instead. This exists to prove the refresh refills a gap.
          *
          *     ⚠ IT LOSES ANYTHING OLDER THAN 1 JANUARY. A scan fetches `1 Jan → today`, so `airs_performance`
-         *     months before that are gone permanently — the UI says so before asking. CRM records and the
-         *     hidden-account decision are deliberately NOT touched (see `_DELETABLE_TABLES`).
+         *     months before that are gone permanently — the UI says so before asking. The hidden-account
+         *     decision is deliberately NOT touched (see `_DELETABLE_TABLES`).
          */
         delete: operations["airs_portfolio_delete_api_airs_portfolios__portefeuille__delete"];
         options?: never;
@@ -9857,6 +9840,25 @@ export interface components {
             weight_start_pct?: number | null;
         };
         /**
+         * BookReturnPoint
+         * @description AIRS's own year-to-date return on one date, and what the book was worth that day.
+         *
+         *     ⚠⚠ `cum_pct` IS READ FROM `airs_performance.cumulatief_rendement`, NEVER DERIVED FROM
+         *     `value_eur`. It is FLOW-AWARE and the value is not: AzTopSelectie's 0 → EUR 1,000,000 on
+         *     2026-06-30 is a funding, and this series correctly stays at 0.00% straight through it. Two
+         *     values cannot tell that apart from a gain.
+         */
+        BookReturnPoint: {
+            /** Cum Pct */
+            cum_pct: number;
+            /** Date */
+            date: string;
+            /** Holdings */
+            holdings?: number | null;
+            /** Value Eur */
+            value_eur?: number | null;
+        };
+        /**
          * BookValueFlow
          * @description Money in or out on one date — never a result. See `_airs_value_series`.
          */
@@ -9893,9 +9895,12 @@ export interface components {
         };
         /**
          * BookValueSeries
-         * @description ⚠⚠ VALUE, NOT RETURN. A funding is a step in this line and is not performance — the flows
-         *     ride along so the chart can mark it. The book's return is
-         *     `airs_performance.cumulatief_rendement`, assembled in `_airs_accounts`.
+         * @description The book's value through time, and the return that value earned.
+         *
+         *     ⚠⚠ TWO DIFFERENT QUANTITIES, AND ONLY ONE OF THEM IS PERFORMANCE. `points` is VALUE: a funding
+         *     is a step in it and is not a gain, which is why the flows ride along. `returns` is AIRS's own
+         *     flow-aware `cumulatief_rendement`, the same column `_airs_accounts._year_perf` reads for the
+         *     Scorecard — so the chart and the tile beside it cannot disagree.
          */
         BookValueSeries: {
             /** First Date */
@@ -9918,6 +9923,15 @@ export interface components {
             portefeuille?: string | null;
             /** Reason */
             reason?: string | null;
+            /** Return From */
+            return_from?: string | null;
+            /** Return Pct */
+            return_pct?: number | null;
+            /**
+             * Returns
+             * @default []
+             */
+            returns?: components["schemas"]["BookReturnPoint"][];
         };
         /** BuildUniverseRequest */
         BuildUniverseRequest: {
@@ -15217,26 +15231,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    airs_crm_relaties_api_airs_crm_relaties_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
         };

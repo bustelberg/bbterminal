@@ -63,6 +63,12 @@ export const JOB_TONE: Record<string, { dot: string; text: string; label: string
   // means every local restart paints a fault, and a reader who learns to discount red rows will
   // discount the real one too.
   interrupted: { dot: 'bg-warn-500', text: 'text-warn-400', label: 'interrupted' },
+  // ⚠⚠ AMBER AND ITS OWN WORD, NOT `overdue`. Both mean the work has not happened, but this one
+  // KNOWS WHY — the row was written by an observer (the misfire listener, or the boot-time gap
+  // scan) and carries the fire time it belongs to and whether the process was busy or absent.
+  // Folded into `overdue` the reader loses the one distinction that decides where to look: overdue
+  // is inferred from silence, missed is recorded evidence. The reason is in the expanded row.
+  missed: { dot: 'bg-warn-500', text: 'text-warn-400', label: 'never ran' },
   unknown: { dot: 'bg-neutral-500', text: 'text-fg-muted', label: 'unknown' },
   off: { dot: 'bg-neutral-600', text: 'text-fg-faint', label: 'off' },
   running: { dot: 'bg-accent-500', text: 'text-accent-400', label: 'running' },

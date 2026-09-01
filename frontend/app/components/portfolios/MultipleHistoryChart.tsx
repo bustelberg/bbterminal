@@ -75,6 +75,7 @@ const MEDIAN_COLOR = chartTheme.axisTick;
 
 export default function MultipleHistoryChart({
   basis: b, forward, currency, fromYear, name, isin, height = 320, className = '',
+  onRefresh, onCancel, canRefresh = false, refreshing = false, cancelling = false,
 }: {
   basis: (typeof BASIS)[keyof typeof BASIS];
   /** The vendor's published forward multiple — the only series here. Empty on the FCF basis, by
@@ -86,6 +87,24 @@ export default function MultipleHistoryChart({
   isin: string;
   height?: number;
   className?: string;
+  /**
+   * Go and get the vendor's series again.
+   *
+   * ⚠⚠ THIS SERIES IS THE ONE THING ON THE TAB THAT GOES STALE WITHOUT SAYING SO. It is read from
+   * GuruFocus, not computed here, and the vendor publishes it with a multi-week lag — measured on
+   * argenx, the newest observation was 24 July while the file was read on 17 August. Everything
+   * else on this card is derived from it, so a stale line silently ages the median, the tile and
+   * the drill-down together and nothing looks wrong.
+   *
+   * ⚠ THE CARD DOES NOT FETCH — the tab owns the metrics and the chart is a function of them, so a
+   * fetch here would be a second loader for one payload. It gets a callback and three flags.
+   */
+  onRefresh?: () => void;
+  onCancel?: () => void;
+  /** False when no GuruFocus company backs this ISIN — the button is then disabled, not absent. */
+  canRefresh?: boolean;
+  refreshing?: boolean;
+  cancelling?: boolean;
 }) {
   // Click-to-inspect, the same affordance the two charts beside it carry.
   const [showData, setShowData] = useState(false);
@@ -93,6 +112,19 @@ export default function MultipleHistoryChart({
   const fVals = forward.map((p) => p.value);
   const median = medianOf(fVals);
   const latestFwd = forward.at(-1)?.value ?? null;
+  /**
+   * The date of the newest observation, for the As-of tile.
+   *
+   * ⚠ THE VENDOR'S DATE, NOT OURS. It is when GuruFocus last published a point, which is the only
+   * date that answers "is this current" — the moment we happened to read it says nothing about
+   * whether there was anything newer to read.
+   *
+   * ⚠ ISO HERE AND `onDate` IN THE TOAST, DELIBERATELY. A `Stat` value is 18px mono inside 8rem, so
+   * `2026-07-24` fits at ten characters and `24 July 2026` truncates to a date that reads as a
+   * different one. The refresh's toast is a sentence with room, and gets the human form.
+   */
+  const asOf = forward.at(-1)
+    ? new Date(forward.at(-1)!.t).toISOString().slice(0, 10) : null;
 
   /**
    * ⚠ NO `align` ANY MORE, AND THAT IS THE ONE SIMPLIFICATION THE REMOVAL ACTUALLY BUYS. It
@@ -127,6 +159,33 @@ export default function MultipleHistoryChart({
             : 'No analyst publishes a free-cash-flow forecast — capex is not forecast — so there is no forward multiple to draw on this basis, at any date. A forward FCF line is planned.'}>
           {hasForward ? 'vendor indicator' : 'no forward FCF yet — nobody forecasts capex'}
         </span>
+        {/* ⚠⚠ ONE CONTROL, THREE STATES, AND IT TURNS INTO THE CANCEL — the same shape and the same
+            three glyphs as the share-price ↻ on the Deep Valuation tab. The reader pressed it HERE,
+            so this is where stopping it belongs; sending them to the toast in the corner to undo
+            something they started on this card is a Cancel that does nothing.
+              ↻  idle        ✕  running, press to abort        ⋯  unwinding after the press
+            ⚠ RENDERED ONLY ON A BASIS THAT HAS A VENDOR LINE. On the FCF basis there is no forward
+            series anywhere, at any date, so a refresh button would promise a fetch that cannot
+            exist — see the note beside `hasForward`.
+            ⚠ DISABLED, NOT ABSENT, WITH NO COMPANY: a control that vanishes takes its space with
+            it, and the header reflows on a state the reader cannot see the cause of. */}
+        {hasForward && onRefresh && (
+          <button type="button"
+            onClick={() => (refreshing ? onCancel?.() : onRefresh())}
+            disabled={cancelling || !canRefresh}
+            aria-label={refreshing ? 'Cancel the re-read' : 'Ask GuruFocus for this series again'}
+            title={cancelling ? 'Cancelling…'
+              : refreshing ? 'Re-reading — press to cancel'
+                : !canRefresh ? 'No GuruFocus company for this ISIN, so there is nothing to re-read'
+                  : 'Ask GuruFocus for this series again'}
+            className={`ml-auto inline-block w-4 text-center text-[12px] leading-none ${
+              cancelling ? 'cursor-wait text-fg-faint'
+                : refreshing ? 'text-warn-400 hover:text-neg-400'
+                  : !canRefresh ? 'cursor-default text-fg-faint/40'
+                    : 'text-fg-faint hover:text-accent-400'}`}>
+            {cancelling ? '⋯' : refreshing ? '✕' : '↻'}
+          </button>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -135,8 +194,21 @@ export default function MultipleHistoryChart({
             info={<InfoTip content={<AspectCard
               what="What the market pays today for the fiscal year now in progress."
               where="GuruFocus `forward_pe_ratio`, published as a time series — read, not computed."
-              when={`Weekly since ${fromYear}; latest point ${forward.at(-1) ? new Date(forward.at(-1)!.t).toISOString().slice(0, 10) : '—'}.`}
+              when={`Weekly since ${fromYear}. The As-of tile beside this one dates the newest point.`}
               how="⚠ Its denominator is the CURRENT fiscal year's consensus, not a rolling twelve months — verified by backing the EPS out of price ÷ this ratio (argenx: 23.20 implied vs 23.23 published, against 27.93 for an NTM blend)." />} />} />
+        )}
+        {/* ⚠⚠ THE VENDOR'S OWN PUBLICATION DATE, WHICH NOTHING ON THIS CARD USED TO SHOW. Every
+            figure here descends from a series read from GuruFocus with a multi-week lag, and the
+            card said only "since 2015" — the window, never the edge. A reader could not tell a
+            line current to yesterday from one that stopped five weeks ago, and the ↻ beside it had
+            no number to move. */}
+        {hasForward && (
+          <Stat label="As of" value={asOf ?? '—'}
+            info={<InfoTip content={<AspectCard
+              what="When GuruFocus last published a point in this series."
+              where="The newest observation on the line, not the moment we read it."
+              when={`Weekly since ${fromYear}.`}
+              how="The vendor publishes with a lag of some weeks, so this can sit behind today with nothing wrong. The ↻ above asks for anything newer." />} />} />
         )}
         <Stat label="Median" value={x(median)} color={MEDIAN_COLOR}
           info={<InfoTip content={<AspectCard

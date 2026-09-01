@@ -115,6 +115,24 @@ def note_write() -> None:
         st["writes"] += 1
 
 
+def wrote() -> bool:
+    """Whether a write has been noted inside the CURRENT memo scope.
+
+    ⚠⚠ IT EXISTS FOR THE CROSS-REQUEST LEG STORE, NOT FOR THIS MEMO. `note_write` already protects
+    the per-request store by clearing it. What it cannot protect is a cache that OUTLIVES the
+    request: `_analysis_cache`'s fingerprint is re-read at most every `_STAMP_TTL_SECONDS` (2.0),
+    so a unit of work that writes a table and then reads it again could be served a snapshot taken
+    before its own write. Two seconds is nothing to a scrape and everything to the one read that
+    has to see what the line above it just stored.
+
+    ⚠ SO A WRITER OPTS OUT OF THE LEG STORE ENTIRELY rather than trying to invalidate it — see
+    `_airs_ref._paged`. The reader that has written is the only one that can know, and "go to the
+    database" is always a correct answer.
+    """
+    st = _ACTIVE.get()
+    return bool(st and st["writes"])
+
+
 def lookup(key: Any) -> Any | None:
     st = _ACTIVE.get()
     if st is None:

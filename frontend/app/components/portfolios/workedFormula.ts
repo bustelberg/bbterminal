@@ -122,14 +122,33 @@ export const subPct2 = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
  * paragraph in the middle of it reads as a rendering bug, which is the opposite of reassuring.
  * Same for an empty `tail`.
  */
-export function withWorked(formula: string, worked: string, tail = ''): string {
+export function withWorked(formula: string, worked: string): string {
   // ⚠ `\\\\` IS A LINE BREAK IN LaTeX, not a paragraph in text. The old shape joined on `\n\n`
   // and the card split it back apart — which stopped working the moment either half became LaTeX,
   // because a backslash means something in both languages and neither knows about the other.
   //
-  // ⚠ AND `tail` IS GONE FROM THE FORMULA BLOCK. It was prose, and prose does not belong inside a
-  // typeset expression; the two callers that used it now pass it as the card's `how`.
-  return [formula, worked].filter(Boolean).join(' \\\\[4pt] ') + (tail ? '' : '');
+  // ⚠ AND `tail` IS GONE FROM THE SIGNATURE TOO (2026-09-01). It was prose, and prose does not
+  // belong inside a typeset expression, so the two callers that used it moved to the card's `how`
+  // — but the PARAMETER stayed, ending in `+ (tail ? '' : '')`, which appends '' either way. A
+  // parameter that is accepted, documented and discarded is worse than none: the next caller
+  // passes something and watches it vanish. `tsc` confirms nobody was passing one.
+  const lines = [formula, worked].filter(Boolean);
+  if (lines.length < 2) return lines.join('');
+  // ⚠⚠ `\\begin{gathered}` BECAUSE A BARE `\\\\` DOES NOTHING IN DISPLAY MODE. That is LaTeX's own
+  // rule, and KaTeX says so on every render: "In LaTeX, \\\\ or \\newline does nothing in display
+  // mode [newLineInDisplayMode]". It reached the browser console twice per card and had been there
+  // since this helper was written.
+  //
+  // ⚠⚠ AND `strict: 'error'` DOES NOT CATCH IT, WHICH IS WHY THE LaTeX TESTS WERE GREEN THROUGHOUT.
+  // Every `*.latex.test.ts` here renders with `throwOnError: true, strict: 'error'` and asserts it
+  // does not throw — and this is a WARNING, not a strict violation, so all of them passed while
+  // every worked line in the app warned. `workedFormula.latex.test.ts` now captures `console.warn`
+  // instead of only catching throws.
+  //
+  // ⚠ `gathered`, NOT `aligned`. `aligned` wants an `&` anchor per line and none of the builders
+  // emit one, so it would set both halves flush-left against an invisible column; `gathered`
+  // centres each line, which is what a formula above its own substitution should do.
+  return `\\begin{gathered} ${lines.join(' \\\\[4pt] ')} \\end{gathered}`;
 }
 
 /**

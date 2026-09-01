@@ -43,6 +43,9 @@ export type ManagementCopy = {
     cancel: string;
     refresh: string;
     refreshAll: string;
+    /** The AIRS walk: its verb while running, and the button once there are rows. */
+    scanning: string;
+    refreshFromAirs: string;
     asOf: string;
   };
   benchmarks: {
@@ -73,8 +76,87 @@ export type ManagementCopy = {
     currentPortfolio: string;
     weightReturnsBy: string;
     autoCalculated: string;
+    /** The toolbar's two buttons. The refresh is ONE control with four states, so they live
+     *  together — a translated label beside an English "Refreshing…" is the half-done look the
+     *  per-surface rule exists to avoid. */
+    refreshAll: string;
+    refreshing: string;
+    scanningModels: string;
+    cancelScan: string;
+    cancelModelScan: string;
+    /** ⚠ OUR name for the bands policy, NOT an AIRS column — see the guard in the test. */
+    allocationBands: string;
+    allocationBandsHint: string;
     loadingHoldings: string;
     noSnapshot: string;
+  };
+
+  /** The stored-models list (`PortfoliosPanel`) — the page's other table. */
+  models: {
+    loading: string;
+    emptyBefore: string;
+    scanAirs: string;
+    searchPlaceholder: string;
+    namePlaceholder: string;
+    colFixedDate: string;
+    colStartDate: string;
+    colAirsBook: string;
+    notAnInstrument: string;
+    unresolvedSeries: string;
+    noSnapshot: string;
+    notAPortfolio: string;
+    notInGrid: string;
+    partialYear: string;
+    notComputed: string;
+    notCounted: string;
+    saveFailed: string;
+    positionsSource: string;
+    forgetChoice: string;
+    fetchedLive: string;
+    cashNoAccounts: string;
+    cashNoIsin: string;
+    viaLinkedModel: string;
+    /** Hovers. ⚠ Translated too — the reader hovering is the same reader. */
+    hintNoBook: string;
+    hintComposition: string;
+    hintEffectiveDate: string;
+    hintClippedName: string;
+    hintYtd: string;
+    hintYtdSource: string;
+    hintSinceInception: string;
+    hintInceptionSource: string;
+    hintAnnualised: string;
+    hintEmptyFixed: string;
+    hintNotAnInstrument: string;
+  };
+
+  /** The account's own reconciliation (`AccountTotalReturn`). */
+  accountReturn: {
+    title: string;
+    couldNotLoad: string;
+    heldPlusSold: string;
+    loadTxFirst: string;
+    soldHeld: (sold: number, held: number) => string;
+    needsTx: string;
+    openTransactions: string;
+    /** The clause AFTER the bold control name. ⚠ Its own key, not a
+     *  concatenation: Dutch puts the verb somewhere else. */
+    needsTxTail: string;
+    reload: string;
+    reloading: string;
+    rowHeld: string;
+    rowRealised: string;
+    rowIncomeSold: string;
+    subPriced: (priced: number, unpriced: number) => string;
+    subRealised: (n: number) => string;
+    subNone: string;
+    totalResult: string;
+    totalResultSub: string;
+    airsResult: string;
+    airsResultSub: string;
+    totalYtd: string;
+    airsYtd: string;
+    closedOut: string;
   };
 };
 
@@ -102,6 +184,8 @@ const en: ManagementCopy = {
     cancel: 'Cancel',
     refresh: 'Refresh',
     refreshAll: 'Refresh all',
+    scanning: 'Scanning…',
+    refreshFromAirs: 'Refresh from AIRS',
     asOf: 'As of',
   },
   benchmarks: {
@@ -132,8 +216,80 @@ const en: ManagementCopy = {
     currentPortfolio: 'Current portfolio',
     weightReturnsBy: 'Weight returns by',
     autoCalculated: 'Auto (calculated)',
+    refreshAll: 'Refresh all',
+    refreshing: 'Refreshing…',
+    scanningModels: 'Scanning models…',
+    cancelScan: 'Cancel scan',
+    cancelModelScan: 'Cancel model scan',
+    allocationBands: 'Asset allocation',
+    allocationBandsHint: 'Per risk profile, the minimum, default and maximum share each asset '
+      + 'class may take.',
     loadingHoldings: 'Loading holdings…',
     noSnapshot: 'No holdings snapshot stored.',
+  },
+  models: {
+    loading: 'Loading stored portfolios…',
+    emptyBefore: 'Nothing stored yet — hit',
+    scanAirs: 'Scan AIRS',
+    searchPlaceholder: 'Search name / description…',
+    namePlaceholder: 'a name you choose…',
+    colFixedDate: 'Fixed date',
+    colStartDate: 'Start date',
+    colAirsBook: 'AIRS book',
+    notAnInstrument: 'This ISIN is not an instrument in our grid — usually an in-house fund, so there is no listing to resolve.',
+    unresolvedSeries: 'This ISIN is not an instrument in our grid, so we have no price series for it.',
+    noSnapshot: 'no snapshot',
+    notAPortfolio: '— not a portfolio —',
+    notInGrid: 'not in grid',
+    partialYear: 'partial year',
+    notComputed: 'Not computed yet.',
+    notCounted: 'Not counted yet — the scan is still walking the portfolios.',
+    saveFailed: 'Save failed — not stored.',
+    positionsSource: 'Positions source',
+    forgetChoice: 'Forget this manual choice and fall back to the automatic guess.',
+    fetchedLive: 'Fetched live from AirSPMS just now.',
+    cashNoAccounts: 'Cash has no accounts to read.',
+    cashNoIsin: 'Cash — no ISIN exists for it.',
+    viaLinkedModel: 'priced via the linked model portfolio',
+    hintNoBook: 'No AIRS book is paired with this model, so there are no book holdings to value.',
+    hintComposition: 'Composition of this model — sector, region and currency — beside the '
+      + 'benchmark, on one set of groups.',
+    hintEffectiveDate: 'The model’s own effective date — when this composition took effect.',
+    hintClippedName: 'This value is CLIPPED, not the real portfolio name.',
+    hintYtd: 'What this model has returned so far this year, holding its current weights.',
+    hintYtdSource: 'asset_price close, EUR via fx_rate',
+    hintSinceInception: 'What this model has returned since the day its composition took effect.',
+    hintInceptionSource: 'asset_price daily EUR curve',
+    hintAnnualised: 'The model’s return restated as a per-year rate, so different ages compare.',
+    hintEmptyFixed: 'A fixed model that contains no instruments — genuinely empty, not un-counted.',
+    hintNotAnInstrument: 'This ISIN is not an instrument in our grid — usually an in-house fund.',
+  },
+  accountReturn: {
+    title: 'Total return',
+    couldNotLoad: 'could not load',
+    heldPlusSold: 'held + sold, against the book’s own',
+    loadTxFirst: 'load the transactions above first',
+    soldHeld: (sold, held) => `${sold} sold · ${held} held`,
+    needsTx: 'This book’s transactions have not been fetched, so what it realised on sales is '
+      + 'unknown — and the positions it still holds are only part of the year. Open',
+    openTransactions: 'Transactions',
+    needsTxTail: 'above to load them, then reload here.',
+    reload: 'Reload',
+    reloading: 'Reloading…',
+    rowHeld: 'Positions still held',
+    rowRealised: 'Realised on sales this year',
+    rowIncomeSold: 'Income from names no longer held',
+    subPriced: (priced, unpriced) =>
+      `${priced} priced${unpriced ? `, ${unpriced} without an opening value` : ''}`,
+    subRealised: (n) => `${n} instrument${n === 1 ? '' : 's'} · AIRS’s own Res. YtD`,
+    subNone: 'none',
+    totalResult: 'Total result',
+    totalResultSub: 'the year, from the positions',
+    airsResult: 'AIRS’s own result',
+    airsResultSub: 'beleggingsresultaat — the system of record',
+    totalYtd: 'Total YTD return',
+    airsYtd: 'AIRS’s own YTD',
+    closedOut: 'No longer in the positions table — this position was closed out.',
   },
 };
 
@@ -173,6 +329,8 @@ const nl: ManagementCopy = {
     cancel: 'Annuleren',
     refresh: 'Vernieuwen',
     refreshAll: 'Alles vernieuwen',
+    scanning: 'Scannen…',
+    refreshFromAirs: 'Vernieuwen vanuit AIRS',
     asOf: 'Per',
   },
   benchmarks: {
@@ -203,8 +361,84 @@ const nl: ManagementCopy = {
     currentPortfolio: 'Huidige portefeuille',
     weightReturnsBy: 'Weeg rendementen op',
     autoCalculated: 'Automatisch (berekend)',
+    refreshAll: 'Ververs alles',
+    refreshing: 'Verversen…',
+    scanningModels: 'Modellen scannen…',
+    cancelScan: 'Scan annuleren',
+    cancelModelScan: 'Modelscan annuleren',
+    allocationBands: 'Asset allocatie',
+    allocationBandsHint: 'Per risicoprofiel de minimale, standaard en maximale weging die elke '
+      + 'beleggingscategorie mag hebben.',
     loadingHoldings: 'Posities laden…',
     noSnapshot: 'Geen positie-momentopname opgeslagen.',
+  },
+  models: {
+    loading: 'Opgeslagen portefeuilles laden…',
+    emptyBefore: 'Nog niets opgeslagen — klik',
+    scanAirs: 'Scan AIRS',
+    searchPlaceholder: 'Zoek naam / omschrijving…',
+    namePlaceholder: 'een naam naar keuze…',
+    colFixedDate: 'Vaste datum',
+    colStartDate: 'Startdatum',
+    colAirsBook: 'AIRS-boek',
+    notAnInstrument: 'Deze ISIN is geen instrument in ons overzicht — meestal een eigen fonds, dus er is geen notering om op te lossen.',
+    unresolvedSeries: 'Deze ISIN is geen instrument in ons overzicht, dus we hebben er geen koersreeks van.',
+    noSnapshot: 'geen momentopname',
+    notAPortfolio: '— geen portefeuille —',
+    notInGrid: 'niet in het overzicht',
+    partialYear: 'deel van het jaar',
+    notComputed: 'Nog niet berekend.',
+    notCounted: 'Nog niet geteld — de scan loopt de portefeuilles nog langs.',
+    saveFailed: 'Opslaan mislukt — niet bewaard.',
+    positionsSource: 'Bron van de posities',
+    forgetChoice: 'Vergeet deze handmatige keuze en volg weer de automatische.',
+    fetchedLive: 'Zojuist live opgehaald uit AirSPMS.',
+    cashNoAccounts: 'Liquiditeiten hebben geen rekeningen om te lezen.',
+    cashNoIsin: 'Liquiditeiten — daar bestaat geen ISIN voor.',
+    viaLinkedModel: 'gewaardeerd via de gekoppelde modelportefeuille',
+    hintNoBook: 'Aan dit model is geen AIRS-boek gekoppeld, dus er zijn geen posities om te '
+      + 'waarderen.',
+    hintComposition: 'De samenstelling van dit model — sector, regio en valuta — naast de '
+      + 'benchmark, op één set groepen.',
+    hintEffectiveDate: 'De eigen ingangsdatum van het model — vanaf wanneer deze samenstelling '
+      + 'geldt.',
+    hintClippedName: 'Deze waarde is AFGEKAPT, niet de echte portefeuillenaam.',
+    hintYtd: 'Wat dit model dit jaar tot nu toe heeft gerendeerd, met de huidige wegingen.',
+    hintYtdSource: 'slotkoers uit asset_price, in EUR via fx_rate',
+    hintSinceInception: 'Wat dit model heeft gerendeerd sinds de samenstelling inging.',
+    hintInceptionSource: 'dagelijkse EUR-reeks uit asset_price',
+    hintAnnualised: 'Het rendement omgerekend naar jaarbasis, zodat verschillende looptijden '
+      + 'vergelijkbaar zijn.',
+    hintEmptyFixed: 'Een vast model zonder instrumenten — echt leeg, niet ongeteld.',
+    hintNotAnInstrument: 'Deze ISIN is geen instrument in ons overzicht — meestal een eigen fonds.',
+  },
+  accountReturn: {
+    title: 'Totaalrendement',
+    couldNotLoad: 'kon niet laden',
+    heldPlusSold: 'aangehouden + verkocht, tegen dat van het boek',
+    loadTxFirst: 'laad eerst de transacties hierboven',
+    soldHeld: (sold, held) => `${sold} verkocht · ${held} aangehouden`,
+    needsTx: 'De transacties van dit boek zijn niet opgehaald, dus wat er op verkopen is '
+      + 'gerealiseerd is onbekend — en de posities die het nog aanhoudt beslaan maar een deel van '
+      + 'het jaar. Open',
+    openTransactions: 'Transacties',
+    needsTxTail: 'hierboven om ze te laden en laad deze daarna opnieuw.',
+    reload: 'Opnieuw laden',
+    reloading: 'Opnieuw laden…',
+    rowHeld: 'Nog aangehouden posities',
+    rowRealised: 'Dit jaar gerealiseerd op verkopen',
+    rowIncomeSold: 'Opbrengsten uit niet meer aangehouden namen',
+    subPriced: (priced, unpriced) =>
+      `${priced} gewaardeerd${unpriced ? `, ${unpriced} zonder beginwaarde` : ''}`,
+    subRealised: (n) => `${n} instrument${n === 1 ? '' : 'en'} · AIRS’ eigen Res. YtD`,
+    subNone: 'geen',
+    totalResult: 'Totaalresultaat',
+    totalResultSub: 'het jaar, vanuit de posities',
+    airsResult: 'Het resultaat van AIRS zelf',
+    airsResultSub: 'beleggingsresultaat — het bronsysteem',
+    totalYtd: 'Totaalrendement YTD',
+    airsYtd: 'YTD volgens AIRS',
+    closedOut: 'Staat niet meer in de positietabel — deze positie is volledig verkocht.',
   },
 };
 
@@ -235,12 +469,19 @@ export function useMgmtCopy(): ManagementCopy {
  * order of magnitude, which is why the numbers below come from `scripts`-style counting rather than
  * from reading. Sizing a translation by eye is how it gets promised in one sitting.
  *
- *   Risk panel (7 views)       `riskCopy.ts` — the TABLE IS COMPLETE in both languages, including
- *                              the ⓘ cards. `ActiveSharePanel` is fully wired; the six sibling
- *                              views (Tracking error, Correlation, Volatility, Drawdown,
- *                              Concentration, Positions) still render the English literals and
- *                              need wiring only — no further translation.
- *   PortfolioAnalysisModal     253 strings / 3,342 words. The big one.
+ *   Risk panel (7 views)       DONE (2026-09-01). `riskCopy.ts` was already complete in both
+ *                              languages and NOTHING RENDERED IT: `ActiveSharePanel` was wired and
+ *                              the five sibling views (Tracking error, Correlation, Volatility,
+ *                              Drawdown, Concentration) still held the English literals. All five
+ *                              are wired now. ⚠ It was NOT wiring only, as this note claimed —
+ *                              `TrackingErrorView` kept its symbol definitions in a view-local
+ *                              `LEGEND` the copy had no section for, and four operand-bearing
+ *                              strings (`pairsMeasured`, `shownAnnualised`, `episodes(pct)`,
+ *                              `freqNote(f)`, `pricedFrom`) existed on screen and not in the copy.
+ *                              A translation sized by reading the copy module misses exactly the
+ *                              strings that never reached it.
+ *   PortfolioAnalysisModal     primary view + holdings table translated (`analyseCopy`); its
+ *                              separately opened child panels remain listed below.
  *   AttributionPanel           97 / 872
  *   BucketDetailPanel          20 / 188
  *   PortfoliosPanel            the /portfolios table this page embeds (~27 strings)
@@ -248,8 +489,14 @@ export function useMgmtCopy(): ManagementCopy {
  *   AccountTransactions        the transactions list
  *   HoldingTimingModal         the "why the trading mattered" popup (~12)
  *   AllocationBandsModal       the band editor
- *   the Fundamental modal      Long Equity + Tables are done (`longEquityCopy`, `tablesCopy`);
- *                              Quick Valuation, Deep Valuation and the drill-downs are not
+ *   the Fundamental modal      Long Equity + Tables (`longEquityCopy`, `tablesCopy`) and DEEP
+ *                              VALUATION (2026-09-01, `deepValuationCopy` — the EGM panel, the
+ *                              Reverse DCF and both raw-data modals, ⓘ cards included) are done.
+ *                              Quick Valuation and the ratio drill-downs are not. ⚠ Deep Valuation
+ *                              measured 4 files / 86 visible strings by scan and needed ~170 keys:
+ *                              the scan sees JSX text and attributes, not the interpolated `how=`
+ *                              prose, which is most of a ⓘ card. Scan to SIZE a batch, read to
+ *                              finish one.
  *
  * ⚠⚠ THE ⓘ CARDS ARE NOW IN SCOPE, REVERSING THE BOUNDARY THIS NOTE USED TO DRAW (2026-08-22, on
  * request). They are not decoration: they carry the definition, the convention chosen and the
@@ -263,7 +510,8 @@ export function useMgmtCopy(): ManagementCopy {
  * concentratie, rendement, gewicht, positie, emittent.
  */
 export const UNTRANSLATED_SURFACES = [
-  'PortfoliosPanel', 'PortfolioAnalysisModal', 'AttributionPanel', 'BucketDetailPanel',
-  'AccountTotalReturn', 'AccountTransactions', 'HoldingTimingModal', 'AllocationBandsModal',
-  'QuickValuationTab', 'DeepValuationTab',
+  'AttributionPanel', 'BucketDetailPanel',
+  'AccountTransactions', 'HoldingTimingModal', 'AllocationBandsModal',
+  'QuickValuationTab', 'PriceTargetCalculator',
+  'PortfolioOverviewPanel (partly — the holdings table is done)',
 ] as const;

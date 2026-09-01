@@ -140,7 +140,7 @@ export default function AutomaticJobsCard() {
  *
  * ⚠⚠ CANCEL IS COOPERATIVE AND ITS LATENCY DIFFERS PER JOB, WHICH THE TOOLTIP STATES. The AIRS scan
  * stops between ACCOUNTS (four reports are stored as a unit); the drift probe between COMPANIES;
- * the FX, CRM and size jobs are seconds long and have no useful boundary at all. Promising
+ * the FX and size jobs are seconds long and have no useful boundary at all. Promising
  * "immediately" on a scraper mid-download is the decorative Cancel this app has already removed
  * once — the honest version says where it will stop.
  *

@@ -82,7 +82,7 @@ export function Field({ label, children }: { label: string; children: React.Reac
  * {@link Legend}, so it no longer leans on a neighbouring sentence to say what its symbols mean —
  * which was the whole argument for keeping it beside `where`.
  */
-function Worked({ text }: { text: string }) {
+export function Worked({ text }: { text: string }) {
   // ⚠⚠ ONE TYPESET EXPRESSION, NOT TWO BLOCKS. `withWorked` joins the symbolic half and the
   // substituted half with `\\[4pt]` — a LaTeX line break — so KaTeX sets them as one display,
   // aligned and in one face. The previous version split on a blank line and styled each half
@@ -118,7 +118,7 @@ export type FormulaSymbol = {
  * reader can see (the ½, the T−1) turns four rows into eight and buries the two symbols that were
  * genuinely opaque; the constants belong in `how`, where the reasoning for them already lives.
  */
-function Legend({ items }: { items: readonly FormulaSymbol[] }) {
+export function Legend({ items }: { items: readonly FormulaSymbol[] }) {
   return (
     <span className="block space-y-1 pl-1">
       {items.map((s) => (

@@ -99,6 +99,44 @@ export function workedPriceMove(implied: number | null | undefined,
 }
 
 /**
+ * `PE_exit · ((1+g)(1+y) / (1+h))^n` — the highest multiple you can pay TODAY and still clear the
+ * hurdle.
+ *
+ * ⚠⚠ THIS IS NOT THE EGM AND THE ⓘ IT SITS IN SAYS SO. The return above solves price → return;
+ * this solves required return → price. `h` is the ONLY input in this file that describes the
+ * READER rather than the company, and it appears in no other expression here — which is exactly
+ * why the panel was showing a hurdle-rate box whose effect nobody could find.
+ *
+ * ⚠ THE COMPOUNDER IS THE SAME ONE THE RETURN USES, written out rather than passed as a scalar:
+ * a reader moving between the two ⓘs has to be able to see that `(1+g)(1+y)` is one quantity used
+ * twice, or the two models look like they disagree about growth.
+ */
+export function workedMaxPE(exitPE: number | null | undefined, g: number, y: number,
+  hurdle: number, years: number, result: number | null | undefined): string {
+  if (!ok(exitPE) || !ok(result) || !ok(hurdle)) return '';
+  return withWorked(
+    String.raw`PE_{\text{exit}}\left(\dfrac{(1+g)(1+y)}{1+h}\right)^{n}`,
+    String.raw`${subNum(exitPE, 2)}\left(\dfrac{(1+${subNum(g, 4)})(1+${subNum(y, 4)})}`
+    + String.raw`{1+${subNum(hurdle, 4)}}\right)^{${years}} = ${subNum(result, 2)}`);
+}
+
+/**
+ * `EPS_FY1 · PE_max` — the price that multiple implies.
+ *
+ * ⚠ NEXT YEAR'S EPS, NOT THE TRAILING ONE, because `PE_max` is built from a FORWARD exit multiple
+ * and the growth that reaches it. Multiplying a forward multiple by a trailing EPS understates the
+ * fair value by one year of growth, which on a compounder is most of the difference the reader
+ * came to see.
+ */
+export function workedFairValue(eps: number | null | undefined,
+  maxPE: number | null | undefined, result: number | null | undefined): string {
+  if (!ok(eps) || !ok(maxPE) || !ok(result)) return '';
+  return withWorked(
+    String.raw`EPS_{\text{FY1}} \times PE_{\max}`,
+    `${subNum(eps, 2)} \times ${subNum(maxPE, 2)} = ${subNum(result, 2)}`);
+}
+
+/**
  * `OCF_est − |C|` — next year's free cash flow, derived.
  *
  * ⚠ THE BARS ARE NOT DECORATION. The vendor files capex NEGATIVE; without the magnitude this

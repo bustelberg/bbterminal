@@ -46,6 +46,11 @@ HOW IT WORKS — NO NEW CACHING SEMANTICS
 """
 from __future__ import annotations
 
+import json
+import logging
+
+from common import read_cache
+
 # ⚠ `deps.supabase` IS RESOLVED AT CALL TIME, NOT BOUND AT IMPORT. `from deps import
 # supabase` captures the object once, so a test (or anything else) that swaps
 # `deps.supabase` afterwards cannot reach this module — and because this module is a
@@ -54,6 +59,8 @@ from __future__ import annotations
 # went red with `KeyError: 'SUPABASE_URL'` (the real proxy trying to build a client).
 # Going through the module keeps one patch point for the whole app.
 import deps
+
+log = logging.getLogger(__name__)
 
 # The union of every column any reader asks for. Adding one here is cheap (the row count is tiny);
 # adding a NEW query shape elsewhere is what costs a round trip.
@@ -92,8 +99,72 @@ def _paged(table: str, cols: str, order_by: tuple[str, ...]) -> list[dict]:
     `column airs_model_weight.id does not exist` the first time this ran. A partial key is worse
     than a wrong one — it fails silently at a page boundary instead of loudly at the first query.
     """
+    key = ("airs_ref", table, cols, order_by)
+    # ⚠⚠ ONLY INSIDE A DECLARED-EXPENSIVE UNIT OF WORK. `read_cache.active()` is opened by exactly
+    # four callers — the Analyse modal, the ad-hoc basket, the /portfolios overview and the
+    # benchmark index build — and they are the ones with enough reads for this to pay. Consulting
+    # the leg store costs a FINGERPRINT, which is one `pg_stat_user_tables` COPY (167ms locally,
+    # one round trip in production) cached for 2s. At a dozen saved round trips that is a large
+    # win; on an endpoint that reads one of these tables once it would be a small LOSS, and
+    # applying it everywhere would have been an optimisation that slowed the cheap paths down.
+    #
+    # ⚠ AND A WRITER OPTS OUT. The fingerprint is re-read at most every 2 seconds, so a unit of
+    # work that writes one of these tables and reads it again could be handed a snapshot from
+    # before its own write — see `read_cache.wrote`.
+    if read_cache.active() is None or read_cache.wrote():
+        return _paged_uncached(table, cols, order_by)
+
+    from routers._analysis_cache import leg  # noqa: PLC0415  (cycle at module level)
+
+    blob = leg(key, lambda: _snapshot(table, cols, order_by))
+    if blob is None:
+        # ⚠ A TABLE THAT WILL NOT SERIALISE IS SERVED FROM THE DATABASE, NOT GUESSED AT. See
+        # `_snapshot`: the fallback is correctness, and it costs a round trip nobody notices.
+        return _paged_uncached(table, cols, order_by)
+    # ⚠⚠ PARSED FRESH FOR EVERY CALLER, WHICH IS WHAT KEEPS THIS MODULE'S ORIGINAL PROMISE. The
+    # note at the top of this file rejected caching PARSED LISTS precisely because the per-request
+    # memo stores the HTTP RESPONSE, which postgrest turns into fresh dicts for every caller — so a
+    # module that mutates a row it got back cannot corrupt the next module's copy, and "caching
+    # parsed lists here would have quietly introduced exactly that hazard for 982 shared dicts".
+    # That reasoning is still correct, so this does not cache a parsed list: it caches the SNAPSHOT
+    # AS TEXT and parses it per call, which is the same shape of guarantee by the same mechanism.
+    #
+    # ⚠⚠ A STRING CANNOT BE DECORATED, and that is the point of choosing it over a deep copy. The
+    # leg store's standing rule is "read, do not decorate" — a rule a future caller has to remember.
+    # Here there is nothing to remember: the cached object is immutable, so the hazard is not
+    # guarded against, it is absent.
+    #
+    # ⚠ AND IT IS THE FASTER OF THE TWO, measured against the deep copy it replaced (20 runs):
+    # `airs_model_portfolio` 0.58ms -> 0.16ms, `airs_model_portfolio_position` 4.69 -> 0.98,
+    # `airs_mutatie` 3.74 -> 1.16. Over the 31 `_paged` calls a warm Analyse request makes, that is
+    # ~46ms of deep copying against ~13ms of parsing.
+    return json.loads(blob)
+
+
+def _snapshot(table: str, cols: str, order_by: tuple[str, ...]) -> str | None:
+    """The table as JSON TEXT, or None if it will not round-trip.
+
+    ⚠⚠ NO `default=` ON `dumps`, DELIBERATELY. A `default=str` would quietly turn anything the
+    encoder does not recognise into its repr — a `Decimal` into `"12.5"`, a `date` into
+    `"2026-09-01"` — and the cached snapshot would then differ in TYPE from what the database
+    hands back, on some rows, only once a column changed type. That is a corruption that looks
+    like data. Without it the encoder RAISES, and the caller falls back to reading the table.
+    Verified at the time of writing: all four tables round-trip exactly (`json.loads(json.dumps(r))
+    == r`), which is expected — postgrest has already decoded them from JSON.
+    """
+    rows = _paged_uncached(table, cols, order_by)
+    try:
+        return json.dumps(rows)
+    except (TypeError, ValueError):
+        log.warning("[airs_ref] %s will not serialise — serving it uncached", table)
+        return None
+
+
+def _paged_uncached(table: str, cols: str, order_by: tuple[str, ...]) -> list[dict]:
+    """The read itself. Split out so the cached path above has something to call on a miss."""
     out: list[dict] = []
     off = 0
+    widest = 0
     while True:
         q = deps.supabase.table(table).select(cols)
         for col in order_by:
@@ -103,6 +174,26 @@ def _paged(table: str, cols: str, order_by: tuple[str, ...]) -> list[dict]:
             break
         out += rows
         off += len(rows)
+        # ⚠⚠ THE LAST PAGE COSTS A ROUND TRIP THAT PROVES NOTHING, AND THIS IS HOW TO SKIP IT
+        # WITHOUT MAKING THE ASSUMPTION THAT IS BANNED. The rule everywhere in this codebase is
+        # "advance by what came back, break on an EMPTY page" — because `len(rows) < page` assumes
+        # the server cap is at least `page`, which is exactly the assumption that failed and cost
+        # us a silently short read. So every paged read ends with one request that returns zero
+        # rows: measured on the Analyse modal, `airs_model_portfolio_position` (1,016 rows) took
+        # three trips for two pages of data, and `airs_mutatie` (1,082) the same.
+        #
+        # `widest` removes it by MEASURING the cap instead of assuming it. Once the server has
+        # handed back a page of `widest` rows, it has demonstrated it will return that many — so a
+        # later page of fewer than `widest` means it ran out of ROWS, not that it hit a cap, and
+        # there is nothing after it. A short FIRST page still proves nothing (it could be the cap),
+        # so that case asks again exactly as before.
+        #
+        # ⚠ STRICTLY STRONGER THAN THE OLD RULE, NEVER WEAKER: with a cap below `_PAGE` every page
+        # comes back the same size and this never fires, which is the environment the rule was
+        # written for.
+        if 0 < len(rows) < widest:
+            break
+        widest = max(widest, len(rows))
     return out
 
 

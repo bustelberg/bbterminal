@@ -659,11 +659,7 @@ def _roster_verdicts() -> dict[str, dict]:
 
 # The tables a "delete this account" clears, and the ONLY ones it touches.
 #
-# ⚠ `airs_crm_relatie` IS DELIBERATELY ABSENT. It is keyed on `portefeuille` too, but it is a CRM
-# record about a RELATION — a client — not a scraped report, and no refresh recreates it. Deleting
-# it here would quietly destroy data this button cannot restore.
-#
-# ⚠ SO IS `airs_account_hidden`. That row is a human DECISION to keep an account off the list;
+# ⚠ `airs_account_hidden` IS DELIBERATELY ABSENT. That row is a human DECISION to keep an account off the list;
 # clearing it would resurrect an account somebody deliberately hid, as a side effect of a refresh
 # test.
 _DELETABLE_TABLES = (
@@ -1353,14 +1349,12 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
                               if res["errors"] else "")))
             _STATUS["message"] = f"{i}/{len(names)} done: {name}"
 
-        # ⚠ THIS JOB DOES NOT TOUCH CRM. It used to also download CRM → Relaties → Alle
-        # relaties inline, which is a different report about different objects (relations, not
-        # portfolios) and already has its own daily job at 11:00
-        # (`airs_crm.run_crm_relaties_refresh_sync`, wired in `scheduler._fire_crm_relaties`).
-        # Running it here meant a second scrape of the same export every time anyone refreshed
-        # the holdings, and — worse — a CRM failure was appended to THIS job's `errors` and
-        # counted in its "N report(s) failed", so a portfolio refresh reported a fault in a
-        # report it was never asked to fetch.
+        # ⚠ ONE JOB, ONE SUBJECT — and the lesson outlived the case that taught it. This used to
+        # download the CRM "Alle relaties" export inline as well: a different report about
+        # different objects (relations, not portfolios), so a CRM failure was appended to THIS
+        # job'''s `errors` and counted in its "N report(s) failed" — a portfolio refresh reporting a
+        # fault in a report nobody asked it to fetch. The CRM feature was retired entirely on
+        # 2026-09-01; the rule against folding a second subject into this loop was not.
         total = len(todo)
         # ⚠ NOTHING TO DO IS A SUCCESS, NOT AN EMPTY FAILURE. `any_stored` alone would call a
         # fleet that is entirely up to date an "error" — the same vacuous-zero trap as a benchmark

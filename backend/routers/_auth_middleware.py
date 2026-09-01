@@ -104,9 +104,6 @@ _USER_READ_PREFIXES: tuple[str, ...] = (
 # CANNOT QUIETLY RE-EXPOSE THEM. `/api/airs/scan` is a GET only because it streams (SSE); it drives
 # a live Playwright scrape of AirSPMS — minutes of work against a third-party system that
 # rate-limits and can lock the shared login out. Method is the wrong test for it.
-# `/api/airs/crm-relaties` IS a genuine read, of CLIENT RELATIONSHIP records — a different subject
-# from the portfolios this page is about, and it belongs to the admin-only /airs-portfolio page.
-#
 # ⚠ THE SSE SCANS ARE STILL DENIED, BUT THEIR *JOB* TWINS ARE NOT — see `_USER_REFRESH_PATTERNS`.
 # The scrape a non-admin may start is the one the Management Dashboard starts: a background job
 # with a handle, a progress toast and a Cancel. The raw SSE forms belong to the admin-only
@@ -115,7 +112,6 @@ _USER_READ_PREFIXES: tuple[str, ...] = (
 # PREFIX it also swallowed `/api/airs/model-portfolios/scan/job`, which is the Dashboard's.
 _ADMIN_ONLY_PREFIXES: tuple[str, ...] = (
     "/api/airs/scan",
-    "/api/airs/crm-relaties",
 )
 
 # ⚠ THE SAME DENY, BY PATTERN, BECAUSE THE ID SITS IN THE MIDDLE OF THE PATH. A prefix here can
@@ -367,8 +363,7 @@ async def enforce_api_auth(
 
     # Non-admin: only the allowed surface.
     # ⚠ THE DENY IS FIRST. It covers endpoints that sit inside a user-readable prefix but are not
-    # reads (the SSE scrapes) or not this page's subject (CRM), so it must not be reachable by
-    # widening a prefix above.
+    # reads — the SSE scrapes — so it must not be reachable by widening a prefix above.
     if _starts_with_any(path, _ADMIN_ONLY_PREFIXES) or _is_admin_only_pattern(path):
         allowed = False
     elif request.method in _WRITE_METHODS:

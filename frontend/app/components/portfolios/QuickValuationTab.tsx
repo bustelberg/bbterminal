@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip,
   XAxis, YAxis,
@@ -25,6 +25,12 @@ import {
   addYears, BASIS, cagrBetween, cagrOf, compoundFrom, latestDateOf, priceTarget, priceVsMetric,
   PRICE_CODES, rebase, yearsBetween, yieldOf, type Basis, type MetricRow,
 } from './quickValuation';
+import { runSSE } from '../../../lib/stream';
+import { invalidateReadCache } from '../../../lib/readCache';
+import { cancelJob, jobsStore, startLocalJob } from '../../../lib/stores/jobs';
+// `2026-07-24` reads as a database key; a toast is read by a person. Shared with the Deep
+// Valuation tab, whose forward-P/E button reports the same date the same way.
+import { onDate } from './asOfLine';
 
 /**
  * The "Quick Valuation" tab: a company's SHARE PRICE against its FREE CASH FLOW PER SHARE over the
@@ -95,32 +101,118 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     { isin: string; currency: string; data: LatestClose | null } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
+  /**
+   * The GuruFocus company behind this ISIN — already on the wire, previously discarded.
+   *
+   * ⚠ `/by-isin/{isin}/metrics` answers `{company_id, company_name, currency, metrics}` and this
+   * tab kept only two of the four. Everything GuruFocus files is keyed by `company_id`, so
+   * refreshing any of it looked like it needed a second lookup. It does not.
+   */
+  const [companyId, setCompanyId] = useState<number | null>(null);
+  /** ⚠ ITS OWN HANDLE, so this button's spinner and Cancel cannot be driven by another job. */
+  const [peJobId, setPeJobId] = useState<string | null>(null);
+  /**
+   * The newest forward-P/E observation date the last `load` saw — what the toast reports.
+   *
+   * ⚠⚠ A REF, NOT STATE, BECAUSE THE REFRESH READS IT IMMEDIATELY AFTER AWAITING `load`. State set
+   * inside that call is not visible in the same tick, so a `useState` here would always hold the
+   * PREVIOUS date and the toast would say "unchanged" on the one run that actually moved it.
+   */
+  const fwdDateRef = useRef<string | null>(null);
+  const jobs = jobsStore.use((st) => st.jobs);
+  const peJob = peJobId == null ? null : jobs.find((jb) => jb.id === peJobId) ?? null;
+  const peRefreshing = peJob?.status === 'running';
+  const peCancelling = peRefreshing && peJob.cancelRequested;
+
+  /**
+   * Read this company's metrics. ⚠ EXTRACTED SO THE ↻ CAN RE-RUN IT — the chart's forward series is
+   * a `useMemo` over `metrics`, so replacing that array is what redraws the line. Nothing else in
+   * the tab needs to know a refresh happened.
+   *
+   * ⚠ `blank` IS FALSE ON A REFRESH. Clearing the metrics first would blank the whole tab for the
+   * length of the round trip, on a press whose entire purpose is to move ONE line.
+   */
+  const load = useCallback(async (blank: boolean, signal?: AbortSignal) => {
+    // ⚠ CURRENCY IS CLEARED WITH THE METRICS. It gates the live-price fetch below; left behind
+    // from the previous company it would convert this one's close at that one's currency.
+    if (blank) { setMetrics(null); setCurrency(null); setLiveRes(null); }
+    setErr(null);
+    const r = await apiFetch(
+      `${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin)}/metrics?cadence=annual`,
+      { signal });
+    if (r.status === 404) { setMetrics([]); return; }
+    const b = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
+    // ⚠ A CANCELLED RUN MUST NOT WRITE. A cacheable read is SHARED, so aborting one caller does not
+    // stop the request; without this the tab repaints from a refresh the reader already stopped.
+    if (signal?.aborted) return;
+    const rows = (b?.metrics ?? []) as MetricRow[];
+    setMetrics(rows);
+    setCurrency(b?.currency ?? null);
+    setCompanyId(typeof b?.company_id === 'number' ? b.company_id : null);
+    // ⚠ THE SAME BUILDER THE CHART USES, on the same rows, so the toast's date and the As-of tile
+    // can never name different points. Read here rather than off `forwardHistory`, which is a memo
+    // computed during the NEXT render and therefore still the old series at this line.
+    const fwd = forwardSeries(rows);
+    fwdDateRef.current = fwd.length
+      ? new Date(fwd[fwd.length - 1].t).toISOString().slice(0, 10) : null;
+  }, [isin]);
+
+  /**
+   * Ask GuruFocus for this company's forward-P/E series again, then redraw the chart.
+   *
+   * ⚠⚠ THE STREAM RETURNS A LOG, NOT A SERIES, SO THE CACHE MUST BE DROPPED BETWEEN THE WRITE AND
+   * THE RE-READ. The metrics payload is on `readCache`'s allowlist with a ten-minute TTL — without
+   * `invalidateReadCache` the re-request is answered from memory with the series we just replaced,
+   * the toast goes green and the line does not move, which is indistinguishable from a failed
+   * fetch. The share-price button one tab over carries the same warning for the same reason.
+   *
+   * ⚠ `indicators` ALONE, AND `force=true`. One vendor call for the one series this button is
+   * under; `refresh-all` is five and would move three other things nobody asked about. Unforced
+   * skips a source GuruFocus already answered today — exactly the case somebody presses this in.
+   */
+  const refreshForwardPE = useCallback(() => {
+    if (companyId == null) return;
+    setPeJobId(startLocalJob(
+      `${name ?? isin} — forward P/E`, 'quickval.forwardpe',
+      async (signal) => {
+        // ⚠ THE STREAM'S LINES ARE DISCARDED ON PURPOSE — they are the fetcher's own log
+        // ("forward_pe_ratio: calling …"), noise in a one-line toast, and they say nothing about
+        // whether the SERIES moved, which is the only question this button is pressed to answer.
+        await runSSE(`${API_URL}/api/earnings/${companyId}/refresh/indicators?force=true`,
+          { method: 'POST' }, () => {}, signal);
+        if (signal.aborted) return 'cancelled';
+        const before = fwdDateRef.current;
+        invalidateReadCache('refreshed the forward P/E on Quick Valuation');
+        await load(false, signal);
+        const after = fwdDateRef.current;
+        // ⚠⚠ THE TOAST REPORTS THE DATE, NOT "done". The twin of this button on the Deep Valuation
+        // tab shipped saying "re-read" whatever happened, and the first thing it produced was a bug
+        // report — "I refreshed it but it's still old" — because a green toast over an unmoved date
+        // is indistinguishable from a fetch that failed. GuruFocus publishes this with a multi-week
+        // lag, so "nothing newer" is the COMMON and CORRECT outcome and has to be sayable.
+        if (after == null) return 'GuruFocus returned no forward P/E for this company';
+        return after !== before
+          ? `forward P/E now ${onDate(after)}`
+          : `still ${onDate(after)} — GuruFocus has nothing newer`;
+      }));
+  }, [companyId, name, isin, load]);
 
   useEffect(() => {
     let alive = true;
     void (async () => {
-      // ⚠ CURRENCY IS CLEARED WITH THE METRICS. It gates the live-price fetch below; left behind
-      // from the previous company it would convert this one's close at that one's currency.
-      setMetrics(null); setCurrency(null); setLiveRes(null); setErr(null);
       try {
         // ⚠ `?cadence=annual` IS SPELT OUT ONLY SO THIS SHARES THE LONG EQUITY TAB'S PAYLOAD. It is
         // the server's default (`cadence != "quarterly"` runs the identical loader), so the URL is
         // a no-op on the wire — but the read cache keys on the URL, and the tab a reader lands on
         // asks for it explicitly. Same request, same key, no second 12,000-row download.
-        const r = await apiFetch(
-          `${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin)}/metrics?cadence=annual`);
-        if (r.status === 404) { if (alive) setMetrics([]); return; }
-        const b = await r.json().catch(() => null);
-        if (!alive) return;
-        if (!r.ok) { setErr(b?.detail ?? `HTTP ${r.status}`); return; }
-        setMetrics((b?.metrics ?? []) as MetricRow[]);
-        setCurrency(b?.currency ?? null);
+        await load(true);
       } catch (e) {
         if (alive) setErr(e instanceof Error ? e.message : String(e));
       }
     })();
     return () => { alive = false; };
-  }, [isin]);
+  }, [isin, load]);
 
   /**
    * Today's close, in the currency the fiscal rows are filed in.
@@ -898,7 +990,10 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         drill-down modal, so it cannot disagree with the charts above about what the company earned. */}
     <MultipleHistoryChart height={CHART_HEIGHT} basis={b} currency={currency}
       forward={forwardHistory} fromYear={MULTIPLE_FROM_YEAR}
-      name={name} isin={isin} />
+      name={name} isin={isin}
+      onRefresh={refreshForwardPE} canRefresh={companyId != null}
+      refreshing={peRefreshing} cancelling={peCancelling}
+      onCancel={() => { if (peJobId) void cancelJob(peJobId); }} />
 
     {/* Top-right, but LAST IN THE DOM — see the grid note above. The only non-chart card, so it
         fills a cell sized by the chart beside it: a flex column with its CAGR footer pinned to the

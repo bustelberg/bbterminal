@@ -24,6 +24,7 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import { useRiskCopy } from './riskCopy';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf } from './asOfLine';
 import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
@@ -43,31 +44,15 @@ const FREQS = [
 const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
 
 /**
- * EVERY SYMBOL THIS VIEW USES, DEFINED ONCE.
+ * ⚠⚠ THE SYMBOLS MOVED TO `riskCopy.te.legend` (2026-09-01) — DEFINED ONCE, NOW IN TWO LANGUAGES.
+ * Four cards share `aₜ`, `T` and `f`, and written per tile the definitions drift on the first edit:
+ * a view where `T` means "paired periods" in one tooltip and "observations" in the next has taught
+ * the reader that the symbol is decorative. That argument is unchanged; what changed is that the
+ * one place is now the copy module, so a Dutch reader gets the definition rather than the digits.
  *
- * ⚠⚠ FOUR CARDS SHARE `aₜ`, `T` AND `f`. Written out per tile, the definitions drift on the first
- * edit — and a view where `T` means "paired periods" in one tooltip and "observations" in the next
- * has taught the reader that the symbol is decorative. One variable, one sentence, four cards.
- *
- * ⚠ THE "the answer:" PREFIX MARKS THE SYMBOL THE TILE ACTUALLY PRINTS, so a reader scanning a
- * six-row legend can find the one that is the number in front of them.
+ * ⚠ THE "the answer:" PREFIX IS PART OF THE TRANSLATED STRING (`teAnswer`, `IR`), not glued on
+ * here — concatenated at the call site the Dutch card would read "the answer: het antwoord".
  */
-const LEGEND = {
-  a: 'the active return in period t — what the sleeve did that period, minus what the tracker did',
-  R: (bookName: string, bench: string | null | undefined) =>
-    `${v(bookName)}'s and ${v(bench)}'s own returns in that period, both in EUR`,
-  aBar: 'the mean active return over the window — the band above is centred on it, not on zero',
-  T: (n: number | null | undefined) =>
-    `the number of paired periods (${v(n)} here) — the intersection of the two calendars`,
-  f: (n: number | null | undefined) => `periods per year (${v(n)}), the annualisation factor`,
-  te: 'one standard deviation of the active return, per year',
-  // ⚠ THE PRODUCT IS THE POINT OF THIS TILE, and it is what separates it from the mean the TE card
-  // uses: chaining the periods answers what the gap actually grew to, averaging them does not.
-  prod: 'the periods CHAINED, not averaged — this is what the gap compounded to, which is why it '
-    + 'sits slightly below the arithmetic mean the band on the tracking-error tile is centred on',
-  Ra: 'the active return from the tile beside this one, annualised',
-  IR: 'the answer: active return per unit of the tracking error taken to earn it',
-};
 
 function Tile({ label, value, tone, info }: {
   label: string; value: string; tone?: string; info?: React.ReactNode;
@@ -167,6 +152,7 @@ export default function TrackingErrorView({
    * WEIGHTS are today's book at its own AIRS valuation date. The card used to say "trailing window
    * — the sleeve as it stands today, carried backwards", which asserted both and dated neither.
    */
+  const t = useRiskCopy();
   const when = data?.available
     ? `Returns: ${v(data.window_from ?? 'no recorded start')} to `
       + `${v(data.window_to ?? 'no recorded end')} (${v(data.observations)} periods)\n`
@@ -178,32 +164,29 @@ export default function TrackingErrorView({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] text-fg-faint">Measured</span>
+        <span className="text-[11px] text-fg-faint">{t.common.measured}</span>
         {FREQS.map((x) => (
           <button key={x.key} type="button" onClick={() => setFreq(x.key)}
-            title={x.key === 'daily'
-              ? 'f = 252. ⚠ The tracker closes at 16:30 London and a US holding at 21:00, so daily '
-                + 'closes are not synchronous — which lowers the measured covariance and INFLATES '
-                + 'the tracking error.'
-              : `f = ${x.f} observations per year.`}
+            title={x.key === 'daily' ? `f = ${x.f}. ${t.common.dailyNote}`
+              : t.common.freqNote(x.f)}
             className={`cursor-pointer rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
               freq === x.key ? 'bg-accent-600 text-white border-transparent'
                 : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300'}`}>
-            {x.label}
+            {t.common[x.key]}
           </button>
         ))}
       </div>
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
-      {!data && !error && <p className="text-xs text-fg-subtle">Computing tracking error…</p>}
+      {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing}</p>}
       {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
 
       {data?.available && (
         <>
           <div className="flex flex-wrap gap-2">
-            <Tile label="Tracking error (realised)" value={pct2(data.tracking_error_pct)}
+            <Tile label={t.te.trackingError} value={pct2(data.tracking_error_pct)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="How much the book's return has diverged from the benchmark's, annualised."
+                what={t.te.cards.te.what}
                 where={where}
                 when={when}
                 worked={data.tracking_error_pct == null ? '' : withWorked(
@@ -216,31 +199,22 @@ export default function TrackingErrorView({
                   // one aligned display rather than as a formula with a sentence stuck under it.
                   + (band ? String.raw` \\[4pt] ` + workedBand(band) : ''))}
                 legend={[
-                  { sym: String.raw`a_t`, is: LEGEND.a },
-                  { sym: String.raw`R_t^{\,p},\; R_t^{\,b}`, is: LEGEND.R(portfolioName, data.benchmark) },
-                  { sym: String.raw`\bar{a}`, is: LEGEND.aBar },
-                  { sym: 'T', is: LEGEND.T(data.observations) },
-                  { sym: 'f', is: LEGEND.f(data.periods_per_year) },
-                  { sym: String.raw`TE`, is: `the answer: ${LEGEND.te}` },
+                  { sym: String.raw`a_t`, is: t.te.legend.a },
+                  { sym: String.raw`R_t^{\,p},\; R_t^{\,b}`, is: t.te.legend.R(portfolioName, data.benchmark) },
+                  { sym: String.raw`\bar{a}`, is: t.te.legend.aBar },
+                  { sym: 'T', is: t.te.legend.T(data.observations) },
+                  { sym: 'f', is: t.te.legend.f(data.periods_per_year) },
+                  { sym: String.raw`TE`, is: t.te.legend.teAnswer },
                 ]}
                 how={(band
-                  ? `A typical year lands ā ± TE — between ${v(subPct2(band.lo))} and `
-                    + `${v(subPct2(band.hi))} against ${v(data.benchmark)}, centred on the mean active `
-                    + `return of ${v(subPct2(band.centre))} and NOT on zero. About two years in `
-                    + 'three; active returns are fatter-tailed than normal, so read it as a scale '
-                    + 'rather than a promise. ⚠ THE CENTRE IS THE ARITHMETIC mean annualised, so '
-                    + 'it sits a little above the geometric Active return tile beside it — the gap '
-                    + 'is roughly TE²/2, and a ±σ band is only coherent around the arithmetic one. '
-                  : '')
-                  + '⚠ REALISED (ex-post), not the ex-ante forecast from a covariance matrix — '
-                  + 'those are different numbers and routinely disagree. ā IS subtracted and the '
-                  + 'divisor is T−1 (Bessel); some providers do neither — that version is '
-                  + 'symmetric about the benchmark, and larger.'} />} />} />
-            <Tile label="Active return (ann.)"
+                  ? `${t.te.bandReading(subPct2(band.lo), subPct2(band.hi),
+                    subPct2(band.centre), data.benchmark)} `
+                  : '') + t.te.cards.te.how} />} />} />
+            <Tile label={t.te.activeReturn}
               value={pct2(data.active_return_ann_pct)}
               tone={(data.active_return_ann_pct ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300'}
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="What the sleeve earned above or below the benchmark, per year."
+                what={t.te.cards.activeReturn.what}
                 where={where}
                 when={when}
                 worked={data.active_return_ann_pct == null ? '' : withWorked(
@@ -248,19 +222,17 @@ export default function TrackingErrorView({
                   String.raw`T = ${data.observations},\; f = ${data.periods_per_year}`
                   + String.raw` \;\Rightarrow\; ${subNum(data.active_return_ann_pct, 2)}\%`)}
                 legend={[
-                  { sym: String.raw`a_t`, is: LEGEND.a },
-                  { sym: String.raw`\prod_t`, is: LEGEND.prod },
-                  { sym: 'T', is: LEGEND.T(data.observations) },
-                  { sym: 'f', is: LEGEND.f(data.periods_per_year) },
+                  { sym: String.raw`a_t`, is: t.te.legend.a },
+                  { sym: String.raw`\prod_t`, is: t.te.legend.prod },
+                  { sym: 'T', is: t.te.legend.T(data.observations) },
+                  { sym: 'f', is: t.te.legend.f(data.periods_per_year) },
                 ]}
-                how={'⚠ THIS IS THE QUANTITY THE TILE BESIDE IT MEASURES THE VOLATILITY OF. They '
-                  + 'are constantly confused: a book can wander a long way from its index and end '
-                  + 'up exactly level, which is a large tracking error and no active return.'} />} />} />
-            <Tile label="Information ratio"
+                how={t.te.cards.activeReturn.how} />} />} />
+            <Tile label={t.te.infoRatio}
               value={data.information_ratio == null ? '—' : data.information_ratio.toFixed(2)}
               tone={(data.information_ratio ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300'}
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="Active return per unit of tracking error."
+                what={t.te.cards.infoRatio.what}
                 where={where}
                 when={when}
                 worked={data.information_ratio == null || data.tracking_error_pct == null ? ''
@@ -270,20 +242,17 @@ export default function TrackingErrorView({
                     + String.raw`{${subNum(data.tracking_error_pct, 2)}\%}`
                     + ` = ${data.information_ratio.toFixed(2)}`)}
                 legend={[
-                  { sym: 'R_a', is: LEGEND.Ra },
-                  { sym: String.raw`TE`, is: LEGEND.te },
-                  { sym: String.raw`IR`, is: LEGEND.IR },
+                  { sym: 'R_a', is: t.te.legend.Ra },
+                  { sym: String.raw`TE`, is: t.te.legend.te },
+                  { sym: String.raw`IR`, is: t.te.legend.IR },
                 ]}
-                how={'Whether the divergence was worth taking. ⚠ A dash means the tracking error '
-                  + 'is ~0 — there is no risk to divide by, not that the ratio is zero.'} />} />} />
-            <Tile label="Observations" value={`${data.observations}`} tone="text-fg-muted"
+                how={t.te.cards.infoRatio.how} />} />} />
+            <Tile label={t.te.observations} value={`${data.observations}`} tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={`The T in the formula — ${v(data.frequency)} periods both series had.`}
+                what={t.te.observationsWhat(data.frequency)}
                 where={where}
                 when={when}
-                how={'A Stockholm listing and a London-traded tracker do not share holidays; '
-                  + 'zipping them offsets the two series from the first mismatch onward and '
-                  + 'produces a plausible figure measured against the wrong days.'} />} />} />
+                how={t.te.cards.observations.how} />} />} />
           </div>
 
           {data.cadence_note && (
