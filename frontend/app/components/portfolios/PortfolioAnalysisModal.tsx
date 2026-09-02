@@ -204,6 +204,47 @@ const AXIS_TICKS = [0, 25, 50, 75, 100];
 
 type Band = NonNullable<ModelPortfolioAnalysis['bands']>[number];
 
+/**
+ * One policy bound on an allocation track: a triangle above the bar, pointing down at the position
+ * it marks. Replaced the full-height stripes (2026-09-02, on request).
+ *
+ * ⚠ IT SITS IN THE TRACK'S TOP GAP, NOT OVER THE RIBBON. The measure is inset 10px inside a 36px
+ * track, so a 5-6px mark at `top-[2px]` lands in space the bar never occupies — nothing is drawn
+ * over the class colour, and the mark cannot be mistaken for part of the bar. That also retires
+ * the old ordering rule: the stripes had to be drawn in a particular sequence because the target
+ * one CROSSED the measure, and a triangle above it never does.
+ *
+ * ⚠⚠ CLAMPED SO IT IS NEVER HALF A TRIANGLE. The track is `overflow-hidden` and a mark centred on
+ * its position loses half itself at 0% and 100% — and a max of exactly 100% is an ordinary band
+ * (the Offensief stocks policy is 70–100). `clamp` pins the whole shape inside the track at both
+ * ends; it shifts by at most half its width, which is invisible against a bound drawn at the
+ * track's own edge.
+ *
+ * ⚠ WHOLE-PIXEL WIDTHS AND OFFSETS, the same rule the composition tick records: an even width with
+ * a half-pixel centre lands the shape between device pixels and it renders soft and off-centre.
+ *
+ * ⚠⚠ `clip-path`, NOT THE BORDER TRICK. A CSS triangle made of borders needs `border-x-[4px]` for
+ * the width AND `border-x-transparent` for the colour on the SAME utility, and which one Tailwind
+ * applies is inferred from the value's shape — a fragile way to draw something whose failure mode
+ * is an invisible mark on a chart nobody is checking. Clipping a plain box keeps the colour on a
+ * real `bg-*` token and the size in explicit pixels, so what renders is what is written.
+ */
+function BandMark({ pct, target = false }: { pct: number; target?: boolean }) {
+  const w = target ? 10 : 8;
+  const h = target ? 6 : 5;
+  return (
+    <span aria-hidden
+      className={`absolute top-[2px] pointer-events-none ${
+        target ? 'bg-neutral-800/85' : 'bg-neutral-500/70'}`}
+      style={{
+        width: w, height: h,
+        // Apex at the bottom centre, base along the top — it points DOWN at the bar below it.
+        clipPath: 'polygon(50% 100%, 0 0, 100% 0)',
+        left: `clamp(0px, calc(${pct}% - ${w / 2}px), calc(100% - ${w}px))`,
+      }} />
+  );
+}
+
 function AllocationBars({ slices, selected, onSelect, variant, bands, soldContribution }: {
   slices: AllocSlice[];
   /** ⚠ The year's contribution from positions SOLD OUT during it. They have no asset class, so no
@@ -362,47 +403,43 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
                   <span key={t} className="absolute inset-y-0 w-px bg-neutral-700/30"
                     style={{ left: `${t}%` }} />
                 ))}
-                {/* ⚠ THE POLICY IS THREE STRIPES — min, target, max — AND NO FILL. The band used to
-                    be drawn as a translucent block spanning min→max with caps at its edges; at one
-                    stripe per bound the same information reads at a glance and nothing is shaded
-                    over the class colour. What the fill added was the SPAN as an area, which the
-                    two outer stripes already delimit; what it cost was a second grey wash behind
-                    every bar. (The target stripe is drawn after the measure, further down, because
-                    it has to cross it.) */}
-                {/* ⚠ THE BOUNDS ARE ALWAYS GREY — they never recolour on a breach. A limit is a
+                {/* ⚠⚠ THE POLICY IS THREE TRIANGLES — min, target, max — HOVERING ABOVE THE BAR
+                    (2026-09-02, on request). They were full-height stripes running through the
+                    track, and before that a translucent min→max block. Each step removed something
+                    drawn OVER the class colour: the block was a grey wash behind every bar, the
+                    stripes crossed the measure. A mark in the track's own headroom points at the
+                    position without touching the thing being measured.
+                    ⚠ ALL THREE ARE DRAWN TOGETHER NOW. The target stripe used to be emitted after
+                    the measure, further down, precisely so it would cross it — a triangle above
+                    the bar never overlaps, so the ordering rule that forced them apart is gone and
+                    the three marks are declared in one place.
+                    ⚠ THE TARGET IS THE BIGGER, DARKER ONE — same distinction the stripes carried
+                    (a pixel wider, `neutral-800/85` against `neutral-500/70`), so the middle mark
+                    is never confused with a bound.
+                    ⚠ THE BOUNDS ARE ALWAYS GREY — they never recolour on a breach. A limit is a
                     fixed property of the policy; it does not change because today's weight sits
                     the wrong side of it. Tinting it amber made the CHART report the exception
-                    twice (the bar visibly ends past the stripe already) and made the mark look
-                    like a different mark. The breach is said where a fact about the holding
-                    belongs: the row's percentage, in amber, with the bound named in its tooltip. */}
+                    twice (the bar visibly ends past the mark already) and made the mark look like
+                    a different mark. The breach is said where a fact about the holding belongs:
+                    the row's percentage, in amber, with the bound named in its tooltip. */}
                 {(() => {
                   const b = bandOf.get(s.bucket);
                   if (!b) return null;
                   return (
                     <>
-                      {b.min_pct != null && (
-                        <span className="absolute inset-y-0 w-0.5 pointer-events-none bg-neutral-500/70"
-                          style={{ left: `${b.min_pct}%` }} />
-                      )}
-                      {b.max_pct != null && (
-                        <span className="absolute inset-y-0 w-0.5 pointer-events-none bg-neutral-500/70"
-                          style={{ left: `calc(${b.max_pct}% - 2px)` }} />
-                      )}
+                      {b.min_pct != null && <BandMark pct={b.min_pct} />}
+                      {b.default_pct != null && <BandMark pct={b.default_pct} target />}
+                      {b.max_pct != null && <BandMark pct={b.max_pct} />}
                     </>
                   );
                 })()}
-                {/* The measure: a slim ribbon, centred, so the stripes read above and below it. */}
+                {/* The measure: a slim ribbon, centred, with the policy marks in the headroom
+                    above it. ⚠ THE 10px INSET IS WHAT THE MARKS SIT IN — thickening the ribbon
+                    would eat the space `BandMark` is positioned into and put the triangles back on
+                    top of the bar, which is the thing this arrangement exists to avoid. */}
                 <span className="absolute inset-y-[10px] left-0 rounded-sm"
                   style={{ width: `${Math.min(100, s.pct)}%`, minWidth: 3,
                     background: allocColor(s.bucket) }} />
-                {/* The target — the third stripe, and LAST so it crosses the bar: a target hidden
-                    under the measure is the one comparison this chart exists to make. Darker and a
-                    pixel wider than the two bounds, so the three are never confused. */}
-                {/* ⚠ SAME WHOLE-PIXEL RULE as the composition tick — see its note. */}
-                {bandOf.get(s.bucket)?.default_pct != null && (
-                  <span className="absolute inset-y-0 w-[4px] rounded-sm bg-neutral-800/85 pointer-events-none"
-                    style={{ left: `calc(${bandOf.get(s.bucket)!.default_pct}% - 2px)` }} />
-                )}
               </span>
               {/* Direct value label, in INK — text wears text tokens; the bar beside it carries the
                   colour. TWO decimals, matching the class subtotals in the holdings table below:
