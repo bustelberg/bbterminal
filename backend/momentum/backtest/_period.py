@@ -705,6 +705,7 @@ def compute_sector_etf_period(
     # Rank sectors via stock-aggregate momentum (top half of score_and_select).
     scored_for_sectors = compute_category_scores(
         signals_df, config.signal_weights, config.category_weights,
+        normalization=config.score_normalization,
     )
     sector_scores = aggregate_to_sector(scored_for_sectors)
     # Walk the FULL ranked sector list (not just the top-N) and collect
@@ -943,6 +944,7 @@ def compute_selection_period(
                 config.signal_weights,
                 config.category_weights,
                 signal_defs_for_mode(config.selection_mode),
+                normalization=config.score_normalization,
             )
 
         def _sel(direction: str, *, with_min_score: bool):

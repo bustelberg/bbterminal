@@ -440,6 +440,7 @@ def run_current_portfolio(
         min_price_score=config.min_price_score,
         backfill_below_min_score=config.backfill_below_min_score,
         signal_defs=signal_defs_for_mode(config.selection_mode),
+        normalization=config.score_normalization,
     )
     t_month_start_select_elapsed = time.perf_counter() - t_month_start_select
 
@@ -464,6 +465,7 @@ def run_current_portfolio(
                 signals_df, config.signal_weights,
                 category_weights=config.category_weights,
                 signal_defs=signal_defs_for_mode(config.selection_mode),
+                normalization=config.score_normalization,
             )
             ranked = sector_pool_scores(scored_for_log)
             chosen = set(selected["sector"].tolist())
@@ -599,6 +601,7 @@ def run_current_portfolio(
                 config.signal_weights,
                 config.category_weights,
                 signal_defs_for_mode(config.selection_mode),
+                normalization=config.score_normalization,
             )
             daily_selected = select_from_scored(
                 scored,

@@ -204,7 +204,7 @@ def ingest_run_stamps(job_names: tuple[str, ...], since: "datetime") -> list["da
     """Every `ingest_run.started_at` under these `job_name`s since `since` — or None if it failed.
 
     ⚠⚠ TWO JOBS PROVE THEMSELVES HERE AND NOWHERE ELSE, AND THEY ARE THE TWO THAT MATTER MOST.
-    `daily_pipeline` and `month_end_price_refresh` are declared `records=False` on purpose: they
+    `daily_pipeline` and `daily_price_slice` are declared `records=False` on purpose: they
     already write a detailed `ingest_run` row per phase, and a second `scheduled_job_run` row for
     the same event would be two records free to disagree. So their `scheduled_job_run` history is
     EMPTY BY DESIGN — and a gap scan that consulted only that table would conclude every tick had

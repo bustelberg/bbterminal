@@ -77,18 +77,6 @@ const pct = (v: number | null | undefined) =>
 export default function BookReturnChart({ portfolioId }: { portfolioId: number }) {
   const [data, setData] = useState<BookValueSeries | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  /**
-   * ⚠⚠ ONE POINT A MONTH BY DEFAULT — see `monthEnds`. AIRS publishes a month-end row for every
-   * month of the year and then a row per scrape date once we started scraping, so the recent half
-   * of this line is forty-odd points against the earlier half's six, and the chart reads as two
-   * different things joined in the middle. A month-end series is the same shape at a resolution the
-   * whole span can be drawn at.
-   *
-   * ⚠ EVERY POINT IS STILL ONE CLICK AWAY, and it has to be: the thinning is a choice about
-   * legibility, and the day-to-day movement it hides is real. Nothing is averaged either way —
-   * both views plot observations on their own dates.
-   */
-  const [dense, setDense] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -124,17 +112,31 @@ export default function BookReturnChart({ portfolioId }: { portfolioId: number }
     );
   }
 
-  /**
-   * ⚠⚠ THE ANCHOR SURVIVES THE THINNING, ALWAYS. `lastPerMonth` keeps the LAST point in each
-   * month, and the pinned 0% sits on the FIRST of its own month — so thinning the whole series
-   * drops it and the monthly view starts at January's −1.94% with no baseline on the chart. It is
-   * held out and re-attached; everything after it thins normally.
-   */
   const anchor = all[0];
-  const points = dense ? all : [anchor, ...lastPerMonth(all.slice(1))];
+  /**
+   * ⚠⚠ ONE POINT A MONTH, ALWAYS — see `monthEnds`. AIRS publishes a month-end row for every month
+   * of the year and then a row per scrape date once we started scraping, so the recent half of this
+   * line is forty-odd points against the earlier half's six, and undrawn that way the chart reads
+   * as two different things joined in the middle. A month-end series is the same shape at a
+   * resolution the whole span can be drawn at.
+   *
+   * ⚠⚠ THE "All points" TOGGLE THAT USED TO SIT IN THE HEADER CAME OFF, 2026-09-02 ON REQUEST.
+   * The dense view is therefore gone, not hidden: `dense` state, both button labels and both
+   * tooltips went with it. The day-to-day movement it showed is real and is no longer reachable
+   * from this chart — every point is still on the hover of the month that contains it, and the
+   * Risk panel's own drawdown view is where intra-month movement is the subject.
+   *
+   * ⚠ THE ANCHOR SURVIVES THE THINNING, ALWAYS, AND THAT MATTERS MORE NOW THAT THERE IS NO ESCAPE
+   * HATCH. `lastPerMonth` keeps the LAST point in each month, and the pinned 0% sits on the FIRST
+   * of its own month — so thinning the whole series drops it and the line starts at January's
+   * −1.94% with no baseline on the chart. It is held out and re-attached; everything after it
+   * thins normally.
+   */
+  const points = [anchor, ...lastPerMonth(all.slice(1))];
 
-  // ⚠ THE HEADLINE AND THE ⓘ'S WINDOW COME FROM `all`, NEVER FROM THE THINNED VIEW. Toggling a
-  // display resolution must not move a reported figure or restate the period it covers.
+  // ⚠ THE HEADLINE AND THE ⓘ'S WINDOW COME FROM `all`, NEVER FROM THE THINNED VIEW. The figure the
+  // header reports is the newest AIRS published, which is usually NOT a month end — reading it off
+  // the thinned series would restate both the number and the period it covers.
   const last = all[all.length - 1];
   const rows = points.map((p) => ({ ...p, t: ts(p.date) }));
   const up = (data.return_pct ?? 0) >= 0;
@@ -157,16 +159,6 @@ export default function BookReturnChart({ portfolioId }: { portfolioId: number }
             the book's value and that date's holding count are on every hover. What the header
             carries now is the one figure this chart exists to state, and a chip the reader has to
             step over to reach it is a cost with no reader. */}
-        {/* ⚠ THE CONTROL NAMES WHAT IT WILL SHOW, not what is showing — a button labelled with the
-            current state reads as a status and gets clicked to "confirm" it. */}
-        <button type="button" onClick={() => setDense((v) => !v)}
-          title={dense
-            ? 'Show one point per month — the last AIRS published in each'
-            : 'Show every date AIRS has published a return for'}
-          className="text-[11px] leading-none px-1.5 py-1 rounded border border-neutral-800/40
-                     text-fg-subtle hover:text-accent-300 hover:bg-overlay/5 cursor-pointer">
-          {dense ? 'Monthly' : 'All points'}
-        </button>
         <InfoTip className="ml-auto" content={<AspectCard
           what="What the book has returned so far this year, from 0% at the start of it."
           where="AIRS's own Rendementen sheet — the same figure as the Return tile beside this."

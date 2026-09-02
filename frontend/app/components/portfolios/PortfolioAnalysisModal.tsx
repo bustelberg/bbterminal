@@ -23,6 +23,7 @@ import BookReturnChart from './BookReturnChart';
 import BucketDetailPanel from './BucketDetailPanel';
 import OwnerEarningsModal from './OwnerEarningsModal';
 import { type Basket } from './types';
+import { isMomentumState, ordinalPercentile, stateLabel, stateTone } from './momentumState';
 import { useAnalyseCopy } from './analyseCopy';
 
 /**
@@ -249,92 +250,43 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
     // remainder — widening the block is the only way to lengthen the bars, and the axis above them
     // is laid out from the same fixed columns so the two cannot drift apart.
     <div className="shrink-0 w-[41rem] max-w-full">
-      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-        <span className="text-[11px] uppercase tracking-wide text-fg-faint">{copy.allocation.title}</span>
-        {/* The profile read off AIRS's own portfolio name — the same classifier the correlation
-            matrix filters by. Shown because the bands below are only meaningful once the reader
-            knows WHICH policy is being drawn. */}
-        {variant && (
-          <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-overlay/5 text-fg-muted"
-            title={copy.allocation.policyTitle(variant)}>
-            {variant}
-          </span>
-        )}
-        {/* ⚠⚠ THE HINT IS THE ONLY THING THAT SAYS THE BARS ARE CLICKABLE, and it used to be the
-            faintest text on the panel (`text-[11px] text-fg-faint`) tucked between the section
-            label and the policy pill — the styling of a caption, on the one line that is an
-            instruction. Reported 2026-09-01: "this should be bigger and more obvious." It is now
-            13px in `accent-400`, the token this app uses for interactive text, with a ↓ pointing
-            at the bars it is talking about.
-            ⚠⚠ BOTH STATES CARRY THE SAME TYPE SIZE AND WEIGHT because they SHARE THE SLOT: the
-            hint is replaced by the active-filter button on click, and a size change there would
-            reflow the header row under the cursor at the moment of pressing.
-            ⚠ IT IS NOT A BUTTON AND MUST NOT LOOK LIKE ONE — a pill or a border here would be a
-            false affordance, since the clickable things are the bars below, not this line. Colour
-            and an arrow say "interactive nearby"; a chrome would say "press me". */}
-        {onSelect && (selected
-          ? <button type="button" onClick={() => onSelect(null)}
-              className="cursor-pointer text-[13px] font-medium text-accent-400 hover:text-accent-300">
-              {copy.allocation.filtering} {copy.bucket(bucketLabel(selected))} {copy.allocation.showAll}
-            </button>
-          : <span className="text-[13px] font-medium text-accent-400">
-              {/* ⚠ ONLY THE ARROW IS HIDDEN FROM ASSISTIVE TECH. The rows below are real
-                  `<button>`s (see `Row`), so their affordance is already announced; the glyph
-                  points at them visually and would read as "down arrow" out loud. The sentence
-                  itself stays — it names WHAT the press does, which the buttons do not. */}
-              <span aria-hidden="true">↓ </span>{copy.allocation.filterHint}
-            </span>)}
-      </div>
-      {/* ⚠ A SECOND THING IS ON THE CHART, SO IT IS NAMED. The bar is what the portfolio holds;
-          the three stripes are what the policy permits. Without this line they read as gridlines
-          and the target tick as noise. Only rendered when there IS a policy — the products with
-          no risk profile draw no stripes and get no legend for them. */}
-      {bandOf.size > 0 && (
-        <div className="flex items-center gap-3.5 text-[11px] text-fg-faint mb-1.5">
-          {/* ⚠ ONE ENTRY PER STRIPE, AND EACH SWATCH IS THAT STRIPE AT ROW SCALE — a legend drawn
-              differently from the thing it names is one more thing to map.
-
-              ⚠ MINIMAL AND MAXIMAL SHARE A SWATCH ON PURPOSE. They are the same kind of mark, told
-              apart by POSITION (left bound, right bound). Neither ever changes colour — see the
-              bounds themselves below.
-
-              ⚠ THERE IS NO BREACH ENTRY (there was one: "outside the band"). Nothing on the chart
-              is amber any more; a weight outside its band is reported on the row's percentage,
-              which goes amber with the crossed bound named in its tooltip. */}
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-0.5 h-3 bg-neutral-500/70" />
-            {copy.allocation.minimum}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-[4px] h-3 rounded-sm bg-neutral-800/85" />
-            {copy.allocation.target}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-0.5 h-3 bg-neutral-500/70" />
-            {copy.allocation.maximum}
-          </span>
-        </div>
+      {/* ⚠⚠ THE HEADER CAME OFF, 2026-09-02 ON REQUEST — the "Allocation" title, the variant
+          pill, the "↓ Click a class to filter the charts" hint and the minimal/target/maximal
+          legend. What is left is the ONE control with no other home.
+          ⚠ THE HINT WENT BECAUSE THE CHIPS REPLACED IT. Stocks / Bonds / Alternatives / Cash now
+          render as buttons (see the row's label span), so the sentence that existed to say "these
+          are clickable" is now said by the things themselves.
+          ⚠⚠ CLEARING A FILTER STILL NEEDS A WAY OUT, AND THIS IS IT. Pressing the ACTIVE chip
+          also clears it (the row toggles), so this is the discoverable path rather than the only
+          one — without it a reader who does not guess the toggle is stuck in a filtered view with
+          no visible exit.
+          ⚠ IT RENDERS ONLY WHEN FILTERED, so the default view carries no chrome at all, which is
+          the point of the removal. The cost is that selecting a class pushes the bars down by this
+          row's height — the click has completed by then, and the whole right-hand side of the
+          block swaps on that same press anyway.
+          ⚠ THE BAND STRIPES ARE STILL DRAWN; only their legend went. Every row's `title` still
+          names the policy and its bounds in full ("Offensief policy: 70% to 100%, target 85%"),
+          which is where a fact about one class already belonged. */}
+      {onSelect && selected && (
+        <button type="button" onClick={() => onSelect(null)}
+          className="cursor-pointer mb-1.5 text-[13px] font-medium text-accent-400 hover:text-accent-300">
+          {copy.allocation.filtering} {copy.bucket(bucketLabel(selected))} {copy.allocation.showAll}
+        </button>
       )}
-      {/* ⚠ THE AXIS SPELLS OUT THE SCALE THE BARS ARE ALREADY ON — 0–100% of the portfolio, fixed,
-          never stretched to the biggest class. Without it the reader has only the printed values to
-          tell a full-width bar from an 85% one, which is exactly the check a bar chart is supposed
-          to make free. Its spacers mirror the row's fixed columns EXACTLY (same widths, same gaps,
-          same padding), so the 0 and the 100 sit on the ends of the track beneath them; change a
-          column width in one place and it must change in the other. */}
-      <div className="flex items-end gap-2.5 -mx-1.5 px-1.5 mb-1 select-none" aria-hidden>
-        <span className="w-[6.5rem] shrink-0" />
-        <span className="relative flex-1 h-3.5">
-          {AXIS_TICKS.map((t) => (
-            <span key={t} className="absolute bottom-0 flex flex-col items-center"
-              style={{ left: `${t}%`, transform: t === 0 ? 'none' : t === 100 ? 'translateX(-100%)' : 'translateX(-50%)' }}>
-              <span className="text-[10px] text-fg-faint tabular-nums leading-none mb-0.5">{t}</span>
-              <span className="w-px h-1 bg-neutral-700/60" />
-            </span>
-          ))}
-        </span>
-        <span className="w-12 shrink-0 text-[10px] text-fg-faint text-right leading-none">%</span>
-        <span className="w-14 shrink-0 text-[10px] text-fg-faint text-right leading-none">YTD</span>
-      </div>
+      {/* ⚠⚠ THE WHOLE HEADER ROW CAME OFF, 2026-09-02 ON REQUEST — first the 0 / 25 / 50 / 75 /
+          100 scale and its ticks, then the `%` and `YTD` column headings, which left the row
+          empty. Every column here is now unlabelled by choice, and the chart carries its own
+          meaning instead: each row prints its class, its percentage to two decimals and its
+          contribution in pp, so nothing above the bars was naming anything the rows do not.
+          ⚠ THE BARS ARE STILL ON A FIXED 0–100% SCALE, never stretched to the biggest class, so
+          their lengths stay comparable between rows AND between books. Only the ruler went.
+          ⚠ THE COLUMN WIDTHS ARE NOW DECLARED IN ONE PLACE. They used to be stated twice — here
+          and on the row — with a note that changing one meant changing the other. That
+          duplication is gone with this row, so `w-[6.5rem]` / `w-12` / `w-16` on the row below
+          are the only definition. Re-adding any header here means re-adding the spacers to match.
+          ⚠ THE IN-BAR GRIDLINES STAY (see the track, below). They sit at `AXIS_TICKS`' quartiles
+          and are now unlabelled, which is ordinary for a bullet chart: a division for the eye to
+          judge against, asserting no number. That constant is still their source. */}
       {/* ⚠ NO LEGEND. One series, and every bar is directly labelled with the class it belongs to —
           a legend box would map colours to names the row already prints. (The composition charts
           below DO carry one: two series there, so identity cannot be colour-alone.) */}
@@ -361,8 +313,36 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
                 toggle ? 'cursor-pointer' : ''} ${
                 active ? 'bg-accent-500/10' : 'hover:bg-overlay/[0.03]'} ${
                 selected && !active ? 'opacity-45' : ''}`}>
-              <span className={`w-[6.5rem] shrink-0 truncate text-[12px] ${
-                active ? 'font-medium text-fg-strong' : 'text-fg-muted'}`}>{copy.bucket(bucketLabel(s.bucket))}</span>
+              {/* ⚠⚠ A CHIP, NOT A `<button>` — THE ROW ALREADY IS ONE. Nesting a button inside a
+                  button is invalid HTML and browsers unnest it, so the inner one would take the
+                  click and the outer 41rem of row would stop responding: a control that looks MORE
+                  pressable and is pressable over a twentieth of the area. This is a `<span>` wearing
+                  the chrome; the whole row stays the target.
+                  ⚠⚠ IT LIGHTS ON `group-hover`, NOT `hover`. The row carries `group`, so pointing
+                  anywhere on it — the bar, the percentage, the contribution — brings the chip up.
+                  A chip that lit only under its own cursor would teach the opposite of what is
+                  true and shrink the perceived target to the label.
+                  ⚠⚠ THE COLUMN IS STILL EXACTLY `w-[6.5rem]`, AND THAT IS LOAD-BEARING. The axis
+                  above these rows is laid out from a spacer of the same literal width (see its
+                  note); padding and border are inside it because Tailwind is border-box, so the
+                  track still starts where the 0 tick says it does. Changing this width means
+                  changing the spacer in the same commit.
+                  ⚠ FULL COLUMN WIDTH, not hugging the text: four equal chips read as one control
+                  set, where `Cash` and `Alternatives` at their natural widths read as debris. It
+                  is also the bigger target.
+                  ⚠ NO CHROME WITHOUT A CLICK. An ad-hoc basket passes no `onSelect`, and the same
+                  rule the cursor already follows applies here — a button that does nothing is a
+                  worse lie than a label. Active state uses the same tokens as this modal's
+                  Attribution / Risk buttons so the two read as the same kind of control. */}
+              <span className={`w-[6.5rem] shrink-0 truncate text-[12px] text-left transition-colors ${
+                toggle
+                  ? `rounded-md border px-2 py-1 ${active
+                      ? 'bg-accent-600 border-transparent text-white font-medium'
+                      : 'bg-elevated border-neutral-800/40 text-fg-muted '
+                        + 'group-hover:border-accent-500/50 group-hover:text-accent-300'}`
+                  : (active ? 'font-medium text-fg-strong' : 'text-fg-muted')}`}>
+                {copy.bucket(bucketLabel(s.bucket))}
+              </span>
               {/* ⚠ THIS IS A BULLET CHART, AND ITS ONE RULE IS THAT THE MEASURE IS THINNER THAN
                   THE RANGE. The policy marks run the FULL height of the track while the bar is a
                   slimmer ribbon down the middle, so a stripe stays visible straight THROUGH the
@@ -1109,10 +1089,20 @@ function FundamentalButton({ onOpen, title, className = '' }: {
 }) {
   const copy = useAnalyseCopy();
   return (
+    // ⚠⚠ THE SAME CHROME AS THE ALLOCATION CLASS CHIPS (2026-09-02, on request) — `rounded-md`,
+    //    a real border, `bg-elevated`, and accent on hover. Three controls in this modal now wear
+    //    it: the class chips, Attribution / Risk, and this. It used to be a flatter, fainter thing
+    //    (`rounded`, `px-1.5 py-0.5`, `text-fg-subtle`) which read as a tag rather than a button,
+    //    and read differently from every other pressable thing on the same screen.
+    // ⚠ IT CARRIES ITS OWN `hover:`, NOT `group-hover:`, and that is the difference from the class
+    //    chips. Those are painted-on labels inside a row that IS the button, so they light with the
+    //    row. This one is a real nested `<button>` with its own `stopPropagation` — it opens the
+    //    Fundamental view instead of selecting the row — so it must light under its OWN cursor, or
+    //    it would promise the row's action.
     <button type="button"
       onClick={(e) => { e.stopPropagation(); onOpen(); }}
       title={title}
-      className={`cursor-pointer text-[11px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap transition-colors ${className}`}>
+      className={`cursor-pointer whitespace-nowrap rounded-md border px-2 py-1 text-[11px] transition-colors bg-elevated border-neutral-800/40 text-fg-muted hover:border-accent-500/50 hover:text-accent-300 ${className}`}>
       {copy.actions.fundamental}
     </button>
   );
@@ -1746,7 +1736,13 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   start after. */}
               {/* ⚠ FIRST OF THE THREE INSTRUMENT COLUMNS — momentum, risk, exposure. It is the
                   only one of the three that is SIGNED, so it is the only one that carries colour. */}
-              <th className={`text-right w-24 ${th}`} onClick={() => click('mom')}>
+              {/* ⚠ `w-28`, ONE STEP WIDER THAN IT WAS, because the cell now carries a rank chip in
+                  front of the number (`++ +28.4%`). At `w-24` the widest case — `−−− −100.0%` —
+                  wraps, and a wrapped cell in a dense table shifts every row after it.
+                  ⚠ SORTING STAYS ON THE NUMBER, never on the state: seven buckets sort into seven
+                  ties, which would scramble the order within each one on every click. The chip is
+                  a reading of the number, so ordering by the number orders the chips too. */}
+              <th className={`text-right w-28 ${th}`} onClick={() => click('mom')}>
                 {copy.holdings.momentum}{caret('mom')}
 {/* ⚠ FORMULA, BLANK LINE, THE SAME FORMULA SUBSTITUTED — the shape the Money-weighted column
                     uses, and the reason it is worth copying: a reader can CHECK the arithmetic instead
@@ -2144,10 +2140,19 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                           ⚠⚠ `!h.is_fund` IS NOT BELT-AND-BRACES — it is the half of the rule the
                           bucket used to carry. Since `Equity ETF` was retired the ETFs are in
                           Stocks, so the bucket test alone puts the button back on every fund it
-                          was written to keep it off. */}
+                          was written to keep it off.
+                          ⚠⚠ ALWAYS VISIBLE, 2026-09-02 ON REQUEST. It was
+                          `opacity-0 group-hover:opacity-100 focus:opacity-100` — present in the
+                          layout, painted only under the cursor. That hides a whole feature from
+                          anyone who does not happen to sweep a row: nothing on screen suggested a
+                          per-holding Fundamental view existed at all, and a control you cannot see
+                          is one you cannot look for.
+                          ⚠ `focus:opacity-100` WENT WITH IT — it existed solely so a keyboard user
+                          could reach a button the mouse rules had hidden. With the button visible
+                          it describes a state that no longer occurs. */}
                       {h.isin && h.bucket === EQUITY_BUCKET && !h.is_fund && (
                         <FundamentalButton
-                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0"
+                          className="shrink-0"
                           title={copy.row.fundamentalTitle(h.name ?? h.isin ?? copy.row.thisPosition)}
                           onOpen={() => onFundamental({ name: h.name ?? h.isin!, isin: h.isin! })} />
                       )}
@@ -2176,11 +2181,39 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       the whole reading — while vol and beta are magnitudes where colour would turn
                       a description into a verdict. */}
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.mom_12_1_pct)}`}>
+                    {/* ⚠⚠ THE CHIP IS A RANK AND THE NUMBER IS A RETURN, AND BOTH STAY. The chip
+                        answers "strong compared to what could have been owned"; the number answers
+                        "by how much". They are not interchangeable and they can disagree in SIGN —
+                        a holding up 8% where the universe's median is up 27% is a real `--`, and a
+                        red chip with no number beside it reads as "this fell", which is false.
+                        ⚠ The chip also cannot separate two rows a bucket apart: measured on ACWI,
+                        `+` spans +15.6% to +29.8%. In a table built for comparing rows, dropping
+                        the number would cost exactly the resolution this column is read for.
+                        ⚠ TONE ON THE CHIP ONLY. The number already carries `retTone` on the whole
+                        cell; a second colour on the same line, computed a different way, is two
+                        answers to "is this good". The chip's own tone comes from the RANK, so it
+                        is `text-…` on the span and deliberately overrides the cell's. */}
+                    {isMomentumState(h.mom_state) && (
+                      <span className={`mr-1.5 font-semibold ${stateTone(h.mom_state)}`}>
+                        {stateLabel(h.mom_state)}
+                      </span>
+                    )}
                     {h.mom_12_1_pct == null ? '—' : `${h.mom_12_1_pct >= 0 ? '+' : ''}${h.mom_12_1_pct.toFixed(1)}%`}
                     <Provenance source="benchmark" asOf={null} kind="formula"
+                      /* ⚠ THE RANK IS SPELLED OUT IN WORDS HERE, because the chip is glyphs. A
+                         reader who cannot tell `++` from `+++` at a glance gets "the 82nd
+                         strongest percentile of the 1,745 ACWI members" on hover — which also
+                         states the POPULATION, since a relative measure whose reference set is
+                         unstated is not readable. Falls back to the plain sentence when this row
+                         has no rank, so a missing precompute reads exactly as it did before. */
                       what={h.mom_12_1_pct == null
                         ? copy.row.momentumMissingWhat(h.name ?? copy.row.thisPosition)
-                        : copy.row.momentumWhat(h.name ?? copy.row.thisPosition)}
+                        : (isMomentumState(h.mom_state) && h.mom_rank_n
+                          ? copy.row.momentumRanked(
+                            h.name ?? copy.row.thisPosition,
+                            ordinalPercentile(h.mom_pct_rank, copy.lang === 'nl' ? 'nl' : 'en') ?? '',
+                            benchmark, h.mom_rank_n)
+                          : copy.row.momentumWhat(h.name ?? copy.row.thisPosition))}
                       note={h.mom_12_1_pct == null ? undefined : copy.row.momentumNote}
                       how={h.mom_12_1_pct == null
                         ? copy.row.momentumMissing
@@ -3154,10 +3187,20 @@ export default function PortfolioAnalysisModal({
           <>
             {/* Top: the allocation bars (the class selector) beside — when NOTHING is selected —
                 the whole-portfolio return / vs-benchmark / excess scorecard, or, when a class IS
-                selected, ONLY that class's own return (+ Attribution for Stocks). LEFT-aligned so
-                the bars hold their position and only the right-hand content changes with the
-                selection. Empty for an ad-hoc basket. */}
-            <div className="flex items-center justify-start gap-8 flex-wrap mb-4 pl-8 lg:pl-20">
+                selected, ONLY that class's own return (+ Attribution for Stocks). Empty for an
+                ad-hoc basket.
+
+                ⚠⚠ CENTRED, AND THAT IS ONLY SAFE BECAUSE THE RIGHT-HAND SLOT NO LONGER CHANGES
+                WIDTH — see the grid below. This row was `justify-start` + `pl-8 lg:pl-20` for a
+                reason worth restating: the modal is `w-[80vw]`, so on a wide screen there is a lot
+                of empty space to the right of this block, and centring it is the obvious fix. But
+                selecting a class swaps a wide scorecard for a narrow tile, so a bare
+                `justify-center` re-centres a NARROWER row and the allocation bars slide sideways —
+                on every click, of the control whose whole purpose is to be clicked. The old
+                left-alignment bought stillness by giving up the centring; the width reservation
+                below buys both, so the padding that used to hold the block off the left edge is
+                gone with it (it would now just push this right of true centre). */}
+            <div className="flex items-center justify-center gap-8 flex-wrap mb-4">
               {data.allocation && data.allocation.length > 0 && (
                 <AllocationBars slices={data.allocation} selected={assetFilter}
                   variant={data.variant} bands={data.bands}
@@ -3171,6 +3214,45 @@ export default function PortfolioAnalysisModal({
                   onSelect={isBasket ? undefined : (b) => {
                     setWhy(null); setRisk(false); setBucket(null); setAssetFilter(b); }} />
               )}
+              {/* ⚠⚠ ONE SLOT, ONE WIDTH, IN BOTH STATES — this is what lets the row above be
+                  centred without the allocation bars moving. Both arms of the ternary occupy the
+                  SAME grid cell as a ghost copy of the scorecard, so the cell is never narrower
+                  than the equation and the row's total width does not depend on the selection.
+
+                  ⚠⚠ THE WIDTH-SETTER IS THE EQUATION ITSELF, NEVER A MEASUREMENT OF IT. A
+                  `w-[32rem]` here would be the exact trap this file already removed once: the
+                  chart used to sit at a hardcoded `w-[24rem]` that matched the chips beside it by
+                  coincidence and stopped matching the moment a benchmark's name changed the middle
+                  chip's width. `Scorecard` is pure presentation over `data.returns`, so rendering
+                  a second, inert copy costs nothing and CANNOT drift from the real one — a longer
+                  benchmark name widens both together.
+
+                  ⚠ ONLY WHEN A CLASS IS SELECTED. In the unselected state the real scorecard is
+                  already in the cell and sets the width itself; a ghost there would render it
+                  twice for nothing.
+
+                  ⚠ THE GHOST IS `invisible`, WHICH IS NOT THE SAME AS `opacity-0`.
+                  `visibility: hidden` takes its subtree out of the tab order and the
+                  accessibility tree — `Scorecard` can carry a button — so with `aria-hidden` it is
+                  fully inert. `h-0 overflow-hidden` then keeps it from contributing HEIGHT: it
+                  reserves a width and nothing else.
+
+                  ⚠ THE GUARANTEE IS `max(equation, selected content)`, so it holds as long as the
+                  selected arm is no wider than the equation (it is ~21rem of buttons against ~32rem
+                  of chips). Should something wider ever land there, the cell grows and the bars
+                  move again — but it can never go NARROWER than the equation, which is the
+                  direction that used to cause the jump.
+
+                  ⚠ `justify-items-center` so the narrower selected content sits centred in the
+                  reserved space rather than pinned to its left edge. */}
+              <div className="grid items-center justify-items-center self-center">
+              {selected && (
+                <div aria-hidden
+                  className="col-start-1 row-start-1 invisible h-0 overflow-hidden pointer-events-none">
+                  <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark} />
+                </div>
+              )}
+              <div className="col-start-1 row-start-1 min-w-0">
               {selected
                 ? (
                   <div className="self-center flex items-stretch gap-3">
@@ -3279,6 +3361,8 @@ export default function PortfolioAnalysisModal({
                     )}
                   </div>
                 )}
+              </div>
+              </div>
             </div>
             {/* ⚠ How much of the INDEX we could price — shown whenever a benchmark number is on
                 screen (the whole-portfolio scorecard, or the Stocks charts). ACWI's missing names
@@ -3288,12 +3372,21 @@ export default function PortfolioAnalysisModal({
                 the composition is the stocks behind them, not the lines AIRS stores — and the
                 payload still reports `looked_through_pct` / `opaque_pct` / `looked_through` for
                 anyone reading the API. It is simply not announced on screen. */}
-            {!sleeve && (data.benchmark_coverage_pct ?? 100) < 97 && (
-              <p className="text-[12px] text-warn-300 mb-3">
-                {copy.coverageWarning(data.benchmark_priced ?? 0, data.benchmark_universe_members ?? 0,
-                  `${(data.benchmark_coverage_pct ?? 0).toFixed(0)}%`)}
-              </p>
-            )}
+            {/* ⚠⚠ THE REBUILD-COVERAGE WARNING CAME OFF THIS VIEW, 2026-09-02 ON REQUEST, AND THE
+                REASON IT DID NOT BELONG IS SHARPER THAN "IT IS NOISE": IT WAS GATED ON `!sleeve`,
+                WHICH IS EXACTLY WHEN THE NUMBER IT WARNS ABOUT IS NOT ON SCREEN. It described the
+                CONSTITUENT REBUILD — how much of ACWI we could price — but since 2026-08-19 the
+                benchmark figure on the whole-portfolio view is the index ETF's own price series
+                (`_index_returns` prefers `etf_returns`, falling back to the rebuild only per
+                window). The ETF has no constituent coverage at all, so this told a reader their
+                Excess tile was unreliable on grounds that did not apply to it.
+                ⚠ WHERE IT DOES APPLY is the other way round: the composition charts' portfolio-vs-
+                benchmark tilts and the Attribution panel both still reconcile to the REBUILD, and
+                both render when a class IS selected. If this is ever restored it belongs there,
+                on `sleeve`, not here.
+                ⚠ The producer still exists — `_asset_benchmark._missing_by_country` and the
+                `benchmark_missing_countries` field — and is now computed with nothing reading it.
+                Move the warning or strip the backend; do not leave it as it stands. */}
             {selected == null ? (
               /* NOTHING selected → the whole portfolio, one row per instrument, grouped by class.
                  A prompt to click something used to sit here; it told the reader what to do next

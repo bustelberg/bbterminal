@@ -93,6 +93,18 @@ class BacktestRequest(BaseModel):
     # names). True = soft preference: above-floor names first, then pad each
     # sector to top_n_per_sector with the next-best BELOW-floor names.
     backfill_below_min_score: bool = False
+    # How each signal is mapped to [0,1] before the weighted blend.
+    #
+    # ⚠⚠ "minmax" IS THE DEFAULT FOR COMPATIBILITY, NOT BECAUSE IT IS RIGHT. It hands the signal
+    # with the fattest tail a fraction of the weight it was given — measured on ACWI, `mom_12_1`
+    # got 16.6% of a requested 33.3%, and the top-20 selection overlap against "rank" was 6 of 20.
+    # "rank" (percentile) makes the weights exact and is the one to pick for a new strategy;
+    # "robust_z" is outlier-resistant but keeps magnitude.
+    #
+    # ⚠ CHANGING IT ALSO CHANGES WHAT `min_price_score` MEANS — the median stock scores 5/100 under
+    # "minmax" and 50/100 under "rank" — so it is part of `strategy_hash`, and an existing strategy
+    # keeps its stored value.
+    score_normalization: Literal["minmax", "rank", "robust_z"] = "minmax"
     universe_label: str | None = None  # if set, use universe_membership for per-month filtering
     index_universe: str | None = None  # if set, use universe_membership for per-month filtering (e.g. "SP500")
     # How `top_n_sectors` buckets companies. "sector" is the universe-level

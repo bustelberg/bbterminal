@@ -396,6 +396,10 @@ async def run_variants_sweep(
             s["key"]: s["default_weight"] for s in _signal_defs
         }
         _cat_weights = req.category_weights
+        # ⚠ Read off the base request like the two weight maps beside it — the prewarm must score
+        #   with the SAME normalization the run will, or it fills the cache with scores the run
+        #   would never have produced.
+        _normalization = getattr(req, "score_normalization", "minmax")
 
         def _score_one(
             combo_inner, period_date_inner, panel_df_inner,
@@ -423,7 +427,8 @@ async def run_variants_sweep(
             if filtered.empty:
                 return combo_inner, period_date_inner, None
             filtered["sector"] = filtered["company_id"].map(sector_map_inner)
-            scored = score_universe(filtered, _sig_weights, _cat_weights, _signal_defs)
+            scored = score_universe(filtered, _sig_weights, _cat_weights, _signal_defs,
+                                    normalization=_normalization)
             return combo_inner, period_date_inner, scored
 
         # Build (combo, period_date, panel, eligible, sector_map) tasks

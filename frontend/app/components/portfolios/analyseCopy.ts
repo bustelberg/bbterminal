@@ -23,7 +23,7 @@ const en = {
   chrome: { benchmark: 'Benchmark', loading: 'Loading composition…', loadError: 'The composition could not be loaded.' },
   bucket: (name: string) => name,
   score: {
-    returnYtd: 'Return (YTD) €', versusReturn: (benchmark: string) => `vs ${benchmark} return €`, excess: 'Excess',
+    returnYtd: 'Return (YTD) €', versusReturn: (benchmark: string) => `vs ${benchmark} return (YTD) €`, excess: 'Excess',
     portfolioWhat: 'What this portfolio returned year to date, in EUR.', portfolioNote: "the portfolio's return, year to date",
     /** ⚠ THE CAVEAT ONLY. `where` names AIRS Rendementen (ATT) and `note` names the field, so
      *  repeating both here was two thirds of a sentence the reader had already had — and it read
@@ -134,6 +134,12 @@ const en = {
     momentumMissing: 'A dash is not a zero — 0% would claim it went nowhere. Needs about 13 months of price history; the two risk columns beside it need four years, so a young listing can show momentum and a dash for volatility.',
     momentumMissingWhat: (name: string) => `${name} has under about 13 months of price history, so it has no 12-1 momentum.`,
     momentumWhat: (name: string) => `What ${name} returned over the 12 months ending one month ago.`,
+    // ⚠ THE POPULATION IS IN THE SENTENCE. A rank without its reference set is unreadable — "82nd"
+    //   of what, out of how many? — and the chip is glyphs, so this is the only place a reader can
+    //   learn that `++` means a percentile against a named universe rather than a verdict.
+    momentumRanked: (name: string, ordinal: string, benchmark: string, n: number) =>
+      `What ${name} returned over the 12 months ending one month ago — the ${ordinal} strongest `
+      + `percentile of the ${n.toLocaleString('en')} ${benchmark} members ranked on the same basis.`,
     momentumHow: (substitution: string) => `Price one month ago ÷ price twelve months ago − 1${substitution}\n\nThe most recent month is excluded on purpose: it mean-reverts, and including it is what makes a raw 12-month return a poor momentum signal.`,
     volHow: (pct: string) => `std(monthly return, ddof=1) × √12 = ${pct}\n\nOur own yfinance closes, converted to EUR at each date's rate — so the currency move is in it, which is what a euro holder actually bears.`,
     betaHow: (benchmark: string, beta: string) => `cov(instrument, ${benchmark}) ÷ var(${benchmark}) = ${beta}\n\nWeekly EUR returns over the trailing 5 years, on the weeks both series have — weekly because the benchmark tracker and a US listing close five hours apart, which halves a daily correlation.`,
@@ -213,7 +219,22 @@ const en = {
     success: (book: string) => `✓ These positions account for the whole year — Contribution adds exactly to AIRS's ${book}.`,
     mismatch: (sum: string, book: string, residual: string) => `⚠ Contribution adds to ${sum} against AIRS's ${book}; ${residual} of the year is not explained by these rows.`,
   },
-  coverageWarning: (priced: number, total: number, pct: string) => `⚠ This index is rebuilt from ${priced} of its ${total} constituents (${pct}) — the rest have no price series yet. Weights are renormalised over the remainder, redistributing the missing names. Treat the tilts as indicative.`,
+  /* ⚠⚠ IT NAMES THE COUNTRIES, AND THE OLD COPY NAMED THE WRONG CAUSE. It used to say "the rest
+     have no price series yet" — measured on ACWI, exactly ONE of the members that reach the price
+     world lacks a series. The real gap is the ISIN bridge, and it is not spread evenly: **India is
+     2 priced of 161**, the UK 41 of 72, Hong Kong 152 of 182, while the United States is 474 of
+     ~476 and Canada and Australia are whole. "Treat the tilts as indicative" told a reader the
+     index was a bit noisy; what they were actually looking at was an ACWI with India removed, and
+     the REGIONAL tilt against it is not approximate but wrong in a nameable direction.
+     ⚠ `missing` is empty when the server could not work out the breakdown — the sentence then
+     stops after the count rather than claiming the gap is spread evenly. */
+  coverageWarning: (priced: number, total: number, pct: string,
+                    missing: { country: string; missing: number; members: number }[]) => {
+    const head = `⚠ This index is rebuilt from ${priced} of its ${total} constituents (${pct}); weights are renormalised over the remainder.`;
+    if (!missing.length) return `${head} Treat the tilts as indicative.`;
+    const where = missing.map((m) => `${m.country} (${m.members - m.missing} of ${m.members})`).join(', ');
+    return `${head} The gap is NOT spread evenly — most of it is ${where}. Regional tilts against this benchmark are the least reliable part of the chart.`;
+  },
   serverText: (text: string) => text,
 } as const;
 
@@ -242,7 +263,7 @@ const nl: AnalyseCopy = {
   bucket: (name) => (({ Stocks: 'Aandelen', Bonds: 'Obligaties', Alternatives: 'Alternatieven', Cash: 'Liquiditeiten',
     Unclassified: 'Niet geclassificeerd' } as Record<string, string>)[name] ?? name),
   score: {
-    returnYtd: 'Rendement (YTD) €', versusReturn: (benchmark) => `vs. rendement ${benchmark} €`, excess: 'Meerrendement',
+    returnYtd: 'Rendement (YTD) €', versusReturn: (benchmark) => `vs. rendement ${benchmark} (YTD) €`, excess: 'Meerrendement',
     portfolioWhat: 'Wat deze portefeuille sinds het begin van het jaar in euro heeft gerendeerd.', portfolioNote: 'het rendement van de portefeuille sinds het begin van het jaar',
     portfolioHowBook: 'Houdt rekening met stortingen en onttrekkingen en bevat inkomsten, over het kalenderjaar — een storting vleit dit cijfer dus niet.',
     portfolioHowModel: 'Σ(gewichtᵢ × rendementᵢ) over de posities van het model. Elke positie gebruikt yfinance-slotkoersen en wordt op elke datum tegen de eigen koers naar EUR omgerekend, zodat het valuta-effect is inbegrepen. Koersrendement: dividenden zijn uitgesloten.',
@@ -342,6 +363,10 @@ const nl: AnalyseCopy = {
     momentumMissing: 'Een streepje is geen nul — 0% zou beweren dat de koers niet bewoog. Hiervoor is ongeveer 13 maanden koershistorie nodig; de twee risicokolommen ernaast vereisen vier jaar. Een jonge notering kan daarom wel momentum maar geen volatiliteit tonen.',
     momentumMissingWhat: (name) => `${name} heeft minder dan ongeveer 13 maanden koershistorie en daarom geen 12-1-momentum.`,
     momentumWhat: (name) => `Het rendement van ${name} over de twaalf maanden die één maand geleden eindigden.`,
+    momentumRanked: (name, ordinal, benchmark, n) =>
+      `Het rendement van ${name} over de twaalf maanden die één maand geleden eindigden — het `
+      + `${ordinal} sterkste percentiel van de ${n.toLocaleString('nl')} ${benchmark}-leden die op `
+      + `dezelfde basis zijn gerangschikt.`,
     momentumHow: (substitution) => `Koers één maand geleden ÷ koers twaalf maanden geleden − 1${substitution}\n\nDe meest recente maand wordt bewust uitgesloten: die vertoont mean reversion. Opname ervan maakt een gewoon twaalfmaandsrendement tot een zwak momentumsignaal.`,
     volHow: (pct) => `std(maandrendement, ddof=1) × √12 = ${pct}\n\nOnze eigen yfinance-slotkoersen, op elke datum omgerekend naar EUR — inclusief de valutabeweging die een eurobelegger werkelijk ondervindt.`,
     betaHow: (benchmark, beta) => `cov(instrument, ${benchmark}) ÷ var(${benchmark}) = ${beta}\n\nWekelijkse EUR-rendementen over de laatste vijf jaar, voor weken waarin beide reeksen bestaan. Wekelijks omdat de benchmarktracker en een Amerikaanse notering vijf uur na elkaar sluiten, waardoor dagelijkse correlatie kunstmatig wordt gehalveerd.`,
@@ -421,7 +446,12 @@ const nl: AnalyseCopy = {
     success: (book) => `✓ Deze posities verklaren het hele jaar — Bijdrage telt exact op tot AIRS' ${book}.`,
     mismatch: (sum, book, residual) => `⚠ Bijdrage telt op tot ${sum} tegenover AIRS' ${book}; ${residual} van het jaar wordt niet door deze rijen verklaard.`,
   },
-  coverageWarning: (priced, total, pct) => `⚠ Deze index is herbouwd uit ${priced} van de ${total} constituenten (${pct}) — voor de rest is nog geen koersreeks beschikbaar. De wegingen zijn over het resterende deel herwogen, waardoor ontbrekende namen worden herverdeeld. Beschouw de afwijkingen als indicatief.`,
+  coverageWarning: (priced, total, pct, missing) => {
+    const head = `⚠ Deze index is herbouwd uit ${priced} van de ${total} constituenten (${pct}); de wegingen zijn over het resterende deel herwogen.`;
+    if (!missing.length) return `${head} Beschouw de afwijkingen als indicatief.`;
+    const where = missing.map((m) => `${m.country} (${m.members - m.missing} van ${m.members})`).join(', ');
+    return `${head} Het gat is NIET gelijkmatig verdeeld — het zit vooral in ${where}. Regionale afwijkingen ten opzichte van deze benchmark zijn het minst betrouwbare deel van de grafiek.`;
+  },
   serverText: (text) => text
     .replace('No Dynamic portfolio is paired with this one, so there are no transactions to read — a model is a set of weights; only a book trades.', 'Er is geen dynamische portefeuille aan gekoppeld, dus er zijn geen transacties om te lezen — een model is een set wegingen; alleen een boek handelt.')
     .replace(/Could not read this book's transactions \(([^)]+)\)\./, 'De transacties van dit boek konden niet worden gelezen ($1).')

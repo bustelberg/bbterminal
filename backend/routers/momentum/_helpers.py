@@ -1,4 +1,4 @@
-"""Shared momentum-domain helpers — pulled out of `main.py` so the four
+"""Shared momentum-domain helpers â pulled out of `main.py` so the four
 submodules under `routers/momentum/` can import without circular deps.
 
 Nothing in here is a FastAPI endpoint. The startup hook
@@ -7,12 +7,12 @@ import time because it has no per-request state and must run once per
 process.
 
 Key concepts:
-- `_strategy_hash` — sliding "this month" identity used by current-picks
+- `_strategy_hash` â sliding "this month" identity used by current-picks
   caching. Does NOT include date range so the cache survives day-to-day.
-- `_backtest_strategy_hash` — full-config identity used by /backtest
+- `_backtest_strategy_hash` â full-config identity used by /backtest
   caching. Includes start/end dates + random/n_trials so different runs
   don't collide.
-- `_save_current_picks_snapshot` — auto-fills `name` only when the
+- `_save_current_picks_snapshot` â auto-fills `name` only when the
   20260507 migration is applied; degrades gracefully otherwise.
 """
 
@@ -41,7 +41,7 @@ def register_startup_hooks(app) -> None:
     def _verify_acwi_exchange_codes() -> None:
         """Warn loudly if any exchange_code acwi.py can emit is missing
         from `gurufocus_exchange`. Holdings on missing codes are silently
-        dropped during ACWI sync — that bug ate MSFT once already, this
+        dropped during ACWI sync â that bug ate MSFT once already, this
         check is so it doesn't happen again."""
         try:
             from index_universe.acwi import expected_db_exchange_codes
@@ -68,16 +68,16 @@ def latest_db_price_date() -> date | None:
     table. Used as a fast pre-flight gate so we don't run a heavy compute
     against stale DB data. Returns None if the table is empty.
 
-    ⚠ BOTH constants are load-bearing, and they must match
+    â  BOTH constants are load-bearing, and they must match
     `idx_metric_data_close_price_date`'s predicate EXACTLY
     (`metric_code='close_price' AND source_code='gurufocus'`) or the partial
     index does not apply and prod seq-scans a 70M-row table into the 8s
     statement timeout (57014).
 
-    ⚠ The previous index here was `(source_code, target_date)`, and the comment
+    â  The previous index here was `(source_code, target_date)`, and the comment
     claiming it "stops at the first close_price row" was wrong:
     `metric_code` was not in it, so it was a FILTER and the scan walked every
-    row dated after the last close — 188,286 of them, ALL `is_prediction`
+    row dated after the last close â 188,286 of them, ALL `is_prediction`
     estimates carrying FUTURE target_dates, at 1,870 ms. That cost grew with
     every quarter of ingested estimates and had nothing to do with prices. The
     partial index makes this a one-tuple index-only scan (0.07 ms). See
@@ -101,7 +101,7 @@ def latest_db_price_date() -> date | None:
 
 
 def strategy_hash(req: "BacktestRequest") -> str:
-    """Sliding-view identity for current-picks. Same params → same hash;
+    """Sliding-view identity for current-picks. Same params â same hash;
     date range intentionally excluded so the cache survives across days
     when only the requested "current month" moves."""
     payload = {
@@ -111,6 +111,10 @@ def strategy_hash(req: "BacktestRequest") -> str:
         "top_n_per_sector": req.top_n_per_sector,
         "max_companies": req.max_companies,
         "min_price_score": req.min_price_score,
+        # ⚠⚠ PART OF THE IDENTITY, BECAUSE IT CHANGES THE SCORES THEMSELVES. Two requests
+        # identical but for this produce different picks from the same signals; a hash blind to it
+        # would serve one strategy's cached snapshot to the other.
+        "score_normalization": getattr(req, "score_normalization", "minmax"),
         "universe_label": req.universe_label,
         "index_universe": req.index_universe,
         "selection_mode": req.selection_mode,
@@ -124,7 +128,7 @@ def strategy_hash(req: "BacktestRequest") -> str:
 
 def backtest_strategy_hash(req: "BacktestRequest") -> str:
     """Full-config identity used by /backtest caching. Unlike
-    `strategy_hash`, this includes start/end dates and random/n_trials —
+    `strategy_hash`, this includes start/end dates and random/n_trials â
     two runs cache to the same row only when their FULL config matches."""
     payload = {
         "start_date": req.start_date,
@@ -135,6 +139,10 @@ def backtest_strategy_hash(req: "BacktestRequest") -> str:
         "top_n_per_sector": req.top_n_per_sector,
         "max_companies": req.max_companies,
         "min_price_score": req.min_price_score,
+        # ⚠⚠ PART OF THE IDENTITY, BECAUSE IT CHANGES THE SCORES THEMSELVES. Two requests
+        # identical but for this produce different picks from the same signals; a hash blind to it
+        # would serve one strategy's cached snapshot to the other.
+        "score_normalization": getattr(req, "score_normalization", "minmax"),
         "universe_label": req.universe_label,
         "index_universe": req.index_universe,
         "selection_mode": req.selection_mode,
@@ -155,7 +163,7 @@ def backtest_strategy_hash(req: "BacktestRequest") -> str:
 
 def find_cached_backtest(hash_: str) -> dict | None:
     """Today's cached backtest for this strategy, or None.
-    Cache validity is scoped to the current UTC day — once `data_date`
+    Cache validity is scoped to the current UTC day â once `data_date`
     rolls over (after the next daily price refresh) the next replay misses.
 
     Also enforces a payload-shape contract: rows produced before fields
@@ -232,7 +240,7 @@ def persist_daily_picks(hash_: str, config: dict, daily_picks: list[dict]) -> No
         ).execute()
 
 
-# ⚠ THE MOST RECENT DAYS ARE NEVER SERVED FROM CACHE, AND THIS IS NOT PARANOIA.
+# â  THE MOST RECENT DAYS ARE NEVER SERVED FROM CACHE, AND THIS IS NOT PARANOIA.
 # A day's selection is a function of the closes known BEFORE it, and those keep
 # arriving: GuruFocus publishes some closes days late and `ingest/prices.py` writes
 # them with their true (earlier) target_date, so a selection computed on Monday for
@@ -244,11 +252,11 @@ DAILY_HOLDINGS_TAIL_DAYS = 5
 
 # The columns a cached selection has to carry for the daily loop to rebuild the day
 # without re-scoring. Everything else on a holding (prices, weight, returns) is
-# re-derived per run — see the migration.
-# ⚠ THE CATEGORY SCORES ARE IN HERE FOR A REASON. The daily-holdings table shows a
+# re-derived per run â see the migration.
+# â  THE CATEGORY SCORES ARE IN HERE FOR A REASON. The daily-holdings table shows a
 # price and a volume score per company, and those come off `score_price` /
 # `score_volume` on the scored frame. Leave them out of the cache and a REUSED day
-# renders them blank while a freshly computed one fills them — which reads as "we
+# renders them blank while a freshly computed one fills them â which reads as "we
 # only score some days" rather than "the cache dropped two columns".
 _CACHED_SELECTION_COLS = (
     "company_id", "gurufocus_ticker", "company_name", "sector",
@@ -257,7 +265,7 @@ _CACHED_SELECTION_COLS = (
 
 
 def fetch_daily_holdings_cache(hash_: str, start: str, end: str) -> dict[str, dict]:
-    """Cached day → `{"holdings": [...], "sector_scores": [...]}` for `hash_` in the window.
+    """Cached day â `{"holdings": [...], "sector_scores": [...]}` for `hash_` in the window.
 
     Best-effort: a missing table or a failed read returns `{}`, which costs a
     recompute and nothing else. A cache that can fail the feature is worse than no
@@ -278,9 +286,9 @@ def fetch_daily_holdings_cache(hash_: str, start: str, end: str) -> dict[str, di
 
 
 def persist_daily_holdings_cache(hash_: str, days: dict[str, dict]) -> None:
-    """Store freshly computed days (selection + sector scores). Best-effort — see above.
+    """Store freshly computed days (selection + sector scores). Best-effort â see above.
 
-    ⚠ THIS IS NOT `current_picks_day` AND MUST NEVER BE POINTED AT IT. Both are keyed
+    â  THIS IS NOT `current_picks_day` AND MUST NEVER BE POINTED AT IT. Both are keyed
     (strategy_hash, target_date); that one records what the pipeline DECIDED with the
     data it had, this one records a RECALCULATION on today's data. An upsert into the
     wrong table replaces the decision with the recalculation and the original is gone.
@@ -336,10 +344,10 @@ def find_cached_snapshot(hash_: str, as_of_date: str) -> dict | None:
 
 def default_snapshot_name(config: dict) -> str:
     """Sensible default label for an auto-saved current-picks snapshot.
-    Format: '{universe or All companies} · {YYYY-MM-DD HH:MM}'."""
+    Format: '{universe or All companies} Â· {YYYY-MM-DD HH:MM}'."""
     universe = (config.get("index_universe") or config.get("universe_label") or "All companies").strip() or "All companies"
     ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-    return f"{universe} · {ts}"
+    return f"{universe} Â· {ts}"
 
 
 # Cached probe for the `name` column on `current_picks_snapshot`. Migration
@@ -358,7 +366,7 @@ def has_current_picks_name_column() -> bool:
         except Exception as e:
             _HAS_CURRENT_PICKS_NAME_COLUMN = False
             logging.getLogger(__name__).warning(
-                "[current-picks] `name` column not present on current_picks_snapshot — "
+                "[current-picks] `name` column not present on current_picks_snapshot â "
                 "rename UX is disabled and the dropdown shows the auto-generated label. "
                 "Apply migration 20260507000000_current_picks_name.sql to enable. (%s: %s)",
                 type(e).__name__, e,
@@ -384,7 +392,7 @@ def save_current_picks_snapshot(
     `kind` distinguishes 'rebalance' (fresh picks computed at this tick)
     from 'price_update' (last rebalance's holdings re-priced because the
     strategy wasn't due to rebalance on this tick). `is_backfill=True`
-    marks snapshots created synthetically on add — historical 'what
+    marks snapshots created synthetically on add â historical 'what
     would have happened' views, NOT real pipeline runs."""
     if triggered_by not in ("auto", "manual"):
         raise ValueError(f"triggered_by must be 'auto' or 'manual', got {triggered_by!r}")

@@ -45,6 +45,7 @@ from ingest.phases import (
     _create_run,
     _run_companies_price_refresh_pipeline_sync,
     _run_full_price_refresh_pipeline_sync,
+    _run_price_slice_pipeline_sync,
     _run_pipeline_sync,
     _run_price_update_pipeline_sync,
     _run_rebalance_pipeline_sync,
@@ -60,7 +61,12 @@ _VALID_JOB_NAMES = {
     # concurrently. See `ingest.phases.pipeline` + `scheduler.py`.
     "price_update",  # re-price the ~24 held companies + MTD snapshot
     "rebalance",     # rebalance the due strategies from a fresh universe
-    "full_price_refresh",  # month-end: re-price ALL companies within budget
+    # ⚠ MANUAL NOW, NOT SCHEDULED. The month-end tick that used to fire this was replaced by
+    # `price_slice` (2026-09-02) — one pass a month and a 30-day staleness guard are the same
+    # period, so the system sat a few days from a cliff and spent them there. This stays as the
+    # right tool for "re-price everything NOW" after a bulk import or a vendor correction.
+    "full_price_refresh",  # manual: re-price ALL companies within budget (the Run-now button)
+    "price_slice",         # daily: the N most-stale companies, most-stale-first
     "universe_price_refresh",  # manual: re-price ONE universe's companies within budget
     "companies_price_refresh",  # manual: re-price an EXPLICIT company-id set (the flagged stale laggards)
     # The dependency-driven daily tick — retained for the cron-revert path /
@@ -95,6 +101,8 @@ def _spawn_ingest(
         args = (run_id, force)
     elif job_name == "full_price_refresh":
         target = _run_full_price_refresh_pipeline_sync
+    elif job_name == "price_slice":
+        target = _run_price_slice_pipeline_sync
     elif job_name == "universe_price_refresh":
         target = _run_universe_price_refresh_pipeline_sync
         args = (run_id, universe or "")
@@ -227,10 +235,17 @@ _JOB_META: dict[str, dict[str, str]] = {
         "cadence": "Daily 05:00 UTC (runs only when a strategy is due)",
     },
     "full_price_refresh": {
-        "label": "Month-end full price refresh",
-        "description": "re-prices ALL companies (most-stale first), bounded by the monthly API budget that's about to reset",
-        "cadence": "Last day of month 12:00 UTC",
+        "label": "Full price refresh (manual)",
+        "description": "re-prices ALL companies (most-stale first), bounded by the monthly API budget — the tool for a bulk import or a vendor correction, not for staying current",
+        "cadence": "Manual only — the daily slice keeps prices current",
     },
+    "price_slice": {
+        "label": "Daily price slice",
+        "description": "re-prices the most-stale companies each day so the whole book cycles in ~19 days, well inside the 30-day staleness guard",
+        "cadence": "Daily 12:00 UTC",
+    },
+    # ⚠ HISTORICAL — the JobSpec is gone (replaced by `daily_price_slice` 2026-09-02); kept so
+    # existing `ingest_run` rows still render with a name rather than a humanized id.
     "month_end_price_refresh": {
         "label": "Month-end full price refresh",
         "description": "re-prices ALL companies (most-stale first), bounded by the monthly API budget that's about to reset",

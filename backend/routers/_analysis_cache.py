@@ -120,6 +120,13 @@ _WATCHED = (
     "airs_account_roster",
     "asset_price", "asset_execution", "asset_analysis", "asset_bucket_override",
     "asset_isin_alias",
+    # ⚠⚠ ADDED WITH THE MOMENTUM STATE CHIP. `_holding_risk` reads this to place each holding's
+    # 12-1 return in the benchmark universe's distribution, and that distribution is REWRITTEN
+    # every day by the precompute. Without this line the daily rewrite would be invisible to the
+    # fingerprint and a warm process would keep bucketing today's holdings against a distribution
+    # from an arbitrary earlier day — no error, no empty cell, just a chip that is quietly one
+    # bucket out. Exactly the class of miss this list exists to prevent.
+    "relative_momentum",
     "fx_rate", "universe", "universe_membership", "universe_asset_membership", "country",
 )
 

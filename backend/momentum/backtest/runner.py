@@ -465,11 +465,17 @@ def run_backtest(
             if score_cache is not None and period_date in score_cache:
                 scored_df = score_cache[period_date]
             else:
+                # ⚠ `score_cache` is keyed on `period_date` ALONE, which is only correct because
+                #   every input to the score pass is constant across the variants that share it —
+                #   `signal_weights`, `category_weights` and now `score_normalization` all come
+                #   from the base request. If a variant AXIS is ever added over any of them, this
+                #   key has to grow with it or one variant will read another's scores.
                 scored_df = score_universe(
                     signals_df,
                     config.signal_weights,
                     config.category_weights,
                     signal_defs,
+                    normalization=config.score_normalization,
                 )
                 if score_cache is not None:
                     score_cache[period_date] = scored_df

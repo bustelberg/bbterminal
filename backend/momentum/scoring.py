@@ -27,15 +27,106 @@ def signal_defs_for_mode(selection_mode: str) -> list[dict]:
 SelectionDirection = Literal["top", "bottom"]
 
 
+# ⚠⚠ THE NORMALIZATION IS A STRATEGY PARAMETER, NOT AN IMPLEMENTATION DETAIL, AND `minmax` IS THE
+#    DEFAULT ONLY BECAUSE CHANGING IT SILENTLY WOULD REWRITE THREE LIVE STRATEGIES. See
+#    `_normalize` for what each one does and why `minmax` is the wrong one for a blend.
+SCORE_NORMALIZATIONS = ("minmax", "rank", "robust_z")
+DEFAULT_SCORE_NORMALIZATION = "minmax"
+
+# ⚠ Robust z is clipped at ±2 MADs BEFORE the 0-1 mapping. Uncapped, one name at +1638% is ~10 MADs
+#   out and re-flattens everyone else — the exact defect this mode exists to remove, reintroduced
+#   one step later. ±2 keeps ~95% of a normal-ish cross-section un-clipped.
+_ROBUST_Z_CAP = 2.0
+# The constant that makes MAD a consistent estimator of σ for a normal distribution.
+_MAD_TO_SIGMA = 1.4826
+
+
+def _normalize(series: pd.Series, method: str) -> pd.Series:
+    """One signal → [0, 1], so a weighted sum of signals means what its weights say.
+
+    ⚠⚠ `minmax` DOES NOT, AND THAT IS THE DEFECT THIS EXISTS FOR. Min-max is monotonic, so on a
+    SINGLE signal it ranks identically to `rank` and nothing is wrong. The damage is in the BLEND:
+    the divisor is `max - min`, so one extreme name collapses everyone else into a sliver of the
+    0-1 range, and a signal that occupies a sliver contributes almost nothing to a weighted sum
+    however heavily it is weighted. Measured on ACWI (1,747 names, three equally-weighted price
+    signals, all asked for 33.3%):
+
+        signal      raw max    realized spread    EFFECTIVE weight
+        mom_12_1     +1638%             0.0417              16.6%
+        mom_6_1       +174%             0.1018              40.6%
+        mom_3_1        +73%             0.1073              42.8%
+
+    The longest-horizon signal — the one the strategy is named for — silently gets half the
+    influence it was given, and the short-horizon signals absorb the difference. Top-20 selection
+    overlap against `rank` on the same weights: **6 of 20**. So this is not cosmetic; it changes
+    which companies are bought.
+
+    ⚠ AND IT DOES NOT NEED A DATA BUG. The extremes here are Kioxia (+1638%), SK Hynix, Micron,
+    Western Digital, SK Square — a real memory/AI supercycle, and a whole correlated CLUSTER rather
+    than one rogue tick. Winsorizing a single outlier would not have fixed it.
+
+    The three modes:
+
+      `minmax`    (x - min) / (max - min). The legacy behaviour, kept as the DEFAULT so saved runs
+                  and the three live scheduled strategies keep buying what they bought. Do not
+                  "fix" it in place — see `min_price_score` below.
+      `rank`      percentile rank, ties averaged. Uniform by construction, so EVERY signal has the
+                  same spread and the weights are exact. Also the only mode where the score has a
+                  plain-language meaning ("60" = better than 60% of the universe), which is what
+                  makes `min_price_score` legible.
+      `robust_z`  (x - median) / (1.4826 · MAD), clipped to ±2, mapped to [0, 1]. Outlier-resistant
+                  like `rank` but keeps MAGNITUDE: two names in the same decile stay apart if one
+                  is genuinely far ahead. Spread is only approximately equal across signals, so
+                  weights are near-exact rather than exact.
+
+    ⚠⚠ THE 0-100 SCORE MEANS SOMETHING DIFFERENT UNDER EACH, AND `min_price_score` IS READ AGAINST
+    IT. On ACWI the median stock scores **5.0/100** under `minmax` and **50/100** under `rank`, so
+    the floor of 30 that all three live strategies carry goes from "roughly the top few percent" to
+    "the top 70%". That is why this is a per-strategy parameter that defaults to the old value and
+    is folded into `_strategy_hash`, rather than a correction applied everywhere at once.
+
+    ⚠ NaN IS LEFT AS NaN here and neutralized by the caller (`fillna(0.5)`), so the three modes
+    agree about missing data rather than each inventing a convention.
+    """
+    s = pd.to_numeric(series, errors="coerce").astype(float)
+    # ⚠ Fewer than two distinct observations is not a cross-section: there is no "relative to the
+    #   others" to express, so every mode returns neutral rather than 0, 1, or a rank of 1.0.
+    if s.notna().sum() < 2 or s.nunique(dropna=True) < 2:
+        return pd.Series(np.nan, index=s.index).where(s.isna(), 0.5)
+
+    if method == "rank":
+        return s.rank(pct=True, method="average")
+
+    if method == "robust_z":
+        med = s.median()
+        mad = (s - med).abs().median()
+        if not mad or pd.isna(mad):
+            # ⚠ A ZERO MAD MEANS THE MIDDLE HALF IS IDENTICAL, NOT THAT THE SIGNAL IS FLAT — the
+            #   tails can still differ. Dividing would be ±inf, so fall back to `rank`, which is
+            #   defined for any distribution, rather than to neutral (which would silently delete
+            #   a signal that does carry information in its tails).
+            return s.rank(pct=True, method="average")
+        z = ((s - med) / (_MAD_TO_SIGMA * mad)).clip(-_ROBUST_Z_CAP, _ROBUST_Z_CAP)
+        return (z + _ROBUST_Z_CAP) / (2 * _ROBUST_Z_CAP)
+
+    lo, hi = s.min(), s.max()
+    return (s - lo) / (hi - lo)
+
+
 def _score_category(
     df: pd.DataFrame,
     signal_weights: dict[str, float],
     signal_keys: list[str],
     score_col: str,
+    *,
+    normalization: str = DEFAULT_SCORE_NORMALIZATION,
 ) -> pd.DataFrame:
-    """Min-max normalize signals within a category and compute a 0-100 score.
+    """Normalize signals within a category and compute a 0-100 score.
 
     Only signals present in both signal_keys and df.columns are used.
+    `normalization` picks how each signal is mapped to [0, 1] — see `_normalize`, where the choice
+    is explained and measured. It is NOT a free implementation choice: it changes which companies
+    are selected and what `min_price_score` means.
     """
     df = df.copy()
     active = {k: signal_weights.get(k, 0) for k in signal_keys if k in df.columns and signal_weights.get(k, 0) != 0}
@@ -49,14 +140,7 @@ def _score_category(
 
     score = np.zeros(len(df))
     for col, weight in normed.items():
-        series = pd.to_numeric(df[col], errors="coerce").astype(float)
-        min_val = series.min()
-        max_val = series.max()
-        if pd.isna(min_val) or pd.isna(max_val) or min_val == max_val:
-            norm = pd.Series(0.5, index=df.index)
-        else:
-            norm = (series - min_val) / (max_val - min_val)
-        norm = norm.fillna(0.5)
+        norm = _normalize(df[col], normalization).fillna(0.5)
         score += norm.values * weight
 
     df[score_col] = (score * 100).round(2)
@@ -100,8 +184,13 @@ def compute_category_scores(
     signal_defs: list[dict] | None = None,
     *,
     exclude_incomplete: bool = True,
+    normalization: str = DEFAULT_SCORE_NORMALIZATION,
 ) -> pd.DataFrame:
     """Score each company per category (0-100), then compute a weighted final score.
+
+    `normalization` selects how each signal is mapped to [0, 1] before the weighted sum —
+    see `_normalize`. It changes selection and the meaning of `min_price_score`, so it defaults to
+    the legacy `minmax` and travels in `_strategy_hash`.
 
     Adds columns: score_price, score_volume, ..., momentum_score (final).
 
@@ -142,7 +231,7 @@ def compute_category_scores(
     # Score each category independently
     for cat, keys in cats.items():
         col = f"score_{cat}"
-        df = _score_category(df, signal_weights, keys, col)
+        df = _score_category(df, signal_weights, keys, col, normalization=normalization)
 
     # Compute weighted final score
     final = np.zeros(len(df))
@@ -179,6 +268,8 @@ def score_universe(
     signal_weights: dict[str, float],
     category_weights: dict[str, float] | None = None,
     signal_defs: list[dict] | None = None,
+    *,
+    normalization: str = DEFAULT_SCORE_NORMALIZATION,
 ) -> pd.DataFrame:
     """The score-half of `score_and_select`: append per-category scores
     + `momentum_score` to every row of `signals_df`. Pure function of
@@ -188,6 +279,10 @@ def score_universe(
     and `category_weights` come from the base request and don't vary
     per variant).
 
+    ⚠ `normalization` IS PART OF THAT CACHE KEY WHEREVER THIS RESULT IS MEMOIZED. Two runs that
+    differ only in it produce different scores from identical signals, so a key blind to it would
+    serve one strategy's scores to another.
+
     `signal_defs` selects which pillars score (default price+volume; pass
     EXTRA_SIGNAL_DEFS for MomentumExtra's trend pillar).
 
@@ -195,7 +290,8 @@ def score_universe(
     top and bottom selections — no need to rescore between them."""
     if signals_df.empty:
         return signals_df
-    return compute_category_scores(signals_df, signal_weights, category_weights, signal_defs)
+    return compute_category_scores(signals_df, signal_weights, category_weights, signal_defs,
+                                   normalization=normalization)
 
 
 def selection_pool(
@@ -387,6 +483,7 @@ def score_and_select(
     min_price_score: float | None = None,
     backfill_below_min_score: bool = False,
     signal_defs: list[dict] | None = None,
+    normalization: str = DEFAULT_SCORE_NORMALIZATION,
 ) -> pd.DataFrame:
     """Convenience wrapper combining `score_universe` + `select_from_scored`
     for callers that don't manage a score cache (single-run path, tests,
@@ -395,7 +492,8 @@ def score_and_select(
     Variant sweeps should use the split form directly so the score pass
     is cached across variants — see `_period.compute_selection_period`
     for the runner's cache-aware call site."""
-    scored = score_universe(signals_df, signal_weights, category_weights, signal_defs)
+    scored = score_universe(signals_df, signal_weights, category_weights, signal_defs,
+                            normalization=normalization)
     return select_from_scored(
         scored,
         top_n_sectors=top_n_sectors,

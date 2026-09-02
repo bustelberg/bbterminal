@@ -5,6 +5,112 @@ Last updated **2026-09-02**. Delete items as they're done.
 
 ---
 
+## 📊 Score normalization + relative-momentum precompute (2026-09-02)
+
+### Shipped
+
+**`score_normalization` is now a strategy parameter** (`minmax` | `rank` | `robust_z`, default
+`minmax`). Min-max gives the signal with the fattest tail a fraction of its stated weight — measured
+on ACWI, three equally-weighted price signals asked for 33.3% each and got **16.6 / 40.6 / 42.8%**,
+with a top-20 selection overlap against `rank` of **6 of 20**. Cause is a real memory/AI supercycle
+cluster (Kioxia +1638%, SK Hynix, Micron, WDC, SK Square), not a data bug, so winsorizing one
+outlier would not have fixed it. Threaded through both hashes, the score cache, and
+`/signal-breakdown` (which explains a run's ranking and must score the same way).
+
+**`relative_momentum` precompute** — migration `20260902010000`, `momentum/relative.py`,
+`scripts/compute_relative_momentum.py`. Live ACWI: **10.5s** end to end, 1,745 of 1,992 ranked
+(87.6% coverage), 344 kB/day, reads at 1.9 ms (universe slice) and 0.7 ms (one company's history).
+
+### Left
+
+1. **⚠ NOTHING CAN SELECT `rank` FROM THE UI YET.** The field exists on `BacktestRequest` and is in
+   `openapi.json`, but `/backtest` has no control for it. Wiring needs `momentum.ts` (store),
+   `useBacktestRun.ts` (request), `useSavedRuns.ts` (restore — it has careful per-field logic) and a
+   select beside the min-price-score input. Until then the fix is reachable only by API.
+2. **⚠ Adopting `rank` on a live strategy is NOT a toggle.** The 0-100 scale moves — the median ACWI
+   stock scores 5/100 under `minmax`, 50/100 under `rank` — and all three live scheduled strategies
+   carry `min_price_score = 30`, which would go from "roughly the top few percent" to "the top 70%".
+   Re-tune the floor in the same edit, or the strategy silently changes meaning.
+3. **⚠ `company_price_coverage` CANNOT REFRESH ANY MORE — its RPC times out.** Caught while smoke-
+   testing the price slice: `refresh_company_price_coverage()` returns **57014 (statement timeout)**
+   every run, because `REFRESH MATERIALIZED VIEW CONCURRENTLY` over a 70M-row `metric_data` cannot
+   finish inside the 8s `authenticator` limit. That is why the MV read **2026-08-05** against a true
+   2026-09-01 on 2026-09-02 — ~4 weeks stale, silently. It backs `asset_grid`'s `gf_price_*` columns
+   and `universe_asset_membership`. The refresh is best-effort by design (logs a WARNING and
+   continues), so nothing failed; it just stopped being true. Fix is a direct-Postgres refresh with
+   `SET statement_timeout = 0` (the `common/pg.py` transport already bypasses PostgREST) rather than
+   an RPC call, or dropping the MV for a cheaper aggregate now that `idx_metric_data_close_price_date`
+   exists.
+4. **~~THE DAILY RANK IS ONLY AS FRESH AS THE CLOSES UNDER IT~~ — FIXED 2026-09-02.**
+   `month_end_price_refresh` was replaced by `daily_price_slice` (12:00 UTC daily, the 150
+   most-stale FETCHABLE companies, ~17-day cycle), so constituent closes now stay well inside the
+   30-day guard and the rank genuinely moves day to day. The earlier "~60k calls/month" figure was
+   the wrong frame: 12-1 reads prices at t−1m and t−12m, both already stored, so nothing needs
+   fetching daily — it only needs the history never to age past 30 days.
+   ⚠ The filter to subscribed exchanges is load-bearing (see CLAUDE.md): without it the slice
+   spends every single day on the 326 permanently-unpriceable companies and never advances.
+4. **⚠ AEX ranks 22 names into 7 buckets — about 3 per state.** That is thin enough to be noise, and
+   it is why `mom_rank_n` rides on every row and the tooltip prints "of 22". Worth deciding whether
+   AEX should offer the chip at all, or whether a minimum population should suppress it.
+5. **UI copy: the misleading case is latent, not absent.** Today the weak states are all genuinely
+   negative (`-` tops out at −0.4%), so sign and state agree. But `+` starts at **+15.6%** — a stock
+   up 14% already renders neutral — and in a stronger market the `-` boundary crosses zero and
+   "positive return, red orb" goes live. `raw_return_pct` is stored for exactly this; the surface
+   still has to be titled *Relative* and show the raw number.
+
+---
+
+## 🌏 ACWI rebuild coverage — the gap is India, and it needs ISINs (2026-09-02)
+
+The Analyse modal's coverage warning blamed "no price series yet". That was wrong: of the ACWI
+members that reach the price world, **exactly one** lacks a series. The real gap is the ISIN bridge,
+and it is systematic, not random:
+
+    India            2 priced of 161
+    United Kingdom  41 of  72
+    Hong Kong      152 of 182
+    United States  474 of ~476
+
+**Fixed:** the copy now names the countries (`analyseCopy.coverageWarning`, EN + NL) off a new
+`missing_countries` in `_asset_benchmark.members()` — computed only when coverage is below the 97%
+the UI warns at, so a healthy universe pays nothing. And
+`scripts/close_benchmark_coverage.py` reports the split by cause and queues what is queueable.
+
+**⚠ THE "GET ISINs FIRST" PLAN WAS WRONG, AND SO WAS THE ROUTE.** An earlier note here proposed an
+OpenFIGI ticker→ISIN lookup. OpenFIGI maps **ISIN→FIGI and never the reverse** — its mapping API
+returns no ISIN at all — and there is no other supplier: GuruFocus does not sell India, and the
+iShares export really does carry only Ticker/Name/Sector/…/Currency/FX Rate, no ISIN, no SEDOL.
+
+**The ISIN is not needed.** `asset_analysis` is keyed on **`symbol`** (NOT NULL); only
+`asset_execution` — the ISIN→asset bridge — requires one, and `index_file_membership` links
+`universe_id → analysis_id` directly, skipping it. `WIPRO.NS` has **7,659 bars and no
+`asset_execution` row**: the existing proof. So the fix is symbol-first ingestion from Yahoo, which
+has no coverage holes.
+
+**`scripts/ingest_index_file_symbols.py`** does it. Measured against the 15-Apr-2026 file:
+
+    2,270 equity rows · 2,224 get a Yahoo symbol · 1,708 already assets · 516 MISSING
+      National Stock Exchange Of India  159   <- the entire India gap
+      XBSP (B3 Brazil) 38 · Toronto 32 · Korea 28 · Johannesburg 27
+
+Proven end to end on 3 Indian names (ABB.NS 6,006 bars, ADANIENT.NS 6,005, ABCAPITAL.NS 2,227,
+back to 2002). INR/BRL/ZAR/KRW all have FX to 2000, so the EUR conversion works.
+
+    uv run python scripts/ingest_index_file_symbols.py --apply          # then:
+    uv run python -c "from index_universe.acwi.asset_membership import sync; print(sync())"
+
+⚠ Yahoo paces hard once it has seen load — the same 3 symbols took 3s cold and 133s while throttled
+— so budget hours, not minutes, for 516. The script stops cleanly on `YahooThrottled` and resumes
+on re-run (anything created is skipped), and refuses to start while the ingest worker is live.
+⚠ 45 file rows get no symbol at all because their exchange is missing from
+`yahoo_map.EXCHANGE_SUFFIX` (Santiago, Philippines, Kuwait, Kosdaq) — a separate, small fix.
+
+⚠ Run `uv run python scripts/close_benchmark_coverage.py --universe ACWI --apply` to queue the 73
+that are fixable today (71 `not_found` + 2 never queued), then let the asset-pipeline worker drain
+it. The script makes no vendor calls itself.
+
+---
+
 ## ⏱ Backend + database complexity audit (2026-09-02) — 4 fixed, 3 left
 
 Full measurements in the sections below. Fixed this pass: the `metric_data` index split

@@ -163,12 +163,28 @@ def _refresh(ticker: str, bid: int, have_max: str | None) -> int:
     return len(rows)
 
 
-def ensure_fresh(label: str) -> tuple[int, tuple[str, float]] | None:
+def ensure_fresh(label: str, *, force: bool = False) -> tuple[int, tuple[str, float]] | None:
     """`(benchmark_id, newest bar)` for this label's proxy ETF, refreshed if it has gone stale.
 
     None when there is no proxy, or when nothing can be had at all. Self-healing: the scheduled
     price phase normally keeps this current (`refresh_index_proxies`), and this is what makes the
     number right anyway on a box where that has not run yet.
+
+    ⚠⚠ `force` IS WHAT MAKES THE SCHEDULED PATH ACTUALLY REFRESH, AND ITS ABSENCE WAS A BUG THAT
+    LOOKED LIKE A WORKING JOB. `refresh_index_proxies` runs daily inside `price_update` and did
+    nothing but call this — which refuses to fetch until the series is MORE than `_STALE_DAYS`
+    behind. So the "daily refresh" was a no-op on any series under four days old: the tile could
+    only ever be repaired once it was already badly stale, and in between it sat a day or two
+    behind everything else on the page with nothing reporting it. Measured 2026-09-02: ACWI and
+    SPY newest bar **2026-08-31** against a **2026-09-01** newest close in both `metric_data` and
+    `asset_price`.
+
+    ⚠ THE TWO CALLERS WANT OPPOSITE THINGS, WHICH IS WHY THIS IS A FLAG AND NOT A LOWER CONSTANT.
+    The scheduled path is the one that SHOULD spend a vendor call every day — that is its whole
+    job, and it runs where nobody is waiting. The reader path must not: it is inside the Analyse
+    modal, ONE request with no partial paint, where a 1.35s GuruFocus round trip is the whole of
+    somebody's wait. Lowering `_STALE_DAYS` instead would have moved the daily call onto the
+    reader, which is exactly what the scheduled pass exists to prevent.
     """
     ticker = PROXY.get(label)
     if not ticker:
@@ -177,9 +193,13 @@ def ensure_fresh(label: str) -> tuple[int, tuple[str, float]] | None:
     if bid is None:
         return None
     last = _latest(bid)
+    # ⚠ CALENDAR DAYS, DELIBERATELY, ON THE LAZY PATH ONLY. A Friday close is the correct newest
+    #   bar all weekend, so a trading-day rule here would buy nothing and a same-day rule would
+    #   fetch on every Saturday open. `force` sidesteps the question entirely for the scheduled
+    #   caller, which simply asks the vendor what it has.
     stale = last is None or date.fromisoformat(last[0]) < date.today() - timedelta(days=_STALE_DAYS)
     guard = (ticker, date.today().isoformat())
-    if stale and not _fetched_today.get(guard):
+    if (force or stale) and not _fetched_today.get(guard):
         _fetched_today[guard] = True
         try:
             if _refresh(ticker, bid, last[0] if last else None):
@@ -199,11 +219,21 @@ def refresh_index_proxies() -> int:
     lazily means inside the Analyse modal — ONE request with no partial paint, where it is the
     whole of somebody's wait. Run daily beside the other benchmark prices, the lazy path becomes
     the repair it was meant to be rather than the normal case.
+
+    ⚠⚠ `force=True`, AND WITHOUT IT THIS FUNCTION DID NOTHING. It called `ensure_fresh` plainly,
+    which declines to fetch until the series is more than `_STALE_DAYS` (3) behind — so a job that
+    runs every morning could not keep a series current, only rescue one already four days gone.
+    The tile sat a day or two behind the rest of the page, every day, and nothing said so. This is
+    the caller that is SUPPOSED to spend a vendor call daily; the freshness test belongs on the
+    reader, not here.
+
+    ⚠ The per-process, per-day guard inside `ensure_fresh` still applies, so a restart-looping box
+    does not turn this into a fetch per boot.
     """
     n = 0
     for label in PROXY:
         try:
-            if ensure_fresh(label):
+            if ensure_fresh(label, force=True):
                 n += 1
         except Exception as exc:                                # noqa: BLE001
             _log.warning("[bench-etf] %s: proxy refresh failed: %s: %s",
