@@ -210,6 +210,61 @@ def load_table_via_copy(table: str, columns: str = "*",
     return None if buf is None else _rows_from_copy(buf)
 
 
+def load_distinct_via_copy(table: str, column: str) -> list | None:
+    """The DISTINCT non-null values of ONE column, in ONE statement.
+
+    Returns `None` to mean "fall back to PostgREST" — unconfigured, psycopg missing, or any error.
+    Same interpolation rule as its siblings: `table` and `column` must never come from a request.
+
+    ⚠⚠ WHY THIS EXISTS: A DROPDOWN'S OPTION LIST IS AN AGGREGATE, AND PULLING THE ROWS TO BUILD IT
+    IN PYTHON IS BOTH SLOWER AND WRONG. `/api/companies/field-options` built its sector list as
+    `universe_membership.select("sector").limit(10000)` and then `{r["sector"] for r in rows}` —
+    8,444 rows over the wire to produce 43 strings.
+
+    ⚠⚠ AND `.limit()` IS NOT WHAT DECIDES HOW MANY ROWS COME BACK — PostgREST's `db-max-rows` is,
+    and it is **1,000 on the cloud project** against 10,000 locally (`project_postgrest_max_rows_trap`).
+    So production was deriving that list from the first 1,000 rows and shipping **40 of the 43
+    sectors**, with no empty cell and no error anywhere: three filter options simply did not exist,
+    and WHICH three depended on physical row order, so a VACUUM could change the answer. The local
+    dataset returned all 43 and could never reproduce it — the exact shape of that trap.
+
+    A `SELECT DISTINCT` cannot truncate, because the aggregate happens before the row limit rather
+    than after it: 43 rows leave the server, and they are all of them.
+
+    ⚠ NULLs and blanks are dropped HERE rather than by the caller, so every caller gets the same
+    answer and none of them has to remember to.
+
+    ⚠⚠ SORTED IN PYTHON, NOT BY `ORDER BY` — the two do not agree, and the DATABASE's answer is the
+    one that can move. Postgres sorts under the database COLLATION, which is locale-aware and need
+    not match between the local container and the cloud project; Python sorts by codepoint. On the
+    live sector list they already differ:
+
+        Postgres:  Industrials, Information Technology, Internet Services, IT Services & Consulting
+        Python:    IT Services & Consulting, IT Services & Software, Industrials, Information …
+
+    Either order is defensible for a dropdown. What is not defensible is the order depending on
+    which environment answered, so it is decided HERE — which also keeps this byte-identical to the
+    `sorted({...})` the callers used before, so swapping the transport in cannot reorder a UI.
+    """
+    if not _db_url():
+        return None
+    if not _SAFE_IDENT.match(table) or not _SAFE_IDENT.match(column):
+        log.warning("[common.pg] refusing a COPY with a non-identifier table/column: %r/%r",
+                    table, column)
+        return None
+    sql = (f"COPY (SELECT DISTINCT {column} FROM {table} "
+           f"WHERE {column} IS NOT NULL AND btrim({column}::text) <> '') "
+           f"TO STDOUT WITH (FORMAT csv)")
+    buf = _run_copy(sql, ())
+    if buf is None:
+        return None
+    out: list = []
+    for row in csv.reader(io.TextIOWrapper(buf, encoding="utf-8", newline="")):
+        if row and row[0].strip():
+            out.append(row[0].strip())
+    return sorted(out)
+
+
 def _drop_scoped_connection() -> None:
     """Forget this thread's connection after an error, so the next COPY reconnects."""
     scope = _CONN_SCOPE.get()

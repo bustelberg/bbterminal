@@ -1,8 +1,64 @@
 # Open follow-ups — resume here
 
 Running list of unfinished / offered-but-not-built work, newest context first.
-Last updated **2026-08-19**. Delete items as they're done.
+Last updated **2026-09-02**. Delete items as they're done.
 
+---
+
+## ⏱ Backend + database complexity audit (2026-09-02) — 4 fixed, 3 left
+
+Full measurements in the sections below. Fixed this pass: the `metric_data` index split
+(migration `20260902000000`), `/api/companies/field-options` truncation, `deps.paginate`'s
+cap assumption, and a leg-cache on `list_account_links`. What is left:
+
+### 1. `metric_data` stores 1,332 metric names 70 million times — ~9 GB of the 22 GB
+
+Measured on the local dataset (70,047,753 rows):
+
+| | avg width | distinct | copies | ≈ heap cost |
+|---|---|---|---|---|
+| `metric_code` | 34 B | 1,332 | 70.0M | ~2.38 GB |
+| `source_code` | 10 B | **2** | 70.0M | ~0.70 GB |
+
+Both are `character varying`, and both are also carried in `metric_data_pkey` (6,349 MB) **and**
+`idx_metric_data_metric_source_company_date` (7,699 MB) — so each is paid for roughly three times.
+Total repeated-string footprint ≈ **9 GB of the table's 22 GB**, and the composite index is now
+larger than the heap it indexes (7,699 MB vs 7,483 MB).
+
+Normalising both to `smallint` FKs against a lookup table would roughly halve `metric_data` and cut
+index maintenance on the hottest write path in the app. ⚠ NOT ATTEMPTED: it touches every query in
+`ingest/`, `momentum/data/_pg.py`, `routers/earnings*.py` and `timeseries/`, and the EAV strings are
+compared as literals in dozens of places. It is a migration with a compatibility view, not an edit.
+⚠ Cheap partial alternatives do NOT exist here — B-tree deduplication cannot help, because these
+keys are essentially unique once `company_id`/`target_date` are appended, so there is nothing to
+deduplicate.
+
+### 2. `company_price_coverage` was **4 weeks stale** locally — check prod
+
+    max(price_to) from the MV : 2026-08-05
+    max(target_date) actual   : 2026-09-01
+
+`_refresh_price_coverage` (`ingest/phases/prices.py`) is **best-effort by design** — it logs a
+WARNING and continues if the RPC fails — and it only ever runs at the end of the price phase. So a
+run of failures, or simply a phase that has not run, leaves the MV behind with nothing on screen
+saying so. The MV backs `asset_grid`'s `gf_price_*` columns and `universe_asset_membership`.
+
+⚠ This is why the `latest-price-date` fix above did NOT route through the MV, even though
+`max(price_to)` is 2.5 ms against the metric_data query's 1,870 ms: it would have been fast and a
+month wrong. Worth deciding whether the grid should show the MV's own age, the way
+`lib/snapshotAge.tsx::lagOwner` makes AIRS's lag visible.
+
+### 3. Small unused indexes (~1.5 MB total) — evidence is weak, left alone
+
+14 non-unique indexes have `idx_scan = 0` locally, all under 500 kB (largest:
+`asset_universe_member_symbol_idx` 456 kB, `asset_analysis_msci_region_idx` 200 kB,
+`idx_airs_mutatie_portfolio` 64 kB — the last fully covered by `idx_airs_mutatie_fonds`, which
+shares its leading column). ⚠ Local scan counts are NOT evidence about production: several of these
+sit on admin and pipeline paths that simply never ran here. Re-read `pg_stat_user_indexes` on prod
+before dropping any. The space at stake does not justify the risk on its own — this is only worth
+doing alongside a prod stats read you are taking anyway.
+
+---
 ---
 
 ## ⏱ Fundamental modal → Long Equity: the ACWI benchmark line — DONE (2026-08-19)

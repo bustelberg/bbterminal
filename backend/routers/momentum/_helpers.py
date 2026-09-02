@@ -68,12 +68,20 @@ def latest_db_price_date() -> date | None:
     table. Used as a fast pre-flight gate so we don't run a heavy compute
     against stale DB data. Returns None if the table is empty.
 
-    The `source_code = 'gurufocus'` filter is load-bearing for performance:
-    it lets Postgres serve this via the `idx_metric_data_source_date`
-    (source_code, target_date) index as a backward index scan (stop at the
-    first close_price row). Without it there's no usable index for
-    `metric_code = … ORDER BY target_date DESC`, so prod seq-scans the whole
-    `metric_data` table and hits the statement timeout (57014)."""
+    ⚠ BOTH constants are load-bearing, and they must match
+    `idx_metric_data_close_price_date`'s predicate EXACTLY
+    (`metric_code='close_price' AND source_code='gurufocus'`) or the partial
+    index does not apply and prod seq-scans a 70M-row table into the 8s
+    statement timeout (57014).
+
+    ⚠ The previous index here was `(source_code, target_date)`, and the comment
+    claiming it "stops at the first close_price row" was wrong:
+    `metric_code` was not in it, so it was a FILTER and the scan walked every
+    row dated after the last close — 188,286 of them, ALL `is_prediction`
+    estimates carrying FUTURE target_dates, at 1,870 ms. That cost grew with
+    every quarter of ingested estimates and had nothing to do with prices. The
+    partial index makes this a one-tuple index-only scan (0.07 ms). See
+    `supabase/migrations/20260902000000_metric_data_source_date_split.sql`."""
     resp = (
         supabase.table("metric_data")
         .select("target_date")
