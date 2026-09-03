@@ -1,0 +1,85 @@
+{
+  "_doc": [
+    "ONE FIXTURE, TWO SUITES — the server's blend and the browser's twin must draw the same line.",
+    "",
+    "Read by `fundamentalBlend.parity.test.ts` (vitest) and `backend/tests/test_blend_client_parity.py`",
+    "(pytest). It lives HERE, under the frontend, because vite refuses to serve a file outside its",
+    "root while python can read anything — so the only workable direction is python reaching across.",
+    "",
+    "The case it encodes: an index whose payload lists a constituent the LINE was never handed. The",
+    "chart is blended over `_members(universe, require_market_cap=True)`; the drill-down payload is",
+    "`all_constituents=True`, which keeps the constituents with no stored market cap at weight 0 so",
+    "the table can say 'in the index, not in the line'. `Echo` is one of those. It can never carry a",
+    "weight, so it is out of every average on both sides — but until 2026-09-03 it still counted in",
+    "the CLIENT's names-coverage denominator (`parts.length`), where the server's `total_n` never",
+    "saw it. 2016 and 2017 are built to sit EXACTLY on the 50% floor: two of the four weighted",
+    "members report them.",
+    "",
+    "  server / fixed client   2/4 = 50.0%  -> drawn -> 100, 107.5, 123.625, 142.16875",
+    "  client before the fix   2/5 = 40.0%  -> refused -> 100, ..., 126.475 at 2018",
+    "",
+    "The gap is not a missing point: skipping a period makes the next step span two intervals, so",
+    "every level after it is a product over a different partition. Echo's own series runs 100 -> 800",
+    "so that a leak into the line would be unmissable rather than a rounding difference.",
+    "",
+    "⚠ THE VALUES ARE THE FIXTURE AND THE EXPECTED SERIES IS DERIVED FROM THEM BY HAND, not captured",
+    "from either implementation. A baseline captured from one side would pin that side's bugs as the",
+    "contract; both suites are supposed to be checkable against the arithmetic below.",
+    "",
+    "  weights are equal (caps all 100), so each step is a plain mean of the members' growth:",
+    "    2016: (0.10 + 0.20 + 0 + 0) / 4 = 0.075   -> 100     x 1.075 = 107.5",
+    "    2017: (0.10 + 0.20) / 2        = 0.15     -> 107.5   x 1.15  = 123.625",
+    "          Charlie/Delta are carried into 2016 (one period) and dropped by 2017 (two), so they",
+    "          span the first step at g=0 and neither of the last two.",
+    "    2018: (0.10 + 0.20) / 2        = 0.15     -> 123.625 x 1.15  = 142.16875"
+  ],
+  "metric": "price_ps",
+  "metric_code": "annuals__Per Share Data__Month End Stock Price",
+  "periods": ["2015", "2016", "2017", "2018"],
+  "members": [
+    {
+      "isin": "TEST00000ALP",
+      "name": "Alpha",
+      "market_cap_eur": 100,
+      "values": { "2015": 100, "2016": 110, "2017": 121, "2018": 133.1 }
+    },
+    {
+      "isin": "TEST00000BRV",
+      "name": "Bravo",
+      "market_cap_eur": 100,
+      "values": { "2015": 100, "2016": 120, "2017": 144, "2018": 172.8 }
+    },
+    {
+      "isin": "TEST00000CHA",
+      "name": "Charlie",
+      "market_cap_eur": 100,
+      "values": { "2015": 100, "2018": 100 }
+    },
+    {
+      "isin": "TEST00000DEL",
+      "name": "Delta",
+      "market_cap_eur": 100,
+      "values": { "2015": 100, "2018": 100 }
+    },
+    {
+      "isin": "TEST00000ECH",
+      "name": "Echo",
+      "market_cap_eur": 0,
+      "values": { "2015": 100, "2016": 200, "2017": 400, "2018": 800 }
+    }
+  ],
+  "expected_drawn": ["2015", "2016", "2017", "2018"],
+  "expected_level": {
+    "2015": 100,
+    "2016": 107.5,
+    "2017": 123.625,
+    "2018": 142.16875
+  },
+  "expected_covered_names_pct": {
+    "2015": 100,
+    "2016": 50,
+    "2017": 50,
+    "2018": 100
+  },
+  "expected_contributors": 4
+}

@@ -16,7 +16,7 @@
 import { describe, expect, it } from 'vitest';
 import katex from 'katex';
 import {
-  subPct, withWorked, workedBand, workedCagr, workedMean, workedRatio,
+  withWorked, workedBand, workedCagr, workedMean, workedRatio,
 } from './workedFormula';
 import { oneSigmaBand } from './activeBand';
 
@@ -124,12 +124,12 @@ describe('an unescaped percent would truncate the expression', () => {
   it('every builder escapes it', () => {
     expect(workedMean([55.4, 54.1])).toContain(String.raw`\%`);
     expect(workedCagr(CAGR)).toContain(String.raw`\%`);
-    expect(workedRatio(1, 2, subPct(5), '', '%')).toContain(String.raw`\%`);
+    expect(workedRatio(1, 2, '+5.00%', '', '%')).toContain(String.raw`\%`);
     // ⚠ AND NONE OF THEM LEAVES A BARE ONE. `\%` contains `%`, so a `toContain` check alone would
     // pass on `\% ... %`; this asserts there is no percent that is not preceded by a backslash.
     expect(workedBand(BAND)).toContain(String.raw`\%`);
     for (const tex of [workedMean([55.4, 54.1]), workedCagr(CAGR), workedBand(BAND),
-      workedRatio(1, 2, subPct(5), '', '%')]) {
+      workedRatio(1, 2, '+5.00%', '', '%')]) {
       expect(tex).not.toMatch(/(^|[^\\])%/);
     }
   });

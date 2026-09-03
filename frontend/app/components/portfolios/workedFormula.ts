@@ -94,18 +94,20 @@ export const texEscape = tex;
 /** Prose inside an expression, upright rather than italic. */
 export const texWords = words;
 
-/** A signed percentage, as a RESULT — one decimal, because nothing divides by it. */
-export const subPct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
-
 /**
- * The same thing at TWO decimals — for a figure that appears in a card's PROSE and in its worked
- * line at once.
+ * A signed percentage, as a RESULT — two decimals, and there is no one-decimal twin any more.
  *
- * ⚠ NOT A SECOND OPINION ABOUT PRECISION, A SECOND SITUATION. `subPct` is a terminal result nobody
- * checks against anything; this is for a number the reader is invited to find twice in one tooltip,
- * and the risk views all print two decimals (see `subDigits`' own ⚠⚠). Rounding the sentence at one
- * decimal and the formula at two puts `+3.1%` and `+3.12%` four lines apart in the same card, which
- * is precisely the "are these the same number?" doubt the worked lines exist to remove.
+ * ⚠ IT IS SIGNED SO A POSITIVE CANNOT READ AS AN ABSOLUTE LEVEL, and more digits are always safe
+ * on a result: nothing divides by it, so precision can only help the arithmetic reconcile.
+ *
+ * ⚠⚠ THERE **WAS** A ONE-DECIMAL `subPct` BESIDE THIS, AND IT WAS DELETED RATHER THAN LEFT
+ * UNUSED (2026-09-03). It was written for "a terminal result nobody checks against anything", and
+ * its only caller was `workedCagr` — whose whole job is to be checked against the tile it sits
+ * under. Once those tiles went to two decimals the one-decimal spelling had no correct call site
+ * left, and an obviously-named helper that rounds differently from every figure on screen is a
+ * trap for whoever writes the next worked line: they would reach for `subPct`, get `+4.5%` under
+ * a tile reading `+4.55%`, and reintroduce exactly the doubt this file exists to remove. One
+ * spelling, one precision.
  */
 export const subPct2 = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
 
@@ -160,6 +162,13 @@ export function withWorked(formula: string, worked: string): string {
  *
  * ⚠ IT TAKES THE `Cagr` AND NOTHING ELSE. The operands ride on the result (see `Cagr.fromValue`),
  * so there is no way to hand this the right rate and the wrong pair of numbers.
+ *
+ * ⚠⚠ THE ANSWER IS `subPct2` BECAUSE THE TILE ABOVE IT PRINTS TWO DECIMALS (2026-09-03, on
+ * request). Every surface this line appears under — the growth cards' `CAGR` / `CAGR · <index>`
+ * tiles and the `Tables` rate rows — now reads `+4.55%`, and a worked line rounding the SAME
+ * quantity to `+4.5%` four lines away is exactly the "are these the same number?" doubt these
+ * lines exist to remove; `subPct2`'s own ⚠ records that trade being made once already. It is a
+ * result nobody divides by, so more digits only ever help it reconcile.
  */
 export function workedCagr(got: Cagr): string {
   if (got.pct === null) return '';
@@ -171,7 +180,7 @@ export function workedCagr(got: Cagr): string {
   // `[2025]` was standing in for. A subscript cannot be mistaken for another operand.
   return `\\left(\\dfrac{${subNum(got.toValue)}_{\\,${tex(got.to)}}}`
     + `{${subNum(got.fromValue)}_{\\,${tex(got.from)}}}\\right)^{1/${got.years}} - 1`
-    + ` = ${tex(subPct(got.pct))}`;
+    + ` = ${tex(subPct2(got.pct))}`;
 }
 
 /**

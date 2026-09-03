@@ -10,7 +10,9 @@ import { roicByYear, type CashReturnInputs } from './cashReturnData';
 import { investedCapitalBlend } from './investedCapitalData';
 import { buildBlend, POSITIVE_ONLY_METRICS, type Blend, type Resp } from './fundamentalBlend';
 import { traceEmpty } from '../../../lib/debugTrace';
-import { cagrExcess, commonEndPeriod, forwardCagr, lineCagr, type Cagr } from './lineCagr';
+import {
+  CAGR_DECIMALS, cagrExcess, cagrPct, commonEndPeriod, forwardCagr, lineCagr, type Cagr,
+} from './lineCagr';
 import { marginByYear, xToPeriod, type MarginInputs } from './marginData';
 import { grossMarginByYear, type GrossMarginInputs } from './grossMarginData';
 import { cashConversionByYear, type CashConversionInputs } from './cashConversionData';
@@ -197,6 +199,15 @@ type Side = {
   err: string | null;
 };
 
+/**
+ * A MEAN row's percentage — one decimal.
+ *
+ * ⚠ THE RATE ROWS DO NOT COME THROUGH HERE ANY MORE (2026-09-03). They print at `CAGR_DECIMALS`
+ * via `cagrPct`, because the same rate is quoted on the `Graphs` tiles one tab away and the two
+ * must round identically; an average margin is quoted nowhere else and stays as it was. Two row
+ * KINDS, two precisions — the rate rows say "per annum" and the mean rows say "average of", which
+ * is already the distinction this table's header spends a paragraph on.
+ */
 const pctCell = (v: number, sign: boolean) =>
   `${sign && v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
 
@@ -246,7 +257,9 @@ function RateCell({ got, copy, span = 1, ownWindow = false }:
           do not always support it identically. */}
       <InfoTip className="cursor-default" text={copy.rateTip(got.from, got.to, got.years)}>
         <span className={got.pct >= 0 ? 'text-fg-soft' : 'text-neg-300'}>
-          {pctCell(got.pct, true)}
+          {/* ⚠ `cagrPct`, NOT `pctCell` — the same spelling the `Graphs` tile uses for the same
+              rate. See `CAGR_DECIMALS`. */}
+          {cagrPct(got.pct)}
         </span>
         {/* ⚠ THE WINDOW IS LABELLED, because a centred number under two headings is unambiguous
             about which column it is NOT in and silent about which window it IS. Same treatment as
@@ -649,7 +662,10 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
               ? <InfoTip text={e.reason} className="cursor-default text-fg-faint">—</InfoTip>
               : <>
                 <span className={e.pp >= 0 ? 'text-pos-300' : 'text-neg-300'}>
-                  {`${e.pp >= 0 ? '+' : ''}${e.pp.toFixed(1)}`}
+                  {/* ⚠ THE SAME DIGITS AS THE TWO CELLS IT IS THE DIFFERENCE OF, or the row stops
+                      adding up on screen: 39.53 − 4.55 is 34.98, and 35.0 is what a reader gets
+                      for doubting it. See `CAGR_DECIMALS`. */}
+                  {`${e.pp >= 0 ? '+' : ''}${e.pp.toFixed(CAGR_DECIMALS)}`}
                 </span>
                 {/* Same rule as the value's badge — see `RateCell`. */}
                 {windows !== shown

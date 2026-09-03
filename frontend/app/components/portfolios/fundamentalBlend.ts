@@ -213,6 +213,40 @@ export function buildBlend(data: Resp, metric?: string) {
       const w = r.market_cap_eur ?? r.weight_pct;
       return w && w > 0 ? w : 0;
     };
+    /**
+     * ⚠⚠ IS THIS ROW ONE THE **LINE** WAS EVER HANDED? An index payload lists EVERY constituent
+     * (`all_constituents=True`), including the ones with no stored market cap — they arrive at
+     * weight 0 so the drill-down can say "in the index, not in the line" instead of silently
+     * showing 22 of the AEX's 25. The CHART is blended one member list up, over
+     * `_members(universe, require_market_cap=True)`, and never sees them at all.
+     *
+     * ⚠⚠ WITHOUT THIS THEY DILUTED THE NAMES FLOOR, AND ONLY THE NAMES FLOOR. `stableW` is 0 for
+     * such a row, so the WEIGHT side was already right; `wAt` returns null for it, so it was
+     * already out of every average. What was left was `parts.length` — the denominator of
+     * `coverN[y] / parts.length` in `drawn()` — counting members the server's `total_n =
+     * len(members)` does not. So the client's names coverage read LOW, and a period at the floor
+     * was refused here and drawn there. A refused period is not a missing point: the chain skips
+     * it and the next step spans two intervals instead of one, so the whole line downstream is a
+     * product over a different partition. `earnings.py::_load_and_expand_members` predicts exactly
+     * this ("quietly adding three members that can never report would drop every period from 21/22
+     * to 21/25 and change which periods the CHART draws") — the flag protects the server and the
+     * protection did not travel with the payload.
+     *
+     * ⚠ REPORTED 2026-09-03 as the Fundamental modal disagreeing with itself on ACWI: share price
+     * +10.9%/yr on `Graphs` against +10.8% in `Tables`, revenue +4.5% against +4.6%. The MECHANISM
+     * is pinned by `fundamentalBlend.parity.test.ts` + `tests/test_blend_client_parity.py` over one
+     * shared fixture; that those particular ACWI figures are this and nothing else is NOT measured.
+     *
+     * ⚠ THE TEST IS `market_cap_eur`, WHICH IS THE SERVER'S OWN. It ships only on the index path
+     * and it IS `require_market_cap`'s subject (`weight_by[ci]` is `company.market_cap_eur`), so
+     * `== null` — a portfolio row, or any payload that omits the field — leaves this a no-op. A
+     * book's 0-weight holding is still counted, exactly as `blend_series` counts it.
+     *
+     * ⚠ NO BADGE AND NO `excluded` REASON. Such a row already shows a blank weight in every
+     * period, the response's `weight_basis` names them in a footnote, and the 2026-08-12 request
+     * was to stop announcing mechanical drops on these rows.
+     */
+    const inLine = (r: Row): boolean => r.market_cap_eur == null || r.market_cap_eur > 0;
     for (const r of data.rows) {
       // ⚠⚠ BEFORE THE DENOMINATOR, UNLIKE THE BASE TEST BELOW — and the difference is real. The
       // base test mirrors `_prepare`, which runs INSIDE `blend_series` on members it was already
@@ -243,6 +277,10 @@ export function buildBlend(data: Resp, metric?: string) {
         // Nothing filed at all — the row already says so via `status`, so no second badge.
         continue;
       }
+      // ⚠ AND BEFORE THE DENOMINATOR TOO, FOR THE SAME REASON AS `eligible` ABOVE: this row was
+      // never handed to `blend_series`, so counting it here reports a coverage the server never
+      // computed. See `inLine`.
+      if (!inLine(r)) continue;
       // ⚠ COUNTED IN THE DENOMINATOR **BEFORE** THE BASE TEST, because that is the order
       // `blend_series` uses: it takes the total over every member handed to it, and `_prepare`
       // drops the non-positive bases afterwards. Filtering first would shrink the denominator,

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import InfoTip from '../InfoTip';
 import { type Blend } from './fundamentalBlend';
-import { cagrExcess, commonEndPeriod, lineCagr } from './lineCagr';
+import { CAGR_DECIMALS, cagrExcess, cagrPct, commonEndPeriod, lineCagr } from './lineCagr';
 
 /**
  * The `Table` view: what the book and the index compounded at, over five and ten years.
@@ -26,7 +26,10 @@ export type CagrBenchmark = typeof CAGR_BENCHMARKS[number];
 
 const WINDOWS = [5, 10] as const;
 
-const pct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+/** ⚠ THE SHARED SPELLING (`cagrPct`, two decimals). Only `CAGR_BENCHMARKS` above is imported
+ *  anywhere today — the table itself renders nowhere — so this is kept in step rather than left as
+ *  a one-decimal copy for whoever mounts it next. See `CAGR_DECIMALS`. */
+const pct = cagrPct;
 
 /**
  * A CELL THAT IS STILL WAITING — one dot, two, three, round again.
@@ -169,7 +172,7 @@ export default function CagrTable({
                     {e.pp == null
                       ? <InfoTip text={e.reason} className="cursor-default text-fg-faint">—</InfoTip>
                       : <span className={e.pp >= 0 ? 'text-pos-300' : 'text-neg-300'}>
-                        {`${e.pp >= 0 ? '+' : ''}${e.pp.toFixed(1)}`}
+                        {`${e.pp >= 0 ? '+' : ''}${e.pp.toFixed(CAGR_DECIMALS)}`}
                       </span>}
                   </td>
                 );

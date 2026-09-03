@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { endpointCagr, lineCagr } from './lineCagr';
+import { CAGR_DECIMALS, cagrPct, endpointCagr, lineCagr } from './lineCagr';
+import { subPct2, workedCagr } from './workedFormula';
 
 /**
  * ONE definition of CAGR, used by both surfaces that quote one.
@@ -98,5 +99,37 @@ describe('the two surfaces agree by construction', () => {
     // …which is why both tiles state the window they used rather than just a percentage.
     expect(a.pct != null && a.years).toBe(12);
     expect(b.pct != null && b.years).toBe(10);
+  });
+});
+
+/**
+ * ONE PRECISION, FOR THE SAME REASON THERE IS ONE DEFINITION.
+ *
+ * ⚠⚠ THE TWO SURFACES ARE IN THE SAME MODAL, so a reader who opens both tabs is comparing them
+ * whether or not a comparison was offered — which is how this file came to exist (29.7% against
+ * 30.1%, a modelling difference nothing on screen explained). Rounding is the cheap half of the
+ * same failure: two spellings of one rate look like a data disagreement long before anyone
+ * suspects formatting, and at one decimal a real 0.04pp gap and an identical pair print the same.
+ */
+describe('how a rate is printed', () => {
+  it('is the same spelling on the Graphs tile and the Tables cell', () => {
+    // Both call `cagrPct`; this is the assertion that it says what the tiles were asked for.
+    expect(cagrPct(39.5312)).toBe('+39.53%');
+    expect(cagrPct(-3.216)).toBe('-3.22%');
+    expect(CAGR_DECIMALS).toBe(2);
+  });
+
+  /**
+   * ⚠⚠ AND THE ⓘ UNDER THE TILE PRINTS THE **SAME** RATE, so it has to round it the same way. A
+   * worked line reading `= +4.5%` beneath a tile reading `+4.55%` is precisely the "are these the
+   * same number?" doubt the worked lines exist to remove — the one-decimal `subPct` was deleted on
+   * 2026-09-03 for having no correct call site left once the tiles moved.
+   */
+  it('agrees with the worked line the tooltip prints under it', () => {
+    const rate = 4.5512;
+    expect(subPct2(rate)).toBe(cagrPct(rate));
+    const worked = workedCagr({ pct: rate, from: '2015', to: '2025', years: 10,
+      fromValue: 100, toValue: 155.8 });
+    expect(worked.endsWith(`= ${cagrPct(rate).replace('%', String.raw`\%`)}`)).toBe(true);
   });
 });

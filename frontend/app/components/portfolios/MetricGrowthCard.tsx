@@ -18,7 +18,7 @@ import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes'
 import { countFor, memberCountHow, memberCountLine, type MemberCount } from './memberCounts';
 import { paddedLogDomain, periodTick, stepChanges, type Step } from './marginData';
 import { atSharedX, ltmWindowsDiffer, ltmYearX, sharedLtmX, type LtmPoint } from './ltmAxis';
-import { endpointCagr } from './lineCagr';
+import { cagrPct, endpointCagr } from './lineCagr';
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, rebaseSeries, seriesCrossesZero, type BenchTarget } from './benchSeries';
 import { benchTileLabel, pairedSpan, SpanNote, Stat } from './CardStats';
@@ -926,7 +926,7 @@ export default function MetricGrowthCard({
                     tile next to it (R²) is still the fit, so the two now answer different
                     questions on purpose: what the rate WAS, and how steadily it got there. */}
                 <Stat label="CAGR"
-                  value={linear || ptp.pct == null ? '—' : `${ptp.pct >= 0 ? '+' : ''}${ptp.pct.toFixed(1)}%`}
+                  value={linear || ptp.pct == null ? '—' : cagrPct(ptp.pct)}
                   color={chartTheme.accent}
                   info={<InfoTip content={<AspectCard
                     what={`The compound annual growth of ${cfg.noun}, first reported period to last.`}
@@ -967,7 +967,7 @@ export default function MetricGrowthCard({
                 {statSpan != null && (
                                     <Stat label={benchTileLabel('CAGR', benchLabel)} color={chartTheme.pos}
                     value={benchCrossesZero || benchPtp.pct == null ? '—'
-                      : `${benchPtp.pct >= 0 ? '+' : ''}${benchPtp.pct.toFixed(1)}%`}
+                      : cagrPct(benchPtp.pct)}
                     info={<InfoTip content={benchCrossesZero
                       ? <AboutCard text={`${benchLabel ?? 'The benchmark'}'s line changes sign; `
                         + 'growth from a non-positive base is not a percentage.'} />
