@@ -10,8 +10,7 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { logLinearFit } from '../../../lib/trendFit';
 import { AboutCard, AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { useLang } from '../../../lib/i18n';
-import { chartTitle, type ChartKey } from './longEquityCopy';
+import { type ChartKey } from './longEquityCopy';
 import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
 import HoldingsIngestPanel from './HoldingsIngestPanel';
 import { LegendItem } from './ChartLegend';
@@ -25,6 +24,7 @@ import { benchNote, benchmarkFirst, rebaseSeries, seriesCrossesZero, type BenchT
 import { benchTileLabel, pairedSpan, SpanNote, Stat } from './CardStats';
 import { clipPoints, sharedSpan } from './windowStats';
 import { withWorked, workedCagr, workedMean } from './workedFormula';
+import CardHeading from './CardHeading';
 
 /**
  * One "Long Equity" growth card: a metric per fiscal year on a LOG axis with an exponential-trend
@@ -267,9 +267,6 @@ export default function MetricGrowthCard({
   memberCounts?: Record<string, MemberCount>;
   benchCounts?: Record<string, MemberCount>;
 }) {
-  // ⚠ The heading only — see `longEquityCopy` for why the rest of the card
-  // (tiles, legend, tooltips) is deliberately not in scope.
-  const [lang] = useLang();
   const [showHoldings, setShowHoldings] = useState(false);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -780,9 +777,17 @@ export default function MetricGrowthCard({
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      <h4 className="text-base font-semibold text-fg-strong">
-        {cfg.titleKey ? chartTitle(lang, cfg.titleKey) : cfg.title}
-      </h4>
+      {/* ⚠⚠ THE ⓘ RIDES ON `titleKey`, NOT ON THIS COMPONENT (2026-09-03, on request: "Share
+          price doesn't have it, EPS doesn't have it"). These five cards had no heading tip at all —
+          the one below belongs to the MEMBER-COUNT line and renders only where members were
+          withheld, so three of the five never showed one and two showed it only on some books.
+          ⚠ A `cfg` BUILT OUTSIDE THIS TAB HAS NO `titleKey` (`QuickValuationTab` passes its own),
+          and it keeps the bare heading rather than being given an explanation written for a card
+          it is not. That is the same condition the TITLE already branches on, so there is one
+          question here and not two. */}
+      {cfg.titleKey
+        ? <CardHeading chartKey={cfg.titleKey} />
+        : <h4 className="text-base font-semibold text-fg-strong">{cfg.title}</h4>}
       {/* ⚠ ONLY WHERE MEMBERS WERE ACTUALLY WITHHELD. On every other card `considered === total`
           and a line saying so is noise on thirteen charts to make one honest. */}
       {countLine && (

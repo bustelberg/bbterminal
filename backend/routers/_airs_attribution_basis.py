@@ -187,6 +187,12 @@ def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
         out.append({
             "isin": isin,
             "weight_pct": start_val / total * 100.0,
+            # ⚠ THE CURRENT VALUE, CARRIED BUT NEVER WEIGHED HERE. `weight_pct` above is and stays
+            # Beginwaarde — a Brinson decomposition is only valid on the weights that earned the
+            # return. This rides along so the drill-down can print TODAY's weight in a column of
+            # its own beside it, which is what makes that table reconcile with the composition
+            # bars (weighed today since 2026-09-03) without either side changing basis.
+            "current_value_eur": cur,
             # ⚠ THE INSTRUMENT'S OWN EUR PRICE RETURN, from the SAME series the benchmark is built
             # from. None where we cannot price it — which `split_legs` then reports as `unpriced`,
             # the one exclusion that is a genuine gap rather than an answer.

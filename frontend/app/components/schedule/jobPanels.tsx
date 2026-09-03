@@ -1633,8 +1633,7 @@ function HeldRow({ c, expected, retryAt }: {
             title="Fetch this stock's price from GuruFocus now (bypasses cache) and show the request + response"
             className={`text-[12px] px-2 py-0.5 rounded-lg border ${btnTone} disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1`}
           >
-            {busy && <Spinner className="h-3 w-3" />}
-            {busy ? 'Fetching…' : '↻ Refresh'}
+            {busy ? 'Fetching…' : 'Refresh'}
           </button>
         </td>
       </tr>

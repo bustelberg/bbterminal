@@ -18,7 +18,7 @@
  * no call site moved.
  */
 import { MIN_YEAR_COVERAGE_PCT } from './marginData';
-import { memberScale, stepGrowth } from './stepGrowth';
+import { baseBarScale, stepGrowth } from './stepGrowth';
 
 export type Row = {
   isin: string; name: string; weight_pct: number; currency: string | null;
@@ -425,9 +425,10 @@ export function buildBlend(data: Resp, metric?: string) {
      * drawn, and measuring the next step from it would compound a move nobody could see.
      */
     /** ⚠ ONCE PER ROW, NOT ONCE PER STEP — the same figure at every interval, and the loop below
-     *  asks for it periods x rows times. Mirrors where the backend computes it. */
+     *  asks for it periods x rows times. Mirrors where the backend computes it.
+     *  ⚠ AND NO BAR AT ALL WHEN THIS ROW IS THE WHOLE LINE — see `baseBarScale`. */
     const scaleOf = new Map<typeof parts[number], number>(
-      parts.map((p) => [p, memberScale(Object.values(at.get(p) ?? {}))]));
+      parts.map((p) => [p, baseBarScale(Object.values(at.get(p) ?? {}), parts.length)]));
     /**
      * ⚠⚠ THE LINE'S OWN MOVE, DECOMPOSED BY MEMBER, IN PERCENTAGE POINTS OF THAT MOVE — and it is
      * computed HERE, inside the loop that chains the line, for the reason everything else in this

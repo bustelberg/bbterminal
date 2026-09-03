@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import InfoTip from '../InfoTip';
 import { type Blend } from './fundamentalBlend';
 import { cagrExcess, commonEndPeriod, lineCagr } from './lineCagr';
@@ -27,11 +28,32 @@ const WINDOWS = [5, 10] as const;
 
 const pct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
 
+/**
+ * A CELL THAT IS STILL WAITING — one dot, two, three, round again.
+ *
+ * ⚠ IT MOVES BECAUSE A STATIC `…` DOES NOT SAY WHICH IT IS (2026-09-03, on request). This table
+ * prints `—` for "measured, and there is no answer" and `…` for "not measured yet", and those two
+ * were a dash and an ellipsis sitting motionless in the same column — indistinguishable at a
+ * glance, on exactly the screen where the difference decides whether you go looking for a bug.
+ * Movement is the whole signal: nothing else on the row is animated.
+ *
+ * ⚠ FIXED WIDTH, RIGHT-ALIGNED WITH THE FIGURES. Letting it grow and shrink would tug the column
+ * three times a second while the numbers beside it hold still.
+ */
+function Dots() {
+  const [n, setN] = useState(1);
+  useEffect(() => {
+    const t = setInterval(() => setN((v) => (v % 3) + 1), 400);
+    return () => clearInterval(t);
+  }, []);
+  return <span className="inline-block w-[1.5em] text-left">{'.'.repeat(n)}</span>;
+}
+
 /** One CAGR cell: the rate, or a dash whose tooltip says which absence this is. */
 function Cell({ blend, years, endPeriod }: {
   blend: Blend | null; years: number; endPeriod: string | null;
 }) {
-  if (!blend) return <td className="px-3 py-2 text-right text-fg-faint">…</td>;
+  if (!blend) return <td className="px-3 py-2 text-right text-fg-faint"><Dots /></td>;
   const got = lineCagr(blend.level, years, endPeriod ?? undefined);
   if (got.pct == null) {
     return (

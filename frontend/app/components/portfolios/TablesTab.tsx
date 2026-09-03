@@ -9,6 +9,7 @@ import { CAGR_BENCHMARKS, type CagrBenchmark } from './CagrTable';
 import { roicByYear, type CashReturnInputs } from './cashReturnData';
 import { investedCapitalBlend } from './investedCapitalData';
 import { buildBlend, POSITIVE_ONLY_METRICS, type Blend, type Resp } from './fundamentalBlend';
+import { traceEmpty } from '../../../lib/debugTrace';
 import { cagrExcess, commonEndPeriod, forwardCagr, lineCagr, type Cagr } from './lineCagr';
 import { marginByYear, xToPeriod, type MarginInputs } from './marginData';
 import { grossMarginByYear, type GrossMarginInputs } from './grossMarginData';
@@ -309,9 +310,13 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   lang: Lang;
 }) {
   const copy = COPY[lang];
-  /** ⚠ ITS OWN BENCHMARK, DEFAULTING TO AEX — the tab's other cards follow whatever index the modal
-   *  was opened against; here the question IS "against what", so it gets a picker. */
-  const [bench, setBench] = useState<CagrBenchmark>('AEX');
+  /** ⚠ ITS OWN BENCHMARK PICKER — the tab's other cards follow whatever index the modal was opened
+   *  against; here the question IS "against what", so it gets a control of its own.
+   *  ⚠⚠ DEFAULTING TO ACWI (2026-09-03, on request; it was AEX). It has to match `LongEquityTab`'s
+   *  default, because Graphs and Tables are two tabs of ONE modal showing the same series — one
+   *  charted and one summarised — and a summary measured against a different index from the charts
+   *  it summarises is a summary of something else. */
+  const [bench, setBench] = useState<CagrBenchmark>('ACWI');
 
   /**
    * What is on screen. Two independent filters, both defaulting to everything.
@@ -559,6 +564,37 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
    * in which function produces the `Cagr`; rendering them twice is how one of them quietly stops
    * pinning both sides to the same window, or starts formatting a negative differently.
    */
+  /**
+   * ⚠⚠ A ROW THAT CANNOT BE MEASURED SAYS WHY, TO THE CONSOLE (2026-09-03). EPS and Share price
+   * were empty here on a company whose data is demonstrably complete — measured through the
+   * endpoint itself: NVIDIA returns 13 periods for `price_ps` and 18 for `eps_nri`, no nulls, no
+   * negatives, the same shape as the `fcf_ps` row that works. Every link read correct on paper
+   * (metric keys, section codes, fetch order, both benchmark and book), so the fault was in a
+   * RUNTIME value nothing printed.
+   *
+   * ⚠⚠ AND THIS IS THE LINE THAT FOUND IT — the answer was "the level has 1 period(s): 2015". The
+   * blend's materiality bar (`baseBarScale`) was refusing every step off a rebased base of 100
+   * because NVIDIA's own median rebased value is 2,706, and the chain does not advance its anchor
+   * on a refusal, so ONE refusal collapsed the whole line to its base point. A one-point line has
+   * no window, which is why the dash's own reason talked about a start year 2010: it is
+   * `commonEndPeriod − 5`, derived from that single point. Kept, because the class of failure is
+   * general — this row is a summary of a line, and a line with no periods looks exactly like a
+   * fetch that never arrived.
+   *
+   * ⚠ THE DASH'S TOOLTIP ALREADY CARRIES THE REASON, but a reason is only half of it: what is
+   * missing is WHICH PERIODS the blended line actually has, and which end period it was pinned to.
+   * That is three facts, they are known here, and none of them was reachable without a debugger.
+   *
+   * ⚠ CONSOLE, NOT THE UI — the repo's rule: the full diagnostic goes to `console.warn`, the reader
+   * gets one short line. This adds nothing to the screen.
+   */
+  const traceRate = (k: MeasureKey, side: string, lvl: Blend['level'], y: number, got: Cagr) => {
+    if (got.pct != null) return;
+    const periods = Object.keys(lvl);
+    traceEmpty('tables', `${k} ${side} ${y}y CAGR`,
+      `${got.reason} · level has ${periods.length} period(s): ${periods.join(', ')}`);
+  };
+
   const rateRow = (
     k: MeasureKey, a: Blend | null, b: Blend | null,
     rate: (lvl: Blend['level'], years: number) => Cagr,
@@ -580,14 +616,22 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
         <InfoTip className="ml-1" content={tipFor(k, rateSub(
           a && windows.length ? rate(a.level, windows[windows.length - 1]) : null))} />
       </td>
-      {windows.map((y) => (
-        <RateCell key={`a${y}`} got={a ? rate(a.level, y) : null} copy={copy}
-          span={shown.length / windows.length} ownWindow={windows !== shown} />
-      ))}
-      {windows.map((y) => (
-        <RateCell key={`b${y}`} got={b ? rate(b.level, y) : null} copy={copy}
-          span={shown.length / windows.length} ownWindow={windows !== shown} />
-      ))}
+      {windows.map((y) => {
+        const got = a ? rate(a.level, y) : null;
+        if (a && got) traceRate(k, 'portfolio', a.level, y, got);
+        return (
+          <RateCell key={`a${y}`} got={got} copy={copy}
+            span={shown.length / windows.length} ownWindow={windows !== shown} />
+        );
+      })}
+      {windows.map((y) => {
+        const got = b ? rate(b.level, y) : null;
+        if (b && got) traceRate(k, 'benchmark', b.level, y, got);
+        return (
+          <RateCell key={`b${y}`} got={got} copy={copy}
+            span={shown.length / windows.length} ownWindow={windows !== shown} />
+        );
+      })}
       {windows.map((y) => {
         const span = shown.length / windows.length;
         // ⚠ SAME RULE AS `RateCell` — a spanned excess belongs to neither column it covers, so

@@ -6,7 +6,6 @@ import { traceError } from '../../../lib/debugTrace';
 import { usePollingFetch } from '../../../lib/hooks/usePollingFetch';
 import { cancelJob, startJob } from '../../../lib/stores/jobs';
 import InfoTip from '../InfoTip';
-import { RefreshIcon } from '../portfolios/RefreshIcon';
 import {
   ago, headline, JOB_TONE, stamp, summaryLine, type JobRow, type JobsPayload,
 } from './automaticJobs';
@@ -83,7 +82,6 @@ export default function AutomaticJobsCard() {
           className="cursor-pointer shrink-0 inline-flex items-center gap-1.5 text-xs px-3 py-1.5
                      rounded-lg border border-neutral-700 bg-page text-fg-soft transition-colors
                      hover:text-accent-300 hover:border-accent-500/50 disabled:opacity-50">
-          <RefreshIcon spinning={busy} size={12} />
           Refresh
         </button>
       </div>
@@ -191,7 +189,7 @@ function RunControl({ j }: { j: JobRow }) {
                   disabled:opacity-50 disabled:cursor-wait ${busy
         ? 'border-warn-500/40 text-warn-400 hover:bg-warn-500/10'
         : 'border-neutral-800/40 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50'}`}>
-      {stopping ? 'Starting…' : busy ? '✕ Cancel' : 'Run now'}
+      {stopping ? 'Starting…' : busy ? 'Cancel' : 'Run now'}
     </button>
   );
 }

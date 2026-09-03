@@ -1223,6 +1223,83 @@ def _body_history_drift(ctx=None) -> tuple[str, dict]:
 # count first.
 _REBUILT_INDICES: tuple[str, ...] = ("AEX",)
 
+#: How many index constituents the daily slice brings current. ⚠ AT `DEFAULT_SLEEP_S` (0.4s) this
+#: is ~100 seconds of paced Yahoo calls, and it sets the CYCLE: the union of ACWI + SP500 + AEX is
+#: ~1,900 instruments, so every constituent is re-read about every eight days and the oldest close
+#: on the charts is bounded at roughly that. Raise it to shorten the cycle, not to catch up — a
+#: missed day self-repairs, because staleness IS the queue.
+BENCHMARK_SLICE = 250
+
+
+def _fire_benchmark_price_slice() -> None:
+    """Bring the most-stale index constituents current — the composition charts' own prices."""
+    _spawn_body("benchmark_price_slice")
+
+
+def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
+    """The `BENCHMARK_SLICE` most-stale constituents of the benchmarks /management-dashboard can
+    draw, brought up to date. Returns a one-line summary.
+
+    ⚠⚠ IT CLOSES A HOLE NOTHING ELSE COVERED. `asset_price_refresh` is scoped to instruments HELD
+    in a model portfolio and `benchmark_index_refresh` to `_REBUILT_INDICES` (AEX) — so an ACWI or
+    SP500 constituent no book holds was refreshed by NOTHING. Measured 2026-09-03 on the working
+    database: of 1,848 ACWI members, 1,663 last closed in July, 177 in August, 8 in September.
+    That was survivable while those prices only fed a rebuilt headline the index ETF has since
+    replaced; it is not survivable now that the Analyse modal's Sector / Region / Currency bars are
+    weighed on them AND drawn only over constituents priced at both ends of the window — a stale
+    series does not age a bar, it drops a name off the chart.
+
+    ⚠⚠ A SLICE, NOT A FULL PASS, AND THE DATABASE IS THE CURSOR. `refresh_stale` orders most-stale
+    first, so there is no bookmark to keep and a missed day repairs itself on the next one — the
+    same state machine `price_slice` uses on the GuruFocus side, for the same reason. A nightly
+    full pass would be ~1,900 paced calls to re-read prices that mostly have not moved.
+
+    ⚠ SCOPED TO WHAT THIS PAGE ACTUALLY DRAWS. `_RANKED_UNIVERSES` is the Analyse modal's own
+    benchmark picker (and the momentum job's list), so the slice covers exactly the indices a
+    reader can select and nothing else. AEX is in it and costs nothing: it is refreshed in full at
+    06:30, so its constituents are never the most stale and never reach the head of the queue.
+    ⚠ FUNDAMENTALS ARE NOT HERE. The Fundamental modal reads GuruFocus `metric_data` through the
+    template universes, which `benchmark_fundamentals_fill` covers quarterly — companies file
+    quarterly, and a price slice has nothing to say about a filing.
+
+    ⚠ IT STANDS DOWN WHILE THE INGEST WORKER IS LIVE, exactly as `asset_price_refresh` does: Yahoo
+    answers an overloaded caller with an EMPTY list rather than a 429, and an empty answer here
+    would be stored as "no new bars" and leave the name stale for another cycle.
+    """
+    from asset_pipeline import queue  # noqa: PLC0415
+    from asset_pipeline.price_refresh import refresh_stale  # noqa: PLC0415
+    from routers._asset_benchmark import members  # noqa: PLC0415
+
+    if queue.is_worker_active():
+        return "skipped — the ingest worker is live", {"skipped": "worker_active"}
+
+    isins: set[str] = set()
+    per_label: dict[str, int] = {}
+    for label in _RANKED_UNIVERSES:
+        try:
+            mem, _cov = members(label)
+        except Exception as exc:                                    # noqa: BLE001
+            # ⚠ ONE LABEL'S FAILURE IS NOT THE JOB'S — the same rule the index refresh follows.
+            log.warning("[benchmark-slice] %s: members unavailable (%s: %s)",
+                        label, type(exc).__name__, exc)
+            per_label[label] = 0
+            continue
+        got = {m["isin"] for m in mem if m.get("isin")}
+        per_label[label] = len(got)
+        isins |= got
+    if not isins:
+        return "no constituents to refresh", {"considered": 0, **per_label}
+
+    res = refresh_stale(isins=isins, limit=BENCHMARK_SLICE)
+    # ⚠ THE CYCLE LENGTH IS LOGGED, because it is the one thing a single healthy-looking run cannot
+    #   show: a slice that has quietly stopped keeping up looks identical to one that never had to.
+    cycle = (len(isins) / BENCHMARK_SLICE) if BENCHMARK_SLICE else 0
+    log.warning("[benchmark-slice] %d constituent(s) across %s; refreshed %s, cycle ~%.1f days",
+                len(isins), per_label, res.get("refreshed"), cycle)
+    return (f"{res.get('refreshed', 0)} of {len(isins)} constituent(s) brought current "
+            f"(~{cycle:.0f}-day cycle)"), {**res, "considered": len(isins), **per_label}
+
+
 
 def _fire_benchmark_index_refresh() -> None:
     """Daily constituent refresh for the indices we REBUILD rather than read off an ETF.
@@ -1763,6 +1840,7 @@ def _register_bodies() -> None:
         "airs_model_prices": _body_airs_model_prices,
         "job_watchdog": _body_job_watchdog,
         "history_drift_check": _body_history_drift,
+        "benchmark_price_slice": _body_benchmark_price_slice,
         "asset_price_refresh": _body_asset_price_refresh,
         "benchmark_index_refresh": _body_benchmark_index_refresh,
         "relative_momentum_refresh": _body_relative_momentum_refresh,

@@ -402,3 +402,56 @@ describe('buildBlend positives-only members', () => {
     expect(b.contrib.get(r[1])).toBeUndefined();
   });
 });
+
+/**
+ * ⚠⚠ A ONE-HOLDING BOOK IS ITS COMPANY, AND THE `Tables` TAB MUST SAY WHAT `Graphs` SAYS. The
+ * Fundamental modal opens on one company as `{holdings:[{isin, weight:1}]}` — `Graphs` then plots
+ * the filed figures directly, while `Tables` runs the SAME figures through this blend. With one
+ * member there is nothing to blend, so the level has to come out at exactly `100 x v(p)/v(base)`,
+ * or the two tabs answer one question twice.
+ *
+ * ⚠ MEASURED 2026-09-03 ON NVIDIA. `MIN_STEP_BASE_FRACTION` compares the rebased base (100) with
+ * `0.10 x median|rebased|` — 271 for the share price — so every step off the base was refused, and
+ * because that path does not advance the anchor it was refused for ever: 13 filed periods, ONE
+ * point drawn, and the Share price and EPS rows read `—`. See `baseBarScale`.
+ */
+describe('buildBlend on a one-holding book', () => {
+  // NVIDIA's real `price_ps` by fiscal year (local DB, 2026-09-03) — the series that came out empty.
+  const NVDA: Record<string, number> = {
+    2015: 0.48, 2016: 0.732, 2017: 2.73, 2018: 6.145, 2019: 3.594, 2020: 5.911,
+    2021: 12.99, 2022: 24.486, 2023: 19.537, 2024: 61.527, 2025: 120.07, 2026: 191.13,
+  };
+  const years = Object.keys(NVDA);
+  const only = () => [row('US67066G1040', 100, { ...NVDA })];
+
+  it('draws every filed period, not just the base', () => {
+    const b = buildBlend(resp(years, only()), 'price_ps');
+    expect(Object.keys(b.level)).toEqual(years);
+  });
+
+  it('is the filed series rebased to 100 — the line Graphs plots, to the last digit', () => {
+    const b = buildBlend(resp(years, only()), 'price_ps');
+    // ⚠ A RATIO, NOT AN ABSOLUTE TOLERANCE — the line reaches ~39,800 by 2026, where
+    // `toBeCloseTo(x, 8)` is asking for more precision than a chain of eleven multiplications has.
+    for (const y of years) {
+      expect(b.level[y].value / (100 * NVDA[y] / NVDA['2015'])).toBeCloseTo(1, 12);
+    }
+  });
+
+  it('so a 10y CAGR off the line equals one off the filed figures', () => {
+    const b = buildBlend(resp(years, only()), 'price_ps');
+    const line = (b.level['2025'].value / b.level['2015'].value) ** 0.1 - 1;
+    const filed = (NVDA['2025'] / NVDA['2015']) ** 0.1 - 1;
+    expect(line).toBeCloseTo(filed, 12);
+  });
+
+  it('leaves a MANY-member line alone, which is the only place the bar has a fallback', () => {
+    // Prosus beside one steady name: the 0.009 anchor is still refused, the steady name carries
+    // the step, and the index does not go through zero. This is the case the constant was read off.
+    const r = [row('STEADY', 50, { 2020: 1.0, 2021: 1.1, 2022: 1.21 }),
+      row('PRX', 50, { 2020: 0.10, 2021: 0.009, 2022: -0.24 })];
+    const b = buildBlend(resp(['2020', '2021', '2022'], r));
+    for (const y of ['2020', '2021', '2022']) expect(b.level[y].value).toBeGreaterThan(0);
+    expect(b.contrib.get(r[1])?.['2022']).toBeUndefined();   // immaterial anchor, still refused
+  });
+});

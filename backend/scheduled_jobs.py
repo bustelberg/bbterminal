@@ -188,6 +188,25 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              "constituent nothing holds was never refreshed by anything.",
     ),
     JobSpec(
+        id="benchmark_price_slice",
+        label="Benchmark constituent price slice",
+        fills="asset_price for the most-stale constituents of ACWI / SP500 / AEX",
+        cadence="Every day, 06:45 UTC",
+        trigger={"day_of_week": "mon-sun", "hour": 6, "minute": 45, "timezone": "UTC"},
+        options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
+        max_age_hours=30,
+        note="⚠ THE HOLE NOTHING ELSE COVERED. `asset_price_refresh` is scoped to instruments HELD "
+             "in a model portfolio and `benchmark_index_refresh` to the REBUILT indices (AEX), so "
+             "an ACWI or SP500 constituent no book holds was refreshed by nothing — 1,663 of "
+             "1,848 ACWI members last closed in July, measured 2026-09-03. The Analyse modal's "
+             "composition bars are weighed on those prices and drawn only over constituents "
+             "priced at both ends of the window, so a stale series drops a name off the chart "
+             "rather than merely ageing it. A SLICE, not a full pass: most-stale-first, so the "
+             "database is the cursor and a missed day self-repairs (`price_slice`'s own shape). "
+             "~250/day over ~1,900 instruments is an eight-day cycle. Stands down while the "
+             "ingest worker is live — Yahoo answers an overloaded caller with an EMPTY list.",
+    ),
+    JobSpec(
         id="relative_momentum_refresh",
         label="Relative momentum ranks (ACWI · SP500 · AEX)",
         fills="relative_momentum — each universe's 12-1 EUR return, ranked into 7 states",

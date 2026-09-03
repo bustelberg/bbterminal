@@ -10,8 +10,6 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { logLinearFit } from '../../../lib/trendFit';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { useLang } from '../../../lib/i18n';
-import { chartTitle } from './longEquityCopy';
 import { Stat, pctSince } from './MetricGrowthCard';
 import { benchTileLabel, SpanNote } from './CardStats';
 import { clipPoints, sharedSpan } from './windowStats';
@@ -23,6 +21,7 @@ import { paddedLogDomain, stepChanges, xToPeriod, type Step } from './marginData
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, rebaseSeries, useBenchInputs, type BenchTarget } from './benchSeries';
 import { type CashReturnInputs } from './cashReturnData';
+import CardHeading from './CardHeading';
 
 /**
  * Invested-capital card: non-current liabilities + total equity per fiscal year — the SAME base
@@ -48,11 +47,6 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
    */
   benchTarget?: BenchTarget | null;
 }) {
-  // ⚠ READ FROM THE STORE, NOT DRILLED THROUGH `LongEquityTab` AS A PROP. Fourteen sibling
-  // cards would mean fourteen chances to forget one, and a card left on English would look
-  // like a missing translation rather than a missing prop. `useLang` is an external store
-  // (see `lib/i18n.ts`), so every card reads the one value directly.
-  const [lang] = useLang();
   const [data, setData] = useState<CashReturnInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
@@ -187,7 +181,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      <h4 className="text-base font-semibold text-fg-strong">{chartTitle(lang, 'investedCapital')}</h4>
+      <CardHeading chartKey="investedCapital" />
 
       {data == null && !err ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>

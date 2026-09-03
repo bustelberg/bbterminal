@@ -14,12 +14,12 @@ import { benchmarkProvenance } from './benchmarkSourceNote';
 import { Provenance, ProvenanceFetchedAt, type SourceKey } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
-import { RefreshIcon } from './RefreshIcon';
 import AttributionPanel from './AttributionPanel';
 import ActiveSharePanel, { type ActiveShareHolding } from './ActiveSharePanel';
 import PanelDialog from './PanelDialog';
 import HoldingTimingModal from './HoldingTimingModal';
 import BookReturnChart from './BookReturnChart';
+import AnalyseLoading from './AnalyseLoading';
 import BucketDetailPanel from './BucketDetailPanel';
 import OwnerEarningsModal from './OwnerEarningsModal';
 import { type Basket } from './types';
@@ -292,28 +292,23 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
     // is laid out from the same fixed columns so the two cannot drift apart.
     <div className="shrink-0 w-[41rem] max-w-full">
       {/* ⚠⚠ THE HEADER CAME OFF, 2026-09-02 ON REQUEST — the "Allocation" title, the variant
-          pill, the "↓ Click a class to filter the charts" hint and the minimal/target/maximal
-          legend. What is left is the ONE control with no other home.
-          ⚠ THE HINT WENT BECAUSE THE CHIPS REPLACED IT. Stocks / Bonds / Alternatives / Cash now
+          pill, the "Click a class to filter the charts" hint and the minimal/target/maximal
+          legend. The last thing left above the bars, a "Filtering to Stocks — show all" button,
+          came off 2026-09-03 for a reason the note it replaces had already written down: it
+          rendered ONLY WHILE FILTERED, so selecting a class pushed every bar down by its height
+          and clearing the filter pulled them back up. Reported as exactly that — the block should
+          "remain stable when toggling on and off" — and a row of bars that jumps under the cursor
+          on the press that selects it is a worse cost than the one it was paying for.
+          ⚠⚠ THE WAY OUT IS THE ACTIVE CHIP, WHICH ALREADY CLEARED IT. The rows toggle: pressing
+          the selected class deselects it, so nothing about clearing a filter has changed except
+          that the second, redundant path is gone. It is less discoverable than a labelled button
+          and that is the accepted cost — the chip the reader just pressed is where they look.
+          ⚠ THE HINT WENT BECAUSE THE CHIPS REPLACED IT. Stocks / Bonds / Alternatives / Cash
           render as buttons (see the row's label span), so the sentence that existed to say "these
           are clickable" is now said by the things themselves.
-          ⚠⚠ CLEARING A FILTER STILL NEEDS A WAY OUT, AND THIS IS IT. Pressing the ACTIVE chip
-          also clears it (the row toggles), so this is the discoverable path rather than the only
-          one — without it a reader who does not guess the toggle is stuck in a filtered view with
-          no visible exit.
-          ⚠ IT RENDERS ONLY WHEN FILTERED, so the default view carries no chrome at all, which is
-          the point of the removal. The cost is that selecting a class pushes the bars down by this
-          row's height — the click has completed by then, and the whole right-hand side of the
-          block swaps on that same press anyway.
           ⚠ THE BAND STRIPES ARE STILL DRAWN; only their legend went. Every row's `title` still
           names the policy and its bounds in full ("Offensief policy: 70% to 100%, target 85%"),
           which is where a fact about one class already belonged. */}
-      {onSelect && selected && (
-        <button type="button" onClick={() => onSelect(null)}
-          className="cursor-pointer mb-1.5 text-[13px] font-medium text-accent-400 hover:text-accent-300">
-          {copy.allocation.filtering} {copy.bucket(bucketLabel(selected))} {copy.allocation.showAll}
-        </button>
-      )}
       {/* ⚠⚠ THE WHOLE HEADER ROW CAME OFF, 2026-09-02 ON REQUEST — first the 0 / 25 / 50 / 75 /
           100 scale and its ticks, then the `%` and `YTD` column headings, which left the row
           empty. Every column here is now unlabelled by choice, and the chart carries its own
@@ -932,6 +927,29 @@ function useColumnGroups() {
 /** The +/− control over those groups. ⚠ Closed by a full-screen click catcher rather than a
  *  document listener: this lives inside a modal that already stops propagation in places, and a
  *  listener the modal swallows leaves a panel nothing can dismiss. */
+/**
+ * THE CHROME EVERY SMALL CONTROL IN THIS MODAL WEARS — one declaration, three wearers.
+ *
+ * ⚠⚠ IT WAS COPIED, AND IT HAD ALREADY DRIFTED. `FundamentalButton` was restyled on 2026-09-02 to
+ * match the allocation class chips, and the two controls beside it in the Holdings header were
+ * left behind: "Look through certificates" was a bare `<label>` with no box at all, and `+ columns`
+ * a flatter `rounded` / `px-1.5` / `text-fg-subtle` thing with no surface. Three controls on one
+ * row, three different ideas of what a button looks like — reported as exactly that
+ * (2026-09-03: "this should also have a similar style to the Fundamental button").
+ *
+ * ⚠ SPLIT INTO SHAPE AND TONE because the picker needs its OPEN state to replace the tone while
+ * keeping the shape. Appending an override instead would leave two utilities setting the same
+ * property and let source order decide — the trap `HEADER_CTL_STOP` is a separate string for.
+ *
+ * ⚠ IT DELIBERATELY DOES NOT COVER Attribution / Risk or the allocation chips. Those are a size
+ * up (`px-3 py-1.5 text-xs`) or light on `group-hover` from the row that contains them, and
+ * folding them in here would change controls nobody asked about.
+ */
+const CHIP_SHAPE = 'cursor-pointer whitespace-nowrap rounded-md border px-2 py-1 '
+  + 'text-[11px] transition-colors';
+const CHIP_IDLE = 'bg-elevated border-neutral-800/40 text-fg-muted '
+  + 'hover:border-accent-500/50 hover:text-accent-300';
+
 function ColumnPicker({ groups, toggle }: {
   groups: Set<ColumnGroup>; toggle: (k: ColumnGroup) => void;
 }) {
@@ -942,9 +960,8 @@ function ColumnPicker({ groups, toggle }: {
       <button type="button" onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         title={copy.actions.columnsTitle}
-        className={`cursor-pointer text-[11px] leading-none px-1.5 py-1 rounded border transition-colors ${
-          open ? 'border-accent-500/50 text-accent-300 bg-overlay/5'
-            : 'border-neutral-800/40 text-fg-subtle hover:text-accent-300 hover:bg-overlay/5'}`}>
+        className={`${CHIP_SHAPE} ${
+          open ? 'bg-overlay/5 border-accent-500/50 text-accent-300' : CHIP_IDLE}`}>
         {copy.actions.columns}
       </button>
       {open && (
@@ -1139,7 +1156,7 @@ function FundamentalButton({ onOpen, title, className = '' }: {
     <button type="button"
       onClick={(e) => { e.stopPropagation(); onOpen(); }}
       title={title}
-      className={`cursor-pointer whitespace-nowrap rounded-md border px-2 py-1 text-[11px] transition-colors bg-elevated border-neutral-800/40 text-fg-muted hover:border-accent-500/50 hover:text-accent-300 ${className}`}>
+      className={`${CHIP_SHAPE} ${CHIP_IDLE} ${className}`}>
       {copy.actions.fundamental}
     </button>
   );
@@ -1290,49 +1307,6 @@ const momSub = (to?: number | null, from?: number | null, pct?: number | null): 
 
 ${to.toFixed(2)} ÷ ${from.toFixed(2)} − 1 = ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
     : '');
-
-/** The column header's worked example: the first row that carries both legs.
- *  ⚠ A REAL ROW FROM THIS TABLE, never an invented illustration — the reader can find it below. */
-const momExample = (rows: BookHolding[]): string => {
-  const h = rows.find((r) => r.mom_12_1_from != null && r.mom_12_1_to != null
-    && r.mom_12_1_pct != null);
-  return h ? `${momSub(h.mom_12_1_to, h.mom_12_1_from, h.mom_12_1_pct)}   (${h.name ?? ''})` : '';
-};
-
-/**
- * The same, for the three OTHER columns whose header stated a formula and never worked it.
- *
- * ⚠⚠ A HEADER AND ITS ROWS MUST EXPLAIN THEMSELVES THE SAME WAY. Vol, Beta and Instrument return
- * each had a substituted line on the ROW tip and only symbols on the COLUMN card — so the same
- * formula was worked or not depending on which ⓘ you happened to open, which reads as two
- * different degrees of confidence in one number. Instrument return was the worst of the three: it
- * is one of the table's three always-on answer columns, and the only one of them whose header
- * carried no numbers at all.
- *
- * ⚠ THE EXAMPLE IS A REAL ROW AND IS NAMED, so the reader can scroll to it and check that the
- * header's arithmetic is the row's. An unnamed example is indistinguishable from an invented one.
- *
- * ⚠ VOL AND BETA SHOW ONLY THE ANSWER, and that is the honest limit rather than an oversight: the
- * operands are ~60 monthly returns and a covariance over 260 weekly pairs. There is no expression
- * to write out, so these two say what came out and where it came from, and the drill-down is the
- * price series itself. Padding them with invented intermediate figures would be worse than symbols.
- */
-const volExample = (rows: BookHolding[]): string => {
-  const h = rows.find((r) => r.vol_5y_pct != null);
-  return h ? `\n\n= ${h.vol_5y_pct!.toFixed(1)}%   (${h.name ?? ''})` : '';
-};
-
-const betaExample = (rows: BookHolding[]): string => {
-  const h = rows.find((r) => r.beta_5y != null);
-  return h ? `\n\n= ${h.beta_5y!.toFixed(2)}   (${h.name ?? ''})` : '';
-};
-
-/** ⚠ `bookMath` IS THE ROW'S OWN BUILDER — the header does not re-derive the expression, it uses
- *  the one the row below it will print, so the two cannot disagree. */
-const bookReturnExample = (rows: BookHolding[], netDividend = 'net dividend'): string => {
-  const h = rows.find((r) => bookMath(r, netDividend) != null && r.own_return_pct != null);
-  return h ? `\n\n${bookMath(h, netDividend)} = ${fmtRet(h.own_return_pct)}   (${h.name ?? ''})` : '';
-};
 
 function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
   const groups = new Map<string, { label: string; rows: BookHolding[] }>();
@@ -1612,17 +1586,17 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
     </span>
   );
   const th = 'py-2 font-medium cursor-pointer select-none whitespace-nowrap hover:text-fg-soft transition-colors';
-  const anchor = holdings.find((h) => h.own_return_from)?.own_return_from;
 
   return (
     <div className="bg-card border border-neutral-800/40 rounded-xl overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-neutral-800/40">
-        <h4 className="text-xs font-medium text-fg-strong">
-          {copy.holdings.title}
-          <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-            what={copy.info.holdingsWhat}
-            how={copy.info.holdingsHow(holdings.length, holdings.filter((h) => (h.via_names ?? []).length).length)} />
-        </h4>
+        {/* ⚠ NO ⓘ HERE EITHER (2026-09-03, on request, after the column ones went). The panel
+            title was the last tip left on this table's chrome; it explained the table as a whole,
+            which is the one thing the per-row cards below cannot say — but the reader asked for a
+            heading, not a control, and the two facts it carried (one row per ISIN after the
+            certificates are looked through, and how many rows got there that way) are stated by
+            the table itself: the Via column names every route in. */}
+        <h4 className="text-xs font-medium text-fg-strong">{copy.holdings.title}</h4>
         <span className="flex items-center gap-2">
           {/* ⚠ HIDDEN WHEN NOTHING WOULD FOLD, rather than offered and inert. A book that holds no
               other book has no certificate legs to collapse, and a checkbox that visibly changes
@@ -1630,7 +1604,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
               ⚠ IT SAYS WHAT IT WILL DO, WITH THE COUNT. "Look through certificates" alone leaves
               the reader to press it to find out; naming the rows makes it a decision. */}
           {foldable > 0 && (
-            <label className="flex items-center gap-1.5 text-[11px] text-fg-muted cursor-pointer"
+            // ⚠ STILL A CHECKBOX INSIDE THE CHIP, not a button that changes colour. It is a
+            //   two-state toggle whose state has to be readable at rest, and the box is what says
+            //   which state it is in; the chrome only makes it look like the controls beside it.
+            <label className={`${CHIP_SHAPE} ${CHIP_IDLE} flex items-center gap-1.5`}
               title={copy.actions.lookThroughTitle}>
               <input type="checkbox" checked={lookThrough}
                 onChange={() => setLookThrough((v) => !v)} className="accent-accent-600" />
@@ -1667,56 +1644,39 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
           modal body, dragging every other section sideways with it. So the table gets its own
           viewport instead — one box that scrolls both ways, with the header pinned inside it. */}
       <div className="overflow-auto max-h-[55vh]">
-        {/* ⚠⚠ A RULE BETWEEN EVERY COLUMN, AND IT IS APPLIED ON THE TABLE RATHER THAN PER CELL.
-            This table is eighteen columns and ~81rem wide — wider than the modal on any ordinary
-            screen, which is why it has its own scrollport — so following one holding's row across
-            it, or one column down it, is the thing the reader is actually doing and had nothing to
-            guide them: rows carried a hairline, columns carried nothing at all.
+        {/* ⚠⚠ NO VERTICAL RULES (2026-09-03, on request — they were added 2026-08-31 and are gone
+            again). A financial table is read ACROSS: you follow a holding to its Result. Column
+            rules compete with that, and at eighteen columns they read as a cage rather than a
+            guide. The horizontal structure is the only structure here.
+
+            ⚠⚠ THE GUTTERS STAY, AND THEY ARE NOT LEFTOVER FROM THE RULES. They were measured for
+            that change and they are worth keeping on their own: **84 of this table's 101 cells had
+            NO horizontal padding at all** — the columns were built to sit flush, separated only by
+            right-alignment and their natural width — and the seventeen that DID carry padding used
+            four different values (`pr-2`, `pr-3`, `pl-4`, `pr-4`), so adjacent columns sat at four
+            different distances. One declaration regularises all of them.
 
             ⚠ ON `<table>` WITH `[&_td]` / `[&_th]`, NOT ON EACH CELL. There are six hand-written
             row shapes here (thead, the class group row, the held row, the sold group row, the sold
             detail row, the grand total) plus a colSpan sub-header, and the money block is gated by
             the column picker — so a per-cell class is ~90 places to keep in step and one of them
             will be missed. It is the same hand-counting hazard `portfolioAnalysisColumns.test.ts`
-            exists for, and the descendant selector sidesteps it entirely.
-
-            ⚠ LIGHTER THAN THE ROW LINES ON PURPOSE. A financial table is read ACROSS — you follow a
-            holding to its Result — so the horizontal structure has to stay primary. At `/20` against
-            the rows' `/[0.15]` these are near-equal, which reads as an even grid; anything stronger
-            makes the eye track columns first and turns the table into a cage.
-
-            ⚠ `last-child` IS EXEMPT or the final column draws a rule against the table edge, which
-            reads as a border the table does not have. The equity sub-header spans the full width as
-            a single cell and is therefore exempt automatically — it wants no internal rule.
-
-            ⚠⚠ AND THE GUTTERS ARE PART OF THE RULE, NOT A SEPARATE POLISH — without them the lines
-            are unusable. Measured: **84 of this table's 101 cells had NO horizontal padding at
-            all**. The columns were built to sit flush, separated only by right-alignment and their
-            natural width, so a `border-r` lands against the last digit of every number; and the
-            seventeen cells that DID carry padding used four different values (`pr-2`, `pr-3`,
-            `pl-4`, `pr-4`), so those rules stood at four different distances. Shipped that way it
-            read as lines clamped onto the numbers with ragged spacing — which is exactly what it
-            was. A rule between two columns only means anything if both sides breathe equally.
-
-            ⚠ SET HERE TOO, FOR THE SAME REASON THE BORDERS ARE: 84 cells is not a place to add a
-            class by hand. The descendant selector also OUTRANKS the per-cell utilities (`.x td` is
-            more specific than `.pr-3`), which is what makes one declaration able to regularise
-            cells that already disagree — the same mechanism `[&_th]:bg-card` above relies on.
+            exists for, and the descendant selector sidesteps it entirely. The selector also
+            OUTRANKS the per-cell utilities (`.x td` is more specific than `.pr-3`), which is what
+            makes one declaration able to regularise cells that already disagree — the same
+            mechanism `[&_th]:bg-card` below relies on.
 
             ⚠ THE EDGES KEEP THEIR WIDER GUTTER. `first-child`/`last-child` are more specific again,
             so `pl-4`/`pr-4` survive: the table still sits off the panel edge rather than starting
             hard against it.
 
-            ⚠ THE TABLE GETS WIDER, and that is the accepted cost. Most columns carry a fixed `w-*`
-            with slack, so they absorb the 1rem; the tight ones grow. It already has its own
+            ⚠ THE TABLE IS WIDER FOR IT, and that is the accepted cost. Most columns carry a fixed
+            `w-*` with slack, so they absorb the 1rem; the tight ones grow. It already has its own
             scrollport (see the note above), so the extra width is scroll, not overflow. */}
         <table className="w-full text-xs
                           [&_th]:px-2 [&_td]:px-2
                           [&_th:first-child]:pl-4 [&_td:first-child]:pl-4
-                          [&_th:last-child]:pr-4 [&_td:last-child]:pr-4
-                          [&_th]:border-r [&_th]:border-neutral-800/20
-                          [&_td]:border-r [&_td]:border-neutral-800/20
-                          [&_th:last-child]:border-r-0 [&_td:last-child]:border-r-0">
+                          [&_th:last-child]:pr-4 [&_td:last-child]:pr-4">
           {/* ⚠ `[&_th]:bg-card` IS LOAD-BEARING, not belt-and-braces. A background on `<thead>`
               alone does not paint reliably under `border-collapse`, so the group rows (`bg-inset`)
               scroll THROUGH the header and the two sets of text overlap. The cells carry it. */}
@@ -1729,6 +1689,17 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
               ⚠ THE WIDTHS LIVE ONLY HERE. The body cells set none, so they follow the header —
               which is what makes a change like this one edit per column instead of two, and also
               why a `<td>` that grows its own width would silently desynchronise the pair. */}
+          {/* ⚠⚠ NO ⓘ ON A COLUMN HEADER (2026-09-03, on request). Nineteen of the eighteen
+              columns carried a `<Provenance … column />`, so a header row meant to be scanned had a
+              hover target on almost every cell of it — and the icons sat between a label and its
+              own sort caret, in a row whose whole job is to be read across at a glance.
+              ⚠⚠ NOTHING WAS LOST BY REMOVING THEM, which is the only reason this is safe: EVERY
+              CELL BELOW CARRIES ITS OWN, with that row's real numbers in it (`<Num prov={…}>`),
+              which is strictly the better place to meet the explanation — at the figure being
+              doubted rather than at the top of a scrolling table. The panel's own title keeps its
+              ⓘ for what the table AS A WHOLE is.
+              ⚠ The copy behind them (`copy.info.*`) is untouched and still feeds the per-row
+              cards; only the header instances are gone. */}
           <thead className="text-[11px] uppercase tracking-wide text-fg-faint bg-card [&_th]:bg-card sticky top-0 z-20">
             <tr className="border-b border-neutral-800/40">
               <th className="text-right w-12 pl-4 pr-2 py-2 font-medium">#</th>
@@ -1745,14 +1716,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   instead of eating the table. */}
               <th className="text-left w-48 max-w-[12rem] py-2 font-medium">
                 {copy.holdings.via}
-                {/* ⚠ THE LIVE COUNT IS A `note`, WHICH RENDERS ON THE **Where** LINE — see
-                    `viaNote`. It was a second paragraph inside `how`, so the field explaining how
-                    the number is made carried a measurement of this particular book. */}
-                <Provenance source="airs_model" asOf={asOf} kind="formula" column
-                  what={copy.info.viaWhat}
-                  note={copy.info.viaNote(
-                    holdings.filter((h) => (h.via_names ?? []).length).length, holdings.length)}
-                  how={copy.info.viaHow} />
               </th>
               {/* ⚠ THE SECTOR CHART'S OWN BUCKET, WHICH IS WHY IT IS WORTH A COLUMN — sorting by
                   it lists the rows behind a bar, in the bar's own vocabulary. A raw
@@ -1760,12 +1723,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   "Financials" and read as two different exposures. */}
               <th className={`text-left w-[10.8rem] ${th}`} onClick={() => click('sector')}>
                 {copy.holdings.sector}{caret('sector')}
-                <Provenance source="yfinance" asOf={asOf} kind="formula" column
-                  what={copy.info.sectorWhat}
-                  how={copy.info.sectorHow(
-                    new Set(holdings.map((h) => h.sector).filter((s) => s && s !== 'Unclassified')).size,
-                    holdings.filter((h) => sectorLabel(h.sector)).length,
-                    holdings.filter((h) => !sectorLabel(h.sector)).length)} />
               </th>
               {/* ⚠ BESIDE SECTOR AND WEIGHT — with the columns that DESCRIBE the instrument
                   rather than the ones that measure this book's year. Sector says what it is, this
@@ -1781,54 +1738,25 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   a reading of the number, so ordering by the number orders the chips too. */}
               <th className={`text-right w-28 ${th}`} onClick={() => click('mom')}>
                 {copy.holdings.momentum}{caret('mom')}
-{/* ⚠ FORMULA, BLANK LINE, THE SAME FORMULA SUBSTITUTED — the shape the Money-weighted column
-                    uses, and the reason it is worth copying: a reader can CHECK the arithmetic instead
-                    of being told the answer. The three ⚠ paragraphs that used to live here (why the
-                    last month is skipped, that this is not the strategy's min-maxed score, that it
-                    needs only ~13 months) were true and are not lost — they are on the per-row ⓘ and
-                    on the dash's own explanation, where a reader meets them at the point of doubt.
-                    ⚠ THE EXAMPLE IS A REAL ROW, the first one that has the two legs, so the numbers
-                    substituted are one this table is actually showing. No row with legs → the formula
-                    alone, never a made-up illustration. */}
-                <Provenance source="benchmark" asOf={null} kind="formula" column
-                  what={copy.info.momentumWhat}
-                  note={copy.info.momentumNote}
-                  how={copy.info.momentumHow(momExample(holdings))} />
               </th>
               {/* ⚠ `w-28`, ONE STEP WIDER THAN ITS TWO NEIGHBOURS, BECAUSE THE HEADER IS A WORD
                   NOW. It read `5y vol` — six characters, and "vol" in a table of holdings is read
                   as VOLUME at least as readily as volatility. Spelt out it is `Volatility` (10)
-                  and `Volatiliteit` (12), which with the sort caret and the ⓘ does not fit 6rem;
-                  `whitespace-nowrap` means it would not wrap, it would PUSH. The window moved into
-                  the ⓘ, which already opens "Five-year annualised volatility…" — and that also puts
-                  this header in the same shape as `Momentum` and `Beta` beside it, both of which
-                  are bare nouns whose window lives in their card.
+                  and `Volatiliteit` (12), which with the sort caret does not fit 6rem;
+                  `whitespace-nowrap` means it would not wrap, it would PUSH. The window is stated
+                  on the per-row card, which also puts this header in the same shape as `Momentum`
+                  and `Beta` beside it, both of which are bare nouns.
                   ⚠ THE 1rem COMES OUT OF `Name`, which is the column an auto-layout table takes
                   slack from first — see its `min-w` note above. That floor is what stops this
                   being a trade against legibility. */}
               <th className={`text-right w-28 ${th}`} onClick={() => click('vol')}>
                 {copy.holdings.vol}{caret('vol')}
-                {/* ⚠ `benchmark`, NOT `airs_volk`. Every other number in this table is AIRS's own
-                    valuation; this one is computed here from OUR daily EUR price series, and a
-                    column whose card names the wrong source is how a reader comes to trust a
-                    figure's provenance wrongly. */}
-                <Provenance source="benchmark" asOf={null} kind="formula" column
-                  what={copy.info.volWhat}
-                  note={copy.info.volNote}
-                  how={copy.info.volHeaderHow(volExample(holdings))} />
               </th>
               <th className={`text-right w-20 ${th}`} onClick={() => click('beta')}>
                 {copy.holdings.beta}{caret('beta')}
-                <Provenance source="benchmark" asOf={null} kind="formula" column
-                  what={copy.info.betaWhat(benchmark)}
-                  note={copy.info.betaNote(benchmark)}
-                  how={copy.info.betaHeaderHow(benchmark, betaExample(holdings))} />
               </th>
               <th className={`text-right w-[7.2rem] ${th}`} onClick={() => click('weight')}>
                 {copy.holdings.weightNow}{caret('weight')}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.weightWhat}
-                  how={copy.info.weightHow(holdings.length, eur0n(grand.valuenow))} />
               </th>
               {/* ⚠ THE THREE COMPONENTS, THEN THEIR SUM — the whole point of merging the ledger
                   into this table. A reader who wants to know what a position MADE should not have
@@ -1845,118 +1773,61 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
 {show('opening') && (
               <th className="text-right w-[9.6rem] py-2 font-medium">
                 {copy.holdings.opening}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.openingWhat}
-                  how={copy.info.openingHow(eur0n(grand.opening))} />
               </th>
 )}
 {show('valuenow') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
                 {copy.holdings.valueNow}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.valueNowWhat}
-                  how={copy.info.valueNowHow(eur0n(grand.valuenow))} />
               </th>
 )}
 {show('avgcapital') && (
               <th className="text-right w-[9.6rem] py-2 font-medium">
                 {copy.holdings.avgCapital}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.avgCapitalWhat}
-                  how={copy.info.avgCapitalHow(eur0n(grand.avgcapital))} />
               </th>
 )}
 {show('unrealised') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
                 {copy.holdings.unrealised}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.unrealisedWhat}
-                  note={copy.info.unrealisedNote}
-                  how={copy.info.unrealisedHow(eur0n(grand.valuenow), eur0n(grand.opening), eur0n(grand.unrealised))} />
               </th>
 )}
 {show('realised') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
                 {copy.holdings.realised}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.realisedWhat}
-                  note={copy.info.realisedNote}
-                  how={copy.info.realisedHow(eur0n(grand.realised))} />
               </th>
 )}
 {show('income') && (
               <th className="text-right w-[7.2rem] py-2 font-medium">
                 {copy.holdings.income}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.incomeWhat}
-                  note={copy.info.incomeNote}
-                  how={copy.info.incomeHow(eur0n(grand.income))} />
               </th>
 )}
 {show('result') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
                 {copy.holdings.result}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.resultWhat}
-                  note={copy.info.resultNote}
-                  how={copy.info.resultHow(eur0n(grand.unrealised), eur0n(grand.realised), eur0n(grand.income), eur0n(grand.result))} />
               </th>
 )}
 {show('koers') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
                 {copy.holdings.price}
-                <Provenance source="airs_volk" asOf={asOf} kind="copied" column
-                  what={copy.info.priceWhat}
-                  note={copy.info.priceNote}
-                  how={copy.info.priceHow(eur0n(grand.koers))} />
               </th>
 )}
 {show('valuta') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
                 {copy.holdings.currency}
-                <Provenance source="airs_volk" asOf={asOf} kind="copied" column
-                  what={copy.info.currencyWhat}
-                  note={copy.info.currencyNote}
-                  how={copy.info.currencyHow(eur0n(grand.valuta))} />
               </th>
 )}
 {show('unsplit') && (
               <th className="text-right w-[7.2rem] py-2 font-medium">
                 {copy.holdings.rest}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.restWhat}
-                  note={copy.info.restNote}
-                  how={copy.info.restHow(eur0n(grand.unsplit))} />
               </th>
 )}
               <th className="text-right w-[9.6rem] py-2 font-medium">
                 {copy.holdings.moneyWeighted}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.moneyWhat}
-                  note={copy.info.moneyNote}
-                  how={copy.info.moneyHow(eur0n(grand.result), eur0n(grand.avgcapital), fmtRet(grand.mwr))} />
               </th>
               <th className={`text-right w-32 pr-4 ${th}`} onClick={() => click('return')}>
                 {copy.holdings.instrumentReturn}{caret('return')}
-                {/* ⚠ `airs_volk`, NOT `yfinance`. This header claimed yfinance while the rows
-                    beneath it are AIRS's own valuation — each row's card names its actual source
-                    correctly, so the column header disagreed with almost every cell under it. The
-                    yfinance path is the marked FALLBACK (ƒ), not the basis.
-                    ⚠ AND IT DESCRIBED THE CLASS ROW'S OLD ARITHMETIC. It said the rows "average
-                    into" the class figure weighted by opening value — true when the class return
-                    was Σ(weight × return), and false since it became Σ result ÷ Σ opening value.
-                    A header that explains a formula the table no longer uses is worse than one
-                    that explains nothing. */}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.instrumentWhat(anchor ?? copy.info.yearOpened)}
-                  how={copy.info.instrumentHow(bookReturnExample(holdings, copy.row.netDividend))} />
               </th>
               <th className={`text-right w-28 ${th}`} onClick={() => click('contribution')}>
                 {copy.holdings.contribution}{caret('contribution')}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.contributionWhat}
-                  note={copy.info.contributionNote}
-                  how={copy.info.contributionHow(eur0n(grand.result), eur0n(realised?.basis_eur), ppt(grand.contribution))} />
               </th>
             </tr>
           </thead>
@@ -1970,34 +1841,55 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
             <tbody key={g.bucket}>
               <tr className="bg-inset border-y border-neutral-800/40">
                 <td className="pl-4" />
-                {/* colSpan 3: Name · Via · Sector — every text column, so the class label
-                    runs to the first number. */}
-                <td className="py-2 font-medium text-fg-strong" colSpan={3}>
-                  <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 align-middle"
-                    style={{ background: allocColor(g.bucket) }} />
-                  {copy.bucket(bucketLabel(g.bucket))}
-                  <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[11px] font-normal text-fg-muted">
-                    {g.rows.length}
+                {/* ⚠⚠ THE NAME COLUMN ALONE, THEN Via · Sector AS AN EMPTY PAIR — it was ONE
+                    `colSpan={3}` (2026-09-03, on request: the Stocks button aligns with the
+                    per-holding ones). It cannot: a cell spanning three columns ends two columns
+                    further right, so `ml-auto` inside it lands on its own vertical line rather
+                    than on theirs. Split, this cell's right edge IS the Name column's, which is
+                    where every row's button now sits.
+                    ⚠ THE LEADING BLOCK IS STILL EIGHT. `portfolioAnalysisColumns.test.ts` sums
+                    `colSpan` rather than counting tags, so 1 + 2 is the same eight cells the
+                    header has — but it is the reason this split is safe to make at all, and the
+                    reason the `colSpan={2}` below must never quietly become a bare `<td />`.
+                    ⚠ THE LABEL NO LONGER RUNS TO THE FIRST NUMBER, which was the old comment's
+                    whole justification. Nothing needed it: the bucket names are one or two short
+                    words in both languages and sit well inside the Name column's `min-w-[15.6rem]`
+                    floor. A longer one widens the column rather than truncating — visible, not
+                    silent. */}
+                <td className="py-2 font-medium text-fg-strong">
+                  <span className="flex items-center min-w-0">
+                    <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 shrink-0"
+                      style={{ background: allocColor(g.bucket) }} />
+                    {copy.bucket(bucketLabel(g.bucket))}
+                    <span className="ml-2 shrink-0 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[11px] font-normal text-fg-muted">
+                      {g.rows.length}
+                    </span>
+                    {/* ⚠ WEIGHTED BY WHAT IS BEING BLENDED, over the members that CAN be blended.
+                        The basket takes each member's `weight_now_pct` — the same figure this row's
+                        subtotal is summed from — and only the rows with an ISIN, because owner
+                        earnings are per-company and cash has none. Sending the whole class would
+                        hand the blender a weight it cannot attribute to anything.
+                        ⚠⚠ AND ONLY ON STOCKS. An ISIN is not enough: an ETF has one and is not a
+                        company (this app deliberately does not look through funds, so there is
+                        nothing behind it to measure), Alternatives is crypto and commodities with no
+                        earnings at all, and a bond is a claim on a company rather than a share of
+                        it. The button used to appear on all of them and opened a modal with nothing
+                        in it — which reads as a broken feature rather than an absent one, the exact
+                        thing `FundamentalButton`'s own docstring says not to do. */}
+                    {/* ⚠ `ml-auto`, THE SAME PIN AS THE PER-HOLDING BUTTONS — see the note at its
+                        call site. This one is the head of that vertical line rather than an
+                        exception to it. */}
+                    {g.bucket === EQUITY_BUCKET && g.basket.holdings.length > 0 && (
+                      <FundamentalButton className="ml-auto shrink-0"
+                        title={copy.classRow.fundamentalTitle(g.basket.holdings.length, copy.bucket(bucketLabel(g.bucket)))}
+                        onOpen={() => onFundamental({
+                          name: g.basket.label, basket: g.basket, weightPct: g.slice?.pct })} />
+                    )}
                   </span>
-                  {/* ⚠ WEIGHTED BY WHAT IS BEING BLENDED, over the members that CAN be blended.
-                      The basket takes each member's `weight_now_pct` — the same figure this row's
-                      subtotal is summed from — and only the rows with an ISIN, because owner
-                      earnings are per-company and cash has none. Sending the whole class would
-                      hand the blender a weight it cannot attribute to anything.
-                      ⚠⚠ AND ONLY ON STOCKS. An ISIN is not enough: an ETF has one and is not a
-                      company (this app deliberately does not look through funds, so there is
-                      nothing behind it to measure), Alternatives is crypto and commodities with no
-                      earnings at all, and a bond is a claim on a company rather than a share of
-                      it. The button used to appear on all of them and opened a modal with nothing
-                      in it — which reads as a broken feature rather than an absent one, the exact
-                      thing `FundamentalButton`'s own docstring says not to do. */}
-                  {g.bucket === EQUITY_BUCKET && g.basket.holdings.length > 0 && (
-                    <FundamentalButton className="ml-2 align-middle"
-                      title={copy.classRow.fundamentalTitle(g.basket.holdings.length, copy.bucket(bucketLabel(g.bucket)))}
-                      onOpen={() => onFundamental({
-                        name: g.basket.label, basket: g.basket, weightPct: g.slice?.pct })} />
-                  )}
                 </td>
+                {/* Via · Sector — a class row has nothing to say in either. ⚠ `colSpan={2}`, not
+                    two cells and not one: see the note above the Name cell. */}
+                <td colSpan={2} />
                 {/* ⚠ TWO EMPTY CELLS, NOT TWO NUMBERS — vol and beta. A class's volatility is
                     NOT the average of its holdings' (it is the vol of the COMBINED series, lower by
                     exactly the diversification between them), and while a class's BETA is a
@@ -2187,9 +2079,25 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                           ⚠ `focus:opacity-100` WENT WITH IT — it existed solely so a keyboard user
                           could reach a button the mouse rules had hidden. With the button visible
                           it describes a state that no longer occurs. */}
+                      {/* ⚠⚠ `ml-auto` — PINNED TO THE NAME COLUMN'S RIGHT EDGE, NOT TRAILING THE
+                          NAME (2026-09-03, on request: "align all Fundamental buttons
+                          vertically"). Sitting immediately after the text, each button started
+                          wherever its own instrument's name happened to end, so a column of ~50
+                          identical controls was scattered across ~14rem of the widest column in
+                          the table — the eye had to find each one instead of reading down a line.
+                          ⚠ IT COSTS THE NAME NOTHING. The name span does not grow, so `ml-auto`
+                          only claims slack the name was not using; on a long name that slack is
+                          zero and the button lands exactly where it did before, against the
+                          truncation. The `min-w-0` + `truncate` pair that makes the cell shrink is
+                          unchanged, so no name loses a character to this.
+                          ⚠ THE CLASS ROW'S BUTTON CANNOT JOIN THE LINE, and that is structural
+                          rather than an oversight: its cell is `colSpan={3}` (Name · Via · Sector)
+                          so its right edge is two columns further out. Pushing it right would put
+                          it on a DIFFERENT vertical line, which is worse than leaving it beside
+                          the class label it belongs to. */}
                       {h.isin && h.bucket === EQUITY_BUCKET && !h.is_fund && (
                         <FundamentalButton
-                          className="shrink-0"
+                          className="ml-auto shrink-0"
                           title={copy.row.fundamentalTitle(h.name ?? h.isin ?? copy.row.thisPosition)}
                           onOpen={() => onFundamental({ name: h.name ?? h.isin!, isin: h.isin! })} />
                       )}
@@ -3154,8 +3062,9 @@ export default function PortfolioAnalysisModal({
               benchmark picker only changes what those inputs are compared against. Close stays
               last, where a dialog's dismiss belongs. */}
           <div className="flex items-center gap-2 shrink-0">
-            {/* ⚠ THE ROW'S REFRESH, NOT A NEW ONE — same handler, same glyph (`RefreshIcon`, shared
-                so the two are visibly one control) and the caller's own wording, so pressing it
+            {/* ⚠ THE ROW'S REFRESH, NOT A NEW ONE — same handler, same LABEL (2026-09-03: the
+                glyph came off every Refresh and every Cancel on the site, on request, so the word
+                is now the whole control) and the caller's own wording, so pressing it
                 here and pressing it on the row cannot come to mean different things. Absent when
                 the caller passes no handler: a basket has no AIRS portfolio behind it to re-scan,
                 and the panels gate the row's button on `isAdmin` for the same reason they gate
@@ -3178,9 +3087,6 @@ export default function PortfolioAnalysisModal({
                 aria-label={stopping ? copy.actions.cancelling
                   : cancellable ? copy.actions.cancelRefresh : copy.actions.refreshPortfolio}
                 className={`${refreshing && canStop ? HEADER_CTL_STOP : HEADER_CTL} inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-wait`}>
-                {refreshing && canStop
-                  ? <span className="text-[10px] leading-none">✕</span>
-                  : <RefreshIcon spinning={refreshing} size={12} />}
                 {stopping ? copy.actions.cancelling : cancellable ? copy.actions.cancel
                   : refreshing ? copy.actions.refreshing : copy.actions.refresh}
               </button>
@@ -3218,7 +3124,9 @@ export default function PortfolioAnalysisModal({
             {copy.lang === 'nl' ? copy.chrome.loadError : error}
           </div>
         )}
-        {!data && !error && <p className="text-xs text-fg-subtle">{copy.chrome.loading}</p>}
+        {/* ⚠ ONE BIG LINE AND A MOVING ELLIPSIS — see `AnalyseLoading` for why this modal gets
+            no skeleton and no progress bar. */}
+        {!data && !error && <AnalyseLoading label={copy.chrome.loading} />}
 
         {data && (
           <>
@@ -3390,10 +3298,16 @@ export default function PortfolioAnalysisModal({
                         design and so drew the WHOLE BOOK's line beside a stocks-only tile. AIRS
                         reports a return for the account, not a slice.
                         ⚠ IT FETCHES ITSELF — see `BookReturnChart`. The modal is one payload with
-                        no partial paint, and its wall clock is the reader's wait. */}
+                        no partial paint, and its wall clock is the reader's wait.
+                        ⚠⚠ WHICH IS WHY `refreshSeq` HAS TO REACH IT. Fetching itself means it does not
+                        ride on the effect above, and Refresh re-runs the AIRS scrape — a new
+                        `airs_performance` row. Without this the chip re-read that row and the chart
+                        did not, so the two sat one scrape apart while both claimed to be the same
+                        column (reported 2026-09-03: +3.44% against +3.05%). Every self-fetching
+                        child of this modal owes the same dependency. */}
                     {!isBasket && id != null && (
                       <div className="w-0 min-w-full">
-                        <BookReturnChart portfolioId={id} />
+                        <BookReturnChart portfolioId={id} refreshSeq={refreshSeq} />
                       </div>
                     )}
                   </div>

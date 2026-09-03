@@ -104,9 +104,19 @@ export function lineCagr(
   const wantYear = endYear - years;
   const from = reported.find((p) => periodYear(p) === wantYear && periodQuarter(p) === q);
   if (!from) {
+    /**
+     * ⚠⚠ IT NAMES THE END OF THE WINDOW, NOT JUST THE START IT COULD NOT FIND (2026-09-03,
+     * reported: "no 2010 point on the line, which is complete nonsense for a 5y lookback from
+     * 2026"). It was — and the nonsense was the message, not the arithmetic: `wantYear` is
+     * `endYear - years`, so a 5-year window asking for 2010 means the window ENDS at 2015. That
+     * end is `commonEndPeriod`, the latest period BOTH lines are drawn at, and when it lands far
+     * in the past the reason blamed the history for a start date it had derived from a bad end.
+     * A reader cannot debug the pin without seeing it, so the pin is in the sentence.
+     */
     return { pct: null,
-      reason: `no ${q ? `Q${q} ` : ''}${wantYear} point on the line — either the history does not `
-        + 'reach back that far, or too few constituents had reported that period for it to be drawn' };
+      reason: `${years}y window ${wantYear}→${endYear}: no ${q ? `Q${q} ` : ''}${wantYear} point on `
+        + `the line. The window ends at ${to} because that is the latest period BOTH lines are `
+        + 'drawn at — if that looks too old, the cause is the end, not the history.' };
   }
 
   const a = level[from].value;

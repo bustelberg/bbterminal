@@ -117,7 +117,7 @@ export const BASIS: Record<Basis, {
     codes: FCF_PS_CODES,
     source: 'GuruFocus `Free Cash Flow per Share`, as reported.',
     what: 'the cash the business threw off per share, after the capital spending needed to keep it running',
-    caveat: '⚠ NOT SBC-ADJUSTED. The FCF-SBC cards on the Long Equity tab subtract stock compensation and are a lower number; this one is free cash flow as reported.',
+    caveat: '⚠ NOT SBC-ADJUSTED. The FCF-SBC cards on the Graphs tab subtract stock compensation and are a lower number; this one is free cash flow as reported.',
     negativeYear: 'cash-burn',
     multiple: 'P/FCF',
     // ⚠ NO ANALYST FCF CONSENSUS EXISTS, AND THE ANSWER IS TO SHOW NO FORWARD — not to model one.

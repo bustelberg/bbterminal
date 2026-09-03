@@ -114,10 +114,10 @@ export type DeepValuationCopy = {
     noneStored: string; noObservationStored: string;
     clearBoxToGoBack: (price: string) => string;
     rawDataYahoo: string; rawDataNoRefresh: string;
-    /** The ↻ control's four states. */
+    /** The Refresh control's four states. */
     reReadClose: string; reReadCancel: string; reReading: string; cancelling: string;
     reReadOverridden: string; reReadStale: string;
-    /** The forward P/E's own ↻ — a different vendor and transport from the share price's. */
+    /** The forward P/E's own Refresh — a different vendor and transport from the share price's. */
     reReadForwardPE: string; reReadNoCompany: string;
     /** ⚠ THE OVERRIDE STATES. A typed forward P/E HIDES whatever the refresh fetches, exactly as a
      *  typed share price does — the button must say so, and the ⓘ must stop dating a vendor
@@ -348,8 +348,8 @@ const en: DeepValuationCopy = {
     noObservationStored: 'No observation stored.',
     clearBoxToGoBack: (price) =>
       `Clear the Share price box to go back to the stored close${price ? `, ${v(price)}` : ''}.`,
-    rawDataYahoo: 'Raw data. ↻ fetches the newest closes from Yahoo.',
-    rawDataNoRefresh: 'Raw data. ↻ cannot refresh this one.',
+    rawDataYahoo: 'Raw data. Refresh fetches the newest closes from Yahoo.',
+    rawDataNoRefresh: 'Raw data. Refresh cannot update this one.',
     reReadClose: 'Re-read the stored close', reReadCancel: 'Cancel the re-read',
     reReading: 'Re-reading — press to cancel', cancelling: 'Cancelling…',
     reReadOverridden: 'Re-read the stored close — the Share price box is overriding it, ',
@@ -709,8 +709,8 @@ const nl: DeepValuationCopy = {
     noObservationStored: 'Geen waarneming opgeslagen.',
     clearBoxToGoBack: (price) =>
       `Maak het veld Koers nu leeg om terug te gaan naar de opgeslagen slotkoers${price ? `, ${v(price)}` : ''}.`,
-    rawDataYahoo: 'Brongegeven. ↻ haalt de nieuwste slotkoersen bij Yahoo op.',
-    rawDataNoRefresh: 'Brongegeven. ↻ kan deze niet verversen.',
+    rawDataYahoo: 'Brongegeven. Refresh haalt de nieuwste slotkoersen bij Yahoo op.',
+    rawDataNoRefresh: 'Brongegeven. Refresh kan deze niet verversen.',
     reReadClose: 'Lees de opgeslagen slotkoers opnieuw', reReadCancel: 'Annuleer het opnieuw lezen',
     reReading: 'Bezig met opnieuw lezen — druk om te annuleren', cancelling: 'Annuleren…',
     reReadOverridden: 'Lees de opgeslagen slotkoers opnieuw — het veld Koers nu overschrijft hem, ',

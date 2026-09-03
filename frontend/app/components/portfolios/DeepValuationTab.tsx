@@ -742,7 +742,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                * for the quarterly `benchmark_fundamentals_fill` or refresh every source of the
                * company from another page.
                *
-               * ⚠ SAME THREE STATES AND THE SAME GLYPHS AS THE SHARE PRICE'S ↻ — see the long note
+               * ⚠ SAME THREE STATES AND THE SAME LABELS AS THE SHARE PRICE'S Refresh — see the note
                * at that button. Two controls on one panel that both re-read a vendor figure must
                * not have two vocabularies; the only difference here is which vendor and which
                * transport, and that is in `refreshForwardPE`.
@@ -767,12 +767,12 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                       : companyId == null ? t.egm.reReadNoCompany
                         : numOrNull(fwdPeStr) != null ? t.egm.reReadForwardPEOverridden
                           : t.egm.reReadForwardPE}
-                  className={`inline-block w-3.5 text-center align-middle text-[11px] leading-none ${
+                  className={`inline-block align-middle text-[11px] leading-none ${
                     peCancelling ? 'cursor-wait text-fg-faint'
                       : peRefreshing ? 'text-warn-400 hover:text-neg-400'
                         : companyId == null ? 'cursor-default text-fg-faint/40'
                           : 'text-fg-faint hover:text-accent-400'}`}>
-                  {peCancelling ? '⋯' : peRefreshing ? '✕' : '↻'}
+                  {peCancelling ? 'Cancelling…' : peRefreshing ? 'Cancel' : 'Refresh'}
                 </button>
               )} />
             <Field label={t.egm.hurdleRate} value={hurdleStr} onChange={setHurdleStr} suffix="%"
@@ -1051,8 +1051,8 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                         * pressed the button HERE, so this is where the way to stop it belongs;
                         * sending them to the toast in the corner to undo something they started
                         * on this row is the same mistake as a Cancel that does nothing.
-                        *   ↻  idle      — amber when the close is over a week old
-                        *   ✕  running   — press again to abort the re-read
+                        *   Refresh      idle — amber when the close is over a week old
+                        *   Cancel       running — press again to abort the re-read
                         *   ⋯  cancelling — the window after the press, while the fetch unwinds
                         *
                         * ⚠ IT KEYS OFF THE TOAST STORE, NOT A LOCAL FLAG. `cancelRequested` flips
@@ -1079,12 +1079,12 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                                 + 'so the new figure appears on that box’s chip'
                               : priceStale ? t.egm.reReadStale
                                 : t.egm.reReadClose}
-                        className={`ml-1 inline-block w-3.5 text-center align-middle text-[11px] leading-none ${
+                        className={`ml-1 inline-block align-middle text-[11px] leading-none ${
                           cancelling ? 'cursor-wait text-fg-faint'
                             : refreshing ? 'text-warn-400 hover:text-neg-400'
                               : priceStale ? 'text-warn-400 hover:text-warn-300'
                                 : 'text-fg-faint hover:text-accent-400'}`}>
-                        {cancelling ? '⋯' : refreshing ? '✕' : '↻'}
+                        {cancelling ? 'Cancelling…' : refreshing ? 'Cancel' : 'Refresh'}
                       </button>
                     </td>
                   </tr>

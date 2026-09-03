@@ -71,14 +71,56 @@ PROXY: dict[str, str] = {
 
 _NAMES = {"ACWI": "iShares MSCI ACWI ETF", "SPY": "SPDR S&P 500 ETF Trust"}
 
-# How far behind today the newest stored bar may be before we go back to the vendor. Three days
-# clears a normal weekend; a long weekend costs one extra call and nothing else.
+# ⚠ THE FALLBACK RULE ONLY. How far behind TODAY the newest stored bar may be before we go back to
+# the vendor, used when the market anchor below cannot be had. Three days clears a normal weekend;
+# a long weekend costs one extra call and nothing else.
 _STALE_DAYS = 3
 
 # ⚠ ONE VENDOR CALL PER TICKER PER PROCESS PER DAY, AT MOST. Without this a stale series would be
 # re-fetched by every Analyse-modal open that missed the leg cache — and the modal is ONE request
 # with no partial paint, so a vendor round trip lands directly in the wait the reader sees.
 _fetched_today: dict[tuple[str, str], bool] = {}
+
+
+def _behind_the_market(last: tuple[str, float] | None) -> bool:
+    """Is this proxy series behind the freshest close we hold ANYWHERE?
+
+    ⚠⚠ ANCHORED TO THE MARKET, NOT TO THE CALENDAR, AND THE CALENDAR RULE WAS WRONG BY EXACTLY THE
+    AMOUNT NOBODY WOULD NOTICE. `_STALE_DAYS = 3` means a series one or two days behind is declared
+    FRESH, so the lazy path declined to fetch it — and the tile then sat a day behind the `Return`
+    chip and the return chart beside it, which read AIRS's newest row. Both figures looked current
+    and neither was reported as anything else. Measured 2026-09-03 on the working database: the
+    ACWI and SPY proxies newest bar **2026-09-01**, against a **2026-09-02** newest close
+    everywhere else — the same one-day lag this module recorded on 2026-09-02 from the other end
+    of the same rule, when `refresh_index_proxies` was found not to be forcing.
+
+    ⚠ IT IS THE SAME ANCHOR THE PRICE PIPELINE'S RETRY AND THE DELISTING SWEEP USE, for the same
+    reason: "today" is not a market date. Anchoring on the freshest close WE HOLD makes a weekend, a
+    holiday and a vendor outage correct by construction — nothing is behind when nothing has moved
+    — where a calendar rule has to be loosened until it stops false-triggering, which is precisely
+    how it came to tolerate the lag it existed to catch.
+
+    ⚠ A FAILURE HERE FALLS BACK TO THE CALENDAR RULE rather than forcing a fetch. The anchor is one
+    cheap indexed read, but it sits on the critical path of a modal that paints nothing until it is
+    done, and "we could not work out whether it is stale" is not a reason to spend a vendor round
+    trip in somebody's wait.
+
+    ⚠ THE ONCE-PER-TICKER-PER-PROCESS-PER-DAY GUARD IS UNCHANGED and is what bounds the cost. This
+    only changes WHICH DAY the first call happens on: on a box whose scheduled
+    `refresh_index_proxies` has run, the series is not behind and the reader still pays nothing.
+    """
+    if last is None:
+        return True
+    try:
+        from asset_pipeline.price_refresh import global_latest_close  # noqa: PLC0415
+        anchor = global_latest_close()
+    except Exception as exc:                                        # noqa: BLE001
+        _log.warning("[bench-etf] market anchor unavailable, falling back to the calendar rule: "
+                     "%s: %s", type(exc).__name__, exc)
+        anchor = None
+    if anchor:
+        return last[0] < str(anchor)[:10]
+    return date.fromisoformat(last[0]) < date.today() - timedelta(days=_STALE_DAYS)
 
 
 def _benchmark_id(ticker: str) -> int | None:
@@ -193,13 +235,21 @@ def ensure_fresh(label: str, *, force: bool = False) -> tuple[int, tuple[str, fl
     if bid is None:
         return None
     last = _latest(bid)
-    # ⚠ CALENDAR DAYS, DELIBERATELY, ON THE LAZY PATH ONLY. A Friday close is the correct newest
-    #   bar all weekend, so a trading-day rule here would buy nothing and a same-day rule would
-    #   fetch on every Saturday open. `force` sidesteps the question entirely for the scheduled
-    #   caller, which simply asks the vendor what it has.
-    stale = last is None or date.fromisoformat(last[0]) < date.today() - timedelta(days=_STALE_DAYS)
+    # ⚠ BEHIND THE MARKET, NOT BEHIND THE CALENDAR — see `_behind_the_market` for the measurement
+    #   that replaced the three-day rule, and for why a weekend needs no special case once the
+    #   anchor is the freshest close we hold. `force` sidesteps the question entirely for the
+    #   scheduled caller, which simply asks the vendor what it has.
+    stale = _behind_the_market(last)
     guard = (ticker, date.today().isoformat())
-    if (force or stale) and not _fetched_today.get(guard):
+    # ⚠⚠ `force` BYPASSES THE DAY GUARD TOO, AND IT DID NOT — which made "Refresh" unable to move
+    #   this tile for the rest of any day the lazy path had already spent its one call. Measured
+    #   2026-09-03: the modal's first open asked the vendor, GuruFocus had not yet published ACWI's
+    #   02-09 bar, it published minutes later, and every Refresh after that was a no-op while the
+    #   book beside it advanced. `force` now means what it says — ASK THE VENDOR NOW — and its only
+    #   callers are the scheduled pass and a button somebody pressed, both of which run where
+    #   nobody is waiting on the round trip. The guard is still SET, so a later lazy read in the
+    #   same process cannot spend a second call.
+    if (force or stale) and (force or not _fetched_today.get(guard)):
         _fetched_today[guard] = True
         try:
             if _refresh(ticker, bid, last[0] if last else None):

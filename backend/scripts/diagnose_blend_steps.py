@@ -140,7 +140,10 @@ def main() -> int:
     refused_base = refused_cap = refused_missing = 0
     for m in members:
         at = m.get("points") or {}
-        scale = m.get("scale") or fb.member_scale(at)
+        # ⚠ `.get` WITH A DEFAULT, NEVER `or` — 0.0 is the legitimate "no materiality bar"
+        # value on a one-member line (`base_bar_scale`), and `or` would silently put the
+        # bar back, so this diagnostic would report refusals the blend never made.
+        scale = m.get("scale", fb.base_bar_scale(at, len(members)))
         periods = sorted(at)
         for prev_p, now_p in zip(periods, periods[1:]):
             prev, now = at.get(prev_p), at.get(now_p)

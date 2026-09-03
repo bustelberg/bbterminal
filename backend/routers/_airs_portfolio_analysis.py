@@ -1,38 +1,38 @@
-"""Composition of an AIRS model portfolio Ã¢ÂÂ sector / region / currency Ã¢ÂÂ against a benchmark.
+"""Composition of an AIRS model portfolio — sector / region / currency — against a benchmark.
 
 ONE VOCABULARY, OR THE COMPARISON IS A LIE
     The portfolio's holdings live in the ISIN world (`asset_execution`); the SP500 benchmark is
     built from `company` rows. Those are different entity universes, and `company` has no sector
-    column at all Ã¢ÂÂ its sector would have to come from `universe_membership`, whose SP500 rows
+    column at all — its sector would have to come from `universe_membership`, whose SP500 rows
     are EMPTY anyway. Two taxonomies side by side in one bar chart is a chart that invents a
     difference ("Technology" vs "Information Technology" is not a tilt).
 
     So BOTH sides are classified from the SAME source: `asset_grid`'s yfinance attributes, joined
-    by ISIN. That is not a convenience Ã¢ÂÂ it is the reason the chart means anything. Measured: all
+    by ISIN. That is not a convenience — it is the reason the chart means anything. Measured: all
     493 SP500 members are present in `asset_grid` with `status='ok'` and a sector, so the
     benchmark loses nothing by being expressed this way.
 
-Ã¢ÂÂ  WE DO NOT LOOK THROUGH FUNDS, AND THAT MUST BE VISIBLE.
+⚠ WE DO NOT LOOK THROUGH FUNDS, AND THAT MUST BE VISIBLE.
     An ETF is a basket. Its *listing* tells you nothing about what it holds:
 
-      * SECTOR   Ã¢ÂÂ 24 of the 26 held ETFs have a "sector" of literally `etf` or `Equity`. Those
+      * SECTOR   — 24 of the 26 held ETFs have a "sector" of literally `etf` or `Equity`. Those
                    are not sectors. Counting them as one would put ~20% of a portfolio into a
                    phantom bucket and quietly deflate every real sector's share.
-      * REGION   Ã¢ÂÂ an MSCI World ETF listed in Amsterdam is not European exposure.
-      * CURRENCY Ã¢ÂÂ that same ETF quoted in EUR holds mostly USD assets. The listing currency is
+      * REGION   — an MSCI World ETF listed in Amsterdam is not European exposure.
+      * CURRENCY — that same ETF quoted in EUR holds mostly USD assets. The listing currency is
                    not the currency exposure.
 
     We have no constituent data for these funds, so we cannot decompose them. The honest move is
-    to say so: every fund folds into `Unclassified` on ALL THREE axes Ã¢ÂÂ a confident wrong sector
+    to say so: every fund folds into `Unclassified` on ALL THREE axes — a confident wrong sector
     split would be worse than one bucket that reads "we can't see inside this".
 
     (For a single-stock holding the listing currency IS a fair proxy for currency exposure, and
     the domicile a fair proxy for region. Imperfect, standard, and not misleading.)
 
-Ã¢ÂÂ  CASH IS A BUCKET, NOT A GAP Ã¢ÂÂ the same rule as the returns: its drag is a fact.
+⚠ CASH IS A BUCKET, NOT A GAP — the same rule as the returns: its drag is a fact.
 
-Ã¢ÂÂ  ONE COMPANY, ONE ROW, on the benchmark side. GuruFocus puts the FULL company market cap on
-    every share class, so Alphabet (GOOGL + GOOG) would contribute its cap TWICE Ã¢ÂÂ 11.3% of the
+⚠ ONE COMPANY, ONE ROW, on the benchmark side. GuruFocus puts the FULL company market cap on
+    every share class, so Alphabet (GOOGL + GOOG) would contribute its cap TWICE — 11.3% of the
     S&P's total weight, fictional. `_benchmark_index._members` already dedupes; we reuse it
     rather than re-deriving the weights and re-introducing the bug.
 """
@@ -56,7 +56,7 @@ CASH_BUCKET = "Cash"
 _log = logging.getLogger(__name__)
 
 UNKNOWN_BUCKET = "Unclassified"
-# A fund is a black box on these axes Ã¢ÂÂ an ETF's listing tells you nothing about its holdings Ã¢ÂÂ so
+# A fund is a black box on these axes — an ETF's listing tells you nothing about its holdings — so
 # it FOLDS INTO Unclassified rather than being split into a sector/region/currency it never had.
 # (Kept as its own name for the callers that still reference it; the value is UNKNOWN_BUCKET.)
 FUND_BUCKET = UNKNOWN_BUCKET
@@ -68,13 +68,13 @@ _FUND_CLASSES = {"etf", "fund", "etc", "etp", "crypto", "commodity"}
 # name, a future spelling) would otherwise open a bucket of its own and read as a region.
 _MSCI_REGIONS = frozenset(MSCI_REGION.values())
 
-# Ã¢ÂÂ  YAHOO SPEAKS TWO SECTOR VOCABULARIES, AND THE OVERLAP IS A SILENT ATTRIBUTION BUG.
+# ⚠ YAHOO SPEAKS TWO SECTOR VOCABULARIES, AND THE OVERLAP IS A SILENT ATTRIBUTION BUG.
 #
 #     Materials          535 rows        Basic Materials       32 rows
 #     Financials         748 rows        Financial Services    82 rows
 #
 # Same sector, two names, depending on when the row was resolved. Left unmerged they are two
-# BUCKETS: a chart shows one sector twice, and Ã¢ÂÂ far worse Ã¢ÂÂ Brinson reads a portfolio holding
+# BUCKETS: a chart shows one sector twice, and — far worse — Brinson reads a portfolio holding
 # "Financial Services" against an index holding "Financials" as a bucket the index does not own.
 # That scores as a phantom ALLOCATION bet with ZERO selection, when in truth the portfolio and the
 # index are in the same sector and the only question is which names they picked. Canonicalised
@@ -84,50 +84,50 @@ _SECTOR_ALIASES = {
     "Financial Services": "Financials",
 }
 
-# Values that appear in the `sector` column of an EQUITY row but are not sectors Ã¢ÂÂ leftovers from
+# Values that appear in the `sector` column of an EQUITY row but are not sectors — leftovers from
 # the ETF/asset-class fallback. A bucket named "Equity" inside a sector chart is noise wearing a
 # label; it is an absence, and it says so.
 _NOT_A_SECTOR = {"equity", "bonds", "commodity", "short commodity", "crypto", "etf"}
 
-# Ã¢ÂÂÃ¢ÂÂ Asset-class allocation (the portfolio's OWN split, no benchmark) Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
-# AIRS's `categorie` classifies what a holding INVESTS IN Ã¢ÂÂ an equity ETF is AAND, a bond ETF is
-# OBL Ã¢ÂÂ so the ETF wrapper is an ORTHOGONAL axis. Only EQUITY is split into direct vs ETF; a bond
+# ── Asset-class allocation (the portfolio's OWN split, no benchmark) ──────────────────────────
+# AIRS's `categorie` classifies what a holding INVESTS IN — an equity ETF is AAND, a bond ETF is
+# OBL — so the ETF wrapper is an ORTHOGONAL axis. Only EQUITY is split into direct vs ETF; a bond
 # ETF is Bonds. Real estate (VAS, the REITs) folds into Alternatives to match the requested buckets.
 _CATEGORIE_TO_CLASS = {"AAND": "Equity", "OBL": "Bonds", "VAS": "Real estate", "ALTBEL": "Alternatives"}
 # Bucket order for the allocation bar. Must match `_airs_holding_isin.BUCKET_ORDER`; a literal here
-# (not an import) to avoid a module-level cycle Ã¢ÂÂ `classify_bucket` is imported per-call instead.
+# (not an import) to avoid a module-level cycle — `classify_bucket` is imported per-call instead.
 _ALLOC_ORDER = ["Equity", "Bonds", "Alternatives", "Cash", UNKNOWN_BUCKET]
 
-# Ã¢ÂÂ Ã¢ÂÂ  THE FOUR CLASSES THAT ARE ALWAYS SHOWN, EVEN AT 0%. A bar that simply omits a class a book
-# does not hold cannot say the book does not hold it Ã¢ÂÂ the reader sees three rows and has to
+# ⚠⚠ THE FOUR CLASSES THAT ARE ALWAYS SHOWN, EVEN AT 0%. A bar that simply omits a class a book
+# does not hold cannot say the book does not hold it — the reader sees three rows and has to
 # remember which fourth is missing, and "holds no bonds" then looks identical to "bonds not
 # computed". Rendering the empty class states the zero.
 #
-# Ã¢ÂÂ Ã¢ÂÂ  AND IT IS WHAT MAKES A POLICY BREACH VISIBLE AT ALL IN THE ONE CASE THAT MATTERS MOST. The
+# ⚠⚠ AND IT IS WHAT MAKES A POLICY BREACH VISIBLE AT ALL IN THE ONE CASE THAT MATTERS MOST. The
 # allocation bands are drawn per bar; a Defensief book holding NO bonds against a 55% minimum had
 # no bar to draw the breach on, so the single largest possible violation was the only one the
 # overlay could not show. At 0% it renders with its band and the breach is unmissable.
 #
-# Ã¢ÂÂ  `Unclassified` IS DELIBERATELY NOT IN HERE. It is not a class anyone allocates to Ã¢ÂÂ it is our
+# ⚠ `Unclassified` IS DELIBERATELY NOT IN HERE. It is not a class anyone allocates to — it is our
 # own failure to classify, so an empty one is good news and printing "Unclassified 0.00%" on every
 # healthy book advertises a problem that does not exist. It still appears the moment it has rows.
 _ALWAYS_SHOWN = ("Equity", "Bonds", "Alternatives", "Cash")
 
 
-# Ã¢ÂÂ Ã¢ÂÂ  THE BENCHMARK LEGS ARE NOT ABOUT THE PORTFOLIO ON SCREEN, AND UNTIL 2026-08-19 EVERY BOOK
+# ⚠⚠ THE BENCHMARK LEGS ARE NOT ABOUT THE PORTFOLIO ON SCREEN, AND UNTIL 2026-08-19 EVERY BOOK
 # PAID FOR THEM AGAIN. `members`, `index_returns` and `_bench_start_caps` take a LABEL and a
 # WINDOW; they do not take a portfolio. There are 26 paired books on /management-dashboard, every
 # one of them defaults to the same benchmark, and opening them in turn recomputed the identical
-# S&P constituents, caps and returns 26 times Ã¢ÂÂ measured at 757ms and 8 round trips per open, i.e.
+# S&P constituents, caps and returns 26 times — measured at 757ms and 8 round trips per open, i.e.
 # ~1.3s of a production load, spent on an answer already in memory.
 #
-# Ã¢ÂÂ  MEMOIZED ON THE DATA FINGERPRINT, NOT A TTL Ã¢ÂÂ `_analysis_cache.leg`. This page's discipline is
+# ⚠ MEMOIZED ON THE DATA FINGERPRINT, NOT A TTL — `_analysis_cache.leg`. This page's discipline is
 # that a figure is current or absent, and the whole argument for that mechanism is in that module:
 # if any watched table has been written the key simply does not match, so a stale benchmark is not
 # unlikely here, it is unreachable.
 #
-# Ã¢ÂÂ  `date.today()` IS IN THE KEY EXPLICITLY. `index_returns` prices to "today", which is an input
-# it takes from the clock rather than from the database Ã¢ÂÂ so a fingerprint that did not move
+# ⚠ `date.today()` IS IN THE KEY EXPLICITLY. `index_returns` prices to "today", which is an input
+# it takes from the clock rather than from the database — so a fingerprint that did not move
 # overnight (nothing written) would otherwise serve yesterday's window under today's question.
 # It is the one input here the fingerprint cannot see.
 def _leg(key: tuple, compute):
@@ -143,34 +143,34 @@ def _today() -> str:
 
 
 def _bench_members(label: str) -> tuple[list[dict], dict]:
-    """`_members`, memoized across portfolios Ã¢ÂÂ see the note above."""
+    """`_members`, memoized across portfolios — see the note above."""
     return _leg(("bench_members", label), lambda: _members(label))
 
 
 def _index_returns(label: str, starts: list[str]) -> dict[str, dict]:
-    """The benchmark's EUR return per window Ã¢ÂÂ the index ETF's own price series where there is
+    """The benchmark's EUR return per window — the index ETF's own price series where there is
     one, the constituent reconstruction where there is not. Memoized across portfolios.
 
-    Ã¢ÂÂ Ã¢ÂÂ  THE ETF IS THE BASIS FOR THE HEADLINE NOW (2026-08-19), AND THE REBUILD IS THE FALLBACK.
+    ⚠⚠ THE ETF IS THE BASIS FOR THE HEADLINE NOW (2026-08-19), AND THE REBUILD IS THE FALLBACK.
     Measured on ACWI YTD: the rebuild says +11.83% EUR against the iShares ACWI ETF's +14.67%.
-    That 2.8pp is structural Ã¢ÂÂ full market cap where MSCI float-adjusts (Aramco 1.50% vs a
+    That 2.8pp is structural — full market cap where MSCI float-adjusts (Aramco 1.50% vs a
     published 0.044%), 1,678 of 1,998 members priced with the missing weight redistributed, a
     static membership snapshot, and every constituent running to its own last close. See
     `_benchmark_etf` for the numbers and the canary that proves the vendor answer is real.
 
-    Ã¢ÂÂ  PER WINDOW, NOT PER LABEL. A since-inception anchor can predate the fund (ACWI's first bar
+    ⚠ PER WINDOW, NOT PER LABEL. A since-inception anchor can predate the fund (ACWI's first bar
     is 2008-03-28) and the AEX has no reachable proxy at all, so the rebuild answers whatever the
     ETF cannot. Falling back per LABEL would put a whole portfolio's YTD back on the rebuild
     because its inception was in 2005.
 
-    Ã¢ÂÂ  AND THE REBUILD IS ONLY RUN FOR THE WINDOWS STILL MISSING. It is the expensive half Ã¢ÂÂ a
-    1,678-constituent COPY plus the cap join Ã¢ÂÂ so when the ETF answers every window (the normal
+    ⚠ AND THE REBUILD IS ONLY RUN FOR THE WINDOWS STILL MISSING. It is the expensive half — a
+    1,678-constituent COPY plus the cap join — so when the ETF answers every window (the normal
     case for ACWI and SP500) it is not called at all.
 
-    Ã¢ÂÂ  THE ATTRIBUTION PANEL IS DELIBERATELY NOT ROUTED THROUGH HERE. It decomposes the index name
+    ⚠ THE ATTRIBUTION PANEL IS DELIBERATELY NOT ROUTED THROUGH HERE. It decomposes the index name
     by name (`index_rows`) and an ETF price has no names in it, so it still reconciles to the
     reconstruction. Two benchmark numbers one click apart is survivable ONLY because that panel
-    already carries both and the gap between them Ã¢ÂÂ see `_airs_portfolio_attribution`.
+    already carries both and the gap between them — see `_airs_portfolio_attribution`.
     """
     key = ("index_returns", label, tuple(sorted(set(starts))), _today())
     return _leg(key, lambda: _index_returns_now(label, starts))
@@ -189,23 +189,23 @@ def _index_returns_now(label: str, starts: list[str]) -> dict[str, dict]:
 
 
 def _bench_prov(win: dict | None) -> dict:
-    """Where the HEADLINE benchmark figure came from, for the tile's provenance Ã¢ÂÂ.
+    """Where the HEADLINE benchmark figure came from, for the tile's provenance ⓘ.
 
-    Ã¢ÂÂ  IT IS NOT `benchmark_as_of`. That field describes the legs the ATTRIBUTION panel draws, which
-    are still the reconstruction's and still yfinance Ã¢ÂÂ so overwriting it would relabel a number
+    ⚠ IT IS NOT `benchmark_as_of`. That field describes the legs the ATTRIBUTION panel draws, which
+    are still the reconstruction's and still yfinance — so overwriting it would relabel a number
     that did not move. These three fields describe the tile only, and are None on the rebuild path
     (which carries no `as_of` of its own; see `_asset_benchmark.index_returns`).
     """
     w = win or {}
     return {"benchmark_source": w.get("source") or "rebuild",
             "benchmark_ticker": w.get("ticker"),
-            # Ã¢ÂÂ  THE MARK IT ACTUALLY OPENED ON, which is NOT `ytd_from`. The anchor is 1 January;
-            # the opening price is the last close on or before it (2025-12-31 for ACWI). The Ã¢ÂÂ
-            # states the window it priced, not the window it was asked for Ã¢ÂÂ those differ by a
+            # ⚠ THE MARK IT ACTUALLY OPENED ON, which is NOT `ytd_from`. The anchor is 1 January;
+            # the opening price is the last close on or before it (2025-12-31 for ACWI). The ⓘ
+            # states the window it priced, not the window it was asked for — those differ by a
             # trading day and a reader checking the figure by hand would find the wrong bar.
             "benchmark_ytd_from": w.get("start_date"),
             "benchmark_ytd_as_of": w.get("as_of"),
-            # The marks behind the figure, so the Ã¢ÂÂ can show the formula filled in. Absent on the
+            # The marks behind the figure, so the ⓘ can show the formula filled in. Absent on the
             # rebuild path, which has 1,678 of them and no two to quote.
             "benchmark_ytd_open_price": w.get("start_price"),
             "benchmark_ytd_close_price": w.get("end_price"),
@@ -213,22 +213,51 @@ def _bench_prov(win: dict | None) -> dict:
             "benchmark_ytd_close_fx": w.get("fx_end")}
 
 
-def _bench_start_caps(label: str, start: str | None) -> dict[str, float]:
-    """`{isin: market cap at `start`}` for an index Ã¢ÂÂ or `{}` when there is no window to open at.
+def _bench_window_isins(label: str) -> set[str] | None:
+    """The constituents priced at BOTH ends of the window — the one list the bar and its
+    drill-down share. `None` when it cannot be had, which leaves the caller on every member.
 
-    Ã¢ÂÂ  THE COMPOSITION CHART'S INDEX BAR IS DRAWN AGAINST A PORTFOLIO WEIGHED AT THE WINDOW'S OPEN,
+    ⚠ IT IS `index_rows`' OWN SET, NOT A SECOND RULE. That function already decides membership for
+    the drill-down (it needs two marks to compute a return, and skips a constituent with no opening
+    price); asking it rather than re-deriving the test is what stops the two lists drifting apart
+    again — which is the whole defect this exists to close.
+
+    ⚠ LEG-CACHED. It is one paged read per benchmark per fingerprint, and the Analyse modal already
+    pays for `index_rows` on the attribution side; sharing the leg store means the second caller is
+    free.
+    """
+    from routers._asset_benchmark import index_rows  # noqa: PLC0415
+
+    def _load() -> set[str] | None:
+        try:
+            rows, _ = index_rows(label, f"{date.today().year}-01-01")
+        except Exception as exc:                                    # noqa: BLE001
+            _log.warning("[analysis] %s: window constituents unavailable (%s: %s) — weighing "
+                         "every member", label, type(exc).__name__, exc)
+            return None
+        # ⚠ EMPTY IS NOT A SET OF NOBODY. An index we could not price at all must fall back to the
+        #   full membership, or every bar on the chart reads 0% under a benchmark that exists.
+        return {r["isin"] for r in rows if r.get("isin")} or None
+
+    return _leg(("bench_window_isins", label), _load)
+
+
+def _bench_start_caps(label: str, start: str | None) -> dict[str, float]:
+    """`{isin: market cap at `start`}` for an index — or `{}` when there is no window to open at.
+
+    ⚠ THE COMPOSITION CHART'S INDEX BAR IS DRAWN AGAINST A PORTFOLIO WEIGHED AT THE WINDOW'S OPEN,
     so it has to be weighed there too. `_members` carries `market_cap_eur` (today) and that is what
-    the bars used until 2026-08-10 Ã¢ÂÂ which made the tilt a subtraction across two bases and put a
+    the bars used until 2026-08-10 — which made the tilt a subtraction across two bases and put a
     figure on screen that contradicted both the axis note above it and the drill-down beneath it.
     Measured on SP500 Technology: 34.90% today against 31.24% at the open.
 
-    Ã¢ÂÂ  THE SAME `index_rows` THE ATTRIBUTION USES, not a second reconstruction. That function already
+    ⚠ THE SAME `index_rows` THE ATTRIBUTION USES, not a second reconstruction. That function already
     backs each constituent's start cap out through its price (`_window_rows`), which is the whole
     reason the attribution is not look-ahead biased; a private copy here would be a second place for
     that to rot. Returning a dict rather than rows keeps the caller's classification untouched.
 
-    Ã¢ÂÂ  EMPTY ON ANY FAILURE, AND EMPTY MEANS "KEEP TODAY'S CAPS". A benchmark bar drawn from a
-    partial start-cap map would be renormalised over whichever constituents happened to resolve Ã¢ÂÂ
+    ⚠ EMPTY ON ANY FAILURE, AND EMPTY MEANS "KEEP TODAY'S CAPS". A benchmark bar drawn from a
+    partial start-cap map would be renormalised over whichever constituents happened to resolve —
     a quietly different index. Falling back to the basis the chart used for a year is the smaller
     wrong, and the axis note already tells the reader which one is in force.
     """
@@ -237,12 +266,12 @@ def _bench_start_caps(label: str, start: str | None) -> dict[str, float]:
     try:
         from ._asset_benchmark import index_rows  # noqa: PLC0415
 
-        # Ã¢ÂÂ  THE MEMO IS INSIDE THE `try`, so a failure is still handled by the policy below rather
-        # than being cached as an empty map Ã¢ÂÂ an outage during one open must not pin "today's caps"
+        # ⚠ THE MEMO IS INSIDE THE `try`, so a failure is still handled by the policy below rather
+        # than being cached as an empty map — an outage during one open must not pin "today's caps"
         # on the chart for everybody afterwards.
         rows, _coverage = _leg(("index_rows", label, start, _today()),
                                lambda: index_rows(label, start))
-    except Exception as e:  # noqa: BLE001 Ã¢ÂÂ the chart must not fail over a weighting refinement
+    except Exception as e:  # noqa: BLE001 — the chart must not fail over a weighting refinement
         _log.warning("[analysis] start-of-window caps for %s unavailable (%s: %s); "
                      "the index bar stays on today's caps", label, type(e).__name__, e)
         return {}
@@ -254,12 +283,12 @@ def _bench_start_caps(label: str, start: str | None) -> dict[str, float]:
 def _weigh_alloc(items: list[tuple[float, str]]) -> list[dict]:
     """Sum the (weight, bucket) pairs into ordered percentage slices.
 
-    Ã¢ÂÂ  THE FOUR `_ALWAYS_SHOWN` CLASSES COME BACK EVEN WHEN THEY ARE EMPTY, at `pct` 0 and
-    `holdings` 0 Ã¢ÂÂ see the Ã¢ÂÂ Ã¢ÂÂ  on that tuple. `Unclassified` appears only when it has something in
+    ⚠ THE FOUR `_ALWAYS_SHOWN` CLASSES COME BACK EVEN WHEN THEY ARE EMPTY, at `pct` 0 and
+    `holdings` 0 — see the ⚠⚠ on that tuple. `Unclassified` appears only when it has something in
     it. An empty book (no weight at all) still returns nothing: there is no portfolio to describe.
 
-    Ã¢ÂÂ  `holdings` COUNTS THE EXPANDED LEGS, WHICH IS THE POINT OF COUNTING THEM. After the
-    certificates are looked through, a slice is no longer "one certificate" Ã¢ÂÂ ToppenbergBeheer
+    ⚠ `holdings` COUNTS THE EXPANDED LEGS, WHICH IS THE POINT OF COUNTING THEM. After the
+    certificates are looked through, a slice is no longer "one certificate" — ToppenbergBeheer
     Defensief's Stocks sleeve is 9 lines in AIRS and 160-odd real companies underneath. A weight
     alone cannot tell those apart, and they are not the same portfolio: 66% in one bond ETF and
     66% spread over sixty names carry different risk and read identically on a pie.
@@ -294,7 +323,7 @@ def _grid(isins: list[str]) -> dict[str, dict]:
 
 
 def _grid_uncached(isins: list[str]) -> dict[str, dict]:
-    # ONE COPY instead of ceil(len/200) round trips Ã¢ÂÂ see `load_rows_via_copy`. The chunked
+    # ONE COPY instead of ceil(len/200) round trips — see `load_rows_via_copy`. The chunked
     # PostgREST loop below is the fallback and is what runs when the direct connection is
     # unavailable; both return the same rows (verified field for field, types included).
     rows = load_rows_via_copy("asset_grid", _GRID_COLS, "isin", isins)
@@ -313,10 +342,10 @@ def _grid_uncached(isins: list[str]) -> dict[str, dict]:
 def _foreign_listing(row: dict) -> bool:
     """Is this row priced on a venue in a DIFFERENT currency than the company is valued in?
 
-    Ã¢ÂÂ  A DIAGNOSTIC, NOT A CURIOSITY. It is the wrong-listing bug, visible in the benchmark: 40 of
+    ⚠ A DIAGNOSTIC, NOT A CURIOSITY. It is the wrong-listing bug, visible in the benchmark: 40 of
     the 491 S&P 500 members are mapped to a European or Canadian venue (Corning on Stuttgart, WR
     Berkley on Munich, Ciena on Xetra, Exxon on a Canadian line). It is why the naive currency
-    split called the S&P 500 "12% EUR", which it plainly is not Ã¢ÂÂ and it corrupts the benchmark's
+    split called the S&P 500 "12% EUR", which it plainly is not — and it corrupts the benchmark's
     PRICE SERIES too, not merely this chart. Counted and returned so the reader is told.
     """
     mc, lc = row.get("market_cap_currency"), row.get("currency")
@@ -329,10 +358,10 @@ def _country_by_code() -> dict[str, str]:
 
 
 def _region(row: dict, isin: str | None, codes: dict[str, str]) -> str:
-    """The issuer's region Ã¢ÂÂ from WHERE THE COMPANY IS, never from where we happen to price it.
+    """The issuer's region — from WHERE THE COMPANY IS, never from where we happen to price it.
 
-    Ã¢ÂÂ  `asset_grid.msci_region` CANNOT BE USED DIRECTLY. It comes from `geo.resolve_geo`, which is
-    documented to fall back to the LISTING country when the domicile is unknown Ã¢ÂÂ sane for the
+    ⚠ `asset_grid.msci_region` CANNOT BE USED DIRECTLY. It comes from `geo.resolve_geo`, which is
+    documented to fall back to the LISTING country when the domicile is unknown — sane for the
     instrument grid, catastrophic here. Yahoo returns no domicile for a thin German regional line,
     and our grid prices a number of US megacaps on exactly those:
 
@@ -340,55 +369,55 @@ def _region(row: dict, isin: str | None, codes: dict[str, str]) -> str:
         CHV.DU   Chevron      on Dusseldorf  EUR 322bn  -> "Germany" -> EUROPE
         IBM.HM   IBM          on Hamburg     EUR 221bn  -> "Germany" -> EUROPE
 
-    That is how the S&P 500 came out **7.2% Europe**, which is nonsense Ã¢ÂÂ it is an index of US
+    That is how the S&P 500 came out **7.2% Europe**, which is nonsense — it is an index of US
     companies. 54 members were classified Europe; most were US megacaps on German venues.
 
-    So: domicile first; then the ISIN's own country prefix (the issuer's registration Ã¢ÂÂ `USÃ¢ÂÂ¦` for
-    Eli Lilly, `IEÃ¢ÂÂ¦` for Linde, `CHÃ¢ÂÂ¦` for Chubb, which is exactly what separates the fake
+    So: domicile first; then the ISIN's own country prefix (the issuer's registration — `US…` for
+    Eli Lilly, `IE…` for Linde, `CH…` for Chubb, which is exactly what separates the fake
     Europeans from the real ones); and if neither, UNKNOWN. The listing venue is never consulted.
 
-    Ã¢ÂÂ Ã¢ÂÂ  A DOMICILE THAT EXISTS BUT HAS NO MSCI REGION FALLS THROUGH TO THE ISIN, AND IT DID NOT USED
+    ⚠⚠ A DOMICILE THAT EXISTS BUT HAS NO MSCI REGION FALLS THROUGH TO THE ISIN, AND IT DID NOT USED
     TO. `if dom: return msci_region_of(dom) or UNKNOWN` gave up on the spot, so a known domicile
-    OUTSIDE MSCI's map Ã¢ÂÂ every incorporation haven, and a few real markets MSCI does not index Ã¢ÂÂ
+    OUTSIDE MSCI's map — every incorporation haven, and a few real markets MSCI does not index —
     never reached the line below it. MercadoLibre is the case that surfaced it: domiciled Uruguay
     (its Montevideo head office, which Yahoo reports correctly), incorporated in Delaware, ISIN
     `US58733R1023`, and it read `Unclassified` in the region tab while `/asset-pipeline` said North
     America. Two screens, one company, no error.
 
-    Ã¢ÂÂ Ã¢ÂÂ  AND THEN THE STORED COLUMN IS THE **LAST** RESORT Ã¢ÂÂ never the first, which is the whole
+    ⚠⚠ AND THEN THE STORED COLUMN IS THE **LAST** RESORT — never the first, which is the whole
     difference. The 18 members left over above are incorporated in havens (Cayman, Bermuda,
     Luxembourg, Isle of Man, Macau), so neither their domicile nor their ISIN prefix is a market and
     both steps above yield nothing; leaving those as `Unclassified` threw away an answer
     `/asset-pipeline` already shows, on 0.24% of ACWI. Reaching step 3 means the domicile did not
-    map, so by construction `asset_grid.msci_region` is `resolve_geo`'s VENUE fallback Ã¢ÂÂ it is our
+    map, so by construction `asset_grid.msci_region` is `resolve_geo`'s VENUE fallback — it is our
     choice of listing talking, and it is used only where the issuer's own geography has said nothing.
 
-    That ordering is what keeps the S&P fix intact: those 54 megacaps have NO domicile and a `USÃ¢ÂÂ¦`
+    That ordering is what keeps the S&P fix intact: those 54 megacaps have NO domicile and a `US…`
     ISIN, so step 2 answers first and this line is never reached for them. Verified after the change:
     S&P Europe still 2.1%, ACWI North America unchanged to 0.1pp.
 
-    Ã¢ÂÂ  WHAT IT GETS WRONG, AND WHY THE FIX IS NOT HERE. Where our venue choice is the wrong listing,
+    ⚠ WHAT IT GETS WRONG, AND WHY THE FIX IS NOT HERE. Where our venue choice is the wrong listing,
     this inherits it: `asset_grid` prices Kingsoft on Stuttgart (`3K1.SG`, EUR 6,550/day), Li Ning on
     Stuttgart (`LNLB.SG`, EUR 2,594/day) and Orient Overseas on Munich (`ORI1.MU`, EUR 3,056/day), so
-    three HONG KONG companies are bucketed EUROPE Ã¢ÂÂ together 0.02% of ACWI. That is a listing defect
+    three HONG KONG companies are bucketed EUROPE — together 0.02% of ACWI. That is a listing defect
     (their real lines are 3888/2331/0316.HK) and it belongs in `repoint_primary_listing.py`, not in a
     special case here: every such row is wrong in the price series too, which no region rule can fix.
-    The other fifteen come out right or defensibly so Ã¢ÂÂ Zhen Ding EM (Taiwan), Entain Europe (LSE),
+    The other fifteen come out right or defensibly so — Zhen Ding EM (Taiwan), Entain Europe (LSE),
     Allegro/Zabka EM (Warsaw), InPost Europe (Amsterdam), Sands China Pacific (HKSE, which is MSCI's
     own answer), Arch/Everest/Credo North America (genuinely US businesses, S&P 500 members).
 
     Known limit, and it is the ISIN-country limit generally: the prefix is where the paper was
     REGISTERED, not where the business is. An ADR carries a US ISIN even for a foreign issuer; a
-    Cayman- or Bermuda-incorporated issuer carries `KYÃ¢ÂÂ¦`/`BMÃ¢ÂÂ¦`, which MSCI does not index either, so
-    it stays `UNKNOWN_BUCKET` (18 of the 21 unclassified ACWI members, 0.35% of the index Ã¢ÂÂ Li Ning,
-    Sands China, XP, StoneCo, ArcelorMittal, EntainÃ¢ÂÂ¦); and an odd-but-VALID prefix is taken at face
-    value Ã¢ÂÂ Patria Bank, a Romanian bank on the BVB, carries `MYL1295OO004`, whose check digit is
+    Cayman- or Bermuda-incorporated issuer carries `KY…`/`BM…`, which MSCI does not index either, so
+    it stays `UNKNOWN_BUCKET` (18 of the 21 unclassified ACWI members, 0.35% of the index — Li Ning,
+    Sands China, XP, StoneCo, ArcelorMittal, Entain…); and an odd-but-VALID prefix is taken at face
+    value — Patria Bank, a Romanian bank on the BVB, carries `MYL1295OO004`, whose check digit is
     good and whose `MY` reads Malaysia, i.e. Emerging Markets by the right family and the wrong
     country. Getting those right needs MSCI's own country assignment (business location + listing),
-    which is not derivable from any field we hold Ã¢ÂÂ an override table, not a heuristic.
+    which is not derivable from any field we hold — an override table, not a heuristic.
     """
     dom = row.get("domicile_country")
-    # Ã¢ÂÂ  NOT `if dom: return Ã¢ÂÂ¦ or UNKNOWN` Ã¢ÂÂ see above. An unmapped domicile is not an answer.
+    # ⚠ NOT `if dom: return … or UNKNOWN` — see above. An unmapped domicile is not an answer.
     if dom:
         reg = msci_region_of(dom)
         if reg:
@@ -399,7 +428,7 @@ def _region(row: dict, isin: str | None, codes: dict[str, str]) -> str:
             reg = msci_region_of(name)
             if reg:
                 return reg
-    # Ã¢ÂÂ  LAST, AND ONLY BECAUSE BOTH STEPS ABOVE SAID NOTHING Ã¢ÂÂ see the docstring. Validated against
+    # ⚠ LAST, AND ONLY BECAUSE BOTH STEPS ABOVE SAID NOTHING — see the docstring. Validated against
     # the real region names rather than passed through: the column is nullable and a stray value
     # would otherwise open a bucket of its own in the chart, which reads as a region.
     stored = row.get("msci_region")
@@ -415,16 +444,16 @@ def _buckets(row: dict | None, is_cash: bool, isin: str | None = None,
         return CASH_BUCKET, CASH_BUCKET, CASH_BUCKET
     if not row:
         return UNKNOWN_BUCKET, UNKNOWN_BUCKET, UNKNOWN_BUCKET
-    # A fund is opaque on ALL THREE axes Ã¢ÂÂ its listing venue, sector and quote currency say nothing
-    # about what it holds Ã¢ÂÂ so it folds into Unclassified (FUND_BUCKET == UNKNOWN_BUCKET).
+    # A fund is opaque on ALL THREE axes — its listing venue, sector and quote currency say nothing
+    # about what it holds — so it folds into Unclassified (FUND_BUCKET == UNKNOWN_BUCKET).
     if (row.get("asset_class") or "").lower() in _FUND_CLASSES:
         return FUND_BUCKET, FUND_BUCKET, FUND_BUCKET
     return (
         _sector(row.get("sector")),
         _region(row, isin, codes or {}),
-        # Ã¢ÂÂ  `market_cap_currency`, NOT the listing currency. Same disease as the region above: the
+        # ⚠ `market_cap_currency`, NOT the listing currency. Same disease as the region above: the
         # listing is OUR choice of venue, and where that choice is wrong it invents exposure the
-        # company does not have Ã¢ÂÂ pricing Corning off Stuttgart does not make it a euro asset. On
+        # company does not have — pricing Corning off Stuttgart does not make it a euro asset. On
         # the S&P 500 the listing field says 91% USD and this one says 98%; the gap is 40
         # mis-mapped rows, not a fact about the index. Falls back to the listing only when the
         # company reports no cap currency at all.
@@ -451,11 +480,11 @@ def _weigh(items: list[tuple[float, tuple[str, str, str]]]) -> dict[str, dict[st
 def _with_start_weights(holdings: list[dict], start_weights: dict[str, float]) -> list[dict]:
     """Attach each holding's START-of-window weight, taken from the legs the charts are built on.
 
-    Ã¢ÂÂ  JOINED BY ISIN, AND THE JOIN IS SAFE BECAUSE BOTH SIDES ARE ALREADY MERGED BY ISIN. Both
-    `_book_port_items` and `book_legs` run `_expand_book_rows`, which ends in `merge_by_isin` Ã¢ÂÂ so
+    ⚠ JOINED BY ISIN, AND THE JOIN IS SAFE BECAUSE BOTH SIDES ARE ALREADY MERGED BY ISIN. Both
+    `_book_port_items` and `book_legs` run `_expand_book_rows`, which ends in `merge_by_isin` — so
     each ISIN is one row on each side and this cannot fan out.
 
-    Ã¢ÂÂ  `None` FOR A ROW WITH NO ISIN (cash) Ã¢ÂÂ not 0.0. Cash genuinely has a start value; we simply
+    ⚠ `None` FOR A ROW WITH NO ISIN (cash) — not 0.0. Cash genuinely has a start value; we simply
     have no key to reach it by here, and a 0 would state something false about a real position.
     A 0.0 that DOES arrive is meaningful: bought after the window opened.
     """
@@ -464,27 +493,27 @@ def _with_start_weights(holdings: list[dict], start_weights: dict[str, float]) -
 
 def _basis_axes(portfolio_id: int, source: str, effective: str | None,
                 bucket_filter: str | None) -> dict | None:
-    """The three composition axes on the ATTRIBUTION BASIS Ã¢ÂÂ the same weights the Brinson table
+    """The three composition axes on the ATTRIBUTION BASIS — the same weights the Brinson table
     shows, from the same function.
 
-    Ã¢ÂÂ  THIS IS A DELIBERATE CHANGE OF QUESTION (2026-07-31), MADE ON REQUEST. These bars used to be
+    ⚠ THIS IS A DELIBERATE CHANGE OF QUESTION (2026-07-31), MADE ON REQUEST. These bars used to be
     "what do we hold now": today's EUR value over the whole equity sleeve. They are now "what did
-    we hold when the window opened, among the holdings we can attribute" Ã¢ÂÂ Beginwaarde over the
+    we hold when the window opened, among the holdings we can attribute" — Beginwaarde over the
     attributable legs, renormalised to 100%. The two differ by more than rounding (Technology 36%
-    Ã¢ÂÂ 39.1%; ASML 7.30% Ã¢ÂÂ 5.75%) and the second is what the attribution table has always shown.
+    → 39.1%; ASML 7.30% → 5.75%) and the second is what the attribution table has always shown.
 
-    Ã¢ÂÂ  WHAT THAT COSTS, RETURNED SO IT CAN BE SHOWN RATHER THAN DISCOVERED. A holding bought during
+    ⚠ WHAT THAT COSTS, RETURNED SO IT CAN BE SHOWN RATHER THAN DISCOVERED. A holding bought during
     the window has no Beginwaarde and is absent; an unpriceable one has no return and is absent.
     `excluded` + `attributable_pct` carry both, per axis, and the UI puts them on screen. Weight
     that silently leaves a percentage is the failure the coverage floors elsewhere exist to stop.
 
-    Ã¢ÂÂ  ONE RULE DECIDES MEMBERSHIP, NOT TWO. The sector axis used to restrict to the
+    ⚠ ONE RULE DECIDES MEMBERSHIP, NOT TWO. The sector axis used to restrict to the
     {Equity, Equity ETF} sleeve (one bucket since 2026-08-18) AND let the classifier fold the
     rest into Unclassified. Two
     overlapping rules for one question is how the panels diverged; the ladder in `split_legs` is
     now the only one, so the bar matches its Brinson row by construction.
 
-    Returns None when nothing can be weighed on this basis Ã¢ÂÂ the caller falls back rather than
+    Returns None when nothing can be weighed on this basis — the caller falls back rather than
     drawing an empty chart as though the portfolio held nothing.
     """
     from ._airs_attribution_basis import (  # noqa: PLC0415  (cycle at module import)
@@ -497,9 +526,9 @@ def _basis_axes(portfolio_id: int, source: str, effective: str | None,
     legs = portfolio_legs(source, portfolio_id, effective, start)
     if not legs:
         return None
-    # Ã¢ÂÂ  A CLASS FILTER WE CANNOT APPLY IS A REFUSAL, NOT A NO-OP. Only the book legs carry an asset
+    # ⚠ A CLASS FILTER WE CANNOT APPLY IS A REFUSAL, NOT A NO-OP. Only the book legs carry an asset
     # class; the model path has none. Ignoring the filter there would chart every class's sectors
-    # under a "Stocks" selection, and applying it would empty the chart Ã¢ÂÂ so hand back to the
+    # under a "Stocks" selection, and applying it would empty the chart — so hand back to the
     # caller's fallback, which classifies from its own loader and can filter honestly.
     if bucket_filter and not any(leg.get("asset_class") for leg in legs):
         return None
@@ -509,12 +538,12 @@ def _basis_axes(portfolio_id: int, source: str, effective: str | None,
     out: dict[str, dict] = {}
     for axis, idx in AXIS_IDX.items():
         attributable, excluded, total_w = split_legs(legs, idx, grid, codes)
-        # Ã¢ÂÂ  THE CLASS FILTER NARROWS THE NUMERATOR AND THE DENOMINATOR TOGETHER, or the bars stop
+        # ⚠ THE CLASS FILTER NARROWS THE NUMERATOR AND THE DENOMINATOR TOGETHER, or the bars stop
         # summing to 100 and every one of them silently means something else.
         #
-        # Ã¢ÂÂ  AND IT MUST NARROW `total_w` AND `excluded` TOO. It did not, and the ratio that came
+        # ⚠ AND IT MUST NARROW `total_w` AND `excluded` TOO. It did not, and the ratio that came
         # out was a MIXED one: Stocks-with-a-sector over the WHOLE book. With Stocks selected the
-        # card then read "87% of the book has a sector" Ã¢ÂÂ true of the book, but presented under a
+        # card then read "87% of the book has a sector" — true of the book, but presented under a
         # Stocks-only chart, where it reads as an accusation that 13% of the STOCKS are
         # unclassified. Every stock in the measured portfolio has a sector; the 13% was five ETFs
         # and a cash line, which are not stocks and were never candidates for this chart. Filtered
@@ -550,10 +579,10 @@ def _basis_axes(portfolio_id: int, source: str, effective: str | None,
             "excluded": excluded,
             # How much of the whole book this axis actually speaks for. NOT assumed to be 100.
             "attributable_pct": (denom / total_w * 100.0) if total_w > 0 else 0.0,
-            # Ã¢ÂÂ  THE ONLY EXCLUSION THAT IS A GAP. An ETF has no sector and a cash line is not a
-            # sector bet Ã¢ÂÂ those are answers, and they already have their own slice in the
+            # ⚠ THE ONLY EXCLUSION THAT IS A GAP. An ETF has no sector and a cash line is not a
+            # sector bet — those are answers, and they already have their own slice in the
             # allocation chart. An UNPRICED holding is different in kind: a real position, in a
-            # real sector, absent from the bars Ã¢ÂÂ so its sector reads lower than it is, and
+            # real sector, absent from the bars — so its sector reads lower than it is, and
             # elsewhere that exact hole credited a model +1.73pp for "avoiding" a sector it held
             # 6% of. Reported separately because only this one deserves a warning; lumping the two
             # made a perfectly ordinary 13% in ETFs look like a defect.
@@ -562,13 +591,13 @@ def _basis_axes(portfolio_id: int, source: str, effective: str | None,
             "positions": len(attributable),
         }
     out["_start"] = start
-    # Ã¢ÂÂ  THE SAME NUMERATOR THE BARS USE, KEYED BY ISIN Ã¢ÂÂ so the Holdings table can print the start
+    # ⚠ THE SAME NUMERATOR THE BARS USE, KEYED BY ISIN — so the Holdings table can print the start
     # weight beside the current one and the reader's own division actually works. `book_legs`
-    # already expresses `weight_pct` as Beginwaarde ÃÂ· ÃÂ£ Beginwaarde over the WHOLE book, which is
+    # already expresses `weight_pct` as Beginwaarde ÷ Σ Beginwaarde over the WHOLE book, which is
     # the right denominator here: it makes the column directly comparable to `weight_now_pct` (also
-    # whole-book) and leaves exactly one documented step to a bar Ã¢ÂÂ divide by `attributable_pct`.
+    # whole-book) and leaves exactly one documented step to a bar — divide by `attributable_pct`.
     #
-    # Ã¢ÂÂ  A 0.0 HERE IS A FACT, NOT A BLANK: the position was bought after the window opened, so it
+    # ⚠ A 0.0 HERE IS A FACT, NOT A BLANK: the position was bought after the window opened, so it
     # has no start value. That is the one case where "now" and "start" cannot be reconciled at all,
     # and the table has to say so rather than print an empty cell.
     out["_start_weights"] = {leg["isin"]: leg["weight_pct"] for leg in legs if leg.get("isin")}
@@ -579,21 +608,21 @@ def _axis_holdings(items: list[tuple[float, tuple[str, str, str]]],
                    labels: list[dict]) -> dict[str, dict[str, list[dict]]]:
     """The rows behind every bar: per axis, per bucket, the holdings and their weights.
 
-    Ã¢ÂÂ  NORMALISED BY THE AXIS TOTAL Ã¢ÂÂ THE SAME DIVISION `_weigh` DOES, SO ÃÂ£ OVER A BUCKET **IS**
+    ⚠ NORMALISED BY THE AXIS TOTAL — THE SAME DIVISION `_weigh` DOES, SO Σ OVER A BUCKET **IS**
     THAT BAR. That identity is the entire purpose of this function: a drill-down whose rows sum to
     something near-but-not-equal to the number that opened it converts one unexplained figure into
     two. It is computed here rather than in the UI for the same reason the sibling drill-downs are
-    handed their series Ã¢ÂÂ a second implementation of the denominator is a second denominator.
+    handed their series — a second implementation of the denominator is a second denominator.
 
-    Ã¢ÂÂ  AND THE DENOMINATOR IS PER AXIS, NOT PER PORTFOLIO. `sector` is weighed over the EQUITY
+    ⚠ AND THE DENOMINATOR IS PER AXIS, NOT PER PORTFOLIO. `sector` is weighed over the EQUITY
     sleeve while `region`/`currency` are weighed over every long position, so the caller passes a
     different `items` list for each and the same holding legitimately carries two different
     weights. Sharing one total across the three would make two of the axes wrong.
 
     Why this exists at all: the attribution table has always shipped its own per-bucket holdings
     (`rows[].portfolio_holdings`, rebased to ITS denominator), so it is self-verifying, while the
-    composition chart shipped aggregates only. The two answer the same-sounding question Ã¢ÂÂ
-    "how much Technology do we hold" Ã¢ÂÂ over different denominators and different weight bases, and
+    composition chart shipped aggregates only. The two answer the same-sounding question —
+    "how much Technology do we hold" — over different denominators and different weight bases, and
     with only one side inspectable a reader had no way to discover that. Measured on Bustelberg
     Offensief: 36% here against 39.1% there, both correct.
     """
@@ -617,15 +646,15 @@ def _axis_holdings(items: list[tuple[float, tuple[str, str, str]]],
 
 
 def _book_fetched_at(portefeuille: str | None) -> str | None:
-    """When WE last successfully scanned this book Ã¢ÂÂ the same `airs_account_roster.reports_at` the
+    """When WE last successfully scanned this book — the same `airs_account_roster.reports_at` the
     /management-dashboard row reads, through the same loader.
 
-    Ã¢ÂÂ  THE SAME FUNCTION THE ROW USES, NOT A SECOND READ OF THE SAME COLUMN. The row and this modal
+    ⚠ THE SAME FUNCTION THE ROW USES, NOT A SECOND READ OF THE SAME COLUMN. The row and this modal
     disagreeing about whether a book is current is the whole defect this exists to close; two
     loaders for one fact is how they would drift apart again. `_fetched_at` keys on the lower-cased
     portefeuille and is memoised for the request by `read_cache`, so this costs nothing.
 
-    `None` for an unpaired portfolio (no book, therefore no scan of one) Ã¢ÂÂ and `Provenance` treats
+    `None` for an unpaired portfolio (no book, therefore no scan of one) — and `Provenance` treats
     that exactly as it treats an absent prop: it declines to name a side rather than guessing one.
     """
     if not portefeuille:
@@ -637,10 +666,10 @@ def _book_fetched_at(portefeuille: str | None) -> str | None:
 
 def _apply_book_source(result: dict, benchmark_label: str) -> None:
     """Swap the PRIMARY portfolio return for AIRS's own book number (`cumulatief_rendement`), and
-    re-price the benchmark over the book's window Ã¢ÂÂ the calendar year, 1 Jan -> today.
+    re-price the benchmark over the book's window — the calendar year, 1 Jan -> today.
 
     AIRS reports the book only over the calendar year, flow-aware and INCLUDING income, and keeps
-    NO composition history Ã¢ÂÂ so 'since inception' has no book equivalent and is cleared rather than
+    NO composition history — so 'since inception' has no book equivalent and is cleared rather than
     left showing the yfinance model's number under a 'book' banner. `strategy_ytd_pct` still carries
     the yfinance figure, so the Book-vs-strategy drift tile is unaffected by the swap.
     """
@@ -658,7 +687,7 @@ def _apply_book_source(result: dict, benchmark_label: str) -> None:
         "portfolio_as_of": result.get("book_as_of"),
         "benchmark_ytd_pct": b_ytd,
         "ytd_excess_pct": (p_ytd - b_ytd) if (p_ytd is not None and b_ytd is not None) else None,
-        # AIRS has no since-inception for the book Ã¢ÂÂ clear the model's rather than mislabel it.
+        # AIRS has no since-inception for the book — clear the model's rather than mislabel it.
         "since_from": None,
         "portfolio_since_pct": None,
         "benchmark_since_pct": None,
@@ -669,23 +698,23 @@ def _apply_book_source(result: dict, benchmark_label: str) -> None:
 
 def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
              source: str = "model") -> dict:
-    """EUR return of the model vs the benchmark Ã¢ÂÂ over the SAME two windows, both times.
+    """EUR return of the model vs the benchmark — over the SAME two windows, both times.
 
     `source="book"` swaps the PRIMARY portfolio return for AIRS's own book figure (see
     `_apply_book_source`); the yfinance model is still computed (it pins `strategy_ytd_pct` for the
     drift tile) and the benchmark stays yfinance either way, so the two remain comparable.
 
-    Ã¢ÂÂ  A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER.
-        The model's "YTD" opens at `max(1 Jan, its inception)` Ã¢ÂÂ for the 27 models younger than
+    ⚠ A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER.
+        The model's "YTD" opens at `max(1 Jan, its inception)` — for the 27 models younger than
         the year that is NOT 1 January. Putting a 6-day portfolio return beside the index's
         full-year return and calling the gap under- or out-performance would be nonsense, and it
         would look exactly like a finding. So the index is priced from the model's OWN
         `ytd_from`, and again from its OWN inception. `index_returns` takes both windows and
         prices them off one load, through the same start-of-window weighting `/benchmarks` uses.
 
-    Ã¢ÂÂ  THE PORTFOLIO SIDE IS *READ*, NEVER RECOMPUTED.
+    ⚠ THE PORTFOLIO SIDE IS *READ*, NEVER RECOMPUTED.
         `compute_portfolio_performance` is the one place a model's return is calculated, and the
-        table on /portfolios shows exactly it. Re-deriving it here Ã¢ÂÂ even "the same way" Ã¢ÂÂ is how
+        table on /portfolios shows exactly it. Re-deriving it here — even "the same way" — is how
         a modal ends up quietly disagreeing with the row that opened it. It costs a price load we
         have already paid for elsewhere; correctness first.
     """
@@ -694,7 +723,7 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
         ytd_anchor_for,
     )
 
-    # Ã¢ÂÂ  SCOPED TO THIS PORTFOLIO Ã¢ÂÂ same function, same definition, one row's worth of work. It
+    # ⚠ SCOPED TO THIS PORTFOLIO — same function, same definition, one row's worth of work. It
     # used to price all 56 models and keep one, which was 5.56s of a modal open. See
     # `only_portfolio_id`: the narrowing touches only the load WINDOWS, which are lower bounds,
     # so the row that comes back is identical.
@@ -705,7 +734,7 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
 
     ytd_from = perf.get("ytd_from") or ytd_anchor_for(effective)
     windows = [w for w in (ytd_from, effective) if w]
-    # Ã¢ÂÂ Ã¢ÂÂ  THIS USED TO READ "THE BENCHMARK IS PRICED IN THE SAME WORLD AS THE PORTFOLIO Ã¢ÂÂ yfinance,
+    # ⚠⚠ THIS USED TO READ "THE BENCHMARK IS PRICED IN THE SAME WORLD AS THE PORTFOLIO — yfinance,
     # not GuruFocus", on the grounds that two price universes with different adjustment conventions
     # and different FX would make the difference between them read as alpha, and that GuruFocus is
     # "the only source that CANNOT price ACWI at all: it does not sell us the UK or India".
@@ -715,7 +744,7 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
     # summing 1,514 names and silently redistributing the weight of the ones you cannot price;
     # they do not exist for ONE US-listed line, which GuruFocus serves in full (4,627 bars from
     # 2008-03-28, the fund's actual inception). And the two-vendor objection was about
-    # *adjustment conventions across a universe* Ã¢ÂÂ on a single ETF close, GuruFocus and yfinance
+    # *adjustment conventions across a universe* — on a single ETF close, GuruFocus and yfinance
     # agree to the cent. What was really being defended is that the benchmark must not be a
     # different KIND of number from the portfolio: both are still EUR price returns over the same
     # window, converted at each mark's own rate.
@@ -737,7 +766,7 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
         "ytd_from": ytd_from,
         "since_from": effective,
         "portfolio_ytd_pct": p_ytd,
-        # As-of dates for the per-value provenance Ã¢ÂÂ. The model return and the benchmark are both
+        # As-of dates for the per-value provenance ⓘ. The model return and the benchmark are both
         # yfinance close series; `_apply_book_source` overrides `portfolio_as_of` with the book
         # snapshot date when the source is the AIRS book.
         "portfolio_as_of": yf_asof,
@@ -753,7 +782,7 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
         "benchmark_since_pct": b_since,
         "since_excess_pct": ((p_since - b_since)
                              if (p_since is not None and b_since is not None) else None),
-        # A young model's YTD *is* its since-inception return Ã¢ÂÂ same window, by construction. The
+        # A young model's YTD *is* its since-inception return — same window, by construction. The
         # UI says so rather than showing the reader two identical rows and letting them wonder.
         "ytd_is_since": bool(effective and ytd_from == effective),
         **_book_return(portfolio_id, ytd_from, p_ytd),
@@ -766,15 +795,15 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
 
 
 def _book_return(portfolio_id: int, ytd_from: str | None, model_ytd: float | None) -> dict:
-    """What the BOOK made, beside what the STRATEGY made Ã¢ÂÂ and the gap, when there is one.
+    """What the BOOK made, beside what the STRATEGY made — and the gap, when there is one.
 
     This modal describes the FIXED portfolio: a set of weights, priced from yfinance. The row
     that opens it shows the DYNAMIC book: real positions, valued by AIRS. They are different
-    objects and they disagree Ã¢ÂÂ measured across the 28 linked pairs, median 3.12pp and up to
-    6.58pp (EuropaTopSelectie: the book -1.28%, the strategy +5.30%). THAT GAP IS THE POINT Ã¢ÂÂ it
+    objects and they disagree — measured across the 28 linked pairs, median 3.12pp and up to
+    6.58pp (EuropaTopSelectie: the book -1.28%, the strategy +5.30%). THAT GAP IS THE POINT — it
     is implementation drift, timing and fees, and nothing else on the page answers it.
 
-    Ã¢ÂÂ  THE GAP IS ONLY A GAP WHEN THE TWO WINDOWS ARE THE SAME, and for 9 of 28 they are not.
+    ⚠ THE GAP IS ONLY A GAP WHEN THE TWO WINDOWS ARE THE SAME, and for 9 of 28 they are not.
         AIRS's `cumulatief_rendement` is always the calendar year (measured: all 51 accounts hold
         7 months, so the book side is never partial). The model's YTD opens at
         `max(1 Jan, inception)`. MomentumTopSelectie's model is TWELVE DAYS old: setting its
@@ -783,7 +812,7 @@ def _book_return(portfolio_id: int, ytd_from: str | None, model_ytd: float | Non
         model's window opens on 1 January; otherwise `comparable` is false and the reason is
         carried instead of a figure.
 
-    Ã¢ÂÂ  THE BOOK'S RETURN IS *READ*, NEVER RECOMPUTED Ã¢ÂÂ same rule the portfolio side already
+    ⚠ THE BOOK'S RETURN IS *READ*, NEVER RECOMPUTED — same rule the portfolio side already
         follows. `_year_perf` is where a book's year is assembled; re-deriving it here is how
         this modal would quietly disagree with the row that opened it.
     """
@@ -797,15 +826,15 @@ def _book_return(portfolio_id: int, ytd_from: str | None, model_ytd: float | Non
                 "book_reason": "No Dynamic portfolio is paired with this one."}
 
     book_ytd = link.get("ytd_pct")
-    # The book's freshness Ã¢ÂÂ the latest AIRS scan of its holdings. Always returned (both source
-    # modes) so the Book-vs-strategy tile's Ã¢ÂÂ can date the book number regardless of the toggle.
+    # The book's freshness — the latest AIRS scan of its holdings. Always returned (both source
+    # modes) so the Book-vs-strategy tile's ⓘ can date the book number regardless of the toggle.
     book_as_of = _book_snapshot_date(link["portefeuille"])
     aligned = ytd_from == f"{date.today().year}-01-01"
     if book_ytd is None:
         reason = "AIRS reports no return for the paired book."
     elif not aligned:
         reason = (f"Not comparable: this strategy's window opens {ytd_from}, while AIRS measures "
-                  f"the book over the whole year. Different windows Ã¢ÂÂ the difference would not "
+                  f"the book over the whole year. Different windows — the difference would not "
                   f"be drift.")
     else:
         reason = None
@@ -827,20 +856,20 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
     """Book holdings with each linked certificate replaced by the stocks of the model it IS.
 
     The certificate's EUR value is split across that model's composition by its own percentages,
-    so the book's total value is unchanged Ã¢ÂÂ only its resolution improves.
+    so the book's total value is unchanged — only its resolution improves.
 
-    Ã¢ÂÂ  START VALUE IS SPLIT ON THE SAME PROPORTIONS AS THE CURRENT ONE. It has to travel with it:
-    the per-bucket return is `ÃÂ£now ÃÂ· ÃÂ£start Ã¢ÂÂ 1`, so expanding `current_value_eur` alone would
+    ⚠ START VALUE IS SPLIT ON THE SAME PROPORTIONS AS THE CURRENT ONE. It has to travel with it:
+    the per-bucket return is `Σnow ÷ Σstart − 1`, so expanding `current_value_eur` alone would
     hand every expanded leg a return computed against a start of zero.
 
-    Ã¢ÂÂ  A CERTIFICATE WITH NOTHING BEHIND IT IS LEFT WHOLE Ã¢ÂÂ dropping it would delete real book
+    ⚠ A CERTIFICATE WITH NOTHING BEHIND IT IS LEFT WHOLE — dropping it would delete real book
     value, and every percentage here is a share of a total that would silently shrink.
     """
     from ._airs_lookthrough import _datum_of, _positions_of  # noqa: PLC0415
 
-    # Ã¢ÂÂ  `sources` IS STAMPED HERE, WHERE THE SPLIT HAPPENS, because this is the only place that
-    # still knows how much of a leg came from where. One entry per ROUTE IN Ã¢ÂÂ `label=None` for the
-    # book's own shares Ã¢ÂÂ carried through `merge_by_isin`, which concatenates them.
+    # ⚠ `sources` IS STAMPED HERE, WHERE THE SPLIT HAPPENS, because this is the only place that
+    # still knows how much of a leg came from where. One entry per ROUTE IN — `label=None` for the
+    # book's own shares — carried through `merge_by_isin`, which concatenates them.
     out: list[dict] = []
     for r in rows:
         target = r.get("linked_portfolio_id")
@@ -848,13 +877,13 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                        "value_eur": float(r.get("current_value_eur") or 0),
                        "start_value_eur": float(r.get("start_value_eur") or 0)}]
         if not target:
-            # held directly Ã¢ÂÂ no strategy in between
+            # held directly — no strategy in between
             out.append({**r, "via_names": [], "via_holding_names": [], "sources": direct_src})
             continue
         child = _positions_of(target, _datum_of(target))
         inner = sum(float(c.get("percentage") or 0) for c in child)
         if not child or inner <= 0:
-            # A certificate with nothing behind it stays whole, so the book holds IT Ã¢ÂÂ the route in
+            # A certificate with nothing behind it stays whole, so the book holds IT — the route in
             # is direct, and labelling it with the strategy it wraps would claim a look-through
             # that did not happen.
             out.append({**r, "via_names": [], "via_holding_names": [], "sources": direct_src})
@@ -872,7 +901,7 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                 "holding_name": c.get("fonds"),
                 "current_value_eur": cur * share,
                 "start_value_eur": start * share,
-                # Ã¢ÂÂ  The parent's Class is NOT inherited: a certificate classified "Equity" would
+                # ⚠ The parent's Class is NOT inherited: a certificate classified "Equity" would
                 # stamp that on a bond the child holds. Cleared so the shared classifier re-derives
                 # it from the child instrument's own grid row.
                 "bucket": None,
@@ -881,7 +910,7 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                 # record of it once its value has been split across the model behind it.
                 "via_names": ([r["linked_portfolio_name"]]
                               if r.get("linked_portfolio_name") else []),
-                # Ã¢ÂÂ  THE CERTIFICATE'S OWN AIRS NAME, which `via_names` does NOT carry Ã¢ÂÂ that is
+                # ⚠ THE CERTIFICATE'S OWN AIRS NAME, which `via_names` does NOT carry — that is
                 # the STRATEGY's name ("StarTopSelectie Offensief"), while the ledger is keyed by
                 # the INSTRUMENT the book actually traded ("Star Selection Index"). Without it a
                 # leg cannot find the flows it arrived through, and the only honest thing left to
@@ -889,7 +918,7 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                 "via_holding_names": ([r["holding_name"]] if r.get("holding_name") else []),
                 # ...and HOW MUCH came that way. `via_names` alone cannot distinguish a position
                 # held entirely through a certificate from one that is 96% the book's own shares.
-                # Ã¢ÂÂ  `model_id` RIDES ALONG, because the route's return has to come from the book
+                # ⚠ `model_id` RIDES ALONG, because the route's return has to come from the book
                 # behind THIS certificate specifically. Two certificates wrapping two strategies
                 # can both hold NVIDIA, and each book values its own position differently.
                 "sources": [{"label": r.get("linked_portfolio_name") or "via a certificate",
@@ -897,7 +926,7 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                              "value_eur": cur * share,
                              "start_value_eur": start * share}],
             })
-    # Ã¢ÂÂ  ONE LEG PER ISIN. A book can hold a stock directly AND through two certificates Ã¢ÂÂ three
+    # ⚠ ONE LEG PER ISIN. A book can hold a stock directly AND through two certificates — three
     # rows for one instrument. React keys the drill-down by ISIN and treats duplicates as
     # unsupported, free to omit a row, so an unmerged list can silently lose a holding.
     # Both EUR fields are summed: merging the current value alone would leave the merged leg's
@@ -912,28 +941,28 @@ def _reclassify_book_rows(rows: list[dict]) -> list[dict]:
     """Give every expanded leg its own Class, from the same classifier the rest of the app uses."""
     from routers._airs_holding_isin import classify_bucket  # noqa: PLC0415
 
-    # Ã¢ÂÂ Ã¢ÂÂ  A LEG WITH NO ISIN MUST BE CLASSIFIED TOO Ã¢ÂÂ SKIPPING IT DISABLED THE ONE RULE WRITTEN FOR
+    # ⚠⚠ A LEG WITH NO ISIN MUST BE CLASSIFIED TOO — SKIPPING IT DISABLED THE ONE RULE WRITTEN FOR
     # IT. This used to `continue` on `not r.get("isin")`, leaving `bucket` as None (rendered
     # "Unclassified"). But `classify_bucket`'s FIRST rule is
     #     `not isin and name in {"effectenrekening", "liquiditeiten"}` -> Cash
     # which by construction can only ever fire on a row with no ISIN. The guard made it
-    # unreachable. Measured: every certificate's own cash line Ã¢ÂÂ `Liquiditeiten`, arriving through
-    # look-through in 8 books Ã¢ÂÂ sat in Unclassified while its `sector` (computed elsewhere, without
+    # unreachable. Measured: every certificate's own cash line — `Liquiditeiten`, arriving through
+    # look-through in 8 books — sat in Unclassified while its `sector` (computed elsewhere, without
     # this guard) correctly read Cash. Two answers for one row, one screen apart.
     #
-    # Ã¢ÂÂ  The direct cash line was NOT affected, which is why this hid: `Effectenrekening` comes in
+    # ⚠ The direct cash line was NOT affected, which is why this hid: `Effectenrekening` comes in
     # already bucketed from `resolve_account_isins` and never reaches here. Only EXPANDED legs
     # arrive with `bucket=None`, so only cash inside a certificate was mislabelled.
     if not rows:
         return rows
-    # Ã¢ÂÂ Ã¢ÂÂ  THE GRID IS NOW READ FOR **EVERY** ROW, NOT ONLY THE UNBUCKETED ONES, AND THAT IS THE
+    # ⚠⚠ THE GRID IS NOW READ FOR **EVERY** ROW, NOT ONLY THE UNBUCKETED ONES, AND THAT IS THE
     # POINT OF THIS CHANGE. `is_fund` has to be on every holding: since `Equity ETF` was retired
     # (2026-08-18) the BUCKET no longer tells a fund from an operating company, and the Analyse
     # modal gates owner-earnings blending on exactly that distinction. Leaving the flag off the
-    # rows that already had a bucket would hand the blender the ETFs in the Stocks block Ã¢ÂÂ
+    # rows that already had a bucket would hand the blender the ETFs in the Stocks block —
     # instruments with no earnings, in an app that deliberately does not look through funds.
     #
-    # Ã¢ÂÂ  IT COSTS ONE EXTRA `_grid` READ on a book whose rows all arrived bucketed. That is the
+    # ⚠ IT COSTS ONE EXTRA `_grid` READ on a book whose rows all arrived bucketed. That is the
     # price of the flag being a FACT ABOUT THE INSTRUMENT rather than a by-product of whichever
     # rows happened to need classifying.
     grid = _grid(sorted({r["isin"] for r in rows if r.get("isin")}))
@@ -942,7 +971,7 @@ def _reclassify_book_rows(rows: list[dict]) -> list[dict]:
         r["is_fund"] = _is_fund(g, r.get("holding_name") or "")
         if r.get("bucket"):
             continue
-        # An ISIN-less, non-cash row still lands on "Unclassified" Ã¢ÂÂ an honest unsure, reached by
+        # An ISIN-less, non-cash row still lands on "Unclassified" — an honest unsure, reached by
         # the classifier rather than by never asking it.
         r["bucket"] = classify_bucket(None, r["is_fund"], r.get("isin"),
                                       r.get("holding_name") or "", g)
@@ -952,9 +981,9 @@ def _reclassify_book_rows(rows: list[dict]) -> list[dict]:
 def _is_fund(grid_row: dict | None, holding_name: str = "") -> bool:
     """Whether this holding is a fund WRAPPER rather than an operating company.
 
-    Ã¢ÂÂ  `holding_name` IS NOT OPTIONAL IN PRACTICE, only in the signature. The grid carries the
+    ⚠ `holding_name` IS NOT OPTIONAL IN PRACTICE, only in the signature. The grid carries the
     vendor's abbreviated name (`INVESCO MARKETS II PLC IVZ MSCI`) where the book carries the
-    readable one (`Invesco World Equal Weight ETF Acc`) Ã¢ÂÂ and it is the readable one that says what
+    readable one (`Invesco World Equal Weight ETF Acc`) — and it is the readable one that says what
     the thing is. See `_is_etf` for the two funds this fixed and the measurement behind it.
     """
     from routers._airs_holding_isin import _is_etf  # noqa: PLC0415
@@ -963,12 +992,12 @@ def _is_fund(grid_row: dict | None, holding_name: str = "") -> bool:
 
 
 def book_unavailable_reason(portfolio_id: int) -> str:
-    """WHY this model has no book view Ã¢ÂÂ in the words the reader needs, not "no positions".
+    """WHY this model has no book view — in the words the reader needs, not "no positions".
 
-    Ã¢ÂÂ  `_book_port_items` RETURNS `None` FOR THREE DIFFERENT REASONS AND THE MODAL SHOWED ONE
+    ⚠ `_book_port_items` RETURNS `None` FOR THREE DIFFERENT REASONS AND THE MODAL SHOWED ONE
     SENTENCE FOR ALL OF THEM. "No positions to show for this portfolio" was rendered when the
     model is not paired with a book, when the paired book has never been scanned, and when the
-    scan returned nothing Ã¢ÂÂ three different problems with three different remedies, and it was
+    scan returned nothing — three different problems with three different remedies, and it was
     reported alongside a portfolios list that visibly HAS rows. The obvious reading is "the modal
     is broken", and the actual answer was never on screen.
 
@@ -980,28 +1009,28 @@ def book_unavailable_reason(portfolio_id: int) -> str:
                  if a.get("model_portfolio_id") == portfolio_id), None)
     if not link:
         return ("This model portfolio is not paired with an AIRS book, so there are no valued "
-                "holdings to show. The portfolios list can still expand the BOOK's own rows Ã¢ÂÂ "
+                "holdings to show. The portfolios list can still expand the BOOK's own rows — "
                 "that view reads the account directly and needs no pairing. Pair them from the "
                 "Link column to see them here.")
     pf = link["portefeuille"]
     n = (supabase.table("airs_holding").select("portefeuille", count="exact")
          .eq("portefeuille", pf).limit(1).execute().count or 0)
     if not n:
-        return (f"Paired with the book {pf}, but `airs_holding` has no rows for it Ã¢ÂÂ its "
+        return (f"Paired with the book {pf}, but `airs_holding` has no rows for it — its "
                 f"Vermogensoverzicht has never been scraped, or the last scan did not reach it. "
                 f"Refresh that portfolio from AIRS.")
     return (f"Paired with the book {pf}, which has {n} stored holding row(s), but none of them "
-            f"survived resolution Ã¢ÂÂ every line lacks an ISIN we can join on. Check the book's "
+            f"survived resolution — every line lacks an ISIN we can join on. Check the book's "
             f"holdings on the portfolios list.")
 
 
 def _book_snapshot_date(portefeuille: str) -> str | None:
-    """The newest `airs_holding` snapshot for one account Ã¢ÂÂ the clock every AIRS-valued figure on
+    """The newest `airs_holding` snapshot for one account — the clock every AIRS-valued figure on
     this screen is as-of.
 
-    Ã¢ÂÂ  A NAMED FUNCTION, NOT AN INLINE QUERY, FOR TWO REASONS. It was written out twice (the book
+    ⚠ A NAMED FUNCTION, NOT AN INLINE QUERY, FOR TWO REASONS. It was written out twice (the book
     items and the legs), so it was two places to keep in step; and inline it was an unstubbable
-    database hop in the middle of an otherwise pure function Ã¢ÂÂ `TestBookWeighting` reached
+    database hop in the middle of an otherwise pure function — `TestBookWeighting` reached
     PRODUCTION through it on a developer machine and raised `KeyError: 'SUPABASE_URL'` in CI,
     which is exactly the asymmetry `tests/conftest.py` exists to make impossible. One seam, and a
     test monkeypatches this instead of faking the whole client.
@@ -1013,17 +1042,17 @@ def _book_snapshot_date(portefeuille: str) -> str | None:
 
 
 def _airs_position_return(row: dict | None, net_income: float = 0.0) -> float | None:
-    """AIRS's own result for one position: (Huidige waarde + net income) ÃÂ· Beginwaarde Ã¢ÂÂ 1.
+    """AIRS's own result for one position: (Huidige waarde + net income) ÷ Beginwaarde − 1.
 
-    Ã¢ÂÂ  ONE DEFINITION, USED BY EVERY AIRS-SOURCED FIGURE ON THIS SCREEN Ã¢ÂÂ the parent's own rows, a
+    ⚠ ONE DEFINITION, USED BY EVERY AIRS-SOURCED FIGURE ON THIS SCREEN — the parent's own rows, a
     directly-held leg of a certificate, and a leg valued by the book behind one. It is the same
     arithmetic the expanded portfolio row's `Return` column runs, so a number here can always be
     checked against the row it came from.
 
-    Ã¢ÂÂ  IT IS A POSITION RESULT, NOT A PRICE RETURN, and the difference is not academic: AIRS's
+    ⚠ IT IS A POSITION RESULT, NOT A PRICE RETURN, and the difference is not academic: AIRS's
     Beginwaarde is the year-open value OR the PURCHASE value for a position opened during the year.
-    MasterCard is +2.14% in BUS_Offensief_Dyn's own book (held since January, Ã¢ÂÂ the year's price
-    move) and +17.62% in StarTopSelectie's (bought later, cheaper) Ã¢ÂÂ same instrument, same window,
+    MasterCard is +2.14% in BUS_Offensief_Dyn's own book (held since January, ≈ the year's price
+    move) and +17.62% in StarTopSelectie's (bought later, cheaper) — same instrument, same window,
     two correct answers to two different questions. That is exactly why each figure has to name the
     book it came from.
     """
@@ -1039,15 +1068,15 @@ def _airs_position_return(row: dict | None, net_income: float = 0.0) -> float | 
 def _weigh_sources(sources: list[dict] | None, total_w: float) -> list[dict]:
     """The routes into one holding, each as a share of the BOOK, largest first.
 
-    `label=None` is the book's own shares. Entries are AGGREGATED BY (label, model) Ã¢ÂÂ a book can
+    `label=None` is the book's own shares. Entries are AGGREGATED BY (label, model) — a book can
     reach the same instrument through two certificates that wrap the same strategy, and two chips
     with the same name and two different percentages is a puzzle, not a breakdown.
 
-    Ã¢ÂÂ  SUMS TO `weight_now_pct` BY CONSTRUCTION: same numerators, same denominator, so the split
+    ⚠ SUMS TO `weight_now_pct` BY CONSTRUCTION: same numerators, same denominator, so the split
     can never disagree with the weight it splits.
 
     The opening value travels with it, because the RETURN of a split holding is these routes
-    weighted by what each held when the window opened Ã¢ÂÂ see `_blend_routes`.
+    weighted by what each held when the window opened — see `_blend_routes`.
     """
     if not sources or total_w <= 0:
         return []
@@ -1070,19 +1099,19 @@ def _weigh_sources(sources: list[dict] | None, total_w: float) -> list[dict]:
 def _blend_routes(routes: list[dict]) -> tuple[float | None, list[str]]:
     """The holding's return: its routes weighted by what each held when the window OPENED.
 
-        ÃÂ£ startÃ¡ÂµÂ¢ ÃÂ· (1 + rÃ¡ÂµÂ¢) ÃÂ· ÃÂ£ startÃ¡ÂµÂ¢ Ã¢ÂÂ 1
+        Σ startᵢ · (1 + rᵢ) ÷ Σ startᵢ − 1
 
-    Ã¢ÂÂ  ONE POSITION REACHED TWO WAYS IS STILL ONE POSITION, AND EITHER LEG ALONE MISREPRESENTS IT.
+    ⚠ ONE POSITION REACHED TWO WAYS IS STILL ONE POSITION, AND EITHER LEG ALONE MISREPRESENTS IT.
     MasterCard is 95.90% of its opening value held outright (+2.14%, this book's own valuation) and
-    4.10% through the Star certificate (+17.62%, StarTopSelectie's) Ã¢ÂÂ quoting the first calls the
+    4.10% through the Star certificate (+17.62%, StarTopSelectie's) — quoting the first calls the
     holding +2.14% while ignoring a leg that nearly tripled the book's rate on it, and quoting the
     second describes 4% of the position with the other 96% invisible. The blend is +2.77%.
 
-    Ã¢ÂÂ  OPENING VALUE, NOT CURRENT Ã¢ÂÂ the same rule the rest of this file lives by. A leg that rose
+    ⚠ OPENING VALUE, NOT CURRENT — the same rule the rest of this file lives by. A leg that rose
     carries a bigger share of the position today than it held while it was rising, so weighting by
     today's value overstates (measured elsewhere on this book: +11.19% against a true +5.58%).
 
-    Ã¢ÂÂ  A ROUTE WITH NO RETURN LEAVES BOTH SIDES. It is dropped from the numerator AND the
+    ⚠ A ROUTE WITH NO RETURN LEAVES BOTH SIDES. It is dropped from the numerator AND the
     denominator, so the answer is the return of the legs we can actually value rather than one
     silently diluted toward zero by a leg we cannot. `blend_weight_pct` is stamped on the routes
     that DID count, so the card can show the reader exactly which ones spoke.
@@ -1103,21 +1132,21 @@ def _blend_routes(routes: list[dict]) -> tuple[float | None, list[str]]:
 
 
 def _wrapped_book_marks(model_ids: set[int]) -> dict[int, dict[str, dict]]:
-    """model id Ã¢ÂÂ {ISIN Ã¢ÂÂ the AIRS valuation of that instrument in the book BEHIND that certificate}.
+    """model id → {ISIN → the AIRS valuation of that instrument in the book BEHIND that certificate}.
 
     A certificate is a wrapper around a model, and that model has an AIRS account of its own with a
     real Vermogensoverzicht: Beginwaarde, Huidige waarde and the journal's dividends, per position.
     That is the book that actually holds the shares, so it is the book that gets to say what they
-    did Ã¢ÂÂ the alternative was our yfinance series, which answers a DIFFERENT question (the year's
-    price move on a listing we picked) and diverged wildly from AIRS on this book: Shopify Ã¢ÂÂ25.54%
-    against +18.24%, Fair Isaac Ã¢ÂÂ32.04% against +15.33%.
+    did — the alternative was our yfinance series, which answers a DIFFERENT question (the year's
+    price move on a listing we picked) and diverged wildly from AIRS on this book: Shopify −25.54%
+    against +18.24%, Fair Isaac −32.04% against +15.33%.
 
-    Ã¢ÂÂ  KEYED BY MODEL, NOT FLATTENED TO ONE ISIN MAP. Two certificates wrapping two strategies can
-    both hold NVIDIA, and each book values ITS OWN position Ã¢ÂÂ different purchase dates, different
+    ⚠ KEYED BY MODEL, NOT FLATTENED TO ONE ISIN MAP. Two certificates wrapping two strategies can
+    both hold NVIDIA, and each book values ITS OWN position — different purchase dates, different
     results (see `_airs_position_return`). Flattened, one of them would answer for both; here each
     route asks the book it actually came through, and nothing has to be arbitrated or averaged.
 
-    A model with no paired account is simply absent Ã¢ÂÂ a certificate can wrap a model nobody holds
+    A model with no paired account is simply absent — a certificate can wrap a model nobody holds
     an account for, and that leg falls back to the price series.
     """
     from routers._airs_account_links import list_account_links  # noqa: PLC0415
@@ -1133,10 +1162,10 @@ def _wrapped_book_marks(model_ids: set[int]) -> dict[int, dict[str, dict]]:
     for mid in sorted(model_ids):
         pf = by_model.get(mid)
         if not pf:
-            _log.warning("[analysis] wrapped model %s has no paired AIRS account Ã¢ÂÂ its legs fall "
+            _log.warning("[analysis] wrapped model %s has no paired AIRS account — its legs fall "
                          "back to the price series", mid)
             continue
-        # See `resolve_account_isins(freshen=...)` Ã¢ÂÂ this path shows no price-check verdict.
+        # See `resolve_account_isins(freshen=...)` — this path shows no price-check verdict.
         res = resolve_account_isins(pf, freshen=False)
         child_rows = res.get("rows") or []
         # The journal, for the same reason the parent loads it: a leg that paid a dividend must not
@@ -1152,7 +1181,7 @@ def _wrapped_book_marks(model_ids: set[int]) -> dict[int, dict[str, dict]]:
             ret = _airs_position_return(r, net)
             if ret is None:
                 continue
-            # Ã¢ÂÂ  THE VALUATION ITSELF RIDES ALONG, not only the percentage it implies. A return with
+            # ⚠ THE VALUATION ITSELF RIDES ALONG, not only the percentage it implies. A return with
             # no numerator and denominator on screen cannot be checked against the book it claims
             # to come from, and checking it against that book is the entire reason it is preferred
             # over our price series.
@@ -1167,18 +1196,18 @@ def _wrapped_book_marks(model_ids: set[int]) -> dict[int, dict[str, dict]]:
 
 
 def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
-    """The composition as the BOOK actually holds it Ã¢ÂÂ weighted by AIRS's EUR values, not the
+    """The composition as the BOOK actually holds it — weighted by AIRS's EUR values, not the
     model's nominal percentages.
 
-    Ã¢ÂÂ  ONLY THE WEIGHTS COME FROM AIRS. The classification (sector / region / currency) still runs
-    through the SAME `_grid` + `_buckets` the model side and the benchmark use Ã¢ÂÂ yfinance's
+    ⚠ ONLY THE WEIGHTS COME FROM AIRS. The classification (sector / region / currency) still runs
+    through the SAME `_grid` + `_buckets` the model side and the benchmark use — yfinance's
     `asset_grid`, joined by ISIN. It has to: the benchmark is classified that way, and two
     taxonomies in one chart invent a tilt ("Technology" vs "Information Technology" is not a bet).
     AIRS's own `BU-Inf.Technol` vocabulary would be exactly that mistake.
 
-    The ISIN comes from the book's own nameÃ¢ÂÂISIN resolution (`resolve_account_isins`, the
+    The ISIN comes from the book's own name→ISIN resolution (`resolve_account_isins`, the
     price-gated match), because `airs_holding` carries no ISIN. A wrong SHARE CLASS there is
-    harmless for classification Ã¢ÂÂ both classes of a fund share sector/region/currency Ã¢ÂÂ even
+    harmless for classification — both classes of a fund share sector/region/currency — even
     where it would be a wrong price.
 
     Returns None when the model has no paired book, or the book resolves to nothing priceable.
@@ -1194,26 +1223,26 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     if not rows:
         return None
 
-    # Ã¢ÂÂ  BOTH OF THESE ARE TAKEN BEFORE THE EXPANSION, AND THAT IS THE ENTIRE POINT.
+    # ⚠ BOTH OF THESE ARE TAKEN BEFORE THE EXPANSION, AND THAT IS THE ENTIRE POINT.
     #
-    # `direct_marks` Ã¢ÂÂ the parent's OWN valuation of each instrument it holds directly. After
+    # `direct_marks` — the parent's OWN valuation of each instrument it holds directly. After
     # `_expand_book_rows` an instrument held BOTH directly and inside a certificate is ONE merged
     # row whose start/current are the sum of the two, and the certificate's half carries the
-    # CERTIFICATE's return Ã¢ÂÂ so the merged figure is unusable and the directly-held position's own
+    # CERTIFICATE's return — so the merged figure is unusable and the directly-held position's own
     # AIRS valuation exists nowhere else. Measured on BUS_Offensief_Dyn: MasterCard is EUR 50,489
     # held directly against EUR 1,991 (3.8%) through the certificate, and it was being priced off
     # yfinance purely because SOME of it arrives wrapped.
     #
-    # `wrapped_ids` Ã¢ÂÂ the models behind the certificates this book holds. Their own AIRS accounts
+    # `wrapped_ids` — the models behind the certificates this book holds. Their own AIRS accounts
     # value every leg the parent cannot: 20 of this book's 23 look-through legs are reachable ONLY
     # through the certificate, so the parent's Vermogensoverzicht has no line for them at all.
     direct_marks = {r["isin"]: r for r in rows
                     if r.get("isin") and not r.get("linked_portfolio_id")}
     wrapped_ids = {r["linked_portfolio_id"] for r in rows if r.get("linked_portfolio_id")}
 
-    # Ã¢ÂÂ  THE BOOK SIDE NEEDS THE SAME LOOK-THROUGH, AND FOR A SHARPER REASON. The model side at
-    # least held nominal percentages; here the certificates ARE the book Ã¢ÂÂ ToppenbergBeheer
-    # Defensief holds nine of them Ã¢ÂÂ so weighting by AIRS's EUR values and classifying what is
+    # ⚠ THE BOOK SIDE NEEDS THE SAME LOOK-THROUGH, AND FOR A SHARPER REASON. The model side at
+    # least held nominal percentages; here the certificates ARE the book — ToppenbergBeheer
+    # Defensief holds nine of them — so weighting by AIRS's EUR values and classifying what is
     # left charts "Unclassified 100%". A composition chart that says the portfolio is entirely
     # unclassifiable is not a limitation, it is a wrong answer: the stocks are known, one link
     # away, and the model side is already drawing them.
@@ -1221,17 +1250,17 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
 
     grid = _grid(sorted({r["isin"] for r in rows if r.get("isin")}))
     items: list[tuple[float, tuple[str, str, str]]] = []
-    # Who each item IS Ã¢ÂÂ parallel to `items` (same loop, same order), so the composition drill-down
+    # Who each item IS — parallel to `items` (same loop, same order), so the composition drill-down
     # can name the rows behind a bar. Identity only; the weight is `items`', because there must be
     # exactly one place a weight comes from.
     labels: list[dict] = []
     alloc_items: list[tuple[float, str]] = []
-    # (row, current EUR value, class) for every LONG position Ã¢ÂÂ the whole-portfolio holdings table.
+    # (row, current EUR value, class) for every LONG position — the whole-portfolio holdings table.
     raw_positions: list[tuple[dict, float, str]] = []
     classified_w = total_w = 0.0
     foreign = holdings = 0
     for r in rows:
-        # Ã¢ÂÂ  Weight is the position VALUE, and a non-positive one is skipped Ã¢ÂÂ same rule the model
+        # ⚠ Weight is the position VALUE, and a non-positive one is skipped — same rule the model
         # side applies to a 0% weight. That drops a short (Nestle India at -EUR 44,680) and an
         # overdraft cash line from the *composition*: a bar chart of what the book is LONG.
         w = float(r.get("current_value_eur") or 0)
@@ -1256,29 +1285,29 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         raw_positions.append((r, w, r.get("bucket") or UNKNOWN_BUCKET))
     if not items:
         return None
-    # Per-bucket return = the START-WEIGHTED value change, ÃÂ£now ÃÂ· ÃÂ£start Ã¢ÂÂ 1 (equivalently each
+    # Per-bucket return = the START-WEIGHTED value change, Σnow ÷ Σstart − 1 (equivalently each
     # holding's return weighted by its OPENING value). NOT current-value weighted: a holding up +148%
     # has tripled its share of the book, so weighting by current value lets one winner dominate and
     # inflates the figure (AITopSelectie: +56.11% current-weighted vs +41.98% true, book +43.08%).
     # For the allocation pie's legend + the sleeve views. Alongside it the per-HOLDING detail
     # (start-weight + return), so a non-equity sleeve's contribution breakdown reconciles to the
-    # sleeve figure: ÃÂ£ over a bucket of (startÃ¡ÂµÂ¢ / ÃÂ£start) ÃÂ· retÃ¡ÂµÂ¢ == that bucket's return above, exactly.
-    # Ã¢ÂÂ  THE INCOME IS LOADED HERE, BEFORE ANY RETURN IS FORMED, BECAUSE EVERY RETURN ON THIS
+    # sleeve figure: Σ over a bucket of (startᵢ / Σstart) · retᵢ == that bucket's return above, exactly.
+    # ⚠ THE INCOME IS LOADED HERE, BEFORE ANY RETURN IS FORMED, BECAUSE EVERY RETURN ON THIS
     # SCREEN HAS TO INCLUDE IT. AIRS's own headline (`cumulatief_rendement`) is flow-aware and
-    # carries dividends; the per-holding column is `(current + net income) ÃÂ· Beginwaarde Ã¢ÂÂ 1`, the
+    # carries dividends; the per-holding column is `(current + net income) ÷ Beginwaarde − 1`, the
     # same figure the expanded row shows. A class subtotal computed on price alone therefore sat
-    # between two totals and disagreed with both Ã¢ÂÂ measured on EuropaTopSelect OFF DYN, the Equity
-    # sleeve read Ã¢ÂÂ2.79% while 17 of its 27 holdings had paid a dividend that the rows above and
+    # between two totals and disagreed with both — measured on EuropaTopSelect OFF DYN, the Equity
+    # sleeve read −2.79% while 17 of its 27 holdings had paid a dividend that the rows above and
     # the tile below both counted. Three bases on one screen, all AIRS-sourced, all defensible
     # separately.
     #
     # `_direct_result` is the row's OWN loader (the Mutaties journal, keyed on `holding_name`), so
-    # the two surfaces cannot drift. Ã¢ÂÂ  The tax is ADDED Ã¢ÂÂ AIRS books withholding as a negative, so
+    # the two surfaces cannot drift. ⚠ The tax is ADDED — AIRS books withholding as a negative, so
     # `gross + tax` IS the net; `- tax` overstates every foreign holding by twice the withholding.
     from ._airs_accounts import _direct_result  # noqa: PLC0415
 
-    # Ã¢ÂÂ  PRE-EXPANSION NAMES TOO. `merge_by_isin` keeps ONE name for an instrument held both directly
-    # and through a certificate, and it need not be the parent's Ã¢ÂÂ so asking the journal only for
+    # ⚠ PRE-EXPANSION NAMES TOO. `merge_by_isin` keeps ONE name for an instrument held both directly
+    # and through a certificate, and it need not be the parent's — so asking the journal only for
     # post-expansion names can lose the income of a position the parent holds itself.
     _income, _sold = _direct_result(
         link["portefeuille"],
@@ -1295,32 +1324,32 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     total_start = sum(s for _r, s, _n in priced) or 1.0
     priced_by_id = {id(r): (s, n) for r, s, n in priced}
 
-    # Ã¢ÂÂ  EVERY LONG POSITION, not only the priced ones Ã¢ÂÂ this list is also the whole-portfolio
+    # ⚠ EVERY LONG POSITION, not only the priced ones — this list is also the whole-portfolio
     # holdings table, and a cash line or an unpriceable structured product that silently vanished
     # from it would leave a table whose classes do not add up to the pie beside them.
     #
-    # Ã¢ÂÂ  TWO WEIGHTS, TWO DENOMINATORS, AND SWAPPING THEM IS A REAL BUG:
+    # ⚠ TWO WEIGHTS, TWO DENOMINATORS, AND SWAPPING THEM IS A REAL BUG:
     #   `weight_pct`      OPENING-value share of the PRICED book. None when we could not price the
     #                     position over the window. This is the one that makes a class's
-    #                     contribution reconcile: ÃÂ£ over a class of (startÃ¡ÂµÂ¢/ÃÂ£start)ÃÂ·retÃ¡ÂµÂ¢ IS that
+    #                     contribution reconcile: Σ over a class of (startᵢ/Σstart)·retᵢ IS that
     #                     class's return, exactly. Weighting by CURRENT value instead lets one
-    #                     winner dominate (a holding up +148% has tripled its share of the book Ã¢ÂÂ
+    #                     winner dominate (a holding up +148% has tripled its share of the book —
     #                     AITopSelectie reads +56.11% current-weighted against a true +41.98%).
-    #   `weight_now_pct`  CURRENT-value share of the WHOLE book Ã¢ÂÂ the same number the allocation
+    #   `weight_now_pct`  CURRENT-value share of the WHOLE book — the same number the allocation
     #                     pie is drawn from, so per-class subtotals in the table equal the pie's
     #                     slices to the decimal. A table that disagrees with the chart directly
     #                     above it is read as a bug in both.
-    # Ã¢ÂÂ  A LOOKED-THROUGH LEG HAS NO BOOK RETURN OF ITS OWN, AND SPLITTING ONE IS A FABRICATION.
+    # ⚠ A LOOKED-THROUGH LEG HAS NO BOOK RETURN OF ITS OWN, AND SPLITTING ONE IS A FABRICATION.
     # `_expand_book_rows` divides a certificate's start AND current value by the same composition
-    # share, so every instrument behind it comes out with the CERTIFICATE's return Ã¢ÂÂ measured on
+    # share, so every instrument behind it comes out with the CERTIFICATE's return — measured on
     # ToppenbergBeheer Defensief, 135 stocks carried just 37 distinct returns, one per certificate,
     # and NVIDIA reported +0.08% (its wrapper's figure) against its own +2.82% over the window.
     # The number was not noise, it was confident and wrong, and it is the kind nobody re-checks.
     #
-    # The book simply does not know what NVIDIA did Ã¢ÂÂ it knows what the certificate did. So the
+    # The book simply does not know what NVIDIA did — it knows what the certificate did. So the
     # per-instrument return comes from the instrument's OWN EUR price series, through the same
     # `compute_holding_marks` that produces the arithmetic behind a portfolio's YTD elsewhere:
-    # same anchor, same split adjustment, same per-date FX. Aggregates are untouched Ã¢ÂÂ a class
+    # same anchor, same split adjustment, same per-date FX. Aggregates are untouched — a class
     # return is still the book's own value change, which is the right answer to "what did my money
     # in this class do" and ties to the portfolio figure.
     from ._airs_lookthrough import _datum_of  # noqa: PLC0415
@@ -1330,32 +1359,32 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     marks = compute_holding_marks(
         sorted({r["isin"] for r, _w, _b in raw_positions if r.get("isin")}), anchor)
 
-    # Ã¢ÂÂ  AIRS'S OWN RETURN FOR A DIRECTLY-HELD ROW; THE YFINANCE SERIES ONLY WHERE THE BOOK CANNOT
-    # ANSWER. The look-through argument above is right and stays Ã¢ÂÂ a certificate's value change
+    # ⚠ AIRS'S OWN RETURN FOR A DIRECTLY-HELD ROW; THE YFINANCE SERIES ONLY WHERE THE BOOK CANNOT
+    # ANSWER. The look-through argument above is right and stays — a certificate's value change
     # belongs to the WRAPPER, so splitting it across the 135 stocks inside gives every one of them
     # the wrapper's number (NVIDIA read +0.08% against its own +2.82%). But it was applied to
     # EVERY row, including the ones the book values directly, and for those AIRS knows the answer
-    # exactly: Fortinet in AITopSelectie OFF DYN is +111.74% by AIRS's own Beginwaarde Ã¢ÂÂ Huidige
+    # exactly: Fortinet in AITopSelectie OFF DYN is +111.74% by AIRS's own Beginwaarde → Huidige
     # waarde (plus its net dividend) and +108.65% off our yfinance series. Both are defensible;
     # having the modal show one while the row that opened it shows the other is not.
     #
     # `via_names` is what tells the two apart: non-empty means the row was exploded out of a
     # certificate and its share of the book's value change is synthetic.
     #
-    # The income is `_net_income` above Ã¢ÂÂ ONE load, shared with the bucket aggregation, so a class
+    # The income is `_net_income` above — ONE load, shared with the bucket aggregation, so a class
     # subtotal and the rows under it cannot end up on different bases.
     _airs_n = _look_n = _direct_via_n = _wrapped_n = _blend_n = _none_n = 0
 
     # The books behind the certificates this one holds. Loaded ONCE, and only when something is
-    # actually wrapped Ã¢ÂÂ an unwrapped book pays nothing for this.
+    # actually wrapped — an unwrapped book pays nothing for this.
     wrapped_marks = _wrapped_book_marks(wrapped_ids)
 
-    # Ã¢ÂÂ  THE DATE A NUMBER IS AS-OF BELONGS TO THE NUMBER, NOT TO THE PAYLOAD.
-    # The analysis publishes `as_of = positions_datum` Ã¢ÂÂ the MODEL COMPOSITION's effective date,
+    # ⚠ THE DATE A NUMBER IS AS-OF BELONGS TO THE NUMBER, NOT TO THE PAYLOAD.
+    # The analysis publishes `as_of = positions_datum` — the MODEL COMPOSITION's effective date,
     # 2025-12-30 for AITopSelectie. That is a true fact about the weights the model declares, and
     # it is the wrong clock for anything valued by the book: these returns are AIRS valuations
     # dated 2026-08-01. Stamped with the payload-level date, the modal reported the same
-    # +111.74% as the portfolios row while calling it 216 days old against the row's 2 Ã¢ÂÂ one
+    # +111.74% as the portfolios row while calling it 216 days old against the row's 2 — one
     # number, two ages, and no way for a reader to tell which surface to believe.
     #
     # So each holding carries its own. A book-valued row is as-of the SNAPSHOT the valuation came
@@ -1367,15 +1396,15 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     for r, w, b_alloc in raw_positions:
         isin = r.get("isin")
         grow = grid.get(isin) if isin else None
-        # The holding's own quote currency Ã¢ÂÂ NOT folded to Unclassified the way the fund axes are.
+        # The holding's own quote currency — NOT folded to Unclassified the way the fund axes are.
         # For a bond/ETF class the quote currency is a fair first-order FX signal (a EUR-quoted line
         # vs a USD one), which is exactly what the currency chart is for.
         cur = (grow.get("market_cap_currency") or grow.get("currency")) if grow else None
-        # Ã¢ÂÂ  THE SECTOR IS THE CHART'S BUCKET, TAKEN FROM THE SAME `_buckets` Ã¢ÂÂ not the raw
+        # ⚠ THE SECTOR IS THE CHART'S BUCKET, TAKEN FROM THE SAME `_buckets` — not the raw
         # `asset_grid.sector`. The holdings table sits directly under the sector bars, so a row
         # reading "Financial Services" beside a bar reading "Financials" is a reader's problem to
         # arbitrate and both are ours to have avoided. It follows that a fund reads Unclassified
-        # here (its listing says nothing about what it holds) and cash reads Cash Ã¢ÂÂ the same
+        # here (its listing says nothing about what it holds) and cash reads Cash — the same
         # answers the bars give, which is what makes a row findable behind a bar.
         sec = _buckets(grow, is_cash=(r.get("asset_class") == "Cash" or not isin),
                        isin=isin, codes=codes)[0]
@@ -1383,15 +1412,15 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         mk = marks.get(isin) if isin else None
         via = r.get("via_names") or []
 
-        # Ã¢ÂÂ  EVERY ROUTE IS VALUED SEPARATELY, BY THE BOOK THAT ACTUALLY HOLDS IT, AND THE HOLDING'S
+        # ⚠ EVERY ROUTE IS VALUED SEPARATELY, BY THE BOOK THAT ACTUALLY HOLDS IT, AND THE HOLDING'S
         # RETURN IS THEIR BLEND. One position reached two ways is still one position, and either
-        # leg alone misrepresents it Ã¢ÂÂ see `_blend_routes`. Each route asks in turn:
+        # leg alone misrepresents it — see `_blend_routes`. Each route asks in turn:
         #
         #   * the book's OWN valuation of its own shares (`label is None`). For a purely direct row
         #     that is the row itself; for a split row it is the PRE-EXPANSION line, because the
         #     merged row's start/current are contaminated by the certificate's proportional split.
-        #     Before this, ANY via tag sent the whole row to yfinance, which is how MasterCard Ã¢ÂÂ
-        #     96% of it held outright Ã¢ÂÂ came to be priced off a listing.
+        #     Before this, ANY via tag sent the whole row to yfinance, which is how MasterCard —
+        #     96% of it held outright — came to be priced off a listing.
         #   * the book BEHIND that certificate (`model_id`), for the part that arrives wrapped.
         #     20 of this book's 23 look-through legs exist ONLY there.
         #
@@ -1411,8 +1440,8 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
                     if direct is None else src_row, _net_income(src_row))
                 rt["book"] = link["portefeuille"] if rt["return_pct"] is not None else None
                 rt["as_of"] = book_as_of
-                # Ã¢ÂÂ  THE VALUATION THE RETURN WAS COMPUTED FROM, which for a split row is the
-                # DIRECT position's Ã¢ÂÂ not this route's slice of the book. They coincide on a
+                # ⚠ THE VALUATION THE RETURN WAS COMPUTED FROM, which for a split row is the
+                # DIRECT position's — not this route's slice of the book. They coincide on a
                 # purely direct row and diverge on a split one, and printing the slice beside the
                 # direct position's return would show two numbers whose ratio is not the third.
                 src_vals = src_row if direct is not None else rt
@@ -1428,11 +1457,11 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
                 wm = (wrapped_marks.get(rt["model_id"]) or {}).get(isin or "")
                 rt["return_pct"] = wm["return_pct"] if wm else None
                 rt["book"] = wm["portefeuille"] if wm else None
-                # Ã¢ÂÂ  THE WRAPPED BOOK'S OWN SNAPSHOT DATE, which trails the parent's (measured 5
+                # ⚠ THE WRAPPED BOOK'S OWN SNAPSHOT DATE, which trails the parent's (measured 5
                 # days on BUS_Offensief_Dyn). Stamping it with the parent's would age-check a
                 # number against a scan it never came from.
                 rt["as_of"] = wm["as_of"] if wm else None
-                # That book's own valuation of ITS position Ã¢ÂÂ the numbers behind `return_pct`, so
+                # That book's own valuation of ITS position — the numbers behind `return_pct`, so
                 # the card can print the division rather than assert its result.
                 rt["book_start_value_eur"] = wm.get("start_value_eur") if wm else None
                 rt["book_current_value_eur"] = wm.get("current_value_eur") if wm else None
@@ -1440,8 +1469,8 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         own, books = _blend_routes(routes)
         if own is not None:
             own_src, own_est = "airs", False
-            # Ã¢ÂÂ  A BLEND IS ONLY AS FRESH AS ITS STALEST LEG. The oldest contributing snapshot, not
-            # this book's Ã¢ÂÂ claiming today's date for a number half-built from a five-day-old scan
+            # ⚠ A BLEND IS ONLY AS FRESH AS ITS STALEST LEG. The oldest contributing snapshot, not
+            # this book's — claiming today's date for a number half-built from a five-day-old scan
             # is the same lie as stamping a look-through row with the parent's clock.
             dates = sorted(rt["as_of"] for rt in routes
                            if rt.get("blend_weight_pct") is not None and rt.get("as_of"))
@@ -1463,10 +1492,10 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             # own EUR series is the only honest answer left.
             own = mk.get("return_pct") if mk else None
             own_src, own_est = ("yfinance", bool(mk.get("start_interpolated"))) if mk else (None, False)
-            # This listing's OWN latest close Ã¢ÂÂ not the book's snapshot and not the fleet's. A
+            # This listing's OWN latest close — not the book's snapshot and not the fleet's. A
             # thinly-traded line can sit weeks behind both, and that is the row worth doubting.
             own_as_of = (mk.get("end_date") or mk.get("last_close")) if mk else None
-            # Ã¢ÂÂ  COUNTED APART. "priced off a listing instead of off the book" and "nobody can price
+            # ⚠ COUNTED APART. "priced off a listing instead of off the book" and "nobody can price
             # this at all" are different outcomes, and rolling them together hides the second: the
             # only two rows left on this book are cash lines with no ISIN, which is the right
             # answer, and a single counter would have reported them as a yfinance fallback.
@@ -1479,9 +1508,9 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             "name": r.get("holding_name"),
             "isin": isin,
             "bucket": b_alloc,
-            # Ã¢ÂÂ Ã¢ÂÂ  CARRIED EXPLICITLY, BECAUSE THIS DICT IS BUILT FRESH AND DROPS WHATEVER IT DOES
+            # ⚠⚠ CARRIED EXPLICITLY, BECAUSE THIS DICT IS BUILT FRESH AND DROPS WHATEVER IT DOES
             # NOT NAME. `is_fund` is set upstream on the source row (`_reclassify_book_rows`) and
-            # was silently lost here Ã¢ÂÂ the payload went out without it and every consumer's
+            # was silently lost here — the payload went out without it and every consumer's
             # `!h.is_fund` guard passed on `undefined`, which is exactly the failure the flag
             # exists to prevent: ETFs back in the fundamentals blend, quietly.
             "is_fund": bool(r.get("is_fund")),
@@ -1489,24 +1518,24 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             "currency": cur,
             "via_names": via,
             # The certificate INSTRUMENT names behind those routes. Parallel to `via_names` (the
-            # strategies) because only this one keys the book's ledger Ã¢ÂÂ see `_via_capital`.
+            # strategies) because only this one keys the book's ledger — see `_via_capital`.
             "via_holding_names": r.get("via_holding_names") or [],
-            # Ã¢ÂÂ  THE ROUTES IN, EACH AS A SHARE OF THE BOOK Ã¢ÂÂ so they SUM to `weight_now_pct`, the
+            # ⚠ THE ROUTES IN, EACH AS A SHARE OF THE BOOK — so they SUM to `weight_now_pct`, the
             # column beside them. A share of the ROW ("96% direct") answers a different question and
             # ties to nothing else on screen; it rides along in the UI's tooltip instead. Each also
             # carries its OWN return, its book, and the share of the blend it spoke for, which is
-            # the arithmetic behind `own_return_pct` Ã¢ÂÂ one list, so the split shown beside the
+            # the arithmetic behind `own_return_pct` — one list, so the split shown beside the
             # Weight column and the split behind the Return column cannot be two different things.
             "sources": routes,
             "weight_pct": (pr[0] / total_start * 100.0) if pr else None,
             "weight_now_pct": w / total_w * 100.0 if total_w else 0.0,
-            # Ã¢ÂÂ  THE EUROS BEHIND THE RESULT COLUMNS, at the EXPANDED granularity Ã¢ÂÂ so a
+            # ⚠ THE EUROS BEHIND THE RESULT COLUMNS, at the EXPANDED granularity — so a
             # looked-through leg carries its share of the certificate's value, exactly as its
             # weight already does. `_expand_book_rows` splits start AND current by the same
             # composition share, so summing these over the expanded rows reproduces the book's own
             # held result: expansion moves value between rows, it does not create or destroy it.
             #
-            # Ã¢ÂÂ  THIS IS A VALUE SPLIT, NOT A RETURN CLAIM. The Return column stays
+            # ⚠ THIS IS A VALUE SPLIT, NOT A RETURN CLAIM. The Return column stays
             # `own_return_pct` (the instrument's own), because handing every stock inside a
             # certificate the wrapper's PERCENTAGE is the documented lie (NVIDIA +0.08% against its
             # own +2.82%). A euro amount is different in kind: the certificate really did produce
@@ -1530,16 +1559,16 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             # +17.62% in StarTopSelectie's, both AIRS, both right, and a column that shows one
             # without naming the book is unfalsifiable. None on a yfinance row.
             "own_return_book": own_book,
-            # Ã¢ÂÂ  PER ROW, because the bases have different clocks Ã¢ÂÂ see `book_as_of` above.
+            # ⚠ PER ROW, because the bases have different clocks — see `book_as_of` above.
             "own_return_as_of": own_as_of,
             "own_income_eur": (net_income if d and own_book == link["portefeuille"] else None),
             # A sparse yfinance series gets an interpolated opening mark, and it has to say so.
             "own_return_estimated": own_est,
         })
     # WARNING, not info: uvicorn leaves the root logger at WARNING, so an `info` line is invisible
-    # in production Ã¢ÂÂ and this is the line that says which of the two return bases each row got.
+    # in production — and this is the line that says which of the two return bases each row got.
     _log.warning(
-        "[analysis] %s: per-holding returns Ã¢ÂÂ %d from this book (Beginwaarde -> Huidige waarde + "
+        "[analysis] %s: per-holding returns — %d from this book (Beginwaarde -> Huidige waarde + "
         "net income, identical to the expanded row's Return column), %d BLENDED across this book "
         "and the book(s) behind a certificate (opening-value weighted), %d from this book's own "
         "DIRECT valuation alone, %d from a wrapped book alone, %d from the yfinance series (no "
@@ -1547,39 +1576,39 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         "no return at all (cash lines, and rows with no ISIN to join on)",
         link["portefeuille"], _airs_n, _blend_n, _direct_via_n, _wrapped_n, _look_n, _none_n)
 
-    # Ã¢ÂÂ  NO `bucket_returns` HERE ANY MORE, AND IT MUST NOT COME BACK. This function computed
-    # `(ÃÂ£ current + income) ÃÂ· ÃÂ£ start` per class, which OMITS whatever the class banked by selling:
+    # ⚠ NO `bucket_returns` HERE ANY MORE, AND IT MUST NOT COME BACK. This function computed
+    # `(Σ current + income) ÷ Σ start` per class, which OMITS whatever the class banked by selling:
     # measured on AITopSelectie, it reported Stocks at +43.53% against a class that made +44.16%,
     # with the EUR 6,307 realised on trims missing from the rate while sitting in the Result column
     # beside it. The class return is now derived ONCE, in `compute_portfolio_analysis`, from the
-    # rows the table actually renders Ã¢ÂÂ so the allocation legend and the class subtotal cannot be
+    # rows the table actually renders — so the allocation legend and the class subtotal cannot be
     # two different numbers. Leaving this here as an unused second answer is how it would drift
     # back in.
     return {"items": items, "labels": labels,
             "alloc_items": alloc_items,
             "holdings_detail": holdings_detail,
             "classified_w": classified_w, "total_w": total_w, "foreign": foreign,
-            # The snapshot every figure above is valued at Ã¢ÂÂ carried out so the payload can stamp
+            # The snapshot every figure above is valued at — carried out so the payload can stamp
             # the weight columns with it instead of with the composition's effective date.
             "book_as_of": book_as_of,
             "holdings": holdings, "portefeuille": link["portefeuille"]}
 
 
 def _realised_block(portfolio_id: int) -> dict:
-    """What this model's paired BOOK realised on sales this year Ã¢ÂÂ the leg the holdings table
+    """What this model's paired BOOK realised on sales this year — the leg the holdings table
     cannot show, because a sold position has no row left.
 
-    Ã¢ÂÂ  IT READS `account_return_reconciliation`, THE ONE PLACE THAT ASSEMBLES A BOOK'S YEAR. The
-    /portfolios "Total return" panel shows exactly this; re-deriving it here Ã¢ÂÂ even "the same way"
-    Ã¢ÂÂ is how a modal ends up quietly disagreeing with the surface it was checked against. Same
+    ⚠ IT READS `account_return_reconciliation`, THE ONE PLACE THAT ASSEMBLES A BOOK'S YEAR. The
+    /portfolios "Total return" panel shows exactly this; re-deriving it here — even "the same way"
+    — is how a modal ends up quietly disagreeing with the surface it was checked against. Same
     rule `_returns` and `_book_return` already follow.
 
-    Ã¢ÂÂ  IT NEVER FETCHES FROM AIRS. The reconciliation reads the CACHED Transacties snapshot; the
+    ⚠ IT NEVER FETCHES FROM AIRS. The reconciliation reads the CACHED Transacties snapshot; the
     modal opens on a click, and a headless scrape behind it would cost seconds and could collide
     with a fleet scan holding the session lock. An unfetched book yields `available: false` with a
     reason, which the UI states rather than showing an empty list that reads as "sold nothing".
 
-    Ã¢ÂÂ  AN UNPAIRED MODEL HAS NO BOOK, SO NO SOLD LEG EXISTS Ã¢ÂÂ absent, not empty. A model portfolio
+    ⚠ AN UNPAIRED MODEL HAS NO BOOK, SO NO SOLD LEG EXISTS — absent, not empty. A model portfolio
     is a set of weights; only a book buys and sells.
     """
     from airs_reconciliation import contributions  # noqa: PLC0415
@@ -1592,16 +1621,16 @@ def _realised_block(portfolio_id: int) -> dict:
     if not link:
         return {"available": False,
                 "note": "No Dynamic portfolio is paired with this one, so there are no "
-                        "transactions to read Ã¢ÂÂ a model is a set of weights; only a book trades."}
+                        "transactions to read — a model is a set of weights; only a book trades."}
     try:
         rec = account_return_reconciliation(link["portefeuille"])
-    except Exception as e:  # noqa: BLE001 Ã¢ÂÂ the sold block must never break the modal
+    except Exception as e:  # noqa: BLE001 — the sold block must never break the modal
         _log.warning("[analysis] realised block failed for %s (%s: %s)",
                      link["portefeuille"], type(e).__name__, e)
         return {"available": False, "portefeuille": link["portefeuille"],
                 "note": f"Could not read this book's transactions ({type(e).__name__})."}
 
-    # Ã¢ÂÂ  NULL IS NOT ZERO Ã¢ÂÂ the distinction the whole panel rests on. No cached sheet means the
+    # ⚠ NULL IS NOT ZERO — the distinction the whole panel rests on. No cached sheet means the
     # realised leg is UNKNOWN, and an empty "Sold this year" list would state that the book sold
     # nothing, which on BUS_Offensief_Dyn would hide EUR 28,656 of realised loss.
     if rec.get("realised_ytd_eur") is None:
@@ -1622,9 +1651,9 @@ def _realised_block(portfolio_id: int) -> dict:
         "available": True,
         "portefeuille": link["portefeuille"],
         "note": None,
-        # The book's own opening capital Ã¢ÂÂ the ONE denominator every figure below sits on.
+        # The book's own opening capital — the ONE denominator every figure below sits on.
         "basis_eur": c["basis_eur"],
-        # Ã¢ÂÂ  False on a book with deposits or withdrawals: `result ÃÂ· opening capital` is not a
+        # ⚠ False on a book with deposits or withdrawals: `result ÷ opening capital` is not a
         # return there, so the percentages are withheld and only the euro amounts stand.
         "comparable": c["comparable"],
         "held_pct": c["held_pct"],
@@ -1636,21 +1665,21 @@ def _realised_block(portfolio_id: int) -> dict:
         "sold_income_eur": rec.get("sold_income_eur"),
         "book_ytd_pct": rec.get("book_return_pct"),
         "residual_eur": rec.get("residual_vs_book_eur"),
-        # Ã¢ÂÂ  None is UNKNOWN, not False Ã¢ÂÂ the two sides can be valued a day apart (VOLK snapshot vs
+        # ⚠ None is UNKNOWN, not False — the two sides can be valued a day apart (VOLK snapshot vs
         # ATT report), and that difference is market movement, not a missing position.
         "reconciles": rec.get("reconciles"),
         "holdings_as_of": rec.get("holdings_as_of"),
         "book_as_of": rec.get("book_as_of"),
         "dates_aligned": rec.get("dates_aligned"),
         "residual_reason": rec.get("residual_reason"),
-        # Ã¢ÂÂ  WHAT THE WEIGHT-BASED VIEWS CANNOT SEE Ã¢ÂÂ the composition bars and Brinson are built on
+        # ⚠ WHAT THE WEIGHT-BASED VIEWS CANNOT SEE — the composition bars and Brinson are built on
         # start weights, and a sold position has none that is recoverable (see `contributions`).
         # They report this share instead of quietly omitting it.
         "realised_share_of_result_pct": c["realised_share_of_result_pct"],
         "legs": c["legs"],
-        # Ã¢ÂÂ  EVERY POSITION THE BOOK TOUCHED, held and sold, on ONE weight both kinds can carry.
+        # ⚠ EVERY POSITION THE BOOK TOUCHED, held and sold, on ONE weight both kinds can carry.
         # See `airs_capital` for why that weight is average invested capital and not a 1-January
-        # snapshot (AITopSelectie's equities were worth EUR 40,319 on 1 Jan against a EUR 1m book Ã¢ÂÂ
+        # snapshot (AITopSelectie's equities were worth EUR 40,319 on 1 Jan against a EUR 1m book —
         # it opened the year in cash).
         **ledger,
     }
@@ -1659,19 +1688,19 @@ def _realised_block(portfolio_id: int) -> dict:
 def _child_book_ledgers(holdings: list[dict]) -> dict[str, dict]:
     """`{child book: {instrument: ledger position}}` for every certificate this book looks through.
 
-    Ã¢ÂÂ Ã¢ÂÂ  THE LOOK-THROUGH IS THE ONLY HONEST WAY TO GET A PER-STOCK INVESTED CAPITAL, because the
-    flows exist Ã¢ÂÂ just not in this book. Bustelberg bought ONE certificate; `StarTopSelectie OFF
+    ⚠⚠ THE LOOK-THROUGH IS THE ONLY HONEST WAY TO GET A PER-STOCK INVESTED CAPITAL, because the
+    flows exist — just not in this book. Bustelberg bought ONE certificate; `StarTopSelectie OFF
     DYN` is the book that actually bought Shopify, and it has Shopify's purchases, its dates and
     its sizes. Splitting the certificate's capital by today's weights (the obvious shortcut) hands
     every leg the identical number and measures nothing per stock. This reads the real thing.
 
-    Ã¢ÂÂ  IT IS THE STRATEGY'S MONEY-WEIGHTED RETURN, NOT THIS BOOK'S, and the tooltip must say so.
+    ⚠ IT IS THE STRATEGY'S MONEY-WEIGHTED RETURN, NOT THIS BOOK'S, and the tooltip must say so.
     Bustelberg's own experience depends on when IT bought the certificate; the strategy's depends
     on when IT bought Shopify. They are different questions and only the second is answerable from
-    stored flows. This is the same compromise `own_return_pct` already makes Ã¢ÂÂ that column is
-    likewise the child book's number Ã¢ÂÂ so the two columns stay consistent with each other.
+    stored flows. This is the same compromise `own_return_pct` already makes — that column is
+    likewise the child book's number — so the two columns stay consistent with each other.
 
-    Ã¢ÂÂ  ONE LEDGER PER CHILD BOOK, not per leg: `_position_ledger` is several queries and a
+    ⚠ ONE LEDGER PER CHILD BOOK, not per leg: `_position_ledger` is several queries and a
     reconciliation, and a 22-leg certificate would otherwise pay for them 22 times.
     """
     from routers._airs_return_reconciliation import account_return_reconciliation  # noqa: PLC0415
@@ -1685,7 +1714,7 @@ def _child_book_ledgers(holdings: list[dict]) -> dict[str, dict]:
     for b in sorted(books):
         try:
             rec = account_return_reconciliation(b)
-            # No transactions for the child means no flows, so no Modified Dietz Ã¢ÂÂ the same gap
+            # No transactions for the child means no flows, so no Modified Dietz — the same gap
             # one level down, and it refuses the same way rather than inventing a denominator.
             if rec.get("realised_ytd_eur") is None:
                 _log.warning("[analysis] look-through into %s has no invested capital: its "
@@ -1694,7 +1723,7 @@ def _child_book_ledgers(holdings: list[dict]) -> dict[str, dict]:
                 continue
             led = _position_ledger(b, rec)
             out[b] = {p["name"]: p for p in (led.get("positions") or []) if p.get("name")}
-        except Exception as e:  # noqa: BLE001 Ã¢ÂÂ a child book must never break the parent's modal
+        except Exception as e:  # noqa: BLE001 — a child book must never break the parent's modal
             _log.warning("[analysis] look-through into %s failed (%s: %s)", b, type(e).__name__, e)
             out[b] = {}
     return out
@@ -1703,12 +1732,12 @@ def _child_book_ledgers(holdings: list[dict]) -> dict[str, dict]:
 def _via_capital(h: dict, by_name: dict, child_ledgers: dict[str, dict] | None = None) -> dict:
     """The certificate's own invested-capital figures, for a leg held through exactly one.
 
-    Ã¢ÂÂ  A LEG INSIDE A CERTIFICATE HAS NO FLOWS OF ITS OWN Ã¢ÂÂ AIRS trades the wrapper. That makes its
+    ⚠ A LEG INSIDE A CERTIFICATE HAS NO FLOWS OF ITS OWN — AIRS trades the wrapper. That makes its
     money-weighted return genuinely unknowable, and this does NOT invent one: it attributes the
     WRAPPER's, under keys the tooltip can label. The blank column stays blank.
 
-    Ã¢ÂÂ  ONLY WHEN THERE IS EXACTLY ONE ROUTE IN. A stock reached through two certificates has two
-    different invested-capital experiences, and "the" wrapper figure does not exist Ã¢ÂÂ naming one
+    ⚠ ONLY WHEN THERE IS EXACTLY ONE ROUTE IN. A stock reached through two certificates has two
+    different invested-capital experiences, and "the" wrapper figure does not exist — naming one
     of them would pick a winner at random. Same rule for a leg the book ALSO holds directly: the
     row is then part its own position and part the certificate's, so a single wrapper figure would
     describe only some of it.
@@ -1716,19 +1745,19 @@ def _via_capital(h: dict, by_name: dict, child_ledgers: dict[str, dict] | None =
     names = h.get("via_holding_names") or []
     if len(names) != 1 or len(h.get("via_names") or []) != 1:
         return {}
-    # Held directly as well as through the wrapper Ã¢ÂÂ `sources` carries one entry per route in, and
+    # Held directly as well as through the wrapper — `sources` carries one entry per route in, and
     # a `label` of None is the book's own shares.
     srcs = [s for s in (h.get("sources") or []) if s.get("label") is not None]
     if len(srcs) != 1 or len(srcs) != len(h.get("sources") or []):
         return {}
     src = srcs[0]
 
-    # Ã¢ÂÂÃ¢ÂÂ FIRST CHOICE: the child book's OWN position, which has this instrument's real purchases.
+    # ── FIRST CHOICE: the child book's OWN position, which has this instrument's real purchases.
     child = (child_ledgers or {}).get(str(src.get("book") or "")) or {}
     pos = child.get(h.get("name") or "") or {}
     if pos.get("return_pct") is not None:
-        # Ã¢ÂÂ  THE RATE TRANSFERS, THE EUROS DO NOT. The child book put its own money in; this book
-        # owns a SLICE of that position, so the capital is scaled by the slice Ã¢ÂÂ otherwise the
+        # ⚠ THE RATE TRANSFERS, THE EUROS DO NOT. The child book put its own money in; this book
+        # owns a SLICE of that position, so the capital is scaled by the slice — otherwise the
         # column reports the strategy's balance sheet inside someone else's portfolio. Scaling
         # both sides leaves the rate untouched, which is the point.
         book_val = float(src.get("book_current_value_eur") or 0)
@@ -1745,7 +1774,7 @@ def _via_capital(h: dict, by_name: dict, child_ledgers: dict[str, dict] | None =
             "via_avg_capital_eur": cap,
         }
 
-    # Ã¢ÂÂÃ¢ÂÂ FALLBACK: no flows in the child, so only the WRAPPER can be measured. One figure for the
+    # ── FALLBACK: no flows in the child, so only the WRAPPER can be measured. One figure for the
     # whole certificate, shipped under its own key and never as this leg's return.
     led = by_name.get(names[0]) or {}
     if led.get("return_pct") is None:
@@ -1758,12 +1787,12 @@ def _via_capital(h: dict, by_name: dict, child_ledgers: dict[str, dict] | None =
 
 
 def _position_ledger(portefeuille: str, rec: dict) -> dict:
-    """The book's whole year, one row per instrument Ã¢ÂÂ the merged held+sold list.
+    """The book's whole year, one row per instrument — the merged held+sold list.
 
-    Ã¢ÂÂ  THE INCOME IS JOINED PER NAME, INCLUDING NAMES NO LONGER HELD. `_direct_result` rolls the
+    ⚠ THE INCOME IS JOINED PER NAME, INCLUDING NAMES NO LONGER HELD. `_direct_result` rolls the
     orphans up into one total (right for the account row, which has no row to put them on); here
     every name gets its own row, so the roll-up would lose the attribution. `direct_result` is
-    read directly for that reason Ã¢ÂÂ same journal, same function, one level less aggregation.
+    read directly for that reason — same journal, same function, one level less aggregation.
     """
     from datetime import date as _date  # noqa: PLC0415
 
@@ -1777,7 +1806,7 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
     rows = (supabase.table("airs_transactie_snapshot").select("columns,kinds,rows")
             .eq("portefeuille", portefeuille).limit(1).execute().data or [])
     if not rows:
-        # Unreachable in practice Ã¢ÂÂ `_realised_block` already refuses on `realised_ytd_eur is None`
+        # Unreachable in practice — `_realised_block` already refuses on `realised_ytd_eur is None`
         # and never calls this. Kept as a floor, and deliberately NOT given its own "reason" field:
         # the reason is authored once, upstream, where the refusal actually happens.
         return {"positions": [], "capital_coverage_ratio": None, "avg_capital_eur": None}
@@ -1785,8 +1814,8 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
                         rows=rows[0].get("rows") or [])
 
     volk = (supabase.table("airs_holding")
-            # Ã¢ÂÂ  `fund_result_eur`/`fx_result_eur` ARE AIRS's OWN price/currency split of the held
-            # result Ã¢ÂÂ see `airs_capital.Position`. Read here rather than derived anywhere.
+            # ⚠ `fund_result_eur`/`fx_result_eur` ARE AIRS's OWN price/currency split of the held
+            # result — see `airs_capital.Position`. Read here rather than derived anywhere.
             .select("holding_name,quantity,start_value_eur,current_value_eur,"
                     "fund_result_eur,fx_result_eur")
             .eq("portefeuille", portefeuille)
@@ -1799,17 +1828,17 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
         amount_eur=float(m["amount_eur"]))
         for m in muts]).by_fonds.items()}
 
-    # Ã¢ÂÂ  THE NAMES WHOSE QUANTITY ARITHMETIC CANNOT BE TRUSTED Ã¢ÂÂ anything carrying a transaction
+    # ⚠ THE NAMES WHOSE QUANTITY ARITHMETIC CANNOT BE TRUSTED — anything carrying a transaction
     # type we do not interpret. `trades()` drops those rows (it emits only buys and sells), so the
     # ledger would never learn of them; they have to be read off the sheet directly. Measured: a
     # `D` row on KLA-Tencor added 279 shares in a 10:1 split, leaving its February purchase in
-    # PRE-split units against a POST-split holding Ã¢ÂÂ `qty_now Ã¢ÂÂ bought` gave 296 where the truth is
+    # PRE-split units against a POST-split holding — `qty_now − bought` gave 296 where the truth is
     # 170, and the money-weighted return read +39.81% instead of +56.67%.
     unknown = {r.get("Fonds") for r in sheet.rows
                if r.get("Fonds") and r.get("Tt") not in ("A", "V")}
     unknown = {n for n in unknown if isinstance(n, str)}
 
-    # Ã¢ÂÂ  A DEPOSIT THAT CAN BE PROVEN A SPLIT IS RESCALED; ONE THAT CANNOT IS STILL REFUSED.
+    # ⚠ A DEPOSIT THAT CAN BE PROVEN A SPLIT IS RESCALED; ONE THAT CANNOT IS STILL REFUSED.
     # `detect_split` needs two things this loader has and the ledger does not: the deposited
     # quantity, and the per-share prices of the trades that happened BEFORE it. See its docstring
     # for why both columns must agree before anything is rescaled.
@@ -1837,7 +1866,7 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
         if ratio:
             splits[name] = ratio
     if splits:
-        _log.warning("[analysis] %s: proven split(s) rescaled Ã¢ÂÂ %s", portefeuille,
+        _log.warning("[analysis] %s: proven split(s) rescaled — %s", portefeuille,
                      ", ".join(f"{k} {v:.4f}:1" for k, v in splits.items()))
 
     led = build_ledger(volk, trades(sheet), income, rec.get("book_start_eur"),
@@ -1848,14 +1877,14 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
             "name": p.name,
             "held": p.held,
             "closed_out": p.closed_out,
-            # Ã¢ÂÂ  BOTH BLANK WHEN THE QUANTITY ARITHMETIC IS REFUSED, not just the ratio. Leaving the
+            # ⚠ BOTH BLANK WHEN THE QUANTITY ARITHMETIC IS REFUSED, not just the ratio. Leaving the
             # capital visible would print a number that is only the flows (the opening leg having
-            # been skipped) Ã¢ÂÂ a partial figure in a column headed "Avg capital invested" is worse
+            # been skipped) — a partial figure in a column headed "Avg capital invested" is worse
             # than none, because it looks whole.
             "opening_eur": None if p.capital_unknown else p.opening_eur,
             "avg_capital_eur": None if p.capital_unknown else p.avg_capital_eur,
             "capital_unknown": p.capital_unknown,
-            # Ã¢ÂÂ  Descriptive Ã¢ÂÂ a share of the year's CAPITAL, not of the return. The column that
+            # ⚠ Descriptive — a share of the year's CAPITAL, not of the return. The column that
             # adds up is `contribution_pct`.
             "weight_pct": p.weight_pct,
             "held_result_eur": p.held_result_eur,
@@ -1875,7 +1904,7 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
             "prior_year_eur": p.prior_year_eur,
         } for p in led.positions],
         "avg_capital_eur": led.avg_capital_eur,
-        # Ã¢ÂÂ  REPORTED, NEVER ASSUMED TO BE 1. Modified Dietz ignores the price path within a
+        # ⚠ REPORTED, NEVER ASSUMED TO BE 1. Modified Dietz ignores the price path within a
         # position and the de-restatement is its own approximation; measured 0.998 and 1.023.
         "capital_coverage_ratio": led.capital_coverage_ratio,
         "ledger_result_eur": led.total_result_eur,
@@ -1885,16 +1914,16 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
 def _variant_bands(name: str | None, omschrijving: str | None) -> dict:
     """The portfolio's risk profile, and the allocation policy recorded for it.
 
-    Ã¢ÂÂ  THE CLASSIFIER IS THE ONE THE APP ALREADY HAS Ã¢ÂÂ `portfolio_variant`, the same function the
+    ⚠ THE CLASSIFIER IS THE ONE THE APP ALREADY HAS — `portfolio_variant`, the same function the
     correlation matrix filters by. It reads AIRS's own NAME first and the description second, and
     its rule ORDER is load-bearing: "bep offensief" contains "offensief", so Beperkt Offensief must
     be tested first or `BUS_Bep_offensief_FX` lands in the wrong profile. Writing a second
     "look at the end of the name" matcher here would be a second answer to one question, and it
-    would get that trap wrong Ã¢ÂÂ which is exactly the bug that module exists to document.
+    would get that trap wrong — which is exactly the bug that module exists to document.
 
-    Ã¢ÂÂ  NO PROFILE IS AN ANSWER, NOT A FAILURE. 8 of the 42 models are not offered at a risk profile
+    ⚠ NO PROFILE IS AN ANSWER, NOT A FAILURE. 8 of the 42 models are not offered at a risk profile
     at all (the themed TopSelectie funds, Risicodragend/Risicomijdend). They get `variant: null` and
-    no bands, and the chart simply draws none Ã¢ÂÂ inventing "Neutraal" for them would put a policy on
+    no bands, and the chart simply draws none — inventing "Neutraal" for them would put a policy on
     a product that has none.
     """
     from ._airs_allocation_bands import load_bands  # noqa: PLC0415
@@ -1902,7 +1931,7 @@ def _variant_bands(name: str | None, omschrijving: str | None) -> dict:
 
     variant = portfolio_variant(name, omschrijving)
     if not variant:
-        _log.warning("[analysis] %r is not offered at a risk profile Ã¢ÂÂ no allocation bands drawn",
+        _log.warning("[analysis] %r is not offered at a risk profile — no allocation bands drawn",
                      name)
         return {"variant": None, "bands": []}
     bands = [b for b in load_bands()
@@ -1923,18 +1952,18 @@ def compute_portfolio_analysis(portfolio_id: int,
 
     `source` ("model" | "book") picks where the RETURN numbers come from: the yfinance model
     reconstruction, or AIRS's own book (`cumulatief_rendement`). The benchmark is yfinance either
-    way. Composition weighting is a separate axis Ã¢ÂÂ see `weight_by`.
+    way. Composition weighting is a separate axis — see `weight_by`.
 
     `weight_by`:
-      "model" (default) Ã¢ÂÂ the strategy's nominal weights (`percentage`). What it is DESIGNED to
+      "model" (default) — the strategy's nominal weights (`percentage`). What it is DESIGNED to
                           hold. The panel is about the strategy, so this is the default.
-      "book"            Ã¢ÂÂ what the paired AIRS book ACTUALLY holds, weighted by EUR value. Only
+      "book"            — what the paired AIRS book ACTUALLY holds, weighted by EUR value. Only
                           the weights change; the classification and the benchmark are identical.
                           Falls back to "model" (with `weight_note`) when there is no book.
     """
-    # Ã¢ÂÂ  THE CLOCK STARTS ON THE FIRST LINE, NOT AT THE BOOK LOAD. It used to be initialised 100
+    # ⚠ THE CLOCK STARTS ON THE FIRST LINE, NOT AT THE BOOK LOAD. It used to be initialised 100
     # lines down, so the composition read, the certificate look-through, the asset-grid join and
-    # the whole BENCHMARK side Ã¢ÂÂ its members, its grid and its classification Ã¢ÂÂ were outside every
+    # the whole BENCHMARK side — its members, its grid and its classification — were outside every
     # phase this endpoint reports. Measured on BUS_Neutraal_FX that was ~400ms of a ~3.4s load
     # attributed to nothing, which is also why the old note here concluded "the split is flat":
     # the unmeasured part cannot show up as a peak. The phases now sum to the wall clock.
@@ -1957,10 +1986,10 @@ def compute_portfolio_analysis(portfolio_id: int,
     if p.get("positions_datum"):
         pos = [r for r in pos if r.get("datum") == p["positions_datum"]]
 
-    # Ã¢ÂÂ  LOOK THROUGH THE CERTIFICATES FIRST, OR THIS CHARTS THE WRONG PORTFOLIO. Nine of
+    # ⚠ LOOK THROUGH THE CERTIFICATES FIRST, OR THIS CHARTS THE WRONG PORTFOLIO. Nine of
     # ToppenbergBeheer Defensief's twelve positions are Leonteq certificates that ARE other
     # models, carrying 44.56% of it. Unexpanded they are unpriceable CH ISINs, so the sector
-    # breakdown is drawn over the remaining 55% Ã¢ÂÂ two bond ETFs and a cash line Ã¢ÂÂ and presented
+    # breakdown is drawn over the remaining 55% — two bond ETFs and a cash line — and presented
     # as the portfolio's composition. Expanding replaces each with the stocks it actually holds.
     from ._airs_lookthrough import expand_positions  # noqa: PLC0415  (cycle at module level)
 
@@ -1974,7 +2003,7 @@ def compute_portfolio_analysis(portfolio_id: int,
     overrides = _load_bucket_overrides(held)   # manual Class pins win, so the bar matches the column
     grid = _grid(held)
     port_items: list[tuple[float, tuple[str, str, str]]] = []
-    # Identity per item, parallel to `port_items` Ã¢ÂÂ see `_axis_holdings`.
+    # Identity per item, parallel to `port_items` — see `_axis_holdings`.
     port_labels: list[dict] = []
     alloc_items: list[tuple[float, str]] = []
     classified_w = total_w = 0.0
@@ -2028,27 +2057,27 @@ def compute_portfolio_analysis(portfolio_id: int,
         bench_items.append((cap, b))
         bench_rows.append((cap, b, m.get("isin") or ""))
 
-    # Ã¢ÂÂÃ¢ÂÂ Book weighting override Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+    # ── Book weighting override ─────────────────────────────────────────────────────────────
     # The model side is always built (it is the fallback). When the reader asks for book weights
-    # and a priced book exists, swap the portfolio items for the book's Ã¢ÂÂ nothing else moves, so
+    # and a priced book exists, swap the portfolio items for the book's — nothing else moves, so
     # the benchmark and the classification stay exactly as they were.
-    # The paired book drives book-weighting (if asked) AND the per-bucket returns for the pie Ã¢ÂÂ
+    # The paired book drives book-weighting (if asked) AND the per-bucket returns for the pie —
     # a return is a property of the held instruments, not the weighting basis. Loaded once.
-    # Ã¢ÂÂ  PHASE TIMING, RETURNED TO THE CLIENT. This endpoint is seconds long and the browser could
-    # only see the total Ã¢ÂÂ "Loading compositionÃ¢ÂÂ¦" for 5s with nothing saying which of its eight
+    # ⚠ PHASE TIMING, RETURNED TO THE CLIENT. This endpoint is seconds long and the browser could
+    # only see the total — "Loading composition…" for 5s with nothing saying which of its eight
     # loads was responsible. The AIRS expand has carried per-phase timings for exactly this reason;
-    # this had none. The split is fairly flat, which is itself the finding Ã¢ÂÂ there is no one hot
+    # this had none. The split is fairly flat, which is itself the finding — there is no one hot
     # query to fix, which is what sent the 2026-08-11 profile after the round-trip COUNT instead
-    # (212 of them, 103 byte-identical repeats Ã¢ÂÂ see `compute_portfolio_analysis_async`).
+    # (212 of them, 103 byte-identical repeats — see `compute_portfolio_analysis_async`).
     _phase("composition_and_benchmark")
     book = _book_port_items(portfolio_id, codes)
     _phase("book_holdings")
-    # Ã¢ÂÂ  SAY WHY THERE IS NO BOOK, HERE, EVERY TIME Ã¢ÂÂ not only when book WEIGHTS were asked for.
+    # ⚠ SAY WHY THERE IS NO BOOK, HERE, EVERY TIME — not only when book WEIGHTS were asked for.
     # The holdings table is empty whenever `book` is None regardless of `weight_by`, and it was
     # the one surface with no explanation attached. WARNING level because uvicorn leaves the root
-    # logger there, so an `info` line never reaches production Ã¢ÂÂ and production is where this was
+    # logger there, so an `info` line never reaches production — and production is where this was
     # reported ("No positions to show" beside a portfolios list that plainly has rows).
-    # Ã¢ÂÂ  COMPUTED BEFORE THE PAYLOAD, because `book_holdings` now needs it: the result columns are
+    # ⚠ COMPUTED BEFORE THE PAYLOAD, because `book_holdings` now needs it: the result columns are
     # grafted onto the holdings rows so the Holdings table is ONE table that adds up.
     realised_block = _realised_block(portfolio_id)
     book_note = None if book else book_unavailable_reason(portfolio_id)
@@ -2069,36 +2098,43 @@ def compute_portfolio_analysis(portfolio_id: int,
             port_foreign, port_holdings = book["foreign"], book["holdings"]
             weight_basis = "book"
         else:
-            weight_note = "No priced book to weight by Ã¢ÂÂ showing the model's own weights."
+            weight_note = "No priced book to weight by — showing the model's own weights."
 
-    # The charts show the (optionally) filtered asset-class sleeve Ã¢ÂÂ click a bar of the allocation
+    # The charts show the (optionally) filtered asset-class sleeve — click a bar of the allocation
     # bar to sub-select. `alloc_items` is parallel to `port_items` (same loop), so zip to filter;
     # the allocation bar itself stays FULL (below), so the reader can re-select.
     #
-    # Ã¢ÂÂ  REGION and CURRENCY describe EVERY holding; SECTOR describes only EQUITY. A bond or a fund
-    # has no equity sector Ã¢ÂÂ it would pile into "Unclassified" and drown the real sectors Ã¢ÂÂ so the
+    # ⚠ REGION and CURRENCY describe EVERY holding; SECTOR describes only EQUITY. A bond or a fund
+    # has no equity sector — it would pile into "Unclassified" and drown the real sectors — so the
     # sector axis is computed over the equity sleeve alone. Each is then intersected with whatever
     # class the allocation bar has selected (so selecting Bonds empties the sector chart, as it
-    # should Ã¢ÂÂ sector is not relevant there).
-    # Ã¢ÂÂ  ONE MEMBER SINCE `Equity ETF` WAS RETIRED (2026-08-18), AND STILL A SET ON PURPOSE Ã¢ÂÂ it is
+    # should — sector is not relevant there).
+    # ⚠ ONE MEMBER SINCE `Equity ETF` WAS RETIRED (2026-08-18), AND STILL A SET ON PURPOSE — it is
     # "the sleeve the sector axis is defined over", which is a different idea from "the Equity
     # bucket" even where the two now coincide. The ETFs it used to name are inside `Equity`, so the
     # denominator below is unchanged by the merge.
     _EQUITY = {"Equity"}
-    general_items = port_items
-    general_labels = port_labels
+    # ⚠ FUNDS ARE OUT OF ALL THREE AXES, not just sector — see the note below. A fund's DOMICILE and
+    # QUOTE CURRENCY describe the wrapper, not what it holds ("⚠ For an ETF this describes its
+    # listing, not what it holds" is already on the Region header), so they were the same
+    # `Unclassified` block on those two charts and are dropped for the same reason.
+    _funds = {lb.get("isin") for lb in port_labels
+              if lb.get("isin") and _is_fund(grid.get(lb["isin"]), lb.get("name") or "")}
+    _keep_all = [(pi, ai, lb) for pi, ai, lb in zip(port_items, alloc_items, port_labels)
+                 if lb.get("isin") not in _funds]
+    general_items = [pi for pi, _ai, _lb in _keep_all]
+    general_labels = [lb for _pi, _ai, lb in _keep_all]
     if bucket_filter:
-        keep = [(pi, lb) for pi, ai, lb in zip(port_items, alloc_items, port_labels)
-                if ai[1] == bucket_filter]
+        keep = [(pi, lb) for pi, ai, lb in _keep_all if ai[1] == bucket_filter]
         general_items = [pi for pi, _lb in keep]
         general_labels = [lb for _pi, lb in keep]
-    # Ã¢ÂÂ  THE SECTOR DENOMINATOR IS THE EQUITY SLEEVE, AND SELECTING A CLASS MUST NOT MOVE IT.
+    # ⚠ THE SECTOR DENOMINATOR IS THE EQUITY SLEEVE, AND SELECTING A CLASS MUST NOT MOVE IT.
     # This used to intersect with `bucket_filter` as well, so picking "Stocks" dropped the equity
     # ETFs (then their own bucket) out of the denominator and every sector percentage rose:
     # Technology 34.41% -> 35.88% on
     # ToppenbergBeheer Defensief, +1.07 to +1.47pp across the three Toppenberg books.
     #
-    # Arithmetically that was correct Ã¢ÂÂ a different question, honestly answered. As an interface
+    # Arithmetically that was correct — a different question, honestly answered. As an interface
     # it is not: the bar you clicked reported one number and reported another once clicked, so the
     # act of inspecting a figure changed it. A reader cannot tell that from a bug, and the first
     # thing they lose is trust in the chart they were about to rely on.
@@ -2106,39 +2142,53 @@ def compute_portfolio_analysis(portfolio_id: int,
     # Sector is an EQUITY view either way (a bond has no sector), so the equity sleeve is the only
     # denominator that answers one question consistently. Selecting a class now re-colours the
     # chart without moving it.
-    # Ã¢ÂÂ  BUT A NON-EQUITY SELECTION STILL EMPTIES IT. Picking Bonds or Cash must not leave the
-    # equity sector chart standing Ã¢ÂÂ sector is not a question about a bond, and showing the
+    # ⚠ BUT A NON-EQUITY SELECTION STILL EMPTIES IT. Picking Bonds or Cash must not leave the
+    # equity sector chart standing — sector is not a question about a bond, and showing the
     # stocks' sectors under a "Bonds" selection would attribute them to the wrong sleeve. So the
     # filter still decides WHETHER the chart is drawn; it just no longer decides its denominator.
+    # ⚠⚠ AND A FUND IS OUT OF THE SECTOR SLEEVE ALTOGETHER (2026-09-03, on request: "we should not
+    # take the stock etfs into account in the drilldown stock section — all those unclassified
+    # things, which are the stock etfs right now, can go away"). An ETF is opaque: this app does
+    # not look through funds, so its sector is not unknown, it is UNDEFINED — and folding it into
+    # `Unclassified` put 16.84% of BUS_Offensief on a bar that says nothing, inside the denominator
+    # of every real sector beside it.
+    # ⚠⚠ IT IS ALSO WHAT MAKES THE BAR AND ITS DRILL-DOWN ONE NUMBER. `split_legs` — the attribution
+    # basis the drill-down is built on — has always excluded funds; the composition kept them, so
+    # Technology read 36.33% on the bar against 43.69% in the list, out by exactly the fund weight
+    # (1/(1 - 0.1684) = 1.2025). One membership rule, one denominator, and the two agree by
+    # construction rather than by a correction applied at the other end.
+    # ⚠ A FUND, NOT EVERY `Unclassified`. An equity we simply cannot classify stays in: dropping it
+    # would make its real sector read as unowned, which is a false finding rather than a missing
+    # one — the distinction `split_legs` draws between `fund` and `unpriced`, applied here too.
     sector_keep = ([] if (bucket_filter and bucket_filter not in _EQUITY)
                    else [(pi, lb) for pi, ai, lb in zip(port_items, alloc_items, port_labels)
-                         if ai[1] in _EQUITY])
+                         if ai[1] in _EQUITY and lb.get("isin") not in _funds])
     sector_items = [pi for pi, _lb in sector_keep]
     sector_labels = [lb for _pi, lb in sector_keep]
     pw_general, pw_sector = _weigh(general_items), _weigh(sector_items)
-    # Ã¢ÂÂ Ã¢ÂÂ  THE INDEX IS WEIGHED ON THE SAME BASIS AS THE PORTFOLIO IT IS DRAWN AGAINST, AND IT WAS
-    # NOT (fixed 2026-08-10). `bench_items` above carries `market_cap_eur` Ã¢ÂÂ the cap TODAY Ã¢ÂÂ while
+    # ⚠⚠ THE INDEX IS WEIGHED ON THE SAME BASIS AS THE PORTFOLIO IT IS DRAWN AGAINST, AND IT WAS
+    # NOT (fixed 2026-08-10). `bench_items` above carries `market_cap_eur` — the cap TODAY — while
     # the portfolio bars moved to the attribution basis (Beginwaarde, the window's open) in
     # 2026-07-31. So every bar pair compared a start-weighted book against a today-weighted index,
-    # and `diff_pct` Ã¢ÂÂ the TILT, the entire reason the two are side by side Ã¢ÂÂ was a subtraction
+    # and `diff_pct` — the TILT, the entire reason the two are side by side — was a subtraction
     # across two bases.
     #
     # Measured on SP500 Technology: **34.90% on today's caps, 31.24% at the window's open.** The
     # chart printed 35% under an axis note reading "Start-of-window weights", and the drill-down
-    # (which has always used `index_rows(label, start)`) printed 31.24% Ã¢ÂÂ a 3.66pp gap that read as
+    # (which has always used `index_rows(label, start)`) printed 31.24% — a 3.66pp gap that read as
     # a broken panel and was really two honest numbers under one label.
     #
-    # Ã¢ÂÂ  ONLY WHEN THERE IS A WINDOW TO OPEN. Without a priced book there is no Beginwaarde and the
-    # portfolio bars fall back to current value Ã¢ÂÂ so the index falls back with it, and the axis
+    # ⚠ ONLY WHEN THERE IS A WINDOW TO OPEN. Without a priced book there is no Beginwaarde and the
+    # portfolio bars fall back to current value — so the index falls back with it, and the axis
     # note already says the basis is not the attribution one. Two fallbacks, one basis, either way.
-    # The rows behind the bars, on each axis's OWN denominator Ã¢ÂÂ see `_axis_holdings`.
+    # The rows behind the bars, on each axis's OWN denominator — see `_axis_holdings`.
     dd_general = _axis_holdings(general_items, general_labels)
     dd_sector = _axis_holdings(sector_items, sector_labels)
 
-    # Ã¢ÂÂ  NAMED, NOT INFERRED. The sector axis divides by the equity sleeve and the other two by
+    # ⚠ NAMED, NOT INFERRED. The sector axis divides by the equity sleeve and the other two by
     # every long position, so "our weight" means a different denominator per chart. The drill-down
     # prints this sentence rather than leaving a reader to reverse-engineer which total a bar is a
-    # share of Ã¢ÂÂ the exact question that made the composition's 36% look inconsistent with the
+    # share of — the exact question that made the composition's 36% look inconsistent with the
     # attribution table's 39.1% for the same sector.
     _basis_note = {
         "sector": "the equity sleeve (shares and equity ETFs)",
@@ -2148,36 +2198,59 @@ def compute_portfolio_analysis(portfolio_id: int,
     weight_field = ("each position's current EUR value" if weight_basis == "book"
                     else "the model's stated percentage")
 
-    # Ã¢ÂÂ  THE BARS ARE WEIGHED ON THE ATTRIBUTION BASIS (2026-07-31) Ã¢ÂÂ see `_basis_axes`. The
-    # current-value path above still runs: it feeds the allocation pie and the holdings table,
-    # which are point-in-time views of what is held and must NOT move to a January basis. Only
-    # these three axes changed, and only so a sector bar equals its own Brinson row.
+    # ⚠⚠ THE BARS NO LONGER USE THIS — see the axis loop below (2026-09-03). What `_basis_axes`
+    # still supplies is `_start_weights`, the per-ISIN weight at the window's open that rides on
+    # the holdings payload as `weight_start_pct`.
+    # ⚠ AND NOTHING RENDERS THAT FIELD TODAY: the "Weight (start)" column came off 2026-08-04.
+    # It is kept because it is a published field and because the Attribution panel is weighed on
+    # exactly this basis, so the payload can still answer "what did this weigh in January" without
+    # a second loader. If it is ever confirmed unused, this call is a whole leg of the modal's
+    # work to delete — measure before assuming it is free.
     basis_axes = _basis_axes(portfolio_id, source, p.get("positions_datum"), bucket_filter)
-    # Ã¢ÂÂ Ã¢ÂÂ  A CONSTITUENT WITH NO START CAP IS DROPPED, NOT FALLEN BACK TO TODAY'S. The first version
+    # ⚠⚠ A CONSTITUENT WITH NO START CAP IS DROPPED, NOT FALLEN BACK TO TODAY'S. The first version
     # of this used `bench_start.get(isin, cap)`, which quietly re-created the very thing it was
     # fixing: a handful of names weighed today inside a bar weighed at the open, and a denominator
     # that then matched neither basis. Measured on SP500 Technology it read 31.92% against the
-    # drill-down's 31.24% Ã¢ÂÂ a 0.68pp gap from about two constituents. Dropping them puts the bar on
+    # drill-down's 31.24% — a 0.68pp gap from about two constituents. Dropping them puts the bar on
     # exactly the constituent set `index_rows` weighs, so the two agree by construction rather than
     # to within a rounding.
-    bench_start = _bench_start_caps(benchmark_label, (basis_axes or {}).get("_start"))
-    bw = _weigh([(bench_start[isin], b) for _cap, b, isin in bench_rows if isin in bench_start]
-                if bench_start else bench_items)
+    # ⚠⚠ TODAY'S CAPS, NOT THE WINDOW'S OPEN (2026-09-03, on request: "Benchmark should also be up
+    # to date daily"). It has to move with the portfolio side below — a book weighed today against
+    # an index weighed in January is a tilt made of two different dates, and every `diff_pct` on
+    # the chart would carry that gap. `_bench_start_caps` and the constituent-dropping rule it
+    # needed go with it: on today's caps every constituent has one.
+    # ⚠⚠ ONE CONSTITUENT LIST FOR THE BAR AND FOR ITS DRILL-DOWN (2026-09-03, on request: "each
+    # company should have a price and marketcap at the start and end, and we use that single list
+    # both for the Sector scorecard and for the drilldown"). They were two: the bar weighed every
+    # member carrying a market cap, the drill-down weighed `index_rows(start)` — the members that
+    # also have a PRICE at both ends, because it has a Return column and a return needs two marks.
+    # Measured on ACWI: 1,849 against 1,845, and the four that differ are Technology-heavy enough
+    # to read 27.95% on the bar against 27.60% one click below it.
+    # ⚠ THE NARROWER LIST WINS, and that is the honest direction. A constituent with no opening
+    # price cannot be shown in the drill-down at all, so including it in the bar means the bar is
+    # a percentage of something the reader cannot go and look at. Dropped: CSG NV (series starts
+    # 2026-01-23), RWE AG (02-12), Kesko Oyj (06-05) — each simply not priced when the year opened.
+    # ⚠ THE WEIGHT IS STILL TODAY'S CAP. This narrows WHO is in the denominator, not WHEN they are
+    # weighed — the bars stay on current values, which is what the axis note promises.
+    priced_both = _bench_window_isins(benchmark_label)
+    bw = _weigh([(cap, b) for cap, b, isin in bench_rows
+                 if not priced_both or isin in priced_both]
+                if priced_both is not None else bench_items)
     _phase("axes")
 
-    # Ã¢ÂÂ Ã¢ÂÂ  THE CLASS RETURN IS RE-DERIVED FROM THE ENRICHED ROWS, AND `_book_port_items`' OWN
-    # `bucket_returns` IS DELIBERATELY DISCARDED. That one is `(ÃÂ£ current + income) ÃÂ· ÃÂ£ start`,
-    # which OMITS whatever the class banked by selling Ã¢ÂÂ the identical defect the Holdings table's
+    # ⚠⚠ THE CLASS RETURN IS RE-DERIVED FROM THE ENRICHED ROWS, AND `_book_port_items`' OWN
+    # `bucket_returns` IS DELIBERATELY DISCARDED. That one is `(Σ current + income) ÷ Σ start`,
+    # which OMITS whatever the class banked by selling — the identical defect the Holdings table's
     # class Return had. Measured on AITopSelectie: it reported Stocks at +43.53% against a class
     # that made +44.16%, the EUR 6,307 realised on trims missing from the rate while sitting in the
     # Result column two cells away. Two class returns a point apart, on one screen, is the pair a
     # reader cannot arbitrate.
     #
-    # Recomputed here Ã¢ÂÂ after `_with_results` Ã¢ÂÂ from EXACTLY the rows the table renders, so the
+    # Recomputed here — after `_with_results` — from EXACTLY the rows the table renders, so the
     # allocation legend and the class subtotal cannot be two different numbers. One formula, one
-    # place: ÃÂ£ result ÃÂ· ÃÂ£ opening value, over the rows that HAVE an opening value.
+    # place: Σ result ÷ Σ opening value, over the rows that HAVE an opening value.
     #
-    # Ã¢ÂÂ  A CLOSED-OUT POSITION HAS NO CLASS, so its realised result is not in any bucket here. That
+    # ⚠ A CLOSED-OUT POSITION HAS NO CLASS, so its realised result is not in any bucket here. That
     # is correct rather than missing: it has no sector, no ISIN and no current weight either, which
     # is why the table gives it its own group outside the classes. The figure that accounts for it
     # is `Contribution`, on the book's own capital.
@@ -2185,24 +2258,24 @@ def compute_portfolio_analysis(portfolio_id: int,
         _with_start_weights(book["holdings_detail"] if book else [],
                             (basis_axes or {}).get("_start_weights") or {}),
         realised_block, benchmark_label)
-    # Ã¢ÂÂ  THE SOLD ROWS GET THE SAME THREE INSTRUMENT COLUMNS AS THE HELD ONES. They had blanks
-    # because a closed-out position carries no ISIN Ã¢ÂÂ not because the figures are meaningless for
+    # ⚠ THE SOLD ROWS GET THE SAME THREE INSTRUMENT COLUMNS AS THE HELD ONES. They had blanks
+    # because a closed-out position carries no ISIN — not because the figures are meaningless for
     # it. See `_sold_position_isins` for how the identity is recovered and what happens when it
     # cannot be. In place on `realised_block`, which is the same object the payload ships below.
     _with_sold_risk(realised_block, benchmark_label)
-    _agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])   # [ÃÂ£ start, ÃÂ£ result]
+    _agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])   # [Σ start, Σ result]
     for _h in enriched_holdings:
         _start = _h.get("start_value_eur") or 0.0
         if _start > 0:
             _agg[_h["bucket"]][0] += _start
             _agg[_h["bucket"]][1] += _h.get("result_eur") or 0.0
     bucket_returns = {b: v[1] / v[0] * 100.0 for b, v in _agg.items() if v[0]}
-    # Ã¢ÂÂ  THE CLASS'S SHARE OF THE BOOK'S YEAR, in POINTS Ã¢ÂÂ a different question from the return
+    # ⚠ THE CLASS'S SHARE OF THE BOOK'S YEAR, in POINTS — a different question from the return
     # beside it, on the book's own opening capital rather than the class's. These ADD; the returns
     # do not, because each of those sits on its own denominator.
     #
-    # Ã¢ÂÂ  THEY DO NOT ADD TO THE WHOLE BOOK, AND THE CALLER MUST SAY SO. A position sold out during
-    # the year has no asset class Ã¢ÂÂ no sector, no ISIN, no current weight Ã¢ÂÂ so no bar can carry it.
+    # ⚠ THEY DO NOT ADD TO THE WHOLE BOOK, AND THE CALLER MUST SAY SO. A position sold out during
+    # the year has no asset class — no sector, no ISIN, no current weight — so no bar can carry it.
     # Measured on BUS_Offensief_Dyn: the classes come to +8.211pp against a book that made +5.827%,
     # the missing -2.384pp being eight names it no longer holds. `realised.positions` carries them
     # and the UI prints the remainder beneath the bars, because a set of parts that silently misses
@@ -2211,7 +2284,7 @@ def compute_portfolio_analysis(portfolio_id: int,
     for _h in enriched_holdings:
         if _h.get("contribution_pct") is not None:
             _contrib[_h["bucket"]] += _h["contribution_pct"]
-    # Ã¢ÂÂ  CASH IS 0%, NOT UNDEFINED Ã¢ÂÂ it has no `Beginwaarde` to divide by, so the rule above leaves
+    # ⚠ CASH IS 0%, NOT UNDEFINED — it has no `Beginwaarde` to divide by, so the rule above leaves
     # it out and the bar reads a dash. That dash says "unknown" about the one asset whose return is
     # certain. Set explicitly, so the allocation legend and the class row agree here too rather
     # than one of them going quiet.
@@ -2220,26 +2293,31 @@ def compute_portfolio_analysis(portfolio_id: int,
 
     axes = []
     for axis in ("sector", "region", "currency"):
-        ba = (basis_axes or {}).get(axis)
-        if ba and ba["weights"]:
-            pw_axis, dd_axis = ba["weights"], ba["holdings"]
-            note = (f"Share of the attributable holdings on the {axis} axis, by each position's "
-                    f"value on {basis_axes['_start']} (Beginwaarde) Ã¢ÂÂ the SAME weights the "
-                    f"Attribution table uses.")
-            positions, excluded = ba["positions"], ba["excluded"]
-            attributable_pct, unpriced_pct = ba["attributable_pct"], ba["unpriced_pct"]
-        else:
-            # Ã¢ÂÂ  FALLBACK, AND IT IS A DIFFERENT QUESTION Ã¢ÂÂ SO IT SAYS SO. No paired book (or
-            # nothing attributable) means there is no Beginwaarde to weigh by. Drawing an empty
-            # chart would claim the portfolio holds nothing; drawing the current-value bars
-            # without a word would put a differently-based number under the same heading.
-            pw = pw_sector if axis == "sector" else pw_general
-            dd = dd_sector if axis == "sector" else dd_general
-            pw_axis, dd_axis = pw[axis], dd[axis]
-            note = (f"Share of {_basis_note[axis]}, by {weight_field}. "
-                    f"Ã¢ÂÂ  Not the Attribution basis Ã¢ÂÂ no start-of-window values are available here.")
-            positions = len(sector_items if axis == "sector" else general_items)
-            excluded, attributable_pct, unpriced_pct = [], None, None
+        # ⚠⚠ CURRENT WEIGHTS, AND THIS REVERSES 2026-07-31 (2026-09-03, on request: "Sector, Region
+        # and Currency should all use daily up to date weights from AIRS"). These bars were moved
+        # ONTO the attribution basis then — Beginwaarde over the attributable legs — so that a
+        # sector bar equalled its own Brinson row. They are back to what the book holds TODAY,
+        # which is the same basis the allocation pie and the holdings table have never left.
+        #
+        # ⚠⚠ THE COST IS THE ONE THAT MOVE BOUGHT, AND IT IS REAL: A SECTOR BAR NO LONGER EQUALS
+        # ITS BRINSON ROW. Measured when the change was made in the other direction, Technology
+        # 36% today against 39.1% at the open, ASML 7.30% against 5.75% — differences well beyond
+        # rounding. The Attribution panel decomposes a RETURN and cannot use today's weights: a
+        # return is earned by what was held while it was earned. So the two panels now answer two
+        # questions, and each says which — this note is that sentence for these bars.
+        #
+        # ⚠ THE COVERAGE DISCLOSURES GO WITH THE BASIS THEY DESCRIBED. `attributable_pct`, the
+        # per-axis `excluded` list and `unpriced_pct` measured what the ATTRIBUTION basis had to
+        # drop — a mid-window purchase with no Beginwaarde, a holding with no return. None of that
+        # applies to a current-value weight, and carrying the old numbers under the new bars would
+        # be the mixed-basis ratio this module has already been bitten by once.
+        pw = pw_sector if axis == "sector" else pw_general
+        dd = dd_sector if axis == "sector" else dd_general
+        pw_axis, dd_axis = pw[axis], dd[axis]
+        note = (f"Share of {_basis_note[axis]}, by {weight_field}, as at the latest AIRS "
+                f"valuation. Not the Attribution basis, which weighs the window's open.")
+        positions = len(sector_items if axis == "sector" else general_items)
+        excluded, attributable_pct, unpriced_pct = [], None, None
         keys = set(pw_axis) | set(bw[axis])
         rows = [{
             "bucket": k,
@@ -2247,7 +2325,7 @@ def compute_portfolio_analysis(portfolio_id: int,
             "benchmark_pct": bw[axis].get(k, 0.0),
             # The tilt. It is the whole point of putting the two side by side.
             "diff_pct": pw_axis.get(k, 0.0) - bw[axis].get(k, 0.0),
-            # Ã¢ÂÂ  THE ROWS SUM TO `portfolio_pct` EXACTLY Ã¢ÂÂ same division, done once. A bucket the
+            # ⚠ THE ROWS SUM TO `portfolio_pct` EXACTLY — same division, done once. A bucket the
             # portfolio does not hold (an unowned sector the benchmark has) is an empty list, which
             # is a finding rather than missing data.
             "holdings": dd_axis.get(k, []),
@@ -2258,20 +2336,20 @@ def compute_portfolio_analysis(portfolio_id: int,
             "rows": rows,
             "basis": note,
             "positions": positions,
-            # Ã¢ÂÂ  WHAT THE BASIS LEAVES OUT, PER AXIS. Named, weighted and reasoned, because this
-            # basis drops a mid-window purchase and an unpriceable holding entirely Ã¢ÂÂ neither can
+            # ⚠ WHAT THE BASIS LEAVES OUT, PER AXIS. Named, weighted and reasoned, because this
+            # basis drops a mid-window purchase and an unpriceable holding entirely — neither can
             # be expressed on it, and a percentage that quietly loses weight is the one failure
             # this whole module is written to avoid.
             #
-            # Ã¢ÂÂ  BUT NOT EVERY EXCLUSION IS A LOSS. A fund, a bond and a cash line have no sector
-            # BY DEFINITION and are not Stocks in the first place Ã¢ÂÂ they are their own slices of
+            # ⚠ BUT NOT EVERY EXCLUSION IS A LOSS. A fund, a bond and a cash line have no sector
+            # BY DEFINITION and are not Stocks in the first place — they are their own slices of
             # the allocation chart, and presenting them as weight the sector chart "cannot handle"
             # made an ordinary 13% in ETFs read as a defect. `unpriced_pct` is the one that is.
             "attributable_pct": attributable_pct,
             "unpriced_pct": unpriced_pct,
             "excluded": [{"name": (e.get("grid_row") or {}).get("name") or e.get("airs_name"),
                           "isin": e.get("isin"), "weight_pct": e["weight_pct"],
-                          # The Class it already carries in our own system Ã¢ÂÂ which is what makes
+                          # The Class it already carries in our own system — which is what makes
                           # "this was never a stock" visible instead of implied.
                           "asset_class": e.get("asset_class"),
                           "reason": e["reason"]} for e in excluded],
@@ -2280,30 +2358,30 @@ def compute_portfolio_analysis(portfolio_id: int,
     return {
         "portfolio_id": portfolio_id,
         "name": p["name"],
-        # Ã¢ÂÂ  THE COMPOSITION'S EFFECTIVE DATE Ã¢ÂÂ NOT THE DATE ANY FIGURE IS VALUED AT. It is when
+        # ⚠ THE COMPOSITION'S EFFECTIVE DATE — NOT THE DATE ANY FIGURE IS VALUED AT. It is when
         # the MODEL declared these weights (2025-12-30 for AITopSelectie). Every book-valued
         # number on this screen is as-of `holdings_as_of` below, which for that same portfolio is
-        # 2026-08-01 Ã¢ÂÂ 216 days apart. Using this one as a provenance timestamp made the modal
+        # 2026-08-01 — 216 days apart. Using this one as a provenance timestamp made the modal
         # report the row's own +111.74% as 216 days old while the row called it 2.
         "as_of": p.get("positions_datum"),
-        # The snapshot the book valuations come from Ã¢ÂÂ the clock for the weight columns and for
+        # The snapshot the book valuations come from — the clock for the weight columns and for
         # every `own_return_source == "airs"` row. Null in model mode, where the holdings table is
         # priced from yfinance and each row carries its own `own_return_as_of` instead.
         "holdings_as_of": (book or {}).get("book_as_of"),
-        # Ã¢ÂÂ Ã¢ÂÂ  THE OTHER HALF OF THE FRESHNESS VERDICT, AND WITHOUT IT THIS MODAL CANNOT AGREE WITH
+        # ⚠⚠ THE OTHER HALF OF THE FRESHNESS VERDICT, AND WITHOUT IT THIS MODAL CANNOT AGREE WITH
         # THE ROW THAT OPENED IT. `holdings_as_of` is the day AIRS VALUED the book; this is the
-        # moment WE last read it Ã¢ÂÂ and `Provenance` needs BOTH to say whose lag it is. Given only
+        # moment WE last read it — and `Provenance` needs BOTH to say whose lag it is. Given only
         # the first, `lagOwner` returns null, the badge cannot rule out that the gap is ours, and
         # it goes amber: measured on AITopSelectie, the row (which passes `fetched_at`) called the
-        # book current while the modal, from the SAME two dates, warned on every Ã¢ÂÂ inside it Ã¢ÂÂ and
+        # book current while the modal, from the SAME two dates, warned on every ⓘ inside it — and
         # no refresh could clear it, because the fact that would have cleared it was never sent.
         # Same bug the row was fixed for on 2026-08-17; the modal never got the second date.
         "holdings_fetched_at": _book_fetched_at((book or {}).get("portefeuille")),
-        # The risk profile this model is offered at, and the allocation policy that goes with it Ã¢ÂÂ
+        # The risk profile this model is offered at, and the allocation policy that goes with it —
         # so the chart can draw the band each class is SUPPOSED to sit in, over the bar showing
         # where it actually sits. See `_variant_bands`.
         **_variant_bands(p.get("name"), p.get("omschrijving")),
-        # Ã¢ÂÂ  WHICH BOOK IS "THIS" BOOK Ã¢ÂÂ needed the moment a Return could come from ANOTHER one. A
+        # ⚠ WHICH BOOK IS "THIS" BOOK — needed the moment a Return could come from ANOTHER one. A
         # row valued by the account behind a certificate carries that account's name in
         # `own_return_book`, and without this the reader has nothing to compare it against, so
         # every AIRS row would have to be labelled or none could be.
@@ -2313,27 +2391,27 @@ def compute_portfolio_analysis(portfolio_id: int,
         "holdings": port_holdings,
         # Which side the portfolio bars describe: the model's nominal weights, or the book's
         # actual EUR holdings. `weight_note` is set only when "book" was asked for and refused.
-        # Milliseconds per phase, so the browser can say WHERE the wait went Ã¢ÂÂ see .
+        # Milliseconds per phase, so the browser can say WHERE the wait went — see .
         "timings_ms": _t,
         "weight_basis": weight_basis,
         "weight_note": weight_note,
         # Why the holdings table is empty, when it is. Null when there IS a book view.
         "book_note": book_note,
-        # Coverage, always Ã¢ÂÂ a composition renormalised over a fraction of the model is the same
+        # Coverage, always — a composition renormalised over a fraction of the model is the same
         # invention the returns refuse to make. The reader gets to see it.
         "covered_pct": (classified_w / total_w * 100.0) if total_w > 0 else 0.0,
         "benchmark_covered_pct": ((bench_classified / bench_total * 100.0)
                                   if bench_total > 0 else 0.0),
-        # Ã¢ÂÂ  Rows priced on a venue whose currency differs from the company's own Ã¢ÂÂ the
+        # ⚠ Rows priced on a venue whose currency differs from the company's own — the
         # wrong-listing bug, surfaced. 40 of the S&P's 491 sit on European/Canadian lines, which
         # is what made the naive currency split read "12% EUR". It also means the benchmark's
         # PRICE SERIES is drawn off those venues. Not hidden: shown, and counted.
         "foreign_listings": port_foreign,
         "benchmark_foreign_listings": bench_foreign,
-        # Ã¢ÂÂ  How much of the INDEX we could price. Never assumed: ACWI's missing names are a whole
+        # ⚠ How much of the INDEX we could price. Never assumed: ACWI's missing names are a whole
         # country at a time (GuruFocus sells no UK or India; yfinance has them but some were never
         # ingested), and a cap-weighted index renormalised over the rest does not lose that
-        # weight Ã¢ÂÂ it redistributes it into everything else. That is a bias, and the reader is
+        # weight — it redistributes it into everything else. That is a bias, and the reader is
         # told rather than left to assume 100%.
         "benchmark_universe_members": bench_coverage.get("universe_members") or 0,
         "benchmark_priced": bench_coverage.get("priced") or 0,
@@ -2344,13 +2422,13 @@ def compute_portfolio_analysis(portfolio_id: int,
         "benchmark_missing_countries": bench_coverage.get("missing_countries") or [],
         "returns": _returns_timed(portfolio_id, p.get("positions_datum"), benchmark_label,
                                   source, _phase),
-        # Ã¢ÂÂ  THE COMPOSITION WAS EXPANDED, AND THAT MUST BE VISIBLE. These charts are drawn over
+        # ⚠ THE COMPOSITION WAS EXPANDED, AND THAT MUST BE VISIBLE. These charts are drawn over
         # the stocks BEHIND the certificates, not over the twelve lines AIRS stores. Without
         # this the reader cannot tell a portfolio that genuinely holds 22 names from one that
-        # holds three certificates Ã¢ÂÂ and cannot check the figures against the composition table,
+        # holds three certificates — and cannot check the figures against the composition table,
         # which still shows the unexpanded rows.
         "looked_through_pct": lookthrough["looked_through_pct"],
-        # Weight still inside a certificate we could NOT expand Ã¢ÂÂ its target has no stored
+        # Weight still inside a certificate we could NOT expand — its target has no stored
         # composition. Not dropped (that would delete the weight silently); reported.
         "opaque_pct": lookthrough["opaque_pct"],
         "looked_through": lookthrough["expanded"],
@@ -2360,22 +2438,22 @@ def compute_portfolio_analysis(portfolio_id: int,
         "allocation": [{**s, "return_pct": bucket_returns.get(s["bucket"]),
                         "contribution_pct": _contrib.get(s["bucket"])}
                        for s in _weigh_alloc(alloc_items)],
-        # Per-holding book detail (bucket / currency / start-weight / return) Ã¢ÂÂ the source for a
+        # Per-holding book detail (bucket / currency / start-weight / return) — the source for a
         # non-equity sleeve's contribution + currency view, where sector-vs-SP500 says nothing.
         # Empty when no book is paired (a model with no book has no per-holding returns).
         #
-        # Ã¢ÂÂ  `weight_start_pct` IS GRAFTED ON FROM THE AXES' OWN LEGS, NOT RECOMPUTED. It is the
+        # ⚠ `weight_start_pct` IS GRAFTED ON FROM THE AXES' OWN LEGS, NOT RECOMPUTED. It is the
         # numerator the sector bars are built from, so the table and the chart cannot disagree
-        # about what a position weighed in January Ã¢ÂÂ which is the entire reason the column exists.
+        # about what a position weighed in January — which is the entire reason the column exists.
         # Both weight columns are whole-book shares, so they sit beside each other honestly:
         # ASML 5.00% at the start against 7.02% now IS the story, and a bar is that start weight
         # divided by the axis's `attributable_pct`.
-        # Ã¢ÂÂ  THE RESULT COLUMNS ARE GRAFTED ON HERE, so the Holdings table is ONE table that adds
+        # ⚠ THE RESULT COLUMNS ARE GRAFTED ON HERE, so the Holdings table is ONE table that adds
         # up rather than a composition view beside a separate ledger. See `_with_results`.
         "book_holdings": enriched_holdings,
-        # Ã¢ÂÂ  THE HOLDINGS TABLE IS ONLY HALF THE YEAR, AND UNTIL NOW NOTHING SAID SO. Every figure
+        # ⚠ THE HOLDINGS TABLE IS ONLY HALF THE YEAR, AND UNTIL NOW NOTHING SAID SO. Every figure
         # above it is built from positions the book STILL HOLDS; a name sold in March has no row
-        # and its result is invisible. Measured on BUS_Offensief_Dyn, that is EUR -28,656 Ã¢ÂÂ 41% of
+        # and its result is invisible. Measured on BUS_Offensief_Dyn, that is EUR -28,656 — 41% of
         # the year's movement, and enough on its own to reverse a sector's verdict in the
         # attribution panel. This block carries it, on the book's own opening capital so held +
         # sold + income adds to the book's YTD exactly.
@@ -2385,21 +2463,21 @@ def compute_portfolio_analysis(portfolio_id: int,
 
 def _with_results(holdings: list[dict], realised: dict,
                   benchmark_label: str = "") -> list[dict]:
-    """Attach each row's RESULT Ã¢ÂÂ unrealised + realised + income Ã¢ÂÂ and its contribution.
+    """Attach each row's RESULT — unrealised + realised + income — and its contribution.
 
-    Ã¢ÂÂ  ONE TABLE, BECAUSE THE TWO WERE ANSWERING ONE QUESTION IN TWO PLACES. The composition view
+    ⚠ ONE TABLE, BECAUSE THE TWO WERE ANSWERING ONE QUESTION IN TWO PLACES. The composition view
     could not add up (a name sold in March has no row) and the ledger could not show a sector or an
     ISIN. Merged, the columns Unrealised / Realised / Income sum to Result, and Result over the
     book's opening capital sums to the book's own year.
 
-    Ã¢ÂÂ  THE REALISED LEG JOINS BY NAME, EXACTLY, AND ONLY LANDS ON A ROW THAT STILL EXISTS. Measured
+    ⚠ THE REALISED LEG JOINS BY NAME, EXACTLY, AND ONLY LANDS ON A ROW THAT STILL EXISTS. Measured
     on BUS_Offensief_Dyn: of 13 traded names, 5 are trims of positions still held (they get their
-    realised result here) and 8 are gone entirely Ã¢ÂÂ EVERY orphan is `closed_out`, which is the
+    realised result here) and 8 are gone entirely — EVERY orphan is `closed_out`, which is the
     whole reason the join is safe. Those 8 have no holdings row by definition and are carried
     separately in `realised.positions`, for the UI to render as its own group.
 
-    Ã¢ÂÂ  A LOOKED-THROUGH LEG NEVER MATCHES, AND MUST NOT. AIRS trades the CERTIFICATE, not the stocks
-    inside it, so an instrument reached through one has no transactions of its own Ã¢ÂÂ 21 of
+    ⚠ A LOOKED-THROUGH LEG NEVER MATCHES, AND MUST NOT. AIRS trades the CERTIFICATE, not the stocks
+    inside it, so an instrument reached through one has no transactions of its own — 21 of
     BUS_Offensief's 52 rows. Its unrealised result is still real (its share of the certificate's
     value change), and its realised is correctly absent rather than invented.
     """
@@ -2407,38 +2485,38 @@ def _with_results(holdings: list[dict], realised: dict,
         return holdings
     basis = realised.get("basis_eur") if realised.get("available") else None
     by_name = {p["name"]: p for p in (realised.get("positions") or []) if p.get("held")}
-    # Ã¢ÂÂ  THE MONEY-WEIGHTED LEG IS ONLY DEFINED WHERE WE KNOW THE FLOWS, and that is the direct
-    # holdings. A leg reached through a certificate has no buys or sells of its own Ã¢ÂÂ AIRS trades
-    # the WRAPPER Ã¢ÂÂ so there is no "money you put in" to divide by, and `None` is the honest
+    # ⚠ THE MONEY-WEIGHTED LEG IS ONLY DEFINED WHERE WE KNOW THE FLOWS, and that is the direct
+    # holdings. A leg reached through a certificate has no buys or sells of its own — AIRS trades
+    # the WRAPPER — so there is no "money you put in" to divide by, and `None` is the honest
     # answer rather than the certificate's flows split across its contents.
-    # ONE ledger per child book, built before the loop Ã¢ÂÂ see `_child_book_ledgers`.
+    # ONE ledger per child book, built before the loop — see `_child_book_ledgers`.
     child_ledgers = _child_book_ledgers(holdings)
     out = []
     for h in holdings:
         start, cur = h.get("start_value_eur"), h.get("current_value_eur")
-        # Ã¢ÂÂ Ã¢ÂÂ  CASH RETURNS EXACTLY 0%, AND SAYING SO IS NOT THE SAME AS SAYING NOTHING. AIRS books
+        # ⚠⚠ CASH RETURNS EXACTLY 0%, AND SAYING SO IS NOT THE SAME AS SAYING NOTHING. AIRS books
         # no `Beginwaarde` for the cash line, so the generic rule below leaves every cash cell a
-        # dash Ã¢ÂÂ and a dash means "we could not work this out", which for cash is false: we know
+        # dash — and a dash means "we could not work this out", which for cash is false: we know
         # precisely what it earned. It earned nothing.
         #
-        # Ã¢ÂÂ  AND ITS DRAG IS A FACT. This repo already prices cash at 0% rather than skipping it
+        # ⚠ AND ITS DRAG IS A FACT. This repo already prices cash at 0% rather than skipping it
         # everywhere else (`portfolio_math.make_cash_holding`, `explain_portfolio_ytd`), for the
         # reason recorded there: dropping it scales a 20%-cash portfolio's return up by 25%. A
-        # dash invites exactly that reading Ã¢ÂÂ that cash is an unknown to be ignored Ã¢ÂÂ where a 0%
+        # dash invites exactly that reading — that cash is an unknown to be ignored — where a 0%
         # states the drag.
         #
-        # Ã¢ÂÂ  ITS INCOME IS STILL ITS OWN. Interest credited to the account is real money and stays
+        # ⚠ ITS INCOME IS STILL ITS OWN. Interest credited to the account is real money and stays
         # in the Income column; only the price leg is asserted to be zero, because a euro is
         # always worth a euro.
         is_cash = h.get("bucket") == CASH_BUCKET
-        # Ã¢ÂÂ  None, not 0, when the row cannot be valued at BOTH ends Ã¢ÂÂ an unpriceable position's
+        # ⚠ None, not 0, when the row cannot be valued at BOTH ends — an unpriceable position's
         # result is undefined, and a 0 would state that it went nowhere.
         #
-        # Ã¢ÂÂ Ã¢ÂÂ  FOR CASH THE ZERO IS A FALLBACK, NEVER AN OVERRIDE, and getting that backwards is a
+        # ⚠⚠ FOR CASH THE ZERO IS A FALLBACK, NEVER AN OVERRIDE, and getting that backwards is a
         # real bug I shipped: forcing 0 unconditionally would have erased a cash line that AIRS
         # values at BOTH ends. A certificate's own `Liquiditeiten` leg has a real start and current
         # value and moved -EUR 61 over the year (FX on a foreign balance, or a movement inside the
-        # wrapper) Ã¢ÂÂ that euro is part of the book's own result, so zeroing it would have silently
+        # wrapper) — that euro is part of the book's own result, so zeroing it would have silently
         # broken the reconciliation the total row asserts. The 0 applies ONLY where there was
         # nothing to compute, which is the case the dash was wrong about.
         unreal = (round(cur - start, 2) if (start and cur is not None)
@@ -2449,7 +2527,7 @@ def _with_results(holdings: list[dict], realised: dict,
         realised_eur = led.get("realised_result_eur") or 0.0
         total = (None if unreal is None and not realised_eur and not income
                  else round((unreal or 0.0) + realised_eur + income, 2))
-        # Ã¢ÂÂ  NOT `led["return_pct"]` BLINDLY Ã¢ÂÂ a looked-through leg never matches a ledger position
+        # ⚠ NOT `led["return_pct"]` BLINDLY — a looked-through leg never matches a ledger position
         # (see above), so `led` is empty for it and both fields stay None. Only a row the book
         # holds DIRECTLY has an average invested capital to divide by.
         avg_cap = led.get("avg_capital_eur")
@@ -2457,9 +2535,9 @@ def _with_results(holdings: list[dict], realised: dict,
                     "unrealised_eur": unreal,
                     "realised_result_eur": realised_eur or None,
                     "result_eur": total,
-                    # Ã¢ÂÂ  WHAT THE MONEY ACTUALLY MADE, as opposed to what the instrument did. The
-                    # `Return` column beside it divides by AIRS's RESTATED Beginwaarde Ã¢ÂÂ today's
-                    # quantity at January's price Ã¢ÂÂ which deliberately erases your timing so the
+                    # ⚠ WHAT THE MONEY ACTUALLY MADE, as opposed to what the instrument did. The
+                    # `Return` column beside it divides by AIRS's RESTATED Beginwaarde — today's
+                    # quantity at January's price — which deliberately erases your timing so the
                     # figure describes the stock. This one divides by the capital that was really
                     # tied up, flow-weighted by when it went in, and its numerator carries the
                     # dividends (net of withholding) and anything realised on a mid-year sale.
@@ -2467,53 +2545,53 @@ def _with_results(holdings: list[dict], realised: dict,
                     # because more of it was bought later at higher prices.
                     "avg_capital_eur": avg_cap,
                     "money_weighted_return_pct": led.get("return_pct"),
-                    # Ã¢ÂÂÃ¢ÂÂ AIRS's OWN SPLIT of the held leg into price and currency, both in EUR.
-                    # Ã¢ÂÂ Ã¢ÂÂ  IT DECOMPOSES `unrealised_eur` AND NOTHING ELSE. `Fondsresultaat` +
+                    # ── AIRS's OWN SPLIT of the held leg into price and currency, both in EUR.
+                    # ⚠⚠ IT DECOMPOSES `unrealised_eur` AND NOTHING ELSE. `Fondsresultaat` +
                     # `Valutaresultaat` IS `current_value_eur - start_value_eur` on AIRS's own
-                    # sheet, so the realised leg and the dividends in `result_eur` are outside it Ã¢ÂÂ
+                    # sheet, so the realised leg and the dividends in `result_eur` are outside it —
                     # `unsplit_result_eur` is what is left, reported rather than folded into
                     # either column. See `airs_capital.Position`.
-                    # Ã¢ÂÂ  NULL FOR A LOOKED-THROUGH LEG, like every other ledger field here: `led` is
+                    # ⚠ NULL FOR A LOOKED-THROUGH LEG, like every other ledger field here: `led` is
                     # empty for it, and AIRS's split belongs to the CERTIFICATE, not to the stock
                     # inside it. A wrapper's currency leg spread over its legs would be one
                     # measurement copied N times, exactly as its return would be.
                     "fund_result_eur": led.get("fund_result_eur"),
                     "fx_result_eur": led.get("fx_result_eur"),
                     "unsplit_result_eur": led.get("unsplit_result_eur"),
-                    # Ã¢ÂÂ  WHICH OF THE TWO REASONS THE CELL IS BLANK. Both produce a `None`, and they
+                    # ⚠ WHICH OF THE TWO REASONS THE CELL IS BLANK. Both produce a `None`, and they
                     # are not the same fact: a leg inside a certificate has no flows because AIRS
                     # trades the wrapper, while a directly-held position with a `D` (Deponering)
                     # row has flows we cannot put on one basis. One tooltip for both told a reader
-                    # that KLA-Tencor Ã¢ÂÂ held outright Ã¢ÂÂ was inside a certificate, which is simply
+                    # that KLA-Tencor — held outright — was inside a certificate, which is simply
                     # untrue and sends them looking for a wrapper that does not exist.
                     "capital_unknown": bool(led.get("capital_unknown")),
-                    # Ã¢ÂÂÃ¢ÂÂ THE WRAPPER'S OWN FIGURE, for a leg that can never have one.
-                    # Ã¢ÂÂ Ã¢ÂÂ  IT IS NOT THIS LEG'S RETURN AND MUST NEVER BE PUT IN THIS LEG'S COLUMN.
+                    # ── THE WRAPPER'S OWN FIGURE, for a leg that can never have one.
+                    # ⚠⚠ IT IS NOT THIS LEG'S RETURN AND MUST NEVER BE PUT IN THIS LEG'S COLUMN.
                     # AIRS bought ONE certificate; splitting its capital by today's weights would
                     # hand every leg the identical number (measured: all 22 StarTopSelectie legs
                     # would read -3.86%), which looks like 22 per-stock measurements and is one
-                    # measurement copied 22 times. Shopify did not return -3.86% on the money Ã¢ÂÂ
+                    # measurement copied 22 times. Shopify did not return -3.86% on the money —
                     # the certificate did. So it ships under its OWN key, for the tooltip to
                     # attribute, and `money_weighted_return_pct` stays null.
                     **_via_capital(h, by_name, child_ledgers),
                     "contribution_pct": (total / basis * 100.0)
                     if (total is not None and basis) else None,
-                    # Ã¢ÂÂ  0%, NOT a dash Ã¢ÂÂ same reason as the price leg above, and same direction:
+                    # ⚠ 0%, NOT a dash — same reason as the price leg above, and same direction:
                     # a FALLBACK where nothing could be computed, never an override of a figure
                     # AIRS actually produced.
                     **({"own_return_pct": 0.0}
                        if is_cash and h.get("own_return_pct") is None else {})})
-    # Ã¢ÂÂ  ONE CALL FOR THE WHOLE TABLE, AFTER IT IS BUILT Ã¢ÂÂ see `_holding_risk`. Asking per row
+    # ⚠ ONE CALL FOR THE WHOLE TABLE, AFTER IT IS BUILT — see `_holding_risk`. Asking per row
     # would turn one batched read into one per holding, and beta would reload the benchmark each
-    # time. Ã¢ÂÂ  `benchmark_label` is threaded in rather than read from a module global: beta is only
+    # time. ⚠ `benchmark_label` is threaded in rather than read from a module global: beta is only
     # meaningful against the index the reader picked, and the picker changes it per request.
     risk = _holding_risk([r.get("isin") for r in out], benchmark_label)
     for r in out:
         got = risk.get(r.get("isin") or "") or {}
-        # Ã¢ÂÂ  THE LIST IS NAMED ONCE (`RISK_KEYS`) BECAUSE IT IS COPIED IN TWO PLACES Ã¢ÂÂ here and onto
+        # ⚠ THE LIST IS NAMED ONCE (`RISK_KEYS`) BECAUSE IT IS COPIED IN TWO PLACES — here and onto
         # the sold rows. Adding `mom_12_1_from`/`_to` to `_holding_risk` and forgetting one of these
         # copy loops is exactly what happened first: the figures were computed, cached and thrown
-        # away one line before the payload, so the Ã¢ÂÂ showed a formula it could not substitute and
+        # away one line before the payload, so the ⓘ showed a formula it could not substitute and
         # nothing anywhere errored.
         for k in RISK_KEYS:
             r[k] = got.get(k)
@@ -2522,14 +2600,14 @@ def _with_results(holdings: list[dict], realised: dict,
 
 #: The window the per-holding volatility column measures, in years.
 #:
-#: Ã¢ÂÂ  NOT ONE OF `_PERF_WINDOWS` (2/4/8). Those exist so the SAME metric can be compared ACROSS
-#: horizons Ã¢ÂÂ a distribution-drift probe. This is one number beside a holding, asked for as "5y".
+#: ⚠ NOT ONE OF `_PERF_WINDOWS` (2/4/8). Those exist so the SAME metric can be compared ACROSS
+#: horizons — a distribution-drift probe. This is one number beside a holding, asked for as "5y".
 #: Declared once so the payload key, the header and the min-bars floor cannot drift apart.
 VOL_YEARS = 5
 
 
-#: Minimum overlapping trading days before a beta is quoted. Ã¢ÂÂ  Deliberately the same floor the
-#: volatility uses Ã¢ÂÂ a beta measured over one year under a "5y" heading is the same lie the vol
+#: Minimum overlapping trading days before a beta is quoted. ⚠ Deliberately the same floor the
+#: volatility uses — a beta measured over one year under a "5y" heading is the same lie the vol
 #: column refuses, and the two must not disagree about which rows have enough history.
 def _min_bars(years: int) -> int:
     """Four years of trading days. Demanding the full `years` drops every listing a month short;
@@ -2538,19 +2616,19 @@ def _min_bars(years: int) -> int:
 
 
 def _daily_eur(isins: list[str], years: int) -> dict[str, list[tuple[str, float]]]:
-    """{isin: [(date, EUR close)]} for the trailing `years` Ã¢ÂÂ ONE batched pass.
+    """{isin: [(date, EUR close)]} for the trailing `years` — ONE batched pass.
 
-    Ã¢ÂÂ Ã¢ÂÂ  EXECUTIONS, CLOSES AND FX ARE EACH READ ONCE FOR EVERY HOLDING AT ONCE. A per-ISIN call
+    ⚠⚠ EXECUTIONS, CLOSES AND FX ARE EACH READ ONCE FOR EVERY HOLDING AT ONCE. A per-ISIN call
     would add ~20 round trips to a request that already opens 71 at eu-west-3 latency, which is the
     difference between a column and a slower modal.
 
-    Ã¢ÂÂ Ã¢ÂÂ  AND IT KEYS BY ISIN THROUGHOUT RATHER THAN ZIPPING. `_group_eur_legs` returns weighted legs
-    with the identity dropped and SILENTLY SKIPS a holding with no execution row or no bars Ã¢ÂÂ so
+    ⚠⚠ AND IT KEYS BY ISIN THROUGHOUT RATHER THAN ZIPPING. `_group_eur_legs` returns weighted legs
+    with the identity dropped and SILENTLY SKIPS a holding with no execution row or no bars — so
     pairing its output back by position shifts every later ISIN onto the previous holding's series.
     A table of real figures under the wrong names is the one failure here nothing on screen could
     contradict.
 
-    Ã¢ÂÂ  EUR, LIKE EVERY OTHER FIGURE ON THIS SCREEN. A euro holder bears the currency move, so a
+    ⚠ EUR, LIKE EVERY OTHER FIGURE ON THIS SCREEN. A euro holder bears the currency move, so a
     dollar stock's risk to them includes it; measuring in the listing's own currency would report a
     risk nobody in this book actually carries.
     """
@@ -2585,10 +2663,10 @@ def _daily_eur(isins: list[str], years: int) -> dict[str, list[tuple[str, float]
 
 
 def _by_week(series: list[tuple[str, float]]) -> dict[tuple[int, int], float]:
-    """{(iso year, iso week): last close of that week} Ã¢ÂÂ the basis beta is measured on.
+    """{(iso year, iso week): last close of that week} — the basis beta is measured on.
 
-    Ã¢ÂÂ  THE LAST CLOSE OF THE WEEK, NOT THE FRIDAY. A market shut on Friday still has a week, and
-    keying on the weekday would silently drop it for one series and keep it for the other Ã¢ÂÂ which
+    ⚠ THE LAST CLOSE OF THE WEEK, NOT THE FRIDAY. A market shut on Friday still has a week, and
+    keying on the weekday would silently drop it for one series and keep it for the other — which
     is the misalignment the weekly basis exists to remove.
     """
     from datetime import date as _date  # noqa: PLC0415
@@ -2602,67 +2680,88 @@ def _by_week(series: list[tuple[str, float]]) -> dict[tuple[int, int], float]:
 
 
 def _by_month(series: list[tuple[str, float]]) -> dict[tuple[int, int], float]:
-    """{(year, month): last close of that month} Ã¢ÂÂ the basis the volatility column is measured on.
+    """{(year, month): last close of that month} — the basis the volatility column is measured on.
 
-    Ã¢ÂÂ  THE LAST CLOSE OF THE MONTH, NOT THE 30th, for the reason `_by_week` keys on the ISO week
+    ⚠ THE LAST CLOSE OF THE MONTH, NOT THE 30th, for the reason `_by_week` keys on the ISO week
     rather than the Friday: a market shut on the last calendar day still had a month, and keying
     on a date would drop it.
 
-    Ã¢ÂÂ  IT IS A THINNING OF THE DAILY SERIES, NOT A RESAMPLE. Every value kept is a real close on its
+    ⚠ IT IS A THINNING OF THE DAILY SERIES, NOT A RESAMPLE. Every value kept is a real close on its
     own date; nothing is averaged or interpolated, so a monthly return is the return between two
-    prices that genuinely traded Ã¢ÂÂ which is what lets it be compared with the daily figure it
+    prices that genuinely traded — which is what lets it be compared with the daily figure it
     replaced rather than being a different kind of number.
     """
     out: dict[tuple[int, int], float] = {}
     for d, v in series:
         if v > 0:
-            out[(int(d[:4]), int(d[5:7]))] = v   # later dates overwrite Ã¢ÂÂ the month's last close
+            out[(int(d[:4]), int(d[5:7]))] = v   # later dates overwrite → the month's last close
     return out
 
 
 #: Everything `_holding_risk` produces that a row carries to the wire.
 #:
-#: Ã¢ÂÂ Ã¢ÂÂ  NAMED ONCE BECAUSE IT IS COPIED TWICE Ã¢ÂÂ onto the held rows and onto the closed-out ones. The
+#: ⚠⚠ NAMED ONCE BECAUSE IT IS COPIED TWICE — onto the held rows and onto the closed-out ones. The
 #: two loops were written out by hand, so adding the momentum LEGS to `_holding_risk` populated
 #: them, cached them, and then dropped them one line before the payload: the tooltip that exists to
-#: show `from ÃÂ· to Ã¢ÂÂ 1 = result` had no legs to substitute, and nothing failed anywhere. A list is
+#: show `from ÷ to − 1 = result` had no legs to substitute, and nothing failed anywhere. A list is
 #: the difference between adding a figure in one place and adding it in three.
 RISK_KEYS = ("vol_5y_pct", "beta_5y", "mom_12_1_pct", "mom_12_1_from", "mom_12_1_to",
              "mom_state", "mom_pct_rank", "mom_rank_n")
 
 #: The cadences these three columns are measured on, in the leg-cache key.
 #:
-#: Ã¢ÂÂ Ã¢ÂÂ  THE FINGERPRINT CANNOT SEE A CODE CHANGE, ONLY A DATA ONE. `_analysis_cache` keys on
-#: `pg_stat_user_tables`, so it guarantees a leg is never stale with respect to the DATABASE Ã¢ÂÂ and
+#: ⚠⚠ THE FINGERPRINT CANNOT SEE A CODE CHANGE, ONLY A DATA ONE. `_analysis_cache` keys on
+#: `pg_stat_user_tables`, so it guarantees a leg is never stale with respect to the DATABASE — and
 #: says nothing about a leg computed by an older version of this function. When the volatility moved
 #: from daily to monthly (2026-09-01) every warm entry in a running process still held the daily
 #: figure, under a key that had no reason to change. A deploy restarts the process and clears it, so
 #: nothing shipped wrong; that it was safe by accident is the problem.
 #:
-#: Ã¢ÂÂ  BUMP THIS WHENEVER THE ARITHMETIC OF A RISK COLUMN CHANGES Ã¢ÂÂ a new cadence, a different
+#: ⚠ BUMP THIS WHENEVER THE ARITHMETIC OF A RISK COLUMN CHANGES — a new cadence, a different
 #: annualisation, a changed floor. It costs one recompute and removes the whole class.
 RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v1"
+
+#: THE SAME TRICK, FOR THE WHOLE PAYLOAD — bump it when the COMPOSITION arithmetic changes.
+#:
+#: ⚠⚠ IT EXISTS BECAUSE THE FIRST CHANGE THAT NEEDED IT SHIPPED WITHOUT IT (2026-09-03). The three
+#: composition axes and their benchmark moved from the window's open to current values, and every
+#: warm `_analysis_cache` entry went on serving the OLD bars: `ac.get` is keyed on
+#: `(portfolio_id, benchmark, weight_by, source, bucket_filter)` plus a fingerprint of
+#: `pg_stat_user_tables`, which can only ever see a DATA change. Nothing in the database moved, so
+#: nothing invalidated — and the axis NOTE, being frontend copy, updated instantly. The screen said
+#: "Current weights" over start weights, which is worse than either basis on its own.
+#:
+#: ⚠ A RESTART CLEARS IT, which is exactly what makes this easy to miss: a deploy looks fine, and
+#: the person who is wrong is whoever has a long-lived process — a developer with `--reload` that
+#: did not fire, or prod between deploys.
+#:
+#: ⚠ IT IS IN THE KEY, NOT THE FINGERPRINT. The fingerprint answers "has the data changed"; this
+#: answers "does this entry come from the code I am running". Two questions, and folding a constant
+#: into a database read would make the second one look like the first.
+#: v2 (2026-09-03): funds out of all three sleeves, and the benchmark narrowed to the
+#: constituents priced at both ends — the list its own drill-down uses.
+COMPOSITION_BASIS = "axes:now/bench:now/nofunds/windowset/v2"
 
 
 def _sold_position_isins(names: list[str]) -> dict[str, str]:
     """`{holding name: isin}` for positions the book no longer holds.
 
-    Ã¢ÂÂ Ã¢ÂÂ  A CLOSED-OUT POSITION HAS NO ISIN OF ITS OWN, which is why the three risk columns were
-    blank on those rows. It has a NAME Ã¢ÂÂ AIRS's `Fonds` Ã¢ÂÂ and the instrument behind that name is
+    ⚠⚠ A CLOSED-OUT POSITION HAS NO ISIN OF ITS OWN, which is why the three risk columns were
+    blank on those rows. It has a NAME — AIRS's `Fonds` — and the instrument behind that name is
     knowable from anywhere it is still recorded. Two sources, in order:
 
       1. `airs_holding`, ANY book, ANY snapshot date. The identity of an instrument does not depend
-         on which book holds it or on when Ã¢ÂÂ the same argument `airs_holding_isin_override` is keyed
+         on which book holds it or on when — the same argument `airs_holding_isin_override` is keyed
          by name for. A name this book sold in March may still be held by a sibling book today.
       2. the hand-supplied pins, for the rest.
 
-    Ã¢ÂÂ  COVERAGE IS PARTIAL AND THAT IS STATED RATHER THAN PAPERED OVER. Stored snapshot history
+    ⚠ COVERAGE IS PARTIAL AND THAT IS STATED RATHER THAN PAPERED OVER. Stored snapshot history
     began 2026-06-23, so a name sold before then is only findable if another book still holds it or
     somebody pinned it. Measured on the live fleet: of 87 names that have left a book within stored
-    history, 78 resolve. An unresolved name keeps its blank cells Ã¢ÂÂ which is the honest answer, and
+    history, 78 resolve. An unresolved name keeps its blank cells — which is the honest answer, and
     the same one the Sector and Weight columns already give on these rows.
 
-    Ã¢ÂÂ Ã¢ÂÂ  AN AMBIGUOUS NAME IS REFUSED, NEVER GUESSED. If one `holding_name` maps to more than one
+    ⚠⚠ AN AMBIGUOUS NAME IS REFUSED, NEVER GUESSED. If one `holding_name` maps to more than one
     ISIN across the table, we cannot say which instrument the row is, and a beta attributed to the
     wrong instrument is worse on this screen than a dash: it is a plausible number in a column the
     reader is scanning for outliers.
@@ -2673,7 +2772,7 @@ def _sold_position_isins(names: list[str]) -> dict[str, str]:
     if not wanted:
         return {}
 
-    # Ã¢ÂÂ  CHUNKED AND PAGED, like every other read here Ã¢ÂÂ a popular name is held by many books over
+    # ⚠ CHUNKED AND PAGED, like every other read here — a popular name is held by many books over
     # many snapshot dates, so this is not one row per name.
     by_name: dict[str, set[str]] = {}
     for i in range(0, len(wanted), IN_CHUNK_SIZE):
@@ -2700,7 +2799,7 @@ def _sold_position_isins(names: list[str]) -> dict[str, str]:
         if len(found) == 1:
             out[name] = next(iter(found))
         elif len(found) > 1:
-            _log.info("[analysis] %r maps to %d ISINs (%s) Ã¢ÂÂ refusing to guess which instrument "
+            _log.info("[analysis] %r maps to %d ISINs (%s) — refusing to guess which instrument "
                       "the sold row is", name, len(found), ", ".join(sorted(found)))
         elif key in pins:
             out[name] = pins[key]["isin"]
@@ -2710,14 +2809,14 @@ def _sold_position_isins(names: list[str]) -> dict[str, str]:
 def _with_sold_risk(realised: dict, benchmark_label: str) -> None:
     """Attach the instrument's momentum / vol / beta to every CLOSED-OUT position, in place.
 
-    Ã¢ÂÂ  A SEPARATE PASS FROM `_with_results`, AND A SEPARATE `_holding_risk` CALL, DELIBERATELY. That
+    ⚠ A SEPARATE PASS FROM `_with_results`, AND A SEPARATE `_holding_risk` CALL, DELIBERATELY. That
     function returns the holdings table; making it also mutate the realised block would hide a side
     effect behind a name that promises a return value. The second call is nearly free: `_holding_risk`
     is memoized per (isin, benchmark) and the sold names of a book are usually still held by a
-    sibling Ã¢ÂÂ and its miss path is ONE batched read, so the worst case is one extra `COPY`, not one
+    sibling — and its miss path is ONE batched read, so the worst case is one extra `COPY`, not one
     per name.
 
-    Ã¢ÂÂ  ONLY THE CLOSED-OUT ONES. A TRIMMED position still has a holdings row, and that row already
+    ⚠ ONLY THE CLOSED-OUT ONES. A TRIMMED position still has a holdings row, and that row already
     carries these three columns from the held path; filling them here too would be a second source
     for the same cell.
     """
@@ -2730,11 +2829,11 @@ def _with_sold_risk(realised: dict, benchmark_label: str) -> None:
     for p in sold:
         isin = isin_of.get((p.get("name") or "").strip())
         got = risk.get(isin or "") or {}
-        # Ã¢ÂÂ  THE ISIN GOES OUT EVEN WHEN THE RISK READ FOUND NOTHING. "We know what this is and have
+        # ⚠ THE ISIN GOES OUT EVEN WHEN THE RISK READ FOUND NOTHING. "We know what this is and have
         # no price series for it" and "we could not tell what this is" are different answers, and
         # the drill-down needs the first one to be able to offer an ingest.
         p["isin"] = isin
-        for k in RISK_KEYS:                      # Ã¢ÂÂ  the same list as the held rows Ã¢ÂÂ see `RISK_KEYS`
+        for k in RISK_KEYS:                      # ⚠ the same list as the held rows — see `RISK_KEYS`
             p[k] = got.get(k)
 
 
@@ -2742,7 +2841,7 @@ def _holding_risk(isins: list[str], benchmark_label: str,
                   years: int = VOL_YEARS) -> dict[str, dict]:
     """{isin: {"vol_5y_pct", "beta_5y", "mom_12_1_pct"}} from the daily EUR close.
 
-    Ã¢ÂÂ Ã¢ÂÂ  THE ANSWER IS A PROPERTY OF THE INSTRUMENT, NOT OF THE BOOK IT IS IN Ã¢ÂÂ which is why it is
+    ⚠⚠ THE ANSWER IS A PROPERTY OF THE INSTRUMENT, NOT OF THE BOOK IT IS IN — which is why it is
     memoized per ISIN (`_analysis_cache.leg`) and not per request. This is the single most
     expensive thing the modal does (950ms of a 2.9s local load: five years of daily closes for
     every holding, then the signal engine, the vol and the beta per name), and the variants of a
@@ -2750,33 +2849,33 @@ def _holding_risk(isins: list[str], benchmark_label: str,
     the first one had already produced. Measured on /management-dashboard: 26 paired books over
     ~1,600 distinct ISINs.
 
-    Ã¢ÂÂ  THE BENCHMARK IS IN THE KEY, because `beta_5y` is measured against it. Vol and momentum are
-    not Ã¢ÂÂ but splitting the row into two cache entries to save recomputing two thirds of it on a
+    ⚠ THE BENCHMARK IS IN THE KEY, because `beta_5y` is measured against it. Vol and momentum are
+    not — but splitting the row into two cache entries to save recomputing two thirds of it on a
     benchmark switch would mean the three numbers on one line could come from two different
     fingerprints. One row, one key.
 
-    Ã¢ÂÂ Ã¢ÂÂ  AND THE MISS PATH STAYS BATCHED, WHICH IS WHY THIS USES `leg_get_many` RATHER THAN A LOOP
+    ⚠⚠ AND THE MISS PATH STAYS BATCHED, WHICH IS WHY THIS USES `leg_get_many` RATHER THAN A LOOP
     OVER `leg()`. The load below is ONE `COPY` for every holding at once (see `_daily_eur`);
-    memoizing per ISIN the naive way would serve the hits and then run that COPY once per miss Ã¢ÂÂ
+    memoizing per ISIN the naive way would serve the hits and then run that COPY once per miss —
     turning the cheapest part of this function into ~60 round trips and making a "faster" modal
     slower on exactly the cold path it was meant to fix.
 
-    Ã¢ÂÂ Ã¢ÂÂ  ONE LOAD FOR BOTH FIGURES. Volatility and beta read the same series over the same window, so
+    ⚠⚠ ONE LOAD FOR BOTH FIGURES. Volatility and beta read the same series over the same window, so
     computing them apart would be two panels of the same data and two chances for the two columns
     beside each other to disagree about how much history a row has.
 
-    Ã¢ÂÂ Ã¢ÂÂ  BETA IS ALIGNED ON DATES, NEVER ZIPPED. A Stockholm listing and a London-traded ETF do not
-    share a calendar Ã¢ÂÂ Midsummer, Ascension, a US holiday Ã¢ÂÂ so pairing the two return series by
+    ⚠⚠ BETA IS ALIGNED ON DATES, NEVER ZIPPED. A Stockholm listing and a London-traded ETF do not
+    share a calendar — Midsummer, Ascension, a US holiday — so pairing the two return series by
     POSITION silently offsets them from the first mismatched holiday onward and produces a
     perfectly plausible beta computed against the wrong days. The intersection of the two date sets
     is the only honest pairing, and it is why this cannot be a `zip`.
 
-    Ã¢ÂÂ  AGAINST THE BENCHMARK THE READER PICKED, through its investable tracker
-    (`_BENCHMARK_RISK_ETF`) Ã¢ÂÂ a real fund with a real daily series, in the same price world as the
+    ⚠ AGAINST THE BENCHMARK THE READER PICKED, through its investable tracker
+    (`_BENCHMARK_RISK_ETF`) — a real fund with a real daily series, in the same price world as the
     holdings. The reconstructed index has no tradeable series to regress against, and regressing on
     something priced another way would put the vendor difference in the beta.
 
-    Ã¢ÂÂ  A DASH IS NOT A ZERO, AND FOR BETA THAT MATTERS MORE THAN FOR VOL: beta 0 means "moves
+    ⚠ A DASH IS NOT A ZERO, AND FOR BETA THAT MATTERS MORE THAN FOR VOL: beta 0 means "moves
     independently of the market", which is a strong claim about a stock we simply cannot measure.
     Too little history, or a benchmark with no tracker, leaves the key absent.
     """
@@ -2799,8 +2898,8 @@ def _holding_risk(isins: list[str], benchmark_label: str,
 
     from routers import _analysis_cache as ac  # noqa: PLC0415
 
-    # Ã¢ÂÂ  A HIT IS AN ANSWER, INCLUDING AN EMPTY ONE. A name with too little history yields `{}` and
-    # that is a real result Ã¢ÂÂ storing it (rather than treating "no row" as "not computed") is what
+    # ⚠ A HIT IS AN ANSWER, INCLUDING AN EMPTY ONE. A name with too little history yields `{}` and
+    # that is a real result — storing it (rather than treating "no row" as "not computed") is what
     # stops a book of young listings from re-running the whole load on every open. `_LruTtlCache`
     # returns None for a miss, so the empty answer is filed as a sentinel dict and read back out.
     keys = [("holding_risk", i, benchmark_label, years, RISK_BASIS) for i in want]
@@ -2821,16 +2920,16 @@ def _holding_risk(isins: list[str], benchmark_label: str,
     todo = [k[1] for k in misses]
     try:
         series = _daily_eur(todo + ([bench_isin] if bench_isin else []), years)
-    except Exception as e:  # noqa: BLE001 Ã¢ÂÂ one missing column must never cost the whole modal
-        # Ã¢ÂÂ  NOTHING IS FILED ON A FAILURE. An outage during one open must not pin a book's risk
+    except Exception as e:  # noqa: BLE001 — one missing column must never cost the whole modal
+        # ⚠ NOTHING IS FILED ON A FAILURE. An outage during one open must not pin a book's risk
         # columns to empty for everybody who opens it afterwards.
         _log.warning("[analysis] per-holding risk failed (%s: %s)", type(e).__name__, e)
         return _served()
 
-    # Ã¢ÂÂ  ONCE FOR THE WHOLE CALL, NOT PER ISIN. It is one paged read of ~1,750 floats (~170ms) and
+    # ⚠ ONCE FOR THE WHOLE CALL, NOT PER ISIN. It is one paged read of ~1,750 floats (~170ms) and
     #   it is identical for every holding in the book, so asking inside the loop would multiply it
     #   by ~60. Leg-cached on the benchmark, so re-opening any book on the same benchmark is free.
-    # Ã¢ÂÂ  `None` when nothing has been precomputed for this benchmark Ã¢ÂÂ the rows then carry no
+    # ⚠ `None` when nothing has been precomputed for this benchmark — the rows then carry no
     #   `mom_state` and the column renders the number alone, which is what it did before. A missing
     #   precompute must degrade to the old behaviour, never to a default distribution.
     dist_hit = ac.leg(("rel_mom_dist", benchmark_label),
@@ -2838,11 +2937,11 @@ def _holding_risk(isins: list[str], benchmark_label: str,
     dist = dist_hit[0] if dist_hit else None
     dist_n = dist_hit[2] if dist_hit else 0
 
-    # Ã¢ÂÂ  FOUR YEARS OF MONTHS, the same shape as the daily and weekly floors Ã¢ÂÂ the three columns
+    # ⚠ FOUR YEARS OF MONTHS, the same shape as the daily and weekly floors — the three columns
     # must not disagree about which rows have enough history to be quoted under a "5y" heading.
     floor_m = int(12 * (years - 1))
     bench_w = _by_week(series.get(bench_isin or "", []))
-    # Ã¢ÂÂ  FOUR YEARS OF WEEKS, mirroring the daily floor Ã¢ÂÂ the two columns must not disagree about
+    # ⚠ FOUR YEARS OF WEEKS, mirroring the daily floor — the two columns must not disagree about
     # which rows have enough history.
     floor_w = int(52 * (years - 1))
 
@@ -2854,87 +2953,87 @@ def _holding_risk(isins: list[str], benchmark_label: str,
             continue
         row: dict = {}
 
-        # Ã¢ÂÂÃ¢ÂÂ MOMENTUM Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
-        # Ã¢ÂÂ Ã¢ÂÂ  `mom_12_1` FROM THE SIGNAL ENGINE, NOT THE STRATEGY'S `momentum_score`. That score is
+        # ── MOMENTUM ────────────────────────────────────────────────────────────────────────
+        # ⚠⚠ `mom_12_1` FROM THE SIGNAL ENGINE, NOT THE STRATEGY'S `momentum_score`. That score is
         # a min-max normalisation ACROSS THE UNIVERSE it was computed over (`scoring._score_
         # category`), so the same stock scores differently against the S&P than against ACWI, two
         # outliers set the scale for the other 498, and a holding in no strategy's universe has no
         # score at all. It ranks within a run; it is not a property of the stock, which is exactly
         # what a column comparing stocks to each other needs.
         #
-        # Ã¢ÂÂ  THE ENGINE'S OWN FUNCTION, so there is ONE definition of 12-1 momentum in this codebase
-        # Ã¢ÂÂ the same one `/signal-lab` charts and the backtester trades on. Reimplementing "twelve
+        # ⚠ THE ENGINE'S OWN FUNCTION, so there is ONE definition of 12-1 momentum in this codebase
+        # — the same one `/signal-lab` charts and the backtester trades on. Reimplementing "twelve
         # months, skipping the last" is four lines and a second answer.
         #
-        # Ã¢ÂÂ  ITS OWN HISTORY REQUIREMENT, WHICH IS SHORTER THAN VOL'S. 12-1 needs ~13 months; the
+        # ⚠ ITS OWN HISTORY REQUIREMENT, WHICH IS SHORTER THAN VOL'S. 12-1 needs ~13 months; the
         # risk columns need four years. A stock that listed two years ago therefore gets a momentum
-        # figure and a dash for vol Ã¢ÂÂ which is right, and why this is computed before the floor.
+        # figure and a dash for vol — which is right, and why this is computed before the floor.
         try:
             ser = pd.Series([v for _d, v in eur],
                             index=pd.to_datetime([d for d, _v in eur])).sort_index()
             mom = compute_single_company_signals(ser).get("mom_12_1")
             if mom is not None:
                 row["mom_12_1_pct"] = float(mom)
-                # Ã¢ÂÂ  THE TWO PRICES THE FIGURE IS THE RATIO OF, so the Ã¢ÂÂ can print the substitution
-                # rather than assert the result Ã¢ÂÂ the shape the Money-weighted column uses.
-                # Ã¢ÂÂ  FROM THE SAME HELPER THE SIGNAL READS, never re-derived here: legs from a second
+                # ⚠ THE TWO PRICES THE FIGURE IS THE RATIO OF, so the ⓘ can print the substitution
+                # rather than assert the result — the shape the Money-weighted column uses.
+                # ⚠ FROM THE SAME HELPER THE SIGNAL READS, never re-derived here: legs from a second
                 # cutoff rule would explain the number with inputs it was not computed from.
                 legs = mom_12_1_legs(ser)
                 if legs is not None:
                     row["mom_12_1_from"], row["mom_12_1_to"] = legs
-                # Ã¢ÂÂ Ã¢ÂÂ  THE STATE IS THIS ROW'S OWN NUMBER PLACED IN THE UNIVERSE'S DISTRIBUTION, NOT
-                # A LOOKUP OF THIS COMPANY'S STORED RANK. The obvious version Ã¢ÂÂ bridge the ISIN to
-                # a `company_id` and read its `relative_momentum` row Ã¢ÂÂ covers only **154 of 254**
+                # ⚠⚠ THE STATE IS THIS ROW'S OWN NUMBER PLACED IN THE UNIVERSE'S DISTRIBUTION, NOT
+                # A LOOKUP OF THIS COMPANY'S STORED RANK. The obvious version — bridge the ISIN to
+                # a `company_id` and read its `relative_momentum` row — covers only **154 of 254**
                 # held ISINs (61%), because a book holds ETFs, bonds, funds and names that are not
                 # constituents; per book it ranges from 56% to 95%. That would blank two rows in
                 # five in a column that currently has a number for every priced holding.
                 #
-                # Ã¢ÂÂ Ã¢ÂÂ  AND IT IS ONLY SOUND BECAUSE BOTH SIDES ARE IN EUR. `eur` is the daily EUR
+                # ⚠⚠ AND IT IS ONLY SOUND BECAUSE BOTH SIDES ARE IN EUR. `eur` is the daily EUR
                 # close; `momentum.relative` converts before ranking for exactly this reason. On
                 # native-currency prices the same universe put 293 of 1,745 names (16.8%) in a
-                # DIFFERENT bucket Ã¢ÂÂ every one of them a plausible number.
+                # DIFFERENT bucket — every one of them a plausible number.
                 #
-                # Ã¢ÂÂ  The two are still different VENDORS (Yahoo here, GuruFocus for the universe),
+                # ⚠ The two are still different VENDORS (Yahoo here, GuruFocus for the universe),
                 # which is fine for deciding a bucket and would not be fine for a subtraction. So
                 # nothing subtracts them: the percentile is a position, not a difference.
                 if dist is not None:
                     state, pct = _relative.state_of(row["mom_12_1_pct"], dist)
                     row["mom_state"], row["mom_pct_rank"] = state, round(pct, 4)
-                    # â  THE POPULATION RIDES ON THE ROW, not on the payload root. It is the same
+                    # ⚠ THE POPULATION RIDES ON THE ROW, not on the payload root. It is the same
                     #   number for every row, but a rank whose reference set is stated somewhere
-                    #   else is a rank a reader has to go looking for â and threading one scalar
+                    #   else is a rank a reader has to go looking for — and threading one scalar
                     #   up through the assembly is three edits where `RISK_KEYS` is none.
                     row["mom_rank_n"] = int(dist_n or 0) or None
-        except Exception as e:  # noqa: BLE001 Ã¢ÂÂ one column must never cost the modal
+        except Exception as e:  # noqa: BLE001 — one column must never cost the modal
             _log.warning("[analysis] momentum failed for %s (%s: %s)", isin, type(e).__name__, e)
 
         if len(eur) < floor:
             out[isin] = row
             continue
-        # Ã¢ÂÂ Ã¢ÂÂ  MONTHLY RETURNS, NOT DAILY (2026-09-01, on request). This column was
-        # `std(daily) ÃÂ Ã¢ÂÂ252` and the note beside the beta argued that it should stay that way,
+        # ⚠⚠ MONTHLY RETURNS, NOT DAILY (2026-09-01, on request). This column was
+        # `std(daily) × √252` and the note beside the beta argued that it should stay that way,
         # because volatility is a SINGLE-series statistic with nothing to be out of sync with. That
-        # argument is sound about the non-synchronous-closing bias the beta has Ã¢ÂÂ and it is not the
+        # argument is sound about the non-synchronous-closing bias the beta has — and it is not the
         # only reason to prefer a longer bar.
         #
-        # Ã¢ÂÂ  WHAT CHANGES: an annualised daily vol reads a stock's day-to-day noise, most of which
+        # ⚠ WHAT CHANGES: an annualised daily vol reads a stock's day-to-day noise, most of which
         # mean-reverts inside a week and none of which a reader holding a model portfolio for years
         # experiences. Twelve monthly returns a year measure the dispersion at the horizon this
-        # panel is about, and Ã¢ÂÂ being the same cadence the AIRS model-portfolio metrics and the
-        # monthly diversifier already use Ã¢ÂÂ put the per-holding column on the same footing as the
+        # panel is about, and — being the same cadence the AIRS model-portfolio metrics and the
+        # monthly diversifier already use — put the per-holding column on the same footing as the
         # book-level figures it sits beside. It is NOT a smoothing: every point is a real close.
         #
-        # Ã¢ÂÂ  THE ANNUALISATION FACTOR MOVES WITH THE CADENCE Ã¢ÂÂ `Ã¢ÂÂ12`, not `Ã¢ÂÂ252`, which is the whole
+        # ⚠ THE ANNUALISATION FACTOR MOVES WITH THE CADENCE — `√12`, not `√252`, which is the whole
         # of the change arithmetically and the one thing a hand-rolled version gets wrong. It is
         # still `annualized_stats`, the ONE definition of vol in this codebase; only the
         # `periods_per_year` it is told changes.
         #
-        # Ã¢ÂÂ  MEASURED ON 44 HOLDINGS WITH FIVE FULL YEARS: median change **-2.2pp**, range -11.6pp
-        # (AT000000STR1: 32.8 -> 23.5) to +8.6pp. It is not a uniform shift Ã¢ÂÂ a name whose daily
-        # noise cancels within the month falls, one that trends inside months rises Ã¢ÂÂ which is why
+        # ⚠ MEASURED ON 44 HOLDINGS WITH FIVE FULL YEARS: median change **-2.2pp**, range -11.6pp
+        # (AT000000STR1: 32.8 -> 23.5) to +8.6pp. It is not a uniform shift — a name whose daily
+        # noise cancels within the month falls, one that trends inside months rises — which is why
         # this is a different measurement rather than the same one rescaled.
         #
-        # Ã¢ÂÂ  A MONTHLY SERIES IS ~60 POINTS OVER FIVE YEARS AGAINST ~1,250, so the estimate is
+        # ⚠ A MONTHLY SERIES IS ~60 POINTS OVER FIVE YEARS AGAINST ~1,250, so the estimate is
         # noisier. That is the honest cost and it is why the floor below is four years of MONTHS
         # rather than a token handful: a vol quoted off eighteen observations under a "5y" heading
         # is the same lie the daily column already refused.
@@ -2947,21 +3046,21 @@ def _holding_risk(isins: list[str], benchmark_label: str,
                 row["vol_5y_pct"] = round(st.ann_vol * 100.0, 1)
 
         if bench_w:
-            # Ã¢ÂÂ Ã¢ÂÂ  WEEKLY, AND THAT IS NOT A PERFORMANCE CHOICE Ã¢ÂÂ IT IS THE ONLY HONEST CADENCE HERE.
+            # ⚠⚠ WEEKLY, AND THAT IS NOT A PERFORMANCE CHOICE — IT IS THE ONLY HONEST CADENCE HERE.
             # The benchmark trackers are LONDON-listed (ISAC.L, 0KZC.L) and close at 16:30 London;
             # a US holding closes at 21:00. So half a US stock's trading day lands in the NEXT
-            # benchmark bar, and the daily correlation is mechanically halved Ã¢ÂÂ the classic
+            # benchmark bar, and the daily correlation is mechanically halved — the classic
             # non-synchronous-trading bias, downward, on every beta.
             #
             # Measured 2026-08-18 on this book: Microsoft vs ACWI came out at corr 0.38 / beta 0.72
-            # on daily returns (its true beta is ~1.05), and 0.50 / 1.04 on weekly. AMD 1.41 Ã¢ÂÂ 1.98,
-            # ASML 1.27 Ã¢ÂÂ 1.74. Weekly spans the gap, so the mismatch washes out; ~260 observations
+            # on daily returns (its true beta is ~1.05), and 0.50 / 1.04 on weekly. AMD 1.41 → 1.98,
+            # ASML 1.27 → 1.74. Weekly spans the gap, so the mismatch washes out; ~260 observations
             # over five years is a healthy sample.
             #
-            # Ã¢ÂÂ  THE THREE COLUMNS NOW SIT ON THREE CADENCES, AND EACH IS CHOSEN FOR ITS OWN
+            # ⚠ THE THREE COLUMNS NOW SIT ON THREE CADENCES, AND EACH IS CHOSEN FOR ITS OWN
             # REASON: momentum daily (the signal engine's own definition), beta WEEKLY (this
-            # bias), volatility MONTHLY (the holding horizon Ã¢ÂÂ see its note above). They are not
-            # required to agree; they are required to say which they used, which the Ã¢ÂÂ on each
+            # bias), volatility MONTHLY (the holding horizon — see its note above). They are not
+            # required to agree; they are required to say which they used, which the ⓘ on each
             # column does. What they DO share is the four-year history floor, so no column quotes
             # a figure under a "5y" heading off a listing that is two years old.
             weeks = sorted(set(_by_week(eur)) & set(bench_w))
@@ -2989,39 +3088,40 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
                                            bucket_filter: str | None = None) -> dict:
     """The Analyse modal's one request.
 
-    Ã¢ÂÂ Ã¢ÂÂ  THE READ MEMO IS OPENED **HERE**, AT THE REQUEST BOUNDARY, NOT INSIDE THE COMPUTATION.
+    ⚠⚠ THE READ MEMO IS OPENED **HERE**, AT THE REQUEST BOUNDARY, NOT INSIDE THE COMPUTATION.
     Measured on BUS_Neutraal_FX, one press issued **212 database round trips of which 103 were
-    byte-identical repeats** Ã¢ÂÂ `airs_performance` nine times, `airs_model_portfolio` five,
+    byte-identical repeats** — `airs_performance` nine times, `airs_model_portfolio` five,
     `asset_grid` three, the SP500 universe id six, and the benchmark's whole price panel THREE
     times through COPY. No module is at fault: this endpoint is a dozen collaborating loaders
     (look-through, book ledger, benchmark, attribution basis, axes) each correctly fetching what
     it needs, and the duplication only exists in their composition.
 
     A request is exactly the scope over which "the database did not change under us" is a safe
-    assumption, so that is the scope of the memo Ã¢ÂÂ not a TTL, not a process-wide cache. See
+    assumption, so that is the scope of the memo — not a TTL, not a process-wide cache. See
     `common/read_cache.py`.
 
-    Ã¢ÂÂ  THE CONTEXT REACHES THE WORKER THREAD BECAUSE `to_thread` COPIES IT. That is the whole
+    ⚠ THE CONTEXT REACHES THE WORKER THREAD BECAUSE `to_thread` COPIES IT. That is the whole
     reason this can be a ContextVar rather than something threaded through fifteen signatures;
     it is also why the memo must be opened OUTSIDE the `to_thread` call rather than within the
     sync function.
 
-    Ã¢ÂÂ  AND THE SYNC FUNCTION KEEPS ITS OWN BEHAVIOUR UNCHANGED. `compute_portfolio_analysis` is
+    ⚠ AND THE SYNC FUNCTION KEEPS ITS OWN BEHAVIOUR UNCHANGED. `compute_portfolio_analysis` is
     still callable from a script or a test with no memo at all, which is what an offline caller
     should get: no shared state, no question about how old an answer is.
 
-    Ã¢ÂÂ  AND A SECOND, WIDER CACHE SITS IN FRONT OF THE MEMO Ã¢ÂÂ `_analysis_cache`. The memo above
+    ⚠ AND A SECOND, WIDER CACHE SITS IN FRONT OF THE MEMO — `_analysis_cache`. The memo above
     removes REPEATS WITHIN one request; it can do nothing about the same request arriving twice,
     which is the common case here (toggle the benchmark and back, switch `weight_by`, reopen the
     same row) and costs the full ~7s each time. That outer cache is keyed on a FINGERPRINT OF THE
-    DATA, not a clock, so it cannot serve a stale figure Ã¢ÂÂ see its module note for why a TTL was
+    DATA, not a clock, so it cannot serve a stale figure — see its module note for why a TTL was
     the wrong instrument on a page whose discipline is "current or absent".
     """
     from common.read_cache import read_cache  # noqa: PLC0415
 
     from routers import _analysis_cache as ac  # noqa: PLC0415
 
-    key = (portfolio_id, benchmark_label, weight_by, source, bucket_filter)
+    key = (portfolio_id, benchmark_label, weight_by, source, bucket_filter,
+           COMPOSITION_BASIS)
     # The fingerprint is a database read, so it goes to a thread like everything else here.
     fp = await asyncio.to_thread(ac.fingerprint)
     hit = ac.get(key, fp)
@@ -3031,8 +3131,8 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
     with read_cache(f"analysis:{portfolio_id}"):
         out = await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label,
                                       weight_by, source, bucket_filter)
-    # Ã¢ÂÂ  Stored against the fingerprint read BEFORE the computation, deliberately. If a write lands
-    # mid-computation the payload is a mix of both states Ã¢ÂÂ filing it under the OLD fingerprint
+    # ⚠ Stored against the fingerprint read BEFORE the computation, deliberately. If a write lands
+    # mid-computation the payload is a mix of both states — filing it under the OLD fingerprint
     # means the next request (which sees the new one) misses and recomputes. Filing it under a
     # fingerprint taken afterwards would publish that mixed payload as if it were the new state.
     ac.put(key, fp, out)
@@ -3040,7 +3140,7 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
 
 
 def portfolio_basket_request(portfolio_id: int):
-    """A model portfolio's holdings as a `BasketRequest` Ã¢ÂÂ the bridge that lets the whole portfolio
+    """A model portfolio's holdings as a `BasketRequest` — the bridge that lets the whole portfolio
     reuse the same basket engines (performance, owner earnings, price series) an instrument / group
     does. 404 when the portfolio has no priceable positions."""
     from fastapi import HTTPException  # noqa: PLC0415
@@ -3061,8 +3161,8 @@ def portfolio_basket_request(portfolio_id: int):
 
 
 def compute_portfolio_risk_windows(portfolio_id: int):
-    """The whole portfolio's returns+risk windows (Analyse Ã¢ÂÂ Risk section). Its holdings, priced
-    as ONE value-weighted EUR basket Ã¢ÂÂ the same 2/4/8-year table a single instrument or a sleeve
+    """The whole portfolio's returns+risk windows (Analyse → Risk section). Its holdings, priced
+    as ONE value-weighted EUR basket — the same 2/4/8-year table a single instrument or a sleeve
     gets. Daily-yfinance only, so this exists only in the yfinance world (AIRS keeps no daily
     history), which is why the Analyse modal gates it behind the yfinance source."""
     from routers._asset_financials import _basket_performance  # noqa: PLC0415
@@ -3083,7 +3183,7 @@ def _returns_timed(portfolio_id, effective, benchmark_label, source, phase):
 
 
 def _basket_returns(holdings, benchmark_label: str) -> dict:
-    """YTD EUR return of an arbitrary basket vs the benchmark Ã¢ÂÂ the Analyse Return tile for a stock
+    """YTD EUR return of an arbitrary basket vs the benchmark — the Analyse Return tile for a stock
     or a group. A basket has no AIRS book and no inception, so 'since inception' is null and the
     figure is always yfinance (`asset_price`), priced the same way the benchmark is."""
     from datetime import date  # noqa: PLC0415
@@ -3115,7 +3215,7 @@ def _basket_returns(holdings, benchmark_label: str) -> dict:
 
 
 def _classify_items(holdings, codes):
-    """(port_items, labels, classified_w, total_w, foreign, holding_count) for a basket Ã¢ÂÂ the
+    """(port_items, labels, classified_w, total_w, foreign, holding_count) for a basket — the
     portfolio side of the composition, built exactly like `compute_portfolio_analysis` does for a
     model. `labels` is parallel to `items` and carries identity only (see `_axis_holdings`)."""
     held = sorted({h.isin for h in holdings if h.isin})
@@ -3138,7 +3238,7 @@ def _classify_items(holdings, codes):
         if h.isin:
             count += 1
         items.append((w, b))
-        # A basket carries no asset-class sleeve Ã¢ÂÂ every leg is in every axis's denominator, which
+        # A basket carries no asset-class sleeve — every leg is in every axis's denominator, which
         # is why the basket path has no sector/general split below.
         labels.append({"name": (row or {}).get("name") or getattr(h, "name", None) or h.isin,
                        "isin": h.isin, "asset_class": None, "via_names": []})
@@ -3147,7 +3247,7 @@ def _classify_items(holdings, codes):
 
 def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: str | None = None) -> dict:
     """Composition + return of an ARBITRARY basket (a single stock, a group, an ad-hoc set) beside
-    the benchmark Ã¢ÂÂ the same shape `compute_portfolio_analysis` returns, so ONE Analyse view serves
+    the benchmark — the same shape `compute_portfolio_analysis` returns, so ONE Analyse view serves
     a stock (a basket of one) and a portfolio alike. yfinance only: a basket has no AIRS book."""
     codes = _country_by_code()
     (port_items, port_labels, classified_w, total_w,
@@ -3182,7 +3282,7 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
                  "diff_pct": pw[axis].get(k, 0.0) - bw[axis].get(k, 0.0),
                  "holdings": dd[axis].get(k, [])} for k in keys]
         rows.sort(key=lambda r: -max(r["portfolio_pct"], r["benchmark_pct"]))
-        # Ã¢ÂÂ  ONE DENOMINATOR ON ALL THREE AXES HERE, unlike a model portfolio: a basket has no
+        # ⚠ ONE DENOMINATOR ON ALL THREE AXES HERE, unlike a model portfolio: a basket has no
         # asset-class sleeve to divide by, so every leg is in every axis's total.
         axes.append({"axis": axis, "rows": rows,
                      "basis": "Share of the whole basket, by each holding's stated weight.",
@@ -3204,24 +3304,24 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
         "benchmark_missing_countries": bench_coverage.get("missing_countries") or [],
         "returns": _basket_returns(holdings, benchmark_label),
         "axes": axes,
-        # A basket has no AIRS book, so no per-holding book returns Ã¢ÂÂ the non-equity sleeve view is
+        # A basket has no AIRS book, so no per-holding book returns — the non-equity sleeve view is
         # a portfolio-only feature.
         "book_holdings": [],
-        # Ã¢ÂÂ  AND IT HAS TO SAY SO. This is the OTHER route to an empty holdings table, and from the
+        # ⚠ AND IT HAS TO SAY SO. This is the OTHER route to an empty holdings table, and from the
         # reader's side the two are identical: the same blank panel, on a portfolio whose rows they
         # can see on the list behind it. A basket is opened when the book is NOT paired with a
         # model portfolio (`fixed_portfolio_id` is null), which is a fact about the pairing, not
         # about the holdings.
         "book_note": ("Opened as a basket of ISINs, because this book is not paired with a model "
                       "portfolio. The charts above are computed from its holdings, but the valued "
-                      "per-holding table is a paired-portfolio feature Ã¢ÂÂ pair it from the Link "
+                      "per-holding table is a paired-portfolio feature — pair it from the Link "
                       "column to get it."),
     }
 
 
 async def compute_basket_analysis_async(holdings, benchmark_label: str = SP500_LABEL,
                                         name: str | None = None) -> dict:
-    """The same modal over an ad-hoc basket Ã¢ÂÂ same memo, same reason (see the portfolio twin).
+    """The same modal over an ad-hoc basket — same memo, same reason (see the portfolio twin).
     It loads the identical benchmark side, which is where the repeated COPY of the whole price
     panel lives."""
     from common.read_cache import read_cache  # noqa: PLC0415

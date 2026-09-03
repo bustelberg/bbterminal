@@ -2,12 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { lastPerMonth } from './monthEnds';
 
 /**
- * ONE POINT PER MONTH, PLUS TODAY.
+ * ONE POINT PER MONTH — THE MOST RECENT ONE IN IT.
  *
  * ⚠⚠ THE PROPERTY THAT MAKES THIS SAFE IS THAT NOTHING IS INVENTED. Every point it returns is one
  * that went in, on its own date — no averaging, no interpolation, no moving an observation to a
  * month boundary. That is why the thinned series can be drawn in the same ink as the full one, and
  * it is the thing to check first if this ever grows a second rule.
+ *
+ * ⚠⚠ AND THE SECOND PROPERTY IS THAT IT ENDS ON THE NEWEST ROW. The `Return` chip beside the chart
+ * reads that same newest row, so the last point of the thinned series IS the chip's figure — by
+ * this rule, not by luck. A current-month special case was added and removed on 2026-09-03 for
+ * exactly that reason; see `monthEnds.ts`.
  */
 
 const p = (date: string, value: number) => ({ date, value });
@@ -18,10 +23,11 @@ describe('lastPerMonth', () => {
     expect(lastPerMonth(rows)).toEqual([p('2026-06-30', 2), p('2026-07-31', 3)]);
   });
 
-  it('⚠ the current month contributes TODAY, with no special case for it', () => {
-    // "Each month and today" is one rule, not two: the partial month's last observation IS today's.
-    // Written as two, the newest point would be duplicated on the last day of a month and nowhere
-    // else — a bug that appears once a month and is gone by morning.
+  it('⚠ the partial month contributes its NEWEST point, and never a second one', () => {
+    // The current month gets no special case, which is what keeps the series ending on the newest
+    // row — the figure the `Return` chip states. A rule that also asked "is it today?" would end
+    // the line at last month's close on any morning AIRS has not published yet, while the chip and
+    // the chart's own header both stated yesterday's number. Tried 2026-09-03, removed same day.
     const rows = [p('2026-07-31', 1), p('2026-08-03', 2), p('2026-08-26', 3)];
     expect(lastPerMonth(rows).map((r) => r.date)).toEqual(['2026-07-31', '2026-08-26']);
   });

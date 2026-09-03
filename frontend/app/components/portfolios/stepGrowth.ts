@@ -62,6 +62,37 @@ export function memberScale(values: number[]): number {
 }
 
 /**
+ * The materiality bar for ONE member — `memberScale`, or **0 (no bar) on a ONE-MEMBER line**, where
+ * the member IS the line. The client twin of `_fundamental_blend.base_bar_scale`.
+ *
+ * ⚠⚠ THE BAR IS A RULE ABOUT ONE MEMBER INSIDE AN AVERAGE OF MANY, AND ON A LINE OF ONE IT HAS
+ * NOTHING TO PROTECT. `MIN_STEP_BASE_FRACTION` refuses a member's step and lets the others carry
+ * the interval — the refusal is an ABSTENTION. With a single contributor there is nobody to
+ * abstain in favour of: `den` comes out 0, `buildBlend` hits its "nothing spans this interval"
+ * `continue`, and — because that path deliberately does NOT advance `anchor` — the SAME base is
+ * offered at every later period and refused every time. One refusal deletes the whole line.
+ *
+ * ⚠⚠ AND THE FIRST PERIOD OF A HYPERGROWER ALWAYS TRIPS IT. Every member is rebased to 100 at its
+ * own first positive period, so the bar reads `100 < 0.10 × median|rebased|` — it fires on ANY
+ * member that grew more than ~10x from its first period to its median one, which is growth and not
+ * a corrupt divisor. Measured 2026-09-03 on NVIDIA through `portfolio-revenue-matrix` as a
+ * one-holding book: `price_ps` 13 periods, median rebased 2,706, bar 271 → **1 period drawn**;
+ * `eps_nri` 18 periods, bar 227 → **1**; `fcf_ps` 13 periods, bar 49 → **13**. A one-point line has
+ * no window, so the `Tables` tab's Share price and EPS rows read `—` while the Graphs tab, which
+ * for one company plots the filed figures with no chain at all, drew all thirteen.
+ *
+ * ⚠ IT DOES NOT LOOSEN THE BAR FOR AN INDEX OR A BOOK. `members > 1` is the whole condition, so
+ * every case the constant was read off (Prosus at a 26% AEX weight, AMD, Mitsubishi Heavy) is
+ * untouched — those are the lines where an abstention has somewhere to fall back to.
+ *
+ * ⚠ 0 IS ALREADY THE "NO BAR" VALUE (`memberScale([])` returns it), so this adds a reason, not a
+ * mechanism. ⚠ Read it with a `??` default, never `||` — `0 || memberScale(v)` puts the bar back.
+ */
+export function baseBarScale(values: number[], members: number): number {
+  return members > 1 ? memberScale(values) : 0;
+}
+
+/**
  * This member's growth from `prev` to `now`, or null when it has none to give.
  *
  * Three refusals and a floor — see the backend twin for the reasoning behind each:

@@ -906,11 +906,11 @@ export interface paths {
         };
         /**
          * Airs Account Model Links
-         * @description Which MODEL is each AIRS ACCOUNT running Ã¢ÂÂ decided, guessed, or neither.
+         * @description Which MODEL is each AIRS ACCOUNT running — decided, guessed, or neither.
          *
          *     This is the only bridge between the ISINs (models have them, and AIRS values nothing) and
          *     the money (accounts have it, and carry no ISIN). It cannot be derived: the holdings do not
-         *     identify the model Ã¢ÂÂ BUS_FTS_Bepoff/DEF/NEU_AFS hold the IDENTICAL 27 ISINs Ã¢ÂÂ so the name
+         *     identify the model — BUS_FTS_Bepoff/DEF/NEU_AFS hold the IDENTICAL 27 ISINs — so the name
          *     is the only discriminator, and the name is four conventions and a typo. Hence a guess that
          *     refuses rather than approximates, plus a stored human decision.
          */
@@ -939,7 +939,7 @@ export interface paths {
         post?: never;
         /**
          * Clear Airs Account Model Link
-         * @description Forget the decision Ã¢ÂÂ the guess speaks again. NOT the same as storing "none".
+         * @description Forget the decision — the guess speaks again. NOT the same as storing "none".
          */
         delete: operations["clear_airs_account_model_link_api_airs_account_model_links__portefeuille__delete"];
         options?: never;
@@ -956,10 +956,10 @@ export interface paths {
         };
         /**
          * Airs Accounts
-         * @description The AIRS ACCOUNTS Ã¢ÂÂ what the books actually made, on AIRS's own EUR values.
+         * @description The AIRS ACCOUNTS — what the books actually made, on AIRS's own EUR values.
          *
          *     A different object from the model portfolios: a model is a COMPOSITION (weights), which AIRS
-         *     has nothing to value Ã¢ÂÂ of 58 models and 39 valued accounts, the overlap is zero. The models
+         *     has nothing to value — of 58 models and 39 valued accounts, the overlap is zero. The models
          *     answer "would this strategy work" (and need yfinance, since nothing else can price a set of
          *     weights); these answer "what did this book make", and AIRS is the system of record.
          */
@@ -984,14 +984,14 @@ export interface paths {
          * Airs Account Set Display Name
          * @description Name one AIRS account, or clear the name.
          *
-         *     Ã¢ÂÂ  THE NAME BELONGS TO THE ACCOUNT, NOT TO THE MODEL IT RUNS. `display_name` on
-         *     `airs_model_portfolio` names a strategy, and an account borrowed it through its pairing Ã¢ÂÂ so a
+         *     ⚠ THE NAME BELONGS TO THE ACCOUNT, NOT TO THE MODEL IT RUNS. `display_name` on
+         *     `airs_model_portfolio` names a strategy, and an account borrowed it through its pairing — so a
          *     book paired with no model could not be named at all, which is exactly backwards: those are the
          *     books still wearing AIRS's own code (`BUS_Ris_bepOff_Kl_AFS_Dy`) and most in need of one. Two
          *     accounts running one model may also deserve different names, and renaming a model must not
          *     silently rename every book paired with it.
          *
-         *     Ã¢ÂÂ  CLEARING IS A DELETE, NOT AN EMPTY STRING. A stored "" would be a name that renders as
+         *     ⚠ CLEARING IS A DELETE, NOT AN EMPTY STRING. A stored "" would be a name that renders as
          *     nothing, indistinguishable on screen from an un-named row and invisible to the fallback chain.
          */
         put: operations["airs_account_set_display_name_api_airs_accounts__portefeuille__display_name_put"];
@@ -1011,7 +1011,7 @@ export interface paths {
         };
         /**
          * Airs Account Holdings
-         * @description One account's positions, with AIRS's own EUR values Ã¢ÂÂ including the Leonteq certificates
+         * @description One account's positions, with AIRS's own EUR values — including the Leonteq certificates
          *     Yahoo cannot price at all (TOPS_OFF_BEH_DYN: AIRS values 7 of 7 where the yfinance path
          *     prices 0 of 9).
          */
@@ -1039,7 +1039,7 @@ export interface paths {
          *     This joins them row-by-row inside the pair confirmed on `/account-model-links`, and then
          *     REFUSES TO TRUST ITS OWN NAME MATCH: every row is checked against the instrument's own
          *     close, because a name cannot see a share class (IE00BNDS1P30 vs IE00BNDS1Q47 are both
-         *     "Vanguard ESG Global Corporate Bond UCITS ETF EUR Hedged" Ã¢ÂÂ Acc and Inc, Ã¢ÂÂ¬4.79 vs Ã¢ÂÂ¬3.99,
+         *     "Vanguard ESG Global Corporate Bond UCITS ETF EUR Hedged" — Acc and Inc, €4.79 vs €3.99,
          *     and they compound differently).
          */
         get: operations["airs_account_isins_api_airs_accounts__portefeuille__isins_get"];
@@ -1064,16 +1064,16 @@ export interface paths {
          * @description Point one of an ACCOUNT's holdings at the model portfolio it IS (or, with a null target,
          *     record that it is not one).
          *
-         *     Ã¢ÂÂ  THE SAME ROW THE MODEL-PORTFOLIO SCREEN WRITES. `airs_model_portfolio_link` is keyed on the
-         *     holding, not on (parent, holding) Ã¢ÂÂ one certificate is the same portfolio wherever it is held
-         *     Ã¢ÂÂ so this is not a second store for the same fact, and the two screens cannot disagree.
+         *     ⚠ THE SAME ROW THE MODEL-PORTFOLIO SCREEN WRITES. `airs_model_portfolio_link` is keyed on the
+         *     holding, not on (parent, holding) — one certificate is the same portfolio wherever it is held
+         *     — so this is not a second store for the same fact, and the two screens cannot disagree.
          */
         put: operations["airs_set_account_holding_link_api_airs_accounts__portefeuille__link_put"];
         post?: never;
         /**
          * Airs Clear Account Holding Link
          * @description Forget the human decision for this holding and fall back to the automatic guess. NOT the
-         *     same as linking it to nothing Ã¢ÂÂ that is a decision too, and is stored as a null.
+         *     same as linking it to nothing — that is a decision too, and is stored as a null.
          *
          *     `portefeuille` names which table the request came from; the row it clears is the same one the
          *     model-portfolio screen writes, because the link is keyed on the holding.
@@ -1093,16 +1093,16 @@ export interface paths {
         };
         /**
          * Airs Account Linkable Portfolios
-         * @description What an ACCOUNT's holdings may be linked to Ã¢ÂÂ the same dropdown the model-portfolio
+         * @description What an ACCOUNT's holdings may be linked to — the same dropdown the model-portfolio
          *     positions table uses, and the same gates.
          *
-         *     Ã¢ÂÂ  "SELF" FOR AN ACCOUNT IS THE MODEL IT RUNS. `linkable_context` excludes the owner so a
+         *     ⚠ "SELF" FOR AN ACCOUNT IS THE MODEL IT RUNS. `linkable_context` excludes the owner so a
          *     portfolio cannot be its own holding; an account is not a model, so its analogue is the model
          *     it is paired with on `/account-model-links`. A certificate of the account's own strategy is
          *     exactly the wrapper cycle the gate exists to stop. An unpaired account excludes nothing,
          *     which is right: we do not know its strategy, so we cannot say which link would be circular.
          *
-         *     ONE call for the whole table Ã¢ÂÂ per row it would be a request per holding.
+         *     ONE call for the whole table — per row it would be a request per holding.
          */
         get: operations["airs_account_linkable_portfolios_api_airs_accounts__portefeuille__linkable_get"];
         put?: never;
@@ -1124,8 +1124,8 @@ export interface paths {
          * Airs Account Return Reconciliation
          * @description Why this book's own YTD is not the YTD its open positions add up to.
          *
-         *     Reads both sides from the loaders the other panels already use Ã¢ÂÂ `_year_perf` for the book,
-         *     `account_holdings` for the positions Ã¢ÂÂ so the reconciliation cannot quietly disagree with
+         *     Reads both sides from the loaders the other panels already use — `_year_perf` for the book,
+         *     `account_holdings` for the positions — so the reconciliation cannot quietly disagree with
          *     either of the figures it is reconciling.
          */
         get: operations["airs_account_return_reconciliation_api_airs_accounts__portefeuille__return_reconciliation_get"];
@@ -1146,7 +1146,7 @@ export interface paths {
         };
         /**
          * Airs Account Transactions
-         * @description What this book BOUGHT and SOLD this year Ã¢ÂÂ the AIRS Transacties report.
+         * @description What this book BOUGHT and SOLD this year — the AIRS Transacties report.
          *
          *     The three reports already stored say what a book holds (VOLK), what it earned (MUT) and what
          *     its strategy asks for (MODEL). None says what it DID, so a position that appeared mid-year, one
@@ -1174,24 +1174,24 @@ export interface paths {
         };
         /**
          * Airs Allocation Bands
-         * @description The allocation policy Ã¢ÂÂ all sixteen cells, nulls where nothing is set.
+         * @description The allocation policy — all sixteen cells, nulls where nothing is set.
          */
         get: operations["airs_allocation_bands_api_airs_allocation_bands_get"];
         /**
          * Airs Set Allocation Bands
          * @description Apply these cells to the policy. Admin-only (the API gate refuses a non-admin write).
          *
-         *     Ã¢ÂÂ  PARTIAL BY DESIGN Ã¢ÂÂ send only the cells you changed. A cell that IS sent and is empty means
+         *     ⚠ PARTIAL BY DESIGN — send only the cells you changed. A cell that IS sent and is empty means
          *     "clear this row"; a cell that is not sent means nothing at all. Sending the full grid from a
          *     stale view therefore deletes everything that changed since it loaded, which is not theoretical:
          *     it wiped 15 of 16 seeded rows on 2026-08-04, silently.
          *
-         *     Ã¢ÂÂ  VALIDATED IN FULL BEFORE ANYTHING IS WRITTEN. A save is ONE intent, so a bad cell rejects the
-         *     whole submission with a sentence naming it Ã¢ÂÂ landing the first eight and refusing the ninth
+         *     ⚠ VALIDATED IN FULL BEFORE ANYTHING IS WRITTEN. A save is ONE intent, so a bad cell rejects the
+         *     whole submission with a sentence naming it — landing the first eight and refusing the ninth
          *     would leave a policy half-updated while the reader believes all of it took.
          *
-         *     Returns the WHOLE grid as stored, so the editor renders what the database now holds Ã¢ÂÂ including
-         *     any cell somebody else changed while it was open Ã¢ÂÂ rather than what it hoped it sent.
+         *     Returns the WHOLE grid as stored, so the editor renders what the database now holds — including
+         *     any cell somebody else changed while it was open — rather than what it hoped it sent.
          */
         put: operations["airs_set_allocation_bands_api_airs_allocation_bands_put"];
         post?: never;
@@ -1212,7 +1212,7 @@ export interface paths {
         put?: never;
         /**
          * Set Asset Bucket Override
-         * @description Manually pin (or clear) a holding's Class. Keyed by ISIN Ã¢ÂÂ a property of the instrument,
+         * @description Manually pin (or clear) a holding's Class. Keyed by ISIN — a property of the instrument,
          *     remembered forever, and it beats the calculated `classify_bucket`. A null/empty bucket deletes
          *     the override (revert to Auto). Returns `{isin, bucket}` (bucket null when cleared).
          */
@@ -1234,7 +1234,7 @@ export interface paths {
         put?: never;
         /**
          * Airs Basket Analysis
-         * @description Composition + return of an ARBITRARY basket (a single stock, a group) beside the benchmark Ã¢ÂÂ
+         * @description Composition + return of an ARBITRARY basket (a single stock, a group) beside the benchmark —
          *     the same payload as the model-portfolio analysis, so ONE Analyse view serves a stock (a basket
          *     of one) and a portfolio alike. yfinance only (a basket has no AIRS book).
          */
@@ -1258,11 +1258,11 @@ export interface paths {
          * Ingest Basket Fundamentals Job
          * @description The same fill, for a basket of holdings rather than a stored model portfolio.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  IT EXISTS BECAUSE MOST BOOKS ON /management-dashboard HAVE NO FIXED MODEL. `openModal` in
+         *     ⚠⚠ IT EXISTS BECAUSE MOST BOOKS ON /management-dashboard HAVE NO FIXED MODEL. `openModal` in
          *     `PortfolioOverviewPanel` only carries a `fixed_portfolio_id` when the account is PAIRED with
          *     one; otherwise it resolves the account's own ISINs into a basket and opens the same Analyse
          *     view. Scoping the refresh to a model portfolio id therefore hid the button on exactly the rows
-         *     a user is most likely to be looking at Ã¢ÂÂ an account is the unit of work, the model is the
+         *     a user is most likely to be looking at — an account is the unit of work, the model is the
          *     optional extra.
          *
          *     Mirrors `POST /api/airs/basket/analysis`, which exists for the identical reason: one view
@@ -1289,7 +1289,7 @@ export interface paths {
          * @description Pin (or clear) the ISIN of an account holding the model has no position for.
          *
          *     Keyed by holding NAME, so one entry fixes every book that holds it (the measured case appears
-         *     in four). Ã¢ÂÂ  It decides IDENTITY ONLY: the pinned ISIN is price-checked like any other, so a
+         *     in four). ⚠ It decides IDENTITY ONLY: the pinned ISIN is price-checked like any other, so a
          *     wrong one comes back `price_mismatch` rather than being trusted because a human typed it.
          */
         post: operations["set_holding_isin_override_api_airs_holding_isin_override_post"];
@@ -1308,7 +1308,7 @@ export interface paths {
         };
         /**
          * Airs Model Portfolios Stored
-         * @description The stored portfolios Ã¢ÂÂ an instant DB read. The page opens on this; `/scan` is the
+         * @description The stored portfolios — an instant DB read. The page opens on this; `/scan` is the
          *     explicit refresh, because re-scraping AirSPMS costs minutes.
          */
         get: operations["airs_model_portfolios_stored_api_airs_model_portfolios_get"];
@@ -1332,10 +1332,10 @@ export interface paths {
          * @description YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models,
          *     plus every instrument that fed them and its price series.
          *
-         *     Ã¢ÂÂ  GZIPPED HERE RATHER THAN BY A `GZipMiddleware`, for the reason `/api/benchmarks/Ã¢ÂÂ¦/grid`
+         *     ⚠ GZIPPED HERE RATHER THAN BY A `GZipMiddleware`, for the reason `/api/benchmarks/…/grid`
          *     records: this app is SSE-heavy, and compression sits between a stream and its client and
          *     buffers. The instrument series are ~450 KB of JSON and compress to ~207 KB; the matrices
-         *     alone are a few KB. `Accept-Encoding` is honoured, not assumed Ã¢ÂÂ `/documentation` publishes
+         *     alone are a few KB. `Accept-Encoding` is honoured, not assumed — `/documentation` publishes
          *     curl quick-starts against this API, and curl does not send it by default.
          */
         get: operations["airs_model_portfolio_correlations_api_airs_model_portfolios_correlations_get"];
@@ -1357,7 +1357,7 @@ export interface paths {
         /**
          * Airs Model Portfolio Performance
          * @description YTD (EUR) for every stored model portfolio. Read `ModelPortfolioPerformance`'s
-         *     docstring Ã¢ÂÂ for half of them the number is a backtest, not a track record.
+         *     docstring — for half of them the number is a backtest, not a track record.
          */
         get: operations["airs_model_portfolio_performance_api_airs_model_portfolios_performance_get"];
         put?: never;
@@ -1400,30 +1400,30 @@ export interface paths {
         put?: never;
         /**
          * Airs Model Portfolios Scan Job
-         * @description The model-portfolio scan as a CANCELLABLE JOB Ã¢ÂÂ phase two of the portfolios page's
+         * @description The model-portfolio scan as a CANCELLABLE JOB — phase two of the portfolios page's
          *     "Refresh all".
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  THIS IS THE HALF OF THAT BUTTON THAT RAN BLIND. Phase one (the account scan) has been a job
+         *     ⚠⚠ THIS IS THE HALF OF THAT BUTTON THAT RAN BLIND. Phase one (the account scan) has been a job
          *     since 2026-08-13: a toast with `i/n`, the account in flight, a working Cancel, and it survives a
-         *     reload. Phase two Ã¢ÂÂ this Ã¢ÂÂ was `runSSE` straight into `console.warn`, so for the MINUTES it runs
+         *     reload. Phase two — this — was `runSSE` straight into `console.warn`, so for the MINUTES it runs
          *     (an edit-page GET plus an XLS download for each of ~58 fixed portfolios) the only thing on
          *     screen saying anything was happening at all was the button's own label. Navigate away and the
          *     work was invisible; reload and it was unrecoverable; there was no way to stop it. One button
          *     reporting two ways, and the slower way was the silent one.
          *
-         *     Ã¢ÂÂ  THE SCAN ITSELF IS UNCHANGED Ã¢ÂÂ the same `fetch_model_portfolios_sync` +
+         *     ⚠ THE SCAN ITSELF IS UNCHANGED — the same `fetch_model_portfolios_sync` +
          *     `count_model_portfolio_holdings_sync` the SSE endpoint above and the scheduler both call, with
          *     two optional hooks. A streaming copy for the job path is exactly the drift `scan_one`'s
          *     docstring warns about.
          *
-         *     Ã¢ÂÂ  CANCEL STOPS BETWEEN PORTFOLIOS, and the summary says where. A portfolio's XLS is downloaded,
+         *     ⚠ CANCEL STOPS BETWEEN PORTFOLIOS, and the summary says where. A portfolio's XLS is downloaded,
          *     counted and persisted as a unit; everything already counted is kept.
          *
-         *     Ã¢ÂÂ  `busy` IS AN ANSWER, NOT AN ERROR Ã¢ÂÂ and here it guards a REAL hazard rather than a
+         *     ⚠ `busy` IS AN ANSWER, NOT AN ERROR — and here it guards a REAL hazard rather than a
          *     bookkeeping one: this shares ONE authenticated AirSPMS session with the account scan, which
-         *     must not be driven by two threads at once. Ã¢ÂÂ  IT IS A PARTIAL GUARD AND SAYING SO IS THE POINT:
+         *     must not be driven by two threads at once. ⚠ IT IS A PARTIAL GUARD AND SAYING SO IS THE POINT:
          *     `_LOCK` is held by `run_airs_vermogen_refresh_sync` and `refresh_one_portfolio`, so this cannot
-         *     collide with either Ã¢ÂÂ but the scheduler's own model-scan ticks (`scheduler.py`) do not take it,
+         *     collide with either — but the scheduler's own model-scan ticks (`scheduler.py`) do not take it,
          *     and neither does the SSE endpoint above, so those two can still overlap this. Non-blocking, so
          *     it can never deadlock the session it exists to protect.
          */
@@ -1452,7 +1452,7 @@ export interface paths {
          *     VOLK per-holding results) instead of the yfinance model reconstruction. The benchmark stays
          *     yfinance either way, so the two are comparable.
          *
-         *     `bucket` (an allocation label Ã¢ÂÂ Equity, Bonds, Ã¢ÂÂ¦) filters the CHART axes to that asset-class
+         *     `bucket` (an allocation label — Equity, Bonds, …) filters the CHART axes to that asset-class
          *     sleeve; the `allocation` bar itself stays over the whole model so a reader can re-select.
          */
         get: operations["airs_model_portfolio_analysis_api_airs_model_portfolios__portfolio_id__analysis_get"];
@@ -1475,15 +1475,15 @@ export interface paths {
          * Airs Model Portfolio Attribution
          * @description Brinson-Fachler attribution of one model against a benchmark, over one window.
          *
-         *     Ã¢ÂÂ  THE DEFAULT IS `book` Ã¢ÂÂ THE BEGINWAARDE START WEIGHTS, NOT THE MODEL'S DESIGN PERCENTAGES.
+         *     ⚠ THE DEFAULT IS `book` — THE BEGINWAARDE START WEIGHTS, NOT THE MODEL'S DESIGN PERCENTAGES.
          *     An attribution weighted by the design % (a flat 5.00% per name) decomposes a portfolio nobody
          *     held: it assumes every position opened the year at its target weight and never drifted. Only
          *     the start weights reproduce the book's realised return, because
-         *     `ÃÂ£ start_iÃÂ·ret_i / ÃÂ£ start_i == (ÃÂ£ cur Ã¢ÂÂ ÃÂ£ start) / ÃÂ£ start` is an identity Ã¢ÂÂ so with any
+         *     `Σ start_i·ret_i / Σ start_i == (Σ cur − Σ start) / Σ start` is an identity — so with any
          *     other weighting the "excess" being decomposed is not the excess the book earned.
          *
          *     `source=model` still gives the yfinance reconstruction of the model's nominal composition,
-         *     which is the right question for an unlinked model Ã¢ÂÂ it is just not what the book did.
+         *     which is the right question for an unlinked model — it is just not what the book did.
          */
         get: operations["airs_model_portfolio_attribution_api_airs_model_portfolios__portfolio_id__attribution_get"];
         put?: never;
@@ -1530,29 +1530,29 @@ export interface paths {
          * Ingest Portfolio Fundamentals Job
          * @description Refresh GuruFocus fundamentals for every company this model portfolio holds.
          *
-         *     The portfolio-scoped twin of the benchmark fill. Ã¢ÂÂ  IT IS THE SAME FILL, not a copy Ã¢ÂÂ see
+         *     The portfolio-scoped twin of the benchmark fill. ⚠ IT IS THE SAME FILL, not a copy — see
          *     `routers/_fundamental_fill.py`. Only the selector differs: an index names its constituents,
          *     a portfolio names its holdings.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  THE ISIN -> company BRIDGE IS PARTIAL, AND THE COUNT MUST SAY SO. A model holds instruments
+         *     ⚠⚠ THE ISIN -> company BRIDGE IS PARTIAL, AND THE COUNT MUST SAY SO. A model holds instruments
          *     by ISIN; GuruFocus fundamentals hang off `company`, joined on `company.isin`. Measured on
          *     AITopSelectie OFF FX: 19 of 20 holdings resolve, and the missing one is Taiwan Semiconductor,
          *     held via its US ADR ISIN (US8740391003) while the company world carries the Taiwan line
          *     (TW0002330008). "Refreshed 19 holdings" is true; implying the portfolio is covered is not, so
          *     `holdings` and `reachable` are both returned and the caller shows `n of m`.
          *
-         *     Ã¢ÂÂ  CERTIFICATES ARE NOT LOOKED THROUGH. A Leonteq AMC that IS another model contributes no
+         *     ⚠ CERTIFICATES ARE NOT LOOKED THROUGH. A Leonteq AMC that IS another model contributes no
          *     company of its own; refresh that model from its own row. Expanding here would make one press
          *     fan out across portfolios without saying so.
          *
-         *     Ã¢ÂÂ  `force=True` BY DEFAULT, AND IT HAS TO BE. Without it `needs()` sees the sentinel row and
-         *     runs nothing, and even selected, `is_cache_fresh` replays the Storage blob for months Ã¢ÂÂ the
+         *     ⚠ `force=True` BY DEFAULT, AND IT HAS TO BE. Without it `needs()` sees the sentinel row and
+         *     runs nothing, and even selected, `is_cache_fresh` replays the Storage blob for months — the
          *     two caches that make the fundamentals grid's per-row Fetch a no-op for a company that already
          *     has data. This button exists precisely to get data we do not yet have.
          *
-         *     Ã¢ÂÂ  `only_due=True` IS WHAT MAKES IT CHEAP. The detector (`ingest.earnings.due`) drops the
+         *     ⚠ `only_due=True` IS WHAT MAKES IT CHEAP. The detector (`ingest.earnings.due`) drops the
          *     holdings whose next fiscal period cannot plausibly have been filed yet, so a press costs one
-         *     API call per company that might actually have something Ã¢ÂÂ and zero when none do.
+         *     API call per company that might actually have something — and zero when none do.
          */
         post: operations["ingest_portfolio_fundamentals_job_api_airs_model_portfolios__portfolio_id__fundamentals_ingest_job_post"];
         delete?: never;
@@ -1570,7 +1570,7 @@ export interface paths {
         };
         /**
          * Airs Holding Timing
-         * @description Why one holding's `Money-weighted` return differs from its `Instrument return` Ã¢ÂÂ trade by trade.
+         * @description Why one holding's `Money-weighted` return differs from its `Instrument return` — trade by trade.
          *
          *     `Instrument return` erases your timing on purpose (it divides by AIRS's opening value restated
          *     to today's quantity, so a share bought in June is still measured from January); `Money-weighted`
@@ -1606,7 +1606,7 @@ export interface paths {
         /**
          * Airs Clear Portfolio Link
          * @description Forget the human decision for this holding and fall back to the automatic guess. This is
-         *     NOT the same as linking it to nothing Ã¢ÂÂ that is a decision too, and is stored as a null.
+         *     NOT the same as linking it to nothing — that is a decision too, and is stored as a null.
          */
         delete: operations["airs_clear_portfolio_link_api_airs_model_portfolios__portfolio_id__link_delete"];
         options?: never;
@@ -1623,9 +1623,9 @@ export interface paths {
         };
         /**
          * Airs Linkable Portfolios
-         * @description What the rows of this portfolio may be linked TO Ã¢ÂÂ every model except the ones a link to
+         * @description What the rows of this portfolio may be linked TO — every model except the ones a link to
          *     would be a cycle: the portfolio itself (no self-reference), and per row, any portfolio that
-         *     already HOLDS that holding (TOPS_STS_L holds 'Star Selection Index' at 100% Ã¢ÂÂ a link there
+         *     already HOLDS that holding (TOPS_STS_L holds 'Star Selection Index' at 100% — a link there
          *     walks straight back to the row you started from).
          *
          *     ONE call for the whole table. Per row it would be ~30 requests to open one portfolio.
@@ -1648,8 +1648,8 @@ export interface paths {
         };
         /**
          * Airs Portfolio Owner Earnings Stream
-         * @description SSE: the whole portfolio's blended owner-earnings (Fundamental Ã¢ÂÂ Owner earnings), streaming
-         *     per-holding progress then the result Ã¢ÂÂ its holdings run through the same basket blender.
+         * @description SSE: the whole portfolio's blended owner-earnings (Fundamental → Owner earnings), streaming
+         *     per-holding progress then the result — its holdings run through the same basket blender.
          */
         get: operations["airs_portfolio_owner_earnings_stream_api_airs_model_portfolios__portfolio_id__owner_earnings_stream_get"];
         put?: never;
@@ -1669,24 +1669,24 @@ export interface paths {
         };
         /**
          * Airs Model Portfolio Positions
-         * @description One model portfolio's positions Ã¢ÂÂ the XLS export that DOES carry an ISIN (the AIRS
+         * @description One model portfolio's positions — the XLS export that DOES carry an ISIN (the AIRS
          *     *holdings* sheet does not; it has only a fund name).
          *
          *     `source=book` instead returns the paired AIRS BOOK's own holdings, with AIRS's own per-holding
-         *     EUR values (Beginwaarde / Huidige waarde) Ã¢ÂÂ a different set of rows than the model composition,
+         *     EUR values (Beginwaarde / Huidige waarde) — a different set of rows than the model composition,
          *     and never cached (the caching below is for the model XLS path).
          *
          *     SERVED FROM OUR CACHE by default: the scan already downloaded this XLS to count the
          *     portfolio's holdings, so re-scraping AirSPMS on every expand is pure waste (and a
          *     several-second wait on an authenticated round-trip). Goes to AIRS only when:
-         *       * `refresh=true`   Ã¢ÂÂ the user explicitly wants the current truth, or
-         *       * `datum` is given Ã¢ÂÂ a historical snapshot, of which we cache only the newest, or
+         *       * `refresh=true`   — the user explicitly wants the current truth, or
+         *       * `datum` is given — a historical snapshot, of which we cache only the newest, or
          *       * we have nothing stored for this portfolio yet.
          *
          *     A cached answer carries `cached_at` and the UI says so. A cached response presented as
          *     fresh is exactly how a stale holding gets trusted.
          *
-         *     `known_instrument` is NEVER cached Ã¢ÂÂ it is a join against `asset_execution`, which grows
+         *     `known_instrument` is NEVER cached — it is a join against `asset_execution`, which grows
          *     every time we add an instrument, so it is recomputed on every read. Cached, a "not in
          *     grid" flag would be wrong the moment the grid catches up.
          */
@@ -1708,7 +1708,7 @@ export interface paths {
         };
         /**
          * Airs Portfolio Price Series
-         * @description The whole portfolio's price-steadiness series (Fundamental Ã¢ÂÂ Stock price) Ã¢ÂÂ its holdings as
+         * @description The whole portfolio's price-steadiness series (Fundamental → Stock price) — its holdings as
          *     one value-weighted EUR index. Same shape as the basket / single-instrument endpoints.
          */
         get: operations["airs_portfolio_price_series_api_airs_model_portfolios__portfolio_id__price_series_get"];
@@ -1735,17 +1735,17 @@ export interface paths {
          *
          *         1. composition   AirSPMS                 weights + ISINs + the effective date
          *         2. instruments   Yahoo / OpenFIGI        ISIN -> symbol, currency (queue-paced)
-         *         3. FX            ECB / pegs / Yahoo      rates covering the window Ã¢ÂÂ BOTH directions
+         *         3. FX            ECB / pegs / Yahoo      rates covering the window — BOTH directions
          *         4. prices        Yahoo                   each holding's series brought current
          *         5. recompute     ours                    the YTD, with the per-leg arithmetic
          *
-         *     Ã¢ÂÂ  WHICH IS WHY "REFRESH FROM AIRS" ALONE CANNOT FIX A WRONG RETURN. The per-row button
+         *     ⚠ WHICH IS WHY "REFRESH FROM AIRS" ALONE CANNOT FIX A WRONG RETURN. The per-row button
          *     re-scrapes step 1 and nothing else, so a disagreement caused by a missing price series or a
          *     short FX history survives any number of presses. This runs all four fetchable steps and then
          *     prints the arithmetic, so the input that differs is visible rather than inferred.
          *
-         *     Ã¢ÂÂ  STEP 3 IS THE ONE NOTHING ELSE DOES. `sync_fx_rates_to_db` only extends FORWARD, so a
-         *     currency whose stored history STARTS after the window opens is never repaired Ã¢ÂÂ and a
+         *     ⚠ STEP 3 IS THE ONE NOTHING ELSE DOES. `sync_fx_rates_to_db` only extends FORWARD, so a
+         *     currency whose stored history STARTS after the window opens is never repaired — and a
          *     holding with no rate on or before its opening bar is dropped, silently, which renormalises
          *     the return over the survivors and reads HIGH.
          */
@@ -1767,7 +1767,7 @@ export interface paths {
         };
         /**
          * Airs Model Portfolio Risk Windows
-         * @description Whole-portfolio returns+risk over 2/4/8-year windows Ã¢ÂÂ the Analyse modal's Risk section.
+         * @description Whole-portfolio returns+risk over 2/4/8-year windows — the Analyse modal's Risk section.
          *
          *     The model's holdings priced as ONE value-weighted daily EUR basket (yfinance / `asset_price`),
          *     so it is the same metric table an instrument or a sleeve gets. yfinance-only by nature (AIRS has
@@ -1793,16 +1793,16 @@ export interface paths {
          * Airs Model Portfolio Value Series
          * @description The paired book's cumulative return through the year, and its value on every date we hold.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  THE RETURN IS AIRS'S OWN `cumulatief_rendement`, READ AND NOT RECOMPUTED Ã¢ÂÂ it is flow-aware,
+         *     ⚠⚠ THE RETURN IS AIRS'S OWN `cumulatief_rendement`, READ AND NOT RECOMPUTED — it is flow-aware,
          *     and that is what lets a curve be drawn at all: AzTopSelectie is funded EUR 1,000,000 on
          *     2026-06-30 and its return line stays at 0.00% straight through it, where a value line has a
          *     vertical. It is the same column the Scorecard's YTD tile reads.
          *
-         *     Ã¢ÂÂ  THE VALUE IS OURS, summed from `airs_holding`. It reproduces AIRS's `eindvermogen` to the euro
+         *     ⚠ THE VALUE IS OURS, summed from `airs_holding`. It reproduces AIRS's `eindvermogen` to the euro
          *     on 21 of AzTopSelectie's 24 snapshots, holds two dates AIRS has no row for, and starts
-         *     2026-06-23 Ã¢ÂÂ when we began keeping snapshots. See `routers/_airs_value_series`.
+         *     2026-06-23 — when we began keeping snapshots. See `routers/_airs_value_series`.
          *
-         *     Ã¢ÂÂ  ITS OWN REQUEST, DELIBERATELY. The Analyse modal is ONE payload with no partial paint, so its
+         *     ⚠ ITS OWN REQUEST, DELIBERATELY. The Analyse modal is ONE payload with no partial paint, so its
          *     wall clock is the reader's wait; a series nobody has scrolled to yet does not belong in it. The
          *     chart fetches this itself, exactly as the Risk panels do.
          */
@@ -1824,23 +1824,23 @@ export interface paths {
         };
         /**
          * Airs Model Portfolio Ytd Explain
-         * @description The full derivation behind ONE model's YTD Ã¢ÂÂ for diffing two deployments.
+         * @description The full derivation behind ONE model's YTD — for diffing two deployments.
          *
          *     Same figure as the grid, by construction: it INSTRUMENTS `compute_portfolio_performance`
          *     rather than recomputing, and asserts that the per-leg contributions sum to the YTD
          *     (`portfolio.reconciles`). Returns three levels, and they are ordered by how far upstream the
          *     cause of a discrepancy would be:
          *
-         *       `load`      Ã¢ÂÂ what this deployment fetched: price transport (COPY vs paged PostgREST),
+         *       `load`      — what this deployment fetched: price transport (COPY vs paged PostgREST),
          *                     the price/FX windows, and the freshest close anywhere in the load. A whole
          *                     environment being a week stale is ONE date here, not 24 leg rows.
-         *       `portfolio` Ã¢ÂÂ the composition's effective date, the anchor it implies, the weight that
+         *       `portfolio` — the composition's effective date, the anchor it implies, the weight that
          *                     could be priced, and the coverage the return was renormalised over.
-         *       `legs`      Ã¢ÂÂ one row per composition line, by contribution: weight, the mark it was
+         *       `legs`      — one row per composition line, by contribution: weight, the mark it was
          *                     bought at (date + EUR price, flagged if interpolated), the close it is
          *                     marked to, its EUR return and its contribution in percentage points.
          *
-         *     Untyped on purpose Ã¢ÂÂ it is a debug surface, so the payload can gain fields without a
+         *     Untyped on purpose — it is a debug surface, so the payload can gain fields without a
          *     regenerated contract. Read-only: it prices the fleet exactly as the grid does and writes
          *     nothing.
          */
@@ -1866,13 +1866,13 @@ export interface paths {
          * Airs Portfolio Active Share
          * @description How much of the book's stock sleeve is NOT the benchmark.
          *
-         *     Ã¢ÂÂ  ON DEMAND, NOT PART OF THE ANALYSE PAYLOAD. Answering it needs the index's constituents
-         *     (`_asset_benchmark.members` Ã¢ÂÂ 1,700 rows and their caps for ACWI), and the Analyse modal is ONE
+         *     ⚠ ON DEMAND, NOT PART OF THE ANALYSE PAYLOAD. Answering it needs the index's constituents
+         *     (`_asset_benchmark.members` — 1,700 rows and their caps for ACWI), and the Analyse modal is ONE
          *     request with no partial paint, so folding this in would put that read on the critical path of
          *     every open for a panel most opens never look at. Same bargain Attribution already strikes.
          *
-         *     Ã¢ÂÂ  THE INDIVIDUAL STOCKS ARE TREATED AS 100% OF THE PORTFOLIO. Funds, cash and bonds are
-         *     dropped and the rest renormalised Ã¢ÂÂ otherwise liquidity counts as an active bet against every
+         *     ⚠ THE INDIVIDUAL STOCKS ARE TREATED AS 100% OF THE PORTFOLIO. Funds, cash and bonds are
+         *     dropped and the rest renormalised — otherwise liquidity counts as an active bet against every
          *     index name at once, which is a different (and much less comparable) measure. `stocks_pct` says
          *     what fraction of the book that sleeve actually is.
          */
@@ -1896,10 +1896,10 @@ export interface paths {
          * Airs Portfolio Concentration
          * @description How much of the book sits in how few issuers, beside the index's own concentration.
          *
-         *     Ã¢ÂÂ  SAME ISSUER FOLDING AS ACTIVE SHARE (`build_issuer_weights`), so the two views cannot
+         *     ⚠ SAME ISSUER FOLDING AS ACTIVE SHARE (`build_issuer_weights`), so the two views cannot
          *     disagree about how many positions the book has.
          *
-         *     Ã¢ÂÂ  NO PRICE SERIES AT ALL Ã¢ÂÂ this is a weights-only measure, so it is much cheaper than the
+         *     ⚠ NO PRICE SERIES AT ALL — this is a weights-only measure, so it is much cheaper than the
          *     other risk views and needs no cadence.
          */
         post: operations["airs_portfolio_concentration_api_airs_portfolio_concentration_post"];
@@ -1922,7 +1922,7 @@ export interface paths {
          * Airs Portfolio Drawdown
          * @description Peak-to-trough falls of the reconstructed stock sleeve, with their dates.
          *
-         *     Ã¢ÂÂ  ONE PRICE LOAD SERVES ALL THREE CADENCES Ã¢ÂÂ the load is the expensive part and re-bucketing
+         *     ⚠ ONE PRICE LOAD SERVES ALL THREE CADENCES — the load is the expensive part and re-bucketing
          *     is free, so the frequency comparison costs no extra round trips.
          */
         post: operations["airs_portfolio_drawdown_api_airs_portfolio_drawdown_post"];
@@ -1945,7 +1945,7 @@ export interface paths {
          * Airs Portfolio Exposure
          * @description The euros behind the weights, per issuer, and the currency split of the sleeve.
          *
-         *     Ã¢ÂÂ  SAME ISSUER FOLDING AS ACTIVE SHARE AND CONCENTRATION (`build_issuer_weights`) Ã¢ÂÂ built once
+         *     ⚠ SAME ISSUER FOLDING AS ACTIVE SHARE AND CONCENTRATION (`build_issuer_weights`) — built once
          *     and read by all three, which is what stops three panels showing three sets of weights for one
          *     portfolio.
          */
@@ -1967,12 +1967,12 @@ export interface paths {
         put?: never;
         /**
          * Airs Portfolio Risk Correlation
-         * @description Correlation to the benchmark, and between the positions Ã¢ÂÂ the Risk panel's third view.
+         * @description Correlation to the benchmark, and between the positions — the Risk panel's third view.
          *
-         *     Ã¢ÂÂ  THE SAME BODY AND THE SAME SERIES AS `tracking-error`, so `ÃÂÃ¢ÂÂÃÂ² = ÃÂÃ¢ÂÂÃÂ² + ÃÂÃ¡ÂµÂÃÂ² Ã¢ÂÂ 2ÃÂÃÂÃ¢ÂÂÃÂÃ¡ÂµÂ` holds
+         *     ⚠ THE SAME BODY AND THE SAME SERIES AS `tracking-error`, so `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ` holds
          *     between the two views rather than approximately holding. See `build_paired_series`.
          *
-         *     Ã¢ÂÂ  SEPARATE FROM ATTRIBUTION BY DESIGN. That lives in its own dialog and decomposes the active
+         *     ⚠ SEPARATE FROM ATTRIBUTION BY DESIGN. That lives in its own dialog and decomposes the active
          *     return; this one measures dispersion. Merging them would imply a reconciliation that does not
          *     exist.
          */
@@ -1994,14 +1994,14 @@ export interface paths {
         put?: never;
         /**
          * Airs Portfolio Tracking Error
-         * @description Volatility of the active return, annualised Ã¢ÂÂ the Risk panel's second view.
+         * @description Volatility of the active return, annualised — the Risk panel's second view.
          *
-         *     Ã¢ÂÂ  THE SAME BODY AS `active-share`, DELIBERATELY. The two views describe ONE portfolio (the
+         *     ⚠ THE SAME BODY AS `active-share`, DELIBERATELY. The two views describe ONE portfolio (the
          *     individual stocks, renormalised to 100%), and sharing the request model is what stops them
-         *     drifting into describing two Ã¢ÂÂ an active share over the stock sleeve beside a tracking error
+         *     drifting into describing two — an active share over the stock sleeve beside a tracking error
          *     over the whole book would be two answers to two questions under one heading.
          *
-         *     Ã¢ÂÂ  SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for
+         *     ⚠ SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for
          *     every holding plus the tracker, and most opens of the Risk panel never switch to it.
          */
         post: operations["airs_portfolio_tracking_error_api_airs_portfolio_tracking_error_post"];
@@ -2024,8 +2024,8 @@ export interface paths {
          * Airs Portfolio Volatility
          * @description Standard deviation of the sleeve's own returns, and its downside half.
          *
-         *     Ã¢ÂÂ  `benchmark` IS NOT WHAT IS MEASURED HERE Ã¢ÂÂ volatility is a single-series statistic. It is
-         *     carried so the index's own ÃÂ can sit beside the book's for scale, and so this view uses the
+         *     ⚠ `benchmark` IS NOT WHAT IS MEASURED HERE — volatility is a single-series statistic. It is
+         *     carried so the index's own σ can sit beside the book's for scale, and so this view uses the
          *     identical series the other three do.
          */
         post: operations["airs_portfolio_volatility_api_airs_portfolio_volatility_post"];
@@ -2110,15 +2110,15 @@ export interface paths {
         post?: never;
         /**
          * Airs Portfolio Delete
-         * @description Delete ONE account's scraped rows Ã¢ÂÂ returns, holdings, mutations, model weights, its roster
-         *     entry and its model pairing Ã¢ÂÂ so a refresh can be watched rebuilding them.
+         * @description Delete ONE account's scraped rows — returns, holdings, mutations, model weights, its roster
+         *     entry and its model pairing — so a refresh can be watched rebuilding them.
          *
-         *     Ã¢ÂÂ  NOT THE WAY TO REMOVE AN UNWANTED ACCOUNT. The next scrape re-creates everything it can see,
+         *     ⚠ NOT THE WAY TO REMOVE AN UNWANTED ACCOUNT. The next scrape re-creates everything it can see,
          *     so a delete achieves nothing there and costs history; `airs_account_hidden` records that
          *     decision instead. This exists to prove the refresh refills a gap.
          *
-         *     Ã¢ÂÂ  IT LOSES ANYTHING OLDER THAN 1 JANUARY. A scan fetches `1 Jan Ã¢ÂÂ today`, so `airs_performance`
-         *     months before that are gone permanently Ã¢ÂÂ the UI says so before asking. The hidden-account
+         *     ⚠ IT LOSES ANYTHING OLDER THAN 1 JANUARY. A scan fetches `1 Jan → today`, so `airs_performance`
+         *     months before that are gone permanently — the UI says so before asking. The hidden-account
          *     decision is deliberately NOT touched (see `_DELETABLE_TABLES`).
          */
         delete: operations["airs_portfolio_delete_api_airs_portfolios__portefeuille__delete"];
@@ -2138,21 +2138,21 @@ export interface paths {
         put?: never;
         /**
          * Airs Portfolio Refresh
-         * @description Re-scan ONE portfolio's AIRS reports Ã¢ÂÂ and the books it is BUILT FROM.
+         * @description Re-scan ONE portfolio's AIRS reports — and the books it is BUILT FROM.
          *
-         *     Ã¢ÂÂ  A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another
-         *     strategy, and everything shown through one Ã¢ÂÂ the looked-through holdings, their returns, the
-         *     attribution Ã¢ÂÂ is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads
+         *     ⚠ A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another
+         *     strategy, and everything shown through one — the looked-through holdings, their returns, the
+         *     attribution — is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads
          *     the twelve lines it stores and leaves the instruments behind them as stale as they were.
          *     Measured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.
          *
-         *     Ã¢ÂÂ  SO THIS IS NOT ALWAYS "a few seconds" ANY MORE Ã¢ÂÂ it is FIVE downloads per account in the
+         *     ⚠ SO THIS IS NOT ALWAYS "a few seconds" ANY MORE — it is FIVE downloads per account in the
          *     chain (Rendement, Vermogensoverzicht, Mutaties, Transacties, Model). Each one's outcome comes back in `cascaded` rather than being folded into a single
          *     status, because a parent refreshed against a child that failed is not fresh. `cascade=false`
          *     refreshes only the named account.
          *
-         *     Ã¢ÂÂ  AND IT REFRESHES BOTH HALVES OF THE PORTFOLIO Ã¢ÂÂ the AIRS book AND the model it is paired
-         *     with Ã¢ÂÂ through `refresh_portfolio_fully`, like every other refresh button. It used to run the
+         *     ⚠ AND IT REFRESHES BOTH HALVES OF THE PORTFOLIO — the AIRS book AND the model it is paired
+         *     with — through `refresh_portfolio_fully`, like every other refresh button. It used to run the
          *     book alone, which is why the same portfolio could read differently depending on which page's
          *     Refresh you had last pressed. The book half is still what the response's top level describes
          *     (that is what this route's callers read); `model` carries the other half.
@@ -2180,28 +2180,28 @@ export interface paths {
          * Airs Portfolio Refresh Job
          * @description The same re-scan as above, as a CANCELLABLE JOB that reports progress.
          *
-         *     Ã¢ÂÂ  WHY A JOB FOR A "few seconds" REFRESH. It is not a few seconds any more: with the cascade it
+         *     ⚠ WHY A JOB FOR A "few seconds" REFRESH. It is not a few seconds any more: with the cascade it
          *     is five downloads per account over a chain that reaches NINE (TOPS_BEOFF_BEH_DYN). Held open as
-         *     one POST, the caller gets a disabled button and no line moving Ã¢ÂÂ indistinguishable from a hung
-         *     one Ã¢ÂÂ and navigating away abandons work that carries on invisibly. As a job it reports into the
+         *     one POST, the caller gets a disabled button and no line moving — indistinguishable from a hung
+         *     one — and navigating away abandons work that carries on invisibly. As a job it reports into the
          *     shared toast stack, survives the route change, and re-attaches on reload (`attachRunningJobs`).
          *
-         *     Ã¢ÂÂ  THE SAME `refresh_one_portfolio`, WITH A LISTENER Ã¢ÂÂ not a streaming copy of it. That function
+         *     ⚠ THE SAME `refresh_one_portfolio`, WITH A LISTENER — not a streaming copy of it. That function
          *     is already the one body the fleet scan and the per-row refresh share; a second version for the
          *     job path is exactly the drift its own docstring exists to prevent. The plain POST above stays
          *     for scripts and for anything that wants one blocking answer.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  IT IS CANCELLABLE BETWEEN ACCOUNTS, AND THAT REVERSES WHAT THIS DOCSTRING USED TO SAY
+         *     ⚠⚠ IT IS CANCELLABLE BETWEEN ACCOUNTS, AND THAT REVERSES WHAT THIS DOCSTRING USED TO SAY
          *     (2026-08-13). It passed no `should_stop` and argued that a half-cascade leaves a parent fresh
          *     against stale children, so the job "reports, it does not stop". The cost of that was a Cancel
-         *     button Ã¢ÂÂ on the row, in the Analyse modal and on the toast itself Ã¢ÂÂ that changed nothing for
-         *     minutes while its card read "cancellingÃ¢ÂÂ¦" and then finished `done`. The argument also proves too
+         *     button — on the row, in the Analyse modal and on the toast itself — that changed nothing for
+         *     minutes while its card read "cancelling…" and then finished `done`. The argument also proves too
          *     much: `cascade=False` produces the identical state on purpose. So the scan now stops at an
          *     account boundary and NAMES the books it left stale (`cancelled_at`, `stale_books`), which is the
          *     honest version of the same compromise. `_LOCK` still refuses a second one.
          *
-         *     Ã¢ÂÂ  AND THE JOB ENDS `cancelled`, NOT `done`. `_work` returning a string Ã¢ÂÂ however carefully it is
-         *     worded Ã¢ÂÂ is a `done` job to the registry, so the toast would go green and the summary would be
+         *     ⚠ AND THE JOB ENDS `cancelled`, NOT `done`. `_work` returning a string — however carefully it is
+         *     worded — is a `done` job to the registry, so the toast would go green and the summary would be
          *     the only thing saying otherwise. `JobCancelled` is what makes the card amber, and it carries the
          *     detail as its message so the summary still names the books left stale.
          */
@@ -2244,8 +2244,8 @@ export interface paths {
          *     the live portfolio list, then downloads + stores the four reports for each account that needs
          *     them. Runs in a daemon thread and returns immediately; poll `/api/airs/vermogen/status`.
          *
-         *     Ã¢ÂÂ  INCREMENTAL. An account whose last pass got all four reports within `AIRS_FRESH_HOURS` is
-         *     skipped Ã¢ÂÂ 44 accounts ÃÂ 4 downloads takes minutes, and re-fetching a report AIRS has not
+         *     ⚠ INCREMENTAL. An account whose last pass got all four reports within `AIRS_FRESH_HOURS` is
+         *     skipped — 44 accounts × 4 downloads takes minutes, and re-fetching a report AIRS has not
          *     republished buys nothing. Discovery itself is never skipped, so an account that is missing
          *     (deleted, or new in AIRS) is always scanned. `?force=true` re-scans everything.
          */
@@ -2267,9 +2267,9 @@ export interface paths {
         put?: never;
         /**
          * Airs Vermogen Refresh Job
-         * @description The fleet re-scan as a CANCELLABLE JOB Ã¢ÂÂ the "Refresh all" button.
+         * @description The fleet re-scan as a CANCELLABLE JOB — the "Refresh all" button.
          *
-         *     Ã¢ÂÂ  WHY THIS EXISTS BESIDE THE PLAIN POST ABOVE. That one fires a daemon thread and returns
+         *     ⚠ WHY THIS EXISTS BESIDE THE PLAIN POST ABOVE. That one fires a daemon thread and returns
          *     immediately; the caller then polls `/api/airs/vermogen/status` every 2.5s and paints its own
          *     banner. Three things follow from that and all three are why this page kept feeling broken:
          *     the work is INVISIBLE after a route change or a reload, there is NO WAY TO STOP IT once
@@ -2279,18 +2279,18 @@ export interface paths {
          *     As a job it reports into the shared toast stack, survives navigation, re-attaches via
          *     `attachRunningJobs`, and the toast's Cancel actually reaches the scan.
          *
-         *     Ã¢ÂÂ  THE SCAN ITSELF IS UNCHANGED Ã¢ÂÂ `run_airs_vermogen_refresh_sync` with two optional hooks, not
+         *     ⚠ THE SCAN ITSELF IS UNCHANGED — `run_airs_vermogen_refresh_sync` with two optional hooks, not
          *     a streaming copy of it. A second implementation for the job path is exactly the drift its own
          *     docstring warns about, and this is the function the 05:00 scheduler tick also calls.
          *
-         *     Ã¢ÂÂ  CANCEL STOPS BETWEEN ACCOUNTS, NOT INSIDE ONE, and the result is a real outcome rather than
+         *     ⚠ CANCEL STOPS BETWEEN ACCOUNTS, NOT INSIDE ONE, and the result is a real outcome rather than
          *     a failure: everything already downloaded is stored and the summary says where it stopped. An
-         *     account's four reports are a unit Ã¢ÂÂ stopping midway would leave a book with two fresh reports
+         *     account's four reports are a unit — stopping midway would leave a book with two fresh reports
          *     and two stale ones and nothing on the row to say which.
          *
-         *     Ã¢ÂÂ  `busy` IS AN ANSWER, NOT AN ERROR. `_LOCK` already serialises the scan (the scheduler holds
+         *     ⚠ `busy` IS AN ANSWER, NOT AN ERROR. `_LOCK` already serialises the scan (the scheduler holds
          *     it too), so a second press returns a sentence instead of painting a red toast beside real
-         *     failures Ã¢ÂÂ the same rule the per-row refresh follows.
+         *     failures — the same rule the per-row refresh follows.
          */
         post: operations["airs_vermogen_refresh_job_api_airs_vermogen_refresh_job_post"];
         delete?: never;
@@ -2329,7 +2329,7 @@ export interface paths {
         };
         /**
          * Airs Vermogen Holdings
-         * @description Stored Vermogensoverzicht holdings for a portfolio Ã¢ÂÂ the latest snapshot
+         * @description Stored Vermogensoverzicht holdings for a portfolio — the latest snapshot
          *     by default, or a specific `as_of` date. Returns `{portfolio_name,
          *     as_of_date, holdings: [...]}` (holdings shaped like `/api/portfolios/parse`).
          */
@@ -8245,7 +8245,7 @@ export interface components {
     schemas: {
         /**
          * ActiveShare
-         * @description `AS = ÃÂ½ ÃÂ£|wÃ¡ÂµÂ Ã¢ÂÂ wÃ¡ÂµÂ|` over the union of both name sets Ã¢ÂÂ see `routers/_active_share.py`.
+         * @description `AS = ½ Σ|wᵖ − wᵇ|` over the union of both name sets — see `routers/_active_share.py`.
          */
         ActiveShare: {
             /** Active Share Pct */
@@ -8331,17 +8331,17 @@ export interface components {
          * ActiveShareRequest
          * @description The holdings the Analyse modal is ALREADY showing.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  THE WEIGHTS COME FROM THE CLIENT ON PURPOSE, WHICH IS THE OPPOSITE OF THIS FILE'S USUAL
+         *     ⚠⚠ THE WEIGHTS COME FROM THE CLIENT ON PURPOSE, WHICH IS THE OPPOSITE OF THIS FILE'S USUAL
          *     RULE. Everywhere else a weight is computed server-side precisely so two surfaces cannot
-         *     disagree Ã¢ÂÂ but this panel sits one click from the Holdings table, and its whole job is to
+         *     disagree — but this panel sits one click from the Holdings table, and its whole job is to
          *     describe THAT book. Re-deriving the weights here would give the risk figure a second
          *     denominator (start weights? design percentages? looked-through or not?) and the first question
          *     anybody asks of a 71% active share is which rows produced it. So it consumes the displayed
          *     numbers, and cannot disagree with the table by construction.
          *
-         *     Ã¢ÂÂ  IT ALSO REMOVES THE SECOND HOLDINGS PIPELINE. A model portfolio and an ad-hoc basket reach
+         *     ⚠ IT ALSO REMOVES THE SECOND HOLDINGS PIPELINE. A model portfolio and an ad-hoc basket reach
          *     this with the same body, so unlike Attribution there is no `portfolio_id` variant to keep in
-         *     step Ã¢ÂÂ one route serves both, the same way `basket/analysis` does for the composition.
+         *     step — one route serves both, the same way `basket/analysis` does for the composition.
          */
         ActiveShareRequest: {
             /**
@@ -8352,7 +8352,7 @@ export interface components {
         };
         /**
          * ActiveShareRow
-         * @description One ISSUER, on both sides. Ã¢ÂÂ  NOT one holding and not one listing Ã¢ÂÂ a book holding two share
+         * @description One ISSUER, on both sides. ⚠ NOT one holding and not one listing — a book holding two share
          *     classes of the same company contributes ONE of these, with the weights summed. See
          *     `_active_share._issuer_key`.
          */
@@ -8384,8 +8384,8 @@ export interface components {
          * ActiveShareUnmatched
          * @description A stock we hold that could not be resolved to an issuer name, so it can only be ACTIVE.
          *
-         *     Ã¢ÂÂ  IT IS IN THE FIGURE, AND IT IS LISTED BECAUSE IT IS. Dropping it would renormalise the rest
-         *     upward and quietly LOWER active share Ã¢ÂÂ the flattering direction Ã¢ÂÂ so the honest choice is to
+         *     ⚠ IT IS IN THE FIGURE, AND IT IS LISTED BECAUSE IT IS. Dropping it would renormalise the rest
+         *     upward and quietly LOWER active share — the flattering direction — so the honest choice is to
          *     count it and show what could not be matched.
          */
         ActiveShareUnmatched: {
@@ -8403,17 +8403,17 @@ export interface components {
          * AirsAccount
          * @description One AIRS account's YEAR, on AIRS's own numbers.
          *
-         *     Ã¢ÂÂ  EVERY MONEY FIELD HERE IS THE YEAR'S, SUMMED ACROSS AIRS'S MONTHLY ROWS. One ATT row is
-         *     one MONTH Ã¢ÂÂ reading the freshest as "the year" served AITopSelectie's July price result of
+         *     ⚠ EVERY MONEY FIELD HERE IS THE YEAR'S, SUMMED ACROSS AIRS'S MONTHLY ROWS. One ATT row is
+         *     one MONTH — reading the freshest as "the year" served AITopSelectie's July price result of
          *     -130,063 where the year made +420,225: wrong sign, third of the size, beside a +42% YTD.
          *     `_airs_accounts._year_perf` does the assembly; read it before adding a field here.
          *
-         *     Ã¢ÂÂ  `ytd_pct` IS `cumulatief_rendement` Ã¢ÂÂ AIRS's own, flow-aware, and never
+         *     ⚠ `ytd_pct` IS `cumulatief_rendement` — AIRS's own, flow-aware, and never
          *     `end_value_eur / begin_value_eur - 1`.
          *
-         *     Ã¢ÂÂ  `latest_month_pct` IS NOT A RIVAL YTD. It is AIRS's `rendement` off the newest row: the
+         *     ⚠ `latest_month_pct` IS NOT A RIVAL YTD. It is AIRS's `rendement` off the newest row: the
          *     latest month's return. It was once served as `value_ratio_pct` and described as "the wrong
-         *     number", on the theory that deposits inflated it Ã¢ÂÂ but AITopSelectie has zero deposits in
+         *     number", on the theory that deposits inflated it — but AITopSelectie has zero deposits in
          *     every month of 2026 and still reads -5.85% there against +46.12% for the year. Different
          *     windows, both correct.
          */
@@ -8483,11 +8483,11 @@ export interface components {
          * AirsAccountDetail
          * @description One account's freshest snapshot.
          *
-         *     Ã¢ÂÂ  THE ROWS DO NOT SUM TO `ytd_pct`, AND THAT IS CORRECT. Each row is a PRICE return (AIRS
+         *     ⚠ THE ROWS DO NOT SUM TO `ytd_pct`, AND THAT IS CORRECT. Each row is a PRICE return (AIRS
          *     restates `Beginwaarde lopend jaar` to the current quantity, so a purchase does not contaminate
          *     it). The account's figure is flow-aware AND includes `income_eur`, which no price return
-         *     contains. The /portfolios MODEL view has the opposite property Ã¢ÂÂ its holdings weight exactly
-         *     to its total Ã¢ÂÂ so a reader arriving from there will expect these to tie.
+         *     contains. The /portfolios MODEL view has the opposite property — its holdings weight exactly
+         *     to its total — so a reader arriving from there will expect these to tie.
          */
         AirsAccountDetail: {
             /** As Of */
@@ -8606,9 +8606,9 @@ export interface components {
          * @description One account, and the model it runs.
          *
          *     `source` says where the pairing came from and is the whole point of the row:
-         *       manual Ã¢ÂÂ a human decided (always wins, including a decision of "none")
-         *       guess  Ã¢ÂÂ an exact stem match, recomputed on every read, never stored
-         *       none   Ã¢ÂÂ nobody has decided and we will not guess
+         *       manual — a human decided (always wins, including a decision of "none")
+         *       guess  — an exact stem match, recomputed on every read, never stored
+         *       none   — nobody has decided and we will not guess
          */
         AirsAccountModelLink: {
             /** Model Name */
@@ -8645,15 +8645,15 @@ export interface components {
         };
         /**
          * AirsAccountReconciliation
-         * @description The book's own YTD, lined up against what its positions Ã¢ÂÂ held AND sold Ã¢ÂÂ explain.
+         * @description The book's own YTD, lined up against what its positions — held AND sold — explain.
          *
-         *     Ã¢ÂÂ  THE TWO NUMBERS ARE ALREADY ON SCREEN A FEW LINES APART AND THEY DISAGREE. Measured
+         *     ⚠ THE TWO NUMBERS ARE ALREADY ON SCREEN A FEW LINES APART AND THEY DISAGREE. Measured
          *     2026-08-05 over 39 accounts, **23 disagree by more than 1pp** (BUS_FTS_BEPOFF_DYN: the book
          *     made -4.57%, its open positions +3.27pp more than that). Both are correct answers to different
          *     questions, and a reader given both with no arithmetic between them cannot arbitrate.
          *
-         *     Ã¢ÂÂ  EVERY COMPONENT IS A EURO AMOUNT. The two percentages are measured on different opening
-         *     capitals, so they do not subtract into anything meaningful Ã¢ÂÂ `gap_pp` is reported for
+         *     ⚠ EVERY COMPONENT IS A EURO AMOUNT. The two percentages are measured on different opening
+         *     capitals, so they do not subtract into anything meaningful — `gap_pp` is reported for
          *     orientation and is deliberately named in POINTS, never divided into.
          */
         AirsAccountReconciliation: {
@@ -8772,19 +8772,19 @@ export interface components {
         };
         /**
          * AirsAccountTransactions
-         * @description One account's AIRS Transacties, as the SHEET Ã¢ÂÂ no schema imposed on it.
+         * @description One account's AIRS Transacties, as the SHEET — no schema imposed on it.
          *
-         *     Ã¢ÂÂ  THE COLUMNS ARE DATA HERE, NOT A CONTRACT. `rapport_types=TRANS` returns an XLS (probed
+         *     ⚠ THE COLUMNS ARE DATA HERE, NOT A CONTRACT. `rapport_types=TRANS` returns an XLS (probed
          *     2026-07-23) and no column of it has ever been measured, so this endpoint reports the report:
          *     `columns` in the sheet's own order, `kinds` giving each one's pandas-inferred type, and `rows`
          *     keyed by column name. Naming fields against a sheet nobody has read is how `Bedrag` gets
-         *     charted where `Bedrag eur` belonged Ã¢ÂÂ one word apart, and the wrong one is a plausible number
+         *     charted where `Bedrag eur` belonged — one word apart, and the wrong one is a plausible number
          *     rather than an error. See `airs_transacties` for the full reasoning and for what replaces this
          *     once the sheet has been seen.
          *
-         *     Ã¢ÂÂ  `source` AND `note` ARE THE ANSWER'S OWN PROVENANCE. An empty `rows` means one of three very
-         *     different things Ã¢ÂÂ the book did not trade, AIRS has no such report for it, or we could not ask
-         *     Ã¢ÂÂ and an empty table with nothing beside it asserts the first.
+         *     ⚠ `source` AND `note` ARE THE ANSWER'S OWN PROVENANCE. An empty `rows` means one of three very
+         *     different things — the book did not trade, AIRS has no such report for it, or we could not ask
+         *     — and an empty table with nothing beside it asserts the first.
          */
         AirsAccountTransactions: {
             /** Cached At */
@@ -8821,22 +8821,22 @@ export interface components {
         };
         /**
          * AirsHoldingIsin
-         * @description One account holding, with the ISIN we believe it is Ã¢ÂÂ and how much to believe it.
+         * @description One account holding, with the ISIN we believe it is — and how much to believe it.
          *
-         *     Ã¢ÂÂ  `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.
+         *     ⚠ `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.
          *       ok             the implied price agrees with that ISIN's own close (FX-converted)
-         *       price_mismatch it does NOT Ã¢ÂÂ the ISIN is not what the book holds, or the book drifted
+         *       price_mismatch it does NOT — the ISIN is not what the book holds, or the book drifted
          *       unpriced       we have no series for it, so there is NOTHING confirming the name match
          *       unmatched      NO ISIN: the model has no position for this holding
-         *       cross_listed   the prices differ, and they are SUPPOSED to Ã¢ÂÂ this ISIN's execution row is
+         *       cross_listed   the prices differ, and they are SUPPOSED to — this ISIN's execution row is
          *                      deliberately served by another instrument (`asset_isin_alias`), e.g. an ADR
          *                      priced from the main company's listing. Not a fault, and not a pass either. at all
          *
-         *     `unpriced` is not a pass. The name matched and nothing checked it Ã¢ÂÂ which for a fund is
+         *     `unpriced` is not a pass. The name matched and nothing checked it — which for a fund is
          *     exactly where the Acc/Inc share-class trap lives.
          *
-         *     Ã¢ÂÂ  `unmatched` AND `price_mismatch` ARE OPPOSITE FINDINGS, NOT DEGREES OF ONE. A mismatch means
-         *     the row pairing is RIGHT and the ISIN on it is wrong (a share class, a venue) Ã¢ÂÂ a finding
+         *     ⚠ `unmatched` AND `price_mismatch` ARE OPPOSITE FINDINGS, NOT DEGREES OF ONE. A mismatch means
+         *     the row pairing is RIGHT and the ISIN on it is wrong (a share class, a venue) — a finding
          *     about the model. `unmatched` means the pairing itself was refused: the name says a different
          *     instrument and the price independently agrees, which is what a STALE model snapshot looks like
          *     when the book has since swapped a position. `rejected_isin`/`rejected_fonds` name the leftover
@@ -8915,12 +8915,12 @@ export interface components {
          * AirsHoldingSegment
          * @description One asset class within a portfolio: the exposure, and what it returned.
          *
-         *     Ã¢ÂÂ  `return_pct` AND `weight_pct` DO NOT COVER THE SAME HOLDINGS. A holding with no opening
+         *     ⚠ `return_pct` AND `weight_pct` DO NOT COVER THE SAME HOLDINGS. A holding with no opening
          *     value has an undefined return but real exposure, so it counts in the weight and not in the
-         *     return Ã¢ÂÂ otherwise its whole value reads as gain (cash is exactly this, and so is a short:
+         *     return — otherwise its whole value reads as gain (cash is exactly this, and so is a short:
          *     Nestle India at -3,504 shares). `priced_value_eur` states how much the return spans.
          *
-         *     Ã¢ÂÂ  It is a PRICE return, like the rows it is built from: no income, not flow-aware. The
+         *     ⚠ It is a PRICE return, like the rows it is built from: no income, not flow-aware. The
          *     segments do not sum to the portfolio's own figure.
          */
         AirsHoldingSegment: {
@@ -8969,10 +8969,10 @@ export interface components {
          * AirsPortfolioOverview
          * @description A portfolio: your name for it, AIRS's numbers for it.
          *
-         *     Ã¢ÂÂ  `link_source` IS PART OF THE ROW, NOT A DETAIL. `name` comes from the Fixed portfolio this
+         *     ⚠ `link_source` IS PART OF THE ROW, NOT A DETAIL. `name` comes from the Fixed portfolio this
          *     book is paired with, and 27 of 28 pairings are an unconfirmed name match. A wrong pairing
-         *     puts a real book's money under another strategy's name, and Ã¢ÂÂ because the risk variants of a
-         *     strategy hold the SAME instruments Ã¢ÂÂ nothing else on the row would look wrong.
+         *     puts a real book's money under another strategy's name, and — because the risk variants of a
+         *     strategy hold the SAME instruments — nothing else on the row would look wrong.
          */
         AirsPortfolioOverview: {
             /** As Of */
@@ -9040,8 +9040,8 @@ export interface components {
          * AirsRealisedLeg
          * @description One instrument's realised result this year, summed over its sales.
          *
-         *     Ã¢ÂÂ  `closed_out` IS DECIDED BY ABSENCE FROM THE HOLDINGS, NOT BY PRESENCE HERE. A sale is a
-         *     REALISATION, not a closure Ã¢ÂÂ Synopsys was trimmed on 2026-01-22 and is still held Ã¢ÂÂ so a name
+         *     ⚠ `closed_out` IS DECIDED BY ABSENCE FROM THE HOLDINGS, NOT BY PRESENCE HERE. A sale is a
+         *     REALISATION, not a closure — Synopsys was trimmed on 2026-01-22 and is still held — so a name
          *     can legitimately appear both here and in the positions table above.
          */
         AirsRealisedLeg: {
@@ -9091,11 +9091,11 @@ export interface components {
          * AllocationBand
          * @description One cell of the allocation policy: what share this class may take in this risk profile.
          *
-         *     Ã¢ÂÂ  EVERY PERCENT IS OPTIONAL, AND NULL IS NOT ZERO. "No policy recorded" and "hold none of this"
+         *     ⚠ EVERY PERCENT IS OPTIONAL, AND NULL IS NOT ZERO. "No policy recorded" and "hold none of this"
          *     are the same claim for a minimum and OPPOSITE claims for a default and a maximum, so an unset
-         *     cell comes back null rather than 0 Ã¢ÂÂ a zeroed grid would publish a policy nobody wrote.
+         *     cell comes back null rather than 0 — a zeroed grid would publish a policy nobody wrote.
          *
-         *     Ã¢ÂÂ  DECLARED ABOVE `ModelPortfolioAnalysis` BECAUSE THAT MODEL EMBEDS IT (the bands drawn over
+         *     ⚠ DECLARED ABOVE `ModelPortfolioAnalysis` BECAUSE THAT MODEL EMBEDS IT (the bands drawn over
          *     the allocation bars). Pydantic resolves the annotation when the class is built, so a definition
          *     further down the file is a NameError at import, not a forward reference.
          */
@@ -9115,10 +9115,10 @@ export interface components {
         };
         /**
          * AllocationBandGrid
-         * @description The whole policy, always complete: every profile ÃÂ every invested class.
+         * @description The whole policy, always complete: every profile × every invested class.
          *
          *     `variants` and `buckets` ship with it so the editor renders the grid the SERVER knows about
-         *     rather than a copy of it Ã¢ÂÂ add a fifth risk profile to `VARIANTS` and the editor grows a column
+         *     rather than a copy of it — add a fifth risk profile to `VARIANTS` and the editor grows a column
          *     without a frontend change, which is the only way the two cannot drift.
          */
         AllocationBandGrid: {
@@ -9420,6 +9420,8 @@ export interface components {
             return_pct?: number | null;
             /** Ticker */
             ticker?: string | null;
+            /** Weight Now Pct */
+            weight_now_pct?: number | null;
             /**
              * Weight Pct
              * @default 0
@@ -9712,41 +9714,41 @@ export interface components {
         };
         /**
          * BookHoldingDetail
-         * @description One paired-book position Ã¢ÂÂ every LONG line, priced or not.
+         * @description One paired-book position — every LONG line, priced or not.
          *
-         *     Ã¢ÂÂ  TWO WEIGHTS ON PURPOSE, AND THEY ARE NOT INTERCHANGEABLE.
+         *     ⚠ TWO WEIGHTS ON PURPOSE, AND THEY ARE NOT INTERCHANGEABLE.
          *
          *     `weight_pct` is the holding's OPENING value (beginwaarde) as a share of the PRICED book, so that
-         *     within ANY asset class, ÃÂ£ (weight_pct / ÃÂ£_class weight_pct) ÃÂ· return_pct reproduces that class's
-         *     START-weighted return (ÃÂ£now/ÃÂ£startÃ¢ÂÂ1) exactly Ã¢ÂÂ the true value change, not the current-value
+         *     within ANY asset class, Σ (weight_pct / Σ_class weight_pct) · return_pct reproduces that class's
+         *     START-weighted return (Σnow/Σstart−1) exactly — the true value change, not the current-value
          *     weighting that lets a big winner dominate. It is None where we could not price the position over
          *     the window, which is why it is nullable: a 0% there would read as "held nothing", not "unknown".
          *
-         *     `weight_now_pct` is the CURRENT value as a share of the WHOLE book Ã¢ÂÂ the very number the
+         *     `weight_now_pct` is the CURRENT value as a share of the WHOLE book — the very number the
          *     allocation chart is drawn from, so per-class subtotals in the holdings table equal the chart's
          *     slices to the decimal. Use this one for anything shown beside the chart; a table that disagrees
          *     with the chart above it is read as a bug in both.
          *
          *     `weight_start_pct` is the THIRD weight, and it is the one that reconciles this table with the
-         *     composition charts. Ã¢ÂÂ  THREE WEIGHTS, ONE POSITION, ALL CORRECT:
+         *     composition charts. ⚠ THREE WEIGHTS, ONE POSITION, ALL CORRECT:
          *
-         *       weight_now_pct    current EUR value ÃÂ· the WHOLE book Ã¢ÂÂ what is held today.
-         *       weight_start_pct  Beginwaarde ÃÂ· the WHOLE book at the window's open. It is GRAFTED ON from
+         *       weight_now_pct    current EUR value ÷ the WHOLE book — what is held today.
+         *       weight_start_pct  Beginwaarde ÷ the WHOLE book at the window's open. It is GRAFTED ON from
          *                         the very legs the sector/region/currency bars are built from, never
          *                         recomputed, so the table and the chart cannot disagree about January.
-         *       the bar itself    `weight_start_pct` ÃÂ· that axis's `attributable_pct` Ã¢ÂÂ a bar is a share of
+         *       the bar itself    `weight_start_pct` ÷ that axis's `attributable_pct` — a bar is a share of
          *                         the holdings that HAVE a bucket, not of the book.
          *
          *     Measured on Bustelberg Offensief: ASML 7.02% now, ~5.00% at the start, 5.75% on the Technology
          *     bar. Dividing the FIRST by the Stocks slice and expecting the THIRD is the trap this column
-         *     closes Ã¢ÂÂ ASML outgrew the book by ~40% over the window, so its current share is much the larger.
+         *     closes — ASML outgrew the book by ~40% over the window, so its current share is much the larger.
          *
-         *     Ã¢ÂÂ  `weight_start_pct` IS NOT `weight_pct`. Same numerator, different denominator: `weight_pct`
+         *     ⚠ `weight_start_pct` IS NOT `weight_pct`. Same numerator, different denominator: `weight_pct`
          *     divides by the PRICED book (so a class's contribution reconciles), this divides by the whole
-         *     book (so it sits honestly beside `weight_now_pct`). A `0.0` is a fact Ã¢ÂÂ bought after the window
+         *     book (so it sits honestly beside `weight_now_pct`). A `0.0` is a fact — bought after the window
          *     opened; `None` means no ISIN to join on (cash), never "zero".
          *
-         *     `currency` is the holding's quote currency (a fair first-order FX signal for a bond/ETF class Ã¢ÂÂ
+         *     `currency` is the holding's quote currency (a fair first-order FX signal for a bond/ETF class —
          *     NOT folded to Unclassified like the fund axes).
          */
         BookHoldingDetail: {
@@ -9865,8 +9867,8 @@ export interface components {
          * BookReturnPoint
          * @description AIRS's own year-to-date return on one date, and what the book was worth that day.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  `cum_pct` IS READ FROM `airs_performance.cumulatief_rendement`, NEVER DERIVED FROM
-         *     `value_eur`. It is FLOW-AWARE and the value is not: AzTopSelectie's 0 Ã¢ÂÂ EUR 1,000,000 on
+         *     ⚠⚠ `cum_pct` IS READ FROM `airs_performance.cumulatief_rendement`, NEVER DERIVED FROM
+         *     `value_eur`. It is FLOW-AWARE and the value is not: AzTopSelectie's 0 → EUR 1,000,000 on
          *     2026-06-30 is a funding, and this series correctly stays at 0.00% straight through it. Two
          *     values cannot tell that apart from a gain.
          */
@@ -9882,7 +9884,7 @@ export interface components {
         };
         /**
          * BookValueFlow
-         * @description Money in or out on one date Ã¢ÂÂ never a result. See `_airs_value_series`.
+         * @description Money in or out on one date — never a result. See `_airs_value_series`.
          */
         BookValueFlow: {
             /** Date */
@@ -9919,10 +9921,10 @@ export interface components {
          * BookValueSeries
          * @description The book's value through time, and the return that value earned.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  TWO DIFFERENT QUANTITIES, AND ONLY ONE OF THEM IS PERFORMANCE. `points` is VALUE: a funding
+         *     ⚠⚠ TWO DIFFERENT QUANTITIES, AND ONLY ONE OF THEM IS PERFORMANCE. `points` is VALUE: a funding
          *     is a step in it and is not a gain, which is why the flows ride along. `returns` is AIRS's own
          *     flow-aware `cumulatief_rendement`, the same column `_airs_accounts._year_perf` reads for the
-         *     Scorecard Ã¢ÂÂ so the chart and the tile beside it cannot disagree.
+         *     Scorecard — so the chart and the tile beside it cannot disagree.
          */
         BookValueSeries: {
             /** First Date */
@@ -9998,10 +10000,10 @@ export interface components {
         };
         /**
          * CompositionExcluded
-         * @description A holding this axis does not weigh, and why. `cash` ÃÂ· `unpriced` ÃÂ· `unclassified`.
+         * @description A holding this axis does not weigh, and why. `cash` · `unpriced` · `unclassified`.
          *
-         *     Ã¢ÂÂ  TWO OF THESE THREE ARE ANSWERS, NOT GAPS. A fund, a bond and a cash line have no sector by
-         *     definition Ã¢ÂÂ they are not Stocks in our own classification and already have their own slice of
+         *     ⚠ TWO OF THESE THREE ARE ANSWERS, NOT GAPS. A fund, a bond and a cash line have no sector by
+         *     definition — they are not Stocks in our own classification and already have their own slice of
          *     the allocation chart. Only `unpriced` is a real hole: a stock we hold, in a real sector, that
          *     we cannot price, so its bucket reads lower than it is. `asset_class` rides along precisely so
          *     the first kind can be shown as "this was never a stock" rather than as missing weight.
@@ -10025,15 +10027,15 @@ export interface components {
          * CompositionHolding
          * @description One holding behind a composition bar, at the weight that bar counted it at.
          *
-         *     Ã¢ÂÂ  `weight_pct` IS A SHARE OF THE AXIS TOTAL, NOT OF THE PORTFOLIO Ã¢ÂÂ ÃÂ£ over a bucket IS that
+         *     ⚠ `weight_pct` IS A SHARE OF THE AXIS TOTAL, NOT OF THE PORTFOLIO — Σ over a bucket IS that
          *     bucket's `portfolio_pct`, exactly. The sector axis divides by the equity sleeve and the other
          *     two by every long position, so the SAME holding carries different weights on different axes and
          *     that is correct. See `_airs_portfolio_analysis._axis_holdings`.
          *
-         *     Ã¢ÂÂ  IT IS ALSO NOT THE ATTRIBUTION TABLE'S WEIGHT, AND THE TWO ARE BOTH RIGHT. Attribution drops
+         *     ⚠ IT IS ALSO NOT THE ATTRIBUTION TABLE'S WEIGHT, AND THE TWO ARE BOTH RIGHT. Attribution drops
          *     funds, cash and anything it could not price, then renormalises what remains to 100% and weights
          *     it by the position's value when the window OPENED. Measured on Bustelberg Offensief:
-         *     Technology reads 36% here and 39.1% there. Neither is a rounding error and neither is wrong Ã¢ÂÂ
+         *     Technology reads 36% here and 39.1% there. Neither is a rounding error and neither is wrong —
          *     they are shares of different denominators, which is precisely what this list exists to show.
          */
         CompositionHolding: {
@@ -10058,7 +10060,7 @@ export interface components {
         };
         /**
          * ConcentrationRow
-         * @description One ISSUER in the top of the book Ã¢ÂÂ not one line. See `_active_share._issuer_key`.
+         * @description One ISSUER in the top of the book — not one line. See `_active_share._issuer_key`.
          */
         ConcentrationRow: {
             /**
@@ -10120,19 +10122,19 @@ export interface components {
          * CorrelationInstrument
          * @description One instrument that fed the correlation matrices, and how it was priced.
          *
-         *     Ã¢ÂÂ  THREE STATES, AND COLLAPSING ANY TWO WOULD MISREAD THE MATRIX. Measured 2026-08-10 over the
+         *     ⚠ THREE STATES, AND COLLAPSING ANY TWO WOULD MISREAD THE MATRIX. Measured 2026-08-10 over the
          *     44 listed models and their 245 distinct ISINs:
          *
          *         direct       230   an `asset_execution` with a yfinance series, EUR-converted per date
          *         lookthrough    9   a Leonteq certificate that IS another model; priced from that model's
          *                            own curve, because the certificate has no price of its own to fetch
-         *         unpriced       6   no series at all Ã¢ÂÂ its weight is what the 60% coverage floor is
+         *         unpriced       6   no series at all — its weight is what the 60% coverage floor is
          *                            measured over, so these rows are the reason a portfolio can be refused
          *
          *     The look-through nine (Star Selection, and the Europa/AI/Dividend/Familie/Merken/Momentum/
          *     Azie/Vastgoed TopSelectie certificates) look unpriceable in the database and are not. A table
-         *     that showed only "priced / not priced" would report the largest of them Ã¢ÂÂ Star Selection, held
-         *     by 12 models Ã¢ÂÂ as missing data.
+         *     that showed only "priced / not priced" would report the largest of them — Star Selection, held
+         *     by 12 models — as missing data.
          */
         CorrelationInstrument: {
             /** Analysis Id */
@@ -10224,11 +10226,11 @@ export interface components {
         };
         /**
          * CorrelationSeries
-         * @description Every charted series on ONE shared date axis Ã¢ÂÂ see `_series_block` for the measurement
-         *     that chose this encoding over the obvious `[[date, value], Ã¢ÂÂ¦]` (452 KB raw against 1,270 KB).
+         * @description Every charted series on ONE shared date axis — see `_series_block` for the measurement
+         *     that chose this encoding over the obvious `[[date, value], …]` (452 KB raw against 1,270 KB).
          *
          *     `values[key][i]` is the level on `dates[i]`, or `null` for a day that instrument did not
-         *     trade. Ã¢ÂÂ  A null is a foreign holiday, NOT a zero: the axis is the union of every instrument's
+         *     trade. ⚠ A null is a foreign holiday, NOT a zero: the axis is the union of every instrument's
          *     trading days, so rendering nulls as 0 draws a spike to the floor on every one of them.
          */
         CorrelationSeries: {
@@ -10516,9 +10518,9 @@ export interface components {
         };
         /**
          * DrawdownEpisode
-         * @description One peak Ã¢ÂÂ trough Ã¢ÂÂ recovery.
+         * @description One peak → trough → recovery.
          *
-         *     Ã¢ÂÂ  AN EPISODE ENDS WHEN THE OLD PEAK IS REGAINED, not when the series turns up. A 40% fall that
+         *     ⚠ AN EPISODE ENDS WHEN THE OLD PEAK IS REGAINED, not when the series turns up. A 40% fall that
          *     bounces 5% and then falls further is ONE drawdown; splitting on direction would report a set of
          *     shallow dips and no crash.
          */
@@ -11039,12 +11041,12 @@ export interface components {
          * HoldingTiming
          * @description One held position's year: what doing nothing would have made, and what each trade changed.
          *
-         *     Ã¢ÂÂ  THE IDENTITY IS EXACT AND IS ASSERTED: `buy_hold_eur + timing_eur == actual_eur`. Measured
+         *     ⚠ THE IDENTITY IS EXACT AND IS ASSERTED: `buy_hold_eur + timing_eur == actual_eur`. Measured
          *     2026-08-05, residual 0.00 on every position tried. Three lines that do not add up are not a
          *     decomposition, and `reconciles` is how the UI knows not to present them as one.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  `actual_eur` IS THE ECONOMIC RESULT AND IS NOT THE TABLE'S `Result` COLUMN. That column is
-         *     AIRS's restated figure Ã¢ÂÂ `Huidige waarde Ã¢ÂÂ Beginwaarde`, where Beginwaarde prices TODAY's share
+         *     ⚠⚠ `actual_eur` IS THE ECONOMIC RESULT AND IS NOT THE TABLE'S `Result` COLUMN. That column is
+         *     AIRS's restated figure — `Huidige waarde − Beginwaarde`, where Beginwaarde prices TODAY's share
          *     count at the 1 January price, valuing shares bought later at January's price rather than what
          *     was paid. `restatement_eur` is the difference, named rather than left for a reader to find.
          */
@@ -11138,9 +11140,9 @@ export interface components {
          * HoldingTradeEffect
          * @description One decision, and what it was worth against not having made it.
          *
-         *     Ã¢ÂÂ  AGAINST DOING NOTHING, NOT AGAINST A PERFECT DECISION. A buy gains if the price rose after
+         *     ⚠ AGAINST DOING NOTHING, NOT AGAINST A PERFECT DECISION. A buy gains if the price rose after
          *     it; a sell gains if the price fell after it. A lucky call and a good one produce the same
-         *     number Ã¢ÂÂ this makes no claim about skill.
+         *     number — this makes no claim about skill.
          */
         HoldingTradeEffect: {
             /** Amount Eur */
@@ -11332,15 +11334,15 @@ export interface components {
         };
         /**
          * LedgerPosition
-         * @description One instrument's whole year Ã¢ÂÂ whether the book still holds it or not.
+         * @description One instrument's whole year — whether the book still holds it or not.
          *
-         *     Ã¢ÂÂ  `contribution_pct` IS THE COLUMN THAT ADDS UP. Its sum over every position IS the book's own
+         *     ⚠ `contribution_pct` IS THE COLUMN THAT ADDS UP. Its sum over every position IS the book's own
          *     YTD (measured exactly: 5.8267 against AIRS's 5.826704, and 44.4624 against 44.462408).
-         *     `weight_pct` is DESCRIPTIVE Ã¢ÂÂ how much of the year's capital this position occupied Ã¢ÂÂ so
-         *     `contribution Ã¢ÂÂ weight ÃÂ return` holds only approximately, and the identity the table asserts
+         *     `weight_pct` is DESCRIPTIVE — how much of the year's capital this position occupied — so
+         *     `contribution ≈ weight × return` holds only approximately, and the identity the table asserts
          *     is the contribution one.
          *
-         *     Ã¢ÂÂ  `return_pct` IS ON AVERAGE CAPITAL, NOT THE INSTRUMENT'S PRICE RETURN. A name bought in June
+         *     ⚠ `return_pct` IS ON AVERAGE CAPITAL, NOT THE INSTRUMENT'S PRICE RETURN. A name bought in June
          *     shows a larger percentage on the same euros than one held all year, because it answers "how
          *     hard did this money work" rather than "what did the instrument do". The Holdings table's own
          *     Return column is the other question and the two will differ.
@@ -11482,16 +11484,16 @@ export interface components {
          * ModelPortfolioAnalysis
          * @description A model portfolio's composition beside a benchmark's, on ONE set of buckets.
          *
-         *     Both sides are classified from `asset_grid`'s yfinance attributes, joined by ISIN Ã¢ÂÂ the
+         *     Both sides are classified from `asset_grid`'s yfinance attributes, joined by ISIN — the
          *     portfolio lives in the ISIN world and the benchmark in the `company` world, and putting two
          *     different sector taxonomies in one chart invents differences that are not there. (All 493
          *     SP500 members are present in `asset_grid` with a sector, so nothing is lost.)
          *
-         *     Ã¢ÂÂ  FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's
-         *     listing tells you nothing about what it holds Ã¢ÂÂ 24 of the 26 held ETFs have a "sector" of
+         *     ⚠ FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's
+         *     listing tells you nothing about what it holds — 24 of the 26 held ETFs have a "sector" of
          *     literally `etf` or `Equity`; an Amsterdam-listed MSCI World ETF is not European exposure; and
          *     quoted in EUR it still holds mostly USD assets. So every fund folds into "Unclassified" on ALL
-         *     THREE axes Ã¢ÂÂ a 40%-ETF portfolio shows a 40% Unclassified bar meaning "we cannot see inside
+         *     THREE axes — a 40%-ETF portfolio shows a 40% Unclassified bar meaning "we cannot see inside
          *     this", true and more useful than a confident wrong split.
          */
         ModelPortfolioAnalysis: {
@@ -11615,7 +11617,7 @@ export interface components {
         };
         /**
          * ModelPortfolioAttribution
-         * @description WHY a model beat or lagged the index Ã¢ÂÂ Brinson-Fachler, plus the names that drove it.
+         * @description WHY a model beat or lagged the index — Brinson-Fachler, plus the names that drove it.
          *
          *     An excess return is a fact, not an explanation: "-11.60% vs ACWI" says nothing about whether
          *     the failed bet was the SECTORS chosen or the STOCKS chosen inside them. Those are different
@@ -11625,17 +11627,17 @@ export interface components {
          *         selection   =  w_b        x (R_p,bucket - R_b,bucket)  the right names inside them?
          *         interaction = the cross term
          *
-         *     Ã¢ÂÂ  THE IDENTITY IS ASSERTED, NOT ASSUMED: sum(allocation + selection + interaction) == excess.
+         *     ⚠ THE IDENTITY IS ASSERTED, NOT ASSUMED: sum(allocation + selection + interaction) == excess.
          *     `residual_pct` and `reconciles` carry the proof. Three columns that do not sum to the excess
          *     are not a decomposition of it.
          *
-         *     Ã¢ÂÂ  FUNDS AND CASH ARE EXCLUDED. An ETF has no sector Ã¢ÂÂ the benchmark's weight in the fund
+         *     ⚠ FUNDS AND CASH ARE EXCLUDED. An ETF has no sector — the benchmark's weight in the fund
          *     bucket is zero, so Brinson would report holding a world tracker as a *sector bet*.
          *     `attributable_pct` says how much of the model the table explains.
          *
-         *     Ã¢ÂÂ  `unpriced_pct` IS NOT THE SAME AS `excluded_pct`, AND IT IS THE DANGEROUS ONE. A fund is
+         *     ⚠ `unpriced_pct` IS NOT THE SAME AS `excluded_pct`, AND IT IS THE DANGEROUS ONE. A fund is
          *     excluded because it is not a sector bet. An UNPRICED equity is excluded because we failed to
-         *     price it Ã¢ÂÂ and its sector then reads as UNOWNED, so the allocation effect on that row is a
+         *     price it — and its sector then reads as UNOWNED, so the allocation effect on that row is a
          *     FALSE finding. (Measured: a model holding 6% Healthcare, unpriceable, was credited +1.73pp of
          *     allocation for "avoiding" Healthcare.) `unpriced_buckets` names the rows to discount.
          */
@@ -11753,30 +11755,30 @@ export interface components {
          * ModelPortfolioPerformance
          * @description One model portfolio's performance, in EUR: YTD, since-inception, Sharpe, Sortino.
          *
-         *     Ã¢ÂÂ  `ytd_pct` IS NOT ALWAYS A FULL YEAR. It is a buy-and-hold of the composition WE HOLD,
-         *     which is the CURRENT one Ã¢ÂÂ AIRS keeps only 2-3 snapshot dates and no monthly history, so
+         *     ⚠ `ytd_pct` IS NOT ALWAYS A FULL YEAR. It is a buy-and-hold of the composition WE HOLD,
+         *     which is the CURRENT one — AIRS keeps only 2-3 snapshot dates and no monthly history, so
          *     January's composition is not recoverable. The window therefore opens at
          *     `max(Jan 1, inception)`, never before the weights existed, and `ytd_from` is that date:
          *
-         *       * `model_changed_in_period` false (29 of 56) Ã¢ÂÂ the model has held these weights since
+         *       * `model_changed_in_period` false (29 of 56) — the model has held these weights since
          *         before Jan 1. `ytd_from` is Jan 1 and this is a true, full YTD.
-         *       * true (27 of 56) Ã¢ÂÂ the model is YOUNGER than the year, so `ytd_from` is its inception
-         *         and the figure covers a PARTIAL year. Realized, not backtested Ã¢ÂÂ but do not rank it
+         *       * true (27 of 56) — the model is YOUNGER than the year, so `ytd_from` is its inception
+         *         and the figure covers a PARTIAL year. Realized, not backtested — but do not rank it
          *         against a 12-month return without noticing (MoTopSelectie_FX has held its weights for
          *         eight days: +0.51%. Priced back to Jan 1 it would read +75.85%, on a basket it never
          *         held, and be the best portfolio in the list).
          *
-         *     `since_model_pct` is the same composition's return over its WHOLE life (`model_effective` Ã¢ÂÂ
+         *     `since_model_pct` is the same composition's return over its WHOLE life (`model_effective` —
          *     its inception), not clipped to this year. For a model younger than the year the two windows
          *     coincide and the two numbers are equal, by construction.
          *
          *     `sharpe` / `sortino` ride that SAME window, annualized from the daily EUR curve at rf = 0.
          *     A ratio is only as honest as the return underneath it, and a YTD-anchored one is a backtest
-         *     for half the list. They are NULL Ã¢ÂÂ not zero Ã¢ÂÂ below `MIN_STAT_DAYS` (20) daily returns: a
+         *     for half the list. They are NULL — not zero — below `MIN_STAT_DAYS` (20) daily returns: a
          *     ratio off a model defined last week is noise with two decimals, and it would render in the
          *     same column, same font, as one measured over two years. `stat_days` is how many it had.
          *
-         *     `ytd_pct` is NULL when `low_coverage` Ã¢ÂÂ under 60% of the model's weight is priceable, so a
+         *     `ytd_pct` is NULL when `low_coverage` — under 60% of the model's weight is priceable, so a
          *     renormalised return would be an invention (TOPS_OFF_BEH once reported "+0.00%" off its 1%
          *     cash line while 99% of it, in structured products, was silently dropped). The since-
          *     inception figures carry their OWN floor (`since_covered_pct`), because a holding that had
@@ -11863,7 +11865,7 @@ export interface components {
         };
         /**
          * ModelPortfolioPosition
-         * @description One row of the portfolio's XLS export. `isin` is the point of the whole exercise Ã¢ÂÂ
+         * @description One row of the portfolio's XLS export. `isin` is the point of the whole exercise —
          *     it is the exact join into `asset_execution`, and it's the identifier the AIRS
          *     *holdings* sheet never gave us (that one only has a fund NAME).
          *
@@ -11871,14 +11873,14 @@ export interface components {
          *     is bought at its last close on or before `ytd_from` and held to its latest close, and
          *     `return_pct` is exactly the quantity the portfolio figure weights together.
          *
-         *     Ã¢ÂÂ  `start_price_eur` / `end_price_eur` are in EUR, not the listing's currency, because
+         *     ⚠ `start_price_eur` / `end_price_eur` are in EUR, not the listing's currency, because
          *     `return_pct` is an EUR return and carries the FX leg. Printing the native closes as the
-         *     arithmetic would show two numbers whose ratio is not the third Ã¢ÂÂ a USD holding can rise in
+         *     arithmetic would show two numbers whose ratio is not the third — a USD holding can rise in
          *     dollars and fall in euros. The native closes ride along (`*_price_local`, `currency`) for a
          *     tooltip, never as the sum.
          *
          *     All of them are NULL for a holding with no price series (an unresolved ETF, a structured
-         *     product) and for the cash line Ã¢ÂÂ which has no ISIN, and is not an instrument.
+         *     product) and for the cash line — which has no ISIN, and is not an instrument.
          */
         ModelPortfolioPosition: {
             /** Categorie */
@@ -12119,7 +12121,7 @@ export interface components {
          * @description One asset-class slice of the portfolio's OWN composition (no benchmark side).
          *
          *     AIRS's `categorie` says what a holding INVESTS IN (an equity ETF is AAND, a bond ETF is OBL);
-         *     the ETF flag is the orthogonal wrapper axis. So only EQUITY is split into direct vs ETF Ã¢ÂÂ a
+         *     the ETF flag is the orthogonal wrapper axis. So only EQUITY is split into direct vs ETF — a
          *     bond ETF is Bonds, not "ETF Bonds". Buckets: Equity | ETF Equity | Bonds | Alternatives | Cash
          *     (Real estate folds into Alternatives) | Unclassified.
          */
@@ -12160,9 +12162,9 @@ export interface components {
         };
         /**
          * PortfolioAnalysisReturns
-         * @description The model's EUR return beside the benchmark's Ã¢ÂÂ over the SAME windows, both times.
+         * @description The model's EUR return beside the benchmark's — over the SAME windows, both times.
          *
-         *     Ã¢ÂÂ  A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER. A model's
+         *     ⚠ A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER. A model's
          *     "YTD" opens at `max(1 Jan, its inception)`, and for the 27 models younger than the year that
          *     is NOT 1 January. Putting a 9-day portfolio return beside the index's full-year return and
          *     calling the gap out-performance would be nonsense that looks exactly like a finding. So the
@@ -12262,12 +12264,12 @@ export interface components {
         };
         /**
          * PortfolioConcentration
-         * @description `CÃ¢ÂÂÃ¢ÂÂ = ÃÂ£ wÃ¢ÂÂÃ¡ÂµÂ¢Ã¢ÂÂ` and `HHI = ÃÂ£ wÃ¡ÂµÂ¢ÃÂ²` Ã¢ÂÂ see `routers/_portfolio_concentration.py`.
+         * @description `C₁₀ = Σ w₍ᵢ₎` and `HHI = Σ wᵢ²` — see `routers/_portfolio_concentration.py`.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  ON ISSUERS, NOT LINES. Alphabet A + Alphabet C is ONE position; counting two would
+         *     ⚠⚠ ON ISSUERS, NOT LINES. Alphabet A + Alphabet C is ONE position; counting two would
          *     understate concentration exactly at the top, where the ten largest are decided.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  BOTH DENOMINATORS ARE RETURNED because the choice changes the number: `top10_pct` is of the
+         *     ⚠⚠ BOTH DENOMINATORS ARE RETURNED because the choice changes the number: `top10_pct` is of the
          *     stock sleeve (comparable across books, the panel's convention) and `top10_of_book_pct` is of
          *     everything including cash and funds (true in absolute terms). Choosing one silently would be
          *     picking a side of a real question.
@@ -12402,9 +12404,9 @@ export interface components {
         };
         /**
          * PortfolioDrawdown
-         * @description Max drawdown of the RECONSTRUCTED sleeve Ã¢ÂÂ see `routers/_portfolio_drawdown.py`.
+         * @description Max drawdown of the RECONSTRUCTED sleeve — see `routers/_portfolio_drawdown.py`.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  NOT THE CLIENT'S REALISED DRAWDOWN, and the two are not interchangeable. This rebuilds a
+         *     ⚠⚠ NOT THE CLIENT'S REALISED DRAWDOWN, and the two are not interchangeable. This rebuilds a
          *     series from the holdings as they stand TODAY: look-ahead bias (those weights were chosen with
          *     hindsight) and survivorship bias (names since sold are absent, and the sold ones skew towards
          *     the fallers). The client's own figure comes from the AIRS returns, with real trades, real costs
@@ -12487,15 +12489,15 @@ export interface components {
         };
         /**
          * PortfolioExposure
-         * @description Effective positions Ã¢ÂÂ `EÃ¡ÂµÂ¢ = qÃ¡ÂµÂ¢ÃÂ·PÃ¡ÂµÂ¢ÃÂ·XÃ¡ÂµÂ¢` Ã¢ÂÂ see `routers/_portfolio_exposure.py`.
+         * @description Effective positions — `Eᵢ = qᵢ·Pᵢ·Xᵢ` — see `routers/_portfolio_exposure.py`.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  WE DO NOT COMPUTE THAT PRODUCT. `airs_holding` carries a quantity, but it also carries
+         *     ⚠⚠ WE DO NOT COMPUTE THAT PRODUCT. `airs_holding` carries a quantity, but it also carries
          *     `current_value_eur`: AIRS's OWN valuation, already in euros, already struck on its own date.
          *     That is the number on the client's statement. Re-deriving it from our close and our FX rate
          *     would produce a second figure disagreeing with the statement on most rows, with nothing on
-         *     screen able to say which was right. `EÃ¡ÂµÂ¢` here IS that valuation, folded per issuer.
+         *     screen able to say which was right. `Eᵢ` here IS that valuation, folded per issuer.
          *
-         *     Ã¢ÂÂ  TRADE DATE vs SETTLEMENT DATE IS AIRS'S CONVENTION AND WE CANNOT VERIFY IT FROM HERE. The
+         *     ⚠ TRADE DATE vs SETTLEMENT DATE IS AIRS'S CONVENTION AND WE CANNOT VERIFY IT FROM HERE. The
          *     Vermogensoverzicht exposes no flag saying which basis it used, so a book with a very recent
          *     trade may differ from a trade-date view by that trade's value with nothing in our data showing
          *     it. Stated rather than assumed away.
@@ -12563,8 +12565,8 @@ export interface components {
          * PortfolioFundamentalsJob
          * @description The job handle, plus the two counts that keep the button honest.
          *
-         *     Ã¢ÂÂ  `holdings` AND `reachable` ARE BOTH RETURNED BECAUSE THEY DIFFER. The gap is holdings whose
-         *     ISIN has no `company` row Ã¢ÂÂ an ADR held under a different ISIN from the one we ingested, a
+         *     ⚠ `holdings` AND `reachable` ARE BOTH RETURNED BECAUSE THEY DIFFER. The gap is holdings whose
+         *     ISIN has no `company` row — an ADR held under a different ISIN from the one we ingested, a
          *     structured product, an in-house fund. Returning only the number fetched would let the UI imply
          *     it covered the portfolio.
          */
@@ -12591,7 +12593,7 @@ export interface components {
         };
         /**
          * PortfolioPerfSources
-         * @description As-of dates of the inputs behind this row's numbers Ã¢ÂÂ for per-value traceability on the
+         * @description As-of dates of the inputs behind this row's numbers — for per-value traceability on the
          *     grid. Every field is an already-loaded date SURFACED, not recomputed: the model figures
          *     (YTD / Since / Sharpe / Sortino) are a yfinance close series converted at FX, over a
          *     composition we scraped from AIRS, so those three dates are what "as of when" means here.
@@ -12672,14 +12674,14 @@ export interface components {
         };
         /**
          * PortfolioVolatility
-         * @description ÃÂ of the stock sleeve's OWN returns Ã¢ÂÂ see `routers/_portfolio_volatility.py`.
+         * @description σ of the stock sleeve's OWN returns — see `routers/_portfolio_volatility.py`.
          *
-         *     Ã¢ÂÂ  SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the
-         *     correlation view puts inside `ÃÂÃ¢ÂÂÃÂ² = ÃÂÃ¢ÂÂÃÂ² + ÃÂÃ¡ÂµÂÃÂ² Ã¢ÂÂ 2ÃÂÃÂÃ¢ÂÂÃÂÃ¡ÂµÂ`. Two ÃÂÃ¢ÂÂ one click apart that
+         *     ⚠ SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the
+         *     correlation view puts inside `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ`. Two σₚ one click apart that
          *     disagreed would tell the reader one of them is wrong and nothing about which.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  NO CASH-FLOW CONTAMINATION, BY CONSTRUCTION RATHER THAN BY CHAIN-LINKING. This is not an
-         *     account-value series Ã¢ÂÂ it is a weighted basket of instrument price returns Ã¢ÂÂ so a deposit or a
+         *     ⚠⚠ NO CASH-FLOW CONTAMINATION, BY CONSTRUCTION RATHER THAN BY CHAIN-LINKING. This is not an
+         *     account-value series — it is a weighted basket of instrument price returns — so a deposit or a
          *     withdrawal is simply not in it. That is what a time-weighted return exists to achieve. The cost
          *     is the other caveat: the weights are TODAY'S, carried backwards.
          */
@@ -12842,15 +12844,15 @@ export interface components {
         };
         /**
          * RealisedBlock
-         * @description What the paired book realised on sales this year Ã¢ÂÂ the leg the holdings table cannot show.
+         * @description What the paired book realised on sales this year — the leg the holdings table cannot show.
          *
-         *     Ã¢ÂÂ  EVERY FIGURE SITS ON ONE DENOMINATOR, `basis_eur` (the book's own `beginvermogen`), so
+         *     ⚠ EVERY FIGURE SITS ON ONE DENOMINATOR, `basis_eur` (the book's own `beginvermogen`), so
          *     `held_pct + realised_pct + sold_income_pct == book_ytd_pct` exactly. The holdings table weights
          *     by each position's share of the PRICED HELD book, which is right for a class return and cannot
-         *     carry a sold position at all Ã¢ÂÂ different question, different denominator.
+         *     carry a sold position at all — different question, different denominator.
          *
-         *     Ã¢ÂÂ  `available: false` IS NOT "SOLD NOTHING". No pairing, no cached Transacties sheet, or a
-         *     sheet we could not read Ã¢ÂÂ each has its own `note`, and an empty list presented as an answer
+         *     ⚠ `available: false` IS NOT "SOLD NOTHING". No pairing, no cached Transacties sheet, or a
+         *     sheet we could not read — each has its own `note`, and an empty list presented as an answer
          *     would hide EUR 28,656 of realised loss on the book this was measured against.
          */
         RealisedBlock: {
@@ -12918,10 +12920,10 @@ export interface components {
          * RealisedContributionLeg
          * @description One name the book SOLD this year, and what that sale contributed to the year.
          *
-         *     Ã¢ÂÂ  THERE IS NO WEIGHT HERE, AND ITS ABSENCE IS THE HONEST STATEMENT. A sold parcel's opening
-         *     value is not recoverable from AIRS's data: `proceeds Ã¢ÂÂ Res. YtD` yields its COST BASIS, which
-         *     for a parcel bought in February is real capital that did not exist on 1 January Ã¢ÂÂ feeding it
-         *     in made the opening-capital gap WORSE (EUR 55,427 Ã¢ÂÂ EUR 377,776 on BUS_Offensief_Dyn), and
+         *     ⚠ THERE IS NO WEIGHT HERE, AND ITS ABSENCE IS THE HONEST STATEMENT. A sold parcel's opening
+         *     value is not recoverable from AIRS's data: `proceeds − Res. YtD` yields its COST BASIS, which
+         *     for a parcel bought in February is real capital that did not exist on 1 January — feeding it
+         *     in made the opening-capital gap WORSE (EUR 55,427 → EUR 377,776 on BUS_Offensief_Dyn), and
          *     partial sells make it unrecoverable in principle since AIRS restates `Beginwaarde` to the
          *     CURRENT quantity. A contribution needs no weight; an allocation effect does, which is why
          *     these legs may never enter the composition bars or Brinson.
@@ -13090,9 +13092,9 @@ export interface components {
         };
         /**
          * RiskCorrelation
-         * @description ÃÂ as a RISK measure Ã¢ÂÂ see `routers/_portfolio_correlation_risk.py`.
+         * @description ρ as a RISK measure — see `routers/_portfolio_correlation_risk.py`.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  NOT ATTRIBUTION, AND THE TWO MUST STAY SEPARATE PANELS. Attribution decomposes the active
+         *     ⚠⚠ NOT ATTRIBUTION, AND THE TWO MUST STAY SEPARATE PANELS. Attribution decomposes the active
          *     return into allocation + selection + interaction, terms that SUM to it exactly. Correlation
          *     appears nowhere in that decomposition and sums to nothing: it says how far the book CAN diverge,
          *     where attribution says where the divergence came from. A combined view would imply they
@@ -13432,7 +13434,7 @@ export interface components {
         /**
          * StoredModelPortfolio
          * @description A stored portfolio row. `holdings` is derived by the view from the positions, so it
-         *     cannot drift from them Ã¢ÂÂ and it keeps three absences apart that are NOT the same thing:
+         *     cannot drift from them — and it keeps three absences apart that are NOT the same thing:
          *
          *       has_fixed_model=false   -> NO MODEL EXISTS (a `normaal`/`meervoudig` portfolio). AIRS
          *                                  stores no composition at all; "0 holdings" would describe a
@@ -13443,7 +13445,7 @@ export interface components {
          *                                  Measured on BUS_DUTD_DEF_AFS + EuropaTopSelect OFF FX, both
          *                                  of which I first mis-reported as "0 holdings".
          *       holdings=0              -> a real, EMPTY fixed model. Not currently observed on any
-         *                                  portfolio, but expressible Ã¢ÂÂ and it must stay distinct from
+         *                                  portfolio, but expressible — and it must stay distinct from
          *                                  the three absences above.
          *
          *     `holdings` counts DISTINCT ISINs: a portfolio can list one instrument on two lines
@@ -13515,15 +13517,15 @@ export interface components {
         };
         /**
          * TrackingError
-         * @description Realised (ex-post) tracking error of the stock sleeve Ã¢ÂÂ see `routers/_tracking_error.py`.
+         * @description Realised (ex-post) tracking error of the stock sleeve — see `routers/_tracking_error.py`.
          *
-         *     Ã¢ÂÂ Ã¢ÂÂ  `TE = Ã¢ÂÂ(1/(TÃ¢ÂÂ1) ÃÂ£ (aÃ¢ÂÂ Ã¢ÂÂ ÃÂ)ÃÂ²) ÃÂ· Ã¢ÂÂf`, WITH ÃÂ SUBTRACTED and Bessel applied. The other
-         *     convention (Ã¢ÂÂ(ÃÂ£aÃ¢ÂÂÃÂ²/T)) is also called tracking error and is a different number; this codebase
+         *     ⚠⚠ `TE = √(1/(T−1) Σ (aₜ − ā)²) · √f`, WITH ā SUBTRACTED and Bessel applied. The other
+         *     convention (√(Σaₜ²/T)) is also called tracking error and is a different number; this codebase
          *     picks one and routes it through `annualized_stats`, the same function every other volatility on
          *     the screen goes through.
          *
-         *     Ã¢ÂÂ  EX-POST, NOT EX-ANTE. There is no covariance-matrix forecast here, and the two routinely
-         *     disagree Ã¢ÂÂ so every label says "realised" rather than leaving the reader to assume.
+         *     ⚠ EX-POST, NOT EX-ANTE. There is no covariance-matrix forecast here, and the two routinely
+         *     disagree — so every label says "realised" rather than leaving the reader to assume.
          */
         TrackingError: {
             /** Active Return Ann Pct */

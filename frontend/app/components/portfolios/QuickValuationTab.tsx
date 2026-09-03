@@ -739,7 +739,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
             which is what the `ReferenceDot` below is stroked with) — the tile and the mark on the
             plot are one fact, and a tile whose bar matches nothing on the chart is a tile the eye
             has to look up. ⚠ Deliberately NOT `pos` green: on this tab green means nothing, and in
-            the Long Equity charts next door it means "the benchmark" on every single card.
+            the Graphs charts next door it means "the benchmark" on every single card.
             ⚠ `Current share price` above stays UNCOLOURED on purpose — it is the live quote, and
             every point plotted here is a fiscal year-end close, so tying it to the price line would
             claim it is on a line it is not on. */}
