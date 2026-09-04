@@ -21,7 +21,7 @@ from collections import Counter, defaultdict
 # `{date: value}` maps), and importing the type under that name shadows it inside them — the same
 # word meaning two things a few lines apart is how the wrong one gets called.
 from datetime import date as _date
-from routers._blend_cache import cached_blend, cached_metric_reads
+from routers._blend_cache import cached_blend, cached_coverage, cached_metric_reads
 from routers._earnings_pg import rows_by_company_via_copy
 from routers._sse import sse_message as event
 import queue as _queue
@@ -2554,14 +2554,14 @@ def _drop_quarter_outliers(by_date: dict[str, float], who: str = "?") -> dict[st
     run = _level_shift(flagged, axis)
     drop = flagged - run
     if run:
-        _log.warning(
-            "[earnings] %s: KEPT %d quarter(s) over %.0fx this series' own median of %.4g — %s. "
-            "They are consecutive AND run to the newest filing, which is the shape of a level "
-            "shift; an old shift would already BE the median. Not interpreted further — check "
-            "whether this company restated, redenominated or split. Expect a real step in any "
-            "index built on this line.",
-            who, len(run), _QUARTER_OUTLIER_FACTOR, median,
-            {d: by_date[d] for d in sorted(run)})
+        # ⚠⚠ ONE LINE, AND STILL AT `warning` — THIS IS THE RARE HALF (2026-09-03, on request:
+        # the guard's logging "pollutes our terminal now"). A level shift is not a dropped outlier:
+        # nothing is removed, and an index built on this line WILL step. That is worth a line
+        # somebody sees. The reasoning behind it moved into this comment, where it belongs — a
+        # five-sentence explanation of a heuristic is documentation, not a log record.
+        _log.warning("[earnings] %s: level shift kept — %d qtr(s) over %.0fx median %.4g, "
+                     "consecutive to the newest filing (restatement / redenomination / split?)",
+                     who, len(run), _QUARTER_OUTLIER_FACTOR, median)
     if drop:
         # The fiscal position of each dropped quarter, e.g. {'Q4': 3}. ⚠ A COUNT, NOT A VERDICT:
         # a recurring spike can be a seasonal business OR the vendor filing an annual figure in a
@@ -2577,15 +2577,23 @@ def _drop_quarter_outliers(by_date: dict[str, float], who: str = "?") -> dict[st
         seasons = Counter(f"Q{(int(d[5:7]) - 1) // 3 + 1}" for d in drop
                           if len(d) >= 7 and d[5:7].isdigit() and 1 <= int(d[5:7]) <= 12)
         repeat = max(seasons.values(), default=0)
-        _log.warning(
-            "[earnings] %s: dropped %d implausible quarter(s) — more than %.0fx this series' own "
-            "median of %.4g, and not part of a run to the newest filing: %s.%s A TTM sum would "
-            "have carried them into a confident annual figure.",
-            who, len(drop), _QUARTER_OUTLIER_FACTOR, median,
-            {d: by_date[d] for d in sorted(drop)},
-            "" if repeat < 3 else
-            f" ⚠ {repeat} of them fall in the SAME fiscal quarter ({seasons.most_common(1)[0][0]})"
-            " — worth an eye: either a seasonal business or an annual figure in a quarterly slot.")
+        # ⚠⚠ `info`, NOT `warning`, AND ONE LINE (2026-09-03, on request). This fires for the
+        # NORMAL case — a vendor spike the guard caught and removed, which is the guard working —
+        # and it fired once per company per metric, each time printing every offending value. One
+        # Tables open produced twenty of these, each five lines long, and a log nobody can read is
+        # a log nobody reads: the level-shift line above, which is the one that changes a chart,
+        # was buried in them.
+        # ⚠ NOT DELETED. uvicorn leaves the root logger at WARNING, so `info` is off the terminal
+        # while staying one `--log-level info` away — and the values themselves are still in the
+        # message for whoever turns it on. Silencing a data-quality guard outright is how a vendor
+        # defect stops being noticed at all.
+        # ⚠ THE SEASONAL HINT SURVIVES because it is the half a human acts on: three drops in one
+        # fiscal quarter is either a seasonal business or an annual figure filed in a quarterly
+        # slot, and the guard cannot tell those apart.
+        _log.info("[earnings] %s: dropped %d qtr(s) over %.0fx median %.4g%s — %s",
+                  who, len(drop), _QUARTER_OUTLIER_FACTOR, median,
+                  "" if repeat < 3 else f" ({repeat} in the same fiscal quarter)",
+                  {d: round(by_date[d], 4) for d in sorted(drop)})
     return {d: v for d, v in by_date.items() if d not in drop}
 
 
@@ -3239,6 +3247,7 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
     """
     from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
     from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+    from routers._fundamental_coverage import coverage_for  # noqa: PLC0415
 
     # ⚠⚠ VALIDATED HERE, BECAUSE THIS IS THE ONE PLACE `metric` ARRIVES AS A STRING FROM OUTSIDE.
     # It used to be resolved by a `.get(metric, revenue)` deep in `_metric_codes`, so a caller that
@@ -3284,6 +3293,33 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
         # share it actually has.
         if only_company_id is not None:
             comp = {k: c for k, c in comp.items() if c.get("company_id") == only_company_id}
+
+        # ⚠⚠ WHICH ROWS THE **LINE** WAS BLENDED FROM, SHIPPED RATHER THAN LEFT TO BE GUESSED.
+        # This response lists every constituent (`all_constituents=True`); the chart is blended one
+        # member list up, over `_blend_inputs` — `_members(require_market_cap=True)` and then only
+        # the holdings `classify_holding` calls `covered`. The client used to reconstruct that from
+        # `market_cap_eur > 0`, which reproduces the cap filter and NOTHING ELSE, so every member
+        # the CLASSIFIER dropped stayed in the client's blend.
+        #
+        # ⚠ MEASURED 2026-09-04 ON ACWI `eps_nri`: 1,513 members, of which the classifier keeps
+        # 1,510 (2 `no_metrics`, 1 `fund`), and the positives-only rule leaves 1,071 — while the
+        # client blended 1,073. The two extras were First Abu Dhabi Bank (its `asset_grid` row is
+        # typed `etf`, so `classify_holding` correctly calls it a fund wrapper) and Samsung Epis
+        # Holdings (no filed financials at all — three analyst-estimate rows and nothing else).
+        # `status` could not stand in for this: it is a different question and reads `ok` for both.
+        #
+        # ⚠ THE VERDICT IS PER ISIN AND INDEPENDENT OF WHICH LIST IT WAS COMPUTED OVER, so running
+        # the classifier on the SUPERSET here gives the same answers the blend's stricter list
+        # gets. The cap test is re-applied per row below rather than inherited.
+        #
+        # ⚠ CANONICAL ISINs, because that is what the rows are keyed on (`ci`) — an aliased member
+        # is classified under its raw ISIN and served by another (`served_by`), and matching on
+        # the raw one would mark the ADR's canonical row as not-in-line.
+        covered_isins: set[str] = cached_coverage(
+            [m["isin"] for m in members if m.get("isin")],
+            lambda: {(r.get("served_by") or r["isin"])
+                     for r in coverage_for(members)["rows"]
+                     if r["reason"] == "covered" and r.get("company_id") and r.get("isin")})
 
         rows: list[dict] = []
         years: set[str] = set()
@@ -3457,6 +3493,13 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
                 "ticker": c.get("gurufocus_ticker"),
                 "exchange": exch,
                 "status": status,
+                # ⚠⚠ WAS THIS ROW IN THE MEMBER LIST THE CHART'S LINE WAS BLENDED OVER — see
+                # `covered_isins`. BOTH halves of `_blend_inputs` are here: the classifier's
+                # verdict, and (for a universe only) the market-cap filter `_members` applies
+                # before it. A portfolio has no cap test — a holding weight is not a market cap —
+                # so its rows ride on the verdict alone.
+                "in_line": ci in covered_isins and (
+                    not body.universe or (weight_by.get(ci) or 0) > 0),
                 "revenue": rev,
                 # ⚠ THE NUMERATOR OF THE WEIGHT, AND ONLY ON THE INDEX PATH. For a universe,
                 # `weight_by[ci]` IS `company.market_cap_eur` (see `_load_and_expand_members`), so

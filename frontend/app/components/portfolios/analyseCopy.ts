@@ -20,10 +20,11 @@ const en = {
     fxsplit: { label: 'Price vs currency (AIRS)', hint: 'Koers + Valuta + Rest = Result' },
     contribution: { label: 'How the Contribution is built', hint: 'Result ÷ the book’s opening capital' },
   },
-  chrome: { benchmark: 'Benchmark', loading: 'Loading composition…', loadError: 'The composition could not be loaded.' },
+  chrome: { benchmark: 'Benchmark', loading: 'Loading composition…',
+    loadError: 'The composition could not be loaded.' },
   bucket: (name: string) => name,
   score: {
-    returnYtd: 'Return (YTD) €', versusReturn: (benchmark: string) => `vs ${benchmark} return €`, excess: 'Excess',
+    returnYtd: 'Return (YTD) €', versusReturn: (benchmark: string) => `vs ${benchmark} return (YTD) €`, excess: 'Excess',
     portfolioWhat: 'What this portfolio returned year to date, in EUR.', portfolioNote: "the portfolio's return, year to date",
     /** ⚠ THE CAVEAT ONLY. `where` names AIRS Rendementen (ATT) and `note` names the field, so
      *  repeating both here was two thirds of a sentence the reader had already had — and it read
@@ -36,12 +37,10 @@ const en = {
     riskTitle: 'Risk — how far the stock sleeve sits from the benchmark (active share), and how much that difference has actually moved (realised tracking error).',
   },
   allocation: {
-    title: 'Allocation', filtering: 'Filtering to', showAll: '— show all ✕', filterHint: 'Click a class to filter the charts',
-    minimum: 'minimal', target: 'target', maximum: 'maximal', sold: 'Sold during the year — no longer a holding',
+    sold: 'Sold during the year — no longer a holding',
     portfolio: 'Portfolio', of: 'of', nothing: 'Nothing to show — the current selection holds no equity, and sector is an equity-only view.',
     unpriceable: (pct: string) => `${pct}% held but unpriceable — missing from these bars`,
     excludes: (pct: string, axis: string) => `Excludes ${pct}% in funds, bonds and cash — no ${axis} to place`,
-    policyTitle: (variant: string) => `Read from this model's own AIRS name. The bands drawn over the bars are the ${variant} allocation policy.`,
     unpricedTitle: 'Real holdings, in real buckets, that we have no price series for. They are absent from the bars, so the buckets they belong to read lower than they are. The holdings table below names them, and the Resolved column on the portfolio row counts them.',
     excludedTitle: 'Funds, bonds and cash have no sector of their own — they are their own slices of the allocation chart above, and the holdings table below names them.',
     totalsTitle: 'Each column is summed exactly as printed, so adding the rows by hand gives this number. Both sides are renormalised over the holdings they can place.',
@@ -51,9 +50,9 @@ const en = {
   },
   axes: {
     sector: 'Sector', region: 'Region', currency: 'Currency',
-    sectorNote: 'Start-of-window weights. Cash, funds and unpriced holdings have no sector.',
-    regionNote: "The issuer's domicile, else its ISIN country. Not the listing venue.",
-    currencyNote: 'The reporting currency of the company. Not the listing currency.',
+    sectorNote: 'Current weights. Cash, funds and unpriced holdings have no sector.',
+    regionNote: "Current weights. The issuer's domicile, else its ISIN country. Not the listing venue.",
+    currencyNote: 'Current weights. The reporting currency of the company. Not the listing currency.',
   },
   holdings: {
     title: 'Holdings', name: 'Name', via: 'Via', sector: 'Sector', momentum: 'Momentum', vol: 'Volatility', beta: 'Beta',
@@ -65,65 +64,13 @@ const en = {
     bookYear: 'The book’s year', allPositions: 'positions, everything it held or sold', direct: 'direct',
   },
   info: {
-    holdingsWhat: 'Every instrument the portfolio holds, grouped by asset class. A position held through a certificate is listed as the instruments behind it, not as the certificate.',
-    viaWhat: 'How the portfolio got into this instrument — its own shares, a strategy whose certificate was looked through to reach it, or both.',
-    sectorWhat: 'The sector this instrument is counted in on the Sector chart above.',
-    momentumWhat: "12-1 momentum: the last 12 months' EUR return, excluding the most recent month.",
-    momentumNote: 'signal_engine mom_12_1 — the same one /signal-lab charts',
-    volWhat: "How much this instrument's price moves, annualised, over the last 5 years.",
-    volNote: 'annualised standard deviation of monthly EUR returns',
-    volHeaderHow: (example: string) => `std(monthly return, ddof=1) × √12 over the trailing 5 years of our own yfinance closes, converted to EUR at each date's rate.${example}\n\nUnder four years of history shows a dash, not a zero.`,
-    betaWhat: (benchmark: string) => `How much this instrument moves for each 1% of ${benchmark}, over 5 years.`,
-    betaNote: (benchmark: string) => `weekly EUR returns, regressed on ${benchmark}`,
-    betaHeaderHow: (benchmark: string, example: string) => `cov(instrument, ${benchmark}) ÷ var(${benchmark}), using weekly EUR returns over the trailing 5 years against ${benchmark}'s investable tracker, on the dates both series have.${example}\n\nToo little overlapping history shows a dash, not a zero.`,
-    weightWhat: 'The share of the portfolio held in this instrument, right now.',
-    openingWhat: 'What this position was worth at the start of the year, on AIRS’s own basis.',
-    valueNowWhat: 'What this position is worth today.',
-    avgCapitalWhat: 'The money actually tied up in this position over the year.',
-    unrealisedWhat: 'What this position has gained or lost while the book has held it — on paper, not banked.',
-    unrealisedNote: 'value now − value when the year opened',
-    realisedWhat: 'What was banked by actually selling — this year’s part of it.',
-    realisedNote: 'AIRS’s Res. YtD, summed over the year’s sales',
-    incomeWhat: 'The dividends and coupons this position paid the book this year.', incomeNote: 'net — gross less withholding tax',
-    resultWhat: 'What the book actually made on this position this year, in euros.', resultNote: 'unrealised + realised + income',
-    priceWhat: "How much of the result is the instrument's own price move, with the currency taken out.",
-    priceNote: "AIRS's Fondsresultaat, in EUR",
-    priceHow: (total: string) => `AIRS splits every held position's value change into a price leg and a currency leg, both in euros, and publishes both. This is its reported Fondsresultaat; nothing is re-derived here.\n\nΣ = ${total}\n\n⚠ It covers only the held leg. Fondsresultaat + Valutaresultaat = Value now − Beginwaarde, so realised sales and dividends sit outside the pair in Rest.\n\n⚠ The second line expresses the same euros as points of this row's money-weighted return, using the same average invested capital. Koers + Valuta + Rest therefore add exactly to that return.\n\n⚠ These are points, not shares of the return. Opposing legs make a share unbounded and sign-flipping.\n\n⚠ A subtotal shows points only when every underlying row has both the split and invested capital. The grand total never shows them because its Result includes sold positions without a split.`,
-    currencyWhat: 'How much of the result is the exchange rate moving, with the price taken out.', currencyNote: "AIRS's Valutaresultaat, in EUR",
-    currencyHow: (total: string) => `AIRS's Valutaresultaat as reported.\n\nΣ = ${total}\n\n⚠ A euro holding reads 0, and that is a measurement rather than a gap. A blank means AIRS published no split: cash, a leg inside a certificate, or a snapshot before 2026-07-18.\n\n⚠ The price and currency legs routinely pull against each other; the net result can therefore be much smaller than either leg.`,
-    restWhat: "The part of the result AIRS's price/currency split does not reach.", restNote: 'result − koers − valuta',
-    restHow: (total: string) => `Result − Koers − Valuta\n\n= ${total}\n\n⚠ In practice this is the realised leg and dividends. AIRS splits what is held; its transactions sheet has no currency column and dividends are booked in EUR. A book that trimmed therefore has a remainder while a book that only held may have none.\n\n⚠ It is derived by subtraction and consequently absorbs any gap between AIRS's split and our held result. Three columns that add to Result are checkable; two that fall short look like an error.`,
-    contributionWhat: 'What this position added to, or took off, the book’s return for the year.',
     contributionNote: 'result ÷ the book’s opening capital', moneyNote: 'result ÷ average invested capital',
-    moneyWhat: 'What this position returned on the money actually put into it — a money-weighted return (Modified Dietz), so WHEN you bought and sold is part of the answer.',
-    instrumentWhat: (anchor: string) => `What this instrument itself returned in euros since ${anchor} — independent of how much of it the book holds, and independent of when you traded it.`,
-    instrumentHow: (example: string) => `(Huidige waarde + net income) ÷ Beginwaarde − 1, per row${example}\n\nBeginwaarde prices today's share count at its 1 January price, which removes your timing. This is therefore not a chained time-weighted return: a share bought in June is still measured from January. Money-weighted beside it uses the same Result over the capital actually tied up.\n\nA row marked ƒ uses our own EUR price series instead. Class rows divide their own Result by their own Beginwaarde.`,
     soldMoneyWhat: 'What the positions sold out during the year returned on the money put into them.',
     soldContributionWhat: 'What the positions sold out during the year added to, or took off, the book’s return.',
     bookMoneyWhat: 'What the book returned on the money it actually had at work — over the positions whose purchases and sales we can see.',
     bookReturnWhat: 'The book’s own return for the year, from AIRS.',
     bookReturnNote: 'cumulatief_rendement — flow-aware, the system of record',
     bookContributionWhat: 'What every position in this table, held and sold, added up to for the book’s year.', yearOpened: 'the year opened',
-    holdingsHow: (rows: number, through: number) => `one row per ISIN, after the certificates are looked through\n\n${rows} rows, ${through} of them reached through a certificate`,
-    /**
-     * ⚠⚠ THE LIVE COUNT LIVES IN `viaNote`, WHICH RENDERS ON THE **Where** LINE (2026-09-01,
-     * on request: 'the how should be really simple here'). It used to be a second paragraph
-     * inside `viaHow`, so the field answering HOW THE NUMBER IS MADE carried a live measurement
-     * of THIS book — a Where fact. The house style already puts live figures in `where`; this
-     * was the one card that had them in `how`.
-     */
-    viaNote: (through: number, rows: number) => `${through} of ${rows} rows arrive through a certificate, the rest are held outright`,
-    viaHow: 'each route’s share of the book — they sum to that row’s Weight',
-    sectorHow: (sectors: number, classified: number, missing: number) => `Yahoo’s sector for the ISIN, canonicalised so one sector has one name\n\n${sectors} sectors across ${classified} rows; ${missing} have none (a fund, or unclassifiable)`,
-    momentumHow: (example: string) => `Price one month ago ÷ price twelve months ago − 1${example}`,
-    weightHow: (rows: number, total: string) => `Huidige waarde ÷ the book’s total Huidige waarde\n\nthe ${rows} rows below sum to ${total} = 100.00%`,
-    openingHow: (total: string) => `Σ (quantity held today × its price on 1 January)\n\n= ${total}`,
-    valueNowHow: (total: string) => `Σ (AIRS’s current valuation)\n\n= ${total}`,
-    avgCapitalHow: (total: string) => `Σ (value at the open + each flow × the share of the year still to run)\n\n= ${total}`,
-    unrealisedHow: (now: string, opening: string, result: string) => `Value now − Beginwaarde\n\n${now} − ${opening} = ${result}`,
-    realisedHow: (total: string) => `Σ Res. YtD over the year’s sales\n\n= ${total}`,
-    incomeHow: (total: string) => `Σ (dividend + withholding tax)\n\n= ${total}`,
-    resultHow: (unrealised: string, realised: string, income: string, result: string) => `Unrealised + Realised + Income\n\n${unrealised} + ${realised} + ${income} = ${result}`,
     moneyHow: (result: string, capital: string, pct: string) => `Result ÷ Avg capital invested\n\n${result} ÷ ${capital} = ${pct}`,
     contributionHow: (result: string, basis: string, pct: string) => `Result ÷ the book’s opening capital\n\n${result} ÷ ${basis} = ${pct}`,
   },
@@ -134,6 +81,12 @@ const en = {
     momentumMissing: 'A dash is not a zero — 0% would claim it went nowhere. Needs about 13 months of price history; the two risk columns beside it need four years, so a young listing can show momentum and a dash for volatility.',
     momentumMissingWhat: (name: string) => `${name} has under about 13 months of price history, so it has no 12-1 momentum.`,
     momentumWhat: (name: string) => `What ${name} returned over the 12 months ending one month ago.`,
+    // ⚠ THE POPULATION IS IN THE SENTENCE. A rank without its reference set is unreadable — "82nd"
+    //   of what, out of how many? — and the chip is glyphs, so this is the only place a reader can
+    //   learn that `++` means a percentile against a named universe rather than a verdict.
+    momentumRanked: (name: string, ordinal: string, benchmark: string, n: number) =>
+      `What ${name} returned over the 12 months ending one month ago — the ${ordinal} strongest `
+      + `percentile of the ${n.toLocaleString('en')} ${benchmark} members ranked on the same basis.`,
     momentumHow: (substitution: string) => `Price one month ago ÷ price twelve months ago − 1${substitution}\n\nThe most recent month is excluded on purpose: it mean-reverts, and including it is what makes a raw 12-month return a poor momentum signal.`,
     volHow: (pct: string) => `std(monthly return, ddof=1) × √12 = ${pct}\n\nOur own yfinance closes, converted to EUR at each date's rate — so the currency move is in it, which is what a euro holder actually bears.`,
     betaHow: (benchmark: string, beta: string) => `cov(instrument, ${benchmark}) ÷ var(${benchmark}) = ${beta}\n\nWeekly EUR returns over the trailing 5 years, on the weeks both series have — weekly because the benchmark tracker and a US listing close five hours apart, which halves a daily correlation.`,
@@ -213,7 +166,22 @@ const en = {
     success: (book: string) => `✓ These positions account for the whole year — Contribution adds exactly to AIRS's ${book}.`,
     mismatch: (sum: string, book: string, residual: string) => `⚠ Contribution adds to ${sum} against AIRS's ${book}; ${residual} of the year is not explained by these rows.`,
   },
-  coverageWarning: (priced: number, total: number, pct: string) => `⚠ This index is rebuilt from ${priced} of its ${total} constituents (${pct}) — the rest have no price series yet. Weights are renormalised over the remainder, redistributing the missing names. Treat the tilts as indicative.`,
+  /* ⚠⚠ IT NAMES THE COUNTRIES, AND THE OLD COPY NAMED THE WRONG CAUSE. It used to say "the rest
+     have no price series yet" — measured on ACWI, exactly ONE of the members that reach the price
+     world lacks a series. The real gap is the ISIN bridge, and it is not spread evenly: **India is
+     2 priced of 161**, the UK 41 of 72, Hong Kong 152 of 182, while the United States is 474 of
+     ~476 and Canada and Australia are whole. "Treat the tilts as indicative" told a reader the
+     index was a bit noisy; what they were actually looking at was an ACWI with India removed, and
+     the REGIONAL tilt against it is not approximate but wrong in a nameable direction.
+     ⚠ `missing` is empty when the server could not work out the breakdown — the sentence then
+     stops after the count rather than claiming the gap is spread evenly. */
+  coverageWarning: (priced: number, total: number, pct: string,
+                    missing: { country: string; missing: number; members: number }[]) => {
+    const head = `⚠ This index is rebuilt from ${priced} of its ${total} constituents (${pct}); weights are renormalised over the remainder.`;
+    if (!missing.length) return `${head} Treat the tilts as indicative.`;
+    const where = missing.map((m) => `${m.country} (${m.members - m.missing} of ${m.members})`).join(', ');
+    return `${head} The gap is NOT spread evenly — most of it is ${where}. Regional tilts against this benchmark are the least reliable part of the chart.`;
+  },
   serverText: (text: string) => text,
 } as const;
 
@@ -238,11 +206,12 @@ const nl: AnalyseCopy = {
     fxsplit: { label: 'Koers versus valuta (AIRS)', hint: 'Koers + Valuta + Rest = Resultaat' },
     contribution: { label: 'Opbouw bijdrage', hint: 'Resultaat ÷ beginkapitaal van het boek' },
   },
-  chrome: { benchmark: 'Benchmark', loading: 'Samenstelling laden…', loadError: 'De samenstelling kon niet worden geladen.' },
+  chrome: { benchmark: 'Benchmark', loading: 'Samenstelling laden…',
+    loadError: 'De samenstelling kon niet worden geladen.' },
   bucket: (name) => (({ Stocks: 'Aandelen', Bonds: 'Obligaties', Alternatives: 'Alternatieven', Cash: 'Liquiditeiten',
     Unclassified: 'Niet geclassificeerd' } as Record<string, string>)[name] ?? name),
   score: {
-    returnYtd: 'Rendement (YTD) €', versusReturn: (benchmark) => `vs. rendement ${benchmark} €`, excess: 'Meerrendement',
+    returnYtd: 'Rendement (YTD) €', versusReturn: (benchmark) => `vs. rendement ${benchmark} (YTD) €`, excess: 'Meerrendement',
     portfolioWhat: 'Wat deze portefeuille sinds het begin van het jaar in euro heeft gerendeerd.', portfolioNote: 'het rendement van de portefeuille sinds het begin van het jaar',
     portfolioHowBook: 'Houdt rekening met stortingen en onttrekkingen en bevat inkomsten, over het kalenderjaar — een storting vleit dit cijfer dus niet.',
     portfolioHowModel: 'Σ(gewichtᵢ × rendementᵢ) over de posities van het model. Elke positie gebruikt yfinance-slotkoersen en wordt op elke datum tegen de eigen koers naar EUR omgerekend, zodat het valuta-effect is inbegrepen. Koersrendement: dividenden zijn uitgesloten.',
@@ -251,12 +220,10 @@ const nl: AnalyseCopy = {
     riskTitle: 'Risico — hoe ver het aandelendeel van de benchmark afwijkt (active share) en hoeveel die afwijking werkelijk heeft bewogen (gerealiseerde tracking error).',
   },
   allocation: {
-    title: 'Allocatie', filtering: 'Filter op', showAll: '— alles tonen ✕', filterHint: 'Klik op een categorie om de grafieken te filteren',
-    minimum: 'minimum', target: 'doel', maximum: 'maximum', sold: 'Verkocht gedurende het jaar — niet meer in portefeuille',
+    sold: 'Verkocht gedurende het jaar — niet meer in portefeuille',
     portfolio: 'Portefeuille', of: 'van', nothing: 'Niets om te tonen — de huidige selectie bevat geen aandelen en sector is alleen voor aandelen.',
     unpriceable: (pct) => `${pct}% aangehouden maar niet prijsbaar — ontbreekt in deze balken`,
     excludes: (pct, axis) => `Exclusief ${pct}% in fondsen, obligaties en liquiditeiten — geen ${axis.toLowerCase()} om toe te wijzen`,
-    policyTitle: (variant) => `Afgeleid uit de eigen AIRS-naam van dit model. De banden over de balken tonen het ${variant}-allocatiebeleid.`,
     unpricedTitle: 'Werkelijke posities in werkelijke categorieën waarvoor geen koersreeks beschikbaar is. Ze ontbreken in de balken, waardoor hun categorieën te laag lijken. De positietabel hieronder noemt ze en de kolom Opgelost op de portefeuillerij telt ze.',
     excludedTitle: 'Fondsen, obligaties en liquiditeiten hebben geen eigen sector — ze vormen eigen segmenten in de allocatiegrafiek hierboven en worden in de positietabel hieronder genoemd.',
     totalsTitle: 'Elke kolom is exact opgeteld zoals deze wordt weergegeven, zodat handmatig optellen hetzelfde getal oplevert. Beide zijden zijn herwogen over de posities die kunnen worden toegewezen.',
@@ -266,9 +233,9 @@ const nl: AnalyseCopy = {
   },
   axes: {
     sector: 'Sector', region: 'Regio', currency: 'Valuta',
-    sectorNote: 'Wegingen aan het begin van de periode. Liquiditeiten, fondsen en niet-geprijsde posities hebben geen sector.',
-    regionNote: 'Vestigingsland van de uitgevende instelling, anders het ISIN-land. Niet de plaats van notering.',
-    currencyNote: 'Rapporteringsvaluta van de onderneming. Niet de noteringsvaluta.',
+    sectorNote: 'Actuele wegingen. Liquiditeiten, fondsen en niet-geprijsde posities hebben geen sector.',
+    regionNote: 'Actuele wegingen. Vestigingsland van de uitgevende instelling, anders het ISIN-land. Niet de plaats van notering.',
+    currencyNote: 'Actuele wegingen. Rapporteringsvaluta van de onderneming. Niet de noteringsvaluta.',
   },
   holdings: {
     title: 'Posities', name: 'Naam', via: 'Via', sector: 'Sector', momentum: 'Momentum', vol: 'Volatiliteit', beta: 'Bèta',
@@ -280,58 +247,13 @@ const nl: AnalyseCopy = {
     bookYear: 'Het boekjaar', allPositions: 'posities, alles wat is aangehouden of verkocht', direct: 'direct',
   },
   info: {
-    holdingsWhat: 'Elk instrument dat de portefeuille aanhoudt, gegroepeerd naar beleggingscategorie. Een positie via een certificaat wordt weergegeven als de onderliggende instrumenten, niet als het certificaat.',
-    viaWhat: 'Hoe de portefeuille in dit instrument terechtkwam — via eigen aandelen, via een strategie waarvan het certificaat is doorgelicht, of via beide.',
-    sectorWhat: 'De sector waarin dit instrument in de sectorgrafiek hierboven wordt meegeteld.',
-    momentumWhat: '12-1-momentum: het EUR-rendement over de laatste 12 maanden, exclusief de meest recente maand.',
-    momentumNote: 'signal_engine mom_12_1 — dezelfde reeks die /signal-lab toont',
-    volWhat: 'Hoe sterk de koers van dit instrument op jaarbasis bewoog over de laatste vijf jaar.',
-    volNote: 'geannualiseerde standaarddeviatie van maandelijkse EUR-rendementen',
-    volHeaderHow: (example) => `std(maandrendement, ddof=1) × √12 over de laatste vijf jaar van onze eigen yfinance-slotkoersen, op elke datum omgerekend naar EUR.${example}\n\nMinder dan vier jaar historie geeft een streepje, geen nul.`,
-    betaWhat: (benchmark) => `Hoe sterk dit instrument over vijf jaar bewoog bij elke 1% beweging van ${benchmark}.`,
-    betaNote: (benchmark) => `wekelijkse EUR-rendementen, geregresseerd op ${benchmark}`,
-    betaHeaderHow: (benchmark, example) => `cov(instrument, ${benchmark}) ÷ var(${benchmark}), met wekelijkse EUR-rendementen over de laatste vijf jaar tegenover de verhandelbare tracker van ${benchmark}, op de datums die beide reeksen hebben.${example}\n\nTe weinig overlappende historie geeft een streepje, geen nul.`,
-    weightWhat: 'Het huidige aandeel van dit instrument in de portefeuille.',
-    openingWhat: 'De waarde van deze positie aan het begin van het jaar, op basis van AIRS.',
-    valueNowWhat: 'De huidige waarde van deze positie.',
-    avgCapitalWhat: 'Het kapitaal dat gedurende het jaar werkelijk in deze positie vastzat.',
-    unrealisedWhat: 'Wat deze positie tijdens de aanhoudperiode op papier heeft gewonnen of verloren — nog niet verzilverd.',
-    unrealisedNote: 'huidige waarde − waarde aan het begin van het jaar',
-    realisedWhat: 'Wat door daadwerkelijke verkoop is verzilverd — het deel van dit jaar.',
-    realisedNote: 'AIRS Res. YtD, opgeteld over de verkopen van dit jaar',
-    incomeWhat: 'De dividenden en coupons die deze positie dit jaar aan het boek uitkeerde.', incomeNote: 'netto — bruto minus bronbelasting',
-    resultWhat: 'Wat het boek dit jaar werkelijk in euro aan deze positie verdiende.', resultNote: 'ongerealiseerd + gerealiseerd + inkomsten',
-    priceWhat: 'Het deel van het resultaat door de eigen koersbeweging van het instrument, zonder het valuta-effect.',
-    priceNote: 'AIRS Fondsresultaat, in EUR',
-    priceHow: (total) => `AIRS splitst de waardeverandering van elke aangehouden positie in een koersdeel en een valutadeel, beide in euro, en publiceert beide. Dit is het gerapporteerde Fondsresultaat; hier wordt niets opnieuw afgeleid.\n\nΣ = ${total}\n\n⚠ Dit dekt alleen het aangehouden deel. Fondsresultaat + Valutaresultaat = Huidige waarde − Beginwaarde. Gerealiseerde verkopen en dividenden vallen daarom buiten het paar en staan in Rest.\n\n⚠ De tweede regel drukt dezelfde euro's uit als punten van het geldgewogen rendement van deze rij, met hetzelfde gemiddeld belegde kapitaal. Koers + Valuta + Rest tellen daardoor exact op tot dat rendement.\n\n⚠ Dit zijn punten, geen aandelen van het rendement. Tegengestelde delen maken zo'n aandeel onbegrensd en laten het teken omslaan.\n\n⚠ Een subtotaal toont alleen punten wanneer elke onderliggende rij zowel de uitsplitsing als belegd kapitaal heeft. Het eindtotaal toont ze nooit, omdat Resultaat ook verkochte posities zonder uitsplitsing bevat.`,
-    currencyWhat: 'Het deel van het resultaat door de wisselkoersbeweging, zonder het koerseffect.', currencyNote: 'AIRS Valutaresultaat, in EUR',
-    currencyHow: (total) => `Het door AIRS gerapporteerde Valutaresultaat.\n\nΣ = ${total}\n\n⚠ Een europositie toont 0; dat is een meting en geen ontbrekend cijfer. Een lege waarde betekent dat AIRS geen uitsplitsing publiceerde: bij liquiditeiten, een onderliggende positie in een certificaat of een momentopname van vóór 18 juli 2026.\n\n⚠ Koers- en valutadelen werken regelmatig tegen elkaar in. Het nettoresultaat kan daardoor veel kleiner zijn dan elk afzonderlijk deel.`,
-    restWhat: 'Het deel van het resultaat dat niet door AIRS’ koers-/valutaverdeling wordt gedekt.', restNote: 'resultaat − koers − valuta',
-    restHow: (total) => `Resultaat − Koers − Valuta\n\n= ${total}\n\n⚠ In de praktijk zijn dit het gerealiseerde deel en dividenden. AIRS splitst wat nog wordt aangehouden; het transactiebestand heeft geen valutakolom en dividenden worden in EUR geboekt. Een boek dat heeft afgebouwd heeft daarom een rest, terwijl een boek dat alleen aanhield mogelijk geen rest heeft.\n\n⚠ Rest wordt door aftrekking afgeleid en neemt daardoor ook elk verschil op tussen AIRS' uitsplitsing en ons aangehouden resultaat. Drie kolommen die tot Resultaat optellen zijn controleerbaar; twee die tekortschieten lijken op een fout.`,
-    contributionWhat: 'Wat deze positie aan het jaarrendement van het boek toevoegde of ervan aftrok.',
     contributionNote: 'resultaat ÷ beginkapitaal van het boek', moneyNote: 'resultaat ÷ gemiddeld belegd kapitaal',
-    moneyWhat: 'Het rendement van deze positie op het werkelijk ingelegde geld — geldgewogen volgens Modified Dietz, zodat het moment van aan- en verkoop meetelt.',
-    instrumentWhat: (anchor) => `Het EUR-rendement van het instrument zelf sinds ${anchor} — onafhankelijk van het portefeuillebelang en van het handelsmoment.`,
-    instrumentHow: (example) => `(Huidige waarde + netto-inkomsten) ÷ Beginwaarde − 1, per rij${example}\n\nBeginwaarde waardeert het huidige aantal tegen de koers van 1 januari en verwijdert zo de eigen timing. Dit is daarom geen gekoppeld tijdgewogen rendement: een aandeel dat in juni is gekocht wordt nog steeds vanaf januari gemeten. Geldgewogen ernaast gebruikt hetzelfde Resultaat over het werkelijk belegde kapitaal.\n\nEen rij met ƒ gebruikt in plaats daarvan onze eigen EUR-koersreeks. Categorierijen delen hun eigen Resultaat door hun eigen Beginwaarde.`,
     soldMoneyWhat: 'Het rendement van de gedurende het jaar volledig verkochte posities op het daarin belegde geld.',
     soldContributionWhat: 'Wat de gedurende het jaar volledig verkochte posities aan het boekrendement toevoegden of ervan aftrokken.',
     bookMoneyWhat: 'Het rendement van het boek op het geld dat werkelijk aan het werk was — over de posities waarvan aankopen en verkopen zichtbaar zijn.',
     bookReturnWhat: 'Het eigen jaarrendement van het boek volgens AIRS.',
     bookReturnNote: 'cumulatief_rendement — kasstroomgewogen, het bronsysteem',
     bookContributionWhat: 'Wat alle aangehouden en verkochte posities in deze tabel samen aan het boekjaar bijdroegen.', yearOpened: 'het begin van het jaar',
-    holdingsHow: (rows, through) => `één rij per ISIN, nadat door certificaten heen is gekeken\n\n${rows} rijen, waarvan ${through} via een certificaat zijn bereikt`,
-    viaNote: (through, rows) => `${through} van de ${rows} rijen lopen via een certificaat; de rest wordt rechtstreeks aangehouden`,
-    viaHow: 'het aandeel van elke route in het boek — samen vormen ze het Gewicht van die rij',
-    sectorHow: (sectors, classified, missing) => `Yahoo’s sector bij het ISIN, gestandaardiseerd zodat elke sector één naam heeft\n\n${sectors} sectoren over ${classified} rijen; ${missing} hebben er geen (fonds of niet classificeerbaar)`,
-    momentumHow: (example) => `Koers één maand geleden ÷ koers twaalf maanden geleden − 1${example}`,
-    weightHow: (rows, total) => `Huidige waarde ÷ totale Huidige waarde van het boek\n\nde ${rows} rijen hieronder tellen op tot ${total} = 100,00%`,
-    openingHow: (total) => `Σ (huidig aantal × koers op 1 januari)\n\n= ${total}`,
-    valueNowHow: (total) => `Σ (huidige waardering volgens AIRS)\n\n= ${total}`,
-    avgCapitalHow: (total) => `Σ (beginwaarde + elke kasstroom × resterend deel van het jaar)\n\n= ${total}`,
-    unrealisedHow: (now, opening, result) => `Huidige waarde − Beginwaarde\n\n${now} − ${opening} = ${result}`,
-    realisedHow: (total) => `Σ Res. YtD over de verkopen van dit jaar\n\n= ${total}`,
-    incomeHow: (total) => `Σ (dividend + bronbelasting)\n\n= ${total}`,
-    resultHow: (unrealised, realised, income, result) => `Ongerealiseerd + Gerealiseerd + Inkomsten\n\n${unrealised} + ${realised} + ${income} = ${result}`,
     moneyHow: (result, capital, pct) => `Resultaat ÷ gemiddeld belegd kapitaal\n\n${result} ÷ ${capital} = ${pct}`,
     contributionHow: (result, basis, pct) => `Resultaat ÷ beginkapitaal van het boek\n\n${result} ÷ ${basis} = ${pct}`,
   },
@@ -342,6 +264,10 @@ const nl: AnalyseCopy = {
     momentumMissing: 'Een streepje is geen nul — 0% zou beweren dat de koers niet bewoog. Hiervoor is ongeveer 13 maanden koershistorie nodig; de twee risicokolommen ernaast vereisen vier jaar. Een jonge notering kan daarom wel momentum maar geen volatiliteit tonen.',
     momentumMissingWhat: (name) => `${name} heeft minder dan ongeveer 13 maanden koershistorie en daarom geen 12-1-momentum.`,
     momentumWhat: (name) => `Het rendement van ${name} over de twaalf maanden die één maand geleden eindigden.`,
+    momentumRanked: (name, ordinal, benchmark, n) =>
+      `Het rendement van ${name} over de twaalf maanden die één maand geleden eindigden — het `
+      + `${ordinal} sterkste percentiel van de ${n.toLocaleString('nl')} ${benchmark}-leden die op `
+      + `dezelfde basis zijn gerangschikt.`,
     momentumHow: (substitution) => `Koers één maand geleden ÷ koers twaalf maanden geleden − 1${substitution}\n\nDe meest recente maand wordt bewust uitgesloten: die vertoont mean reversion. Opname ervan maakt een gewoon twaalfmaandsrendement tot een zwak momentumsignaal.`,
     volHow: (pct) => `std(maandrendement, ddof=1) × √12 = ${pct}\n\nOnze eigen yfinance-slotkoersen, op elke datum omgerekend naar EUR — inclusief de valutabeweging die een eurobelegger werkelijk ondervindt.`,
     betaHow: (benchmark, beta) => `cov(instrument, ${benchmark}) ÷ var(${benchmark}) = ${beta}\n\nWekelijkse EUR-rendementen over de laatste vijf jaar, voor weken waarin beide reeksen bestaan. Wekelijks omdat de benchmarktracker en een Amerikaanse notering vijf uur na elkaar sluiten, waardoor dagelijkse correlatie kunstmatig wordt gehalveerd.`,
@@ -421,7 +347,12 @@ const nl: AnalyseCopy = {
     success: (book) => `✓ Deze posities verklaren het hele jaar — Bijdrage telt exact op tot AIRS' ${book}.`,
     mismatch: (sum, book, residual) => `⚠ Bijdrage telt op tot ${sum} tegenover AIRS' ${book}; ${residual} van het jaar wordt niet door deze rijen verklaard.`,
   },
-  coverageWarning: (priced, total, pct) => `⚠ Deze index is herbouwd uit ${priced} van de ${total} constituenten (${pct}) — voor de rest is nog geen koersreeks beschikbaar. De wegingen zijn over het resterende deel herwogen, waardoor ontbrekende namen worden herverdeeld. Beschouw de afwijkingen als indicatief.`,
+  coverageWarning: (priced, total, pct, missing) => {
+    const head = `⚠ Deze index is herbouwd uit ${priced} van de ${total} constituenten (${pct}); de wegingen zijn over het resterende deel herwogen.`;
+    if (!missing.length) return `${head} Beschouw de afwijkingen als indicatief.`;
+    const where = missing.map((m) => `${m.country} (${m.members - m.missing} van ${m.members})`).join(', ');
+    return `${head} Het gat is NIET gelijkmatig verdeeld — het zit vooral in ${where}. Regionale afwijkingen ten opzichte van deze benchmark zijn het minst betrouwbare deel van de grafiek.`;
+  },
   serverText: (text) => text
     .replace('No Dynamic portfolio is paired with this one, so there are no transactions to read — a model is a set of weights; only a book trades.', 'Er is geen dynamische portefeuille aan gekoppeld, dus er zijn geen transacties om te lezen — een model is een set wegingen; alleen een boek handelt.')
     .replace(/Could not read this book's transactions \(([^)]+)\)\./, 'De transacties van dit boek konden niet worden gelezen ($1).')

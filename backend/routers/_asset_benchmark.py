@@ -39,6 +39,7 @@ THE BRIDGE IS THE ISIN, AND IT IS A JOIN, NOT A COLUMN
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase
@@ -52,6 +53,8 @@ from routers._benchmark_index import (
     index_weights,
 )
 
+
+_log = logging.getLogger(__name__)
 
 _BENCH_GRID_COLS = ("isin,analysis_id,yahoo_symbol,name,gf_company_name,currency,"
                     "market_cap_eur,market_cap_currency,status,bars,is_default,"
@@ -222,6 +225,45 @@ COPY (
         else:
             rec[kind] = (d, float(close))
     return out
+
+
+#: Below this, the UI prints the coverage warning — so below this is where the breakdown that
+#: explains it is worth computing. One number, read by both sides of the same sentence.
+_COVERAGE_WARN_PCT = 97.0
+
+
+def _missing_by_country(ids: list[int], priced: list[dict]) -> list[dict]:
+    """The countries this rebuild is missing most of: `[{country, missing, members}]`, worst first.
+
+    ⚠ BEST EFFORT, AND AN EMPTY LIST MEANS "COULD NOT SAY", NOT "NOTHING MISSING". `covered_pct`
+    already carries the magnitude; this only ever adds the WHERE. A failure here must cost the
+    modal nothing, so it is caught and swallowed — a missing sentence, never a missing panel.
+
+    ⚠ COUNTED IN COMPANIES, NOT WEIGHT. Weight would be the better measure and is not available:
+    an unpriced member has no cap in the asset world, which is why it is unpriced. A count is the
+    honest thing we can actually say, and the copy says "names" rather than implying weight.
+    """
+    try:
+        priced_isins = {m["isin"] for m in priced if m.get("isin")}
+        rows: list[dict] = []
+        for chunk in (ids[i:i + IN_CHUNK_SIZE] for i in range(0, len(ids), IN_CHUNK_SIZE)):
+            rows += (supabase.table("company")
+                     .select("isin,gurufocus_exchange:gurufocus_exchange("
+                             "country:country(country_name))")
+                     .in_("company_id", chunk).execute().data or [])
+        tally: dict[str, list[int]] = {}
+        for r in rows:
+            country = (((r.get("gurufocus_exchange") or {}).get("country") or {})
+                       .get("country_name")) or "Unclassified"
+            slot = tally.setdefault(country, [0, 0])          # [missing, members]
+            slot[1] += 1
+            if not r.get("isin") or r["isin"] not in priced_isins:
+                slot[0] += 1
+        ranked = sorted(((c, m, n) for c, (m, n) in tally.items() if m), key=lambda t: -t[1])
+        return [{"country": c, "missing": m, "members": n} for c, m, n in ranked[:3]]
+    except Exception as e:  # noqa: BLE001 — a sentence must never cost the panel
+        _log.warning("[bench] missing-by-country lookup failed: %s: %s", type(e).__name__, e)
+        return []
 
 
 def _universe_company_ids(label: str) -> list[int]:
@@ -453,6 +495,21 @@ def members(label: str) -> tuple[list[dict], dict]:
 
     out = list(by_name.values())
     caps_from, caps_to, caps_unstamped = cap_stamp_range(out)
+    # ⚠⚠ WHICH COUNTRIES ARE MISSING, NOT JUST HOW MANY NAMES. The note under `covered_pct` has
+    #   always said the missing names are "systematic (a whole country), not random" — and the
+    #   warning on screen said the opposite in effect, blaming "no price series yet" and inviting
+    #   the reader to treat every tilt as merely approximate. Measured on ACWI: **India is 5 priced
+    #   of ~161 members**, the UK 73 of ~101, Korea 56 of ~79 — while the United States is 474 of
+    #   ~476 and Canada and Australia are fully priced. A reader comparing a book's REGIONAL tilt
+    #   against this benchmark is not looking at a slightly noisy index, they are looking at one
+    #   with India removed. Naming that is the difference between a caveat and a warning.
+    #
+    # ⚠ GATED ON THE SAME THRESHOLD THE UI USES TO SHOW THE WARNING. A fully-covered universe pays
+    #   nothing for this — there is no sentence to write — and this sits on the Analyse modal's
+    #   one request, whose wall clock is the reader's wait.
+    pct = (len(out) / len(ids) * 100.0) if ids else None
+    missing_countries = (_missing_by_country(ids, out)
+                         if pct is not None and pct < _COVERAGE_WARN_PCT else [])
     coverage = {
         # ⚠⚠ STILL THE COMPANY WORLD, AND `priced` CAN NOW EXCEED IT. Since 2026-09-01
         # `universe_asset_membership` unions `index_file_membership`, so ACWI has 129 constituents
@@ -475,7 +532,11 @@ def members(label: str) -> tuple[list[dict], dict]:
         # renormalised over a fraction of its constituents is exactly the invention the portfolio
         # returns refuse to make, and here the missing names are systematic (a whole country), not
         # random.
-        "covered_pct": (len(out) / len(ids) * 100.0) if ids else None,
+        "covered_pct": pct,
+        # [{country, missing, members}], worst first, at most 3. Empty when coverage is healthy or
+        # the lookup failed — a caller must render its absence as "no breakdown", never as "none
+        # missing", which is what `covered_pct` is for.
+        "missing_countries": missing_countries,
     }
     return out, coverage
 

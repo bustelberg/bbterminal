@@ -23,7 +23,8 @@ from pydantic import BaseModel
 
 from routers._cache_headers import CACHE_USER
 
-from deps import supabase
+from common.pg import load_distinct_via_copy
+from deps import paginate, supabase
 
 router = APIRouter(tags=["companies"])
 
@@ -98,17 +99,46 @@ def _resolve_exchange_id(exchange_code: str) -> int | None:
     return resp.data[0]["exchange_id"] if resp.data else None
 
 
+def _distinct_options(table: str, column: str) -> list[str]:
+    """The distinct values of one column, as a dropdown's option list.
+
+    ⚠⚠ THE AGGREGATE HAPPENS IN THE DATABASE, AND THAT IS A CORRECTNESS FIX, NOT A SPEED ONE.
+    This used to be `select(column).limit(N)` reduced to a set in Python, and `.limit()` does not
+    decide how many rows come back — PostgREST's `db-max-rows` does, and it is **1,000 on the
+    cloud project** against 10,000 locally. `universe_membership` holds 8,444 rows, so production
+    derived the sector list from the first 1,000 of them and shipped **40 of the 43 sectors**:
+    three filter options that simply did not exist, no empty cell, no error, and WHICH three
+    depended on physical row order so a VACUUM could change the answer. The local dataset returned
+    all 43 and could never reproduce it (`project_postgrest_max_rows_trap`).
+
+    A `SELECT DISTINCT` cannot truncate — the aggregate runs before the row limit, not after — so
+    43 rows leave the server and they are all of them.
+
+    ⚠ THE POSTGREST FALLBACK PAGES rather than re-reading `.limit()` as a bound, because a
+    fallback that is quietly wrong is worse than no fallback: it is the path that runs exactly
+    when the fast one is unavailable, i.e. when nobody is looking.
+    """
+    fast = load_distinct_via_copy(table, column)
+    if fast is not None:
+        return [str(v) for v in fast]
+    seen = {
+        str(r[column]).strip()
+        for r in paginate(lambda lo, hi:
+                          supabase.table(table).select(column).range(lo, hi).execute())
+        if r.get(column) and str(r[column]).strip()
+    }
+    return sorted(seen)
+
+
 @router.get("/api/companies/field-options")
 async def get_company_field_options(response: Response):
     """Dropdown options for the companies page — exchanges, countries, sectors."""
     response.headers["Cache-Control"] = CACHE_USER
-    exch_resp = supabase.table("gurufocus_exchange").select("exchange_code").limit(1000).execute()
-    exchanges = sorted({r["exchange_code"] for r in (exch_resp.data or [])})
-    country_resp = supabase.table("country").select("country_name").limit(1000).execute()
-    countries = sorted({r["country_name"] for r in (country_resp.data or [])})
-    sector_resp = supabase.table("universe_membership").select("sector").limit(10000).execute()
-    sectors = sorted({r["sector"] for r in (sector_resp.data or []) if r.get("sector") and r["sector"].strip()})
-    return {"exchanges": exchanges, "countries": countries, "sectors": sectors}
+    return {
+        "exchanges": _distinct_options("gurufocus_exchange", "exchange_code"),
+        "countries": _distinct_options("country", "country_name"),
+        "sectors": _distinct_options("universe_membership", "sector"),
+    }
 
 
 @router.get("/api/companies")

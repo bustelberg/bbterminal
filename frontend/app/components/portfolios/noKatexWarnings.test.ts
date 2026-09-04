@@ -9,7 +9,6 @@ import {
 import {
   workedFairValue, workedMarketCap, workedMaxPE, workedPriceMove,
 } from './valuationFormulas';
-import { CHAIN_TEX, workedReturn as workedBookReturn } from './bookReturnFormula';
 import { meanSub, rateSub } from './tablesSubstitution';
 
 /**
@@ -76,9 +75,6 @@ const CASES: [string, string][] = [
   ['valuation: fair value', workedFairValue(11.46, 20.608, 236.17)],
   ['valuation: price move', workedPriceMove(596.13, 281.42, '+111.8%')],
   ['valuation: market cap', workedMarketCap(281.42, 2540, 714806)],
-  ['book return: chain', CHAIN_TEX],
-  ['book return: worked',
-    workedBookReturn({ date: '2026-08-26', cum_pct: 35.3619, value_eur: 1353619.25 }, '2026-01-01')],
   ['workedCagr', workedCagr(CAGR)],
   ['tables: rate substitution', rateSub(CAGR)],
   // ⚠ THE TRANSFORMED FORM, which is the one that adds a SECOND line of its own

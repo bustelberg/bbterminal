@@ -84,7 +84,11 @@ function labelledSeries(row: CashReturnRow): { label: string; value: number }[] 
  * is a ratio against the member's own median, so both are scale-free. What catches Vertiv now is
  * `stepGrowth`, twice over: its 2018 figure is 29,000× its 2017 one (over `_MAX_STEP_GROWTH`, 100×)
  * AND that 0.024 base is 0.00002 of its own median (under `_MIN_STEP_BASE_FRACTION`, 0.10). It sits
- * out those steps and rejoins, rather than being re-based around. ⚠ Those two guards are general —
+ * out those steps and rejoins, rather than being re-based around. ⚠⚠ ON A ONE-HOLDING BOOK ONLY
+ * THE **CEILING** IS LEFT: `baseBarScale` lifts the materiality bar where the member IS the line
+ * (see it for the NVIDIA measurements), so a Vertiv-shaped shell year is caught by
+ * `MAX_STEP_GROWTH` alone — 29,000x, still refused — and the line honestly STOPS instead of
+ * printing a step nobody reported. ⚠ Those two guards are general —
  * they catch every IPO, spin-off and redenomination of the same shape (VICI, Carvana, CrowdStrike)
  * — where the base rule only worked where a per-period cap happened to exist, and was explicitly
  * inert for a portfolio holding. The chain protects both.

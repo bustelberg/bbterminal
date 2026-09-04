@@ -135,20 +135,30 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              "would hide a broken schedule), `error` (it has a reason; read it) or `unknown`.",
     ),
     JobSpec(
-        id="month_end_price_refresh",
-        label="Month-end full price refresh",
-        fills="metric_data for EVERY company, most-stale first",
-        cadence="Daily tick at 12:00 UTC; acts only in the last days of the month",
+        id="daily_price_slice",
+        label="Daily price slice (most-stale companies)",
+        fills="metric_data for the most-stale companies — the whole book every ~19 days",
+        cadence="Every day, 12:00 UTC",
         trigger={"hour": 12, "minute": 0, "timezone": "UTC"},
         options={"coalesce": True, "misfire_grace_time": 3600},
-        # ⚠ THE WORK IS MONTHLY EVEN THOUGH THE TICK IS DAILY — see `max_age_hours`. 35 days covers
-        # a long month plus the retry window; sooner would flag a job that is behaving exactly as
-        # designed on 28 days out of 30.
-        max_age_hours=35 * 24,
-        evidence=("full_price_refresh",),
+        # ⚠ THE WORK IS DAILY NOW, so the threshold is a day plus slack — unlike the month-end pass
+        # this replaced, which wanted 35 days because it was idle on 28 of every 30 by design.
+        max_age_hours=30,
+        evidence=("price_slice",),
         records=False,          # already writes ingest_run — see `records`
-        note="Bounded by what is left of the monthly GuruFocus quota, which resets midnight EST "
-             "on the 1st — it spends what would otherwise be lost.",
+        note="⚠⚠ REPLACED `month_end_price_refresh` (2026-09-02). One pass a month and the signal "
+             "engine's 30-day staleness guard are THE SAME PERIOD, so the system was always a few "
+             "days from a cliff and spent them there: measured 2026-09-02, ACWI coverage held at "
+             "1,743 of 1,758 on 09-27 and collapsed to 16 on 09-30, because every name whose close "
+             "was 30 days old is dropped from every signal at once. Amortising the identical work "
+             "over the month bounds the oldest price at ~19 days and removes the cliff, for "
+             "essentially the same monthly quota spent evenly instead of in one month-end spike. "
+             "⚠ Most-stale-first, so a missed day self-repairs: the database's own staleness is "
+             "the cursor and there is no state to get out of sync. ⚠ Still bounded by the "
+             "per-region GuruFocus budget. ⚠ Size via `DAILY_PRICE_SLICE` (default 150); the run "
+             "logs its own cycle length and errors above 25 days. ⚠ The FULL pass survives as "
+             "`full_price_refresh` behind its Run-now button, for a bulk import or a vendor "
+             "correction — it is the wrong tool for staying current, which is what this is.",
     ),
     JobSpec(
         id="asset_price_refresh",
@@ -176,6 +186,45 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              "25 constituents are the whole cost here. ⚠ `asset_price_refresh` does NOT cover "
              "this: it is scoped to instruments HELD IN A MODEL PORTFOLIO, so an index "
              "constituent nothing holds was never refreshed by anything.",
+    ),
+    JobSpec(
+        id="benchmark_price_slice",
+        label="Benchmark constituent price slice",
+        fills="asset_price for the most-stale constituents of ACWI / SP500 / AEX",
+        cadence="Every day, 06:45 UTC",
+        trigger={"day_of_week": "mon-sun", "hour": 6, "minute": 45, "timezone": "UTC"},
+        options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
+        max_age_hours=30,
+        note="⚠ THE HOLE NOTHING ELSE COVERED. `asset_price_refresh` is scoped to instruments HELD "
+             "in a model portfolio and `benchmark_index_refresh` to the REBUILT indices (AEX), so "
+             "an ACWI or SP500 constituent no book holds was refreshed by nothing — 1,663 of "
+             "1,848 ACWI members last closed in July, measured 2026-09-03. The Analyse modal's "
+             "composition bars are weighed on those prices and drawn only over constituents "
+             "priced at both ends of the window, so a stale series drops a name off the chart "
+             "rather than merely ageing it. A SLICE, not a full pass: most-stale-first, so the "
+             "database is the cursor and a missed day self-repairs (`price_slice`'s own shape). "
+             "~250/day over ~1,900 instruments is an eight-day cycle. Stands down while the "
+             "ingest worker is live — Yahoo answers an overloaded caller with an EMPTY list.",
+    ),
+    JobSpec(
+        id="relative_momentum_refresh",
+        label="Relative momentum ranks (ACWI · SP500 · AEX)",
+        fills="relative_momentum — each universe's 12-1 EUR return, ranked into 7 states",
+        cadence="Every day, 07:30 UTC",
+        trigger={"day_of_week": "mon-sun", "hour": 7, "minute": 30, "timezone": "UTC"},
+        options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
+        max_age_hours=30,
+        note="⚠ 07:00, AFTER the 05:00 price_update AND the 06:30 index refresh — the ranks are "
+             "only as current as the closes under them, so running first would rank yesterday's "
+             "prices under today's date. ⚠⚠ ITS FRESHNESS IS BOUNDED BY SOMETHING IT DOES NOT "
+             "CONTROL: `price_update` refreshes HELD companies only, so most ACWI constituents "
+             "move on the month-end `full_price_refresh`, not daily (measured 2026-09-02: 1,680 of "
+             "1,992 members last closed 2026-08-28, 16 at 09-01). A daily run is still right — it "
+             "is cheap, idempotent and picks up every refresh within a day — but the ANSWER only "
+             "moves when the prices do. ⚠ COVERAGE IS THE CANARY: the signal engine drops a name "
+             "whose last close is over 30 days old, so if constituent prices ever stop being "
+             "refreshed this job's coverage falls before anything else shows it. It logs coverage "
+             "per universe and WARNS below 70%. ⚠ Cheap: ~15s and ~2,270 rows for all three.",
     ),
     JobSpec(
         id="benchmark_fundamentals_fill",

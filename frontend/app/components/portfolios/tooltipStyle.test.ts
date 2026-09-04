@@ -43,11 +43,14 @@ const UNICODE_MATHS = ['÷', '×', 'Σ', '√'];
  * make a new tooltip pass is the one edit this file exists to prevent.
  */
 const UNCONVERTED = new Set([
-  'AccountTotalReturn.tsx',
+  // ⚠ THREE FILES CAME OFF THIS LIST AT ONCE — `AccountTotalReturn.tsx`, `CorrelationView.tsx`
+  // and `DeepValuationTab.tsx` — the moment `withoutComments` stopped reading comments as copy.
+  // Their only `⚠`s sat in `/* */` blocks between the branches of a field expression, and their
+  // real tooltips were inside the rules all along. They were never unconverted; the scanner just
+  // could not tell, which had the ratchet accusing files that had done the work. Anything left on
+  // this list is here on its own merits.
   'CagrTable.tsx',
   'ConcentrationView.tsx',
-  'CorrelationView.tsx',
-  'DeepValuationTab.tsx',
   'DrawdownView.tsx',
   'MetricGrowthCard.tsx',
   'MultipleHistoryChart.tsx',
@@ -69,6 +72,24 @@ function componentFiles(): string[] {
 }
 
 /**
+ * The source with its comments removed.
+ *
+ * ⚠⚠ A COMMENT IS NOT COPY, AND WITHOUT THIS THE SCANNER READS ONE AS IF IT WERE. `CardHeading.tsx`
+ * documents why its tip is an `AspectCard` "NOT `InfoTip text=`" — prose ABOUT a tooltip prop, in a
+ * JSDoc block that also carries a `⚠` and runs well past `MAX_FIELD`. The `text=` inside it matched,
+ * the slice that followed was the rest of the comment, and the file failed two of the three rules
+ * on copy that reaches no screen at all. ⚠ The failure mode is the bad one: it accuses a file that
+ * is doing the right thing, and the fix it invites is to stop the source explaining itself.
+ *
+ * ⚠ BLOCK COMMENTS ONLY, and the `//` rule is guarded on the character before it — `https://` is
+ * the one that would otherwise truncate a legitimate literal, and this test's job is to read
+ * literals.
+ */
+function withoutComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
+}
+
+/**
  * The STRING LITERALS a tooltip field is built from, one entry per field occurrence.
  *
  * ⚠ IT READS THE LITERALS, NOT THE EXPRESSION. A field is routinely a concatenation, a ternary or a
@@ -76,7 +97,8 @@ function componentFiles(): string[] {
  * between the field and the next attribute is joined. A field whose text lives in a copy module
  * contributes nothing here — that module is covered by its own tests.
  */
-function fields(source: string): { field: string; body: string }[] {
+function fields(src: string): { field: string; body: string }[] {
+  const source = withoutComments(src);
   const out: { field: string; body: string }[] = [];
   const re = new RegExp(`\\b(${FIELDS.join('|')})=\\{?`, 'g');
   for (const m of source.matchAll(re)) {
@@ -102,8 +124,9 @@ describe('every ⓘ on the dashboard follows the Active Share card', () => {
     const total = converted.reduce(
       (n, f) => n + fields(readFileSync(join(DIR, f), 'utf8')).length, 0);
     expect(converted.length).toBeGreaterThan(20);
-    // ⚠ A FLOOR, NOT A TARGET — 65 fields sit in the converted files today, and the number
-    // only grows as the ratchet turns. It exists to fail loudly if the scanner ever stops
+    // ⚠ A FLOOR, NOT A TARGET — 117 fields sit in the converted files today (65 before the three
+    // comment-only false positives came off the list), and the number only grows as the ratchet
+    // turns. It exists to fail loudly if the scanner ever stops
     // matching, which would make every rule below vacuously true.
     expect(total).toBeGreaterThan(40);
   });

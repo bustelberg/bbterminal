@@ -280,7 +280,7 @@ describe('cagrOf', () => {
   });
 
   it('skips a negative start rather than compounding out of it', () => {
-    // 5 Ã· −5 is negative and its 4th root is not a number. Dropping the burn year leaves one
+    // 5 ÷ −5 is negative and its 4th root is not a number. Dropping the burn year leaves one
     // positive point, and one point is not a rate — so there is no CAGR, which is the answer.
     const pts = [{ year: 2020, price: 10, value: -5 }, { year: 2024, price: 20, value: 5 }];
     expect(cagrOf(pts, (p) => p.value)).toBeNull();

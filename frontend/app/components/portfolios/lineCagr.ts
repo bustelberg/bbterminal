@@ -37,6 +37,31 @@ export type Cagr =
   | { pct: null; reason: string };
 
 /**
+ * ⚠⚠ HOW MANY DECIMALS A RATE IS PRINTED AT, IN ONE PLACE, BECAUSE THE TWO SURFACES QUOTING ONE
+ * ARE IN THE SAME MODAL AND GET COMPARED (2026-09-03, two decimals on request).
+ *
+ * The `Graphs` cards' `CAGR` / `CAGR · <index>` tiles and the `Tables` rate rows are the same
+ * measure over the same series, so a reader who opens both tabs is running a comparison whether or
+ * not one was offered — this file's own header exists because that comparison once found 29.7% and
+ * 30.1%. Precision is the cheap half of that: two figures rounded differently look like a data
+ * disagreement long before anyone suspects formatting, and at one decimal a genuine 0.04pp gap and
+ * an identical pair are indistinguishable.
+ *
+ * ⚠ THE EXCESS COLUMN HAS TO FOLLOW IT. `Tables` prints book, index and `book − index` side by
+ * side, and the whole point of the third is that a reader can check it against the first two:
+ * 39.53 − 4.55 rounded to one decimal is 35.0, which is not what subtracting the printed figures
+ * gives. Same digits on all three, or the row stops adding up on screen.
+ *
+ * ⚠ KEEP IN STEP WITH `workedFormula.subPct2`, which prints the SAME rate inside the ⓘ under these
+ * tiles — pinned by `endpointCagr.test.ts` rather than left to a comment.
+ */
+export const CAGR_DECIMALS = 2;
+
+/** A rate as every CAGR tile and cell prints it. ⚠ SIGNED — an unsigned `4.55%` beside a negative
+ *  one reads as a magnitude, and these sit in columns next to each other. */
+export const cagrPct = (pct: number) => `${pct >= 0 ? '+' : ''}${pct.toFixed(CAGR_DECIMALS)}%`;
+
+/**
  * The fiscal YEAR a period label belongs to, or null when it is not a reported one.
  *
  * ⚠⚠ `LTM` AND `2026e` ARE BOTH REFUSED, FOR DIFFERENT REASONS, AND BOTH WOULD LOOK FINE.
@@ -104,9 +129,19 @@ export function lineCagr(
   const wantYear = endYear - years;
   const from = reported.find((p) => periodYear(p) === wantYear && periodQuarter(p) === q);
   if (!from) {
+    /**
+     * ⚠⚠ IT NAMES THE END OF THE WINDOW, NOT JUST THE START IT COULD NOT FIND (2026-09-03,
+     * reported: "no 2010 point on the line, which is complete nonsense for a 5y lookback from
+     * 2026"). It was — and the nonsense was the message, not the arithmetic: `wantYear` is
+     * `endYear - years`, so a 5-year window asking for 2010 means the window ENDS at 2015. That
+     * end is `commonEndPeriod`, the latest period BOTH lines are drawn at, and when it lands far
+     * in the past the reason blamed the history for a start date it had derived from a bad end.
+     * A reader cannot debug the pin without seeing it, so the pin is in the sentence.
+     */
     return { pct: null,
-      reason: `no ${q ? `Q${q} ` : ''}${wantYear} point on the line — either the history does not `
-        + 'reach back that far, or too few constituents had reported that period for it to be drawn' };
+      reason: `${years}y window ${wantYear}→${endYear}: no ${q ? `Q${q} ` : ''}${wantYear} point on `
+        + `the line. The window ends at ${to} because that is the latest period BOTH lines are `
+        + 'drawn at — if that looks too old, the cause is the end, not the history.' };
   }
 
   const a = level[from].value;

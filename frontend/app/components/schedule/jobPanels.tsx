@@ -132,7 +132,14 @@ export const JOB_PANELS: Record<string, (ctx: PipelineCtx) => ReactNode> = {
       />
     </>
   ),
-  month_end_price_refresh: (ctx) => (
+  /* ⚠ RENAMED FROM `month_end_price_refresh` (2026-09-02) — the key IS the JobSpec id, so when
+     that job was replaced by `daily_price_slice` this panel would have silently stopped rendering
+     and the row would have collapsed to a generic one, losing the budget + coverage console that
+     is the whole reason these two jobs have no Run-now button.
+     ⚠ It still watches `full_price_refresh` for `running`/`lastRun`: that op survives as the
+     MANUAL full pass behind this section's own button, and the section is where you press it. The
+     scheduled work is `price_slice`, which /schedule reads through the JobSpec's `evidence`. */
+  daily_price_slice: (ctx) => (
     <FullPriceRefreshSection
       running={ctx.running('full_price_refresh')}
       lastRun={ctx.lastRun('full_price_refresh')}
@@ -1626,8 +1633,7 @@ function HeldRow({ c, expected, retryAt }: {
             title="Fetch this stock's price from GuruFocus now (bypasses cache) and show the request + response"
             className={`text-[12px] px-2 py-0.5 rounded-lg border ${btnTone} disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1`}
           >
-            {busy && <Spinner className="h-3 w-3" />}
-            {busy ? 'Fetching…' : '↻ Refresh'}
+            {busy ? 'Fetching…' : 'Refresh'}
           </button>
         </td>
       </tr>

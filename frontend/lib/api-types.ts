@@ -4548,12 +4548,22 @@ export interface paths {
          * Latest Price Date
          * @description Most recent close-price observation across all companies. The
          *     /backtest page uses this as the default end-date — "test up to
-         *     however current our data is." The `source_code = 'gurufocus'` filter is
-         *     load-bearing: it lets Postgres serve this via the
-         *     `idx_metric_data_source_date` (source_code, target_date) index as a
-         *     backward scan. Without it there's no usable index for
-         *     `metric_code = … ORDER BY target_date DESC`, so prod seq-scans the whole
-         *     `metric_data` table and trips the statement timeout (57014).
+         *     however current our data is."
+         *
+         *     ⚠ BOTH constants are load-bearing, and they must match
+         *     `idx_metric_data_close_price_date`'s predicate EXACTLY
+         *     (`metric_code='close_price' AND source_code='gurufocus'`) or the partial
+         *     index does not apply and prod seq-scans a 70M-row table into the 8s
+         *     statement timeout (57014).
+         *
+         *     ⚠ The previous index here was `(source_code, target_date)`, and the comment
+         *     claiming it "stops at the first close_price row" was wrong: `metric_code`
+         *     was not in it, so it was a FILTER and the scan walked every row dated after
+         *     the last close — 188,286 of them, ALL `is_prediction` estimates carrying
+         *     FUTURE target_dates, at 1,870 ms. That cost grew with every quarter of
+         *     ingested estimates and had nothing to do with prices. The partial index
+         *     makes this a one-tuple index-only scan (0.07 ms). See
+         *     `supabase/migrations/20260902000000_metric_data_source_date_split.sql`.
          */
         get: operations["latest_price_date_api_data_latest_price_date_get"];
         put?: never;
@@ -9410,6 +9420,8 @@ export interface components {
             return_pct?: number | null;
             /** Ticker */
             ticker?: string | null;
+            /** Weight Now Pct */
+            weight_now_pct?: number | null;
             /**
              * Weight Pct
              * @default 0
@@ -9505,6 +9517,12 @@ export interface components {
              * @default 0.3
              */
             regime_ramp_lo?: number;
+            /**
+             * Score Normalization
+             * @default minmax
+             * @enum {string}
+             */
+            score_normalization?: "minmax" | "rank" | "robust_z";
             /** Sector Etfs */
             sector_etfs?: {
                 [key: string]: number;
@@ -9771,6 +9789,12 @@ export interface components {
             mom_12_1_pct?: number | null;
             /** Mom 12 1 To */
             mom_12_1_to?: number | null;
+            /** Mom Pct Rank */
+            mom_pct_rank?: number | null;
+            /** Mom Rank N */
+            mom_rank_n?: number | null;
+            /** Mom State */
+            mom_state?: number | null;
             /** Money Weighted Return Pct */
             money_weighted_return_pct?: number | null;
             /** Name */
@@ -11371,6 +11395,12 @@ export interface components {
             mom_12_1_pct?: number | null;
             /** Mom 12 1 To */
             mom_12_1_to?: number | null;
+            /** Mom Pct Rank */
+            mom_pct_rank?: number | null;
+            /** Mom Rank N */
+            mom_rank_n?: number | null;
+            /** Mom State */
+            mom_state?: number | null;
             /** Name */
             name: string;
             /** Opening Eur */
@@ -11503,6 +11533,10 @@ export interface components {
              * @default 0
              */
             benchmark_members?: number;
+            /** Benchmark Missing Countries */
+            benchmark_missing_countries?: {
+                [key: string]: unknown;
+            }[];
             /**
              * Benchmark Priced
              * @default 0
@@ -11628,6 +11662,10 @@ export interface components {
             benchmark: string;
             /** Benchmark Coverage Pct */
             benchmark_coverage_pct?: number | null;
+            /** Benchmark Missing Countries */
+            benchmark_missing_countries?: {
+                [key: string]: unknown;
+            }[];
             /**
              * Benchmark Return Pct
              * @default 0
@@ -13326,6 +13364,11 @@ export interface components {
             company_id: number;
             /** Index Universe */
             index_universe?: string | null;
+            /**
+             * Score Normalization
+             * @default minmax
+             */
+            score_normalization?: string;
             /** Signal Weights */
             signal_weights?: {
                 [key: string]: number;

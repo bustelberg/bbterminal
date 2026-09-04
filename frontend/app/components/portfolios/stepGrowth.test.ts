@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_STEP_GROWTH, MIN_STEP_BASE_FRACTION, memberScale, stepGrowth } from './stepGrowth';
+import {
+  MAX_STEP_GROWTH, MIN_STEP_BASE_FRACTION, baseBarScale, memberScale, stepGrowth,
+} from './stepGrowth';
 
 /**
  * The client twin of `backend/tests/test_blend_step_growth.py`, over the same measured cases —
@@ -107,5 +109,31 @@ describe('an implausible RESULT is refused, not carried', () => {
     const got = stepGrowth(172.97, 108415.57, 36.22);
     expect(got).toBeNull();
     expect(got).not.toBe(MAX_STEP_GROWTH);
+  });
+});
+
+/**
+ * ⚠⚠ A REFUSAL IS AN ABSTENTION, AND ON A LINE OF ONE THERE IS NOBODY TO ABSTAIN IN FAVOUR OF.
+ * The client twin of the backend's `TestTheBarNeedsSOMEBODYToFallBackTo`; see `baseBarScale` for
+ * the NVIDIA measurements that made it visible (Share price 13 periods → 1 drawn).
+ */
+describe('baseBarScale', () => {
+  it('gives a one-member line NO bar, because refusing its base deletes the line', () => {
+    expect(baseBarScale([100, 5000], 1)).toBe(0);
+  });
+
+  it('is memberScale unchanged the moment there is a second member', () => {
+    expect(baseBarScale([100, 5000], 2)).toBe(memberScale([100, 5000]));
+  });
+
+  it('0 is already the "no bar" value, so this adds a reason and not a mechanism', () => {
+    // The hypergrower's first step, which a 0.10 x 2,706 bar refused.
+    expect(stepGrowth(100, 152.5, 0)).toBeCloseTo(0.525, 10);
+  });
+
+  it('still refuses an implausible RESULT with one member — only the divisor bar is lifted', () => {
+    // Vertiv's SPAC shell: 0.024 → 696.1 is 29,000x, a vendor/entity artefact whether one company
+    // or a thousand is on the line. The line honestly stops instead of printing it.
+    expect(stepGrowth(0.024, 696.1, 0)).toBeNull();
   });
 });

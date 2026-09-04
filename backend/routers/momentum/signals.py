@@ -59,6 +59,11 @@ class SignalBreakdownRequest(BaseModel):
     index_universe: str | None = None
     signal_weights: dict[str, float] | None = None
     category_weights: dict[str, float] | None = None
+    # ⚠⚠ MUST MATCH THE RUN BEING EXPLAINED. This endpoint exists to show WHY a company scored what
+    # it scored in a given backtest month; scoring it under a different normalization than the run
+    # used would produce a breakdown that explains a ranking which never happened. The caller sends
+    # the run's own value; the default is the legacy one, matching a request that omits it.
+    score_normalization: str = "minmax"
 
 
 # In-process LRU cache for (loaded universe, computed signal panel) at a
@@ -660,7 +665,10 @@ async def _signal_breakdown_stream(req: SignalBreakdownRequest):
         n = len(cats_keys)
         cw_normalized = {c: 1.0 / n for c in cats_keys}
 
-    scored_df = compute_category_scores(panel_df, sig_weights, req.category_weights) if not panel_df.empty else pd.DataFrame()
+    scored_df = compute_category_scores(
+        panel_df, sig_weights, req.category_weights,
+        normalization=req.score_normalization,
+    ) if not panel_df.empty else pd.DataFrame()
 
     company_row = None
     if not scored_df.empty:

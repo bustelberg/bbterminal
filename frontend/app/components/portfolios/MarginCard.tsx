@@ -9,8 +9,6 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { useLang } from '../../../lib/i18n';
-import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
 import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
@@ -20,6 +18,7 @@ import MarginInputsModal from './MarginInputsModal';
 import { marginByYear, paddedDomain, type MarginInputs , xToPeriod } from './marginData';
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
+import CardHeading from './CardHeading';
 
 /**
  * FCF-SBC margin card: (Free Cash Flow − Stock-Based Compensation) ÷ Revenue per fiscal year, on a
@@ -44,9 +43,6 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
   /** The index to draw beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
 }) {
-  // ⚠ READ FROM THE STORE, NOT DRILLED THROUGH `LongEquityTab` AS A PROP — see the same
-  // note on the sibling cards. `useLang` is an external store (`lib/i18n.ts`).
-  const [lang] = useLang();
   const [data, setData] = useState<MarginInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
@@ -95,7 +91,7 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      <h4 className="text-base font-semibold text-fg-strong">{chartTitle(lang, 'fcfMargin', sbcCorrection)}</h4>
+      <CardHeading chartKey="fcfMargin" sbc={sbcCorrection} />
 
       {data == null && !err ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>

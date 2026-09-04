@@ -14,15 +14,16 @@ import { benchmarkProvenance } from './benchmarkSourceNote';
 import { Provenance, ProvenanceFetchedAt, type SourceKey } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
-import { RefreshIcon } from './RefreshIcon';
 import AttributionPanel from './AttributionPanel';
 import ActiveSharePanel, { type ActiveShareHolding } from './ActiveSharePanel';
 import PanelDialog from './PanelDialog';
 import HoldingTimingModal from './HoldingTimingModal';
 import BookReturnChart from './BookReturnChart';
+import AnalyseLoading from './AnalyseLoading';
 import BucketDetailPanel from './BucketDetailPanel';
 import OwnerEarningsModal from './OwnerEarningsModal';
 import { type Basket } from './types';
+import { isMomentumState, ordinalPercentile, stateLabel, stateTone } from './momentumState';
 import { useAnalyseCopy } from './analyseCopy';
 
 /**
@@ -203,6 +204,47 @@ const AXIS_TICKS = [0, 25, 50, 75, 100];
 
 type Band = NonNullable<ModelPortfolioAnalysis['bands']>[number];
 
+/**
+ * One policy bound on an allocation track: a triangle above the bar, pointing down at the position
+ * it marks. Replaced the full-height stripes (2026-09-02, on request).
+ *
+ * ⚠ IT SITS IN THE TRACK'S TOP GAP, NOT OVER THE RIBBON. The measure is inset 10px inside a 36px
+ * track, so a 5-6px mark at `top-[2px]` lands in space the bar never occupies — nothing is drawn
+ * over the class colour, and the mark cannot be mistaken for part of the bar. That also retires
+ * the old ordering rule: the stripes had to be drawn in a particular sequence because the target
+ * one CROSSED the measure, and a triangle above it never does.
+ *
+ * ⚠⚠ CLAMPED SO IT IS NEVER HALF A TRIANGLE. The track is `overflow-hidden` and a mark centred on
+ * its position loses half itself at 0% and 100% — and a max of exactly 100% is an ordinary band
+ * (the Offensief stocks policy is 70–100). `clamp` pins the whole shape inside the track at both
+ * ends; it shifts by at most half its width, which is invisible against a bound drawn at the
+ * track's own edge.
+ *
+ * ⚠ WHOLE-PIXEL WIDTHS AND OFFSETS, the same rule the composition tick records: an even width with
+ * a half-pixel centre lands the shape between device pixels and it renders soft and off-centre.
+ *
+ * ⚠⚠ `clip-path`, NOT THE BORDER TRICK. A CSS triangle made of borders needs `border-x-[4px]` for
+ * the width AND `border-x-transparent` for the colour on the SAME utility, and which one Tailwind
+ * applies is inferred from the value's shape — a fragile way to draw something whose failure mode
+ * is an invisible mark on a chart nobody is checking. Clipping a plain box keeps the colour on a
+ * real `bg-*` token and the size in explicit pixels, so what renders is what is written.
+ */
+function BandMark({ pct, target = false }: { pct: number; target?: boolean }) {
+  const w = target ? 10 : 8;
+  const h = target ? 6 : 5;
+  return (
+    <span aria-hidden
+      className={`absolute top-[2px] pointer-events-none ${
+        target ? 'bg-neutral-800/85' : 'bg-neutral-500/70'}`}
+      style={{
+        width: w, height: h,
+        // Apex at the bottom centre, base along the top — it points DOWN at the bar below it.
+        clipPath: 'polygon(50% 100%, 0 0, 100% 0)',
+        left: `clamp(0px, calc(${pct}% - ${w / 2}px), calc(100% - ${w}px))`,
+      }} />
+  );
+}
+
 function AllocationBars({ slices, selected, onSelect, variant, bands, soldContribution }: {
   slices: AllocSlice[];
   /** ⚠ The year's contribution from positions SOLD OUT during it. They have no asset class, so no
@@ -249,92 +291,38 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
     // remainder — widening the block is the only way to lengthen the bars, and the axis above them
     // is laid out from the same fixed columns so the two cannot drift apart.
     <div className="shrink-0 w-[41rem] max-w-full">
-      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-        <span className="text-[11px] uppercase tracking-wide text-fg-faint">{copy.allocation.title}</span>
-        {/* The profile read off AIRS's own portfolio name — the same classifier the correlation
-            matrix filters by. Shown because the bands below are only meaningful once the reader
-            knows WHICH policy is being drawn. */}
-        {variant && (
-          <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-overlay/5 text-fg-muted"
-            title={copy.allocation.policyTitle(variant)}>
-            {variant}
-          </span>
-        )}
-        {/* ⚠⚠ THE HINT IS THE ONLY THING THAT SAYS THE BARS ARE CLICKABLE, and it used to be the
-            faintest text on the panel (`text-[11px] text-fg-faint`) tucked between the section
-            label and the policy pill — the styling of a caption, on the one line that is an
-            instruction. Reported 2026-09-01: "this should be bigger and more obvious." It is now
-            13px in `accent-400`, the token this app uses for interactive text, with a ↓ pointing
-            at the bars it is talking about.
-            ⚠⚠ BOTH STATES CARRY THE SAME TYPE SIZE AND WEIGHT because they SHARE THE SLOT: the
-            hint is replaced by the active-filter button on click, and a size change there would
-            reflow the header row under the cursor at the moment of pressing.
-            ⚠ IT IS NOT A BUTTON AND MUST NOT LOOK LIKE ONE — a pill or a border here would be a
-            false affordance, since the clickable things are the bars below, not this line. Colour
-            and an arrow say "interactive nearby"; a chrome would say "press me". */}
-        {onSelect && (selected
-          ? <button type="button" onClick={() => onSelect(null)}
-              className="cursor-pointer text-[13px] font-medium text-accent-400 hover:text-accent-300">
-              {copy.allocation.filtering} {copy.bucket(bucketLabel(selected))} {copy.allocation.showAll}
-            </button>
-          : <span className="text-[13px] font-medium text-accent-400">
-              {/* ⚠ ONLY THE ARROW IS HIDDEN FROM ASSISTIVE TECH. The rows below are real
-                  `<button>`s (see `Row`), so their affordance is already announced; the glyph
-                  points at them visually and would read as "down arrow" out loud. The sentence
-                  itself stays — it names WHAT the press does, which the buttons do not. */}
-              <span aria-hidden="true">↓ </span>{copy.allocation.filterHint}
-            </span>)}
-      </div>
-      {/* ⚠ A SECOND THING IS ON THE CHART, SO IT IS NAMED. The bar is what the portfolio holds;
-          the three stripes are what the policy permits. Without this line they read as gridlines
-          and the target tick as noise. Only rendered when there IS a policy — the products with
-          no risk profile draw no stripes and get no legend for them. */}
-      {bandOf.size > 0 && (
-        <div className="flex items-center gap-3.5 text-[11px] text-fg-faint mb-1.5">
-          {/* ⚠ ONE ENTRY PER STRIPE, AND EACH SWATCH IS THAT STRIPE AT ROW SCALE — a legend drawn
-              differently from the thing it names is one more thing to map.
-
-              ⚠ MINIMAL AND MAXIMAL SHARE A SWATCH ON PURPOSE. They are the same kind of mark, told
-              apart by POSITION (left bound, right bound). Neither ever changes colour — see the
-              bounds themselves below.
-
-              ⚠ THERE IS NO BREACH ENTRY (there was one: "outside the band"). Nothing on the chart
-              is amber any more; a weight outside its band is reported on the row's percentage,
-              which goes amber with the crossed bound named in its tooltip. */}
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-0.5 h-3 bg-neutral-500/70" />
-            {copy.allocation.minimum}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-[4px] h-3 rounded-sm bg-neutral-800/85" />
-            {copy.allocation.target}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-0.5 h-3 bg-neutral-500/70" />
-            {copy.allocation.maximum}
-          </span>
-        </div>
-      )}
-      {/* ⚠ THE AXIS SPELLS OUT THE SCALE THE BARS ARE ALREADY ON — 0–100% of the portfolio, fixed,
-          never stretched to the biggest class. Without it the reader has only the printed values to
-          tell a full-width bar from an 85% one, which is exactly the check a bar chart is supposed
-          to make free. Its spacers mirror the row's fixed columns EXACTLY (same widths, same gaps,
-          same padding), so the 0 and the 100 sit on the ends of the track beneath them; change a
-          column width in one place and it must change in the other. */}
-      <div className="flex items-end gap-2.5 -mx-1.5 px-1.5 mb-1 select-none" aria-hidden>
-        <span className="w-[6.5rem] shrink-0" />
-        <span className="relative flex-1 h-3.5">
-          {AXIS_TICKS.map((t) => (
-            <span key={t} className="absolute bottom-0 flex flex-col items-center"
-              style={{ left: `${t}%`, transform: t === 0 ? 'none' : t === 100 ? 'translateX(-100%)' : 'translateX(-50%)' }}>
-              <span className="text-[10px] text-fg-faint tabular-nums leading-none mb-0.5">{t}</span>
-              <span className="w-px h-1 bg-neutral-700/60" />
-            </span>
-          ))}
-        </span>
-        <span className="w-12 shrink-0 text-[10px] text-fg-faint text-right leading-none">%</span>
-        <span className="w-14 shrink-0 text-[10px] text-fg-faint text-right leading-none">YTD</span>
-      </div>
+      {/* ⚠⚠ THE HEADER CAME OFF, 2026-09-02 ON REQUEST — the "Allocation" title, the variant
+          pill, the "Click a class to filter the charts" hint and the minimal/target/maximal
+          legend. The last thing left above the bars, a "Filtering to Stocks — show all" button,
+          came off 2026-09-03 for a reason the note it replaces had already written down: it
+          rendered ONLY WHILE FILTERED, so selecting a class pushed every bar down by its height
+          and clearing the filter pulled them back up. Reported as exactly that — the block should
+          "remain stable when toggling on and off" — and a row of bars that jumps under the cursor
+          on the press that selects it is a worse cost than the one it was paying for.
+          ⚠⚠ THE WAY OUT IS THE ACTIVE CHIP, WHICH ALREADY CLEARED IT. The rows toggle: pressing
+          the selected class deselects it, so nothing about clearing a filter has changed except
+          that the second, redundant path is gone. It is less discoverable than a labelled button
+          and that is the accepted cost — the chip the reader just pressed is where they look.
+          ⚠ THE HINT WENT BECAUSE THE CHIPS REPLACED IT. Stocks / Bonds / Alternatives / Cash
+          render as buttons (see the row's label span), so the sentence that existed to say "these
+          are clickable" is now said by the things themselves.
+          ⚠ THE BAND STRIPES ARE STILL DRAWN; only their legend went. Every row's `title` still
+          names the policy and its bounds in full ("Offensief policy: 70% to 100%, target 85%"),
+          which is where a fact about one class already belonged. */}
+      {/* ⚠⚠ THE WHOLE HEADER ROW CAME OFF, 2026-09-02 ON REQUEST — first the 0 / 25 / 50 / 75 /
+          100 scale and its ticks, then the `%` and `YTD` column headings, which left the row
+          empty. Every column here is now unlabelled by choice, and the chart carries its own
+          meaning instead: each row prints its class, its percentage to two decimals and its
+          contribution in pp, so nothing above the bars was naming anything the rows do not.
+          ⚠ THE BARS ARE STILL ON A FIXED 0–100% SCALE, never stretched to the biggest class, so
+          their lengths stay comparable between rows AND between books. Only the ruler went.
+          ⚠ THE COLUMN WIDTHS ARE NOW DECLARED IN ONE PLACE. They used to be stated twice — here
+          and on the row — with a note that changing one meant changing the other. That
+          duplication is gone with this row, so `w-[6.5rem]` / `w-12` / `w-16` on the row below
+          are the only definition. Re-adding any header here means re-adding the spacers to match.
+          ⚠ THE IN-BAR GRIDLINES STAY (see the track, below). They sit at `AXIS_TICKS`' quartiles
+          and are now unlabelled, which is ordinary for a bullet chart: a division for the eye to
+          judge against, asserting no number. That constant is still their source. */}
       {/* ⚠ NO LEGEND. One series, and every bar is directly labelled with the class it belongs to —
           a legend box would map colours to names the row already prints. (The composition charts
           below DO carry one: two series there, so identity cannot be colour-alone.) */}
@@ -361,8 +349,36 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
                 toggle ? 'cursor-pointer' : ''} ${
                 active ? 'bg-accent-500/10' : 'hover:bg-overlay/[0.03]'} ${
                 selected && !active ? 'opacity-45' : ''}`}>
-              <span className={`w-[6.5rem] shrink-0 truncate text-[12px] ${
-                active ? 'font-medium text-fg-strong' : 'text-fg-muted'}`}>{copy.bucket(bucketLabel(s.bucket))}</span>
+              {/* ⚠⚠ A CHIP, NOT A `<button>` — THE ROW ALREADY IS ONE. Nesting a button inside a
+                  button is invalid HTML and browsers unnest it, so the inner one would take the
+                  click and the outer 41rem of row would stop responding: a control that looks MORE
+                  pressable and is pressable over a twentieth of the area. This is a `<span>` wearing
+                  the chrome; the whole row stays the target.
+                  ⚠⚠ IT LIGHTS ON `group-hover`, NOT `hover`. The row carries `group`, so pointing
+                  anywhere on it — the bar, the percentage, the contribution — brings the chip up.
+                  A chip that lit only under its own cursor would teach the opposite of what is
+                  true and shrink the perceived target to the label.
+                  ⚠⚠ THE COLUMN IS STILL EXACTLY `w-[6.5rem]`, AND THAT IS LOAD-BEARING. The axis
+                  above these rows is laid out from a spacer of the same literal width (see its
+                  note); padding and border are inside it because Tailwind is border-box, so the
+                  track still starts where the 0 tick says it does. Changing this width means
+                  changing the spacer in the same commit.
+                  ⚠ FULL COLUMN WIDTH, not hugging the text: four equal chips read as one control
+                  set, where `Cash` and `Alternatives` at their natural widths read as debris. It
+                  is also the bigger target.
+                  ⚠ NO CHROME WITHOUT A CLICK. An ad-hoc basket passes no `onSelect`, and the same
+                  rule the cursor already follows applies here — a button that does nothing is a
+                  worse lie than a label. Active state uses the same tokens as this modal's
+                  Attribution / Risk buttons so the two read as the same kind of control. */}
+              <span className={`w-[6.5rem] shrink-0 truncate text-[12px] text-left transition-colors ${
+                toggle
+                  ? `rounded-md border px-2 py-1 ${active
+                      ? 'bg-accent-600 border-transparent text-white font-medium'
+                      : 'bg-elevated border-neutral-800/40 text-fg-muted '
+                        + 'group-hover:border-accent-500/50 group-hover:text-accent-300'}`
+                  : (active ? 'font-medium text-fg-strong' : 'text-fg-muted')}`}>
+                {copy.bucket(bucketLabel(s.bucket))}
+              </span>
               {/* ⚠ THIS IS A BULLET CHART, AND ITS ONE RULE IS THAT THE MEASURE IS THINNER THAN
                   THE RANGE. The policy marks run the FULL height of the track while the bar is a
                   slimmer ribbon down the middle, so a stripe stays visible straight THROUGH the
@@ -382,47 +398,43 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
                   <span key={t} className="absolute inset-y-0 w-px bg-neutral-700/30"
                     style={{ left: `${t}%` }} />
                 ))}
-                {/* ⚠ THE POLICY IS THREE STRIPES — min, target, max — AND NO FILL. The band used to
-                    be drawn as a translucent block spanning min→max with caps at its edges; at one
-                    stripe per bound the same information reads at a glance and nothing is shaded
-                    over the class colour. What the fill added was the SPAN as an area, which the
-                    two outer stripes already delimit; what it cost was a second grey wash behind
-                    every bar. (The target stripe is drawn after the measure, further down, because
-                    it has to cross it.) */}
-                {/* ⚠ THE BOUNDS ARE ALWAYS GREY — they never recolour on a breach. A limit is a
+                {/* ⚠⚠ THE POLICY IS THREE TRIANGLES — min, target, max — HOVERING ABOVE THE BAR
+                    (2026-09-02, on request). They were full-height stripes running through the
+                    track, and before that a translucent min→max block. Each step removed something
+                    drawn OVER the class colour: the block was a grey wash behind every bar, the
+                    stripes crossed the measure. A mark in the track's own headroom points at the
+                    position without touching the thing being measured.
+                    ⚠ ALL THREE ARE DRAWN TOGETHER NOW. The target stripe used to be emitted after
+                    the measure, further down, precisely so it would cross it — a triangle above
+                    the bar never overlaps, so the ordering rule that forced them apart is gone and
+                    the three marks are declared in one place.
+                    ⚠ THE TARGET IS THE BIGGER, DARKER ONE — same distinction the stripes carried
+                    (a pixel wider, `neutral-800/85` against `neutral-500/70`), so the middle mark
+                    is never confused with a bound.
+                    ⚠ THE BOUNDS ARE ALWAYS GREY — they never recolour on a breach. A limit is a
                     fixed property of the policy; it does not change because today's weight sits
                     the wrong side of it. Tinting it amber made the CHART report the exception
-                    twice (the bar visibly ends past the stripe already) and made the mark look
-                    like a different mark. The breach is said where a fact about the holding
-                    belongs: the row's percentage, in amber, with the bound named in its tooltip. */}
+                    twice (the bar visibly ends past the mark already) and made the mark look like
+                    a different mark. The breach is said where a fact about the holding belongs:
+                    the row's percentage, in amber, with the bound named in its tooltip. */}
                 {(() => {
                   const b = bandOf.get(s.bucket);
                   if (!b) return null;
                   return (
                     <>
-                      {b.min_pct != null && (
-                        <span className="absolute inset-y-0 w-0.5 pointer-events-none bg-neutral-500/70"
-                          style={{ left: `${b.min_pct}%` }} />
-                      )}
-                      {b.max_pct != null && (
-                        <span className="absolute inset-y-0 w-0.5 pointer-events-none bg-neutral-500/70"
-                          style={{ left: `calc(${b.max_pct}% - 2px)` }} />
-                      )}
+                      {b.min_pct != null && <BandMark pct={b.min_pct} />}
+                      {b.default_pct != null && <BandMark pct={b.default_pct} target />}
+                      {b.max_pct != null && <BandMark pct={b.max_pct} />}
                     </>
                   );
                 })()}
-                {/* The measure: a slim ribbon, centred, so the stripes read above and below it. */}
+                {/* The measure: a slim ribbon, centred, with the policy marks in the headroom
+                    above it. ⚠ THE 10px INSET IS WHAT THE MARKS SIT IN — thickening the ribbon
+                    would eat the space `BandMark` is positioned into and put the triangles back on
+                    top of the bar, which is the thing this arrangement exists to avoid. */}
                 <span className="absolute inset-y-[10px] left-0 rounded-sm"
                   style={{ width: `${Math.min(100, s.pct)}%`, minWidth: 3,
                     background: allocColor(s.bucket) }} />
-                {/* The target — the third stripe, and LAST so it crosses the bar: a target hidden
-                    under the measure is the one comparison this chart exists to make. Darker and a
-                    pixel wider than the two bounds, so the three are never confused. */}
-                {/* ⚠ SAME WHOLE-PIXEL RULE as the composition tick — see its note. */}
-                {bandOf.get(s.bucket)?.default_pct != null && (
-                  <span className="absolute inset-y-0 w-[4px] rounded-sm bg-neutral-800/85 pointer-events-none"
-                    style={{ left: `calc(${bandOf.get(s.bucket)!.default_pct}% - 2px)` }} />
-                )}
               </span>
               {/* Direct value label, in INK — text wears text tokens; the bar beside it carries the
                   colour. TWO decimals, matching the class subtotals in the holdings table below:
@@ -915,6 +927,29 @@ function useColumnGroups() {
 /** The +/− control over those groups. ⚠ Closed by a full-screen click catcher rather than a
  *  document listener: this lives inside a modal that already stops propagation in places, and a
  *  listener the modal swallows leaves a panel nothing can dismiss. */
+/**
+ * THE CHROME EVERY SMALL CONTROL IN THIS MODAL WEARS — one declaration, three wearers.
+ *
+ * ⚠⚠ IT WAS COPIED, AND IT HAD ALREADY DRIFTED. `FundamentalButton` was restyled on 2026-09-02 to
+ * match the allocation class chips, and the two controls beside it in the Holdings header were
+ * left behind: "Look through certificates" was a bare `<label>` with no box at all, and `+ columns`
+ * a flatter `rounded` / `px-1.5` / `text-fg-subtle` thing with no surface. Three controls on one
+ * row, three different ideas of what a button looks like — reported as exactly that
+ * (2026-09-03: "this should also have a similar style to the Fundamental button").
+ *
+ * ⚠ SPLIT INTO SHAPE AND TONE because the picker needs its OPEN state to replace the tone while
+ * keeping the shape. Appending an override instead would leave two utilities setting the same
+ * property and let source order decide — the trap `HEADER_CTL_STOP` is a separate string for.
+ *
+ * ⚠ IT DELIBERATELY DOES NOT COVER Attribution / Risk or the allocation chips. Those are a size
+ * up (`px-3 py-1.5 text-xs`) or light on `group-hover` from the row that contains them, and
+ * folding them in here would change controls nobody asked about.
+ */
+const CHIP_SHAPE = 'cursor-pointer whitespace-nowrap rounded-md border px-2 py-1 '
+  + 'text-[11px] transition-colors';
+const CHIP_IDLE = 'bg-elevated border-neutral-800/40 text-fg-muted '
+  + 'hover:border-accent-500/50 hover:text-accent-300';
+
 function ColumnPicker({ groups, toggle }: {
   groups: Set<ColumnGroup>; toggle: (k: ColumnGroup) => void;
 }) {
@@ -925,9 +960,8 @@ function ColumnPicker({ groups, toggle }: {
       <button type="button" onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         title={copy.actions.columnsTitle}
-        className={`cursor-pointer text-[11px] leading-none px-1.5 py-1 rounded border transition-colors ${
-          open ? 'border-accent-500/50 text-accent-300 bg-overlay/5'
-            : 'border-neutral-800/40 text-fg-subtle hover:text-accent-300 hover:bg-overlay/5'}`}>
+        className={`${CHIP_SHAPE} ${
+          open ? 'bg-overlay/5 border-accent-500/50 text-accent-300' : CHIP_IDLE}`}>
         {copy.actions.columns}
       </button>
       {open && (
@@ -1109,10 +1143,20 @@ function FundamentalButton({ onOpen, title, className = '' }: {
 }) {
   const copy = useAnalyseCopy();
   return (
+    // ⚠⚠ THE SAME CHROME AS THE ALLOCATION CLASS CHIPS (2026-09-02, on request) — `rounded-md`,
+    //    a real border, `bg-elevated`, and accent on hover. Three controls in this modal now wear
+    //    it: the class chips, Attribution / Risk, and this. It used to be a flatter, fainter thing
+    //    (`rounded`, `px-1.5 py-0.5`, `text-fg-subtle`) which read as a tag rather than a button,
+    //    and read differently from every other pressable thing on the same screen.
+    // ⚠ IT CARRIES ITS OWN `hover:`, NOT `group-hover:`, and that is the difference from the class
+    //    chips. Those are painted-on labels inside a row that IS the button, so they light with the
+    //    row. This one is a real nested `<button>` with its own `stopPropagation` — it opens the
+    //    Fundamental view instead of selecting the row — so it must light under its OWN cursor, or
+    //    it would promise the row's action.
     <button type="button"
       onClick={(e) => { e.stopPropagation(); onOpen(); }}
       title={title}
-      className={`cursor-pointer text-[11px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 whitespace-nowrap transition-colors ${className}`}>
+      className={`${CHIP_SHAPE} ${CHIP_IDLE} ${className}`}>
       {copy.actions.fundamental}
     </button>
   );
@@ -1263,49 +1307,6 @@ const momSub = (to?: number | null, from?: number | null, pct?: number | null): 
 
 ${to.toFixed(2)} ÷ ${from.toFixed(2)} − 1 = ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
     : '');
-
-/** The column header's worked example: the first row that carries both legs.
- *  ⚠ A REAL ROW FROM THIS TABLE, never an invented illustration — the reader can find it below. */
-const momExample = (rows: BookHolding[]): string => {
-  const h = rows.find((r) => r.mom_12_1_from != null && r.mom_12_1_to != null
-    && r.mom_12_1_pct != null);
-  return h ? `${momSub(h.mom_12_1_to, h.mom_12_1_from, h.mom_12_1_pct)}   (${h.name ?? ''})` : '';
-};
-
-/**
- * The same, for the three OTHER columns whose header stated a formula and never worked it.
- *
- * ⚠⚠ A HEADER AND ITS ROWS MUST EXPLAIN THEMSELVES THE SAME WAY. Vol, Beta and Instrument return
- * each had a substituted line on the ROW tip and only symbols on the COLUMN card — so the same
- * formula was worked or not depending on which ⓘ you happened to open, which reads as two
- * different degrees of confidence in one number. Instrument return was the worst of the three: it
- * is one of the table's three always-on answer columns, and the only one of them whose header
- * carried no numbers at all.
- *
- * ⚠ THE EXAMPLE IS A REAL ROW AND IS NAMED, so the reader can scroll to it and check that the
- * header's arithmetic is the row's. An unnamed example is indistinguishable from an invented one.
- *
- * ⚠ VOL AND BETA SHOW ONLY THE ANSWER, and that is the honest limit rather than an oversight: the
- * operands are ~60 monthly returns and a covariance over 260 weekly pairs. There is no expression
- * to write out, so these two say what came out and where it came from, and the drill-down is the
- * price series itself. Padding them with invented intermediate figures would be worse than symbols.
- */
-const volExample = (rows: BookHolding[]): string => {
-  const h = rows.find((r) => r.vol_5y_pct != null);
-  return h ? `\n\n= ${h.vol_5y_pct!.toFixed(1)}%   (${h.name ?? ''})` : '';
-};
-
-const betaExample = (rows: BookHolding[]): string => {
-  const h = rows.find((r) => r.beta_5y != null);
-  return h ? `\n\n= ${h.beta_5y!.toFixed(2)}   (${h.name ?? ''})` : '';
-};
-
-/** ⚠ `bookMath` IS THE ROW'S OWN BUILDER — the header does not re-derive the expression, it uses
- *  the one the row below it will print, so the two cannot disagree. */
-const bookReturnExample = (rows: BookHolding[], netDividend = 'net dividend'): string => {
-  const h = rows.find((r) => bookMath(r, netDividend) != null && r.own_return_pct != null);
-  return h ? `\n\n${bookMath(h, netDividend)} = ${fmtRet(h.own_return_pct)}   (${h.name ?? ''})` : '';
-};
 
 function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
   const groups = new Map<string, { label: string; rows: BookHolding[] }>();
@@ -1585,17 +1586,17 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
     </span>
   );
   const th = 'py-2 font-medium cursor-pointer select-none whitespace-nowrap hover:text-fg-soft transition-colors';
-  const anchor = holdings.find((h) => h.own_return_from)?.own_return_from;
 
   return (
     <div className="bg-card border border-neutral-800/40 rounded-xl overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-neutral-800/40">
-        <h4 className="text-xs font-medium text-fg-strong">
-          {copy.holdings.title}
-          <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-            what={copy.info.holdingsWhat}
-            how={copy.info.holdingsHow(holdings.length, holdings.filter((h) => (h.via_names ?? []).length).length)} />
-        </h4>
+        {/* ⚠ NO ⓘ HERE EITHER (2026-09-03, on request, after the column ones went). The panel
+            title was the last tip left on this table's chrome; it explained the table as a whole,
+            which is the one thing the per-row cards below cannot say — but the reader asked for a
+            heading, not a control, and the two facts it carried (one row per ISIN after the
+            certificates are looked through, and how many rows got there that way) are stated by
+            the table itself: the Via column names every route in. */}
+        <h4 className="text-xs font-medium text-fg-strong">{copy.holdings.title}</h4>
         <span className="flex items-center gap-2">
           {/* ⚠ HIDDEN WHEN NOTHING WOULD FOLD, rather than offered and inert. A book that holds no
               other book has no certificate legs to collapse, and a checkbox that visibly changes
@@ -1603,7 +1604,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
               ⚠ IT SAYS WHAT IT WILL DO, WITH THE COUNT. "Look through certificates" alone leaves
               the reader to press it to find out; naming the rows makes it a decision. */}
           {foldable > 0 && (
-            <label className="flex items-center gap-1.5 text-[11px] text-fg-muted cursor-pointer"
+            // ⚠ STILL A CHECKBOX INSIDE THE CHIP, not a button that changes colour. It is a
+            //   two-state toggle whose state has to be readable at rest, and the box is what says
+            //   which state it is in; the chrome only makes it look like the controls beside it.
+            <label className={`${CHIP_SHAPE} ${CHIP_IDLE} flex items-center gap-1.5`}
               title={copy.actions.lookThroughTitle}>
               <input type="checkbox" checked={lookThrough}
                 onChange={() => setLookThrough((v) => !v)} className="accent-accent-600" />
@@ -1640,56 +1644,39 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
           modal body, dragging every other section sideways with it. So the table gets its own
           viewport instead — one box that scrolls both ways, with the header pinned inside it. */}
       <div className="overflow-auto max-h-[55vh]">
-        {/* ⚠⚠ A RULE BETWEEN EVERY COLUMN, AND IT IS APPLIED ON THE TABLE RATHER THAN PER CELL.
-            This table is eighteen columns and ~81rem wide — wider than the modal on any ordinary
-            screen, which is why it has its own scrollport — so following one holding's row across
-            it, or one column down it, is the thing the reader is actually doing and had nothing to
-            guide them: rows carried a hairline, columns carried nothing at all.
+        {/* ⚠⚠ NO VERTICAL RULES (2026-09-03, on request — they were added 2026-08-31 and are gone
+            again). A financial table is read ACROSS: you follow a holding to its Result. Column
+            rules compete with that, and at eighteen columns they read as a cage rather than a
+            guide. The horizontal structure is the only structure here.
+
+            ⚠⚠ THE GUTTERS STAY, AND THEY ARE NOT LEFTOVER FROM THE RULES. They were measured for
+            that change and they are worth keeping on their own: **84 of this table's 101 cells had
+            NO horizontal padding at all** — the columns were built to sit flush, separated only by
+            right-alignment and their natural width — and the seventeen that DID carry padding used
+            four different values (`pr-2`, `pr-3`, `pl-4`, `pr-4`), so adjacent columns sat at four
+            different distances. One declaration regularises all of them.
 
             ⚠ ON `<table>` WITH `[&_td]` / `[&_th]`, NOT ON EACH CELL. There are six hand-written
             row shapes here (thead, the class group row, the held row, the sold group row, the sold
             detail row, the grand total) plus a colSpan sub-header, and the money block is gated by
             the column picker — so a per-cell class is ~90 places to keep in step and one of them
             will be missed. It is the same hand-counting hazard `portfolioAnalysisColumns.test.ts`
-            exists for, and the descendant selector sidesteps it entirely.
-
-            ⚠ LIGHTER THAN THE ROW LINES ON PURPOSE. A financial table is read ACROSS — you follow a
-            holding to its Result — so the horizontal structure has to stay primary. At `/20` against
-            the rows' `/[0.15]` these are near-equal, which reads as an even grid; anything stronger
-            makes the eye track columns first and turns the table into a cage.
-
-            ⚠ `last-child` IS EXEMPT or the final column draws a rule against the table edge, which
-            reads as a border the table does not have. The equity sub-header spans the full width as
-            a single cell and is therefore exempt automatically — it wants no internal rule.
-
-            ⚠⚠ AND THE GUTTERS ARE PART OF THE RULE, NOT A SEPARATE POLISH — without them the lines
-            are unusable. Measured: **84 of this table's 101 cells had NO horizontal padding at
-            all**. The columns were built to sit flush, separated only by right-alignment and their
-            natural width, so a `border-r` lands against the last digit of every number; and the
-            seventeen cells that DID carry padding used four different values (`pr-2`, `pr-3`,
-            `pl-4`, `pr-4`), so those rules stood at four different distances. Shipped that way it
-            read as lines clamped onto the numbers with ragged spacing — which is exactly what it
-            was. A rule between two columns only means anything if both sides breathe equally.
-
-            ⚠ SET HERE TOO, FOR THE SAME REASON THE BORDERS ARE: 84 cells is not a place to add a
-            class by hand. The descendant selector also OUTRANKS the per-cell utilities (`.x td` is
-            more specific than `.pr-3`), which is what makes one declaration able to regularise
-            cells that already disagree — the same mechanism `[&_th]:bg-card` above relies on.
+            exists for, and the descendant selector sidesteps it entirely. The selector also
+            OUTRANKS the per-cell utilities (`.x td` is more specific than `.pr-3`), which is what
+            makes one declaration able to regularise cells that already disagree — the same
+            mechanism `[&_th]:bg-card` below relies on.
 
             ⚠ THE EDGES KEEP THEIR WIDER GUTTER. `first-child`/`last-child` are more specific again,
             so `pl-4`/`pr-4` survive: the table still sits off the panel edge rather than starting
             hard against it.
 
-            ⚠ THE TABLE GETS WIDER, and that is the accepted cost. Most columns carry a fixed `w-*`
-            with slack, so they absorb the 1rem; the tight ones grow. It already has its own
+            ⚠ THE TABLE IS WIDER FOR IT, and that is the accepted cost. Most columns carry a fixed
+            `w-*` with slack, so they absorb the 1rem; the tight ones grow. It already has its own
             scrollport (see the note above), so the extra width is scroll, not overflow. */}
         <table className="w-full text-xs
                           [&_th]:px-2 [&_td]:px-2
                           [&_th:first-child]:pl-4 [&_td:first-child]:pl-4
-                          [&_th:last-child]:pr-4 [&_td:last-child]:pr-4
-                          [&_th]:border-r [&_th]:border-neutral-800/20
-                          [&_td]:border-r [&_td]:border-neutral-800/20
-                          [&_th:last-child]:border-r-0 [&_td:last-child]:border-r-0">
+                          [&_th:last-child]:pr-4 [&_td:last-child]:pr-4">
           {/* ⚠ `[&_th]:bg-card` IS LOAD-BEARING, not belt-and-braces. A background on `<thead>`
               alone does not paint reliably under `border-collapse`, so the group rows (`bg-inset`)
               scroll THROUGH the header and the two sets of text overlap. The cells carry it. */}
@@ -1702,6 +1689,17 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
               ⚠ THE WIDTHS LIVE ONLY HERE. The body cells set none, so they follow the header —
               which is what makes a change like this one edit per column instead of two, and also
               why a `<td>` that grows its own width would silently desynchronise the pair. */}
+          {/* ⚠⚠ NO ⓘ ON A COLUMN HEADER (2026-09-03, on request). Nineteen of the eighteen
+              columns carried a `<Provenance … column />`, so a header row meant to be scanned had a
+              hover target on almost every cell of it — and the icons sat between a label and its
+              own sort caret, in a row whose whole job is to be read across at a glance.
+              ⚠⚠ NOTHING WAS LOST BY REMOVING THEM, which is the only reason this is safe: EVERY
+              CELL BELOW CARRIES ITS OWN, with that row's real numbers in it (`<Num prov={…}>`),
+              which is strictly the better place to meet the explanation — at the figure being
+              doubted rather than at the top of a scrolling table. The panel's own title keeps its
+              ⓘ for what the table AS A WHOLE is.
+              ⚠ The copy behind them (`copy.info.*`) is untouched and still feeds the per-row
+              cards; only the header instances are gone. */}
           <thead className="text-[11px] uppercase tracking-wide text-fg-faint bg-card [&_th]:bg-card sticky top-0 z-20">
             <tr className="border-b border-neutral-800/40">
               <th className="text-right w-12 pl-4 pr-2 py-2 font-medium">#</th>
@@ -1718,14 +1716,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   instead of eating the table. */}
               <th className="text-left w-48 max-w-[12rem] py-2 font-medium">
                 {copy.holdings.via}
-                {/* ⚠ THE LIVE COUNT IS A `note`, WHICH RENDERS ON THE **Where** LINE — see
-                    `viaNote`. It was a second paragraph inside `how`, so the field explaining how
-                    the number is made carried a measurement of this particular book. */}
-                <Provenance source="airs_model" asOf={asOf} kind="formula" column
-                  what={copy.info.viaWhat}
-                  note={copy.info.viaNote(
-                    holdings.filter((h) => (h.via_names ?? []).length).length, holdings.length)}
-                  how={copy.info.viaHow} />
               </th>
               {/* ⚠ THE SECTOR CHART'S OWN BUCKET, WHICH IS WHY IT IS WORTH A COLUMN — sorting by
                   it lists the rows behind a bar, in the bar's own vocabulary. A raw
@@ -1733,12 +1723,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   "Financials" and read as two different exposures. */}
               <th className={`text-left w-[10.8rem] ${th}`} onClick={() => click('sector')}>
                 {copy.holdings.sector}{caret('sector')}
-                <Provenance source="yfinance" asOf={asOf} kind="formula" column
-                  what={copy.info.sectorWhat}
-                  how={copy.info.sectorHow(
-                    new Set(holdings.map((h) => h.sector).filter((s) => s && s !== 'Unclassified')).size,
-                    holdings.filter((h) => sectorLabel(h.sector)).length,
-                    holdings.filter((h) => !sectorLabel(h.sector)).length)} />
               </th>
               {/* ⚠ BESIDE SECTOR AND WEIGHT — with the columns that DESCRIBE the instrument
                   rather than the ones that measure this book's year. Sector says what it is, this
@@ -1746,56 +1730,33 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   start after. */}
               {/* ⚠ FIRST OF THE THREE INSTRUMENT COLUMNS — momentum, risk, exposure. It is the
                   only one of the three that is SIGNED, so it is the only one that carries colour. */}
-              <th className={`text-right w-24 ${th}`} onClick={() => click('mom')}>
+              {/* ⚠ `w-28`, ONE STEP WIDER THAN IT WAS, because the cell now carries a rank chip in
+                  front of the number (`++ +28.4%`). At `w-24` the widest case — `−−− −100.0%` —
+                  wraps, and a wrapped cell in a dense table shifts every row after it.
+                  ⚠ SORTING STAYS ON THE NUMBER, never on the state: seven buckets sort into seven
+                  ties, which would scramble the order within each one on every click. The chip is
+                  a reading of the number, so ordering by the number orders the chips too. */}
+              <th className={`text-right w-28 ${th}`} onClick={() => click('mom')}>
                 {copy.holdings.momentum}{caret('mom')}
-{/* ⚠ FORMULA, BLANK LINE, THE SAME FORMULA SUBSTITUTED — the shape the Money-weighted column
-                    uses, and the reason it is worth copying: a reader can CHECK the arithmetic instead
-                    of being told the answer. The three ⚠ paragraphs that used to live here (why the
-                    last month is skipped, that this is not the strategy's min-maxed score, that it
-                    needs only ~13 months) were true and are not lost — they are on the per-row ⓘ and
-                    on the dash's own explanation, where a reader meets them at the point of doubt.
-                    ⚠ THE EXAMPLE IS A REAL ROW, the first one that has the two legs, so the numbers
-                    substituted are one this table is actually showing. No row with legs → the formula
-                    alone, never a made-up illustration. */}
-                <Provenance source="benchmark" asOf={null} kind="formula" column
-                  what={copy.info.momentumWhat}
-                  note={copy.info.momentumNote}
-                  how={copy.info.momentumHow(momExample(holdings))} />
               </th>
               {/* ⚠ `w-28`, ONE STEP WIDER THAN ITS TWO NEIGHBOURS, BECAUSE THE HEADER IS A WORD
                   NOW. It read `5y vol` — six characters, and "vol" in a table of holdings is read
                   as VOLUME at least as readily as volatility. Spelt out it is `Volatility` (10)
-                  and `Volatiliteit` (12), which with the sort caret and the ⓘ does not fit 6rem;
-                  `whitespace-nowrap` means it would not wrap, it would PUSH. The window moved into
-                  the ⓘ, which already opens "Five-year annualised volatility…" — and that also puts
-                  this header in the same shape as `Momentum` and `Beta` beside it, both of which
-                  are bare nouns whose window lives in their card.
+                  and `Volatiliteit` (12), which with the sort caret does not fit 6rem;
+                  `whitespace-nowrap` means it would not wrap, it would PUSH. The window is stated
+                  on the per-row card, which also puts this header in the same shape as `Momentum`
+                  and `Beta` beside it, both of which are bare nouns.
                   ⚠ THE 1rem COMES OUT OF `Name`, which is the column an auto-layout table takes
                   slack from first — see its `min-w` note above. That floor is what stops this
                   being a trade against legibility. */}
               <th className={`text-right w-28 ${th}`} onClick={() => click('vol')}>
                 {copy.holdings.vol}{caret('vol')}
-                {/* ⚠ `benchmark`, NOT `airs_volk`. Every other number in this table is AIRS's own
-                    valuation; this one is computed here from OUR daily EUR price series, and a
-                    column whose card names the wrong source is how a reader comes to trust a
-                    figure's provenance wrongly. */}
-                <Provenance source="benchmark" asOf={null} kind="formula" column
-                  what={copy.info.volWhat}
-                  note={copy.info.volNote}
-                  how={copy.info.volHeaderHow(volExample(holdings))} />
               </th>
               <th className={`text-right w-20 ${th}`} onClick={() => click('beta')}>
                 {copy.holdings.beta}{caret('beta')}
-                <Provenance source="benchmark" asOf={null} kind="formula" column
-                  what={copy.info.betaWhat(benchmark)}
-                  note={copy.info.betaNote(benchmark)}
-                  how={copy.info.betaHeaderHow(benchmark, betaExample(holdings))} />
               </th>
               <th className={`text-right w-[7.2rem] ${th}`} onClick={() => click('weight')}>
                 {copy.holdings.weightNow}{caret('weight')}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.weightWhat}
-                  how={copy.info.weightHow(holdings.length, eur0n(grand.valuenow))} />
               </th>
               {/* ⚠ THE THREE COMPONENTS, THEN THEIR SUM — the whole point of merging the ledger
                   into this table. A reader who wants to know what a position MADE should not have
@@ -1812,118 +1773,61 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
 {show('opening') && (
               <th className="text-right w-[9.6rem] py-2 font-medium">
                 {copy.holdings.opening}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.openingWhat}
-                  how={copy.info.openingHow(eur0n(grand.opening))} />
               </th>
 )}
 {show('valuenow') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
                 {copy.holdings.valueNow}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.valueNowWhat}
-                  how={copy.info.valueNowHow(eur0n(grand.valuenow))} />
               </th>
 )}
 {show('avgcapital') && (
               <th className="text-right w-[9.6rem] py-2 font-medium">
                 {copy.holdings.avgCapital}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.avgCapitalWhat}
-                  how={copy.info.avgCapitalHow(eur0n(grand.avgcapital))} />
               </th>
 )}
 {show('unrealised') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
                 {copy.holdings.unrealised}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.unrealisedWhat}
-                  note={copy.info.unrealisedNote}
-                  how={copy.info.unrealisedHow(eur0n(grand.valuenow), eur0n(grand.opening), eur0n(grand.unrealised))} />
               </th>
 )}
 {show('realised') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
                 {copy.holdings.realised}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.realisedWhat}
-                  note={copy.info.realisedNote}
-                  how={copy.info.realisedHow(eur0n(grand.realised))} />
               </th>
 )}
 {show('income') && (
               <th className="text-right w-[7.2rem] py-2 font-medium">
                 {copy.holdings.income}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.incomeWhat}
-                  note={copy.info.incomeNote}
-                  how={copy.info.incomeHow(eur0n(grand.income))} />
               </th>
 )}
 {show('result') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
                 {copy.holdings.result}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.resultWhat}
-                  note={copy.info.resultNote}
-                  how={copy.info.resultHow(eur0n(grand.unrealised), eur0n(grand.realised), eur0n(grand.income), eur0n(grand.result))} />
               </th>
 )}
 {show('koers') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
                 {copy.holdings.price}
-                <Provenance source="airs_volk" asOf={asOf} kind="copied" column
-                  what={copy.info.priceWhat}
-                  note={copy.info.priceNote}
-                  how={copy.info.priceHow(eur0n(grand.koers))} />
               </th>
 )}
 {show('valuta') && (
               <th className="text-right w-[8.4rem] py-2 font-medium">
                 {copy.holdings.currency}
-                <Provenance source="airs_volk" asOf={asOf} kind="copied" column
-                  what={copy.info.currencyWhat}
-                  note={copy.info.currencyNote}
-                  how={copy.info.currencyHow(eur0n(grand.valuta))} />
               </th>
 )}
 {show('unsplit') && (
               <th className="text-right w-[7.2rem] py-2 font-medium">
                 {copy.holdings.rest}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.restWhat}
-                  note={copy.info.restNote}
-                  how={copy.info.restHow(eur0n(grand.unsplit))} />
               </th>
 )}
               <th className="text-right w-[9.6rem] py-2 font-medium">
                 {copy.holdings.moneyWeighted}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.moneyWhat}
-                  note={copy.info.moneyNote}
-                  how={copy.info.moneyHow(eur0n(grand.result), eur0n(grand.avgcapital), fmtRet(grand.mwr))} />
               </th>
               <th className={`text-right w-32 pr-4 ${th}`} onClick={() => click('return')}>
                 {copy.holdings.instrumentReturn}{caret('return')}
-                {/* ⚠ `airs_volk`, NOT `yfinance`. This header claimed yfinance while the rows
-                    beneath it are AIRS's own valuation — each row's card names its actual source
-                    correctly, so the column header disagreed with almost every cell under it. The
-                    yfinance path is the marked FALLBACK (ƒ), not the basis.
-                    ⚠ AND IT DESCRIBED THE CLASS ROW'S OLD ARITHMETIC. It said the rows "average
-                    into" the class figure weighted by opening value — true when the class return
-                    was Σ(weight × return), and false since it became Σ result ÷ Σ opening value.
-                    A header that explains a formula the table no longer uses is worse than one
-                    that explains nothing. */}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.instrumentWhat(anchor ?? copy.info.yearOpened)}
-                  how={copy.info.instrumentHow(bookReturnExample(holdings, copy.row.netDividend))} />
               </th>
               <th className={`text-right w-28 ${th}`} onClick={() => click('contribution')}>
                 {copy.holdings.contribution}{caret('contribution')}
-                <Provenance source="airs_volk" asOf={asOf} kind="formula" column
-                  what={copy.info.contributionWhat}
-                  note={copy.info.contributionNote}
-                  how={copy.info.contributionHow(eur0n(grand.result), eur0n(realised?.basis_eur), ppt(grand.contribution))} />
               </th>
             </tr>
           </thead>
@@ -1937,34 +1841,55 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
             <tbody key={g.bucket}>
               <tr className="bg-inset border-y border-neutral-800/40">
                 <td className="pl-4" />
-                {/* colSpan 3: Name · Via · Sector — every text column, so the class label
-                    runs to the first number. */}
-                <td className="py-2 font-medium text-fg-strong" colSpan={3}>
-                  <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 align-middle"
-                    style={{ background: allocColor(g.bucket) }} />
-                  {copy.bucket(bucketLabel(g.bucket))}
-                  <span className="ml-2 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[11px] font-normal text-fg-muted">
-                    {g.rows.length}
+                {/* ⚠⚠ THE NAME COLUMN ALONE, THEN Via · Sector AS AN EMPTY PAIR — it was ONE
+                    `colSpan={3}` (2026-09-03, on request: the Stocks button aligns with the
+                    per-holding ones). It cannot: a cell spanning three columns ends two columns
+                    further right, so `ml-auto` inside it lands on its own vertical line rather
+                    than on theirs. Split, this cell's right edge IS the Name column's, which is
+                    where every row's button now sits.
+                    ⚠ THE LEADING BLOCK IS STILL EIGHT. `portfolioAnalysisColumns.test.ts` sums
+                    `colSpan` rather than counting tags, so 1 + 2 is the same eight cells the
+                    header has — but it is the reason this split is safe to make at all, and the
+                    reason the `colSpan={2}` below must never quietly become a bare `<td />`.
+                    ⚠ THE LABEL NO LONGER RUNS TO THE FIRST NUMBER, which was the old comment's
+                    whole justification. Nothing needed it: the bucket names are one or two short
+                    words in both languages and sit well inside the Name column's `min-w-[15.6rem]`
+                    floor. A longer one widens the column rather than truncating — visible, not
+                    silent. */}
+                <td className="py-2 font-medium text-fg-strong">
+                  <span className="flex items-center min-w-0">
+                    <span className="inline-block w-2.5 h-2.5 rounded-sm mr-2 shrink-0"
+                      style={{ background: allocColor(g.bucket) }} />
+                    {copy.bucket(bucketLabel(g.bucket))}
+                    <span className="ml-2 shrink-0 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[11px] font-normal text-fg-muted">
+                      {g.rows.length}
+                    </span>
+                    {/* ⚠ WEIGHTED BY WHAT IS BEING BLENDED, over the members that CAN be blended.
+                        The basket takes each member's `weight_now_pct` — the same figure this row's
+                        subtotal is summed from — and only the rows with an ISIN, because owner
+                        earnings are per-company and cash has none. Sending the whole class would
+                        hand the blender a weight it cannot attribute to anything.
+                        ⚠⚠ AND ONLY ON STOCKS. An ISIN is not enough: an ETF has one and is not a
+                        company (this app deliberately does not look through funds, so there is
+                        nothing behind it to measure), Alternatives is crypto and commodities with no
+                        earnings at all, and a bond is a claim on a company rather than a share of
+                        it. The button used to appear on all of them and opened a modal with nothing
+                        in it — which reads as a broken feature rather than an absent one, the exact
+                        thing `FundamentalButton`'s own docstring says not to do. */}
+                    {/* ⚠ `ml-auto`, THE SAME PIN AS THE PER-HOLDING BUTTONS — see the note at its
+                        call site. This one is the head of that vertical line rather than an
+                        exception to it. */}
+                    {g.bucket === EQUITY_BUCKET && g.basket.holdings.length > 0 && (
+                      <FundamentalButton className="ml-auto shrink-0"
+                        title={copy.classRow.fundamentalTitle(g.basket.holdings.length, copy.bucket(bucketLabel(g.bucket)))}
+                        onOpen={() => onFundamental({
+                          name: g.basket.label, basket: g.basket, weightPct: g.slice?.pct })} />
+                    )}
                   </span>
-                  {/* ⚠ WEIGHTED BY WHAT IS BEING BLENDED, over the members that CAN be blended.
-                      The basket takes each member's `weight_now_pct` — the same figure this row's
-                      subtotal is summed from — and only the rows with an ISIN, because owner
-                      earnings are per-company and cash has none. Sending the whole class would
-                      hand the blender a weight it cannot attribute to anything.
-                      ⚠⚠ AND ONLY ON STOCKS. An ISIN is not enough: an ETF has one and is not a
-                      company (this app deliberately does not look through funds, so there is
-                      nothing behind it to measure), Alternatives is crypto and commodities with no
-                      earnings at all, and a bond is a claim on a company rather than a share of
-                      it. The button used to appear on all of them and opened a modal with nothing
-                      in it — which reads as a broken feature rather than an absent one, the exact
-                      thing `FundamentalButton`'s own docstring says not to do. */}
-                  {g.bucket === EQUITY_BUCKET && g.basket.holdings.length > 0 && (
-                    <FundamentalButton className="ml-2 align-middle"
-                      title={copy.classRow.fundamentalTitle(g.basket.holdings.length, copy.bucket(bucketLabel(g.bucket)))}
-                      onOpen={() => onFundamental({
-                        name: g.basket.label, basket: g.basket, weightPct: g.slice?.pct })} />
-                  )}
                 </td>
+                {/* Via · Sector — a class row has nothing to say in either. ⚠ `colSpan={2}`, not
+                    two cells and not one: see the note above the Name cell. */}
+                <td colSpan={2} />
                 {/* ⚠ TWO EMPTY CELLS, NOT TWO NUMBERS — vol and beta. A class's volatility is
                     NOT the average of its holdings' (it is the vol of the COMBINED series, lower by
                     exactly the diversification between them), and while a class's BETA is a
@@ -2144,10 +2069,35 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                           ⚠⚠ `!h.is_fund` IS NOT BELT-AND-BRACES — it is the half of the rule the
                           bucket used to carry. Since `Equity ETF` was retired the ETFs are in
                           Stocks, so the bucket test alone puts the button back on every fund it
-                          was written to keep it off. */}
+                          was written to keep it off.
+                          ⚠⚠ ALWAYS VISIBLE, 2026-09-02 ON REQUEST. It was
+                          `opacity-0 group-hover:opacity-100 focus:opacity-100` — present in the
+                          layout, painted only under the cursor. That hides a whole feature from
+                          anyone who does not happen to sweep a row: nothing on screen suggested a
+                          per-holding Fundamental view existed at all, and a control you cannot see
+                          is one you cannot look for.
+                          ⚠ `focus:opacity-100` WENT WITH IT — it existed solely so a keyboard user
+                          could reach a button the mouse rules had hidden. With the button visible
+                          it describes a state that no longer occurs. */}
+                      {/* ⚠⚠ `ml-auto` — PINNED TO THE NAME COLUMN'S RIGHT EDGE, NOT TRAILING THE
+                          NAME (2026-09-03, on request: "align all Fundamental buttons
+                          vertically"). Sitting immediately after the text, each button started
+                          wherever its own instrument's name happened to end, so a column of ~50
+                          identical controls was scattered across ~14rem of the widest column in
+                          the table — the eye had to find each one instead of reading down a line.
+                          ⚠ IT COSTS THE NAME NOTHING. The name span does not grow, so `ml-auto`
+                          only claims slack the name was not using; on a long name that slack is
+                          zero and the button lands exactly where it did before, against the
+                          truncation. The `min-w-0` + `truncate` pair that makes the cell shrink is
+                          unchanged, so no name loses a character to this.
+                          ⚠ THE CLASS ROW'S BUTTON CANNOT JOIN THE LINE, and that is structural
+                          rather than an oversight: its cell is `colSpan={3}` (Name · Via · Sector)
+                          so its right edge is two columns further out. Pushing it right would put
+                          it on a DIFFERENT vertical line, which is worse than leaving it beside
+                          the class label it belongs to. */}
                       {h.isin && h.bucket === EQUITY_BUCKET && !h.is_fund && (
                         <FundamentalButton
-                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0"
+                          className="ml-auto shrink-0"
                           title={copy.row.fundamentalTitle(h.name ?? h.isin ?? copy.row.thisPosition)}
                           onOpen={() => onFundamental({ name: h.name ?? h.isin!, isin: h.isin! })} />
                       )}
@@ -2176,11 +2126,39 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       the whole reading — while vol and beta are magnitudes where colour would turn
                       a description into a verdict. */}
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.mom_12_1_pct)}`}>
+                    {/* ⚠⚠ THE CHIP IS A RANK AND THE NUMBER IS A RETURN, AND BOTH STAY. The chip
+                        answers "strong compared to what could have been owned"; the number answers
+                        "by how much". They are not interchangeable and they can disagree in SIGN —
+                        a holding up 8% where the universe's median is up 27% is a real `--`, and a
+                        red chip with no number beside it reads as "this fell", which is false.
+                        ⚠ The chip also cannot separate two rows a bucket apart: measured on ACWI,
+                        `+` spans +15.6% to +29.8%. In a table built for comparing rows, dropping
+                        the number would cost exactly the resolution this column is read for.
+                        ⚠ TONE ON THE CHIP ONLY. The number already carries `retTone` on the whole
+                        cell; a second colour on the same line, computed a different way, is two
+                        answers to "is this good". The chip's own tone comes from the RANK, so it
+                        is `text-…` on the span and deliberately overrides the cell's. */}
+                    {isMomentumState(h.mom_state) && (
+                      <span className={`mr-1.5 font-semibold ${stateTone(h.mom_state)}`}>
+                        {stateLabel(h.mom_state)}
+                      </span>
+                    )}
                     {h.mom_12_1_pct == null ? '—' : `${h.mom_12_1_pct >= 0 ? '+' : ''}${h.mom_12_1_pct.toFixed(1)}%`}
                     <Provenance source="benchmark" asOf={null} kind="formula"
+                      /* ⚠ THE RANK IS SPELLED OUT IN WORDS HERE, because the chip is glyphs. A
+                         reader who cannot tell `++` from `+++` at a glance gets "the 82nd
+                         strongest percentile of the 1,745 ACWI members" on hover — which also
+                         states the POPULATION, since a relative measure whose reference set is
+                         unstated is not readable. Falls back to the plain sentence when this row
+                         has no rank, so a missing precompute reads exactly as it did before. */
                       what={h.mom_12_1_pct == null
                         ? copy.row.momentumMissingWhat(h.name ?? copy.row.thisPosition)
-                        : copy.row.momentumWhat(h.name ?? copy.row.thisPosition)}
+                        : (isMomentumState(h.mom_state) && h.mom_rank_n
+                          ? copy.row.momentumRanked(
+                            h.name ?? copy.row.thisPosition,
+                            ordinalPercentile(h.mom_pct_rank, copy.lang === 'nl' ? 'nl' : 'en') ?? '',
+                            benchmark, h.mom_rank_n)
+                          : copy.row.momentumWhat(h.name ?? copy.row.thisPosition))}
                       note={h.mom_12_1_pct == null ? undefined : copy.row.momentumNote}
                       how={h.mom_12_1_pct == null
                         ? copy.row.momentumMissing
@@ -3084,8 +3062,9 @@ export default function PortfolioAnalysisModal({
               benchmark picker only changes what those inputs are compared against. Close stays
               last, where a dialog's dismiss belongs. */}
           <div className="flex items-center gap-2 shrink-0">
-            {/* ⚠ THE ROW'S REFRESH, NOT A NEW ONE — same handler, same glyph (`RefreshIcon`, shared
-                so the two are visibly one control) and the caller's own wording, so pressing it
+            {/* ⚠ THE ROW'S REFRESH, NOT A NEW ONE — same handler, same LABEL (2026-09-03: the
+                glyph came off every Refresh and every Cancel on the site, on request, so the word
+                is now the whole control) and the caller's own wording, so pressing it
                 here and pressing it on the row cannot come to mean different things. Absent when
                 the caller passes no handler: a basket has no AIRS portfolio behind it to re-scan,
                 and the panels gate the row's button on `isAdmin` for the same reason they gate
@@ -3108,9 +3087,6 @@ export default function PortfolioAnalysisModal({
                 aria-label={stopping ? copy.actions.cancelling
                   : cancellable ? copy.actions.cancelRefresh : copy.actions.refreshPortfolio}
                 className={`${refreshing && canStop ? HEADER_CTL_STOP : HEADER_CTL} inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-wait`}>
-                {refreshing && canStop
-                  ? <span className="text-[10px] leading-none">✕</span>
-                  : <RefreshIcon spinning={refreshing} size={12} />}
                 {stopping ? copy.actions.cancelling : cancellable ? copy.actions.cancel
                   : refreshing ? copy.actions.refreshing : copy.actions.refresh}
               </button>
@@ -3148,16 +3124,28 @@ export default function PortfolioAnalysisModal({
             {copy.lang === 'nl' ? copy.chrome.loadError : error}
           </div>
         )}
-        {!data && !error && <p className="text-xs text-fg-subtle">{copy.chrome.loading}</p>}
+        {/* ⚠ ONE BIG LINE AND A MOVING ELLIPSIS — see `AnalyseLoading` for why this modal gets
+            no skeleton and no progress bar. */}
+        {!data && !error && <AnalyseLoading label={copy.chrome.loading} />}
 
         {data && (
           <>
             {/* Top: the allocation bars (the class selector) beside — when NOTHING is selected —
                 the whole-portfolio return / vs-benchmark / excess scorecard, or, when a class IS
-                selected, ONLY that class's own return (+ Attribution for Stocks). LEFT-aligned so
-                the bars hold their position and only the right-hand content changes with the
-                selection. Empty for an ad-hoc basket. */}
-            <div className="flex items-center justify-start gap-8 flex-wrap mb-4 pl-8 lg:pl-20">
+                selected, ONLY that class's own return (+ Attribution for Stocks). Empty for an
+                ad-hoc basket.
+
+                ⚠⚠ CENTRED, AND THAT IS ONLY SAFE BECAUSE THE RIGHT-HAND SLOT NO LONGER CHANGES
+                WIDTH — see the grid below. This row was `justify-start` + `pl-8 lg:pl-20` for a
+                reason worth restating: the modal is `w-[80vw]`, so on a wide screen there is a lot
+                of empty space to the right of this block, and centring it is the obvious fix. But
+                selecting a class swaps a wide scorecard for a narrow tile, so a bare
+                `justify-center` re-centres a NARROWER row and the allocation bars slide sideways —
+                on every click, of the control whose whole purpose is to be clicked. The old
+                left-alignment bought stillness by giving up the centring; the width reservation
+                below buys both, so the padding that used to hold the block off the left edge is
+                gone with it (it would now just push this right of true centre). */}
+            <div className="flex items-center justify-center gap-8 flex-wrap mb-4">
               {data.allocation && data.allocation.length > 0 && (
                 <AllocationBars slices={data.allocation} selected={assetFilter}
                   variant={data.variant} bands={data.bands}
@@ -3171,6 +3159,45 @@ export default function PortfolioAnalysisModal({
                   onSelect={isBasket ? undefined : (b) => {
                     setWhy(null); setRisk(false); setBucket(null); setAssetFilter(b); }} />
               )}
+              {/* ⚠⚠ ONE SLOT, ONE WIDTH, IN BOTH STATES — this is what lets the row above be
+                  centred without the allocation bars moving. Both arms of the ternary occupy the
+                  SAME grid cell as a ghost copy of the scorecard, so the cell is never narrower
+                  than the equation and the row's total width does not depend on the selection.
+
+                  ⚠⚠ THE WIDTH-SETTER IS THE EQUATION ITSELF, NEVER A MEASUREMENT OF IT. A
+                  `w-[32rem]` here would be the exact trap this file already removed once: the
+                  chart used to sit at a hardcoded `w-[24rem]` that matched the chips beside it by
+                  coincidence and stopped matching the moment a benchmark's name changed the middle
+                  chip's width. `Scorecard` is pure presentation over `data.returns`, so rendering
+                  a second, inert copy costs nothing and CANNOT drift from the real one — a longer
+                  benchmark name widens both together.
+
+                  ⚠ ONLY WHEN A CLASS IS SELECTED. In the unselected state the real scorecard is
+                  already in the cell and sets the width itself; a ghost there would render it
+                  twice for nothing.
+
+                  ⚠ THE GHOST IS `invisible`, WHICH IS NOT THE SAME AS `opacity-0`.
+                  `visibility: hidden` takes its subtree out of the tab order and the
+                  accessibility tree — `Scorecard` can carry a button — so with `aria-hidden` it is
+                  fully inert. `h-0 overflow-hidden` then keeps it from contributing HEIGHT: it
+                  reserves a width and nothing else.
+
+                  ⚠ THE GUARANTEE IS `max(equation, selected content)`, so it holds as long as the
+                  selected arm is no wider than the equation (it is ~21rem of buttons against ~32rem
+                  of chips). Should something wider ever land there, the cell grows and the bars
+                  move again — but it can never go NARROWER than the equation, which is the
+                  direction that used to cause the jump.
+
+                  ⚠ `justify-items-center` so the narrower selected content sits centred in the
+                  reserved space rather than pinned to its left edge. */}
+              <div className="grid items-center justify-items-center self-center">
+              {selected && (
+                <div aria-hidden
+                  className="col-start-1 row-start-1 invisible h-0 overflow-hidden pointer-events-none">
+                  <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark} />
+                </div>
+              )}
+              <div className="col-start-1 row-start-1 min-w-0">
               {selected
                 ? (
                   <div className="self-center flex items-stretch gap-3">
@@ -3271,14 +3298,22 @@ export default function PortfolioAnalysisModal({
                         design and so drew the WHOLE BOOK's line beside a stocks-only tile. AIRS
                         reports a return for the account, not a slice.
                         ⚠ IT FETCHES ITSELF — see `BookReturnChart`. The modal is one payload with
-                        no partial paint, and its wall clock is the reader's wait. */}
+                        no partial paint, and its wall clock is the reader's wait.
+                        ⚠⚠ WHICH IS WHY `refreshSeq` HAS TO REACH IT. Fetching itself means it does not
+                        ride on the effect above, and Refresh re-runs the AIRS scrape — a new
+                        `airs_performance` row. Without this the chip re-read that row and the chart
+                        did not, so the two sat one scrape apart while both claimed to be the same
+                        column (reported 2026-09-03: +3.44% against +3.05%). Every self-fetching
+                        child of this modal owes the same dependency. */}
                     {!isBasket && id != null && (
                       <div className="w-0 min-w-full">
-                        <BookReturnChart portfolioId={id} />
+                        <BookReturnChart portfolioId={id} refreshSeq={refreshSeq} />
                       </div>
                     )}
                   </div>
                 )}
+              </div>
+              </div>
             </div>
             {/* ⚠ How much of the INDEX we could price — shown whenever a benchmark number is on
                 screen (the whole-portfolio scorecard, or the Stocks charts). ACWI's missing names
@@ -3288,12 +3323,21 @@ export default function PortfolioAnalysisModal({
                 the composition is the stocks behind them, not the lines AIRS stores — and the
                 payload still reports `looked_through_pct` / `opaque_pct` / `looked_through` for
                 anyone reading the API. It is simply not announced on screen. */}
-            {!sleeve && (data.benchmark_coverage_pct ?? 100) < 97 && (
-              <p className="text-[12px] text-warn-300 mb-3">
-                {copy.coverageWarning(data.benchmark_priced ?? 0, data.benchmark_universe_members ?? 0,
-                  `${(data.benchmark_coverage_pct ?? 0).toFixed(0)}%`)}
-              </p>
-            )}
+            {/* ⚠⚠ THE REBUILD-COVERAGE WARNING CAME OFF THIS VIEW, 2026-09-02 ON REQUEST, AND THE
+                REASON IT DID NOT BELONG IS SHARPER THAN "IT IS NOISE": IT WAS GATED ON `!sleeve`,
+                WHICH IS EXACTLY WHEN THE NUMBER IT WARNS ABOUT IS NOT ON SCREEN. It described the
+                CONSTITUENT REBUILD — how much of ACWI we could price — but since 2026-08-19 the
+                benchmark figure on the whole-portfolio view is the index ETF's own price series
+                (`_index_returns` prefers `etf_returns`, falling back to the rebuild only per
+                window). The ETF has no constituent coverage at all, so this told a reader their
+                Excess tile was unreliable on grounds that did not apply to it.
+                ⚠ WHERE IT DOES APPLY is the other way round: the composition charts' portfolio-vs-
+                benchmark tilts and the Attribution panel both still reconcile to the REBUILD, and
+                both render when a class IS selected. If this is ever restored it belongs there,
+                on `sleeve`, not here.
+                ⚠ The producer still exists — `_asset_benchmark._missing_by_country` and the
+                `benchmark_missing_countries` field — and is now computed with nothing reading it.
+                Move the warning or strip the backend; do not leave it as it stands. */}
             {selected == null ? (
               /* NOTHING selected → the whole portfolio, one row per instrument, grouped by class.
                  A prompt to click something used to sit here; it told the reader what to do next

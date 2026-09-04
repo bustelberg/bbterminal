@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  subDigits, subNum, subPct, withWorked, workedBand, workedCagr, workedMean, workedRatio,
+  subDigits, subNum, subPct2, withWorked, workedBand, workedCagr, workedMean, workedRatio,
 } from './workedFormula';
 import { oneSigmaBand } from './activeBand';
 
@@ -90,11 +90,22 @@ describe('subDigits', () => {
   });
 });
 
-describe('subPct', () => {
+describe('subPct2', () => {
   it('always carries a sign, so a positive cannot read as an absolute level', () => {
-    expect(subPct(19.74)).toBe('+19.7%');
-    expect(subPct(-3.21)).toBe('-3.2%');
-    expect(subPct(0)).toBe('+0.0%');
+    expect(subPct2(19.74)).toBe('+19.74%');
+    expect(subPct2(-3.21)).toBe('-3.21%');
+    expect(subPct2(0)).toBe('+0.00%');
+  });
+
+  /**
+   * ⚠⚠ TWO DECIMALS, AND THE TEST IS HERE TO SAY THAT IS DELIBERATE. The one-decimal `subPct` was
+   * deleted on 2026-09-03 when the CAGR tiles went to two: its only caller was `workedCagr`, whose
+   * line has to reconcile against the tile it sits under, so the shorter spelling had no correct
+   * call site left. A rate printed `+4.5%` beneath a tile reading `+4.55%` is the doubt these
+   * worked lines exist to remove.
+   */
+  it('rounds to the precision the tiles print, so a worked line reconciles', () => {
+    expect(subPct2(4.5512)).toBe('+4.55%');
   });
 });
 

@@ -72,6 +72,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import gzip
+import hashlib
 import inspect
 import json
 import logging
@@ -114,6 +115,12 @@ _GRID_MAX_ENTRIES = 6
 
 _cache: _LruTtlCache[Any] = _LruTtlCache(max_size=_MAX_ENTRIES, ttl_seconds=_TTL_SECONDS)
 _grid_cache: _LruTtlCache[Any] = _LruTtlCache(max_size=_GRID_MAX_ENTRIES, ttl_seconds=_TTL_SECONDS)
+# The `classify_holding` verdicts for one member list — see `cached_coverage`. Tiny entries (a set
+# of ISINs), so the cap is about how many member lists a session touches, not about bytes: three
+# indices plus whatever books were opened.
+_COVERAGE_MAX_ENTRIES = 24
+_coverage_cache: _LruTtlCache[Any] = _LruTtlCache(max_size=_COVERAGE_MAX_ENTRIES,
+                                                  ttl_seconds=_TTL_SECONDS)
 
 
 def cache_key(endpoint: str, body: Any) -> tuple | None:
@@ -144,10 +151,15 @@ def invalidate() -> int:
     would rebuild "fresh" responses on top of stale fundamentals — the one outcome worse than not
     caching at all, because it looks like it worked.
     """
-    n = _cache.size() + _grid_cache.size() + _metrics_cache.size()
+    n = (_cache.size() + _grid_cache.size() + _metrics_cache.size()
+         + _coverage_cache.size())
     _cache.clear()
     _grid_cache.clear()
     _metrics_cache.clear()
+    # ⚠ THE COVERAGE VERDICTS GO TOO, AND THEY ARE THE ONE AN INGEST MOST OBVIOUSLY MOVES: a
+    # company classed `no_metrics` becomes `covered` the moment its financials land, which is
+    # exactly what the button that calls this just did.
+    _coverage_cache.clear()
     if n:
         _log.info("[blend-cache] invalidated %d entr%s", n, "y" if n == 1 else "ies")
     # ⚠ THE REBUILD IS HUNG OFF THE CLEAR, NOT OFF THE INGEST JOB. Two writers drop this cache —
@@ -325,6 +337,57 @@ def cached_grid(label: str, cadence: str, compute: Callable[[], Any]) -> Any:
     try:
         result = compute()
         _grid_cache.put(key, result)
+        return result
+    finally:
+        with _metrics_lock:
+            _metrics_inflight.pop(key, None)
+        event.set()                                    # type: ignore[union-attr]
+
+
+def cached_coverage(isins: list[str], compute: Callable[[], Any]) -> Any:
+    """`classify_holding`'s verdicts for ONE member list, computed once and shared.
+
+    ⚠⚠ IT EXISTS SO THE DRILL-DOWN CAN SAY WHICH ROWS THE LINE WAS BLENDED FROM WITHOUT PAYING FOR
+    THE ANSWER FIVE TIMES. `coverage_for` is ~137 round trips on ACWI — a chunked `asset_grid` +
+    `company` read per 100 ISINs, then the sentinel `metric_data` probe in chunks of 20 — and
+    `TablesTab` fires `portfolio-revenue-matrix` once per rate row (five for the book, five for
+    the benchmark). Uncached that is the classifier run ten times per page load for an answer that
+    is the same every time.
+
+    ⚠ KEYED ON THE MEMBER LIST, NOT ON A UNIVERSE LABEL. The same verdicts are wanted for a book
+    (an ad-hoc `holdings` basket has no label) and for the index, and two callers passing the same
+    ISINs must collide — so the key is the sorted set itself, hashed. It cannot collide across
+    different lists and it needs no second mapping from label to members.
+
+    ⚠ CLEARED BY `invalidate()`, LIKE EVERY OTHER STORE HERE, and this one has the most obvious
+    reason to be: `no_metrics` becomes `covered` the moment a fundamentals ingest lands.
+
+    ⚠ SINGLE-FLIGHT for the same reason `cached_grid` has it — the five matrix requests for one
+    target leave the browser together, so against a cold cache they would otherwise all miss.
+    """
+    key = ("coverage", hashlib.sha1(  # noqa: S324 — a cache key, not a credential
+        "\n".join(sorted(set(isins))).encode()).hexdigest())
+    hit = _coverage_cache.get(key)
+    if hit is not None:
+        return hit
+
+    with _metrics_lock:
+        event = _metrics_inflight.get(key)
+        owner = event is None
+        if owner:
+            event = threading.Event()
+            _metrics_inflight[key] = event
+
+    if not owner:
+        event.wait(timeout=_INFLIGHT_TIMEOUT)          # type: ignore[union-attr]
+        hit = _coverage_cache.get(key)
+        # ⚠ A WAITER WHOSE OWNER FAILED RECOMPUTES rather than inheriting the failure — the same
+        # judgement as `cached_grid` and `cached_metric_reads`.
+        return hit if hit is not None else compute()
+
+    try:
+        result = compute()
+        _coverage_cache.put(key, result)
         return result
     finally:
         with _metrics_lock:

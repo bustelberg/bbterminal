@@ -1,8 +1,9 @@
 'use client';
 
 import InfoTip from '../InfoTip';
+import LoadingDots from './LoadingDots';
 import { type Blend } from './fundamentalBlend';
-import { cagrExcess, commonEndPeriod, lineCagr } from './lineCagr';
+import { CAGR_DECIMALS, cagrExcess, cagrPct, commonEndPeriod, lineCagr } from './lineCagr';
 
 /**
  * The `Table` view: what the book and the index compounded at, over five and ten years.
@@ -25,13 +26,24 @@ export type CagrBenchmark = typeof CAGR_BENCHMARKS[number];
 
 const WINDOWS = [5, 10] as const;
 
-const pct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+/** ⚠ THE SHARED SPELLING (`cagrPct`, two decimals). Only `CAGR_BENCHMARKS` above is imported
+ *  anywhere today — the table itself renders nowhere — so this is kept in step rather than left as
+ *  a one-decimal copy for whoever mounts it next. See `CAGR_DECIMALS`. */
+const pct = cagrPct;
+
+/**
+ * ⚠⚠ THE `Dots` THAT LIVED HERE IS NOW `LoadingDots`, AND MOVING IT IS THE POINT (2026-09-03).
+ * It was written here, for this request, on the same day — and this component renders NOWHERE (only
+ * its `CAGR_BENCHMARKS` constant is imported), so the fix shipped to a dead file while `TablesTab`,
+ * the table people actually read, kept its motionless ellipsis. The shared one is also CSS rather
+ * than a `setInterval` per cell: that table holds up to seventy of them.
+ */
 
 /** One CAGR cell: the rate, or a dash whose tooltip says which absence this is. */
 function Cell({ blend, years, endPeriod }: {
   blend: Blend | null; years: number; endPeriod: string | null;
 }) {
-  if (!blend) return <td className="px-3 py-2 text-right text-fg-faint">…</td>;
+  if (!blend) return <td className="px-3 py-2 text-right text-fg-faint"><LoadingDots /></td>;
   const got = lineCagr(blend.level, years, endPeriod ?? undefined);
   if (got.pct == null) {
     return (
@@ -147,7 +159,7 @@ export default function CagrTable({
                     {e.pp == null
                       ? <InfoTip text={e.reason} className="cursor-default text-fg-faint">—</InfoTip>
                       : <span className={e.pp >= 0 ? 'text-pos-300' : 'text-neg-300'}>
-                        {`${e.pp >= 0 ? '+' : ''}${e.pp.toFixed(1)}`}
+                        {`${e.pp >= 0 ? '+' : ''}${e.pp.toFixed(CAGR_DECIMALS)}`}
                       </span>}
                   </td>
                 );

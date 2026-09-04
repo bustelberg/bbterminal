@@ -271,13 +271,18 @@ export default function OwnerEarningsModal({
           <div className="flex items-center gap-3 mb-3 shrink-0 flex-wrap">
           <div className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 w-fit">
             {((isAgg
-              // ⚠ `Tables` SITS BESIDE `Long Equity`. It is the same reads those cards draw,
+              // ⚠ `Tables` SITS BESIDE `Graphs`. It is the same reads those cards draw,
               // summarised, so it belongs with them rather than at the far end of the row.
               // ⚠ AN AGGREGATE GETS TWO OF THE FOUR. Quick and Deep Valuation are per-company — a
               // reverse DCF wants one share price and one share count — so a book is offered only
               // the two that blend. The list is the whole difference; nothing downstream branches.
-              ? [['longequity', 'Long Equity'], ['tables', 'Tables']]
-              : [['longequity', 'Long Equity'], ['tables', 'Tables'],
+              // ⚠ THE LABEL IS `Graphs`, THE KEY IS STILL `longequity` (2026-09-03, on
+              // request). Only the word on screen changed: the key is this modal's state, it is
+              // what `openTab` and every caller pass, and renaming it would touch the `Tab` union,
+              // `LongEquityTab.tsx` and `longEquityCopy.ts` for no reader-visible gain. The prose
+              // that NAMED the tab did have to follow — see `tablesCopy` and `quickValuation`.
+              ? [['longequity', 'Graphs'], ['tables', 'Tables']]
+              : [['longequity', 'Graphs'], ['tables', 'Tables'],
                 ['quickval', 'Quick Valuation'],
                 ['deepval', 'Deep Valuation']]
             ) as [Tab, string][]).map(([t, label]) => (
@@ -304,7 +309,7 @@ export default function OwnerEarningsModal({
               no tab in this modal holds a view that needs re-keying. */}
           {/* ⚠ `everything` — THIS MODAL PRICES THINGS, so the statements feed alone was never what
               its tabs draw. Quick Valuation shows today's share price and charts the multiple off
-              the daily closes; its forward line and Long Equity's dotted consensus are the
+              the daily closes; its forward line and the Graphs tab's dotted consensus are the
               indicator and estimate feeds. None of the three is in the default fill. */}
           {scope && (
             <PortfolioFundamentalsRefresh scope={scope} everything />

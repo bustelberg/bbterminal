@@ -84,6 +84,82 @@ def _pair(portefeuille: str | None, portfolio_id: int | None) -> tuple[str | Non
     return (hit or {}).get("portefeuille"), portfolio_id
 
 
+
+def job_verdict(portefeuille: str, full: dict) -> str:
+    """One refresh result -> what the job card should say. Raises to end the job non-`done`.
+
+    ⚠⚠ IT EXISTS BECAUSE A CANCEL CAN BE CAUGHT AT TWO LEVELS AND ONLY ONE OF THEM WAS READ
+    (2026-09-03, reported: "I tried to cancel a refresh but this happened —
+    `RuntimeError: BUS_Offensief_Dyn: AIRS scan failed — no reports returned`"). The caller looked
+    at `full["book"]["cancelled_at"]` alone. But `refresh_portfolio_fully` also stops BEFORE the
+    book half, and there it has no book result to put a flag in: it sets `cancelled_at` on the
+    WRAPPER and leaves `book` as `None`. The caller then read `{}`, found no `status == "ok"`, and
+    reported a scan failure — for a scan that was never attempted, with an empty `errors` list
+    which is exactly why the message could only fall back to "no reports returned". A cancel
+    rendered as a red RuntimeError is the worst of both: it hides that the button worked, and it
+    invents an AIRS fault that did not happen.
+
+    ⚠ ORDER IS BOOK, THEN WRAPPER, THEN BUSY, THEN FAILURE. The book's own flag is the more
+    specific answer (it names the dependent book it stopped before, and what is left stale), so it
+    is read first; the wrapper's is the fallback for the two boundaries the book cannot speak for.
+
+    ⚠ A CANCEL BEFORE THE MODEL HALF IS STILL A CANCEL, even though the book beside it is fully
+    refreshed and stored. It used to return the ordinary success summary, so a reader who pressed
+    Stop got a green card and no statement that the model portfolio had been skipped.
+
+    ⚠ AND THE FAILURE MESSAGE NAMES ITS OWN LAYER. "no reports returned" reads as AIRS answering
+    with nothing, which is one of three quite different things — see the `status` clause.
+
+    ⚠ PURE, AND SEPARATE FROM THE ENDPOINT, so it can be tested without a job registry, an AirSPMS
+    session or a database. It was a closure inside the route, which is why nothing covered it.
+    """
+    from jobs import JobCancelled  # noqa: PLC0415  (registry imports routers at module level)
+
+    res = full.get("book") or {}
+    # ⚠ THE BOOK HALF DRIVES THIS SUMMARY, because that is what this endpoint's caller asked
+    # about. The MODEL half is one extra clause rather than folded in — a reader who pressed
+    # "Refresh" on an account row should see that its model was rebuilt too, not have the two
+    # averaged into one word.
+    model_note = ("" if full.get("model_status") == "absent"
+                  else " · model portfolio rebuilt" if full.get("model_status") == "ok"
+                  else f" · ⚠ model portfolio NOT rebuilt ({full.get('model_status')})")
+
+    if res.get("cancelled_at"):
+        stale = res.get("stale_books") or []
+        raise JobCancelled(
+            f"cancelled before {res['cancelled_at']}"
+            + (f" — {len(stale)} book(s) left un-refreshed: {', '.join(stale)}"
+               if stale else " — nothing was read"))
+    if full.get("cancelled_at"):
+        raise JobCancelled(
+            f"cancelled before {full['cancelled_at']}"
+            + (" — nothing was read" if full.get("book") is None
+               else " — the AIRS book was refreshed and stored; the model portfolio was not"))
+    if res.get("status") == "busy":
+        # ⚠ AN ANSWER, NOT A FAILURE. The fleet scan holds the session; this is a "try again",
+        # and raising would paint it red beside the real errors.
+        return f"{portefeuille} — another AIRS refresh is running; nothing was re-read"
+
+    also = res.get("cascaded") or []
+    bad = [c for c in also if c.get("status") != "ok"]
+    if res.get("status") != "ok":
+        raise RuntimeError(
+            f"{portefeuille}: AIRS scan failed — "
+            + (", ".join(res.get("errors") or [])
+               # ⚠ NO ERRORS IS ITS OWN FINDING, NOT A BLANK. Every report `scan_one` runs records
+               # a reason when it fails, so an empty list means the scan did not run — and saying
+               # which layer stopped short is the difference between a diagnosis and a shrug.
+               or f"no report errors were recorded (book status "
+                  f"{res.get('status') or 'absent'}, half {full.get('book_status')})"))
+    # ⚠ A FAILED DEPENDENCY DOWNGRADES THE WHOLE SUMMARY: the parent's own scan succeeded, but its
+    # looked-through figures are read from a book that did not, and one word saying "refreshed"
+    # would claim a freshness it does not have.
+    return (f"{portefeuille} — {res.get('holdings_rows', 0)} holdings as of "
+            f"{res.get('as_of') or 'today'}"
+            + (f" · also refreshed {len(also)} book(s) it is built from" if also else '')
+            + model_note
+            + (f" — {len(bad)} FAILED, see the console" if bad else ''))
+
 def refresh_portfolio_fully(
     portefeuille: str | None = None,
     portfolio_id: int | None = None,

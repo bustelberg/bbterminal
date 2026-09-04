@@ -23,6 +23,7 @@ from __future__ import annotations
 from .pipeline import (
     _run_companies_price_refresh_pipeline_sync,
     _run_full_price_refresh_pipeline_sync,
+    _run_price_slice_pipeline_sync,
     _run_pipeline_sync,
     _run_price_update_pipeline_sync,
     _run_rebalance_pipeline_sync,
@@ -36,6 +37,7 @@ __all__ = [
     "_now_utc_iso",
     "_run_companies_price_refresh_pipeline_sync",
     "_run_full_price_refresh_pipeline_sync",
+    "_run_price_slice_pipeline_sync",
     "_run_pipeline_sync",
     "_run_price_update_pipeline_sync",
     "_run_rebalance_pipeline_sync",

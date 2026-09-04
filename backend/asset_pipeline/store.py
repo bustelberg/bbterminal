@@ -122,6 +122,64 @@ def upsert_asset(res: dict, figi: dict | None = None) -> dict:
     return {"analysis_id": analysis_id, "execution_id": execution_id, "symbol": symbol}
 
 
+#: A row a PERSON unmapped, written into `reason` — see `scripts/unmap_asset_row.py`.
+#:
+#: ⚠⚠ IT IS WHAT STOPS THE FIX BEING UNDONE BY THE NEXT SWEEP. `queue.requeue_unmapped()` re-queues
+#: every `not_found` row OpenFIGI identified, on the reasonable theory that it only failed because
+#: Yahoo was throttled. That theory is wrong for a row somebody unmapped ON PURPOSE because the
+#: resolver had it on a DIFFERENT instrument: re-resolving it runs the same resolver over the same
+#: candidates and can land on the same wrong ticker, silently. First Abu Dhabi Bank
+#: (`AEN000101016`) is the measured case — OpenFIGI offers only Bloomberg composite codes, Yahoo has
+#: no Abu Dhabi coverage at all, and the ticker `FAB` bare is a US First Trust ETF with 4,822 bars.
+#:
+#: ⚠ A PREFIX, NOT AN EXACT STRING, so the rest of `reason` stays free for the human explanation.
+MANUAL_UNMAP_PREFIX = "unmapped by hand"
+
+
+def unmap_execution(isin: str, reason: str) -> dict | None:
+    """Strip a wrong resolution off one ISIN, leaving the instrument OpenFIGI names and no prices.
+
+    Returns the row as it was BEFORE the change, or None when there is no row / nothing to do.
+
+    ⚠⚠ THE WHOLE RESOLVED IDENTITY GOES, NOT JUST THE STATUS. `asset_grid` is a VIEW that reads
+    `asset_class` / `name` / `sector` off this row, so clearing the status alone leaves every screen
+    still calling an Abu Dhabi bank a First Trust ETF — and `_fundamental_coverage.classify_holding`
+    still reads `asset_class='etf'` and still answers `fund`. The field list was checked against
+    what a genuine `not_found` row looks like rather than guessed.
+
+    ⚠ `name` BECOMES THE OPENFIGI NAME — the instrument this ISIN actually is. Leaving the wrong
+    instrument's name keeps the wrong answer on screen with nothing pointing at it.
+
+    ⚠ THE REASON IS PREFIXED WITH `MANUAL_UNMAP_PREFIX`, and that is not cosmetic: it is the only
+    thing stopping `queue.requeue_unmapped()` handing this ISIN straight back to the resolver,
+    which would run the same candidates and can restore the same wrong ticker.
+
+    ⚠ THE PRICE ROWS ARE LEFT. They are real bars for a real instrument, merely filed under the
+    wrong ISIN, and nothing reads them once `analysis_id` is null. Deleting is a separate,
+    irreversible decision.
+    """
+    rows = supabase.table("asset_execution").select("*").eq("isin", isin).execute().data or []
+    if not rows:
+        return None
+    r = rows[0]
+    full = (reason if reason.startswith(MANUAL_UNMAP_PREFIX)
+            else f"{MANUAL_UNMAP_PREFIX}: {reason}")
+    patch = {
+        "status": "not_found", "is_default": False, "reason": full,
+        "yahoo_symbol": None, "analysis_id": None,
+        "asset_class": None, "sector": None,
+        "exchange": None, "currency": None, "listing_country": None,
+        "med_adv_eur": None, "first_date": None, "years": None,
+        "name": r.get("openfigi_name") or r.get("name"),
+    }
+    # ⚠ ONLY COLUMNS THAT EXIST. `sector` looks like one of these because `asset_grid` has it — the
+    # view reads it off the ANALYSIS — and PostgREST answers an update naming a missing column with
+    # a 42703, at the one moment this is halfway through a write.
+    patch = {k: v for k, v in patch.items() if k in r}
+    supabase.table("asset_execution").update(patch).eq("execution_id", r["execution_id"]).execute()
+    return r
+
+
 def upsert_unmapped(
     isin: str,
     status: str,

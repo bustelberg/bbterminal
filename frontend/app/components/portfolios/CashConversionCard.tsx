@@ -9,8 +9,6 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { useLang } from '../../../lib/i18n';
-import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
 import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
@@ -20,6 +18,7 @@ import { cashConversionByYear, type CashConversionInputs } from './cashConversio
 import { paddedDomain , xToPeriod } from './marginData';
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
+import CardHeading from './CardHeading';
 
 /**
  * Cash-conversion card: Free Cash Flow ÷ Net Income per fiscal year, on a LINEAR % axis. Whether
@@ -54,9 +53,6 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
   /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
 }) {
-  // ⚠ READ FROM THE STORE, NOT DRILLED THROUGH `LongEquityTab` AS A PROP — see the same
-  // note on the sibling cards. `useLang` is an external store (`lib/i18n.ts`).
-  const [lang] = useLang();
   const [data, setData] = useState<CashConversionInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
@@ -105,9 +101,7 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      <h4 className="text-base font-semibold text-fg-strong">
-        {chartTitle(lang, 'cashConversion', sbcCorrection)}
-      </h4>
+      <CardHeading chartKey="cashConversion" sbc={sbcCorrection} />
 
       {data == null && !err ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>

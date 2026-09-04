@@ -160,10 +160,10 @@ export default function MultipleHistoryChart({
           {hasForward ? 'vendor indicator' : 'no forward FCF yet — nobody forecasts capex'}
         </span>
         {/* ⚠⚠ ONE CONTROL, THREE STATES, AND IT TURNS INTO THE CANCEL — the same shape and the same
-            three glyphs as the share-price ↻ on the Deep Valuation tab. The reader pressed it HERE,
+            three WORDS as the share-price Refresh on the Deep Valuation tab. The reader pressed it HERE,
             so this is where stopping it belongs; sending them to the toast in the corner to undo
             something they started on this card is a Cancel that does nothing.
-              ↻  idle        ✕  running, press to abort        ⋯  unwinding after the press
+              Refresh  idle     Cancel  running, press to abort     Cancelling…  unwinding
             ⚠ RENDERED ONLY ON A BASIS THAT HAS A VENDOR LINE. On the FCF basis there is no forward
             series anywhere, at any date, so a refresh button would promise a fetch that cannot
             exist — see the note beside `hasForward`.
@@ -178,12 +178,12 @@ export default function MultipleHistoryChart({
               : refreshing ? 'Re-reading — press to cancel'
                 : !canRefresh ? 'No GuruFocus company for this ISIN, so there is nothing to re-read'
                   : 'Ask GuruFocus for this series again'}
-            className={`ml-auto inline-block w-4 text-center text-[12px] leading-none ${
+            className={`ml-auto inline-block text-[12px] leading-none ${
               cancelling ? 'cursor-wait text-fg-faint'
                 : refreshing ? 'text-warn-400 hover:text-neg-400'
                   : !canRefresh ? 'cursor-default text-fg-faint/40'
                     : 'text-fg-faint hover:text-accent-400'}`}>
-            {cancelling ? '⋯' : refreshing ? '✕' : '↻'}
+            {cancelling ? 'Cancelling…' : refreshing ? 'Cancel' : 'Refresh'}
           </button>
         )}
       </div>
@@ -200,7 +200,7 @@ export default function MultipleHistoryChart({
         {/* ⚠⚠ THE VENDOR'S OWN PUBLICATION DATE, WHICH NOTHING ON THIS CARD USED TO SHOW. Every
             figure here descends from a series read from GuruFocus with a multi-week lag, and the
             card said only "since 2015" — the window, never the edge. A reader could not tell a
-            line current to yesterday from one that stopped five weeks ago, and the ↻ beside it had
+            line current to yesterday from one that stopped five weeks ago, and the Refresh beside it had
             no number to move. */}
         {hasForward && (
           <Stat label="As of" value={asOf ?? '—'}
@@ -208,7 +208,7 @@ export default function MultipleHistoryChart({
               what="When GuruFocus last published a point in this series."
               where="The newest observation on the line, not the moment we read it."
               when={`Weekly since ${fromYear}.`}
-              how="The vendor publishes with a lag of some weeks, so this can sit behind today with nothing wrong. The ↻ above asks for anything newer." />} />} />
+              how="The vendor publishes with a lag of some weeks, so this can sit behind today with nothing wrong. The Refresh above asks for anything newer." />} />} />
         )}
         <Stat label="Median" value={x(median)} color={MEDIAN_COLOR}
           info={<InfoTip content={<AspectCard

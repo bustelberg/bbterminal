@@ -213,6 +213,35 @@ def _bench_prov(win: dict | None) -> dict:
             "benchmark_ytd_close_fx": w.get("fx_end")}
 
 
+def _bench_window_isins(label: str) -> set[str] | None:
+    """The constituents priced at BOTH ends of the window — the one list the bar and its
+    drill-down share. `None` when it cannot be had, which leaves the caller on every member.
+
+    ⚠ IT IS `index_rows`' OWN SET, NOT A SECOND RULE. That function already decides membership for
+    the drill-down (it needs two marks to compute a return, and skips a constituent with no opening
+    price); asking it rather than re-deriving the test is what stops the two lists drifting apart
+    again — which is the whole defect this exists to close.
+
+    ⚠ LEG-CACHED. It is one paged read per benchmark per fingerprint, and the Analyse modal already
+    pays for `index_rows` on the attribution side; sharing the leg store means the second caller is
+    free.
+    """
+    from routers._asset_benchmark import index_rows  # noqa: PLC0415
+
+    def _load() -> set[str] | None:
+        try:
+            rows, _ = index_rows(label, f"{date.today().year}-01-01")
+        except Exception as exc:                                    # noqa: BLE001
+            _log.warning("[analysis] %s: window constituents unavailable (%s: %s) — weighing "
+                         "every member", label, type(exc).__name__, exc)
+            return None
+        # ⚠ EMPTY IS NOT A SET OF NOBODY. An index we could not price at all must fall back to the
+        #   full membership, or every bar on the chart reads 0% under a benchmark that exists.
+        return {r["isin"] for r in rows if r.get("isin")} or None
+
+    return _leg(("bench_window_isins", label), _load)
+
+
 def _bench_start_caps(label: str, start: str | None) -> dict[str, float]:
     """`{isin: market cap at `start`}` for an index — or `{}` when there is no window to open at.
 
@@ -2085,11 +2114,18 @@ def compute_portfolio_analysis(portfolio_id: int,
     # bucket" even where the two now coincide. The ETFs it used to name are inside `Equity`, so the
     # denominator below is unchanged by the merge.
     _EQUITY = {"Equity"}
-    general_items = port_items
-    general_labels = port_labels
+    # ⚠ FUNDS ARE OUT OF ALL THREE AXES, not just sector — see the note below. A fund's DOMICILE and
+    # QUOTE CURRENCY describe the wrapper, not what it holds ("⚠ For an ETF this describes its
+    # listing, not what it holds" is already on the Region header), so they were the same
+    # `Unclassified` block on those two charts and are dropped for the same reason.
+    _funds = {lb.get("isin") for lb in port_labels
+              if lb.get("isin") and _is_fund(grid.get(lb["isin"]), lb.get("name") or "")}
+    _keep_all = [(pi, ai, lb) for pi, ai, lb in zip(port_items, alloc_items, port_labels)
+                 if lb.get("isin") not in _funds]
+    general_items = [pi for pi, _ai, _lb in _keep_all]
+    general_labels = [lb for _pi, _ai, lb in _keep_all]
     if bucket_filter:
-        keep = [(pi, lb) for pi, ai, lb in zip(port_items, alloc_items, port_labels)
-                if ai[1] == bucket_filter]
+        keep = [(pi, lb) for pi, ai, lb in _keep_all if ai[1] == bucket_filter]
         general_items = [pi for pi, _lb in keep]
         general_labels = [lb for _pi, lb in keep]
     # ⚠ THE SECTOR DENOMINATOR IS THE EQUITY SLEEVE, AND SELECTING A CLASS MUST NOT MOVE IT.
@@ -2110,9 +2146,23 @@ def compute_portfolio_analysis(portfolio_id: int,
     # equity sector chart standing — sector is not a question about a bond, and showing the
     # stocks' sectors under a "Bonds" selection would attribute them to the wrong sleeve. So the
     # filter still decides WHETHER the chart is drawn; it just no longer decides its denominator.
+    # ⚠⚠ AND A FUND IS OUT OF THE SECTOR SLEEVE ALTOGETHER (2026-09-03, on request: "we should not
+    # take the stock etfs into account in the drilldown stock section — all those unclassified
+    # things, which are the stock etfs right now, can go away"). An ETF is opaque: this app does
+    # not look through funds, so its sector is not unknown, it is UNDEFINED — and folding it into
+    # `Unclassified` put 16.84% of BUS_Offensief on a bar that says nothing, inside the denominator
+    # of every real sector beside it.
+    # ⚠⚠ IT IS ALSO WHAT MAKES THE BAR AND ITS DRILL-DOWN ONE NUMBER. `split_legs` — the attribution
+    # basis the drill-down is built on — has always excluded funds; the composition kept them, so
+    # Technology read 36.33% on the bar against 43.69% in the list, out by exactly the fund weight
+    # (1/(1 - 0.1684) = 1.2025). One membership rule, one denominator, and the two agree by
+    # construction rather than by a correction applied at the other end.
+    # ⚠ A FUND, NOT EVERY `Unclassified`. An equity we simply cannot classify stays in: dropping it
+    # would make its real sector read as unowned, which is a false finding rather than a missing
+    # one — the distinction `split_legs` draws between `fund` and `unpriced`, applied here too.
     sector_keep = ([] if (bucket_filter and bucket_filter not in _EQUITY)
                    else [(pi, lb) for pi, ai, lb in zip(port_items, alloc_items, port_labels)
-                         if ai[1] in _EQUITY])
+                         if ai[1] in _EQUITY and lb.get("isin") not in _funds])
     sector_items = [pi for pi, _lb in sector_keep]
     sector_labels = [lb for _pi, lb in sector_keep]
     pw_general, pw_sector = _weigh(general_items), _weigh(sector_items)
@@ -2148,10 +2198,14 @@ def compute_portfolio_analysis(portfolio_id: int,
     weight_field = ("each position's current EUR value" if weight_basis == "book"
                     else "the model's stated percentage")
 
-    # ⚠ THE BARS ARE WEIGHED ON THE ATTRIBUTION BASIS (2026-07-31) — see `_basis_axes`. The
-    # current-value path above still runs: it feeds the allocation pie and the holdings table,
-    # which are point-in-time views of what is held and must NOT move to a January basis. Only
-    # these three axes changed, and only so a sector bar equals its own Brinson row.
+    # ⚠⚠ THE BARS NO LONGER USE THIS — see the axis loop below (2026-09-03). What `_basis_axes`
+    # still supplies is `_start_weights`, the per-ISIN weight at the window's open that rides on
+    # the holdings payload as `weight_start_pct`.
+    # ⚠ AND NOTHING RENDERS THAT FIELD TODAY: the "Weight (start)" column came off 2026-08-04.
+    # It is kept because it is a published field and because the Attribution panel is weighed on
+    # exactly this basis, so the payload can still answer "what did this weigh in January" without
+    # a second loader. If it is ever confirmed unused, this call is a whole leg of the modal's
+    # work to delete — measure before assuming it is free.
     basis_axes = _basis_axes(portfolio_id, source, p.get("positions_datum"), bucket_filter)
     # ⚠⚠ A CONSTITUENT WITH NO START CAP IS DROPPED, NOT FALLEN BACK TO TODAY'S. The first version
     # of this used `bench_start.get(isin, cap)`, which quietly re-created the very thing it was
@@ -2160,9 +2214,28 @@ def compute_portfolio_analysis(portfolio_id: int,
     # drill-down's 31.24% — a 0.68pp gap from about two constituents. Dropping them puts the bar on
     # exactly the constituent set `index_rows` weighs, so the two agree by construction rather than
     # to within a rounding.
-    bench_start = _bench_start_caps(benchmark_label, (basis_axes or {}).get("_start"))
-    bw = _weigh([(bench_start[isin], b) for _cap, b, isin in bench_rows if isin in bench_start]
-                if bench_start else bench_items)
+    # ⚠⚠ TODAY'S CAPS, NOT THE WINDOW'S OPEN (2026-09-03, on request: "Benchmark should also be up
+    # to date daily"). It has to move with the portfolio side below — a book weighed today against
+    # an index weighed in January is a tilt made of two different dates, and every `diff_pct` on
+    # the chart would carry that gap. `_bench_start_caps` and the constituent-dropping rule it
+    # needed go with it: on today's caps every constituent has one.
+    # ⚠⚠ ONE CONSTITUENT LIST FOR THE BAR AND FOR ITS DRILL-DOWN (2026-09-03, on request: "each
+    # company should have a price and marketcap at the start and end, and we use that single list
+    # both for the Sector scorecard and for the drilldown"). They were two: the bar weighed every
+    # member carrying a market cap, the drill-down weighed `index_rows(start)` — the members that
+    # also have a PRICE at both ends, because it has a Return column and a return needs two marks.
+    # Measured on ACWI: 1,849 against 1,845, and the four that differ are Technology-heavy enough
+    # to read 27.95% on the bar against 27.60% one click below it.
+    # ⚠ THE NARROWER LIST WINS, and that is the honest direction. A constituent with no opening
+    # price cannot be shown in the drill-down at all, so including it in the bar means the bar is
+    # a percentage of something the reader cannot go and look at. Dropped: CSG NV (series starts
+    # 2026-01-23), RWE AG (02-12), Kesko Oyj (06-05) — each simply not priced when the year opened.
+    # ⚠ THE WEIGHT IS STILL TODAY'S CAP. This narrows WHO is in the denominator, not WHEN they are
+    # weighed — the bars stay on current values, which is what the axis note promises.
+    priced_both = _bench_window_isins(benchmark_label)
+    bw = _weigh([(cap, b) for cap, b, isin in bench_rows
+                 if not priced_both or isin in priced_both]
+                if priced_both is not None else bench_items)
     _phase("axes")
 
     # ⚠⚠ THE CLASS RETURN IS RE-DERIVED FROM THE ENRICHED ROWS, AND `_book_port_items`' OWN
@@ -2220,26 +2293,31 @@ def compute_portfolio_analysis(portfolio_id: int,
 
     axes = []
     for axis in ("sector", "region", "currency"):
-        ba = (basis_axes or {}).get(axis)
-        if ba and ba["weights"]:
-            pw_axis, dd_axis = ba["weights"], ba["holdings"]
-            note = (f"Share of the attributable holdings on the {axis} axis, by each position's "
-                    f"value on {basis_axes['_start']} (Beginwaarde) — the SAME weights the "
-                    f"Attribution table uses.")
-            positions, excluded = ba["positions"], ba["excluded"]
-            attributable_pct, unpriced_pct = ba["attributable_pct"], ba["unpriced_pct"]
-        else:
-            # ⚠ FALLBACK, AND IT IS A DIFFERENT QUESTION — SO IT SAYS SO. No paired book (or
-            # nothing attributable) means there is no Beginwaarde to weigh by. Drawing an empty
-            # chart would claim the portfolio holds nothing; drawing the current-value bars
-            # without a word would put a differently-based number under the same heading.
-            pw = pw_sector if axis == "sector" else pw_general
-            dd = dd_sector if axis == "sector" else dd_general
-            pw_axis, dd_axis = pw[axis], dd[axis]
-            note = (f"Share of {_basis_note[axis]}, by {weight_field}. "
-                    f"⚠ Not the Attribution basis — no start-of-window values are available here.")
-            positions = len(sector_items if axis == "sector" else general_items)
-            excluded, attributable_pct, unpriced_pct = [], None, None
+        # ⚠⚠ CURRENT WEIGHTS, AND THIS REVERSES 2026-07-31 (2026-09-03, on request: "Sector, Region
+        # and Currency should all use daily up to date weights from AIRS"). These bars were moved
+        # ONTO the attribution basis then — Beginwaarde over the attributable legs — so that a
+        # sector bar equalled its own Brinson row. They are back to what the book holds TODAY,
+        # which is the same basis the allocation pie and the holdings table have never left.
+        #
+        # ⚠⚠ THE COST IS THE ONE THAT MOVE BOUGHT, AND IT IS REAL: A SECTOR BAR NO LONGER EQUALS
+        # ITS BRINSON ROW. Measured when the change was made in the other direction, Technology
+        # 36% today against 39.1% at the open, ASML 7.30% against 5.75% — differences well beyond
+        # rounding. The Attribution panel decomposes a RETURN and cannot use today's weights: a
+        # return is earned by what was held while it was earned. So the two panels now answer two
+        # questions, and each says which — this note is that sentence for these bars.
+        #
+        # ⚠ THE COVERAGE DISCLOSURES GO WITH THE BASIS THEY DESCRIBED. `attributable_pct`, the
+        # per-axis `excluded` list and `unpriced_pct` measured what the ATTRIBUTION basis had to
+        # drop — a mid-window purchase with no Beginwaarde, a holding with no return. None of that
+        # applies to a current-value weight, and carrying the old numbers under the new bars would
+        # be the mixed-basis ratio this module has already been bitten by once.
+        pw = pw_sector if axis == "sector" else pw_general
+        dd = dd_sector if axis == "sector" else dd_general
+        pw_axis, dd_axis = pw[axis], dd[axis]
+        note = (f"Share of {_basis_note[axis]}, by {weight_field}, as at the latest AIRS "
+                f"valuation. Not the Attribution basis, which weighs the window's open.")
+        positions = len(sector_items if axis == "sector" else general_items)
+        excluded, attributable_pct, unpriced_pct = [], None, None
         keys = set(pw_axis) | set(bw[axis])
         rows = [{
             "bucket": k,
@@ -2338,6 +2416,10 @@ def compute_portfolio_analysis(portfolio_id: int,
         "benchmark_universe_members": bench_coverage.get("universe_members") or 0,
         "benchmark_priced": bench_coverage.get("priced") or 0,
         "benchmark_coverage_pct": bench_coverage.get("covered_pct"),
+        # ⚠ NAMES WHERE THE GAP IS, because it is not spread evenly — see `_missing_by_country`.
+        #   Empty means "could not work it out", which the copy renders as no sentence rather than
+        #   as "nothing missing"; the magnitude is always in `benchmark_coverage_pct`.
+        "benchmark_missing_countries": bench_coverage.get("missing_countries") or [],
         "returns": _returns_timed(portfolio_id, p.get("positions_datum"), benchmark_label,
                                   source, _phase),
         # ⚠ THE COMPOSITION WAS EXPANDED, AND THAT MUST BE VISIBLE. These charts are drawn over
@@ -2623,7 +2705,8 @@ def _by_month(series: list[tuple[str, float]]) -> dict[tuple[int, int], float]:
 #: them, cached them, and then dropped them one line before the payload: the tooltip that exists to
 #: show `from ÷ to − 1 = result` had no legs to substitute, and nothing failed anywhere. A list is
 #: the difference between adding a figure in one place and adding it in three.
-RISK_KEYS = ("vol_5y_pct", "beta_5y", "mom_12_1_pct", "mom_12_1_from", "mom_12_1_to")
+RISK_KEYS = ("vol_5y_pct", "beta_5y", "mom_12_1_pct", "mom_12_1_from", "mom_12_1_to",
+             "mom_state", "mom_pct_rank", "mom_rank_n")
 
 #: The cadences these three columns are measured on, in the leg-cache key.
 #:
@@ -2636,7 +2719,28 @@ RISK_KEYS = ("vol_5y_pct", "beta_5y", "mom_12_1_pct", "mom_12_1_from", "mom_12_1
 #:
 #: ⚠ BUMP THIS WHENEVER THE ARITHMETIC OF A RISK COLUMN CHANGES — a new cadence, a different
 #: annualisation, a changed floor. It costs one recompute and removes the whole class.
-RISK_BASIS = "mom:d/beta:w/vol:m"
+RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v1"
+
+#: THE SAME TRICK, FOR THE WHOLE PAYLOAD — bump it when the COMPOSITION arithmetic changes.
+#:
+#: ⚠⚠ IT EXISTS BECAUSE THE FIRST CHANGE THAT NEEDED IT SHIPPED WITHOUT IT (2026-09-03). The three
+#: composition axes and their benchmark moved from the window's open to current values, and every
+#: warm `_analysis_cache` entry went on serving the OLD bars: `ac.get` is keyed on
+#: `(portfolio_id, benchmark, weight_by, source, bucket_filter)` plus a fingerprint of
+#: `pg_stat_user_tables`, which can only ever see a DATA change. Nothing in the database moved, so
+#: nothing invalidated — and the axis NOTE, being frontend copy, updated instantly. The screen said
+#: "Current weights" over start weights, which is worse than either basis on its own.
+#:
+#: ⚠ A RESTART CLEARS IT, which is exactly what makes this easy to miss: a deploy looks fine, and
+#: the person who is wrong is whoever has a long-lived process — a developer with `--reload` that
+#: did not fire, or prod between deploys.
+#:
+#: ⚠ IT IS IN THE KEY, NOT THE FINGERPRINT. The fingerprint answers "has the data changed"; this
+#: answers "does this entry come from the code I am running". Two questions, and folding a constant
+#: into a database read would make the second one look like the first.
+#: v2 (2026-09-03): funds out of all three sleeves, and the benchmark narrowed to the
+#: constituents priced at both ends — the list its own drill-down uses.
+COMPOSITION_BASIS = "axes:now/bench:now/nofunds/windowset/v2"
 
 
 def _sold_position_isins(names: list[str]) -> dict[str, str]:
@@ -2778,6 +2882,7 @@ def _holding_risk(isins: list[str], benchmark_label: str,
     import numpy as np  # noqa: PLC0415
     import pandas as pd  # noqa: PLC0415
 
+    from momentum import relative as _relative  # noqa: PLC0415
     from momentum.diversification import annualized_stats  # noqa: PLC0415
     from signal_engine.daily import (  # noqa: PLC0415
         compute_single_company_signals, mom_12_1_legs,
@@ -2820,6 +2925,17 @@ def _holding_risk(isins: list[str], benchmark_label: str,
         # columns to empty for everybody who opens it afterwards.
         _log.warning("[analysis] per-holding risk failed (%s: %s)", type(e).__name__, e)
         return _served()
+
+    # ⚠ ONCE FOR THE WHOLE CALL, NOT PER ISIN. It is one paged read of ~1,750 floats (~170ms) and
+    #   it is identical for every holding in the book, so asking inside the loop would multiply it
+    #   by ~60. Leg-cached on the benchmark, so re-opening any book on the same benchmark is free.
+    # ⚠ `None` when nothing has been precomputed for this benchmark — the rows then carry no
+    #   `mom_state` and the column renders the number alone, which is what it did before. A missing
+    #   precompute must degrade to the old behaviour, never to a default distribution.
+    dist_hit = ac.leg(("rel_mom_dist", benchmark_label),
+                      lambda: _relative.load_distribution(benchmark_label))
+    dist = dist_hit[0] if dist_hit else None
+    dist_n = dist_hit[2] if dist_hit else 0
 
     # ⚠ FOUR YEARS OF MONTHS, the same shape as the daily and weekly floors — the three columns
     # must not disagree about which rows have enough history to be quoted under a "5y" heading.
@@ -2865,6 +2981,29 @@ def _holding_risk(isins: list[str], benchmark_label: str,
                 legs = mom_12_1_legs(ser)
                 if legs is not None:
                     row["mom_12_1_from"], row["mom_12_1_to"] = legs
+                # ⚠⚠ THE STATE IS THIS ROW'S OWN NUMBER PLACED IN THE UNIVERSE'S DISTRIBUTION, NOT
+                # A LOOKUP OF THIS COMPANY'S STORED RANK. The obvious version — bridge the ISIN to
+                # a `company_id` and read its `relative_momentum` row — covers only **154 of 254**
+                # held ISINs (61%), because a book holds ETFs, bonds, funds and names that are not
+                # constituents; per book it ranges from 56% to 95%. That would blank two rows in
+                # five in a column that currently has a number for every priced holding.
+                #
+                # ⚠⚠ AND IT IS ONLY SOUND BECAUSE BOTH SIDES ARE IN EUR. `eur` is the daily EUR
+                # close; `momentum.relative` converts before ranking for exactly this reason. On
+                # native-currency prices the same universe put 293 of 1,745 names (16.8%) in a
+                # DIFFERENT bucket — every one of them a plausible number.
+                #
+                # ⚠ The two are still different VENDORS (Yahoo here, GuruFocus for the universe),
+                # which is fine for deciding a bucket and would not be fine for a subtraction. So
+                # nothing subtracts them: the percentile is a position, not a difference.
+                if dist is not None:
+                    state, pct = _relative.state_of(row["mom_12_1_pct"], dist)
+                    row["mom_state"], row["mom_pct_rank"] = state, round(pct, 4)
+                    # ⚠ THE POPULATION RIDES ON THE ROW, not on the payload root. It is the same
+                    #   number for every row, but a rank whose reference set is stated somewhere
+                    #   else is a rank a reader has to go looking for — and threading one scalar
+                    #   up through the assembly is three edits where `RISK_KEYS` is none.
+                    row["mom_rank_n"] = int(dist_n or 0) or None
         except Exception as e:  # noqa: BLE001 — one column must never cost the modal
             _log.warning("[analysis] momentum failed for %s (%s: %s)", isin, type(e).__name__, e)
 
@@ -2981,7 +3120,8 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
 
     from routers import _analysis_cache as ac  # noqa: PLC0415
 
-    key = (portfolio_id, benchmark_label, weight_by, source, bucket_filter)
+    key = (portfolio_id, benchmark_label, weight_by, source, bucket_filter,
+           COMPOSITION_BASIS)
     # The fingerprint is a database read, so it goes to a thread like everything else here.
     fp = await asyncio.to_thread(ac.fingerprint)
     hit = ac.get(key, fp)
@@ -3158,6 +3298,10 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
         "benchmark_universe_members": bench_coverage.get("universe_members") or 0,
         "benchmark_priced": bench_coverage.get("priced") or 0,
         "benchmark_coverage_pct": bench_coverage.get("covered_pct"),
+        # ⚠ NAMES WHERE THE GAP IS, because it is not spread evenly — see `_missing_by_country`.
+        #   Empty means "could not work it out", which the copy renders as no sentence rather than
+        #   as "nothing missing"; the magnitude is always in `benchmark_coverage_pct`.
+        "benchmark_missing_countries": bench_coverage.get("missing_countries") or [],
         "returns": _basket_returns(holdings, benchmark_label),
         "axes": axes,
         # A basket has no AIRS book, so no per-holding book returns — the non-equity sleeve view is

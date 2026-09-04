@@ -71,14 +71,56 @@ PROXY: dict[str, str] = {
 
 _NAMES = {"ACWI": "iShares MSCI ACWI ETF", "SPY": "SPDR S&P 500 ETF Trust"}
 
-# How far behind today the newest stored bar may be before we go back to the vendor. Three days
-# clears a normal weekend; a long weekend costs one extra call and nothing else.
+# ⚠ THE FALLBACK RULE ONLY. How far behind TODAY the newest stored bar may be before we go back to
+# the vendor, used when the market anchor below cannot be had. Three days clears a normal weekend;
+# a long weekend costs one extra call and nothing else.
 _STALE_DAYS = 3
 
 # ⚠ ONE VENDOR CALL PER TICKER PER PROCESS PER DAY, AT MOST. Without this a stale series would be
 # re-fetched by every Analyse-modal open that missed the leg cache — and the modal is ONE request
 # with no partial paint, so a vendor round trip lands directly in the wait the reader sees.
 _fetched_today: dict[tuple[str, str], bool] = {}
+
+
+def _behind_the_market(last: tuple[str, float] | None) -> bool:
+    """Is this proxy series behind the freshest close we hold ANYWHERE?
+
+    ⚠⚠ ANCHORED TO THE MARKET, NOT TO THE CALENDAR, AND THE CALENDAR RULE WAS WRONG BY EXACTLY THE
+    AMOUNT NOBODY WOULD NOTICE. `_STALE_DAYS = 3` means a series one or two days behind is declared
+    FRESH, so the lazy path declined to fetch it — and the tile then sat a day behind the `Return`
+    chip and the return chart beside it, which read AIRS's newest row. Both figures looked current
+    and neither was reported as anything else. Measured 2026-09-03 on the working database: the
+    ACWI and SPY proxies newest bar **2026-09-01**, against a **2026-09-02** newest close
+    everywhere else — the same one-day lag this module recorded on 2026-09-02 from the other end
+    of the same rule, when `refresh_index_proxies` was found not to be forcing.
+
+    ⚠ IT IS THE SAME ANCHOR THE PRICE PIPELINE'S RETRY AND THE DELISTING SWEEP USE, for the same
+    reason: "today" is not a market date. Anchoring on the freshest close WE HOLD makes a weekend, a
+    holiday and a vendor outage correct by construction — nothing is behind when nothing has moved
+    — where a calendar rule has to be loosened until it stops false-triggering, which is precisely
+    how it came to tolerate the lag it existed to catch.
+
+    ⚠ A FAILURE HERE FALLS BACK TO THE CALENDAR RULE rather than forcing a fetch. The anchor is one
+    cheap indexed read, but it sits on the critical path of a modal that paints nothing until it is
+    done, and "we could not work out whether it is stale" is not a reason to spend a vendor round
+    trip in somebody's wait.
+
+    ⚠ THE ONCE-PER-TICKER-PER-PROCESS-PER-DAY GUARD IS UNCHANGED and is what bounds the cost. This
+    only changes WHICH DAY the first call happens on: on a box whose scheduled
+    `refresh_index_proxies` has run, the series is not behind and the reader still pays nothing.
+    """
+    if last is None:
+        return True
+    try:
+        from asset_pipeline.price_refresh import global_latest_close  # noqa: PLC0415
+        anchor = global_latest_close()
+    except Exception as exc:                                        # noqa: BLE001
+        _log.warning("[bench-etf] market anchor unavailable, falling back to the calendar rule: "
+                     "%s: %s", type(exc).__name__, exc)
+        anchor = None
+    if anchor:
+        return last[0] < str(anchor)[:10]
+    return date.fromisoformat(last[0]) < date.today() - timedelta(days=_STALE_DAYS)
 
 
 def _benchmark_id(ticker: str) -> int | None:
@@ -163,12 +205,28 @@ def _refresh(ticker: str, bid: int, have_max: str | None) -> int:
     return len(rows)
 
 
-def ensure_fresh(label: str) -> tuple[int, tuple[str, float]] | None:
+def ensure_fresh(label: str, *, force: bool = False) -> tuple[int, tuple[str, float]] | None:
     """`(benchmark_id, newest bar)` for this label's proxy ETF, refreshed if it has gone stale.
 
     None when there is no proxy, or when nothing can be had at all. Self-healing: the scheduled
     price phase normally keeps this current (`refresh_index_proxies`), and this is what makes the
     number right anyway on a box where that has not run yet.
+
+    ⚠⚠ `force` IS WHAT MAKES THE SCHEDULED PATH ACTUALLY REFRESH, AND ITS ABSENCE WAS A BUG THAT
+    LOOKED LIKE A WORKING JOB. `refresh_index_proxies` runs daily inside `price_update` and did
+    nothing but call this — which refuses to fetch until the series is MORE than `_STALE_DAYS`
+    behind. So the "daily refresh" was a no-op on any series under four days old: the tile could
+    only ever be repaired once it was already badly stale, and in between it sat a day or two
+    behind everything else on the page with nothing reporting it. Measured 2026-09-02: ACWI and
+    SPY newest bar **2026-08-31** against a **2026-09-01** newest close in both `metric_data` and
+    `asset_price`.
+
+    ⚠ THE TWO CALLERS WANT OPPOSITE THINGS, WHICH IS WHY THIS IS A FLAG AND NOT A LOWER CONSTANT.
+    The scheduled path is the one that SHOULD spend a vendor call every day — that is its whole
+    job, and it runs where nobody is waiting. The reader path must not: it is inside the Analyse
+    modal, ONE request with no partial paint, where a 1.35s GuruFocus round trip is the whole of
+    somebody's wait. Lowering `_STALE_DAYS` instead would have moved the daily call onto the
+    reader, which is exactly what the scheduled pass exists to prevent.
     """
     ticker = PROXY.get(label)
     if not ticker:
@@ -177,9 +235,21 @@ def ensure_fresh(label: str) -> tuple[int, tuple[str, float]] | None:
     if bid is None:
         return None
     last = _latest(bid)
-    stale = last is None or date.fromisoformat(last[0]) < date.today() - timedelta(days=_STALE_DAYS)
+    # ⚠ BEHIND THE MARKET, NOT BEHIND THE CALENDAR — see `_behind_the_market` for the measurement
+    #   that replaced the three-day rule, and for why a weekend needs no special case once the
+    #   anchor is the freshest close we hold. `force` sidesteps the question entirely for the
+    #   scheduled caller, which simply asks the vendor what it has.
+    stale = _behind_the_market(last)
     guard = (ticker, date.today().isoformat())
-    if stale and not _fetched_today.get(guard):
+    # ⚠⚠ `force` BYPASSES THE DAY GUARD TOO, AND IT DID NOT — which made "Refresh" unable to move
+    #   this tile for the rest of any day the lazy path had already spent its one call. Measured
+    #   2026-09-03: the modal's first open asked the vendor, GuruFocus had not yet published ACWI's
+    #   02-09 bar, it published minutes later, and every Refresh after that was a no-op while the
+    #   book beside it advanced. `force` now means what it says — ASK THE VENDOR NOW — and its only
+    #   callers are the scheduled pass and a button somebody pressed, both of which run where
+    #   nobody is waiting on the round trip. The guard is still SET, so a later lazy read in the
+    #   same process cannot spend a second call.
+    if (force or stale) and (force or not _fetched_today.get(guard)):
         _fetched_today[guard] = True
         try:
             if _refresh(ticker, bid, last[0] if last else None):
@@ -199,11 +269,21 @@ def refresh_index_proxies() -> int:
     lazily means inside the Analyse modal — ONE request with no partial paint, where it is the
     whole of somebody's wait. Run daily beside the other benchmark prices, the lazy path becomes
     the repair it was meant to be rather than the normal case.
+
+    ⚠⚠ `force=True`, AND WITHOUT IT THIS FUNCTION DID NOTHING. It called `ensure_fresh` plainly,
+    which declines to fetch until the series is more than `_STALE_DAYS` (3) behind — so a job that
+    runs every morning could not keep a series current, only rescue one already four days gone.
+    The tile sat a day or two behind the rest of the page, every day, and nothing said so. This is
+    the caller that is SUPPOSED to spend a vendor call daily; the freshness test belongs on the
+    reader, not here.
+
+    ⚠ The per-process, per-day guard inside `ensure_fresh` still applies, so a restart-looping box
+    does not turn this into a fetch per boot.
     """
     n = 0
     for label in PROXY:
         try:
-            if ensure_fresh(label):
+            if ensure_fresh(label, force=True):
                 n += 1
         except Exception as exc:                                # noqa: BLE001
             _log.warning("[bench-etf] %s: proxy refresh failed: %s: %s",

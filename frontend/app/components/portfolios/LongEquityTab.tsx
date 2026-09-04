@@ -269,15 +269,22 @@ export default function LongEquityTab({
    * chart can be guaranteed to mean the same thing. The index arrives cap-weighted; the card's
    * existing weighted average does the rest.
    */
-  // ⚠ AEX, NOT `BENCHMARKS[0]`. The default is a choice about what this book is measured against —
-  // a Dutch book against the Dutch index — not "whichever we happen to list first", and pinning it
-  // to the array's order means reordering the list silently re-benchmarks every chart in the tab.
-  const [benchmark, setBenchmark] = useState<string | null>(compare ? COMPARE_VALUE : 'AEX');
+  // ⚠⚠ ACWI, AND SPELT OUT RATHER THAN `BENCHMARKS[0]` (2026-09-03, on request; it was 'AEX').
+  // The default is a choice about what a book is measured against, so it is written where the
+  // choice is made: pinning it to the array's order would let a reorder of the list silently
+  // re-benchmark every chart on the tab.
+  // ⚠ WHY ACWI RATHER THAN THE DUTCH INDEX IT WAS. These books are global — the Analyse modal's
+  // own scorecard already defaults to ACWI, and the relative-momentum precompute ranks against it
+  // — so AEX put the tab's fourteen charts on a 22-name national index while the tile two clicks
+  // away used a 2,000-name global one. Two defaults for the same question, on one screen.
+  // ⚠ THE OTHER TWO ARE STILL OFFERED and the coverage note above still applies: SP500 is the
+  // best-ingested, so a card drawn against ACWI states the coverage it actually reached.
+  const [benchmark, setBenchmark] = useState<string | null>(compare ? COMPARE_VALUE : 'ACWI');
 
   /**
    * ⚠ A COMPANY PICKED ELSEWHERE WINS, AND THE SELECT FOLLOWS IT. On /research-dashboard the second
-   * company is chosen by the PAGE, not by this control; leaving the select on 'AEX' would draw an
-   * index while the page above it named a company. Derived at render from `compare` — an effect
+   * company is chosen by the PAGE, not by this control; leaving the select on the default index
+   * would draw an index while the page above it named a company. Derived at render from `compare` — an effect
    * that assigned it would render once with the wrong line and again with the right one.
    */
   const selected = compare && benchmark === COMPARE_VALUE ? COMPARE_VALUE : benchmark;

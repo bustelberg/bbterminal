@@ -402,3 +402,189 @@ describe('buildBlend positives-only members', () => {
     expect(b.contrib.get(r[1])).toBeUndefined();
   });
 });
+
+/**
+ * ⚠⚠ A ONE-HOLDING BOOK IS ITS COMPANY, AND THE `Tables` TAB MUST SAY WHAT `Graphs` SAYS. The
+ * Fundamental modal opens on one company as `{holdings:[{isin, weight:1}]}` — `Graphs` then plots
+ * the filed figures directly, while `Tables` runs the SAME figures through this blend. With one
+ * member there is nothing to blend, so the level has to come out at exactly `100 x v(p)/v(base)`,
+ * or the two tabs answer one question twice.
+ *
+ * ⚠ MEASURED 2026-09-03 ON NVIDIA. `MIN_STEP_BASE_FRACTION` compares the rebased base (100) with
+ * `0.10 x median|rebased|` — 271 for the share price — so every step off the base was refused, and
+ * because that path does not advance the anchor it was refused for ever: 13 filed periods, ONE
+ * point drawn, and the Share price and EPS rows read `—`. See `baseBarScale`.
+ */
+describe('buildBlend on a one-holding book', () => {
+  // NVIDIA's real `price_ps` by fiscal year (local DB, 2026-09-03) — the series that came out empty.
+  const NVDA: Record<string, number> = {
+    2015: 0.48, 2016: 0.732, 2017: 2.73, 2018: 6.145, 2019: 3.594, 2020: 5.911,
+    2021: 12.99, 2022: 24.486, 2023: 19.537, 2024: 61.527, 2025: 120.07, 2026: 191.13,
+  };
+  const years = Object.keys(NVDA);
+  const only = () => [row('US67066G1040', 100, { ...NVDA })];
+
+  it('draws every filed period, not just the base', () => {
+    const b = buildBlend(resp(years, only()), 'price_ps');
+    expect(Object.keys(b.level)).toEqual(years);
+  });
+
+  it('is the filed series rebased to 100 — the line Graphs plots, to the last digit', () => {
+    const b = buildBlend(resp(years, only()), 'price_ps');
+    // ⚠ A RATIO, NOT AN ABSOLUTE TOLERANCE — the line reaches ~39,800 by 2026, where
+    // `toBeCloseTo(x, 8)` is asking for more precision than a chain of eleven multiplications has.
+    for (const y of years) {
+      expect(b.level[y].value / (100 * NVDA[y] / NVDA['2015'])).toBeCloseTo(1, 12);
+    }
+  });
+
+  it('so a 10y CAGR off the line equals one off the filed figures', () => {
+    const b = buildBlend(resp(years, only()), 'price_ps');
+    const line = (b.level['2025'].value / b.level['2015'].value) ** 0.1 - 1;
+    const filed = (NVDA['2025'] / NVDA['2015']) ** 0.1 - 1;
+    expect(line).toBeCloseTo(filed, 12);
+  });
+
+  it('leaves a MANY-member line alone, which is the only place the bar has a fallback', () => {
+    // Prosus beside one steady name: the 0.009 anchor is still refused, the steady name carries
+    // the step, and the index does not go through zero. This is the case the constant was read off.
+    const r = [row('STEADY', 50, { 2020: 1.0, 2021: 1.1, 2022: 1.21 }),
+      row('PRX', 50, { 2020: 0.10, 2021: 0.009, 2022: -0.24 })];
+    const b = buildBlend(resp(['2020', '2021', '2022'], r));
+    for (const y of ['2020', '2021', '2022']) expect(b.level[y].value).toBeGreaterThan(0);
+    expect(b.contrib.get(r[1])?.['2022']).toBeUndefined();   // immaterial anchor, still refused
+  });
+});
+
+/**
+ * THE MATERIALITY BAR'S INPUT IS THE **LEG**, NOT THE WHOLE AXIS.
+ *
+ * ⚠⚠ REPORTED 2026-09-04 as the Fundamental modal disagreeing with itself on ACWI: `eps_nri`
+ * +15.95%/yr on the `Tables` tab against +16.82% on `Graphs`, same window (2015->2025), same
+ * database. `price_ps` agreed to four figures, which is what pointed at the cause: EPS is the only
+ * charted metric with a forecast leg.
+ *
+ * `blend_series` fills `p["at"]` over the axis IT was handed and takes `base_bar_scale` off that,
+ * and a chart with a forecast is TWO calls — so the actual leg's bar is the median of a member's
+ * ACTUAL magnitudes. `buildBlend` blends one combined axis (filed, `LTM`, then the `…e` columns in
+ * one row map), so a single median over all of it mixes legs. A forecast tail is by construction
+ * the largest part of a compounder's series, the bar is `0.10 x median`, and raising it starts
+ * refusing a member's own EARLY steps: measured on the live index, the tail raised the bar for
+ * 1,009 of 1,073 members, pushed 65 anchors under their own bar (Wells Fargo, Mitsubishi UFJ,
+ * AT&T, TotalEnergies, Disney — mature, slow-growing names), and depressed EVERY ONE of the ten
+ * steps between 0.15% and 1.9%.
+ *
+ * ⚠ THE OTHER HALF OF THE SAME BUG, AND IT POINTS THE OTHER WAY: `LTM` and a period carried past
+ * the coverage floor ARE in the server's `at`, so they DO set the bar. Checked against the server's
+ * own `at` rather than reasoned from the LTM having its own metric code — the first fix here
+ * excluded both and overshot to +16.96%.
+ */
+describe('the materiality bar is per leg', () => {
+  /** A member whose forecast tail dwarfs its filed history, beside two ordinary ones. */
+  const hypergrower = () => [
+    row('A', 1, { 2015: 10, 2016: 1, 2017: 10, 2018: 10,
+                  '2019e': 100, '2020e': 100, '2021e': 100, '2022e': 100, '2023e': 100 }),
+    row('B', 1, { 2015: 100, 2016: 100, 2017: 110, 2018: 120,
+                  '2019e': 130, '2020e': 130, '2021e': 130, '2022e': 130, '2023e': 130 }),
+    row('C', 1, { 2015: 100, 2016: 100, 2017: 110, 2018: 120,
+                  '2019e': 130, '2020e': 130, '2021e': 130, '2022e': 130, '2023e': 130 }),
+  ];
+  const YEARS = ['2015', '2016', '2017', '2018',
+                 '2019e', '2020e', '2021e', '2022e', '2023e'];
+
+  it('a forecast tail does not bar a member from its own filed steps', () => {
+    const rows = hypergrower();
+    const b = buildBlend(resp(YEARS, rows));
+    // A rebases to 100 at 2015, so its filed values are [100, 10, 100, 100] — median 100, bar
+    // 10.0, and its 2016 anchor of 10 is NOT under it. Over the whole axis the five forecast
+    // periods rebase to 1000, the median becomes 1000, the bar 100, and the same anchor fails.
+    expect(b.contrib.get(rows[0])?.['2017']).toBeDefined();
+    // (9.0 + 0.10 + 0.10) ÷ 3 — A tenfolds, B and C add 10% each.
+    expect(b.step['2017'].growthPct).toBeCloseTo(306.6667, 3);
+  });
+
+  it('…and the LTM still sets it, because the server has the LTM in `at`', () => {
+    // Filed [100, 10, 900] has a median of 100 and a bar of 10, which the 2016 anchor of 10
+    // clears. With the LTM at 900 the median is 500, the bar 50, and A sits the step out.
+    const rows = [
+      row('A', 1, { 2015: 10, 2016: 1, 2017: 90, LTM: 90 }),
+      row('B', 1, { 2015: 100, 2016: 100, 2017: 110, LTM: 115 }),
+      row('C', 1, { 2015: 100, 2016: 100, 2017: 110, LTM: 115 }),
+    ];
+    const b = buildBlend(resp(['2015', '2016', '2017', 'LTM'], rows));
+    expect(b.contrib.get(rows[0])?.['2017']).toBeUndefined();
+    expect(b.step['2017'].growthPct).toBeCloseTo(10, 6);       // B and C alone
+  });
+
+  it('…and so does a period carried past the coverage floor, which `at` never sees', () => {
+    // ⚠⚠ THE AIG CASE, WHICH IS WHY `barAt` EXISTS. Only C reports 2018, so at 33% the period is
+    // under `MIN_YEAR_COVERAGE_PCT` and this file refuses to carry into it — deliberately, since a
+    // carried figure in an undrawn period renders as a projection. `carry_forward` on the server
+    // has no such gate, so its `at` carries A's 900 into 2018 and the median moves from 100 to
+    // 500: bar 50, and A's 2016 anchor of 10 is refused there while it is accepted here.
+    const rows = [
+      row('A', 1, { 2015: 10, 2016: 1, 2017: 90 }),
+      row('B', 1, { 2015: 100, 2016: 100, 2017: 110 }),
+      row('C', 1, { 2015: 100, 2016: 100, 2017: 110, 2018: 120 }),
+    ];
+    const b = buildBlend(resp(['2015', '2016', '2017', '2018'], rows));
+    expect(b.level['2018']).toBeUndefined();                   // under the floor, not drawn
+    expect(b.contrib.get(rows[0])?.['2017']).toBeUndefined();   // and yet it sets A's bar
+    expect(b.step['2017'].growthPct).toBeCloseTo(10, 6);
+  });
+});
+
+/**
+ * ⚠⚠ WHICH ROWS THE LINE WAS BLENDED FROM IS THE SERVER'S ANSWER, NOT A RECONSTRUCTION.
+ *
+ * This payload lists every constituent (`all_constituents=True`); the chart is blended over
+ * `_blend_inputs` = `_members(require_market_cap=True)` AND THEN `classify_holding == "covered"`.
+ * The old test here — `market_cap_eur > 0` — reproduced the cap filter and nothing else, so every
+ * member the classifier dropped (`fund`, `no_metrics`, `not_equity`, `unsubscribed`,
+ * `no_company`) sat in this blend and not in the server's.
+ *
+ * Measured 2026-09-04 on live ACWI `eps_nri`: 1,073 members here against 1,071 there — First Abu
+ * Dhabi Bank (its `asset_grid` row is typed `etf`, so the classifier calls it a fund wrapper) and
+ * Samsung Epis Holdings (no filed financials at all, three analyst-estimate rows). Both carry a
+ * real market cap, so no cap test could ever have caught them.
+ */
+describe('in_line is the server’s own member list', () => {
+  it('excludes a row the classifier dropped, however healthy it looks', () => {
+    const dropped: Row = { ...row('A', 1, { 2015: 100, 2016: 200 }),
+                           market_cap_eur: 45e9, in_line: false };
+    const kept = [
+      { ...row('B', 1, { 2015: 100, 2016: 110 }), market_cap_eur: 10e9, in_line: true },
+      { ...row('C', 1, { 2015: 100, 2016: 110 }), market_cap_eur: 10e9, in_line: true },
+    ];
+    const b = buildBlend(resp(['2015', '2016'], [dropped, ...kept]));
+    expect(b.contributors).toBe(2);
+    expect(b.contrib.get(dropped)?.['2016']).toBeUndefined();
+    expect(b.step['2016'].growthPct).toBeCloseTo(10, 6);   // not (100 + 10 + 10) ÷ 3
+  });
+
+  it('⚠ falls back to the cap test when the field is absent, never to “not in the line”', () => {
+    // An older payload — or any response that predates the flag — must behave exactly as before.
+    const rows = [
+      // ⚠ EQUAL CAPS, because the cap IS the weight here — `wAt` reads `market_cap_eur` on an
+      // index row, so unequal ones would make the expected figure a weighted average and hide
+      // which half of this test failed.
+      { ...row('A', 1, { 2015: 100, 2016: 200 }), market_cap_eur: 10e9 },
+      { ...row('B', 1, { 2015: 100, 2016: 110 }), market_cap_eur: 10e9 },
+      { ...row('C', 1, { 2015: 100, 2016: 110 }), market_cap_eur: 0 },   // no cap ⇒ out, as before
+    ];
+    const b = buildBlend(resp(['2015', '2016'], rows));
+    expect(b.contributors).toBe(2);
+    expect(b.step['2016'].growthPct).toBeCloseTo(55, 6);   // (100 + 10) ÷ 2
+  });
+
+  it('⚠ `false` is a value, so it must not fall through the way `||` would', () => {
+    // A portfolio row ships no `market_cap_eur` at all, so the fallback would say "in the line".
+    const rows = [
+      { ...row('A', 50, { 2015: 100, 2016: 200 }), in_line: false },
+      { ...row('B', 50, { 2015: 100, 2016: 110 }), in_line: true },
+    ];
+    const b = buildBlend(resp(['2015', '2016'], rows));
+    expect(b.contributors).toBe(1);
+    expect(b.step['2016'].growthPct).toBeCloseTo(10, 6);
+  });
+});

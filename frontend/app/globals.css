@@ -329,3 +329,37 @@ html {
 @media (prefers-reduced-motion: reduce) {
   .loading-bar::after { animation-duration: 2.4s; }
 }
+
+/* Waiting for one VALUE — three dots that fill in one at a time, then start over. The cell-sized
+   twin of `.loading-bar`, for the place a bar cannot go: inside a table cell, in a column of
+   figures.
+
+   ⚠ IT MOVES BECAUSE A MOTIONLESS `…` DOES NOT SAY WHICH ABSENCE IT IS. These tables print `—` for
+   "measured, and there is no answer" and `…` for "not measured yet" — two motionless glyphs in one
+   column, on exactly the screen where the difference decides whether the reader goes looking for a
+   bug. Movement is the whole signal; nothing else in the row animates.
+
+   ⚠ FIXED WIDTH. Letting it grow and shrink would tug the column three times a second while the
+   numbers beside it hold still.
+
+   ⚠ CSS, NOT A TIMER. A loading table can hold seventy of these; a `setInterval` each would be
+   seventy React re-renders a second, all drifting out of phase with one another because each
+   starts whenever its cell mounted. These share the document's timeline and cost nothing.
+
+   Markup comes from `portfolios/LoadingDots.tsx` — three spans, `aria-hidden` like every
+   `.loading-bar` caller. Nothing else should hand-roll it. */
+.loading-dots {
+  display: inline-block;
+  width: 1.5em;
+  text-align: left;
+}
+.loading-dots > span:nth-child(2) { animation: loading-dots-2 1.2s linear infinite; }
+.loading-dots > span:nth-child(3) { animation: loading-dots-3 1.2s linear infinite; }
+/* The first dot never hides, so the cell is never empty — an indicator that blinks out entirely
+   reads as a flicker rather than as progress. */
+@keyframes loading-dots-2 { 0%, 32.9% { opacity: 0; } 33%, 100% { opacity: 1; } }
+@keyframes loading-dots-3 { 0%, 65.9% { opacity: 0; } 66%, 100% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  /* All three, motionless — which is exactly the `…` this replaced. */
+  .loading-dots > span { animation: none; }
+}

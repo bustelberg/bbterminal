@@ -287,12 +287,12 @@ def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
 
 #: How old our copy of a CONTINUOUSLY-REVISED feed may be before a smart press re-asks for it.
 #:
-#: â â  THE ONE NUMBER HERE THAT IS NOT MEASURED, AND IT IS ONLY HALF A GUESS. Statements need no such
-#: rule â a company files on a schedule and `period_due` answers exactly when a new one can exist.
+#: ⚠⚠ THE ONE NUMBER HERE THAT IS NOT MEASURED, AND IT IS ONLY HALF A GUESS. Statements need no such
+#: rule — a company files on a schedule and `period_due` answers exactly when a new one can exist.
 #: Estimates and indicators have no fiscal boundary: analysts revise a consensus whenever they like,
 #: so "is it stale" can only be a question about elapsed time. Seven days is taken from the one
-#: cadence that IS observable â the forward-P/E series arrives WEEKLY (measured on company 11: 102
-#: of 107 gaps are exactly 7 days) â so a shorter window cannot find new points and a longer one
+#: cadence that IS observable — the forward-P/E series arrives WEEKLY (measured on company 11: 102
+#: of 107 gaps are exactly 7 days) — so a shorter window cannot find new points and a longer one
 #: leaves them unfetched. The estimates feed reuses it for want of anything better to derive from;
 #: if it proves too eager, this is the constant to move.
 SMART_REFRESH_AFTER_DAYS = 7
@@ -324,11 +324,11 @@ FEED_FETCHED_AT = {
 def _is_stale(last: date | None, today: date, *, has_rows: bool = True) -> bool:
     """Is our copy of a continuously-revised feed old enough to be worth re-asking for?
 
-    â  NEVER-WRITTEN COUNTS AS STALE. `None` here means we hold nothing, which is the strongest
+    ⚠ NEVER-WRITTEN COUNTS AS STALE. `None` here means we hold nothing, which is the strongest
     reason to fetch there is — reading it as "not stale" would make a feed we have never
     fetched look permanently up to date.
 
-    â  ONE DEFINITION, TWO CALLERS. The row button and the bulk button must not come to disagree
+    ⚠ ONE DEFINITION, TWO CALLERS. The row button and the bulk button must not come to disagree
     about what "smart" means, or the big one stops being N presses of the small one.
     """
     # ⚠⚠ `last` IS NOW "WHEN DID WE ASK" (`company.<feed>_fetched_at`), NOT "WHEN DID A ROW APPEAR"

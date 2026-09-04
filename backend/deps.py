@@ -334,10 +334,34 @@ def paginate(query: Callable[[int, int], Any], *, page_size: int = 1000) -> Iter
 
     `query(lo, hi)` receives inclusive 0-based range bounds (PostgREST
     `.range(lo, hi)` semantics) and returns an executed response (with a
-    `.data` list) or a plain list of rows. Pages of `page_size` are walked
-    until one comes back short (or empty) — the single home for the
-    offset/`.range()` loop that PostgREST's 1000-row cap forces on every
+    `.data` list) or a plain list of rows — the single home for the
+    offset/`.range()` loop that PostgREST's row cap forces on every
     full-table scan.
+
+    ⚠⚠ IT ADVANCES BY WHAT CAME BACK AND MEASURES THE CAP; IT DOES NOT ASSUME
+    `page_size` IS THE CAP. This used to `return` on `len(data) < page_size` and
+    step `offset += page_size`, which is the banned assumption in both halves:
+    the server's `db-max-rows` — not our `.range()` — decides how many rows
+    arrive, and it is **1,000 on the cloud project against 10,000 locally**. So
+    a cap BELOW `page_size` made the first short page look like the last one,
+    and all 37 callers would have silently read only the first `cap` rows of
+    their table. It was safe by coincidence: the default `page_size` happened to
+    equal the cloud cap. Lower `db-max-rows`, or pass a bigger `page_size`, and
+    every full-table read in the app truncates at once, with no empty cell and
+    no error (`project_postgrest_max_rows_trap`).
+
+    ⚠ THE CAP IS MEASURED, NOT ASSUMED: once a page has returned N rows the
+    server has PROVEN it will return N, so a later page shorter than N ran out
+    of ROWS rather than hitting a cap, and we can stop without probing. Same
+    rule as `routers/_airs_ref._paged`.
+
+    ⚠ THE PRICE IS ONE EMPTY REQUEST when the read never proves a page — a table
+    that fits inside the first page, or one whose size is an exact multiple of
+    the cap. Nothing has been PROVEN there, and the two states it cannot
+    distinguish ("that was all the rows" and "that was all the server would
+    give me") are exactly the ones this function exists to keep apart. One round
+    trip is the honest price of that distinction; the previous code got it for
+    free by guessing, and guessed wrong in the direction of silent data loss.
 
     Example:
         for row in paginate(lambda lo, hi:
@@ -345,10 +369,18 @@ def paginate(query: Callable[[int, int], Any], *, page_size: int = 1000) -> Iter
             ...
     """
     offset = 0
+    proven = 0   # the largest page this server has actually returned
     while True:
         result = query(offset, offset + page_size - 1)
         data = getattr(result, "data", result) or []
-        yield from data
-        if len(data) < page_size:
+        if not data:
             return
-        offset += page_size
+        yield from data
+        n = len(data)
+        if n < proven:
+            # Shorter than a page the server has already delivered — out of rows, not capped.
+            return
+        proven = max(proven, n)
+        # ⚠ BY `n`, NEVER BY `page_size`: they differ on exactly the runs this guards against,
+        # and stepping by the larger of the two SKIPS the rows in between.
+        offset += n

@@ -10,11 +10,10 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { logLinearFit } from '../../../lib/trendFit';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { useLang } from '../../../lib/i18n';
-import { chartTitle } from './longEquityCopy';
 import { Stat, pctSince } from './MetricGrowthCard';
 import { benchTileLabel, SpanNote } from './CardStats';
 import { clipPoints, sharedSpan } from './windowStats';
+import { cagrPct } from './lineCagr';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
 import InvestedCapitalInputsModal from './InvestedCapitalInputsModal';
@@ -23,6 +22,7 @@ import { paddedLogDomain, stepChanges, xToPeriod, type Step } from './marginData
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, rebaseSeries, useBenchInputs, type BenchTarget } from './benchSeries';
 import { type CashReturnInputs } from './cashReturnData';
+import CardHeading from './CardHeading';
 
 /**
  * Invested-capital card: non-current liabilities + total equity per fiscal year — the SAME base
@@ -48,11 +48,6 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
    */
   benchTarget?: BenchTarget | null;
 }) {
-  // ⚠ READ FROM THE STORE, NOT DRILLED THROUGH `LongEquityTab` AS A PROP. Fourteen sibling
-  // cards would mean fourteen chances to forget one, and a card left on English would look
-  // like a missing translation rather than a missing prop. `useLang` is an external store
-  // (see `lib/i18n.ts`), so every card reads the one value directly.
-  const [lang] = useLang();
   const [data, setData] = useState<CashReturnInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
@@ -183,11 +178,23 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
     return `${v.toFixed(0)}M`;
   };
   const ccy = !isIndex && currency ? `${currency} ` : '';
-  const cagr = (v: number | null) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`);
+  /**
+   * ⚠ THE SAME SPELLING AS EVERY OTHER CAGR TILE (`cagrPct`, two decimals) — this card sits in the
+   * same grid as the growth cards and its row is in the `Tables` tab, so a reader compares them.
+   *
+   * ⚠⚠ IT IS STILL THE **FITTED** RATE, WHICH THE OTHERS NO LONGER ARE. `fit.cagr` is `e^slope − 1`
+   * of the log-linear regression; `MetricGrowthCard` and the `Tables` row for invested capital both
+   * report the point-to-point `endpointCagr`, which is the one definition `lineCagr`'s header says
+   * this app has. So this tile and the `Invested capital CAGR` row can legitimately differ, by
+   * however far the endpoint years sit off the trend — and two decimals makes that visible rather
+   * than creating it. Left as it is deliberately: changing WHICH rate this reports is a decision
+   * about the number, not about its formatting.
+   */
+  const cagr = (v: number | null) => (v == null ? '—' : cagrPct(v * 100));
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      <h4 className="text-base font-semibold text-fg-strong">{chartTitle(lang, 'investedCapital')}</h4>
+      <CardHeading chartKey="investedCapital" />
 
       {data == null && !err ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>

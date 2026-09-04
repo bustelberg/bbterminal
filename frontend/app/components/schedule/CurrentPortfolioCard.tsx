@@ -618,7 +618,7 @@ export default function CurrentPortfolioCard({
                             : 'text-fg-faint hover:text-accent-300 opacity-0 group-hover:opacity-100 focus:opacity-100'
                         }`}
                       >
-                        {refreshing.has(h.company_id) ? '…' : '↻'}
+                        {refreshing.has(h.company_id) ? 'Refreshing…' : 'Refresh'}
                       </button>
                     )}
                   </td>
@@ -689,7 +689,7 @@ export default function CurrentPortfolioCard({
       </div>
       <p className="text-xs text-fg-subtle mt-3 leading-relaxed">
         Sorted by current weight. <span className="font-medium">Target</span> is the last-rebalance weight; <span className="font-medium">Current</span> is the drifted weight, renormalized to 100%. <span className="font-medium">Start/End</span> are entry and latest-close prices in local currency. <span className="font-medium">Return (€)</span> and <span className="font-medium">Total</span> are the engine&apos;s figures (per-holding and weighted portfolio return), matching the headline MTD. <span className="font-medium">Start/End (€)</span>{' '}are the engine&apos;s EUR marks — &quot;—&quot; until priced (ETFs self-heal on the next price update).
-        {canEditCash && <> A stale (<span className="text-warn-400">orange</span>) close date shows a <span className="text-warn-400">↻</span> to refresh that holding from GuruFocus, with the request and response inline.</>}
+        {canEditCash && <> A stale (<span className="text-warn-400">orange</span>) close date shows a <span className="text-warn-400">Refresh</span> button for that holding, with the request and response inline.</>}
         {' '}Click a <span className="font-medium">company name</span> for the arithmetic behind its selection.
       </p>
       {breakdown && (

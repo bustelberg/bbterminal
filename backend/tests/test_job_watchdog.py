@@ -1,7 +1,7 @@
 """The watchdog: the automatic-jobs page's own verdict, acted on.
 
 ⚠⚠ THE MEASURED SYMPTOM (prod, 2026-08-18). `daily_pipeline` read `overdue — 7.1d ago` and
-`month_end_price_refresh` read `interrupted — 18.0d ago`, both with a perfectly healthy `next run`
+`daily_price_slice` read `interrupted — 18.0d ago`, both with a perfectly healthy `next run`
 beside them. The TICK was firing; the WORK was not finishing, and nothing tried again. The page had
 been computing exactly that verdict for months and its only consumer was a person reading it.
 
@@ -153,7 +153,7 @@ class TestNoVerdictMeansNoAction:
 
 class TestThePipelineJobsItCouldNotTouch:
     """⚠⚠ THE TWO JOBS THIS WATCHDOG WAS BUILT FOR WERE THE TWO IT SKIPPED, for eleven days after
-    it shipped. `daily_pipeline` and `month_end_price_refresh` have no `JOB_BODIES` entry —
+    it shipped. `daily_pipeline` and `daily_price_slice` have no `JOB_BODIES` entry —
     deliberately, because a generic "Run now" would be a worse button than the one with a live
     console tail in their own expanded row — and that same membership was gating what the watchdog
     could re-run. So they landed in `unrunnable` every sweep while the page beside them reported
@@ -168,7 +168,7 @@ class TestThePipelineJobsItCouldNotTouch:
         fired: list[str] = []
         monkeypatch.setattr(S, "_WATCHDOG_STARTERS", {
             "daily_pipeline": lambda: fired.append("daily_pipeline"),
-            "month_end_price_refresh": lambda: fired.append("month_end_price_refresh"),
+            "daily_price_slice": lambda: fired.append("daily_price_slice"),
         })
         return health, started, fired
 
@@ -187,11 +187,11 @@ class TestThePipelineJobsItCouldNotTouch:
         and narrate into `ingest_run`, which is where /schedule already watches them; wrapping them
         in a registry job would put a second progress surface on a run that has one."""
         health, started, fired = pipeline
-        health["rows"] = [_row("month_end_price_refresh", "interrupted")]
+        health["rows"] = [_row("daily_price_slice", "interrupted")]
 
         S._body_job_watchdog()
 
-        assert fired == ["month_end_price_refresh"]
+        assert fired == ["daily_price_slice"]
         assert started == [], "it must not go through start_job_now"
 
     def test_a_job_with_neither_is_still_reported_unrunnable(self, pipeline):

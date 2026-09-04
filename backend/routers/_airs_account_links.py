@@ -168,7 +168,42 @@ def list_account_links() -> dict:
     The accounts come from `airs_performance` (the front-office scrape), NOT from
     `airs_model_portfolio`: 18 of the 51 accounts have no row in the models list at all, and
     those are precisely the ones a models-table-driven view would never show.
+
+    ⚠⚠ IT IS A FLEET FACT, AND THE ANALYSE PATH ASKS FOR IT FIVE TIMES. This answers nothing about
+    any one portfolio — it is the whole account/model pairing table — and the callers want ONE row
+    out of it, which they find with a linear `next(...)` over the rebuilt list. There are five such
+    lookups in `_airs_portfolio_analysis` alone, plus `_airs_attribution_basis` and
+    `_airs_holding_timing` on the same request. So it is a LEG in exactly the sense
+    `_analysis_cache` means: same fingerprint, same staleness guarantee, no dependence on which
+    book is open.
+
+    ⚠ `read_cache` ALREADY ABSORBS THE ROUND TRIPS, and that is why this is worth only what it is
+    worth. Measured inside one `read_cache` block: the first call 1,390 ms, each repeat **23-31 ms**
+    — the HTTP is served from the memo and what remains is re-PARSING the ~150 KB `airs_performance`
+    body and re-running `_year_perf`'s monthly reduction over 1,968 rows. Caching the assembled
+    result removes ~100 ms per modal open; it is not the 2.5s that counting bare calls suggests,
+    and anyone re-measuring this outside a `read_cache` block will get that wrong number.
+
+    ⚠ THE RESULT IS SHARED BY REFERENCE AND MUST BE TREATED AS IMMUTABLE — the leg store's standing
+    rule. Audited at the time of writing: all fourteen call sites READ (`next(...)` lookups, dict
+    and list comprehensions that build new objects); not one assigns into a returned row. If you
+    add a caller, read — do not decorate.
     """
+    from common import read_cache  # noqa: PLC0415
+
+    # ⚠ ONLY INSIDE A DECLARED-EXPENSIVE UNIT OF WORK, and never across a write — the same gate as
+    # `_airs_ref._paged`. Outside one, the leg store would cost a FINGERPRINT (one
+    # `pg_stat_user_tables` COPY) to answer a question nobody is about to ask again, making a lone
+    # caller slower by a round trip. `wrote()` opts a writer out so it cannot be handed a snapshot
+    # from before its own write.
+    if read_cache.active() is None or read_cache.wrote():
+        return _list_account_links_uncached()
+    from routers._analysis_cache import leg  # noqa: PLC0415  (cycle at module level)
+    return leg(("account-links",), _list_account_links_uncached)
+
+
+def _list_account_links_uncached() -> dict:
+    """The assembly itself. Split out so the memo above wraps it without duplicating any of it."""
     from routers._airs_accounts import _year_perf  # noqa: PLC0415  (circular at module level)
 
     perf = _year_perf()

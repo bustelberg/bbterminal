@@ -409,6 +409,44 @@ def member_scale(at: dict[str, float]) -> float:
     return median(vals) if vals else 0.0
 
 
+def base_bar_scale(at: dict[str, float], members: int) -> float:
+    """The materiality bar for ONE member — `member_scale`, or **0.0 (no bar) on a ONE-MEMBER
+    line**, where the member IS the line.
+
+    ⚠⚠ THE BAR IS A RULE ABOUT ONE MEMBER INSIDE AN AVERAGE OF MANY, AND ON A LINE OF ONE IT HAS
+    NOTHING TO PROTECT. `_MIN_STEP_BASE_FRACTION` refuses a member's step and lets the others carry
+    the interval — the refusal is an ABSTENTION. With a single contributor there is nobody to
+    abstain in favour of: `_weighted_arithmetic` gets an empty list, `blend_series` hits its
+    "nothing spans this interval" `continue`, and — because that path deliberately does NOT advance
+    `anchor` — the SAME base is offered at every later period and refused every time. One refusal
+    therefore deletes the whole line, not one step.
+
+    ⚠⚠ AND THE FIRST PERIOD OF A HYPERGROWER ALWAYS TRIPS IT. `_prepare` rebases each member to 100
+    at its own first positive period, so the bar reads `100 < 0.10 × median|rebased|` — i.e. it
+    fires on ANY member that grew more than ~10x from its first period to its median one. That is
+    not a corrupt divisor; it is growth. Measured 2026-09-03 on NVIDIA (US67066G1040) through
+    `portfolio-revenue-matrix` as a one-holding book:
+
+        price_ps  13 periods  median rebased 2,706  bar 271  ->   1 period drawn
+        eps_nri   18 periods  median rebased 2,269  bar 227  ->   1 period drawn
+        fcf_ps    13 periods  median rebased   494  bar  49  ->  13 periods drawn
+
+    A one-point line has no window, so the `Tables` tab's Share-price and EPS rows read `—` while
+    the Graphs tab — which for ONE company plots the filed figures directly, with no chain — drew
+    all thirteen. Two tabs of one modal, one company, one metric, two answers.
+
+    ⚠ IT DOES NOT LOOSEN THE BAR FOR AN INDEX OR A BOOK. `members > 1` is the whole condition, so
+    every measured case the constant was read off (Prosus at a 26% AEX weight, AMD, Mitsubishi
+    Heavy in ACWI) is untouched — those are exactly the lines where an abstention has somewhere to
+    fall back to.
+
+    ⚠ 0.0 IS ALREADY THE "NO BAR" VALUE — `member_scale({})` returns it and `prev < 0.10 x 0` is
+    false for every positive `prev`. So this adds a reason, not a mechanism. ⚠ Read it with `.get`
+    and a default, never `or`: `0.0 or member_scale(at)` silently puts the bar back.
+    """
+    return member_scale(at) if members > 1 else 0.0
+
+
 def step_growth(prev: float | None, now: float | None, scale: float) -> float | None:
     """One member's growth over one interval — or None when it has none to give.
 
@@ -601,7 +639,8 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
         # ⚠ ONCE PER MEMBER, NOT ONCE PER STEP. It is the same figure at every interval — the
         # member's own typical magnitude — and the level chain asks for it O(periods x members)
         # times. Computed here, where `at` has just been filled, so the two cannot fall out of step.
-        p["scale"] = member_scale(p["at"])
+        # ⚠ AND NO BAR AT ALL WHEN THIS MEMBER IS THE WHOLE LINE — see `base_bar_scale`.
+        p["scale"] = base_bar_scale(p["at"], len(prepared))
 
     def _clears(d: str) -> bool:
         return (100.0 * cover_w[d] / total_w >= MIN_BLEND_COVERAGE_PCT
@@ -1169,7 +1208,8 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
             # FLOOR. Re-deriving "the same way" here is how a panel comes to attribute a −2,700%
             # move to a holding the chart above it no longer moved on — and this panel is checked
             # once and believed thereafter.
-            g = step_growth(at.get(anchor), at.get(period), p.get("scale", member_scale(at)))
+            g = step_growth(at.get(anchor), at.get(period),
+                            p.get("scale", base_bar_scale(at, len(reporting))))
             contrib.append((p, abs(float(w or 0)), g if w else None))
         # ⚠ THE DENOMINATOR IS THE MEMBERS THAT MOVED, not everyone in the table — a member with no
         # growth to measure must not dilute the step toward zero. It appears with nulls; it is not

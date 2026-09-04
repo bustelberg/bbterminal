@@ -214,7 +214,7 @@ const en: TablesCopy = {
   meanTip: (n, from, to, of) =>
     `Mean of ${n} year${n === 1 ? '' : 's'} over ${from}–${to}`
     + `${of == null ? '' : `, of the ${of} asked for`}. Weighted per year by the same weights the `
-    + 'Long Equity chart uses — this is that line, averaged.',
+    + 'chart on Graphs uses — this is that line, averaged.',
   showNumbers: 'Show the numbers behind this row — every holding, every year, and the figures each '
     + 'one was computed from',
   noCoverage: (from, to) =>
@@ -255,8 +255,8 @@ const en: TablesCopy = {
           one; with six of them, singling out FCF/share reads as "the others DO match the cards",
           which is the opposite of true. */}
       {showFcf && <>
-        {' '}The rate rows are point-to-point and will not match the growth cards on the Long
-        Equity tab, which fit a trend through every year ({whyLink}).
+        {' '}The rate rows are point-to-point and will not match the growth cards on the
+        Graphs tab, which fit a trend through every year ({whyLink}).
       </>}
       {/* ⚠⚠ THE MEMBER RULE, IN THE PROSE. Every series on this table is the one the Long Equity
           chart of the same name draws — same holdings, same weighting, same coverage floor — and
@@ -265,7 +265,7 @@ const en: TablesCopy = {
           "n of m"; a table of rates has nowhere to put one per row, so it is said once, here. */}
       {showFiltered && <>
         {' '}The <strong>FCF per share</strong> and <strong>EPS</strong> rows are drawn from the
-        same series as the Long Equity charts — and, like them, only from the companies whose
+        same series as the charts on Graphs — and, like them, only from the companies whose
         figure is <strong>positive in every period</strong>, analyst estimates included. The rest
         are excluded outright, so read those two rows as how the survivors grew.
       </>}
@@ -363,7 +363,7 @@ const nl: TablesCopy = {
   meanTip: (n, from, to, of) =>
     `Gemiddelde van ${n} jaar over ${from}–${to}`
     + `${of == null ? '' : `, van de ${of} gevraagde`}. Per jaar gewogen met dezelfde wegingen als `
-    + 'de Long Equity-grafiek — dit is die lijn, gemiddeld.',
+    + 'de grafiek op Graphs — dit is die lijn, gemiddeld.',
   showNumbers: 'Toon de cijfers achter deze regel — elke positie, elk jaar, en de getallen waaruit '
     + 'elk cijfer is berekend',
   noCoverage: (from, to) =>
@@ -399,12 +399,12 @@ const nl: TablesCopy = {
       </>}
       {showFcf && <>
         {' '}De groeirijen lopen van eindpunt tot eindpunt en zullen niet overeenkomen met de
-        groeikaarten op het Long Equity-tabblad, die een trend door alle jaren leggen
+        groeikaarten op het tabblad Graphs, die een trend door alle jaren leggen
         ({whyLink}).
       </>}
       {showFiltered && <>
         {' '}De rijen <strong>Vrije kasstroom per aandeel</strong> en <strong>Winst per
-        aandeel</strong> gebruiken dezelfde reeks als de Long Equity-grafieken — en net als daar alleen de bedrijven waarvan
+        aandeel</strong> gebruiken dezelfde reeks als de grafieken op Graphs — en net als daar alleen de bedrijven waarvan
         het cijfer in <strong>elke periode positief</strong> is, analistenramingen inbegrepen. De
         overige vallen er volledig uit; lees die twee rijen dus als de groei van de overblijvers.
       </>}

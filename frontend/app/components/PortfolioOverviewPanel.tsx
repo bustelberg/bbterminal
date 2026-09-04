@@ -10,7 +10,6 @@ import { Provenance, ProvenanceFetchedAt } from '../../lib/provenance';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
-import { RefreshIcon } from './portfolios/RefreshIcon';
 import { cancelJob, startJob } from '../../lib/stores/jobs';
 import { createLiveReload } from '../../lib/liveReload';
 import AllocationBandsModal from './portfolios/AllocationBandsModal';
@@ -829,13 +828,12 @@ export default function PortfolioOverviewPanel() {
     const dir = sortDir === 'asc' ? 1 : -1;
     const val = (r: AirsPortfolioOverview): string | number | null => (
       sortKey === 'name' ? (r.name ?? '')
-        : sortKey === 'isins' ? r.isins ?? null
-          : sortKey === 'ytd' ? r.ytd_pct ?? null
-            : r.latest_month_pct ?? null);
+        : sortKey === 'ytd' ? r.ytd_pct ?? null
+          : r.latest_month_pct ?? null);
     return [...base].sort((a, b) => {
       const x = val(a), y = val(b);
-      // ⚠ ABSENT SORTS TO THE BOTTOM IN BOTH DIRECTIONS. A portfolio with no ISINs or no return
-      // has no value here — it is not a very small one. Letting null fall through to a numeric
+      // ⚠ ABSENT SORTS TO THE BOTTOM IN BOTH DIRECTIONS. A portfolio with no return has no
+      // value here — it is not a very small one. Letting null fall through to a numeric
       // compare would park every unlinked book at the top of an ascending sort and read as "these
       // are the worst performers", which is a claim the data never made.
       if (x == null && y == null) return 0;
@@ -849,18 +847,26 @@ export default function PortfolioOverviewPanel() {
   })();
 
   return (
+    /* ⚠⚠ EVERY EXPLICIT FONT SIZE IN THIS FILE WENT UP ONE STEP (2026-09-03, on request: "make
+       the font of everything a bit bigger"). It is written out per class rather than set once on
+       this section, and that is not a missed opportunity: `rem` is ROOT-relative, so a
+       `font-size` here would move nothing — and almost every size on this page is an arbitrary
+       px value, which no container can scale either. The single knob that does exist
+       (`html{font-size}`, see the design-system doc) is global and would take the whole app with
+       it.
+       ⚠ THE MAP WAS 9→10, 10→11, 11→12, 12→13, and `text-xs` (12px) → `text-[13px]` so it stays
+       equal to what it was equal to, `text-sm` (14px) → `text-[15px]`. Applied in ONE pass: run
+       in sequence, 9→10 would be re-matched by 10→11 and every size would collapse upward into
+       the largest.
+       ⚠ SHARED COMPONENTS KEPT THEIR SIZES ON PURPOSE — the provenance ⓘ cards, the state badges,
+       `LinkCell` and the Analyse modal all render on other screens too, so bumping them here
+       would silently resize those. What grew is what this file owns. */
     <section className="bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
       <div className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h3 className="text-sm font-semibold text-fg-strong">
+          <h3 className="text-[15px] font-semibold text-fg-strong">
             Portfolios{rows ? ` · ${view.length}` : ''}
           </h3>
-          <p className="text-[12px] text-fg-faint mt-0.5 max-w-3xl">
-            {'Named from the Fixed portfolio; figures from AIRS, year to date.'}
-            {/* Only an admin can open a row, so only an admin is told to — an instruction that
-                does not work is worse than none. */}
-            {isAdmin && ' Expand a row for holdings.'}
-          </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           {/* Scan every portfolio that NEEDS it — the backend skips an account whose last pass got
@@ -875,17 +881,15 @@ export default function PortfolioOverviewPanel() {
                 ? 'Stop the model-portfolio scan. The portfolio being counted finishes first (seconds), then it stops — every count already stored is kept.'
                 : 'Stop the scan. The account being read finishes first (seconds), then it stops — everything already downloaded is kept.')
               : 'Everything AIRS has: Rapportage → Front-Office (Actieve · Interne · zonder consolidatie), then Rendement, Vermogensoverzicht, Mutaties and Model for each book — plus the model portfolios if they have never been scanned. An account fully scanned in the last few hours is skipped. Shift-click forces a full re-scan of everything (minutes).'}
-            className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-wait ${
+            className={`inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-wait ${
               allJob
                 ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
                 : 'border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50'}`}>
-            {allJob ? <span className="text-[11px] leading-none">✕</span>
-                    : <RefreshIcon spinning={refreshingAll} size={12} />}
             {/* ⚠ BOTH PHASES NOW OFFER CANCEL. Phase two used to run after the fleet job had
                 resolved, so `fleetJob` was already null and the label was the only thing left
                 saying the button was busy — a control that reads "Scanning models…" for minutes
                 with no way to stop it. It is a job of its own now, so `allJob` is whichever half
-                is live and the ✕ means the same thing throughout. */}
+                is live and Cancel means the same thing throughout. */}
             {allJob ? (modelsJob ? t.overview.cancelModelScan : t.overview.cancelScan)
               : refreshingAll ? (scanningModels ? t.overview.scanningModels
                                                 : t.overview.refreshing)
@@ -897,7 +901,7 @@ export default function PortfolioOverviewPanel() {
               stated target at all. */}
           <button type="button" onClick={() => setShowBands(true)}
             title={t.overview.allocationBandsHint}
-            className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors">
+            className="inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors">
             {t.overview.allocationBands}
           </button>
           {/* ⚠ ONE BUTTON. It ran as two for a while — accounts here, model portfolios on a second
@@ -905,7 +909,7 @@ export default function PortfolioOverviewPanel() {
               in front of the operator as a chore. They are phases of one action now; only the
               reporting stays separate. */}
           {rows && (
-            <label className={`flex items-center gap-1.5 text-xs cursor-pointer whitespace-nowrap ${
+            <label className={`flex items-center gap-1.5 text-[13px] cursor-pointer whitespace-nowrap ${
               substantial === 0 ? 'text-fg-faint' : 'text-fg-subtle'}`}
               title={substantial === 0
                 ? 'No account is paired with a model portfolio yet, so this filter would hide every row — it is inactive until a model-portfolio scan has run.'
@@ -932,7 +936,7 @@ export default function PortfolioOverviewPanel() {
           upgrade (nicknames, Brinson attribution, the bucket drill-downs), and it sits beside
           Refresh all rather than blocking the page. */}
       {refreshMsg && (
-        <div className={`text-[12px] rounded-lg px-3 py-1.5 border ${
+        <div className={`text-[13px] rounded-lg px-3 py-1.5 border ${
           refreshMsg.kind === 'error' ? 'text-neg-300 bg-neg-500/10 border-neg-500/20'
             : refreshMsg.kind === 'warn' ? 'text-warn-300 bg-warn-500/10 border-warn-500/20'
               : refreshMsg.kind === 'ok' ? 'text-pos-300 bg-pos-500/10 border-pos-500/20'
@@ -950,9 +954,9 @@ export default function PortfolioOverviewPanel() {
           still recomputed on every read (never frozen into the table), so it self-corrects when a
           portfolio is renamed, and the Link control still overrides it per row. */}
 
-      {!rows && !err && <p className="text-xs text-fg-subtle">{t.common.loading}</p>}
+      {!rows && !err && <p className="text-[13px] text-fg-subtle">{t.common.loading}</p>}
       {err && (
-        <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">{err}</div>
+        <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-[13px] text-neg-300">{err}</div>
       )}
 
       {rows && (
@@ -961,18 +965,15 @@ export default function PortfolioOverviewPanel() {
               content and the PAGE scrolls it. The horizontal container has to stay — 17 columns
               are wider than a phone, and the repo rule is that a dense table scrolls inside its
               own box so the page never scrolls sideways. */}
-          <table className="w-full text-xs whitespace-nowrap">
+          <table className="w-full text-[13px] whitespace-nowrap">
             <thead className="bg-card z-10 [&_th]:bg-card">
-              <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
+              <tr className="text-fg-faint text-[12px] uppercase tracking-wide border-b border-neutral-800/40">
                 {/* ⚠ A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
                     or re-sorted, which is the point — it is there to say "the 14th row", so two
                     people can talk about the same line. `text-right` so the digits align. */}
                 <th className="px-3 py-1.5 font-medium text-right w-8">#</th>
                 <th className="px-3 py-1.5 font-medium text-left" />{/* Analyse */}
                 <SortTh label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                <SortTh label="ISINs" k="isins" align="right"
-                  sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
-                  title="Positions in the Fixed portfolio — the ISINs this pairing can reach. Blank = not linked to one." />
                 <SortTh label="YTD" k="ytd" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
                   title="AIRS's own cumulatief_rendement for the year — each month's investment return compounded. It accounts for deposits and withdrawals, so it is not just (end value ÷ start value − 1)." />
@@ -1005,12 +1006,24 @@ export default function PortfolioOverviewPanel() {
                           attribution), which is why it needs `fixed_portfolio_id` and an unlinked
                           row cannot offer it. stopPropagation so it does not also toggle the row. */}
                       <td className="px-3 py-1.5 whitespace-nowrap">
-                        <div className="flex items-stretch gap-1">
+                        {/* ⚠⚠ BOTH CONTROLS ARE SIZED HERE AND NOWHERE ELSE (2026-09-03, on
+                            request: "make the Analyse and Refresh button bigger"). They sit side
+                            by side under `items-stretch`, so the two MUST carry the same text size
+                            and padding — stretch equalises their HEIGHT, which means a size change
+                            to one silently pads the other to match instead of failing visibly.
+                            `text-[11px] px-1.5 py-0.5` → `px-2.5 py-1`, and `rounded` →
+                            `rounded-md` so they match the chip chrome the Analyse modal uses.
+                            ⚠ THE SIZE ITSELF IS NO LONGER SET HERE ALONE — every explicit font
+                            size on this page went up a step the same day (see the note on the
+                            section below), so these carry `text-[13px]` with the rest of it.
+                            ⚠ THE ROW GETS TALLER, and that is the accepted cost: the cell's own
+                            `py-1.5` no longer sets the row height, these do. */}
+                        <div className="flex items-stretch gap-1.5">
                           {canAnalyse(r) && (
                             <button
                               onClick={(e) => { e.stopPropagation(); void openModal(r); }}
                               disabled={opening === r.dynamic_portefeuille}
-                              className="inline-flex items-center text-[11px] px-1.5 py-0.5 rounded border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg disabled:opacity-50"
+                              className="inline-flex items-center text-[13px] px-2.5 py-1 rounded-md border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg disabled:opacity-50"
                             >
                               {opening === r.dynamic_portefeuille ? '…' : 'Analyse'}
                             </button>
@@ -1048,20 +1061,32 @@ export default function PortfolioOverviewPanel() {
                                     : "Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."}
                                 aria-label={stopping ? 'Cancelling this refresh'
                                   : cancellable ? 'Cancel this refresh' : 'Refresh this portfolio'}
-                                className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded border transition-colors disabled:opacity-50 disabled:cursor-wait ${
+                                className={`inline-flex items-center justify-center text-[13px] leading-none px-2.5 py-1 rounded-md border transition-colors disabled:opacity-50 disabled:cursor-wait ${
                                   busy
                                     ? 'border-warn-500/40 text-warn-400 hover:bg-warn-500/10'
                                     : 'border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300'}`}
                               >
-                                {busy
-                                  ? <span className="text-[10px] leading-none px-0.5">✕</span>
-                                  : <RefreshIcon spinning={false} size={12} />}
+                                {/* ⚠ THE WORD, NOT A GLYPH (2026-09-03, on request: every Refresh
+                                    says "Refresh" and every Cancel says "Cancel", site-wide). This
+                                    one carried no label at all, so it GAINS the word rather than
+                                    losing an icon — and the cell is sized for it. The `title` and
+                                    `aria-label` above already said both; now the button does. */}
+                                {busy ? 'Cancel' : 'Refresh'}
                               </button>
                             );
                           })()}
                         </div>
                       </td>
-                      <td className="px-3 py-1.5 text-fg whitespace-nowrap">
+                      {/* ⚠⚠ THE THREE COLUMNS THAT ARE THE ANSWER ARE A SIZE UP FROM THE REST
+                          (2026-09-03, on request). Name · YTD · Current month are what this page
+                          is for; the row number, the two action buttons and the delete are chrome
+                          around them. At one uniform `text-[13px]` the row read as six equal
+                          things and the eye had to pick the important ones out every time.
+                          ⚠ ON THE CELL, so anything nested that sets its OWN size keeps it — the
+                          expand caret, the AIRS-code hover, the freshness badge. A larger figure
+                          beside its own small badge is the hierarchy; scaling the badge with it
+                          would be the same flat row one step louder. */}
+                      <td className="px-3 py-1.5 text-[15px] text-fg whitespace-nowrap">
                         <span className="text-fg-faint mr-1.5">{isOpen ? '▾' : '▸'}</span>
                         {/* ⚠ AIRS NAMES ONE PORTFOLIO THREE WAYS — our readable name, the Fixed
                             code and the Dynamic code — and printing all three ran them together
@@ -1083,7 +1108,7 @@ export default function PortfolioOverviewPanel() {
                             className="text-left hover:text-accent-300 hover:underline decoration-dotted underline-offset-2">
                             {r.name}
                             {r.name_is_custom && (
-                              <span className="text-accent-400 text-[10px] leading-none ml-1 align-middle">✎</span>
+                              <span className="text-accent-400 text-[11px] leading-none ml-1 align-middle">✎</span>
                             )}
                           </button>
                         ) : (
@@ -1098,7 +1123,7 @@ export default function PortfolioOverviewPanel() {
                             figures are still real — they just do not all describe the same date,
                             and the badge names exactly which one is stale. */}
                         {(r.missing_reports?.length ?? 0) > 0 && (
-                          <span className="ml-1.5 text-[11px] text-warn-300"
+                          <span className="ml-1.5 text-[12px] text-warn-300"
                             title={`This account's last scan did not retrieve: ${r.missing_reports!
                               .map((c) => REPORT_LABELS[c] ?? c).join(', ')}. Its other figures are from the newer scan, so the row mixes dates — retry with the Refresh button on the left, or leave it to the daily scan.`}>
                             ⚠ {r.missing_reports!.map((c) => REPORT_LABELS[c] ?? c).join(', ')}
@@ -1107,37 +1132,43 @@ export default function PortfolioOverviewPanel() {
                         {/* ⚠ NO BADGE FOR A GUESSED PAIRING. A name match is how nearly every row
                             is paired, so an amber ⚠ on 27 of 28 of them marked the NORMAL case as
                             exceptional — which is how a badge stops being read, and takes the ones
-                            that matter with it. The provenance below still states that the pairing
-                            is a name match; it is reachable, just not shouted. */}
-                        {/* The name is the FIXED side's, reached through a pairing — so its card
-                            states the pairing and how it was made. */}
-                        <Provenance source="airs_model" kind={r.fixed_name ? 'formula' : 'copied'}
+                            that matter with it. The `Where` line below still says the pairing was
+                            matched by name; it is reachable, just not shouted. */}
+                        {/* ⚠⚠ `copied`, NOT `formula`, AND NO `how` (2026-09-03, on request: "this
+                            is simply read in from AIRS, so the info icon should be that simple
+                            too"). A name is a STRING WE FETCHED. `formula` printed "A formula on
+                            the data:" over it and the `how` then spent four lines deriving a value
+                            nobody computes — the pairing, the match reason, and what to do if it
+                            looks wrong — which is a paragraph about the LINK, not about the name
+                            in the cell. The Link control is the place to act on that, and it is
+                            two columns away in the expanded row.
+                            ⚠ THE GUESS IS STILL DISCLOSED, in the one clause it needs: `Where`
+                            says "matched to this book by name" when the pairing was inferred, and
+                            names the deliberate link when it was not. Dropping the `how` must not
+                            drop the fact that most of these pairings are inferred.
+                            ⚠⚠ AND IT NOW CARRIES A DATE. With neither `asOf` nor `fetchedAt` the
+                            card read "no dated source (a structural / computed value)" — which was
+                            wrong twice over: it IS dated, by the scan that read it, and calling a
+                            fetched string computed is the same mistake `formula` was making. The
+                            name has no valuation date of its own, so `fetchedAt` alone is right:
+                            the card badges it and prices its own freshness from it. */}
+                        <Provenance source="airs_model" kind="copied" fetchedAt={r.fetched_at}
                           what={r.fixed_name
-                            ? 'The name of this account, taken from the model portfolio it is paired with.'
+                            ? 'The name of this account, read from the model portfolio it is paired with.'
                             : 'The name of this account, as AIRS itself calls it.'}
-                          note={r.fixed_name ? 'name — from the Fixed portfolio this book is paired with' : 'name — the AIRS book itself; no Fixed portfolio paired'}
-                          how={r.fixed_name
-                            ? `${r.dynamic_portefeuille} paired with ${r.fixed_name}${
-                              r.link_source === 'guess'
-                                ? ` by a name match (${trimStop(r.link_reason ?? 'name match')}). Set it explicitly from the Link control if it looks wrong — the risk variants of a strategy hold the same instruments, so no other column would reveal a wrong pairing.`
-                                : ' by a link somebody set explicitly'}`
-                            : undefined} />
+                          note={r.fixed_name
+                            ? (r.link_source === 'guess'
+                              ? 'name — from the Fixed portfolio matched to this book by name'
+                              : 'name — from the Fixed portfolio this book is linked to')
+                            : 'name — the AIRS book itself; no Fixed portfolio paired'} />
                       </td>
-                      <td className="px-3 py-1.5 text-right font-mono text-fg-subtle">
-                        {r.isins ?? '—'}
-                        {r.isins != null && (
-                          <Provenance source="airs_model" kind="formula" what="How many instruments the paired model portfolio names."
-                            note="position count"
-                            how="a count of the positions in the paired Fixed portfolio" />
-                        )}
-                      </td>
-                      <td className={`px-3 py-1.5 text-right font-mono font-semibold ${tone(r.ytd_pct)}`}>
+                      <td className={`px-3 py-1.5 text-[15px] text-right font-mono font-semibold ${tone(r.ytd_pct)}`}>
                         {pct(r.ytd_pct)}
                         <Provenance source="airs_att" asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
                           what="This account's return so far this year, as AIRS itself reports it."
                           note="cumulatief_rendement — AIRS's own compounded year, net of deposit/withdrawal timing" />
                       </td>
-                      <td className={`px-3 py-1.5 text-right font-mono ${tone(r.latest_month_pct)}`}>
+                      <td className={`px-3 py-1.5 text-[15px] text-right font-mono ${tone(r.latest_month_pct)}`}>
                         {pct(r.latest_month_pct)}
                         <Provenance source="airs_att" asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
                           what="What this account returned in the most recent month AIRS has closed."
@@ -1235,7 +1266,7 @@ export default function PortfolioOverviewPanel() {
  *  For an ISIN-bearing row it is EDITABLE: an overlaid `<select>` lets a user pin the Class (or
  *  pick "Auto" to revert to the calculated one). The choice is persisted per ISIN and beats the
  *  calculation forever; an overridden badge wears a ring on its dot. Cash (no ISIN) is read-only. */
-type SortKey = 'name' | 'isins' | 'ytd' | 'month';
+type SortKey = 'name' | 'ytd' | 'month';
 
 /** A sortable column heading. The arrow shows the ACTIVE column only — an indicator on every
  *  header tells the reader nothing about which one is in force. */
@@ -1251,7 +1282,7 @@ function SortTh({ label, k, sortKey, sortDir, onSort, align = 'left', title }: {
         className={'inline-flex items-center gap-1 hover:text-accent-400 transition-colors '
           + (active ? 'text-fg-soft' : '')}>
         {label}
-        <span className={'text-[9px] ' + (active ? 'text-accent-400' : 'text-fg-faint/40')}>
+        <span className={'text-[10px] ' + (active ? 'text-accent-400' : 'text-fg-faint/40')}>
           {active ? (sortDir === 'asc' ? '▲' : '▼') : '▾'}
         </span>
       </button>
@@ -1288,7 +1319,7 @@ function BucketBadge({ bucket, isin, overridden, onOverride }: {
       title={overridden ? 'Class manually set — pick “Auto” to revert to the calculated class.' : 'Auto-classified — click to override the Class.'}>
       {dot}
       <span className="text-fg-soft">{bucketLabel(bucket)}</span>
-      {overridden && <span className="text-accent-400 text-[10px] leading-none">✎</span>}
+      {overridden && <span className="text-accent-400 text-[11px] leading-none">✎</span>}
       {/* The picker overlays the whole cell, invisible, so the badge stays the visible affordance. */}
       <select
         aria-label="Set Class"
@@ -1375,7 +1406,7 @@ function IsinCell({ r, onPin }: {
         <button type="button" disabled={!onPin}
           onClick={(e) => { e.stopPropagation(); void onPin?.(r.holding_name, r.isin); }}
           title="ISIN set by hand — AIRS gives this holding none. Click to change or clear it."
-          className="text-accent-400 text-[10px] leading-none ml-1 align-middle hover:text-accent-300">
+          className="text-accent-400 text-[11px] leading-none ml-1 align-middle hover:text-accent-300">
           ✎
         </button>
       )}
@@ -1642,8 +1673,8 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
     }
     if (portefeuille && onOverride) await onOverride(portefeuille);
   }, [portefeuille, onOverride]);
-  if (!d) return <p className="text-[12px] text-fg-subtle">{t.overview.loadingHoldings}</p>;
-  if (!d.rows?.length) return <p className="text-[12px] text-fg-subtle">{t.overview.noSnapshot}</p>;
+  if (!d) return <p className="text-[13px] text-fg-subtle">{t.overview.loadingHoldings}</p>;
+  if (!d.rows?.length) return <p className="text-[13px] text-fg-subtle">{t.overview.noSnapshot}</p>;
   const byName = new Map((i?.rows ?? []).map((r) => [r.holding_name, r]));
 
   // Grouped by the CALCULATED Class (the `bucket`, incl. manual overrides), in the backend's order
@@ -1732,8 +1763,8 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
           click is genuinely optional. */}
       <button type="button" onClick={() => setShowRows((v) => !v)}
         aria-expanded={showRows}
-        className="w-full flex items-center gap-2 text-left text-[12px] px-2 py-1.5 rounded-lg border border-neutral-800/40 bg-card hover:bg-overlay/5 transition-colors">
-        <span className={`text-[9px] text-fg-faint transition-transform ${showRows ? 'rotate-90' : ''}`}>▶</span>
+        className="w-full flex items-center gap-2 text-left text-[13px] px-2 py-1.5 rounded-lg border border-neutral-800/40 bg-card hover:bg-overlay/5 transition-colors">
+        <span className={`text-[10px] text-fg-faint transition-transform ${showRows ? 'rotate-90' : ''}`}>▶</span>
         <span className="font-medium text-fg-strong">{t.overview.currentPortfolio}</span>
         <span className="text-fg-faint">
           {all.length} holding{all.length === 1 ? '' : 's'}
@@ -1749,7 +1780,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
               to qualify it. The chip says a different basis is waiting rather than quietly
               printing its answer. */}
           {isHypothetical && (
-            <span className="text-warn-500 font-sans text-[11px]"
+            <span className="text-warn-500 font-sans text-[12px]"
               title={`Inside, the returns are weighted by ${WEIGHT_BASES.find((x) => x.key === basisKey)!.label} — a hypothetical. The figure here is the book's own start-weighted return.`}>
               ⚠ {WEIGHT_BASES.find((x) => x.key === basisKey)!.label} inside
             </span>
@@ -1765,7 +1796,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
           a segmented control rather than a literal slider — a slider would put "Model wt" at an
           unlabelled 3/4 position and make the default indistinguishable from a nudge.
           ⚠ ONLY "Start wt" is the book's own return; the rest are clearly-marked hypotheticals. */}
-      <div className="flex items-center gap-2 flex-wrap text-[11px]">
+      <div className="flex items-center gap-2 flex-wrap text-[12px]">
         <span className="text-fg-faint">{t.overview.weightReturnsBy}</span>
         <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden">
           {WEIGHT_BASES.map((b) => (
@@ -1798,9 +1829,9 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
             whole table against the left edge with dead space beside it, which reads as a broken
             layout rather than a shorter table. `w-full` is a FLOOR, not a cap: past the container
             width the table still grows and the box still scrolls. */}
-        <table className="w-full text-xs whitespace-nowrap">
+        <table className="w-full text-[13px] whitespace-nowrap">
           <thead className="bg-card z-20 [&_th]:bg-card">
-            <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
+            <tr className="text-fg-faint text-[12px] uppercase tracking-wide border-b border-neutral-800/40">
               <th className="px-3 py-1.5 font-medium text-left">{t.overview.colFund}</th>
               <th className="px-3 py-1.5 font-medium text-left"
                 title="AIRS's own ISIN-code where the book carries one (exact), else matched by name to a Fixed portfolio position, else pinned by hand. Always price-checked against that instrument's own close. ⚠ = the price disagrees; ? = no series, so nothing cross-checks it.">

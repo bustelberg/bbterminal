@@ -9,8 +9,6 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { useLang } from '../../../lib/i18n';
-import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
 import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
@@ -20,6 +18,7 @@ import { capexMarginByYear, type CapexMarginInputs } from './capexMarginData';
 import { paddedDomain , xToPeriod } from './marginData';
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
+import CardHeading from './CardHeading';
 
 /**
  * Capex-margin card: |Capex| ÷ Revenue per fiscal year, on a LINEAR % axis (a ratio, not a
@@ -40,11 +39,6 @@ export default function CapexMarginCard({ holdingsTarget, holdingsName, benchTar
   /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
 }) {
-  // ⚠ READ FROM THE STORE, NOT DRILLED THROUGH `LongEquityTab` AS A PROP. Fourteen sibling
-  // cards would mean fourteen chances to forget one, and a card left on English would look
-  // like a missing translation rather than a missing prop. `useLang` is an external store
-  // (see `lib/i18n.ts`), so every card reads the one value directly.
-  const [lang] = useLang();
   const [data, setData] = useState<CapexMarginInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
@@ -92,7 +86,7 @@ export default function CapexMarginCard({ holdingsTarget, holdingsName, benchTar
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      <h4 className="text-base font-semibold text-fg-strong">{chartTitle(lang, 'capexMargin')}</h4>
+      <CardHeading chartKey="capexMargin" />
 
       {data == null && !err ? (
         <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>

@@ -38,6 +38,14 @@
  * the reader's wait; a chart nobody has scrolled to yet does not belong in it. This fetches itself,
  * exactly as the Risk panels do.
  *
+ * ⚠⚠ AND FETCHING ITSELF IS WHY IT NEEDS `refreshSeq` (2026-09-03, reported: the chip read +3.44%
+ * and the chart +3.05%). The two ARE one column of one table — that part was never wrong — but the
+ * modal's Refresh re-runs the AIRS scrape, which writes a NEW `airs_performance` row, and only the
+ * modal's own payload was re-read afterwards. This effect depended on `portfolioId` alone, so the
+ * chart kept the response it fetched when the modal opened: the chip moved to the row the scrape
+ * had just written and the chart still held the one before it. "By construction" is a claim about
+ * the COLUMN, and it says nothing about WHEN each side last read it.
+ *
  * ⚠ IT SHARES THE SCORECARD'S ROW, RIGHT OF THE EXCESS TILE, so its height is set against three
  * chips rather than against what a chart would like: 104px of plot, one line of chrome above and
  * one below. The caller fixes the WIDTH for the same reason — see the note at its call site.
@@ -50,11 +58,10 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
+import { v } from '../../../lib/dynamicValue';
 import InfoTip from '../InfoTip';
 import { traceError } from '../../../lib/debugTrace';
 import { lastPerMonth } from './monthEnds';
-import { withWorked } from './workedFormula';
-import { CHAIN_TEX, workedReturn } from './bookReturnFormula';
 import type { BookValueSeries } from '../../../lib/types/api';
 
 /** `2026-08-26` → a UTC timestamp. ⚠ UTC, not local: a date-only string parsed as local time
@@ -74,21 +81,22 @@ const eur = (v: number | null | undefined) =>
 const pct = (v: number | null | undefined) =>
   (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
 
-export default function BookReturnChart({ portfolioId }: { portfolioId: number }) {
+export default function BookReturnChart(
+  {
+    portfolioId,
+    /**
+     * Bumped by the modal's caller when a refresh finishes — the SAME counter the modal's own
+     * payload effect takes.
+     *
+     * ⚠ A REAL DEPENDENCY, not defensive padding. See the note at the top of this file: without it
+     * this chart is the one surface in the block that never re-reads what the scrape just wrote,
+     * and it disagrees with the chip above it by exactly one AIRS row.
+     */
+    refreshSeq = 0,
+  }: { portfolioId: number; refreshSeq?: number },
+) {
   const [data, setData] = useState<BookValueSeries | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  /**
-   * ⚠⚠ ONE POINT A MONTH BY DEFAULT — see `monthEnds`. AIRS publishes a month-end row for every
-   * month of the year and then a row per scrape date once we started scraping, so the recent half
-   * of this line is forty-odd points against the earlier half's six, and the chart reads as two
-   * different things joined in the middle. A month-end series is the same shape at a resolution the
-   * whole span can be drawn at.
-   *
-   * ⚠ EVERY POINT IS STILL ONE CLICK AWAY, and it has to be: the thinning is a choice about
-   * legibility, and the day-to-day movement it hides is real. Nothing is averaged either way —
-   * both views plot observations on their own dates.
-   */
-  const [dense, setDense] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -108,7 +116,7 @@ export default function BookReturnChart({ portfolioId }: { portfolioId: number }
       }
     })();
     return () => { alive = false; };
-  }, [portfolioId]);
+  }, [portfolioId, refreshSeq]);
 
   const all = data?.returns ?? [];
   if (err) return <p className="text-[12px] text-neg-300">{err}</p>;
@@ -124,17 +132,42 @@ export default function BookReturnChart({ portfolioId }: { portfolioId: number }
     );
   }
 
-  /**
-   * ⚠⚠ THE ANCHOR SURVIVES THE THINNING, ALWAYS. `lastPerMonth` keeps the LAST point in each
-   * month, and the pinned 0% sits on the FIRST of its own month — so thinning the whole series
-   * drops it and the monthly view starts at January's −1.94% with no baseline on the chart. It is
-   * held out and re-attached; everything after it thins normally.
-   */
   const anchor = all[0];
-  const points = dense ? all : [anchor, ...lastPerMonth(all.slice(1))];
+  /**
+   * ⚠⚠ ONE POINT A MONTH, ALWAYS — see `monthEnds`. AIRS publishes a month-end row for every month
+   * of the year and then a row per scrape date once we started scraping, so the recent half of this
+   * line is forty-odd points against the earlier half's six, and undrawn that way the chart reads
+   * as two different things joined in the middle. A month-end series is the same shape at a
+   * resolution the whole span can be drawn at.
+   *
+   * ⚠⚠ A SINGLE MOST-RECENT POINT PER MONTH, AND THE CURRENT MONTH IS NOT A SPECIAL CASE
+   * (2026-09-03, on request, after one was tried and removed the same day). Ending on the newest
+   * row is what makes this line agree with the `Return` chip above it — the chip reads that row.
+   * A rule that also asked "is this point TODAY's?" dropped the current month on any morning AIRS
+   * had not published yet, leaving the line at last month's close while the chip and this chart's
+   * own header both stated yesterday's figure: a resolution inventing a disagreement to hide one.
+   *
+   * ⚠⚠ SO A LAST POINT THAT LOOKS A DAY BEHIND IS A STALE READ, NOT A RESOLUTION — see the
+   * `refreshSeq` note at the top of this file, which is what the reported +3.44% against +3.05%
+   * actually was.
+   *
+   * ⚠⚠ THE "All points" TOGGLE THAT USED TO SIT IN THE HEADER CAME OFF, 2026-09-02 ON REQUEST.
+   * The dense view is therefore gone, not hidden: `dense` state, both button labels and both
+   * tooltips went with it. The day-to-day movement it showed is real and is no longer reachable
+   * from this chart — every point is still on the hover of the month that contains it, and the
+   * Risk panel's own drawdown view is where intra-month movement is the subject.
+   *
+   * ⚠ THE ANCHOR SURVIVES THE THINNING, ALWAYS, AND THAT MATTERS MORE NOW THAT THERE IS NO ESCAPE
+   * HATCH. The thinning keeps the LAST point in each month, and the pinned 0% sits on the FIRST
+   * of its own month — so thinning the whole series drops it and the line starts at January's
+   * −1.94% with no baseline on the chart. It is held out and re-attached; everything after it
+   * thins normally.
+   */
+  const points = [anchor, ...lastPerMonth(all.slice(1))];
 
-  // ⚠ THE HEADLINE AND THE ⓘ'S WINDOW COME FROM `all`, NEVER FROM THE THINNED VIEW. Toggling a
-  // display resolution must not move a reported figure or restate the period it covers.
+  // ⚠ THE HEADLINE AND THE ⓘ'S WINDOW COME FROM `all`, NEVER FROM THE THINNED VIEW. The figure the
+  // header reports is the newest AIRS published, which is usually NOT a month end — reading it off
+  // the thinned series would restate both the number and the period it covers.
   const last = all[all.length - 1];
   const rows = points.map((p) => ({ ...p, t: ts(p.date) }));
   const up = (data.return_pct ?? 0) >= 0;
@@ -157,22 +190,21 @@ export default function BookReturnChart({ portfolioId }: { portfolioId: number }
             the book's value and that date's holding count are on every hover. What the header
             carries now is the one figure this chart exists to state, and a chip the reader has to
             step over to reach it is a cost with no reader. */}
-        {/* ⚠ THE CONTROL NAMES WHAT IT WILL SHOW, not what is showing — a button labelled with the
-            current state reads as a status and gets clicked to "confirm" it. */}
-        <button type="button" onClick={() => setDense((v) => !v)}
-          title={dense
-            ? 'Show one point per month — the last AIRS published in each'
-            : 'Show every date AIRS has published a return for'}
-          className="text-[11px] leading-none px-1.5 py-1 rounded border border-neutral-800/40
-                     text-fg-subtle hover:text-accent-300 hover:bg-overlay/5 cursor-pointer">
-          {dense ? 'Monthly' : 'All points'}
-        </button>
+        {/* ⚠⚠ NO `how` AND NO `worked` (2026-09-03, on request: "it's simply copied straight from
+            AIRS, no calculation needed"). This figure is READ — `cumulatief_rendement`, one column,
+            one row — so a chained-product formula under it described an arithmetic nobody here
+            performs, and the house rule already said so: no worked line over raw data. What is
+            left is what / where / when, which is the whole of the Active Share shape when there is
+            no maths to typeset.
+            ⚠⚠ AND EVERY LIVE FIGURE IS BADGED (`v()`). The dates were interpolated bare, so a
+            reader scanning the card could not tell this book's window from the sentence around it
+            — which is the one question badging exists to answer, and the only reason the card
+            carries them. The return itself is not repeated here: it is set in the header above. */}
         <InfoTip className="ml-auto" content={<AspectCard
           what="What the book has returned so far this year, from 0% at the start of it."
-          where="AIRS's own Rendementen sheet — the same figure as the Return tile beside this."
-          when={`${data.return_from ?? anchor.date} to ${last.date}.`}
-          how="Flow-aware: money paid in or taken out moves the value, never this line."
-          worked={withWorked(CHAIN_TEX, workedReturn(last, data.return_from))} />} />
+          where={`AIRS's own Rendementen sheet — the same figure as the Return tile beside this, `
+            + `over ${v(all.length - 1)} published points.`}
+          when={`${v(data.return_from ?? anchor.date)} to ${v(last.date)}.`} />} />
       </div>
       <ResponsiveContainer width="100%" height={104}>
         <AreaChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>

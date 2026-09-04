@@ -14,6 +14,7 @@ is captured in `accumulated_errors` (first ~5 surface in
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
@@ -1005,6 +1006,120 @@ def _run_full_price_refresh_pipeline_sync(run_id: int) -> None:
             accumulated_errors.append(msg)
 
     _finalize_run(run_id, accumulated_errors, log, tag="full_price_refresh")
+
+
+#: How many companies the daily slice refreshes. `_load_all_companies()` is most-stale-first, so
+#: this is a bound on how OLD the oldest price in the database can get: ~2,760 active companies at
+#: 150/day cycles the whole book in ~19 days.
+#:
+#: ⚠⚠ THE NUMBER THAT MATTERS IS THE CYCLE LENGTH, AND IT IS BOUNDED BY 30. `signal_engine.daily`
+#: drops any name whose newest bar is more than `MAX_STALENESS_DAYS = 30` before the cutoff, and
+#: that constant is not arbitrary: 12-1 momentum anchors its numerator ~1 month back, so a series
+#: more than 30 days stale makes `asof_values` silently anchor the leg EARLIER than intended —
+#: "12-1" quietly becomes "12-1.5", with no error and no gap. A cycle at or near 30 days is
+#: therefore marginal by construction, which is exactly what the month-end refresh was: measured
+#: 2026-09-02, ACWI coverage held at 1,743 of 1,758 on 09-27 and collapsed to **16** on 09-30.
+#:
+#: ⚠ IT COSTS ONE GuruFocus CALL PER COMPANY REGARDLESS OF THE GAP — `ensure_prices_for_company`
+#: fetches only dates newer than the stored max, but that is still one request. So monthly spend is
+#: `2,760 × 30 / cycle_days`: ~2,760 at a 30-day cycle (what the month-end pass cost), ~4,400 at 19.
+#: Measured headroom: the tightest region is `usa`, which peaked at 16,301 of 20,000 in 2026-07, and
+#: its share of this is a few hundred calls a month. ⚠ The per-region budget guard still applies on
+#: top and is the real backstop.
+DAILY_PRICE_SLICE = int(os.environ.get("DAILY_PRICE_SLICE", "150"))
+
+
+def _run_price_slice_pipeline_sync(run_id: int, slice_size: int = 0) -> None:
+    """Operation 3 — the DAILY rotating price slice that replaced the month-end full refresh.
+
+    Refreshes the `slice_size` MOST STALE companies, bounded by the same per-region GuruFocus
+    budget the full pass uses. Prices only — no templates/prune/momentum.
+
+    ⚠⚠ WHY THIS REPLACED A MONTH-END PASS RATHER THAN JOINING IT. One pass a month and a 30-day
+    staleness guard are the same period, so the system was always a few days from a cliff and spent
+    those days there: every name whose close was 30 days old was dropped from every signal at once,
+    silently, right before the refresh that would have fixed it. Amortising the identical work over
+    the month bounds the oldest price at ~19 days instead of ~31 and removes the cliff — for the
+    same monthly quota, spent evenly instead of in one spike that had to fight `full_price_refresh`'s
+    own month-end window for budget.
+
+    ⚠ MOST-STALE-FIRST IS WHAT MAKES IT SELF-CORRECTING, and it is not implemented here:
+    `_load_all_companies()` already returns that order, so a day the job does not run is repaired
+    by the next one picking up the names that aged past the others. No cursor, no state, nothing to
+    get out of sync — the database's own staleness IS the cursor.
+
+    ⚠ THE FULL PASS IS STILL THERE, as `full_price_refresh`, behind its Run-now button. It is the
+    right tool for "re-price everything now" after a bulk import or a vendor correction; it is the
+    wrong tool for keeping a universe current, which is what this does.
+
+    Serialized against the other ops via `_PIPELINE_LOCK`.
+    """
+    log = logging.getLogger(__name__)
+    accumulated_errors: list[str] = []
+    n = slice_size if slice_size > 0 else DAILY_PRICE_SLICE
+
+    with _serialized(run_id):
+        from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
+        from ingest.api_usage import remaining_budget  # noqa: PLC0415
+        from ingest.phases.prices import _load_all_companies  # noqa: PLC0415
+        from deps import supabase  # noqa: PLC0415
+
+        _update_run(run_id, current_phase="prices",
+                    current_message="Selecting the most-stale companies…")
+        try:
+            everyone = _load_all_companies()          # already most-stale-first
+            # ⚠⚠ THE UNFETCHABLE MUST COME OUT FIRST, AND THIS IS THE DIFFERENCE BETWEEN A SLICE
+            #    THAT WORKS AND ONE THAT NEVER ADVANCES. 326 of 2,759 active companies have NO
+            #    price data at all, and ~322 of those are on exchanges our GuruFocus subscription
+            #    does not cover (NSE 160, LSE 102, TSX 38, ASX 13, DUB 5, TSXV 3, BOM 1). Having no
+            #    price makes them INFINITELY stale, so most-stale-first puts every one of them
+            #    ahead of every real company — permanently. A 150/day slice would therefore spend
+            #    its first two days on 403s and then start again tomorrow with the same 150 names,
+            #    refreshing nothing, for ever.
+            #
+            #    ⚠ The full pass never hit this because it walks EVERYONE: it burns the 403s in the
+            #    first minutes and carries on. A slice has no "carries on" — its head IS its whole
+            #    run. Caught by the first smoke run, whose 8 most-stale companies were 8 straight
+            #    403s (NSE:INFY, ASX:OCL, TSX:GIB.A …).
+            #
+            #    ⚠ `is_gf_subscribed_exchange` is the ONE definition of "can we buy this data",
+            #    shared with the ACWI membership builder — not a second list to drift from it. An
+            #    unknown or missing exchange is excluded, because we cannot claim coverage for it.
+            #    ⚠ `_load_all_companies` returns FLAT rows — `{cid, ticker, exchange}` — not the
+            #      nested `gurufocus_exchange` shape the `company` select uses. Reading the nested
+            #      key here returned None for every row, so the filter excluded the ENTIRE book and
+            #      the run finished in 0.4s having refreshed nothing: a green, fast, empty success.
+            #      Caught only by printing the queue, which is why that check is worth keeping.
+            feasible = [c for c in everyone if is_gf_subscribed_exchange(c.get("exchange"))]
+            skipped = len(everyone) - len(feasible)
+            slice_ = feasible[:n]
+            budget = remaining_budget(supabase)
+            cycle = (len(feasible) + n - 1) // n if n else 0
+            msg = (f"Daily price slice — {len(slice_)} of {len(feasible)} fetchable companies, "
+                   f"most-stale first ({skipped} skipped as unsubscribed exchanges; full cycle "
+                   f"≈ {cycle} days). Budget left this month: "
+                   f"USA {budget.get('usa', 0)}, EU {budget.get('europe', 0)}, "
+                   f"Asia {budget.get('asia', 0)}.")
+            log_step(run_id, msg, phase="start")
+            _update_run(run_id, current_message=msg)
+            # ⚠ A CYCLE THAT NO LONGER FITS INSIDE THE STALENESS GUARD IS THE ONE FAILURE THIS JOB
+            #   CANNOT SEE FROM INSIDE A SINGLE RUN — every run looks healthy while the oldest
+            #   price ages past 30 days and names start vanishing from every signal. Said out loud,
+            #   at WARNING, because uvicorn leaves the root logger there in production.
+            if cycle > 25:
+                warn = (f"⚠ Full cycle is ≈{cycle} days against a 30-day staleness guard — raise "
+                        f"DAILY_PRICE_SLICE (now {n}) or names will start dropping from signals.")
+                log.warning("[price_slice] run_id=%s %s", run_id, warn)
+                log_step(run_id, warn, level="error", phase="prices")
+            _run_prices_phase(run_id, accumulated_errors, companies_override=slice_,
+                              budget_by_region=budget)
+        except Exception as e:
+            msg = f"Daily price slice failed: {type(e).__name__}: {e}"
+            log.warning("[price_slice] run_id=%s %s", run_id, msg)
+            log_step(run_id, msg, level="error", phase="prices")
+            accumulated_errors.append(msg)
+
+    _finalize_run(run_id, accumulated_errors, log, tag="price_slice")
 
 
 def _run_universe_price_refresh_pipeline_sync(run_id: int, universe_label: str) -> None:

@@ -193,6 +193,10 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
             "ticker": b.get("ticker"),
             "weight_pct": b["weight_pct"], "return_pct": b["return_eur_pct"],
             "contribution_pct": b["weight_pct"] / 100.0 * b["return_eur_pct"],
+            # ⚠ TODAY'S CAP, FOR THE SECOND WEIGHT COLUMN ONLY — `market_cap_eur` is the current
+            # figure `start_cap_eur` was rolled BACK from, so the two columns are the same cap at
+            # two dates rather than two different measurements. Nothing below divides by it.
+            "_cap_now": float(b.get("market_cap_eur") or 0.0),
         })
 
     # The model's OWN holdings per bucket — raw weight (matches the composition chart) + the EUR
@@ -204,6 +208,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
             "isin": i["isin"], "name": i["name"], "ticker": None,
             "weight_pct": i["weight_pct"], "return_pct": i["return_pct"],
             "contribution_pct": i["weight_pct"] / 100.0 * (i["return_pct"] or 0.0),
+            "_value_now": float(i.get("current_value_eur") or 0.0),
         })
 
     # Renormalise BOTH sides over what each can attribute. The identity below needs weights that
@@ -230,16 +235,50 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     # and its own holdings added to 9.11% — out by exactly 100/attributable_pct (3.77x), on every
     # bucket. A reader who adds up the list gets a different number from the heading above it,
     # and neither is wrong on its own, which is the worst kind of disagreement to debug.
+    # ⚠⚠ A SECOND WEIGHT, ON TODAY'S VALUES, RENORMALISED OVER THE SAME SET (2026-09-03, on
+    # request). The composition bars moved to current weights that day, so a bucket reading 36% on
+    # the chart opened a drill-down whose names added to 39.1% — the two were on different dates
+    # and neither was wrong. This column is the bridge: same members, same denominator rule, today's
+    # figures instead of the window's open.
+    # ⚠ IT IS A COLUMN, NOT A REPLACEMENT. `weight_pct` still drives Return and Contribution, and
+    # `Σ weight × return / 100 == contribution` is still exact — a return is earned by what was
+    # held while it was earned, so re-weighting the decomposition on today's values would make it
+    # decompose a portfolio nobody held (the same argument the endpoint's own docstring makes about
+    # design weights).
+    # ⚠ ZERO TOTAL MEANS NO COLUMN, NOT A DIVISION BY ZERO: `None` renders as a dash, which is the
+    # honest answer for a side whose current values we do not have (the `model` source has none).
+    # ⚠⚠ THE DENOMINATOR IS EVERY LEG, NOT JUST THE ATTRIBUTABLE ONES — which is what makes this
+    # column equal the bar (2026-09-03, reported: "43.69% is weight now, 39.66% is weight start,
+    # but the sector card shows 36.33% which is neither"). Measured on BUS_Offensief: the bar reads
+    # 36.33% and the drill-down read 43.69%, exactly 36.33 x 1.2025 — and 1.2025 is 1/(1 - 0.1684),
+    # the book's Unclassified weight. The composition chart counts Unclassified as its own BUCKET;
+    # the attribution basis throws it out and renormalises the rest to 100. Same numerator, two
+    # denominators, and the ratio was the excluded weight every time.
+    # ⚠ SO THIS COLUMN NO LONGER SUMS TO 100 ACROSS BUCKETS, AND MUST NOT. It is a share of the
+    # whole sleeve, exactly as the bars are; the missing remainder is the weight that has no bucket
+    # to drill into. `weight_pct` beside it still renormalises, because the Brinson identity needs
+    # weights summing to 1 over what it can attribute.
+    # ⚠⚠ THE ATTRIBUTABLE SET, AND NOTHING ADDED BACK — because the composition bars now exclude
+    # funds too (2026-09-03; see `_airs_portfolio_analysis`'s sector sleeve). This briefly added
+    # the excluded weight back in, to reach a bar that still counted funds as `Unclassified`. That
+    # was a correction applied at the wrong end: two membership rules, kept in step by arithmetic.
+    # One rule on both sides makes the bar and this column the same number by construction.
+    p_now_total = sum(h["_value_now"] for legs in port_holdings_by_bucket.values() for h in legs)
+    b_now_total = sum(h["_cap_now"] for legs in bench_holdings_by_bucket.values() for h in legs)
     for legs in port_holdings_by_bucket.values():
         for h in legs:
             h["weight_pct"] = h["weight_pct"] / p_w_total * 100.0
             # The contribution is weight x return, so it has to be rescaled with the weight or it
             # stops being the product of the two numbers printed beside it.
             h["contribution_pct"] = h["weight_pct"] / 100.0 * (h["return_pct"] or 0.0)
+            h["weight_now_pct"] = (h.pop("_value_now") / p_now_total * 100.0
+                                   if p_now_total > 0 else None)
     for legs in bench_holdings_by_bucket.values():
         for h in legs:
             h["weight_pct"] = h["weight_pct"] / b_w_total * 100.0
             h["contribution_pct"] = h["weight_pct"] / 100.0 * (h["return_pct"] or 0.0)
+            h["weight_now_pct"] = (h.pop("_cap_now") / b_now_total * 100.0
+                                   if b_now_total > 0 else None)
 
     r_p_total = sum(w / 100.0 * ret for rows in p_by_bucket.values() for w, ret in rows)
     r_b_total = sum(w / 100.0 * ret for rows in b_norm.values() for w, ret in rows)

@@ -27,7 +27,7 @@ from datetime import date as dt_date
 import pandas as pd
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from airs_scanner import (
     download_portfolio_sync,
@@ -528,6 +528,26 @@ async def _portfolio_refresh_stream(portfolio_id: int):
 
     def run():
         try:
+            # ⚠⚠ THE BENCHMARK LEG IS BROUGHT CURRENT BY THE SAME PRESS (2026-09-03, on request:
+            # the `vs ACWI` tile "should always be simultaneously updated with the Return tile and
+            # the graph"). Those three all sit in one row of one screen, and until now this button
+            # moved two of them: it re-acquires the BOOK's inputs, while the index ETF's own price
+            # series was left to the 05:00 pass — so on any box where that has not run, the
+            # comparison leg stayed put while the book advanced, and both figures looked current.
+            # ⚠ HERE AND NOT IN `refresh_portfolio_fully`, WHICH IS SHARED WITH THE FLEET PASS.
+            # This is one global series, so calling it per portfolio would spend a vendor call on
+            # each of ~40 books at 05:00 to fetch the same two tickers.
+            # ⚠ IT MUST NOT BE ABLE TO FAIL THE REFRESH. A GuruFocus wobble costs the benchmark
+            # leg its freshness; it says nothing about the composition, the FX or the prices this
+            # press is really about.
+            emit("phase", message="benchmark index prices")
+            try:
+                from routers._benchmark_etf import refresh_index_proxies  # noqa: PLC0415
+                emit("progress",
+                     message=f"  {refresh_index_proxies()} index proxy series brought current")
+            except Exception as e:  # noqa: BLE001
+                emit("progress",
+                     message=f"  index proxies not refreshed: {type(e).__name__}: {e}")
             # ⚠ BOTH HALVES, THROUGH THE ONE FUNCTION. This stream used to run the model half only
             # (composition -> instruments -> FX -> prices -> recompute) while /management-dashboard's
             # button ran the book half only, so "Refresh" meant different work on the two pages and
@@ -1148,6 +1168,14 @@ class BookHoldingDetail(BaseModel):
     # read even though it could — the tooltip then states the formula without substituting it.
     mom_12_1_from: float | None = None
     mom_12_1_to: float | None = None
+    # ⚠⚠ WHERE THAT RETURN SITS IN THE BENCHMARK UNIVERSE, as a seven-state bucket
+    # (-3 = weakest decile .. +3 = strongest) plus the exact percentile behind it. It is the ROW'S
+    # OWN return placed in the universe's distribution, never a lookup of this company's stored
+    # rank — only 61% of held ISINs are constituents at all. Null when no `relative_momentum`
+    # precompute exists for the selected benchmark, which renders as the bare number, as before.
+    mom_state: int | None = None
+    mom_pct_rank: float | None = None
+    mom_rank_n: int | None = None
     own_return_source: str | None = None      # "airs" | "yfinance" | None
     # ⚠ WHICH AIRS BOOK THE FIGURE CAME FROM, because it is no longer always this one. A leg held
     # only inside a certificate is valued by the account behind that certificate — the book that
@@ -1288,6 +1316,14 @@ class LedgerPosition(BaseModel):
     # read even though it could — the tooltip then states the formula without substituting it.
     mom_12_1_from: float | None = None
     mom_12_1_to: float | None = None
+    # ⚠⚠ WHERE THAT RETURN SITS IN THE BENCHMARK UNIVERSE, as a seven-state bucket
+    # (-3 = weakest decile .. +3 = strongest) plus the exact percentile behind it. It is the ROW'S
+    # OWN return placed in the universe's distribution, never a lookup of this company's stored
+    # rank — only 61% of held ISINs are constituents at all. Null when no `relative_momentum`
+    # precompute exists for the selected benchmark, which renders as the bare number, as before.
+    mom_state: int | None = None
+    mom_pct_rank: float | None = None
+    mom_rank_n: int | None = None
 
 
 class RealisedBlock(BaseModel):
@@ -1429,6 +1465,9 @@ class ModelPortfolioAnalysis(BaseModel):
     benchmark_universe_members: int = 0
     benchmark_priced: int = 0
     benchmark_coverage_pct: float | None = None
+    # Where the coverage gap is, worst first, at most 3. Empty = the breakdown could not be worked
+    # out; it never means "nothing missing" — that is what `benchmark_coverage_pct` says.
+    benchmark_missing_countries: list[dict] = Field(default_factory=list)
     returns: PortfolioAnalysisReturns | None = None
     axes: list[PortfolioAnalysisAxis] = []
     # The portfolio's OWN asset-class split, weighted by the active basis (model % or book EUR). A
@@ -2332,6 +2371,12 @@ class AttributionName(BaseModel):
     airs_name: str | None = None
     ticker: str | None = None
     weight_pct: float = 0.0
+    #: TODAY's share, on the same members and the same denominator rule as `weight_pct`.
+    #: ⚠ A SECOND COLUMN, NOT A CORRECTION. `weight_pct` is the window's open and is what Return
+    #: and Contribution are built from; this one is what the composition bars are weighed on, so
+    #: the drill-down reconciles with the bar it opened from. Null where the source has no current
+    #: values (`source=model`, whose weights are design percentages).
+    weight_now_pct: float | None = None
     return_pct: float | None = None
     contribution_pct: float = 0.0
     # True when this company is held on BOTH sides — in the model AND the benchmark bucket.
@@ -2401,6 +2446,9 @@ class ModelPortfolioAttribution(BaseModel):
     name: str | None = None
     benchmark: str
     benchmark_coverage_pct: float | None = None
+    # Where the coverage gap is, worst first, at most 3. Empty = the breakdown could not be worked
+    # out; it never means "nothing missing" — that is what `benchmark_coverage_pct` says.
+    benchmark_missing_countries: list[dict] = Field(default_factory=list)
     window: str                      # ytd | since
     axis: str                        # sector | region | currency
     # "model" (yfinance reconstruction) or "book" (paired AIRS book's actual holdings + returns).
@@ -3189,9 +3237,27 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
     """
     import jobs as job_registry  # noqa: PLC0415
 
-    from routers._airs_full_refresh import refresh_portfolio_fully  # noqa: PLC0415
+    from routers._airs_full_refresh import (  # noqa: PLC0415
+        job_verdict,
+        refresh_portfolio_fully,
+    )
 
     def _work(ctx) -> str:
+        # ⚠⚠ THE BENCHMARK LEG, SAME PRESS — see the twin note in `_portfolio_refresh_stream`.
+        # The Analyse modal opens from either page and its Refresh is whichever of these two the
+        # page passed in, so a guarantee that holds on one of them and not the other is not a
+        # guarantee. Line only (`0, 0`): this is one call, not a phase with a denominator.
+        # ⚠ SKIPPED IF THE CANCEL IS ALREADY IN. This is two GuruFocus round trips (~3s) before
+        #   the scan starts, and spending them on a job the reader has already stopped is the
+        #   whole of a Cancel that appears to do nothing. `refresh_portfolio_fully` sees the same
+        #   flag at its own first boundary and returns cancelled, which `job_verdict` reports.
+        if not ctx.cancelled:
+            ctx.progress(0, 0, "bringing the benchmark index prices current…")
+            try:
+                from routers._benchmark_etf import refresh_index_proxies  # noqa: PLC0415
+                refresh_index_proxies()
+            except Exception as e:  # noqa: BLE001 — never fail a book refresh over the benchmark
+                ctx.progress(0, 0, f"index proxies not refreshed: {type(e).__name__}: {e}")
         full = refresh_portfolio_fully(
             portefeuille=portefeuille, cascade=cascade,
             on_step=lambda done, total, msg: ctx.progress(done, total, msg),
@@ -3199,37 +3265,11 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
             # `_LOCK`; unwinding it with an exception from the inside would leave the AirSPMS
             # session locked against every later refresh. Same reason the fleet job gives.
             should_stop=lambda: ctx.cancelled)
-        # ⚠ THE BOOK HALF STILL DRIVES THIS SUMMARY, because that is what this endpoint's caller
-        # asked about and every branch below reads its keys. The MODEL half is reported as one
-        # extra clause rather than folded in — a reader who pressed "Refresh" on an account row
-        # should see that its model was rebuilt too, not have the two averaged into one word.
-        res = full.get("book") or {}
-        model_note = ("" if full.get("model_status") == "absent"
-                      else " · model portfolio rebuilt" if full.get("model_status") == "ok"
-                      else f" · ⚠ model portfolio NOT rebuilt ({full.get('model_status')})")
-        if res.get("cancelled_at"):
-            stale = res.get("stale_books") or []
-            raise job_registry.JobCancelled(
-                f"cancelled before {res['cancelled_at']}"
-                + (f" — {len(stale)} book(s) left un-refreshed: {', '.join(stale)}"
-                   if stale else " — nothing was read"))
-        if res.get("status") == "busy":
-            # ⚠ AN ANSWER, NOT A FAILURE. The fleet scan holds the session; this is a "try again",
-            # and raising would paint it red beside the real errors.
-            return f"{portefeuille} — another AIRS refresh is running; nothing was re-read"
-        also = res.get("cascaded") or []
-        bad = [c for c in also if c.get("status") != "ok"]
-        if res.get("status") != "ok":
-            raise RuntimeError(
-                f"{portefeuille}: AIRS scan failed — {', '.join(res.get('errors') or []) or 'no reports returned'}")
-        # ⚠ A FAILED DEPENDENCY DOWNGRADES THE WHOLE SUMMARY, exactly as the inline message did:
-        # the parent's own scan succeeded, but its looked-through figures are read from a book that
-        # did not, and one word saying "refreshed" would claim a freshness it does not have.
-        return (f"{portefeuille} — {res.get('holdings_rows', 0)} holdings as of "
-                f"{res.get('as_of') or 'today'}"
-                + (f" · also refreshed {len(also)} book(s) it is built from" if also else '')
-                + model_note
-                + (f" — {len(bad)} FAILED, see the console" if bad else ''))
+        # ⚠ THE WORDING LIVES IN `job_verdict`, NOT HERE. It was a closure, so nothing could test
+        # it — and it read the BOOK's cancel flag alone while `refresh_portfolio_fully` also
+        # cancels at two boundaries where there is no book result to carry one, which turned a
+        # pressed Cancel into a red "AIRS scan failed — no reports returned". See its docstring.
+        return job_verdict(portefeuille, full)
 
     job, reused = job_registry.start("airs.portfolio.refresh", portefeuille, _work)
     return {"job_id": job.id, "label": portefeuille, "already_running": reused}

@@ -37,6 +37,9 @@ function HoldingsCols() {
           the NAME column, which is the only auto one — so these three gain exactly what the
           truncated name loses. That is the trade being made deliberately: the figures are the
           reason the panel is open, and a clipped name still has its full text on hover. */}
+      {/* ⚠ THE TWO WEIGHTS SHARE A WIDTH. They are one quantity at two dates and are compared
+          by eye down the pair; a different width would read as a difference in kind. */}
+      <col className="w-[6rem]" />
       <col className="w-[6rem]" />
       <col className="w-[6.375rem]" />
       <col className="w-[6.75rem]" />
@@ -44,10 +47,11 @@ function HoldingsCols() {
   );
 }
 
-type SortKey = 'name' | 'weight' | 'return' | 'contrib';
+type SortKey = 'name' | 'weightNow' | 'weight' | 'return' | 'contrib';
 
 const SORT_VAL: Record<SortKey, (h: Name) => number | string | null> = {
   name: (h) => (h.name ?? '').toLowerCase(),
+  weightNow: (h) => h.weight_now_pct ?? null,
   weight: (h) => h.weight_pct ?? null,
   return: (h) => h.return_pct ?? null,
   contrib: (h) => h.contribution_pct ?? null,
@@ -77,17 +81,57 @@ const SORT_VAL: Record<SortKey, (h: Name) => number | string | null> = {
  * it is the thing a reader can check in five seconds. If it ever stops holding, the cause is a
  * basis drifting apart again, not a rounding.
  */
+/** ⚠⚠ THE COLUMN THAT RECONCILES WITH THE BAR YOU CLICKED (2026-09-03, on request). The
+ *  composition charts moved to CURRENT weights that day and this panel stayed on the window's
+ *  open, so a Technology bar reading 36% opened a list totalling 39.1% — the same two-bases
+ *  mismatch the note above records from the other direction, re-created by moving the other side.
+ *
+ *  ⚠ IT IS A SECOND COLUMN AND NOT A REPLACEMENT, because Return and Contribution are BUILT from
+ *  the start weight: `Σ weight × return ÷ 100 == contribution` is exact, and it is exact only on
+ *  the weights that earned the return. Re-weighting the decomposition on today's values would
+ *  decompose a portfolio nobody held — the same argument the attribution endpoint already makes
+ *  about design weights. So both dates are shown, each labelled, and the arithmetic keeps its own.
+ *
+ *  ⚠ A DASH MEANS THE SOURCE HAS NO CURRENT VALUES (`source=model`, whose weights are design
+ *  percentages), not that the holding has none. */
+const WEIGHT_NOW_HINT = 'Share of the same attributable holdings, weighted by what each is worth '
+  + 'NOW. This is the basis the Sector / Region / Currency bars use, so a bucket total here equals '
+  + 'its bar. Return and Contribution are built from the Weight (start) column beside it, '
+  + 'not from this one.';
+
 const WEIGHT_HINT = 'Share of the attributable holdings (funds, cash and unpriced names removed, '
   + 'the rest renormalised to 100%), weighted by each position\'s value when the window OPENED. '
-  + 'The composition chart is weighted the same way — your bar and the index\'s — so a bucket '
-  + 'total here equals its bar.';
+  + 'Return and Contribution are built from it. The composition bars moved to CURRENT values on '
+  + '2026-09-03, so a bucket total here is no longer their bar — that basis is the Weight (now) '
+  + 'column, which is what a drill-down opened from a bar shows.';
 
 /** ⚠ EXPORTED, AND THE ATTRIBUTION TABLE'S ROW DRILL-DOWN USES THE SAME ONE. Both answer the
  *  identical question — "which names are behind this bucket, on each side" — off the identical
  *  payload. A second table with its own columns, sort and overlap treatment would be two
  *  appearances of one fact, and the reader would have to learn which is which. */
-export function Holdings({ rows, startLabel = 'Start of window' }: {
+export function Holdings({ rows, startLabel = 'Start of window', weightBasis = 'start' }: {
   rows: Name[];
+  /**
+   * WHICH DATE THE WEIGHT COLUMN IS ON — and it follows WHERE THE READER CAME FROM
+   * (2026-09-03, on request: the composition drill-downs "should display WEIGHT (NOW) instead of
+   * WEIGHT (START)").
+   *
+   * ⚠⚠ IT DOES NOT PICK WHICH COLUMNS RENDER — BOTH ALWAYS DO. It was briefly a switch that
+   * showed one weight and hid the other; that was wrong in the direction it hid, because the two
+   * columns answer different questions and a reader in this pane wants both: what the bucket is
+   * TODAY (which ties to the bar they clicked) and what it was at the OPEN (which is what Return
+   * and Contribution are built from). This only sets which of the two the list opens sorted by.
+   *
+   * ⚠ THE ORDER IS FIXED, `now` THEN `start`, in both modes. A reader moving between a composition
+   * drill-down and an attribution one should not have to re-find the columns; the basis that sent
+   * them here shows up as the sort, not as a different layout.
+   *
+   * ⚠ RETURN AND CONTRIBUTION ARE ALWAYS BUILT FROM THE START WEIGHT — `Σ weight × return ÷ 100 ==
+   * contribution`, exact, and exact only on the weights that earned the return. That is why the
+   * start column can never be the one dropped: it is the only one those two can be checked
+   * against.
+   */
+  weightBasis?: 'now' | 'start';
   /**
    * WHEN the weight was measured, named in the header.
    *
@@ -106,7 +150,14 @@ export function Holdings({ rows, startLabel = 'Start of window' }: {
 }) {
   // Sortable — click a header to toggle direction. Default: weight, largest first. Each table sorts
   // on its OWN state (your names and the index's are independent lists).
-  const [key, setKey] = useState<SortKey>('weight');
+  // ⚠ THE COLUMN, ITS HINT AND THE DEFAULT SORT ALL COME FROM ONE FLAG. Three places deciding
+  //   "which weight" independently is how a table ends up sorted by a column it does not show.
+  // ⚠ BOTH COLUMNS ALWAYS RENDER (2026-09-03, on request, reversing the single-column cut made
+  //   an hour earlier). What `weightBasis` still decides is the DEFAULT SORT — the reader arrives
+  //   from a bar weighed now or from a decomposition weighed at the open, and the list should
+  //   open ordered by the number that sent them here.
+  const wKey: SortKey = weightBasis === 'now' ? 'weightNow' : 'weight';
+  const [key, setKey] = useState<SortKey>(wKey);
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
   /**
    * The three figures the total row shows — computed BEFORE the early return so the hook order is
@@ -127,11 +178,17 @@ export function Holdings({ rows, startLabel = 'Start of window' }: {
    */
   const totals = useMemo(() => {
     const weight = rows.reduce((s, h) => s + (h.weight_pct ?? 0), 0);
+    // ⚠ NULL WHEN NO ROW HAS ONE, rather than 0 — a source with no current values must print a
+    //   dash here too, or the total would claim this bucket is worth nothing today.
+    const nowRows = rows.filter((h) => h.weight_now_pct != null);
+    const weightNow = nowRows.length
+      ? nowRows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0) : null;
     const priced = rows.filter((h) => h.return_pct != null && (h.weight_pct ?? 0) > 0);
     const den = priced.reduce((s, h) => s + h.weight_pct!, 0);
     const contribRows = rows.filter((h) => h.contribution_pct != null);
     return {
       weight,
+      weightNow,
       ret: den > 0 ? priced.reduce((s, h) => s + h.weight_pct! * h.return_pct!, 0) / den : null,
       retRows: priced.length,
       contrib: contribRows.length
@@ -160,7 +217,26 @@ export function Holdings({ rows, startLabel = 'Start of window' }: {
     setDir(k === 'name' ? 'asc' : 'desc');   // names A→Z, numbers large→small on first click
   };
   const caret = (k: SortKey) => (key === k ? (dir === 'asc' ? ' ▲' : ' ▼') : '');
-  const th = 'py-1 font-medium cursor-pointer select-none whitespace-nowrap hover:text-fg-soft';
+  // ⚠⚠ THE HOVER IS ACCENT, NOT A SHADE (2026-09-03, on request: the headers "should be
+  //   selectable when I hover over them"). Every one of these has been sortable and carried
+  //   `cursor-pointer` the whole time — what it did not have was a state a reader could SEE. The
+  //   old `hover:text-fg-soft` moved a faint grey one step towards a slightly less faint grey, on
+  //   an 11px uppercase label, which is a change nobody notices and therefore an affordance nobody
+  //   finds. Accent is what this app already means by "this reacts to you".
+  // ⚠ AND A ROW-WIDE WASH, because a bare colour shift on a two-line header (`Weight` over
+  //   `(now)`) leaves the reader guessing where the target ends — the two weight columns sit
+  //   side by side, and the box is what says which one is under the cursor.
+  // ⚠⚠ NO `select-none` (2026-09-03, on request: "if I click my mouse and drag the cursor the
+  //   headers should be highlighted, that is not possible now"). It was there to make a sortable
+  //   header feel like a button — a drag across one used to leave a blue smear instead of sorting.
+  //   That is a cosmetic worry, and it was costing something real: these labels name the basis a
+  //   column is on ("Weight (now)", "Weight (Start of year)"), which is exactly the text somebody
+  //   quotes when asking why two numbers differ, and it could not be selected or copied.
+  // ⚠ THE CLICK IS UNAFFECTED. `onClick` fires on mouseup over the same element whether or not a
+  //   selection was made, so sorting still works on a plain click; only a deliberate DRAG now
+  //   selects instead of doing nothing.
+  const th = 'py-1 font-medium cursor-pointer whitespace-nowrap transition-colors '
+    + 'hover:text-accent-300 hover:bg-overlay/5';
 
   return (
     <table className="w-full text-[12px] table-fixed">
@@ -177,6 +253,15 @@ export function Holdings({ rows, startLabel = 'Start of window' }: {
               keeps its width and the Name column beside it keeps the space it would have lost.
               `whitespace-normal` because the shared `th` class is nowrap, which would otherwise
               stop the qualifier wrapping inside its own line too. */}
+          {/* ⚠ NOW BEFORE START, in both modes. A fixed order is what lets a reader move between
+              a composition drill-down and an attribution one without re-finding the columns; the
+              basis that sent them here shows up as the SORT, not as a different layout. */}
+          <th className={`${th} px-1 text-right`} onClick={() => click('weightNow')} title={WEIGHT_NOW_HINT}>
+            Weight{caret('weightNow')}
+            <span className="block normal-case whitespace-normal font-normal text-fg-subtle">
+              (now)
+            </span>
+          </th>
           <th className={`${th} px-1 text-right`} onClick={() => click('weight')} title={WEIGHT_HINT}>
             Weight{caret('weight')}
             <span className="block normal-case whitespace-normal font-normal text-fg-subtle">
@@ -198,6 +283,9 @@ export function Holdings({ rows, startLabel = 'Start of window' }: {
           <td />
           <td className="py-1 pr-2 truncate" title={`All ${rows.length} name${rows.length === 1 ? '' : 's'} in this bucket`}>
             Total <span className="text-fg-faint font-normal">({rows.length})</span>
+          </td>
+          <td className="py-1 px-1 text-right font-mono tabular-nums" title={WEIGHT_NOW_HINT}>
+            {totals.weightNow == null ? '—' : `${totals.weightNow.toFixed(2)}%`}
           </td>
           <td className="py-1 px-1 text-right font-mono tabular-nums" title={WEIGHT_HINT}>
             {totals.weight.toFixed(2)}%
@@ -238,7 +326,12 @@ export function Holdings({ rows, startLabel = 'Start of window' }: {
                 <span className={`truncate ${h.in_both ? 'text-fg-strong font-medium' : 'text-fg-soft'}`}>{h.name ?? '—'}</span>
               </span>
             </td>
-            <td className="py-1 px-1 text-right font-mono text-fg" title={WEIGHT_HINT}>{(h.weight_pct ?? 0).toFixed(2)}%</td>
+            <td className="py-1 px-1 text-right font-mono text-fg" title={WEIGHT_NOW_HINT}>
+              {h.weight_now_pct == null ? '—' : `${h.weight_now_pct.toFixed(2)}%`}
+            </td>
+            <td className="py-1 px-1 text-right font-mono text-fg" title={WEIGHT_HINT}>
+              {(h.weight_pct ?? 0).toFixed(2)}%
+            </td>
             <td className="py-1 px-1 text-right font-mono"><Num v={h.return_pct} /></td>
             {/* Contribution = weight × return — percentage POINTS of the basket's return, not %. */}
             <td className="py-1 pl-1 text-right font-mono"><Num v={h.contribution_pct} pp /></td>
@@ -342,23 +435,16 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
 
       {!loading && !error && attr && (
         <>
-          {row && (
-            <div className="text-[12px] text-fg-soft mb-3 flex flex-wrap items-center gap-x-4 gap-y-1">
-              {attr?.start && (
-                <span className="font-mono text-fg-muted">Since {attr.start}</span>
-              )}
-              <span title="Overweighting a group that beat the index (vs the whole index's return).">
-                allocation <Num v={row.allocation_pct} pp />
-              </span>
-              <span title="Did your names in this group beat the index's names in it?">
-                selection <Num v={row.selection_pct} pp />
-              </span>
-              <span title="The cross term (over/underweight × out/under-performance).">
-                interaction <Num v={row.interaction_pct} pp />
-              </span>
-              <span className="font-semibold">total <Num v={row.total_pct} pp /></span>
-            </div>
-          )}
+          {/* ⚠⚠ NO BRINSON STRIP HERE (2026-09-03, on request). It read "Since 2026-01-01 ·
+              allocation +3.16pp · selection -3.29pp · interaction -2.27pp · total -2.40pp" above
+              the names. Three of those four are decomposition terms on the START weights, sitting
+              on top of a table this panel now weighs on CURRENT values — two bases in one pane,
+              with the reader's eye moving between them.
+              ⚠ NOTHING IS LOST: the identical four figures are the Attribution panel's own row for
+              this bucket, which is where the decomposition is the subject rather than a header.
+              This pane answers "which names are in this bucket, on each side", and it now answers
+              only that. The payload still carries the terms (`row.allocation_pct` and the rest) —
+              it is one `<div>` that went, not a computation. */}
 
           {nonAttributable && (
             <p className="text-[12px] text-fg-faint mb-2">
@@ -382,7 +468,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
                   {/* ⚠ "Start of year" IS SAFE HERE ONLY BECAUSE THIS PANEL PINS `window=ytd` in
                       its own request (see the fetch above). If that ever becomes a toggle, this
                       label has to follow it — see `Holdings`'s `startLabel`. */}
-                  <Holdings rows={row.portfolio_holdings ?? []} startLabel="Start of year" />
+                  <Holdings rows={row.portfolio_holdings ?? []} startLabel="Start of year" weightBasis="now" />
                 </div>
                 <div>
                   <p className="text-[12px] font-medium text-fg-muted mb-1">
@@ -402,7 +488,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
                       {' '}· weighted at window open
                     </span>
                   </p>
-                  <Holdings rows={row.benchmark_holdings ?? []} startLabel="Start of year" />
+                  <Holdings rows={row.benchmark_holdings ?? []} startLabel="Start of year" weightBasis="now" />
                 </div>
               </div>
               {(row.portfolio_holdings ?? []).some((h) => h.in_both) && (

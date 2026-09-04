@@ -3659,6 +3659,17 @@
             ],
             "title": "Ticker"
           },
+          "weight_now_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Now Pct"
+          },
           "weight_pct": {
             "default": 0.0,
             "title": "Weight Pct",
@@ -3835,6 +3846,16 @@
             "default": 0.3,
             "title": "Regime Ramp Lo",
             "type": "number"
+          },
+          "score_normalization": {
+            "default": "minmax",
+            "enum": [
+              "minmax",
+              "rank",
+              "robust_z"
+            ],
+            "title": "Score Normalization",
+            "type": "string"
           },
           "sector_etfs": {
             "anyOf": [
@@ -4511,6 +4532,39 @@
               }
             ],
             "title": "Mom 12 1 To"
+          },
+          "mom_pct_rank": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mom Pct Rank"
+          },
+          "mom_rank_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mom Rank N"
+          },
+          "mom_state": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mom State"
           },
           "money_weighted_return_pct": {
             "anyOf": [
@@ -8548,6 +8602,39 @@
             ],
             "title": "Mom 12 1 To"
           },
+          "mom_pct_rank": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mom Pct Rank"
+          },
+          "mom_rank_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mom Rank N"
+          },
+          "mom_state": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mom State"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -8881,6 +8968,14 @@
             "title": "Benchmark Members",
             "type": "integer"
           },
+          "benchmark_missing_countries": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Benchmark Missing Countries",
+            "type": "array"
+          },
           "benchmark_priced": {
             "default": 0,
             "title": "Benchmark Priced",
@@ -9114,6 +9209,14 @@
               }
             ],
             "title": "Benchmark Coverage Pct"
+          },
+          "benchmark_missing_countries": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Benchmark Missing Countries",
+            "type": "array"
           },
           "benchmark_return_pct": {
             "default": 0.0,
@@ -13795,6 +13898,11 @@
               }
             ],
             "title": "Index Universe"
+          },
+          "score_normalization": {
+            "default": "minmax",
+            "title": "Score Normalization",
+            "type": "string"
           },
           "signal_weights": {
             "anyOf": [
@@ -23563,7 +23671,7 @@
     },
     "/api/data/latest-price-date": {
       "get": {
-        "description": "Most recent close-price observation across all companies. The\n/backtest page uses this as the default end-date \u2014 \"test up to\nhowever current our data is.\" The `source_code = 'gurufocus'` filter is\nload-bearing: it lets Postgres serve this via the\n`idx_metric_data_source_date` (source_code, target_date) index as a\nbackward scan. Without it there's no usable index for\n`metric_code = \u2026 ORDER BY target_date DESC`, so prod seq-scans the whole\n`metric_data` table and trips the statement timeout (57014).",
+        "description": "Most recent close-price observation across all companies. The\n/backtest page uses this as the default end-date \u2014 \"test up to\nhowever current our data is.\"\n\n\u26a0 BOTH constants are load-bearing, and they must match\n`idx_metric_data_close_price_date`'s predicate EXACTLY\n(`metric_code='close_price' AND source_code='gurufocus'`) or the partial\nindex does not apply and prod seq-scans a 70M-row table into the 8s\nstatement timeout (57014).\n\n\u26a0 The previous index here was `(source_code, target_date)`, and the comment\nclaiming it \"stops at the first close_price row\" was wrong: `metric_code`\nwas not in it, so it was a FILTER and the scan walked every row dated after\nthe last close \u2014 188,286 of them, ALL `is_prediction` estimates carrying\nFUTURE target_dates, at 1,870 ms. That cost grew with every quarter of\ningested estimates and had nothing to do with prices. The partial index\nmakes this a one-tuple index-only scan (0.07 ms). See\n`supabase/migrations/20260902000000_metric_data_source_date_split.sql`.",
         "operationId": "latest_price_date_api_data_latest_price_date_get",
         "responses": {
           "200": {

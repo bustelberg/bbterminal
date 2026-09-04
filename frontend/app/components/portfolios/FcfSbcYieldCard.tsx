@@ -9,8 +9,6 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { useLang } from '../../../lib/i18n';
-import { chartTitle } from './longEquityCopy';
 import { pairedSpan, RatioStats } from './CardStats';
 import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
@@ -22,6 +20,7 @@ import DailyToggle from './DailyToggle';
 import { paddedDomain, xToMonth, xToPeriod } from './marginData';
 import { periodAxis } from '../../../lib/chartAxis';
 import { benchNote, benchmarkFirst, mergeSeries, useBenchInputs, withBench, type BenchTarget } from './benchSeries';
+import CardHeading from './CardHeading';
 
 /**
  * FCF-SBC yield card: (Free Cash Flow − Stock-Based Compensation) ÷ Market Cap per fiscal year, on
@@ -45,9 +44,6 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
   /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
 }) {
-  // ⚠ READ FROM THE STORE, NOT DRILLED THROUGH `LongEquityTab` AS A PROP — see the same
-  // note on the sibling cards. `useLang` is an external store (`lib/i18n.ts`).
-  const [lang] = useLang();
   const [data, setData] = useState<FcfSbcYieldInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
@@ -102,7 +98,7 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
       <div className="flex items-baseline justify-between gap-2">
-        <h4 className="text-base font-semibold text-fg-strong">{chartTitle(lang, 'fcfYield', sbcCorrection)}</h4>
+        <CardHeading chartKey="fcfYield" sbc={sbcCorrection} />
         <DailyToggle on={daily} onChange={setDaily}
           note={'Daily: FCF − SBC stays flat between fiscal periods while the market cap moves '
             + 'every trading day — rebuilt from the day’s close and the share count, since '

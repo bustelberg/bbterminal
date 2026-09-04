@@ -9,7 +9,10 @@ import { CAGR_BENCHMARKS, type CagrBenchmark } from './CagrTable';
 import { roicByYear, type CashReturnInputs } from './cashReturnData';
 import { investedCapitalBlend } from './investedCapitalData';
 import { buildBlend, POSITIVE_ONLY_METRICS, type Blend, type Resp } from './fundamentalBlend';
-import { cagrExcess, commonEndPeriod, forwardCagr, lineCagr, type Cagr } from './lineCagr';
+import { traceEmpty } from '../../../lib/debugTrace';
+import {
+  CAGR_DECIMALS, cagrExcess, cagrPct, commonEndPeriod, forwardCagr, lineCagr, type Cagr,
+} from './lineCagr';
 import { marginByYear, xToPeriod, type MarginInputs } from './marginData';
 import { grossMarginByYear, type GrossMarginInputs } from './grossMarginData';
 import { cashConversionByYear, type CashConversionInputs } from './cashConversionData';
@@ -17,6 +20,7 @@ import {
   coverageFromBurden, interestBurdenByYear, type InterestBurdenInputs,
 } from './interestBurdenData';
 import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
+import LoadingDots from './LoadingDots';
 import GrossMarginInputsModal from './GrossMarginInputsModal';
 import MarginInputsModal from './MarginInputsModal';
 import CashReturnInputsModal from './CashReturnInputsModal';
@@ -196,6 +200,15 @@ type Side = {
   err: string | null;
 };
 
+/**
+ * A MEAN row's percentage — one decimal.
+ *
+ * ⚠ THE RATE ROWS DO NOT COME THROUGH HERE ANY MORE (2026-09-03). They print at `CAGR_DECIMALS`
+ * via `cagrPct`, because the same rate is quoted on the `Graphs` tiles one tab away and the two
+ * must round identically; an average margin is quoted nowhere else and stays as it was. Two row
+ * KINDS, two precisions — the rate rows say "per annum" and the mean rows say "average of", which
+ * is already the distinction this table's header spends a paragraph on.
+ */
 const pctCell = (v: number, sign: boolean) =>
   `${sign && v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
 
@@ -221,8 +234,12 @@ const unitCell = (v: number, unit: Unit, sign = false) => (unit === 'mult'
  * `ownWindow` = this row is measured over a window the column heading does not name (the 3-year
  * expectation). See the ⚠ on the years badge below for why that is not the same thing as `span`.
  */
-function RateCell({ got, copy, span = 1, ownWindow = false }:
-{ got: Cagr | null; copy: TablesCopy; span?: number; ownWindow?: boolean }) {
+function RateCell({ got, copy, span = 1, ownWindow = false, pending = false }:
+{ got: Cagr | null; copy: TablesCopy; span?: number; ownWindow?: boolean;
+  /** ⚠ IS SOMETHING ACTUALLY COMING? See `arriving` — dots that keep moving after a failed fetch,
+   *  or over a value that will never exist, promise an arrival, which is a worse lie than the
+   *  motionless `…` they replaced. */
+  pending?: boolean }) {
   /**
    * ⚠⚠ A SPANNED CELL IS **CENTRED**, NOT RIGHT-ALIGNED, AND THAT IS NOT A STYLE CHOICE. Right
    * alignment is correct for a number that belongs to a column; this one belongs to NEITHER of the
@@ -231,7 +248,13 @@ function RateCell({ got, copy, span = 1, ownWindow = false }:
    * "this is not in either column", and it is why the row reads as its own thing at a glance.
    */
   const align = span > 1 ? 'text-center' : 'text-right';
-  if (!got) return <td colSpan={span} className={`px-2.5 py-1 ${align} text-fg-faint`}>…</td>;
+  if (!got) {
+    return (
+      <td colSpan={span} className={`px-2.5 py-1 ${align} text-fg-faint`}>
+        {pending ? <LoadingDots /> : '…'}
+      </td>
+    );
+  }
   if (got.pct == null) {
     return (
       <td colSpan={span} className={`px-2.5 py-1 ${align}`}>
@@ -245,7 +268,9 @@ function RateCell({ got, copy, span = 1, ownWindow = false }:
           do not always support it identically. */}
       <InfoTip className="cursor-default" text={copy.rateTip(got.from, got.to, got.years)}>
         <span className={got.pct >= 0 ? 'text-fg-soft' : 'text-neg-300'}>
-          {pctCell(got.pct, true)}
+          {/* ⚠ `cagrPct`, NOT `pctCell` — the same spelling the `Graphs` tile uses for the same
+              rate. See `CAGR_DECIMALS`. */}
+          {cagrPct(got.pct)}
         </span>
         {/* ⚠ THE WINDOW IS LABELLED, because a centred number under two headings is unambiguous
             about which column it is NOT in and silent about which window it IS. Same treatment as
@@ -265,9 +290,15 @@ function RateCell({ got, copy, span = 1, ownWindow = false }:
 }
 
 /** A mean cell — the value, how much of the window it covers, and the window itself on hover. */
-function MeanCell({ got, copy, unit = 'pct', transform }:
-{ got: WindowMean | null; copy: TablesCopy; unit?: Unit; transform?: MeanTransform }) {
-  if (!got) return <td className="px-2.5 py-1 text-right text-fg-faint">…</td>;
+function MeanCell({ got, copy, unit = 'pct', transform, pending = false }:
+{ got: WindowMean | null; copy: TablesCopy; unit?: Unit; transform?: MeanTransform;
+  /** See `RateCell`'s — same rule, same reason. */
+  pending?: boolean }) {
+  if (!got) {
+    return (
+      <td className="px-2.5 py-1 text-right text-fg-faint">{pending ? <LoadingDots /> : '…'}</td>
+    );
+  }
   if (got.mean == null) {
     return (
       <td className="px-2.5 py-1 text-right">
@@ -309,9 +340,13 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   lang: Lang;
 }) {
   const copy = COPY[lang];
-  /** ⚠ ITS OWN BENCHMARK, DEFAULTING TO AEX — the tab's other cards follow whatever index the modal
-   *  was opened against; here the question IS "against what", so it gets a picker. */
-  const [bench, setBench] = useState<CagrBenchmark>('AEX');
+  /** ⚠ ITS OWN BENCHMARK PICKER — the tab's other cards follow whatever index the modal was opened
+   *  against; here the question IS "against what", so it gets a control of its own.
+   *  ⚠⚠ DEFAULTING TO ACWI (2026-09-03, on request; it was AEX). It has to match `LongEquityTab`'s
+   *  default, because Graphs and Tables are two tabs of ONE modal showing the same series — one
+   *  charted and one summarised — and a summary measured against a different index from the charts
+   *  it summarises is a summary of something else. */
+  const [bench, setBench] = useState<CagrBenchmark>('ACWI');
 
   /**
    * What is on screen. Two independent filters, both defaulting to everything.
@@ -526,6 +561,29 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   const invCapEnd = bookInvCap && idxInvCap
     ? commonEndPeriod(bookInvCap.level, idxInvCap.level) : null;
 
+  /**
+   * IS THIS ROW'S ANSWER STILL ON ITS WAY? — the gate on every animated `…` in this table.
+   *
+   * ⚠⚠ AN EMPTY CELL IS NOT ONE STATE, IT IS THREE, AND ONLY ONE OF THEM IS "WAIT". The row has no
+   * value yet; or a fetch FAILED and nothing is coming; or both sides arrived and share no year at
+   * all — a bank has no gross profit line, so its gross-margin row is permanently empty and
+   * correct. Dots that keep moving over either of the last two promise an arrival, which is a
+   * worse lie than the motionless `…` they replace: the reader waits instead of reading the error
+   * banner two rows up.
+   *
+   * ⚠ SO IT ASKS THE ROW'S OWN PAYLOADS, not a table-wide "loading" flag. A per-row question needs
+   * a per-row answer: with one flag for the table, the bank's gross-margin row would animate until
+   * the LAST unrelated fetch landed and then stop, which is an indicator that tracks the wrong
+   * thing.
+   *
+   * ⚠ AND IT REFUSES ON AN ERROR, checking BOTH sides — the book's `err` and the benchmark chain's
+   * `index.err`, which are already rendered as their own lines above the table. `useBenchInputs`
+   * leaves its payload null on failure exactly as it does while in flight, so the payload alone
+   * cannot tell the two apart.
+   */
+  const arriving = (bookPayload: unknown, benchPayload: unknown) =>
+    !err && !index.err && (bookPayload == null || benchPayload == null);
+
   const ready = marginData && roicData && fcfPs;
   const th = 'px-2.5 py-1 font-medium text-right whitespace-nowrap';
 
@@ -559,9 +617,43 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
    * in which function produces the `Cagr`; rendering them twice is how one of them quietly stops
    * pinning both sides to the same window, or starts formatting a negative differently.
    */
+  /**
+   * ⚠⚠ A ROW THAT CANNOT BE MEASURED SAYS WHY, TO THE CONSOLE (2026-09-03). EPS and Share price
+   * were empty here on a company whose data is demonstrably complete — measured through the
+   * endpoint itself: NVIDIA returns 13 periods for `price_ps` and 18 for `eps_nri`, no nulls, no
+   * negatives, the same shape as the `fcf_ps` row that works. Every link read correct on paper
+   * (metric keys, section codes, fetch order, both benchmark and book), so the fault was in a
+   * RUNTIME value nothing printed.
+   *
+   * ⚠⚠ AND THIS IS THE LINE THAT FOUND IT — the answer was "the level has 1 period(s): 2015". The
+   * blend's materiality bar (`baseBarScale`) was refusing every step off a rebased base of 100
+   * because NVIDIA's own median rebased value is 2,706, and the chain does not advance its anchor
+   * on a refusal, so ONE refusal collapsed the whole line to its base point. A one-point line has
+   * no window, which is why the dash's own reason talked about a start year 2010: it is
+   * `commonEndPeriod − 5`, derived from that single point. Kept, because the class of failure is
+   * general — this row is a summary of a line, and a line with no periods looks exactly like a
+   * fetch that never arrived.
+   *
+   * ⚠ THE DASH'S TOOLTIP ALREADY CARRIES THE REASON, but a reason is only half of it: what is
+   * missing is WHICH PERIODS the blended line actually has, and which end period it was pinned to.
+   * That is three facts, they are known here, and none of them was reachable without a debugger.
+   *
+   * ⚠ CONSOLE, NOT THE UI — the repo's rule: the full diagnostic goes to `console.warn`, the reader
+   * gets one short line. This adds nothing to the screen.
+   */
+  const traceRate = (k: MeasureKey, side: string, lvl: Blend['level'], y: number, got: Cagr) => {
+    if (got.pct != null) return;
+    const periods = Object.keys(lvl);
+    traceEmpty('tables', `${k} ${side} ${y}y CAGR`,
+      `${got.reason} · level has ${periods.length} period(s): ${periods.join(', ')}`);
+  };
+
   const rateRow = (
     k: MeasureKey, a: Blend | null, b: Blend | null,
     rate: (lvl: Blend['level'], years: number) => Cagr,
+    /** ⚠ THE ROW'S OWN PAYLOADS, NOT `a`/`b` — a `Blend` is null both while its response is in
+     *  flight and after one that failed, so the blends cannot answer this. See `arriving`. */
+    pending: boolean,
     windows: readonly number[] = shown,
   ) => (
     <tr key={k} className="[&>td]:border-b [&>td]:border-neutral-800/20">
@@ -580,22 +672,34 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
         <InfoTip className="ml-1" content={tipFor(k, rateSub(
           a && windows.length ? rate(a.level, windows[windows.length - 1]) : null))} />
       </td>
-      {windows.map((y) => (
-        <RateCell key={`a${y}`} got={a ? rate(a.level, y) : null} copy={copy}
-          span={shown.length / windows.length} ownWindow={windows !== shown} />
-      ))}
-      {windows.map((y) => (
-        <RateCell key={`b${y}`} got={b ? rate(b.level, y) : null} copy={copy}
-          span={shown.length / windows.length} ownWindow={windows !== shown} />
-      ))}
+      {windows.map((y) => {
+        const got = a ? rate(a.level, y) : null;
+        if (a && got) traceRate(k, 'portfolio', a.level, y, got);
+        return (
+          <RateCell key={`a${y}`} got={got} copy={copy} pending={pending}
+            span={shown.length / windows.length} ownWindow={windows !== shown} />
+        );
+      })}
+      {windows.map((y) => {
+        const got = b ? rate(b.level, y) : null;
+        if (b && got) traceRate(k, 'benchmark', b.level, y, got);
+        return (
+          <RateCell key={`b${y}`} got={got} copy={copy} pending={pending}
+            span={shown.length / windows.length} ownWindow={windows !== shown} />
+        );
+      })}
       {windows.map((y) => {
         const span = shown.length / windows.length;
         // ⚠ SAME RULE AS `RateCell` — a spanned excess belongs to neither column it covers, so
         // right-aligning it would park it under `10y` exactly as the value did.
         const align = span > 1 ? 'text-center' : 'text-right';
         if (!a || !b) {
-          return <td key={`e${y}`} colSpan={span}
-            className={`px-2.5 py-1 ${align} text-fg-faint`}>…</td>;
+          return (
+            <td key={`e${y}`} colSpan={span}
+              className={`px-2.5 py-1 ${align} text-fg-faint`}>
+              {pending ? <LoadingDots /> : '…'}
+            </td>
+          );
         }
         const e = cagrExcess(rate(a.level, y), rate(b.level, y));
         return (
@@ -605,7 +709,10 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
               ? <InfoTip text={e.reason} className="cursor-default text-fg-faint">—</InfoTip>
               : <>
                 <span className={e.pp >= 0 ? 'text-pos-300' : 'text-neg-300'}>
-                  {`${e.pp >= 0 ? '+' : ''}${e.pp.toFixed(1)}`}
+                  {/* ⚠ THE SAME DIGITS AS THE TWO CELLS IT IS THE DIFFERENCE OF, or the row stops
+                      adding up on screen: 39.53 − 4.55 is 34.98, and 35.0 is what a reader gets
+                      for doubting it. See `CAGR_DECIMALS`. */}
+                  {`${e.pp >= 0 ? '+' : ''}${e.pp.toFixed(CAGR_DECIMALS)}`}
                 </span>
                 {/* Same rule as the value's badge — see `RateCell`. */}
                 {windows !== shown
@@ -623,6 +730,9 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   const meanRow = (
     k: MeasureKey,
     a: Map<number, number | null>, b: Map<number, number | null>, endX: number | null,
+    /** ⚠ NOT DERIVABLE FROM `a`/`b` HERE — both are already-built Maps, and an EMPTY one means
+     *  "still loading" and "this book has no such line" alike. See `arriving`. */
+    pending: boolean,
     unit: Unit = 'pct',
     /** Applied AFTER the window mean — see `MeanTransform`. Coverage is the only row that needs it. */
     transform?: MeanTransform,
@@ -644,15 +754,21 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
         ))} />
       </td>
       {shown.map((y) => (
-        <MeanCell key={`a${y}`} copy={copy} unit={unit} transform={transform}
+        <MeanCell key={`a${y}`} copy={copy} unit={unit} transform={transform} pending={pending}
           got={endX == null ? null : windowMean(a, endX, y)} />
       ))}
       {shown.map((y) => (
-        <MeanCell key={`b${y}`} copy={copy} unit={unit} transform={transform}
+        <MeanCell key={`b${y}`} copy={copy} unit={unit} transform={transform} pending={pending}
           got={endX == null ? null : windowMean(b, endX, y)} />
       ))}
       {shown.map((y) => {
-        if (endX == null) return <td key={`e${y}`} className="px-2.5 py-1 text-right text-fg-faint">…</td>;
+        if (endX == null) {
+          return (
+            <td key={`e${y}`} className="px-2.5 py-1 text-right text-fg-faint">
+              {pending ? <LoadingDots /> : '…'}
+            </td>
+          );
+        }
         const wa = windowMean(a, endX, y);
         const wb = windowMean(b, endX, y);
         // ⚠ `meanExcess` STILL DECIDES WHETHER THERE IS AN EXCESS AT ALL — it carries the guard
@@ -793,14 +909,17 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
               {/* ⚠ THE RATE ROWS ARE NAMED `CAGR`/`expected`; the two means are named `avg`.
                   They are different questions and the labels are the only thing saying so. */}
               {on('revCagr') && rateRow('revCagr', bookRev, idxRev,
-                (lvl, y) => lineCagr(lvl, y, revEnd ?? undefined))}
+                (lvl, y) => lineCagr(lvl, y, revEnd ?? undefined),
+                arriving(revenue, bRevenue))}
               {/* ⚠ THE HISTORY OF THE SERIES THE LAST ROW FORECASTS, on the same shared end period
                   (`epsBase`) — so the rate hands over to the expectation instead of ending
                   somewhere else. See the ⚠ where `epsBase` is computed. */}
               {on('epsCagr') && rateRow('epsCagr', bookEps, idxEps,
-                (lvl, y) => lineCagr(lvl, y, epsBase ?? undefined))}
+                (lvl, y) => lineCagr(lvl, y, epsBase ?? undefined),
+                arriving(epsNri, bEpsNri))}
               {on('fcfCagr') && rateRow('fcfCagr', bookBlend, idxBlend,
-                (lvl, y) => lineCagr(lvl, y, fcfEnd ?? undefined))}
+                (lvl, y) => lineCagr(lvl, y, fcfEnd ?? undefined),
+                arriving(fcfPs, bFcfPs))}
               {/* ⚠ ITS OWN `priceEnd`, NOT `fcfEnd`. Every row on this table pins both sides to the
                   latest period THEY share, and the price line does not end where the FCF line does:
                   a company files a fiscal-year-end price with the same statements, but the coverage
@@ -808,20 +927,29 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
                   share FCF may not). Borrowing the neighbouring row's window would silently measure
                   one row over a span its own line does not reach — see `lineCagr`'s ⚠. */}
               {on('priceCagr') && rateRow('priceCagr', bookPrice, idxPrice,
-                (lvl, y) => lineCagr(lvl, y, priceEnd ?? undefined))}
+                (lvl, y) => lineCagr(lvl, y, priceEnd ?? undefined),
+                arriving(pricePs, bPricePs))}
               {/* ⚠ THE DENOMINATOR OF THE ROIC ROW BELOW, deliberately adjacent to it: capital
                   growing faster than the return on it is a book buying its growth, and neither row
                   says that alone. */}
+              {/* ⚠ `roicData`/`bRoic` — invested capital is DERIVED from the ROIC payload (see
+                  `bookInvCap`), so this row waits on that fetch and not on one of its own. */}
               {on('invCapCagr') && rateRow('invCapCagr', bookInvCap, idxInvCap,
-                (lvl, y) => lineCagr(lvl, y, invCapEnd ?? undefined))}
+                (lvl, y) => lineCagr(lvl, y, invCapEnd ?? undefined),
+                arriving(roicData, bRoic))}
               {/* ⚠ THE WEDGE BETWEEN THE REVENUE ROW AND THE PER-SHARE ROWS — see its note. */}
               {on('sharesCagr') && rateRow('sharesCagr', bookShares, idxShares,
-                (lvl, y) => lineCagr(lvl, y, sharesEnd ?? undefined))}
+                (lvl, y) => lineCagr(lvl, y, sharesEnd ?? undefined),
+                arriving(sharesResp, bShares))}
               {on('grossMargin')
-                && meanRow('grossMargin', book.grossMargin, index.grossMargin, grossEnd)}
-              {on('fcfMargin') && meanRow('fcfMargin', book.margin, index.margin, marginEnd)}
-              {on('roic') && meanRow('roic', book.roic, index.roic, roicEnd)}
-              {on('cashConv') && meanRow('cashConv', book.cashConv, index.cashConv, convEnd)}
+                && meanRow('grossMargin', book.grossMargin, index.grossMargin, grossEnd,
+                  arriving(grossM, bGrossM))}
+              {on('fcfMargin') && meanRow('fcfMargin', book.margin, index.margin, marginEnd,
+                arriving(marginData, bMargin))}
+              {on('roic') && meanRow('roic', book.roic, index.roic, roicEnd,
+                arriving(roicData, bRoic))}
+              {on('cashConv') && meanRow('cashConv', book.cashConv, index.cashConv, convEnd,
+                arriving(cashConvD, bCashConv))}
               {/* ⚠ `'mult'` — THE ONLY NON-PERCENTAGE ROW HERE. See `Unit`: 12.4× printed as
                   12.4% reads as the exact inverse of what it says. */}
               {/* ⚠⚠ THE ONLY ROW WITH A `transform`, and it is what keeps the average honest: the
@@ -830,8 +958,8 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
                   year (a burden of 0 has no reciprocal) and lets one high-coverage year run away
                   with the mean. */}
               {on('intCover')
-                && meanRow('intCover', book.intBurden, index.intBurden, coverEnd, 'mult',
-                  coverageFromBurden)}
+                && meanRow('intCover', book.intBurden, index.intBurden, coverEnd,
+                  arriving(intBurden, bIntBurden), 'mult', coverageFromBurden)}
               {/* ⚠⚠ LAST, AND VISUALLY SEPARATED, BECAUSE IT IS THE ONLY ROW THAT IS NOT A
                   MEASUREMENT. Everything above happened; this is what analysts currently expect,
                   revised whenever they like and systematically optimistic. Sitting it among the
@@ -843,7 +971,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
                   figure; the row is the only place in the table where a heading does not apply. */}
               {on('epsFwd') && rateRow('epsFwd', bookEps, idxEps,
                 (lvl, y) => forwardCagr(lvl, y, epsBase ?? undefined),
-                EXPECTED_WINDOW)}
+                arriving(epsNri, bEpsNri), EXPECTED_WINDOW)}
             </tbody>
           </table>
         </div>

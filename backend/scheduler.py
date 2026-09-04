@@ -77,15 +77,6 @@ _PIPELINE_STALE_AFTER_SECONDS = 3600
 # once the day's budget is spent the next daily tick takes over.
 _PRICE_RETRY_DELAY_HOURS = float(os.environ.get("PRICE_RETRY_DELAY_HOURS", "3"))
 _PRICE_RETRY_MAX_PER_DAY = int(os.environ.get("PRICE_RETRY_MAX_PER_DAY", "3"))
-# The month-end full-price refresh gets ALL companies' most-recent prices before
-# the monthly GuruFocus quota resets. Rather than a single last-day tick (which a
-# deploy/restart in its 1h grace would drop for the whole month), it runs on a
-# daily 12:00-UTC tick gated to the last `_MONTH_END_WINDOW_DAYS` days of the
-# month: it fires once the window opens (~2 days before month end), and if that
-# day's run is missed OR errors, the next day in the window retries — no
-# startup/every-deploy auto-repricing. Guarded so it only actually runs once the
-# window has a successful full refresh.
-_MONTH_END_WINDOW_DAYS = int(os.environ.get("MONTH_END_WINDOW_DAYS", "2"))
 _price_retry_lock = threading.Lock()
 # UTC-date ISO string → retries scheduled so far that day. Pruned to a single
 # key (today's) on each schedule so it never grows.
@@ -334,65 +325,24 @@ def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
     )
 
 
-def _month_end_window_start(today: "date") -> "date":
-    """First day of the end-of-month refresh window: `_MONTH_END_WINDOW_DAYS`
-    days before the month's last day (inclusive). E.g. a 30-day month with the
-    default 2 → the 28th, so the window is the 28th–30th."""
-    import calendar  # noqa: PLC0415
-    last_day = calendar.monthrange(today.year, today.month)[1]
-    start_day = max(1, last_day - _MONTH_END_WINDOW_DAYS)
-    return today.replace(day=start_day)
+def _fire_daily_price_slice() -> None:
+    """Refresh the most-stale slice of the company book. Fires every day, unconditionally.
 
+    ⚠⚠ IT REPLACED A GATED MONTH-END TICK, AND THE GATE IS THE PART THAT IS GONE. The old
+    `_fire_month_end_refresh` woke daily and did nothing on ~28 days out of 30, then fired one full
+    pass inside a window — with a "did it already run this window" guard, a retry-tomorrow path and
+    a fallback that preferred firing when the guard lookup failed. All of that machinery existed to
+    make ONE run a month land reliably, which is a hard thing to do; doing a thirtieth of the work
+    every day is not, and needs none of it. No window, no guard, no retry logic: if a day is
+    missed, the next day's slice is simply more stale and picks up the same names, because
+    `_load_all_companies()` is most-stale-first and the database's own staleness is the cursor.
 
-def _fire_month_end_refresh() -> None:
-    """Daily 12:00-UTC tick that runs the FULL price refresh once during the
-    end-of-month window (the last `_MONTH_END_WINDOW_DAYS`+1 days). Fires on the
-    first window day; if that run was missed (deploy/restart) or errored, the next
-    day in the window retries — so a single dropped tick no longer loses the whole
-    month. No-op outside the window, and once the window already has a successful
-    full refresh (so it runs at most once/month). Never raises into the scheduler
-    thread."""
+    ⚠ Never raises into the scheduler thread.
+    """
     try:
-        today = datetime.now(timezone.utc).date()
-        window_start = _month_end_window_start(today)
-        if today < window_start:
-            return  # not yet in the end-of-month window — cheap daily no-op
-
-        from deps import supabase  # noqa: PLC0415 — avoid import cycle
-        # Already refreshed in THIS window? (A successful full/manual run whose
-        # finished_at is on/after the window start.) An ad-hoc refresh earlier in
-        # the month doesn't count — we want fresh prices near month end.
-        try:
-            resp = (
-                supabase.table("ingest_run")
-                .select("run_id")
-                .in_("job_name", ["full_price_refresh", "manual"])
-                .eq("status", "ok")
-                .gte("finished_at", window_start.isoformat())
-                .limit(1)
-                .execute()
-            )
-            if resp.data:
-                _log.info(
-                    "[scheduler] month-end refresh: already ran this window (since %s) — no-op",
-                    window_start,
-                )
-                return
-        except Exception as e:
-            # If the guard lookup fails, prefer firing (a redundant run is cheap —
-            # already-fresh companies short-circuit) over silently skipping.
-            _log.warning(
-                "[scheduler] month-end refresh: window-guard lookup failed (%s: %s) — firing anyway",
-                type(e).__name__, e,
-            )
-
-        _log.warning(
-            "[scheduler] month-end refresh: in window (since %s) with no successful "
-            "full refresh yet — firing full_price_refresh", window_start,
-        )
-        _fire_job("full_price_refresh")
-    except Exception as e:
-        _log.warning("[scheduler] month-end refresh tick failed: %s: %s", type(e).__name__, e)
+        _fire_job("price_slice")
+    except Exception as e:  # noqa: BLE001
+        _log.warning("[scheduler] daily price slice tick failed: %s: %s", type(e).__name__, e)
 
 
 def _trading_day_age(latest: "date | None") -> "int | None":
@@ -766,7 +716,7 @@ def _body_job_watchdog(ctx=None) -> tuple[str, dict]:
     ⚠⚠ EXCEPT THE TWO PIPELINE JOBS, WHICH IT COULD NOT TOUCH AT ALL UNTIL 2026-09-01 AND WHICH ARE
     THE TWO IT WAS BUILT FOR. They have no `JOB_BODIES` entry — deliberately, because they own a
     richer Run-now with a live console tail in their own expanded row — and that same membership
-    was gating what this could re-run, so `daily_pipeline` and `month_end_price_refresh` landed in
+    was gating what this could re-run, so `daily_pipeline` and `daily_price_slice` landed in
     `unrunnable` every sweep. Measured 2026-09-01: 21.0 and 31.8 days stale, both reported broken
     by the page this reads, both skipped by the code that reads it. `_WATCHDOG_STARTERS` separates
     the presentation question from the capability one; they fire through their own tick callable
@@ -1273,6 +1223,83 @@ def _body_history_drift(ctx=None) -> tuple[str, dict]:
 # count first.
 _REBUILT_INDICES: tuple[str, ...] = ("AEX",)
 
+#: How many index constituents the daily slice brings current. ⚠ AT `DEFAULT_SLEEP_S` (0.4s) this
+#: is ~100 seconds of paced Yahoo calls, and it sets the CYCLE: the union of ACWI + SP500 + AEX is
+#: ~1,900 instruments, so every constituent is re-read about every eight days and the oldest close
+#: on the charts is bounded at roughly that. Raise it to shorten the cycle, not to catch up — a
+#: missed day self-repairs, because staleness IS the queue.
+BENCHMARK_SLICE = 250
+
+
+def _fire_benchmark_price_slice() -> None:
+    """Bring the most-stale index constituents current — the composition charts' own prices."""
+    _spawn_body("benchmark_price_slice")
+
+
+def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
+    """The `BENCHMARK_SLICE` most-stale constituents of the benchmarks /management-dashboard can
+    draw, brought up to date. Returns a one-line summary.
+
+    ⚠⚠ IT CLOSES A HOLE NOTHING ELSE COVERED. `asset_price_refresh` is scoped to instruments HELD
+    in a model portfolio and `benchmark_index_refresh` to `_REBUILT_INDICES` (AEX) — so an ACWI or
+    SP500 constituent no book holds was refreshed by NOTHING. Measured 2026-09-03 on the working
+    database: of 1,848 ACWI members, 1,663 last closed in July, 177 in August, 8 in September.
+    That was survivable while those prices only fed a rebuilt headline the index ETF has since
+    replaced; it is not survivable now that the Analyse modal's Sector / Region / Currency bars are
+    weighed on them AND drawn only over constituents priced at both ends of the window — a stale
+    series does not age a bar, it drops a name off the chart.
+
+    ⚠⚠ A SLICE, NOT A FULL PASS, AND THE DATABASE IS THE CURSOR. `refresh_stale` orders most-stale
+    first, so there is no bookmark to keep and a missed day repairs itself on the next one — the
+    same state machine `price_slice` uses on the GuruFocus side, for the same reason. A nightly
+    full pass would be ~1,900 paced calls to re-read prices that mostly have not moved.
+
+    ⚠ SCOPED TO WHAT THIS PAGE ACTUALLY DRAWS. `_RANKED_UNIVERSES` is the Analyse modal's own
+    benchmark picker (and the momentum job's list), so the slice covers exactly the indices a
+    reader can select and nothing else. AEX is in it and costs nothing: it is refreshed in full at
+    06:30, so its constituents are never the most stale and never reach the head of the queue.
+    ⚠ FUNDAMENTALS ARE NOT HERE. The Fundamental modal reads GuruFocus `metric_data` through the
+    template universes, which `benchmark_fundamentals_fill` covers quarterly — companies file
+    quarterly, and a price slice has nothing to say about a filing.
+
+    ⚠ IT STANDS DOWN WHILE THE INGEST WORKER IS LIVE, exactly as `asset_price_refresh` does: Yahoo
+    answers an overloaded caller with an EMPTY list rather than a 429, and an empty answer here
+    would be stored as "no new bars" and leave the name stale for another cycle.
+    """
+    from asset_pipeline import queue  # noqa: PLC0415
+    from asset_pipeline.price_refresh import refresh_stale  # noqa: PLC0415
+    from routers._asset_benchmark import members  # noqa: PLC0415
+
+    if queue.is_worker_active():
+        return "skipped — the ingest worker is live", {"skipped": "worker_active"}
+
+    isins: set[str] = set()
+    per_label: dict[str, int] = {}
+    for label in _RANKED_UNIVERSES:
+        try:
+            mem, _cov = members(label)
+        except Exception as exc:                                    # noqa: BLE001
+            # ⚠ ONE LABEL'S FAILURE IS NOT THE JOB'S — the same rule the index refresh follows.
+            _log.warning("[benchmark-slice] %s: members unavailable (%s: %s)",
+                         label, type(exc).__name__, exc)
+            per_label[label] = 0
+            continue
+        got = {m["isin"] for m in mem if m.get("isin")}
+        per_label[label] = len(got)
+        isins |= got
+    if not isins:
+        return "no constituents to refresh", {"considered": 0, **per_label}
+
+    res = refresh_stale(isins=isins, limit=BENCHMARK_SLICE)
+    # ⚠ THE CYCLE LENGTH IS LOGGED, because it is the one thing a single healthy-looking run cannot
+    #   show: a slice that has quietly stopped keeping up looks identical to one that never had to.
+    cycle = (len(isins) / BENCHMARK_SLICE) if BENCHMARK_SLICE else 0
+    _log.warning("[benchmark-slice] %d constituent(s) across %s; refreshed %s, cycle ~%.1f days",
+                 len(isins), per_label, res.get("refreshed"), cycle)
+    return (f"{res.get('refreshed', 0)} of {len(isins)} constituent(s) brought current "
+            f"(~{cycle:.0f}-day cycle)"), {**res, "considered": len(isins), **per_label}
+
+
 
 def _fire_benchmark_index_refresh() -> None:
     """Daily constituent refresh for the indices we REBUILD rather than read off an ETF.
@@ -1312,6 +1339,86 @@ def _body_benchmark_index_refresh(ctx=None) -> tuple[str, dict]:
     if failed:
         msg += f" · failed {', '.join(failed)}"
     return msg, {"refreshed": len(done), "failed": len(failed)}
+
+
+#: The universes whose 12-1 returns are ranked into the seven relative-momentum states.
+#:
+#: ⚠ THE SAME THREE THE ANALYSE MODAL OFFERS AS BENCHMARKS, and that is the requirement, not a
+#: coincidence: `_holding_risk` ranks a holding against WHICHEVER benchmark the reader picked, so a
+#: label missing here is a picker option whose momentum column silently loses its chip.
+_RANKED_UNIVERSES = ("ACWI", "SP500", "AEX")
+
+#: Coverage below this is reported as a WARNING rather than an info line.
+#:
+#: ⚠ IT IS A PRICE-STALENESS ALARM WEARING A COVERAGE THRESHOLD. The signal engine drops any name
+#: whose last close is over 30 days old, so if constituent prices stop being refreshed the first
+#: visible symptom is this number falling — not an error, not an empty page. Measured healthy:
+#: ACWI 87.6%, SP500 99.2%, AEX 88.0%.
+_RANK_COVERAGE_WARN = 70.0
+
+
+def _fire_relative_momentum_refresh() -> None:
+    """Re-rank each benchmark universe's 12-1 momentum for the newest closes we hold.
+
+    ⚠ 07:00 UTC, AFTER `price_update` (05:00) and `benchmark_index_refresh` (06:30). A rank is a
+    statement about a set of prices, so computing it before the day's prices land would stamp
+    today's date on yesterday's closes. Own daemon thread; never raises into the scheduler.
+    """
+    _spawn_body("relative_momentum_refresh")
+
+
+def _body_relative_momentum_refresh(ctx=None) -> tuple[str, dict]:
+    """Compute + persist one slice per universe. Returns a one-line summary.
+
+    ⚠ ONE UNIVERSE'S FAILURE IS NOT THE JOB'S, the same rule as the index refresh beside it: a
+    universe with no members or a bad price load must not cost the other two their ranks.
+
+    ⚠⚠ IT RANKS AS OF THE NEWEST CLOSE WE HOLD, NEVER `today`. Today is routinely a date we have no
+    prices for — a weekend, a holiday, a pipeline that has not run — and asking for it would rank
+    an empty set or drop every name on the staleness rule. This is the same date /backtest uses for
+    its default end.
+    """
+    from momentum import relative  # noqa: PLC0415
+    from routers.momentum._helpers import latest_db_price_date  # noqa: PLC0415
+
+    as_of = latest_db_price_date()
+    if as_of is None:
+        # ⚠ NOT AN ERROR. No closes at all is a statement about the price pipeline, not about this
+        # job, and failing here would point an operator at the wrong thing.
+        return "no close prices held — nothing to rank", {"ranked": 0, "skipped": True}
+
+    done: list[str] = []
+    failed: list[str] = []
+    thin: list[str] = []
+    for label in _RANKED_UNIVERSES:
+        if ctx and ctx.cancelled():
+            break
+        try:
+            result = relative.compute(
+                label, as_of,
+                on_step=lambda m, _l=label: _log.info("[relative_momentum] %s: %s", _l, m),
+            )
+            relative.persist(result)
+            cov = result.coverage_pct
+            done.append(f"{label} {result.universe_n}/{result.members_total}")
+            if cov < _RANK_COVERAGE_WARN:
+                # ⚠ WARNING, because uvicorn leaves the root logger at WARNING in production and an
+                #   `info` here would be invisible exactly when it matters.
+                thin.append(f"{label} {cov:.0f}%")
+                _log.warning("[relative_momentum] %s coverage %.1f%% (%d of %d) — constituent "
+                             "closes may have stopped refreshing", label, cov,
+                             result.universe_n, result.members_total)
+        except Exception as e:  # noqa: BLE001 — one universe must not take the others down
+            _log.warning("[relative_momentum] %s failed: %s: %s", label, type(e).__name__, e)
+            failed.append(f"{label}: {type(e).__name__}")
+
+    msg = f"ranked as of {as_of} — {', '.join(done) or 'nothing'}"
+    if thin:
+        msg += f" · ⚠ thin coverage: {', '.join(thin)}"
+    if failed:
+        msg += f" · failed {', '.join(failed)}"
+    return msg, {"as_of": as_of.isoformat(), "ranked": len(done),
+                 "failed": len(failed), "thin": len(thin)}
 
 
 # The indices whose constituents get a quarterly fundamentals pass.
@@ -1733,8 +1840,10 @@ def _register_bodies() -> None:
         "airs_model_prices": _body_airs_model_prices,
         "job_watchdog": _body_job_watchdog,
         "history_drift_check": _body_history_drift,
+        "benchmark_price_slice": _body_benchmark_price_slice,
         "asset_price_refresh": _body_asset_price_refresh,
         "benchmark_index_refresh": _body_benchmark_index_refresh,
+        "relative_momentum_refresh": _body_relative_momentum_refresh,
         "benchmark_fundamentals_fill": _body_benchmark_fundamentals,
         "table_size_sample": _body_table_size_sample,
     })
@@ -1743,7 +1852,7 @@ def _register_bodies() -> None:
     # daemon threads and narrate into `ingest_run`, which is where /schedule already watches them.
     _WATCHDOG_STARTERS.update({
         "daily_pipeline": _fire_daily_sequence,
-        "month_end_price_refresh": _fire_month_end_refresh,
+        "daily_price_slice": _fire_daily_price_slice,
     })
 
 
@@ -1825,7 +1934,7 @@ def scan_for_missed_ticks(now=None) -> dict:
         if not should_scan(spec):
             continue
         # ⚠⚠ BOTH TABLES, BECAUSE "DID THIS TICK FIRE" HAS TWO ANSWER SHEETS. A `records=False`
-        # job (`daily_pipeline`, `month_end_price_refresh`) writes `ingest_run` rows and NO
+        # job (`daily_pipeline`, `daily_price_slice`) writes `ingest_run` rows and NO
         # `scheduled_job_run` row — by design, so one event cannot have two disagreeing records.
         # Scanning only the latter would report every night of a healthy pipeline as a missed tick,
         # which is the loudest possible false alarm on the two jobs nobody can afford to start
@@ -1999,16 +2108,14 @@ def register_scheduler(app) -> None:
         # `coalesce=True` collapses any backlog into a single run and
         # `misfire_grace_time` gives 10 min of slack — both declared with the schedule.
         _register("daily_pipeline", _fire_daily_sequence)
-        # Month-end FULL price refresh — re-price EVERY company (most-stale
-        # first), bounded by the monthly GuruFocus quota that's about to reset.
-        # Fires DAILY at 12:00 UTC (07:00 EST, safely inside the EST usage month
-        # that resets midnight EST on the 1st), but `_fire_month_end_refresh`
-        # gates it to the last `_MONTH_END_WINDOW_DAYS`+1 days AND to "not already
-        # done this window" — so it runs ONCE near month end, and a missed/failed
-        # day retries the next day in the window (vs the old single last-day tick
-        # a deploy could drop for the whole month). Prices-only; serializes
-        # against the daily ops via the pipeline lock.
-        _register("month_end_price_refresh", _fire_month_end_refresh)
+        # Daily price slice — the most-stale companies, every day, so the whole book cycles in
+        # ~19 days and no series ever ages into the signal engine's 30-day staleness drop.
+        # Replaced the gated month-end full pass (2026-09-02): one pass a month against a 30-day
+        # guard is the same period, so coverage collapsed for the few days before each refresh.
+        # 12:00 UTC — the slot the month-end tick already held, well clear of the 05:00 pipeline,
+        # and 07:00 EST, safely inside the EST usage month that resets midnight EST on the 1st.
+        # Prices-only; serializes against the daily ops via the pipeline lock.
+        _register("daily_price_slice", _fire_daily_price_slice)
         # Daily AIRS refresh — working days, morning, Amsterdam-local (the hour is declared in
         # `scheduled_jobs.SCHEDULED_JOBS`, not restated here).
         # The per-job timezone makes APScheduler handle the CET/CEST DST shift;
@@ -2052,6 +2159,16 @@ def register_scheduler(app) -> None:
         # Daily constituent refresh for the REBUILT indices (AEX). 06:30 UTC: after the
         # 05:00 pipeline and before the 07:00 drift probe, so the three never compete.
         _register("benchmark_index_refresh", _fire_benchmark_index_refresh)
+        # The most-stale constituents of ACWI / SP500 / AEX. 06:45 UTC: between the 06:30 rebuild
+        # and the 07:00 drift probe, so no two Yahoo passes overlap. ⚠ This line was MISSING when
+        # the job shipped — the spec, the fire function and the `JOB_BODIES` entry all existed, so
+        # /schedule listed it and its Run-now button worked, and the only thing absent was the
+        # trigger: a job that looks scheduled from every surface and never fires on its own.
+        _register("benchmark_price_slice", _fire_benchmark_price_slice)
+        # Re-rank the benchmark universes' 12-1 momentum. 07:30 UTC: after the 05:00 pipeline, the
+        # 06:30 index refresh and the 07:00 drift probe, so it ranks the freshest closes the day
+        # has and competes with none of them.
+        _register("relative_momentum_refresh", _fire_relative_momentum_refresh)
         # Quarterly fundamentals over every benchmark constituent. The 10th, far from
         # month-end, so it can never drain a region the full price refresh needs.
         _register("benchmark_fundamentals_fill", _fire_benchmark_fundamentals)
