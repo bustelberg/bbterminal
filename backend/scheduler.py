@@ -1280,8 +1280,8 @@ def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
             mem, _cov = members(label)
         except Exception as exc:                                    # noqa: BLE001
             # ⚠ ONE LABEL'S FAILURE IS NOT THE JOB'S — the same rule the index refresh follows.
-            log.warning("[benchmark-slice] %s: members unavailable (%s: %s)",
-                        label, type(exc).__name__, exc)
+            _log.warning("[benchmark-slice] %s: members unavailable (%s: %s)",
+                         label, type(exc).__name__, exc)
             per_label[label] = 0
             continue
         got = {m["isin"] for m in mem if m.get("isin")}
@@ -1294,8 +1294,8 @@ def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
     # ⚠ THE CYCLE LENGTH IS LOGGED, because it is the one thing a single healthy-looking run cannot
     #   show: a slice that has quietly stopped keeping up looks identical to one that never had to.
     cycle = (len(isins) / BENCHMARK_SLICE) if BENCHMARK_SLICE else 0
-    log.warning("[benchmark-slice] %d constituent(s) across %s; refreshed %s, cycle ~%.1f days",
-                len(isins), per_label, res.get("refreshed"), cycle)
+    _log.warning("[benchmark-slice] %d constituent(s) across %s; refreshed %s, cycle ~%.1f days",
+                 len(isins), per_label, res.get("refreshed"), cycle)
     return (f"{res.get('refreshed', 0)} of {len(isins)} constituent(s) brought current "
             f"(~{cycle:.0f}-day cycle)"), {**res, "considered": len(isins), **per_label}
 
@@ -2159,6 +2159,12 @@ def register_scheduler(app) -> None:
         # Daily constituent refresh for the REBUILT indices (AEX). 06:30 UTC: after the
         # 05:00 pipeline and before the 07:00 drift probe, so the three never compete.
         _register("benchmark_index_refresh", _fire_benchmark_index_refresh)
+        # The most-stale constituents of ACWI / SP500 / AEX. 06:45 UTC: between the 06:30 rebuild
+        # and the 07:00 drift probe, so no two Yahoo passes overlap. ⚠ This line was MISSING when
+        # the job shipped — the spec, the fire function and the `JOB_BODIES` entry all existed, so
+        # /schedule listed it and its Run-now button worked, and the only thing absent was the
+        # trigger: a job that looks scheduled from every surface and never fires on its own.
+        _register("benchmark_price_slice", _fire_benchmark_price_slice)
         # Re-rank the benchmark universes' 12-1 momentum. 07:30 UTC: after the 05:00 pipeline, the
         # 06:30 index refresh and the 07:00 drift probe, so it ranks the freshest closes the day
         # has and competes with none of them.

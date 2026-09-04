@@ -67,13 +67,26 @@ describe('investedCapitalIndexByYear', () => {
     // base — an index running to 13,328,800 by 2020, documented as an accepted limit.
     //
     // The chain has no base to get wrong (`g = at(y)/at(anchor) − 1` divides it out) and refuses
-    // the STEP instead, twice over: 0.024 → 696.062 is ~29,000x (past `_MAX_STEP_GROWTH`, 100x) and
-    // 0.024 is 0.00002 of this member's own median (under `_MIN_STEP_BASE_FRACTION`, 0.10). So the
-    // line starts and stops rather than drawing a number nobody can read — which is the honest
-    // answer for a ticker whose reported history is three different entities.
+    // the STEP instead: 0.024 → 696.062 is ~29,000x, past `_MAX_STEP_GROWTH` (100x). So the line
+    // starts and stops rather than drawing a number nobody can read — which is the honest answer
+    // for a ticker whose reported history is three different entities.
+    //
+    // ⚠⚠ ONLY THE CEILING IS LEFT ON A ONE-HOLDING BOOK (2026-09-03, `baseBarScale`). The
+    // materiality bar — 0.024 being 0.00002 of this member's own median, under
+    // `_MIN_STEP_BASE_FRACTION` — is a rule about ONE member inside an average of MANY, where a
+    // refusal is an ABSTENTION and the others carry the interval. Here the member IS the line, so
+    // there is nobody to abstain in favour of and one refusal deleted the whole series; the bar is
+    // therefore lifted at `members === 1`. The 2016→2017 step is now DRAWN, and drawing it is
+    // right: −4% is what the shell's own founder capital did, and it is the ceiling, not the
+    // divisor bar, that was ever protecting anyone from the 29,000x.
     const idx = investedCapitalIndexByYear([VERTIV(undefined)]);
     expect(idx.get(2016)).toBe(100);
-    expect(idx.get(2017)).toBeUndefined();
+    expect(idx.get(2017)).toBeCloseTo(96, 6);   // 0.024 / 0.025 — small, real, and no longer barred
+    // ⚠ AND THE STEP THAT MATTERS IS STILL REFUSED, which is the whole point of keeping this
+    // fixture. A refusal does NOT advance the anchor, so 2020 is offered the same 0.024 base and
+    // refused for the same reason — the line stops at 2017 rather than resuming at a shell figure.
+    expect(idx.get(2018)).toBeUndefined();
+    expect(idx.get(2020)).toBeUndefined();
     // And above all: never the seven-figure index the old rule drew here.
     expect([...idx.values()].every((v) => v < 1e4)).toBe(true);
   });
