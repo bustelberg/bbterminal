@@ -237,18 +237,34 @@ class TestAMetricIsAggregatableOnlyIfItsForecastLegIs:
         assert e.aggregatable_metrics(["eps_nri"]) == ["eps_nri"]
         assert e.aggregatable_metrics(["revenue", "fcf_ps"]) == ["revenue", "fcf_ps"]
 
-    def test_todays_configuration_aggregates_neither_per_share_line(self):
+    def test_todays_configuration_sums_every_charted_level(self):
         """⚠ WHERE THE TWO SETS ACTUALLY STAND, pinned so the trade is a decision rather than a
-        drift. `fcf_ps` (2026-08-26) and `eps_nri` (2026-08-31) are both drawn as weighted averages
-        of per-member growth over members positive in every period — see `_POSITIVE_ONLY_METRICS`
-        for what that costs — so neither has euros anywhere, and `revenue` is the only summed line
-        left. ⚠ A metric in BOTH sets would be a survivorship-filtered SUM, which is the one
-        combination nothing wants: the sum needs no filter and the filter only adds bias."""
+        drift.
+
+        ⚠⚠ `fcf_ps` WENT BACK ON THE AGGREGATE ON 2026-09-04, because the rate average was wrong by
+        a factor of four rather than merely biased. ACWI 2015→2025, same members and window:
+        +33.93%/yr as a cap-weighted average of per-member growth rates, against +7.52%/yr as the
+        growth of the SUM of their free cash flow — with the median constituent at +8.90%/yr and
+        the aggregate reproducing the +7.56% this construction measured on 2026-08-25. 18.6x over a
+        decade is not a global index's cash flow.
+
+        `eps_nri` followed the same day and reads the same way: +26.50%/yr as a rate average
+        against +8.31% summed, with the median constituent at +8.82%.
+
+        ⚠⚠ AND ITS FORECAST LEG CAME ALONG WITHOUT ANYONE LISTING IT — `_AGGREGATABLE_FORECAST` is
+        derived from this set, which is the whole reason a consensus cannot end up on a different
+        construction from the actual it continues. Asserted here because it is the property that
+        makes the pair safe, not an implementation detail.
+
+        ⚠ A METRIC IN BOTH SETS WOULD BE A SURVIVORSHIP-FILTERED SUM, which is the one combination
+        nothing wants — the sum needs no filter and the filter only adds bias. That is why the two
+        edits are one decision, and it is asserted below rather than left to memory."""
         from routers import earnings as e
-        assert e._AGGREGATABLE_PER_SHARE == frozenset()
-        assert e._AGGREGATABLE_FORECAST == frozenset()
-        assert set(e.aggregatable_metrics([])) == {"revenue"}
-        assert e.aggregatable_metrics(["eps_nri"]) == []
+        assert e._AGGREGATABLE_PER_SHARE == frozenset({"fcf_ps", "eps_nri"})
+        assert e._AGGREGATABLE_FORECAST == frozenset({e._FORECAST_METRIC["eps_nri"]})
+        assert set(e.aggregatable_metrics([])) == {"revenue", "fcf_ps", "eps_nri"}
+        assert e.aggregatable_metrics(["eps_nri"]) == ["eps_nri"]
+        assert e._POSITIVE_ONLY_METRICS == frozenset()
         assert not (e._POSITIVE_ONLY_METRICS
                     & (e._AGGREGATABLE_PER_SHARE | e._AGGREGATABLE_TOTAL))
 

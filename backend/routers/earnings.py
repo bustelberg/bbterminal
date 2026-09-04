@@ -1103,11 +1103,50 @@ def _drop_superseded_forecasts(by_metric: dict[str, dict[int, dict[str, float]]]
 #: (`tests/test_aggregate_blend.py` measures 127.78 against a true 110.0 on its fixture), where the
 #: euro join was the real step across the boundary.
 #:
-#: ⚠ THE SET IS NOW EMPTY AND MUST NOT BE DELETED. Every mechanism behind it — `_shares_at`, the
-#: per-share × share-count conversion in `fundamental_totals`, `_AGGREGATABLE_FORECAST`,
-#: `aggregatable_metrics` — is still correct, still tested, and is what any future per-share metric
-#: joins. Emptying it is a decision about EPS, not about the machinery.
-_AGGREGATABLE_PER_SHARE: frozenset[str] = frozenset()
+#: ⚠⚠⚠ `fcf_ps` CAME BACK ON 2026-09-04, BECAUSE THE RATE AVERAGE WAS NOT MERELY BIASED, IT WAS
+#: WRONG BY A FACTOR OF FOUR. Asked "what is ACWI's FCF/share growth, 2015→2025", the same members
+#: and window answer:
+#:
+#:     cap-weighted average of per-member growth rates      +33.93%/yr
+#:       (the same, with the magnitude guards that were removed the same day)   +18.85%/yr
+#:     growth of the SUM of their free cash flow             +7.52%/yr   <- this
+#:     the MEDIAN member's own 10-year CAGR                  +8.90%/yr
+#:
+#: +33.93%/yr compounds to 18.6x over the decade for a global index. Two checks that share none of
+#: the line's biases — the aggregate and the median constituent — both land at 7-9%, and the
+#: aggregate reproduces the +7.56% this construction measured when it was last used (2026-08-25),
+#: so it is stable rather than a coincidence of today's data.
+#:
+#: ⚠ THE MEAN OF THE MEMBERS' OWN 10-YEAR RATES IS +10.08%, so weighting alone cannot get from ~10%
+#: to ~34%. The rest is the CHAIN: one member's absurd single-year step enters that step at full
+#: weight and never washes out, which is why removing `_MAX_STEP_GROWTH` was worth +8.36pp on its
+#: own. A sum is bounded by a member's share of the total euros; a rate average multiplies its
+#: weight by an unbounded rate.
+#:
+#: ⚠ IT MUST BE PAIRED WITH LEAVING `_POSITIVE_ONLY_METRICS` — see there. Aggregating while still
+#: filtering to members positive in every period keeps the survivorship half of the bias for no
+#: reason: a SUM never divides a member by itself, so a negative year is just a smaller number.
+#:
+#: ⚠ Every mechanism here — `_shares_at`, the per-share × share-count conversion in
+#: `fundamental_totals`, `_AGGREGATABLE_FORECAST`, `aggregatable_metrics` — was kept while this set
+#: was empty precisely so a metric could rejoin it without rebuilding anything.
+#: ⚠⚠ `eps_nri` FOLLOWED IT THE SAME DAY, and its numbers are the same story. ACWI 2015→2025:
+#:
+#:     cap-weighted average of per-member growth rates      +26.50%/yr   (1,072 of 1,511 members)
+#:     growth of the SUM of their earnings                   +8.31%/yr   (1,489 of 1,511)
+#:     the MEDIAN member's own 10-year CAGR                  +8.82%/yr
+#:
+#: ⚠ ITS FORECAST LEG CAME WITH IT, AUTOMATICALLY — `_AGGREGATABLE_FORECAST` is derived from this
+#: set, precisely so a consensus can never end up on a different construction from the actual it
+#: continues. Aggregating one leg alone is the measured 2026-08-25 defect (a vertical jump from LTM
+#: to 2026e, caught by eye because every unit was individually right).
+#:
+#: ⚠⚠ THE JOIN IS STILL NOT RIGHT AND THIS DID NOT FIX IT — it made it less wrong. Measured on the
+#: same run: the last actual to the first consensus is +91.5% on the rate chain and +37.7% here,
+#: where a one-year bottom-up consensus for a global index should be ~10-13%. The member sets on
+#: either side are near-identical (1,489 actual against 1,476 forecast), so it is not a composition
+#: artefact. Open, and tracked as its own problem rather than folded into this one.
+_AGGREGATABLE_PER_SHARE: frozenset[str] = frozenset({"fcf_ps", "eps_nri"})
 
 #: Metrics drawn from members POSITIVE IN EVERY PERIOD, and from nobody else.
 #:
@@ -1134,7 +1173,21 @@ _AGGREGATABLE_PER_SHARE: frozenset[str] = frozenset()
 #: ONE line, so a member positive through its actuals and negative in a consensus year would be in
 #: the first half and out of the second — composition changing at the seam, which is exactly where
 #: nobody looks for it. See `_positive_only_groups`.
-_POSITIVE_ONLY_METRICS = frozenset({"fcf_ps", "eps_nri"})
+#: ⚠⚠⚠ `fcf_ps` LEFT ON 2026-09-04, WITH THE SAME EDIT THAT PUT IT BACK ON THE EURO AGGREGATE —
+#: the two are ONE decision and reversing either alone keeps half the bias. The filter exists
+#: because a year-on-year chain DIVIDES A MEMBER BY ITSELF, so a negative base inverts the curve
+#: and a sign change means nothing. A SUM never does that: a member's bad year is simply a smaller
+#: number in the total, so excluding the cash-burners, the recoveries and every bank whose FCF
+#: swings on deposit flows buys nothing there and costs survivorship in one direction. It was
+#: cutting the ACWI line from 1,511 members to 665.
+#: (This is the same test the FCF-SBC margin card was given for one afternoon and had reverted:
+#: does this line divide a member by itself? A chain does; a sum and every ratio card do not.)
+#: ⚠⚠ `eps_nri` LEFT TOO, SO THIS SET IS NOW EMPTY — AND MUST NOT BE DELETED. Both metrics that
+#: carried it are on the euro aggregate, where the rule buys nothing; the machinery
+#: (`_positive_only_groups`, `_positive_only_members`, the `positive_only` value of `rule`, and the
+#: client's matching set and copy) is correct, tested against a patched set, and is what any future
+#: growth-chain metric joins. Emptying it is a decision about two metrics, not about the mechanism.
+_POSITIVE_ONLY_METRICS: frozenset[str] = frozenset()
 
 #: Levels that are ALREADY a company total — no share count involved.
 _AGGREGATABLE_TOTAL = frozenset({"revenue"})
