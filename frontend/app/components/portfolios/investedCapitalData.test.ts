@@ -60,35 +60,27 @@ describe('investedCapitalIndexByYear', () => {
     expect(idx.get(2018)).not.toBeCloseTo(2_784_248, -2);
   });
 
-  it('⚠ a PORTFOLIO row is now protected too, by the step guards rather than by the base', () => {
-    // ⚠⚠ THIS IS THE CASE THAT CHANGED, AND IT CHANGED FOR THE BETTER. The old base rule was
-    // explicitly INERT here: a holding weight has no history, so "first weightable period" is
-    // "first period with a figure", and a portfolio holding Vertiv was shown the shell's 0.024
-    // base — an index running to 13,328,800 by 2020, documented as an accepted limit.
+  it('⚠⚠ a PORTFOLIO row is NO LONGER protected — the step guards were removed on request', () => {
+    // ⚠⚠⚠ THIS FIXTURE NOW PINS WHAT WAS GIVEN UP, AND IT IS THE CLEAREST STATEMENT OF IT ANYWHERE.
+    // Both magnitude heuristics were removed on 2026-09-04, on request — `MIN_STEP_BASE_FRACTION`
+    // (a member's anchor under 10% of its own median) and `MAX_STEP_GROWTH` (a step over 100x). A
+    // portfolio row has no per-period cap, so nothing excludes Vertiv's SPAC-shell years, and the
+    // 0.024 → 696.062 step (~29,000x) is now taken.
     //
-    // The chain has no base to get wrong (`g = at(y)/at(anchor) − 1` divides it out) and refuses
-    // the STEP instead: 0.024 → 696.062 is ~29,000x, past `_MAX_STEP_GROWTH` (100x). So the line
-    // starts and stops rather than drawing a number nobody can read — which is the honest answer
-    // for a ticker whose reported history is three different entities.
+    // The result is EXACTLY the number the guards were built to stop: an index of 2,784,248 at
+    // 2018 off $24k of founder capital — three different legal entities in one ticker's column.
     //
-    // ⚠⚠ ONLY THE CEILING IS LEFT ON A ONE-HOLDING BOOK (2026-09-03, `baseBarScale`). The
-    // materiality bar — 0.024 being 0.00002 of this member's own median, under
-    // `_MIN_STEP_BASE_FRACTION` — is a rule about ONE member inside an average of MANY, where a
-    // refusal is an ABSTENTION and the others carry the interval. Here the member IS the line, so
-    // there is nobody to abstain in favour of and one refusal deleted the whole series; the bar is
-    // therefore lifted at `members === 1`. The 2016→2017 step is now DRAWN, and drawing it is
-    // right: −4% is what the shell's own founder capital did, and it is the ceiling, not the
-    // divisor bar, that was ever protecting anyone from the 29,000x.
+    // ⚠ IT IS NOT A REGRESSION, IT IS THE AGREED TRADE. The rules that caught this also refused 44
+    // steps that were flat, falling or under 2x across ACWI's five lines, and cost 6.72pp/yr on
+    // FCF/share; a threshold on the answer cannot tell a shell year from a trough year. Catching
+    // this case belongs in a STRUCTURAL test — an entity discontinuity at the listing date, which
+    // is what a SPAC actually is — not in a magnitude rule. Until that exists, a portfolio holding
+    // a post-SPAC ticker draws a line nobody can read, and that is visible rather than silent.
     const idx = investedCapitalIndexByYear([VERTIV(undefined)]);
     expect(idx.get(2016)).toBe(100);
-    expect(idx.get(2017)).toBeCloseTo(96, 6);   // 0.024 / 0.025 — small, real, and no longer barred
-    // ⚠ AND THE STEP THAT MATTERS IS STILL REFUSED, which is the whole point of keeping this
-    // fixture. A refusal does NOT advance the anchor, so 2020 is offered the same 0.024 base and
-    // refused for the same reason — the line stops at 2017 rather than resuming at a shell figure.
-    expect(idx.get(2018)).toBeUndefined();
-    expect(idx.get(2020)).toBeUndefined();
-    // And above all: never the seven-figure index the old rule drew here.
-    expect([...idx.values()].every((v) => v < 1e4)).toBe(true);
+    expect(idx.get(2017)).toBeCloseTo(96, 6);            // 0.024 / 0.025 — the shell's own year
+    expect(idx.get(2018)).toBeCloseTo(2_784_248, -2);    // the 29,000x step, now taken
+    expect(idx.get(2020)).toBeCloseTo(13_328_800, -2);   // and compounding from there
   });
 
   it('chains from weighted growth, so the base cancels out of the answer', () => {
