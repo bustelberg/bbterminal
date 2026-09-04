@@ -64,7 +64,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date as _date
-from statistics import median
 
 # Below this share of the blended weight reporting on a date, that date has no honest value.
 #
@@ -125,46 +124,53 @@ MIN_BLEND_COVERAGE_NAMES_PCT = 50.0
 # Prosus. NVIDIA's whole FCF/share series lives at 0.04–0.16 a share and is perfectly real. So the
 # bar is the member's own median |value|, which makes it scale-free and currency-free.
 #
-# ⚠ 0.10 IS READ OFF THE DISTRIBUTION, NOT PICKED. base ÷ median|value| over the two books measured:
-# AMD **0.0078** and Prosus **0.0606** are the two pathological anchors; the next-lowest are Adyen
-# **0.150** and Lam Research **0.184**, and the bulk sit 0.21–1.0. Adyen's is a real 6.7x growth
-# story and must survive. 0.10 sits in the gap, twice over.
-_MIN_STEP_BASE_FRACTION = 0.10
-
-# The other end of the same question — and it was never asked.
+# ⚠⚠⚠ THE TWO MAGNITUDE HEURISTICS WERE REMOVED ON 2026-09-04, ON REQUEST. `step_growth` now refuses
+# a step ONLY where the arithmetic is undefined (a non-positive anchor) and floors it at −100%. The
+# constants and their evidence are kept HERE, unenforced, because they were read off measured
+# distributions and re-deriving them from scratch is the expensive part — if a corrupt figure ever
+# has to be caught again, start from these numbers, and prefer a STRUCTURAL test to a threshold.
 #
-# ⚠⚠ `_MIN_STEP_BASE_FRACTION` GUARDS THE DIVISOR AND THE NUMERATOR HAD NO CEILING AT ALL. The rule
-# above refuses a base too small to divide by; nothing refused a RESULT too large to believe. So a
-# vendor scale error — a per-share figure delivered in the wrong unit — passed straight through as
-# growth, and the chain multiplies it by the member's weight with no bound.
+# WHAT WAS REMOVED, AND WHAT IT WAS WORTH (ACWI, 2015->2025, measured the day it went):
 #
-# Measured on ACWI's annual FCF/share, 26,160 accepted steps across 1,712 constituents:
+#     line          enforced     no base rule     neither
+#     fcf_ps         +18.85%         +25.57%      +33.93%
+#     eps_nri        +16.82%         +21.05%      +26.49%
+#     revenue         +4.45%          +4.45%       +4.45%
+#     price_ps       +10.89%         +10.91%      +10.91%
 #
-#     MITSUBISHI HEAVY  2024->2025      50.78 ->  86,214.52   +169,684%   moves the index +116.12pp
-#     DENSO CORP        2024->2025     172.97 -> 108,415.57    +62,580%   moves the index  +17.97pp
+# Only the PER-SHARE lines were ever bound by either rule — the tell that the pathology belongs to a
+# share-count denominator rather than to the figures themselves.
 #
-# On a line indexed to 100, one corrupt cell in a 0.07%-weight constituent more than DOUBLED it.
+# ── the base rule (`_MIN_STEP_BASE_FRACTION = 0.10`): refuse a step whose ANCHOR is under 10% of
+#    that member's own median |value|. 0.10 was read off a two-book distribution — AMD 0.0078 and
+#    Prosus 0.0606 pathological, Adyen 0.150 and Lam Research 0.184 the next lowest, the bulk
+#    0.21–1.0. It went because it never looked at the STEP, only the divisor: of its 180 refusals
+#    across ACWI's five lines, 44 threw away steps that were flat or falling or under 2x, including
+#    `748.588 -> 748.454` (−0.02%) and `748.439 -> 748.439` (exactly zero). A member with a big
+#    later run-up had its whole early history refused whatever happened in it.
 #
-# ⚠ 100x IN ONE YEAR IS READ OFF THE DISTRIBUTION, NOT PICKED — the same method as the constant
-# above. FCF/share: p99 = +718%, p99.9 = +2,386%, p99.99 = +6,889%, and then nothing until DENSO at
-# +62,580%. The largest step that is unambiguously REAL is Bank of America's +3,818% (2008->2009,
-# recovering from the crisis). EPS excl. NRI agrees: p99.9 = +2,609%, and every one of the 20 steps
-# above +10,000% is a scale error — sixteen of them in the SAME 2003->2004 transition across
-# unrelated European filers (Randstad 0.56 -> 160.00, Thales 0.69 -> 193.00, Kesko 0.26 -> 47.25),
-# which is a vendor redenomination and not sixteen simultaneous miracles. Revenue, a level series
-# with no share-count denominator to mis-scale, has ZERO steps over +10,000% and tops out at
-# +5,494% — which is the tell that this pathology belongs to PER-SHARE lines.
+# ── the ceiling (`_MAX_STEP_GROWTH = 100.0`): refuse a step over 100x in one year. ⚠⚠ THIS ONE HAD
+#    THE STRONGER CASE AND IT IS THE ONE TO BRING BACK FIRST if these lines ever read wrong.
+#    Measured on ACWI's annual FCF/share, 26,160 accepted steps across 1,712 constituents:
 #
-# So the gap is between ~+6,900% (the top of the real distribution) and ~+10,100% (the bottom of the
-# corrupt one). 100x sits in it.
+#        MITSUBISHI HEAVY  2024->2025      50.78 ->  86,214.52  +169,684%  moves the index +116.12pp
+#        DENSO CORP        2024->2025     172.97 -> 108,415.57   +62,580%  moves the index  +17.97pp
 #
-# ⚠ IT REFUSES THE STEP, IT DOES NOT CAP IT. Capping would invent a growth rate nobody reported;
-# refusing means the member sits out that one interval and rejoins at the next, exactly as the three
-# refusals above it behave. We cannot say what its growth was, so it does not vote.
+#    One corrupt cell in a 0.07%-weight constituent more than DOUBLED a line indexed to 100. The
+#    distribution says the >100x population is vendor error and not business: FCF/share p99 = +718%,
+#    p99.9 = +2,386%, p99.99 = +6,889%, then nothing until DENSO at +62,580%; the largest
+#    unambiguously REAL step is Bank of America's +3,818% (2008->2009). EPS agrees, and sixteen of
+#    its twenty steps above +10,000% fall in the SAME 2003->2004 transition across unrelated
+#    European filers (Randstad 0.56 -> 160.00, Thales 0.69 -> 193.00, Kesko 0.26 -> 47.25) — a
+#    vendor redenomination, not sixteen simultaneous miracles. Revenue, which has no share-count
+#    denominator to mis-scale, has ZERO steps over +10,000%.
 #
-# ⚠ AND IT IS NOT SYMMETRIC, DELIBERATELY. The downside is already handled — the floor at −100% is
-# the most a level can lose — so there is no matching "too negative" case to catch.
-_MAX_STEP_GROWTH = 100.0
+# ⚠ SO A KNOWN-BAD CELL NOW REACHES THE CHART. The agreed trade is that a vendor figure is reported
+#   as filed and a bad one shows up as a bad number rather than as a silently missing member. The
+#   principled replacement is structural, not a threshold: a near-exact 100x/1000x break in the
+#   share count (Japan Post Bank's `shares` is 1,000x too small, so its per-share reads +25,000%),
+#   or an entity discontinuity at a listing date. A threshold cannot tell a corrupt divisor from a
+#   trough year, which is exactly how the base rule came to refuse Industrivärden's real recovery.
 
 # How long a member's last reported figure stands in for a period it did not report — see
 # `carry_forward`. One year: the longest any still-reporting filer goes between filings, so nothing
@@ -394,60 +400,7 @@ def _prepare(members: list[dict], kind: str, bucket=year_bucket) -> tuple[list[d
     return ok, dropped
 
 
-def member_scale(at: dict[str, float]) -> float:
-    """A member's own typical magnitude — the median |value| across the periods it contributes.
-
-    ⚠ MEDIAN, NOT MEAN. The thing being measured against is an outlier, and a mean is moved by the
-    very outlier it is supposed to identify: Prosus's own values run 0.0090 … 0.70, and one of them
-    is the artefact. The median is the figure the series actually lives at.
-
-    ⚠ COMPUTED ON THE **REBASED** VALUES, WHICH IS SAFE BECAUSE THE TEST IS A RATIO. `_prepare`
-    scales a level member by a per-member constant (100/base); it divides out of `prev ÷ scale`, so
-    this needs neither the raw series nor a currency.
-    """
-    vals = [abs(v) for v in at.values()]
-    return median(vals) if vals else 0.0
-
-
-def base_bar_scale(at: dict[str, float], members: int) -> float:
-    """The materiality bar for ONE member — `member_scale`, or **0.0 (no bar) on a ONE-MEMBER
-    line**, where the member IS the line.
-
-    ⚠⚠ THE BAR IS A RULE ABOUT ONE MEMBER INSIDE AN AVERAGE OF MANY, AND ON A LINE OF ONE IT HAS
-    NOTHING TO PROTECT. `_MIN_STEP_BASE_FRACTION` refuses a member's step and lets the others carry
-    the interval — the refusal is an ABSTENTION. With a single contributor there is nobody to
-    abstain in favour of: `_weighted_arithmetic` gets an empty list, `blend_series` hits its
-    "nothing spans this interval" `continue`, and — because that path deliberately does NOT advance
-    `anchor` — the SAME base is offered at every later period and refused every time. One refusal
-    therefore deletes the whole line, not one step.
-
-    ⚠⚠ AND THE FIRST PERIOD OF A HYPERGROWER ALWAYS TRIPS IT. `_prepare` rebases each member to 100
-    at its own first positive period, so the bar reads `100 < 0.10 × median|rebased|` — i.e. it
-    fires on ANY member that grew more than ~10x from its first period to its median one. That is
-    not a corrupt divisor; it is growth. Measured 2026-09-03 on NVIDIA (US67066G1040) through
-    `portfolio-revenue-matrix` as a one-holding book:
-
-        price_ps  13 periods  median rebased 2,706  bar 271  ->   1 period drawn
-        eps_nri   18 periods  median rebased 2,269  bar 227  ->   1 period drawn
-        fcf_ps    13 periods  median rebased   494  bar  49  ->  13 periods drawn
-
-    A one-point line has no window, so the `Tables` tab's Share-price and EPS rows read `—` while
-    the Graphs tab — which for ONE company plots the filed figures directly, with no chain — drew
-    all thirteen. Two tabs of one modal, one company, one metric, two answers.
-
-    ⚠ IT DOES NOT LOOSEN THE BAR FOR AN INDEX OR A BOOK. `members > 1` is the whole condition, so
-    every measured case the constant was read off (Prosus at a 26% AEX weight, AMD, Mitsubishi
-    Heavy in ACWI) is untouched — those are exactly the lines where an abstention has somewhere to
-    fall back to.
-
-    ⚠ 0.0 IS ALREADY THE "NO BAR" VALUE — `member_scale({})` returns it and `prev < 0.10 x 0` is
-    false for every positive `prev`. So this adds a reason, not a mechanism. ⚠ Read it with `.get`
-    and a default, never `or`: `0.0 or member_scale(at)` silently puts the bar back.
-    """
-    return member_scale(at) if members > 1 else 0.0
-
-
-def step_growth(prev: float | None, now: float | None, scale: float) -> float | None:
+def step_growth(prev: float | None, now: float | None) -> float | None:
     """One member's growth over one interval — or None when it has none to give.
 
     ⚠⚠ THE ONE DEFINITION, READ BY BOTH THE LINE (`blend_series`) AND THE PANEL THAT EXPLAINS IT
@@ -455,13 +408,38 @@ def step_growth(prev: float | None, now: float | None, scale: float) -> float | 
     and used to apply the rule twice — so a breakdown could attribute a −2,700% move to a holding
     the line no longer moved on. The client's twin in `HoldingsRevenueModal` mirrors this exactly.
 
-    Three refusals and a floor, in order:
+    ⚠⚠ THE TWO MAGNITUDE HEURISTICS WERE REMOVED ON 2026-09-04, ON REQUEST AND ON MEASUREMENT, and
+    what is left is arithmetic only. They were `_MIN_STEP_BASE_FRACTION` (refuse a step whose anchor
+    is under 10% of that member's own median) and `_MAX_STEP_GROWTH` (refuse a step over 100x).
+
+    Measured across ACWI's five annual lines before removing them: 185 refusals, 180 of them by the
+    base rule — and 44 of those threw away steps that were FLAT OR FALLING or under 2x, including
+    `748.588 -> 748.454` (−0.02%) and `748.439 -> 748.439` (exactly zero). The rule never looked at
+    the step at all, only at the divisor, so a member with a big later run-up had its whole early
+    history refused whatever happened in it. The cost of that was 6.72pp/yr on ACWI's FCF/share and
+    4.23pp/yr on EPS; the cap was worth another 8.36pp and 5.44pp. Revenue and share price moved by
+    0.00 and 0.02pp, i.e. the guards only ever bound the per-share lines.
+
+    ⚠ WHAT THAT LETS IN, STATED PLAINLY: a member step of 2,976 -> 1,865,695 (626x in one year) now
+    enters the line at full weight, as do four more above 100x, and ACWI's FCF/share reads +33.93%/yr
+    where it read +18.85%. That is the deliberate trade — a vendor figure is reported as filed, and
+    a bad one is a bad number rather than a silently missing member. The right way to catch the real
+    unit errors is STRUCTURAL (a near-exact 100x/1000x break in the share count — Japan Post Bank's
+    `shares` is 1,000x too small — or an entity discontinuity at a listing date), not a threshold on
+    the answer, which cannot tell a corrupt divisor from a trough year.
+
+    ⚠ AND IT REMOVED A WHOLE CLASS OF TWIN DIVERGENCE WITH THEM. Both surfaces computed the bar over
+    their own view of a member (the server's `at` carries a carried `2026` and `LTM` that the
+    drill-down payload does not), so `Graphs` and `Tables` disagreed on exactly the members sitting
+    near their own bar — 18.85% against 18.90% on ACWI FCF/share, traced to one member,
+    Industrivärden, whose 1.087 -> 16.18 recovery one side counted and the other refused. With no
+    bar there is no `scale`, so there is nothing left for them to disagree about.
+
+    Two refusals and a floor, in order:
 
     * NO ANCHOR / NO VALUE — the member cannot span this interval. It sits out THIS step and joins
       at the next; it is never dropped from the metric.
-    * A NON-POSITIVE ANCHOR — there is no ratio to a zero or a negative.
-    * AN IMMATERIAL ANCHOR — see `_MIN_STEP_BASE_FRACTION`. This is the one that stops a single
-      near-break-even holding turning an index inside out.
+    * A NON-POSITIVE ANCHOR — there is no ratio to a zero or a negative. Arithmetic, not judgement.
     * FLOORED AT −100%. ⚠ BELOW ZERO THERE IS NO SCALE. A per-share figure of −0.24 against a base
       of +0.30 is not "180% worse" in any sense an INDEX can carry: an index is a product of
       (1 + g), so a term below −1 does not make it small, it makes it NEGATIVE — and a negative
@@ -472,15 +450,7 @@ def step_growth(prev: float | None, now: float | None, scale: float) -> float | 
     """
     if prev is None or now is None or prev <= 0:
         return None
-    if prev < _MIN_STEP_BASE_FRACTION * scale:
-        return None
-    growth = now / prev - 1.0
-    # ⚠ AN IMPLAUSIBLE RESULT — see `_MAX_STEP_GROWTH`. The mirror of the base test above: that one
-    # asks whether the divisor is big enough to divide by, this one whether the answer is small
-    # enough to have come from a business rather than from a unit.
-    if growth > _MAX_STEP_GROWTH:
-        return None
-    return max(growth, -1.0)
+    return max(now / prev - 1.0, -1.0)
 
 
 def _weight_at(m: dict, period: str) -> float | None:
@@ -636,12 +606,6 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
             if reported:
                 cover_w[period] += abs(float(p.get("weight") or 0))
                 cover_n[period] += 1
-        # ⚠ ONCE PER MEMBER, NOT ONCE PER STEP. It is the same figure at every interval — the
-        # member's own typical magnitude — and the level chain asks for it O(periods x members)
-        # times. Computed here, where `at` has just been filled, so the two cannot fall out of step.
-        # ⚠ AND NO BAR AT ALL WHEN THIS MEMBER IS THE WHOLE LINE — see `base_bar_scale`.
-        p["scale"] = base_bar_scale(p["at"], len(prepared))
-
     def _clears(d: str) -> bool:
         return (100.0 * cover_w[d] / total_w >= MIN_BLEND_COVERAGE_PCT
                 and 100.0 * cover_n[d] / total_n >= MIN_BLEND_COVERAGE_NAMES_PCT)
@@ -840,7 +804,7 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
             pairs = [(abs(float(w)), g)
                      for p in prepared
                      for w in [_weight_at(p, anchor)]
-                     for g in [step_growth(p["at"].get(anchor), p["at"].get(d), p["scale"])]
+                     for g in [step_growth(p["at"].get(anchor), p["at"].get(d))]
                      if w and g is not None]
             step = _weighted_arithmetic(pairs)
             if step is None:
@@ -1204,12 +1168,11 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
             # the worst of the two failures, because it is the one that gets checked and believed.
             w = _weight_at(p, anchor)
             at = p.get("at") or {k: v for k, (_d, v) in p["by_year"].items()}
-            # ⚠ THE SAME `step_growth` THE LINE USES, INCLUDING THE MATERIALITY BAR AND THE −100%
-            # FLOOR. Re-deriving "the same way" here is how a panel comes to attribute a −2,700%
-            # move to a holding the chart above it no longer moved on — and this panel is checked
-            # once and believed thereafter.
-            g = step_growth(at.get(anchor), at.get(period),
-                            p.get("scale", base_bar_scale(at, len(reporting))))
+            # ⚠ THE SAME `step_growth` THE LINE USES, INCLUDING THE −100% FLOOR. Re-deriving "the
+            # same way" here is how a panel comes to attribute a −2,700% move to a holding the
+            # chart above it no longer moved on — and this panel is checked once and believed
+            # thereafter.
+            g = step_growth(at.get(anchor), at.get(period))
             contrib.append((p, abs(float(w or 0)), g if w else None))
         # ⚠ THE DENOMINATOR IS THE MEMBERS THAT MOVED, not everyone in the table — a member with no
         # growth to measure must not dilute the step toward zero. It appears with nulls; it is not

@@ -2932,8 +2932,28 @@ def _holding_risk(isins: list[str], benchmark_label: str,
     # ⚠ `None` when nothing has been precomputed for this benchmark — the rows then carry no
     #   `mom_state` and the column renders the number alone, which is what it did before. A missing
     #   precompute must degrade to the old behaviour, never to a default distribution.
-    dist_hit = ac.leg(("rel_mom_dist", benchmark_label),
-                      lambda: _relative.load_distribution(benchmark_label))
+    # ⚠⚠ AND THE READ IS GUARDED, BECAUSE "NOT PRECOMPUTED" AND "CANNOT BE READ" ARRIVE
+    #   DIFFERENTLY AND THE COMMENT ABOVE WAS ONLY TRUE OF THE FIRST. `load_distribution` returns
+    #   None for an empty table, which degrades exactly as intended — but a table that is not there
+    #   at all raises `APIError` instead, and this call sits OUTSIDE the `_daily_eur` try above, so
+    #   it took the whole endpoint down with a 500.
+    #
+    #   Measured in production 2026-09-04 on `/api/airs/model-portfolios/1935/analysis`:
+    #   `PGRST205 — Could not find the table 'public.relative_momentum' in the schema cache`, i.e.
+    #   `supabase/migrations/20260902010000_relative_momentum.sql` had not been pushed. The whole
+    #   Analyse modal — attribution, risk, composition, the lot — failed for want of one CHIP on
+    #   one column, after all of its expensive work had already been done and logged.
+    #
+    # ⚠ IT LOGS, LOUDLY. A missing migration must still be findable; what it must not do is decide
+    #   whether fifteen panels render.
+    try:
+        dist_hit = ac.leg(("rel_mom_dist", benchmark_label),
+                          lambda: _relative.load_distribution(benchmark_label))
+    except Exception as e:  # noqa: BLE001 — a missing chip must never cost the whole modal
+        _log.warning("[analysis] relative-momentum distribution unavailable for %s (%s: %s) — "
+                     "the momentum column renders without its state chip",
+                     benchmark_label, type(e).__name__, e)
+        dist_hit = None
     dist = dist_hit[0] if dist_hit else None
     dist_n = dist_hit[2] if dist_hit else 0
 
