@@ -245,3 +245,31 @@ class TestUpperCasingIsNotNormalisation:
             src = "\n".join(code)
             assert "_norm_ccy(" in src, fn.__name__
             assert ".upper()" not in src, fn.__name__
+
+
+class TestFilsAreThousandthsNotHundredths:
+    """⚠⚠ THE ONE ENTRY WHERE COPYING THE LINE ABOVE IT WOULD BE WRONG.
+
+    Every other minor unit here is 1/100 of its major. The Kuwaiti dinar is divided into **1,000**
+    fils, and Yahoo quotes the Kuwait exchange in them: measured on the live quote, National Bank
+    of Kuwait (`KW0EQ0100010`) closed at 861.0 `KWF` against a share that trades at ~0.861 KWD. At
+    a divisor of 100 it would price at 8.61 KWD — ten times its value, and an ordinary-looking
+    number at every surface downstream.
+
+    It was added 2026-09-04 with the row itself: that ISIN had been mapped to `NBKCF`, National
+    Bank of **Canada**, so repointing it to the real Kuwaiti listing introduced this currency to
+    the pipeline for the first time.
+    """
+    FX = {"KWD": {"2026-01-02": 0.3554}}       # KWD per EUR, as `fx_rate` stores it
+
+    def test_the_map_knows_fils_and_its_divisor_is_a_thousand(self):
+        assert SUBUNIT["KWF"] == ("KWD", 1000.0)
+
+    def test_a_fils_quote_resolves_to_the_dinar_rate(self):
+        assert _rate(self.FX, "KWF", "2026-01-02") is not None
+
+    def test_the_real_close_lands_on_the_right_side_of_a_thousandfold_error(self):
+        r = _rate(self.FX, "KWF", "2026-01-02")
+        assert r == pytest.approx(355.4)                     # 0.3554 * 1000
+        eur = 861.0 / r                                      # NBK's real close, in fils
+        assert eur == pytest.approx(2.42, abs=0.01)          # ~EUR 2.42, not EUR 24.23

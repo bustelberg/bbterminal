@@ -46,6 +46,21 @@ export type Row = {
    *  Absent on a portfolio, where the weight is a holding weight and no cap is involved. */
   market_cap_eur?: number | null;
   /**
+   * WAS THIS ROW IN THE MEMBER LIST THE CHART'S LINE WAS BLENDED OVER — the server's own answer,
+   * from `portfolio-revenue-matrix`.
+   *
+   * ⚠⚠ IT REPLACES A RECONSTRUCTION THAT COULD ONLY EVER BE PARTIAL. This payload lists every
+   * constituent; the line is blended over `_blend_inputs`, which is `_members(require_market_cap)`
+   * AND THEN `classify_holding`. `market_cap_eur > 0` reproduces the first half only, so every
+   * member the classifier dropped — `fund`, `no_metrics`, `not_equity`, `unsubscribed`,
+   * `no_company` — was silently in the client's blend and out of the server's. Measured on ACWI
+   * `eps_nri`: 1,073 members here against 1,071 there, worth 0.01pp/yr on a 10-year CAGR that the
+   * `Graphs` tab prints beside this one to two decimals.
+   *
+   * ⚠ OPTIONAL, AND ABSENT MEANS "OLD PAYLOAD", NOT "NOT IN THE LINE" — see `inLine`.
+   */
+  in_line?: boolean;
+  /**
    * INDEX ROWS ONLY — the market cap as at each fiscal period, in EUR, converted at that
    * period's own end date (`period_caps_eur`).
    *
@@ -246,7 +261,18 @@ export function buildBlend(data: Resp, metric?: string) {
      * period, the response's `weight_basis` names them in a footnote, and the 2026-08-12 request
      * was to stop announcing mechanical drops on these rows.
      */
-    const inLine = (r: Row): boolean => r.market_cap_eur == null || r.market_cap_eur > 0;
+    /**
+     * ⚠⚠ THE SERVER'S ANSWER WHEN IT SHIPS ONE (`in_line`), AND THE CAP TEST ONLY AS A FALLBACK.
+     * The cap test reproduces `_members(require_market_cap=True)` and stops there; the blend's
+     * member list is that AND `classify_holding == "covered"`, and no field on this row could
+     * stand in for the second half (`status` is a different question and reads `ok` for the rows
+     * that differ). So the verdict now travels with the payload — see `Row.in_line`.
+     *
+     * ⚠ `?? ` ON THE FIELD, NOT `||` — `false` is the meaningful value here and `||` would fall
+     * through to the cap test for exactly the rows the flag exists to exclude.
+     */
+    const inLine = (r: Row): boolean =>
+      r.in_line ?? (r.market_cap_eur == null || r.market_cap_eur > 0);
     for (const r of data.rows) {
       // ⚠⚠ BEFORE THE DENOMINATOR, UNLIKE THE BASE TEST BELOW — and the difference is real. The
       // base test mirrors `_prepare`, which runs INSIDE `blend_series` on members it was already
@@ -387,12 +413,32 @@ export function buildBlend(data: Resp, metric?: string) {
      * `carry_forward` twice.
      */
     const fund = new Map<typeof parts[number], Record<string, number>>();
+    /**
+     * ⚠⚠ THE MATERIALITY BAR'S OWN VIEW OF A MEMBER, AND IT IS NOT `at` — because the server's
+     * `at` is not this one's. `blend_series` fills `p["at"]` straight out of `carry_forward`,
+     * which is UNGATED: a member is carried into every axis period inside the bound and the
+     * coverage floor decides only whether that period is DRAWN. This file gates the carry on
+     * `drawn(y)` instead, deliberately (a carried figure in a period the chart omits holds up
+     * nothing and renders as a projection — see the ⚠ at `carried` below), so `at` is missing
+     * exactly the periods the floor refuses.
+     *
+     * That is invisible everywhere except the bar, which is a MEDIAN over `at` — so one absent
+     * period moves it. Measured on AIG in the live ACWI blend: the server's `at` carries a `2026`
+     * (FY2026 exists — January filers report it — and is far under the names floor at 237 of
+     * 1,073), giving 13 values and a median of 205.58; without it the median is 165.35, the bar
+     * falls from 20.56 to 16.53, and AIG's 2016 anchor of 16.74 goes from REFUSED to accepted.
+     * That one member put +1.36pp on the 2016->2017 step and 1.1% on every level after it.
+     *
+     * So the carry is unrolled twice: gated for the line and the table, ungated for the bar.
+     */
+    const barAt = new Map<typeof parts[number], Record<string, number>>();
     for (const p of parts) {
       let last: { idx: number; y: string } | null = null;
       let since = 0;
       let lastF: { v: number; y: string } | null = null;
       let sinceF = 0;
       at.set(p, {});
+      barAt.set(p, {});
       fund.set(p, {});
       for (const y of data.years) {
         const own = p.idx[y];
@@ -438,6 +484,10 @@ export function buildBlend(data: Resp, metric?: string) {
         if (fv != null && w) fund.get(p)![y] = fv;
         // ⚠ ONLY INTO A PERIOD THE CHART DRAWS — see the ⚠⚠ on `drawn`. Elsewhere a carried figure
         // holds up nothing and reads as a projection.
+        // ⚠ THE UNGATED CARRY, FOR THE BAR ONLY — see `barAt`. Same bound and same weight test as
+        // the line below; what it does not ask is whether the period cleared the floor.
+        const barV = own ?? (last && since <= maxCarry ? last.idx : null);
+        if (barV != null && w) barAt.get(p)![y] = barV;
         const carried = own == null && last && since <= maxCarry && drawn(y) ? last : null;
         const v = own ?? carried?.idx ?? null;
         if (v == null) continue;
@@ -464,9 +514,44 @@ export function buildBlend(data: Resp, metric?: string) {
      */
     /** ⚠ ONCE PER ROW, NOT ONCE PER STEP — the same figure at every interval, and the loop below
      *  asks for it periods x rows times. Mirrors where the backend computes it.
-     *  ⚠ AND NO BAR AT ALL WHEN THIS ROW IS THE WHOLE LINE — see `baseBarScale`. */
-    const scaleOf = new Map<typeof parts[number], number>(
-      parts.map((p) => [p, baseBarScale(Object.values(at.get(p) ?? {}), parts.length)]));
+     *  ⚠ AND NO BAR AT ALL WHEN THIS ROW IS THE WHOLE LINE — see `baseBarScale`.
+     *
+     * ⚠⚠ ONE BAR **PER LEG**, BECAUSE THE SERVER COMPUTES ONE PER `blend_series` CALL AND A CHART
+     * WITH A FORECAST IS TWO CALLS. `blend_series` fills `p["at"]` over the axis IT was handed and
+     * takes `base_bar_scale(p["at"], …)` off that, so the actual leg's bar is the median of a
+     * member's ACTUAL magnitudes and the forecast leg's is the median of its forecasts. This file
+     * blends one combined axis — filed periods, `LTM`, then the `…e` columns, all in one row map —
+     * so a single median over `at` mixes them, and a forecast tail is by construction the LARGEST
+     * part of a compounder's series. The bar is `0.10 x median`, so the tail RAISES it and the
+     * member's own early steps start failing it: the refusal is an abstention, the remaining
+     * members carry the interval, and every level after it is a product over a different set.
+     *
+     * ⚠ MEASURED ON LIVE ACWI `eps_nri`, 1,073 members, 2015->2025: the tail raised the bar for
+     * 1,009 of them and pushed 65 anchors under their own bar — mature, slow-growing names
+     * (Wells Fargo, Mitsubishi UFJ, AT&T, TotalEnergies, Disney). It depressed EVERY ONE of the ten
+     * steps, by 0.15% to 1.9%, compounding to 439.29 against the server's 473.48 — reported as the
+     * Fundamental modal disagreeing with itself, +15.95%/yr on `Tables` against +16.82% on
+     * `Graphs`. `price_ps` was unaffected and agreed to four figures, which is exactly why this
+     * survived the 2026-09-03 pass: EPS is the only charted metric with a forecast leg.
+     *
+     * ⚠ CHOSEN BY THE **ANCHOR**, not by the target: the bar guards the DIVISOR (`stepGrowth`
+     * refuses on `prev`), so the leg that matters is the one the step is measured FROM.
+     *
+     * ⚠⚠ `LTM` IS IN THE FILED MEDIAN, AND ASSUMING OTHERWISE WAS WRONG — checked against the
+     * server's own `at` rather than reasoned from the fact that the LTM has its own metric code.
+     * Measured on AIG in the live ACWI blend, the actual leg's `at` is
+     * `{2015…2025, 2026: carried, LTM: 384.186}` — 13 values, median 205.58 — so the LTM (and a
+     * period carried past the coverage floor) DO set the bar there. The estimates are what is
+     * absent, because they are the other `blend_series` call.
+     */
+    const legOf = (p: string): 'filed' | 'forecast' => (isEstimatePeriod(p) ? 'forecast' : 'filed');
+    const scaleOf = new Map<typeof parts[number], Record<'filed' | 'forecast', number>>(
+      parts.map((p) => {
+        const vals = Object.entries(barAt.get(p) ?? {});
+        const bar = (leg: 'filed' | 'forecast') => baseBarScale(
+          vals.filter(([q]) => legOf(q) === leg).map(([, v]) => v), parts.length);
+        return [p, { filed: bar('filed'), forecast: bar('forecast') }];
+      }));
     /**
      * ⚠⚠ THE LINE'S OWN MOVE, DECOMPOSED BY MEMBER, IN PERCENTAGE POINTS OF THAT MOVE — and it is
      * computed HERE, inside the loop that chains the line, for the reason everything else in this
@@ -604,7 +689,9 @@ export function buildBlend(data: Resp, metric?: string) {
           // ⚠ THE SHARED RULE, NOT AN INLINE `prev > 0`. That guard caught zero and missed the
           // near-zero base — which is what let one holding drive an index through zero and take
           // most of the line off a log axis with it. See `stepGrowth`.
-          const g = stepGrowth(at.get(p)?.[anchor], at.get(p)?.[y], scaleOf.get(p) ?? 0);
+          // ⚠ THE ANCHOR'S LEG — see `scaleOf`. The bar is a test on the divisor.
+          const g = stepGrowth(at.get(p)?.[anchor], at.get(p)?.[y],
+                               scaleOf.get(p)?.[legOf(anchor)] ?? 0);
           if (!w || g == null) continue;
           num += w * g;
           den += w;

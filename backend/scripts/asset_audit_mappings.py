@@ -1,14 +1,24 @@
 """Audit the OpenFIGI -> yfinance mapping of EVERY asset row.
 
-Read-only by default: walks every `asset_grid` row and checks whether the
-resolved yfinance analysis is the SAME company OpenFIGI identified for the ISIN
-(rapidfuzz name match — the same test the dedupe/suspect logic uses). Prints each
-mismatch + a summary. Pass --fix to RE-QUEUE the mismatched rows so the worker
-re-resolves them cleanly (still NO Yahoo here — just a DB write), so it's safe to
-run anytime, even while the worker is going.
+READ-ONLY. Walks every `asset_grid` row and checks whether the resolved yfinance analysis is the
+SAME company OpenFIGI identified for the ISIN (rapidfuzz name match — the same test
+`resolve.identity_status` stamps on the row). Prints each mismatch + a summary.
 
-    uv run python scripts/asset_audit_mappings.py          # report only
-    uv run python scripts/asset_audit_mappings.py --fix     # report + re-queue bad rows
+    uv run python scripts/asset_audit_mappings.py
+
+⚠⚠ IT NO LONGER ACTS, AND THE COUNT IS WHY. `--fix` re-queued every mismatch for re-resolution;
+measured 2026-09-04 on the live grid, 110 rows fail this test and only ~15 are genuinely the wrong
+company. The rest are OpenFIGI's own spelling — `MUENCHENER RUECKVER AG-REG` for Münchener
+Rückversicherungs-Gesellschaft, `IND & COMM BK OF CHINA-H` for ICBC, `SAMSUNG ELECTRO-REGS GDR
+PFD`, `DHL GROUP` for Deutsche Post (a rename), `VANG FTSE JPN USDA` for a Vanguard ETF — i.e.
+CORRECT mappings on liquid names. Re-resolving a correct row can only make it worse: Yahoo answers
+an overloaded caller with an EMPTY list rather than a 429, so the ranker picks from a candidate set
+missing the real listing (Alphabet -> GOOA.VI, 75,000x thinner). The action lives in
+`scripts/asset_fix_mismaps.py`, which takes the ISINs a human has checked.
+
+⚠ THE TEST IS RE-RUN RATHER THAN READ off `identity_status`, deliberately: this is the checker, and
+a row stamped before a change to `same_company` carries a verdict nobody has re-asked. The two
+agreed exactly when last compared (110 = 110).
 
 Caveat: this catches WRONG-COMPANY mappings (yfinance resolved to a different
 company than the ISIN). It does NOT catch same-company-wrong-listing (a name that
@@ -22,7 +32,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # backend/ on path
 
 import deps  # noqa: E402,F401  (loads env + Supabase client)
-from asset_pipeline import queue  # noqa: E402
 from asset_pipeline.resolve import same_company  # noqa: E402
 
 APPLY = "--fix" in sys.argv
@@ -69,10 +78,21 @@ def main() -> None:
           f"{no_figi} no-OpenFIGI-name · {unmapped} unmapped", flush=True)
 
     if bad and APPLY:
-        res = queue.enqueue([r["isin"] for r in bad], skip_existing=False)
-        print(f"--fix: re-queued {res['queued']} mismatched rows — the worker will re-resolve them.", flush=True)
+        # ⚠⚠ `--fix` IS REFUSED, AND IT IS REFUSED HERE BECAUSE THIS WAS THE SECOND DOOR TO THE
+        # SAME BLANKET RE-RESOLVE. `asset_fix_mismaps.py` was made review-first on 2026-09-04 —
+        # measured, only ~15 of these 110 are genuinely the wrong company, the rest are OpenFIGI's
+        # own spelling (`MUENCHENER RUECKVER AG-REG`, `IND & COMM BK OF CHINA-H`, `DHL GROUP`) —
+        # and this line went straight to `queue.enqueue` on ALL of them, bypassing that entirely.
+        # Re-resolving a CORRECT row can only move it to a thinner listing: Yahoo answers an
+        # overloaded caller with an empty list, not a 429.
+        print("\n--fix is no longer supported here: it re-queued every mismatch, and most of "
+              "these\nare OpenFIGI spelling rather than wrong mappings. Review the list above, "
+              "then:\n"
+              "    uv run python scripts/asset_fix_mismaps.py --isin <ISIN> [--isin <ISIN> …]\n"
+              "which takes the ones you have actually checked.", flush=True)
     elif bad:
-        print("Run with --fix to re-queue these for the worker to re-resolve.", flush=True)
+        print("Review these, then re-queue the ones that are really wrong with "
+              "scripts/asset_fix_mismaps.py --isin <ISIN>.", flush=True)
 
 
 if __name__ == "__main__":

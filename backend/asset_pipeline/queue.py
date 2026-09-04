@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from deps import IN_CHUNK_SIZE, supabase
 
 from . import openfigi, store
-from .resolve import resolve, same_company
+from .resolve import resolve
 from .yahoo import YahooThrottled
 
 log = logging.getLogger(__name__)
@@ -305,7 +305,7 @@ def requeue_unmapped() -> dict:
     off = 0
     while True:
         r = (
-            supabase.table("asset_execution").select("isin, openfigi_figi, openfigi_type")
+            supabase.table("asset_execution").select("isin, openfigi_figi, openfigi_type, reason")
             .in_("status", ["not_found", "error"]).range(off, off + 999).execute().data
         ) or []
         rows += r
@@ -315,30 +315,71 @@ def requeue_unmapped() -> dict:
     isins = [
         r["isin"] for r in rows
         if r.get("openfigi_figi") and (r.get("openfigi_type") or "") not in _UNPRICEABLE_TYPES
+        # ⚠⚠ A DELIBERATE UNMAP IS NOT A THROTTLE CASUALTY — see `store.MANUAL_UNMAP_PREFIX`. This
+        # function's premise is that a `not_found` row failed only because Yahoo was busy, which is
+        # true of almost all of them and false of exactly the ones somebody unmapped because the
+        # resolver had them on a different instrument. Re-queueing those runs the same resolver
+        # over the same candidates and can restore the same wrong ticker.
+        and not (r.get("reason") or "").startswith(store.MANUAL_UNMAP_PREFIX)
     ]
     res = enqueue(isins, skip_existing=False)
     return {"unmapped": len(rows), "retryable": len(isins), **res}
 
 
-def requeue_suspects() -> dict:
-    """Re-queue the wrong-company mis-mapped rows (stored analysis name is a
-    DIFFERENT company than the ISIN's OpenFIGI name) for a clean worker pass —
-    fixes the throttle-corrupted re-resolutions without a second competing Yahoo
-    process. `skip_existing=False` so these already-ok rows actually re-process."""
+def requeue_suspects(only: list[str] | None = None, apply: bool = False) -> dict:
+    """The wrong-company mis-mapped rows — LISTED by default, re-queued only when asked.
+
+    ⚠⚠ IT USED TO RE-QUEUE ALL OF THEM, UNASKED, AND THAT IS THE DESTRUCTIVE RE-RESOLVE THIS
+    PIPELINE IS BUILT AROUND AVOIDING. `same_company` is the right test for an operating company
+    and it is WRONG far more often than it is right on this population: measured 2026-09-04 on the
+    live grid, 110 rows fail it and only ~15 are genuinely the wrong company. The other ~95 are
+    OpenFIGI's own spelling — `MUENCHENER RUECKVER AG-REG` for Münchener Rückversicherungs-
+    Gesellschaft, `IND & COMM BK OF CHINA-H` for ICBC, `SAMSUNG ELECTRO-REGS GDR PFD`, `DHL GROUP`
+    for Deutsche Post (a rename), `VANG FTSE JPN USDA` for a Vanguard ETF. Re-resolving those is
+    the Alphabet-to-Vienna failure waiting to happen: Yahoo answers an overloaded caller with an
+    EMPTY list, so a re-resolution of a CORRECT row can only move it to a thinner listing.
+
+    ⚠ AND NO THRESHOLD RESCUES IT — three rules were scored against the 15 hand-checked errors:
+    the type allowlist alone catches all 15 but would re-resolve 38 correct rows; type AND a
+    country mismatch cuts that to 11 false positives but misses 3 real ones (including the Abu
+    Dhabi bank that started this); "a bare US ticker for a non-US ISIN" is structural and clean but
+    catches only 4 of 15, because most of these resolved onto a non-US venue. There is no safe
+    automatic gate in the data on the row, so the decision stays with a person and this function's
+    job is to make it a SHORT list rather than to act on a long one.
+
+    ⚠ THE VERDICT IS READ, NOT RE-DERIVED. `identity_status` is stamped at resolve time by
+    `resolve.identity_status`, which is this same `same_company` call; computing it again here was
+    a second copy of the detector, free to drift from the badge the grid shows.
+
+    `only` re-queues exactly the named ISINs (the reviewed ones). `apply=True` with no `only`
+    re-queues every suspect — the old behaviour, now something a caller has to ask for by name.
+    """
     rows: list[dict] = []
     off = 0
     while True:
         r = (
-            supabase.table("asset_grid").select("isin, name, openfigi_name")
-            .eq("status", "ok").range(off, off + 999).execute().data
+            supabase.table("asset_execution")
+            .select("isin, name, openfigi_name, openfigi_type, yahoo_symbol, med_adv_eur")
+            .eq("status", "ok").eq("identity_status", "mismatch")
+            .range(off, off + 999).execute().data
         ) or []
         rows += r
         if len(r) < 1000:
             break
         off += 1000
-    suspects = [
-        r["isin"] for r in rows
-        if r.get("openfigi_name") and not same_company(r.get("name"), r.get("openfigi_name"))
-    ]
+
+    if only is not None:
+        wanted = {x.strip().upper() for x in only}
+        suspects = [r["isin"] for r in rows if r["isin"] in wanted]
+        unknown = sorted(wanted - {r["isin"] for r in rows})
+    else:
+        suspects = [r["isin"] for r in rows]
+        unknown = []
+
+    if not apply and only is None:
+        # ⚠ REPORT, NOT ACT. Returning the rows lets the caller print them; `queued` is 0 and says
+        # so, rather than a dry run that looks like it did something.
+        return {"suspects": len(suspects), "rows": rows, "queued": 0, "skipped": 0,
+                "applied": False, "unknown": unknown}
     res = enqueue(suspects, skip_existing=False)
-    return {"suspects": len(suspects), **res}
+    return {"suspects": len(suspects), "rows": rows, "applied": True, "unknown": unknown, **res}
