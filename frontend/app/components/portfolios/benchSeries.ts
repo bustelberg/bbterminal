@@ -179,6 +179,17 @@ export function spliceCaps<T>(data: T, caps: CapTable): T {
  */
 export function useBenchInputs<T>(
   path: string, target: BenchTarget | null | undefined,
+  /**
+   * Extra body fields merged into `benchBody`'s — `{ metrics: [...] }` for
+   * `/fundamental-blend-metrics`, which narrows an index blend from "every charted code per
+   * constituent" to one chunked query per metric.
+   *
+   * ⚠⚠ IT MUST BE A MODULE CONSTANT, NOT AN INLINE OBJECT. The effect re-runs on `benchKey(target)`
+   * alone, so a value that changes identity every render would be read once and then silently
+   * ignored — the request would keep the FIRST body for the life of the component. A literal
+   * spelled at the call site is the shape that fails that way; a shared constant cannot.
+   */
+  extra?: Record<string, unknown>,
 ): [T | null, string | null] {
   const [state, setState] = useState<[T | null, string | null]>([null, null]);
   const key = benchKey(target);
@@ -187,7 +198,9 @@ export function useBenchInputs<T>(
     void (async () => {
       setState([null, null]);
       if (!target) return;
-      const body = benchBody(target);
+      const body = extra
+        ? JSON.stringify({ ...JSON.parse(benchBody(target)) as object, ...extra })
+        : benchBody(target);
       const post = (p: string) => apiFetch(`${API_URL}/api/earnings/${p}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
       });

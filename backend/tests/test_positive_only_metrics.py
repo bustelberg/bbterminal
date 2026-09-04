@@ -42,6 +42,25 @@ def _rows(code: str) -> list[dict]:
 COVERED = [{"company_id": i, "weight_pct": 10.0} for i in (1, 2, 3)]
 
 
+@pytest.fixture(autouse=True)
+def _rule_has_a_member(monkeypatch):
+    """⚠⚠ THE LIVE SET IS EMPTY SINCE 2026-09-04, SO THE MECHANISM IS DRIVEN THROUGH A PATCHED ONE.
+
+    `fcf_ps` and `eps_nri` both went back onto the euro aggregate — where a filter that exists to
+    protect a year-on-year RATIO buys nothing, because a sum never divides a member by itself.
+    Measured on ACWI 2015→2025: FCF +33.93%/yr as a rate average against +7.52% summed, EPS +26.50%
+    against +8.31%, with the median constituent at +8.90% and +8.82%.
+
+    ⚠ THE RULE IS STILL TESTED, AND THAT IS THE POINT OF PATCHING RATHER THAN DELETING. Everything
+    here — the group map, the key-versus-code bridge, the counts, the `rule` string the card's ⓘ is
+    picked from — is what a future growth-chain metric inherits the day it joins, and an untested
+    mechanism is one that will be wrong when it does. Same treatment `_AGGREGATABLE_PER_SHARE` had
+    while IT was empty.
+    """
+    from routers import earnings as e
+    monkeypatch.setattr(e, "_POSITIVE_ONLY_METRICS", frozenset({"eps_nri"}))
+
+
 @pytest.fixture
 def earnings():
     from routers import earnings as e
@@ -50,17 +69,17 @@ def earnings():
 
 class TestOnlyTheAlwaysPositiveMembersDrawTheLine:
     def test_a_member_negative_in_any_period_is_excluded(self, earnings):
-        built = earnings._blend_rows(_rows(FCF), COVERED)
-        assert built["member_counts"][FCF] == {"considered": 1, "total": 3,
+        built = earnings._blend_rows(_rows(EPS), COVERED)
+        assert built["member_counts"][EPS] == {"considered": 1, "total": 3,
                                               "rule": "positive_only"}
 
     def test_one_bad_year_anywhere_is_enough(self, earnings):
         """⚠ ANY PERIOD, not the base period and not the last. Company #2 is positive at both ends
         and dips in the middle; a first-or-last test would keep it and the filter would be a
         different rule from the one the card describes."""
-        rows = [r for r in _rows(FCF) if r["company_id"] == 2]
+        rows = [r for r in _rows(EPS) if r["company_id"] == 2]
         built = earnings._blend_rows(rows, [COVERED[1]])
-        assert built["member_counts"][FCF]["considered"] == 0
+        assert built["member_counts"][EPS]["considered"] == 0
 
     def test_a_metric_not_in_the_set_keeps_every_member(self, earnings):
         # ⚠ THE CONTROL. Revenue goes negative for nobody, but the point is the RULE is per metric:
@@ -69,10 +88,10 @@ class TestOnlyTheAlwaysPositiveMembersDrawTheLine:
         assert built["member_counts"][REV] == {"considered": 3, "total": 3, "rule": "all"}
 
     def test_the_filter_is_keyed_off_the_metric_KEY_not_the_code_spelling(self, earnings):
-        """⚠⚠ THE TRAP THAT WOULD MAKE IT A SILENT NO-OP. `_POSITIVE_ONLY_METRICS` holds `fcf_ps`;
-        the loop walks `annuals__Per Share Data__Free Cash Flow per Share` AND its lowercase twin.
+        """⚠⚠ THE TRAP THAT WOULD MAKE IT A SILENT NO-OP. `_POSITIVE_ONLY_METRICS` holds `eps_nri`;
+        the loop walks `annuals__Per Share Data__EPS without NRI` AND its lowercase twin.
         Comparing the two directly matches nothing and every member stays in."""
-        lower = "annuals__per_share_data__Free Cash Flow per Share"
+        lower = "annuals__per_share_data__EPS without NRI"
         built = earnings._blend_rows(_rows(lower), COVERED)
         assert built["member_counts"][lower] == {"considered": 1, "total": 3,
                                                 "rule": "positive_only"}
@@ -82,16 +101,16 @@ class TestTheCountIsAlwaysReported:
     def test_every_code_gets_a_count_even_when_nothing_was_withheld(self, earnings):
         """⚠ SO A CARD NEVER HAS TO KNOW whether its metric happens to be filtered to render
         "n of m" — it compares the two numbers and stays silent when they match."""
-        built = earnings._blend_rows(_rows(REV) + _rows(FCF), COVERED)
-        assert set(built["member_counts"]) == {REV, FCF}
+        built = earnings._blend_rows(_rows(REV) + _rows(EPS), COVERED)
+        assert set(built["member_counts"]) == {REV, EPS}
         assert built["member_counts"][REV]["considered"] == built["member_counts"][REV]["total"]
-        assert built["member_counts"][FCF]["considered"] < built["member_counts"][FCF]["total"]
+        assert built["member_counts"][EPS]["considered"] < built["member_counts"][EPS]["total"]
 
     def test_the_total_is_the_covered_set_not_the_rows_that_arrived(self, earnings):
-        # ⚠ A company with no FCF row at all is still part of "of 3" — the reader is comparing
+        # ⚠ A company with no EPS row at all is still part of "of 3" — the reader is comparing
         # against the book, not against whoever happened to file.
-        rows = [r for r in _rows(FCF) if r["company_id"] == 1]
-        assert earnings._blend_rows(rows, COVERED)["member_counts"][FCF]["total"] == 3
+        rows = [r for r in _rows(EPS) if r["company_id"] == 1]
+        assert earnings._blend_rows(rows, COVERED)["member_counts"][EPS]["total"] == 3
 
 
 class TestTheRuleSaysWhyMembersAreMissing:
@@ -101,8 +120,8 @@ class TestTheRuleSaysWhyMembersAreMissing:
     second copy of a decision that lives in one set membership here."""
 
     def test_a_filtered_metric_says_positive_only(self, earnings):
-        built = earnings._blend_rows(_rows(FCF), COVERED)
-        assert built["member_counts"][FCF]["rule"] == "positive_only"
+        built = earnings._blend_rows(_rows(EPS), COVERED)
+        assert built["member_counts"][EPS]["rule"] == "positive_only"
 
     def test_an_unfiltered_growth_chain_says_all(self, earnings):
         """⚠ AND `all` MUST NOT BE READ AS "nothing is missing" — it says no RULE withheld anyone.
@@ -194,14 +213,23 @@ class TestEpsEligibilitySpansTheConsensusToo:
         built = e._blend_rows(rows, COVERED[:2])
         assert built["member_counts"][EPS]["considered"] == 2
 
-    def test_eps_is_not_summed_in_euros_any_more(self):
-        """⚠ THE OTHER HALF OF THE SAME DECISION. The filter only makes sense on the growth chain:
-        a euro sum handles a negative member correctly and needs no filter, so a metric that is
-        positives-only must not also be aggregatable — see `_AGGREGATABLE_PER_SHARE`."""
+    def test_the_two_sets_can_never_overlap(self, monkeypatch):
+        """⚠ THE INVARIANT, NOT THE CURRENT MEMBERSHIP. The filter only makes sense on the growth
+        chain: a euro sum handles a negative member correctly and needs no filter, so a metric that
+        is positives-only must not also be aggregatable. Asserted against the LIVE sets — the
+        autouse fixture's patched one is deliberately dropped here, because what this guards is the
+        real configuration.
+
+        ⚠ Both sets are on the aggregate today (2026-09-04), so the live filter set is empty and
+        this holds trivially. It is kept because the day something rejoins the filter is the day the
+        overlap becomes possible, and it is silent when it happens: a survivorship-filtered SUM
+        looks like an ordinary line."""
+        monkeypatch.undo()
         from routers import earnings as e
-        assert "eps_nri" in e._POSITIVE_ONLY_METRICS
-        assert "eps_nri" not in e._AGGREGATABLE_PER_SHARE
-        assert e.aggregatable_metrics(["eps_nri"]) == []
+        assert not (e._POSITIVE_ONLY_METRICS
+                    & (e._AGGREGATABLE_PER_SHARE | e._AGGREGATABLE_TOTAL))
+        assert "eps_nri" in e._AGGREGATABLE_PER_SHARE
+        assert e.aggregatable_metrics(["eps_nri"]) == ["eps_nri"]
 
     def test_the_group_carries_both_section_spellings_and_the_consensus(self):
         """⚠ DERIVED FROM `_METRIC_CODES`, NEVER LISTED — a hand-written group goes stale silently
@@ -210,6 +238,8 @@ class TestEpsEligibilitySpansTheConsensusToo:
         group = e._positive_only_groups()
         assert set(group[EPS]) == {EPS, "annuals__per_share_data__EPS without NRI", EST}
         assert group[EST] == group[EPS]
-        # ⚠ `fcf_ps` HAS NO CONSENSUS, so its group is just its own spellings — the joint rule
-        # costs it nothing and its count is unchanged by this.
-        assert set(group[FCF]) == set(e._METRIC_CODES["fcf_ps"])
+        # ⚠ AND `eps_nri` IS NOW THE ONLY MEMBER OF THE SET, so it is the only group there is.
+        #   `fcf_ps` left on 2026-09-04 when it went back onto the euro aggregate, where a filter
+        #   buys nothing — a SUM never divides a member by itself.
+        assert FCF not in group
+        assert set(group) == {EPS, "annuals__per_share_data__EPS without NRI", EST}

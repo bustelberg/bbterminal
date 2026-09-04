@@ -136,7 +136,83 @@ export type Blend = ReturnType<typeof buildBlend>;
  */
 /** ⚠ EXPORTED so a surface can SAY which rows it filtered without keeping a second list of
  *  them — `TablesTab`'s footnote names the affected rows off this set. */
-export const POSITIVE_ONLY_METRICS = new Set(['fcf_ps', 'eps_nri']);
+/**
+ * ⚠⚠ EMPTY SINCE 2026-09-04, AND THE SERVER'S SET EMPTIED IN THE SAME EDIT. `fcf_ps` and then
+ * `eps_nri` both went back onto the euro aggregate, where the filter buys nothing: the rule exists
+ * because a year-on-year chain divides a member by itself, and a SUM never does — a bad year is
+ * just a smaller number in the total. Keeping it would have left the survivorship half of the bias
+ * in place (ACWI's FCF line was drawn from 665 of 1,511 members, EPS from 1,072) for no arithmetic
+ * reason. Measured: FCF +33.93%/yr as a rate average against +7.52% summed, EPS +26.50% against
+ * +8.31%, with the median constituent at +8.90% and +8.82%.
+ *
+ * ⚠ IT MUST NOT BE DELETED FOR BEING EMPTY. The rule, its badge, its copy and its counts are all
+ * still correct and are what a future growth-chain metric joins.
+ *
+ * ⚠ IF THESE TWO SETS EVER DIFFER, THE DRILL-DOWN EXPLAINS A LINE IT CANNOT REACH — which this
+ * file has already done once. Change one, change the other, in the same commit.
+ */
+export const POSITIVE_ONLY_METRICS = new Set<string>([]);
+
+/** One row of `/api/earnings/fundamental-blend-metrics` — the SERVER's blended line. */
+export type BlendMetricRow = {
+  metric_code: string; target_date: string; numeric_value: number | null;
+};
+
+/**
+ * THE SERVER'S OWN LINE, KEYED BY PERIOD — read, never recomputed.
+ *
+ * ⚠⚠ THIS EXISTS SO THE `Tables` TAB STOPS ANSWERING FROM A RECONSTRUCTION. `Graphs` asks
+ * `/fundamental-blend-metrics` for the blended line; `Tables` used to ask
+ * `/portfolio-revenue-matrix` for the RAW per-company figures and rebuild the line with
+ * `buildBlend`. Two tabs of one modal, one series, two sources — and they disagreed four times in
+ * one day: share price 10.91 against 10.89, EPS 15.95 against 16.82, FCF/share 18.85 against 18.90,
+ * EPS again 8.31 against 8.32.
+ *
+ * ⚠⚠ AND THE RECONSTRUCTION COULD NEVER HAVE BEEN EXACT, WHICH IS THE REAL ARGUMENT. The matrix is
+ * specified as "the ground data behind the chart" — the filed figures — NOT as "everything the
+ * blend used. So it is a strict subset of the server's inputs, and each divergence was a different
+ * missing input: the `LTM` point and a period carried past the coverage floor (both absent from the
+ * payload, both in the server's `at`), and the member list itself (`_members ∩ covered`, which had
+ * to be added as `in_line`). Patching inputs one incident at a time cannot converge on a payload
+ * that was never specified to carry them.
+ *
+ * `buildBlend` KEEPS ITS JOB — it is the drill-down's independent reconstruction from the cells on
+ * screen, which is what makes that table a check on the chart rather than a restatement of it.
+ * What it is no longer is a source for a figure rendered elsewhere as the answer.
+ *
+ * ⚠ `LTM` IS DELIBERATELY DROPPED. It ships under its own `ltm__` code, and every consumer here
+ * (`lineCagr`, `forwardCagr`, `commonEndPeriod`) filters to periods `periodYear` can parse — so
+ * carrying it would add a key nothing reads and one more thing to keep in step.
+ *
+ * ⚠ A FORECAST BECOMES `2026e`, because that is the period vocabulary the rest of this file and
+ * `lineCagr` speak. The server ships it under a separate metric code with an ordinary date, so the
+ * suffix is the only thing that distinguishes a consensus from a filed year downstream.
+ */
+export function levelFromBlend(
+  rows: readonly BlendMetricRow[],
+  codes: readonly string[],
+  forecastCodes: readonly string[] = [],
+): Record<string, { value: number }> {
+  const filed = new Set(codes);
+  const forecast = new Set(forecastCodes);
+  // ⚠ LATEST DATE WINS PER PERIOD, mirroring `MetricGrowthCard.extractPoints`. A metric with two
+  // section spellings can carry one period twice (the vendor renamed its sections), and taking
+  // whichever arrived first would make the line depend on row order.
+  const best: Record<string, { date: string; value: number }> = {};
+  for (const r of rows) {
+    const isForecast = forecast.has(r.metric_code);
+    if (!isForecast && !filed.has(r.metric_code)) continue;
+    if (r.numeric_value == null) continue;
+    const date = String(r.target_date);
+    const year = date.slice(0, 4);
+    if (!/^\d{4}$/.test(year)) continue;
+    const period = isForecast ? `${year}e` : year;
+    const cur = best[period];
+    if (!cur || date > cur.date) best[period] = { date, value: r.numeric_value };
+  }
+  return Object.fromEntries(
+    Object.entries(best).map(([p, v]) => [p, { value: v.value }]));
+}
 
 export function buildBlend(data: Resp, metric?: string) {
     /**

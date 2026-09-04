@@ -208,6 +208,34 @@ const CARDS: MetricCfg[] = [
   // the portfolio card read "No dividend/share ingested" while every holding carried the line.
 ];
 
+/**
+ * THE METRIC LIST THE BLEND IS NARROWED TO — one declaration, because two tabs now send it.
+ *
+ * ⚠⚠ `TablesTab` SENDS THE IDENTICAL ARRAY SO THE TWO SHARE ONE CACHE ENTRY. Both the server's
+ * `cached_blend` and the browser's `readCache` key on the request BODY, so a different metric list
+ * is a different entry — and an index blend is the most expensive read on this modal (~1,500
+ * constituents on ACWI). Spelling the list twice would not be a wrong answer, it would be the
+ * expensive answer computed twice.
+ */
+export const BLEND_METRICS: string[] = [...new Set(CARDS.flatMap(
+  (c) => [c.benchmarkMetric, ...(c.forecastMetric ? [c.forecastMetric] : [])]))];
+
+/**
+ * metric KEY -> the GuruFocus codes its line is drawn from, for reading a blended payload back.
+ *
+ * ⚠⚠ DERIVED FROM `CARDS`, NEVER LISTED SEPARATELY. These are the same code lists the charts
+ * extract with, and this file has already paid for one key/code mismatch — `fcf_per_share` against
+ * the real `fcf_ps`, which drew REVENUE under an FCF heading at +19.0% against +28.0%. A second
+ * hand-written copy is that bug with a longer fuse.
+ *
+ * ⚠ GROWTH CARDS ONLY. A ratio card's line is an average of a point-in-time ratio, not a level
+ * chain, so it has no blended level to read and is not comparable to these.
+ */
+export const BLEND_CODES: Record<string, { codes: string[]; forecast: string[] }> =
+  Object.fromEntries(CARDS
+    .filter((c) => c.kind === 'growth')
+    .map((c) => [c.benchmarkMetric, { codes: c.codes, forecast: c.forecastCodes ?? [] }]));
+
 export default function LongEquityTab({
   isin, name, basket, portfolioId, sbcCorrection = true, compare = null,
 }: {
@@ -411,10 +439,11 @@ export default function LongEquityTab({
           // Hand-writing `{universe: …}` here is what made this the ONE fetch that could not
           // compare against a company: the ten cards went through `useBenchInputs` and switched,
           // and the three growth cards silently kept drawing the index. One builder, one shape.
+          // ⚠ `BLEND_METRICS`, NOT AN INLINE LIST — `TablesTab` sends the same array so the two
+          //   tabs share one cache entry. See its declaration.
           body: JSON.stringify({
             ...JSON.parse(benchBody(benchTarget)),
-            metrics: [...new Set(CARDS.flatMap(
-              (c) => [c.benchmarkMetric, ...(c.forecastMetric ? [c.forecastMetric] : [])]))],
+            metrics: BLEND_METRICS,
           }),
         });
         const b = await r.json().catch(() => null);

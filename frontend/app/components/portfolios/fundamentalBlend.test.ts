@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { buildBlend, type Blend, type Resp, type Row } from './fundamentalBlend';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  buildBlend, POSITIVE_ONLY_METRICS, type Blend, type Resp, type Row,
+} from './fundamentalBlend';
 
 /**
  * THE PER-MEMBER DECOMPOSITION OF THE BLENDED LINE'S MOVE — the `Contribution` view of the
@@ -340,6 +342,19 @@ describe('buildBlend — the euro sum', () => {
  * `…e` columns in the same map as the filed years, so reading the whole row IS the joint rule.
  */
 describe('buildBlend positives-only members', () => {
+  /**
+   * ⚠⚠ THE LIVE SET IS EMPTY SINCE 2026-09-04, SO THE RULE IS DRIVEN THROUGH A PATCHED ONE — the
+   * mirror of the backend's autouse fixture, and for the same reason. `fcf_ps` and `eps_nri` both
+   * went back onto the euro aggregate, where a filter that protects a year-on-year RATIO buys
+   * nothing (a sum never divides a member by itself). Measured on ACWI 2015→2025: FCF +33.93%/yr
+   * as a rate average against +7.52% summed, EPS +26.50% against +8.31%.
+   *
+   * ⚠ THE RULE, ITS BADGE AND ITS COPY ARE ALL STILL LIVE CODE. An untested mechanism is one that
+   * will be wrong the day a growth-chain metric joins it.
+   */
+  beforeEach(() => POSITIVE_ONLY_METRICS.add('eps_nri'));
+  afterEach(() => POSITIVE_ONLY_METRICS.delete('eps_nri'));
+
   const rows = () => [
     row('A', 50, { 2023: 1, 2024: 2, '2026e': 4 }),
     row('B', 50, { 2023: 1, 2024: 2, '2026e': -1 }),   // profitable, forecast to lose money
@@ -396,10 +411,20 @@ describe('buildBlend positives-only members', () => {
     expect(b.contrib.get(r[1])!['2024'].growthPct).toBeCloseTo(100, 10);
   });
 
-  it('still applies to fcf_ps, whose group is just its own filed years', () => {
+  it('⚠⚠ NO LONGER applies to fcf_ps — it went back onto the euro aggregate', () => {
+    // 2026-09-04. The filter exists because a year-on-year chain DIVIDES A MEMBER BY ITSELF; a SUM
+    // never does, so a negative year is just a smaller number in the total and excluding the
+    // cash-burners only adds survivorship. Measured on ACWI 2015→2025, the rate average read
+    // +33.93%/yr against the aggregate's +7.52% — with the median constituent at +8.90%.
+    //
+    // ⚠ B still contributes nothing HERE, but for the arithmetic reason rather than the member
+    // rule: its 2023 base is positive and its 2024 is −2, so `stepGrowth` floors it at −100%
+    // (a member that has gone to or below zero can lose no more than everything). It is IN the
+    // line — which is the whole difference — and the assertion is on the growth, not on absence.
     const r = [row('A', 50, { 2023: 1, 2024: 2 }), row('B', 50, { 2023: 1, 2024: -2 })];
     const b = buildBlend(resp(['2023', '2024'], r), 'fcf_ps');
-    expect(b.contrib.get(r[1])).toBeUndefined();
+    expect(b.contrib.get(r[1])!['2024'].growthPct).toBeCloseTo(-100, 10);
+    expect(b.excludedByRule.has(r[1])).toBe(false);
   });
 });
 
