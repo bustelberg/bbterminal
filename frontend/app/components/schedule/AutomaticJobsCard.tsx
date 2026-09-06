@@ -9,7 +9,7 @@ import InfoTip from '../InfoTip';
 import {
   ago, headline, JOB_TONE, stamp, summaryLine, type JobRow, type JobsPayload,
 } from './automaticJobs';
-import { JOB_PANELS } from './jobPanels';
+import { JOB_PANELS, ROW_ACTIONS } from './jobPanels';
 import { usePipelineActivity, type PipelineCtx } from './usePipelineActivity';
 
 /**
@@ -60,10 +60,12 @@ export default function AutomaticJobsCard() {
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-fg-strong flex items-center gap-1.5">
             Automatic jobs
-            <InfoTip text={'Every job declared in backend/scheduled_jobs.py, beside what the '
-              + 'scheduler in THIS process is actually holding and when each last ran. A job that '
-              + 'is declared but not registered is the failure this table exists to show: it '
-              + 'appears in no run history, because it has no runs.'} />
+            {/* ⚠ THE ⓘ IS WHERE THE EXPLANATION LIVES, and it is the only place on this card that
+                explains anything. The table's job is to be scannable; the reasoning is one hover
+                away rather than a paragraph every reader passes over daily. */}
+            <InfoTip text={'What is declared, what the scheduler in THIS process is holding, and '
+              + 'when each last ran. A declared-but-not-registered job is what this exists to '
+              + 'show — it appears in no run history, because it has no runs.'} />
           </h2>
           {data && (
             <p className={`text-[12px] mt-0.5 ${headline(data).tone}`}>{headline(data).text}</p>
@@ -117,12 +119,12 @@ export default function AutomaticJobsCard() {
             </tbody>
           </table>
           <p className="px-4 py-2 text-[11px] text-fg-faint border-t border-neutral-800/40">
-            {/* ⚠ THE SCOPE IS NAMED. The scheduler is in-process by design (one instance,
-                DISABLE_SCHEDULER=1 on any replica), so “registered” and “next run” describe the
-                container that served this request — not the fleet. A reader who assumes otherwise
-                would take a correct replica for a broken primary. */}
-            Registration and next-run times are read from the scheduler in the process that served
-            this request. Checked {stamp(data.checked_at)}.
+            {/* ⚠ THE SCOPE IS STILL NAMED, IN ONE CLAUSE. The scheduler is in-process by design
+                (one instance, DISABLE_SCHEDULER=1 on any replica), so “registered” and “next run”
+                describe the container that served this request, not the fleet — a reader who
+                assumes otherwise takes a correct replica for a broken primary. That is the whole
+                fact; the two sentences it used to take were the same fact said twice. */}
+            Read from this container’s scheduler · checked {stamp(data.checked_at)}.
           </p>
         </div>
       )}
@@ -240,8 +242,12 @@ function Row({ j, panel, ctx }: {
         <td className="px-3 py-1.5 text-right whitespace-nowrap">
           {/* ⚠ NO "Details" BUTTON — the panel lives INSIDE the row (step 3), so the row's own ▸ is
               the disclosure and a second control opening the same thing two cells apart would be
-              two ways to do one thing. */}
-          <RunControl j={j} />
+              two ways to do one thing.
+              ⚠ THE REGISTRY WINS WHERE IT HAS AN ENTRY, and the two are mutually exclusive by
+              construction: `ROW_ACTIONS` exists precisely for the rows `runnable` is false on, so
+              `RunControl` would render nothing there anyway. Falling back rather than rendering
+              both keeps one button per row. */}
+          {ROW_ACTIONS[j.id]?.(ctx) ?? <RunControl j={j} />}
         </td>
       </tr>
       {open && (

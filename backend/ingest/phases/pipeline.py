@@ -156,18 +156,32 @@ def _maybe_full_refetch(run_id: int, cids: list[int], accumulated_errors: list[s
         accumulated_errors.append(msg)
 
 
-def _log_universe_freshness(run_id: int, companies: list[dict], *, when: str) -> None:
+def _log_universe_freshness(
+    run_id: int, companies: list[dict], *, when: str, required: date | None = None,
+) -> None:
     """Transcribe how far a company set is from the deciding bar, BEFORE and AFTER
     a fetch — the difference is the only proof the fetch achieved anything.
 
     Names the laggards (capped, with the overflow stated), because "1,431 stale"
     tells you to refresh and "these 2 are still stale" tells you WHICH vendor gaps
-    you are living with. Best-effort: a diagnostic must never fail the refresh."""
+    you are living with. Best-effort: a diagnostic must never fail the refresh.
+
+    ⚠⚠ `required` IS PASSED IN BY THE REBALANCE AND DEFAULTED ONLY FOR THE MANUAL BUTTON. The
+    default is `_deciding_bar_for([])`, which is the bar for a first-MONDAY strategy — right for
+    the per-universe refresh, where there is no strategy in view and Monday is the house default,
+    and wrong for a rebalance whose due set may sit on another weekday. Reporting "short of the
+    bar" against a bar the run is not aiming at names the wrong companies in both directions.
+
+    ⚠ IT REPORTS PRICE AND VOLUME SEPARATELY, which is the half `universe_freshness` cannot: that
+    one classifies on `close_price` alone (peer-relative, for deciding what to re-fetch), so a
+    company whose price is current and whose VOLUME stopped a month ago is `fresh` there and is
+    dropped by the signal engine's staleness guard anyway — two of the seven momentum signals are
+    volume. This is the only surface that shows it."""
     try:
         from momentum.data._pg import load_latest_metric_dates_via_copy  # noqa: PLC0415
 
         cids = [int(c["cid"]) for c in companies if c.get("cid") is not None]
-        required = _deciding_bar_for([])
+        required = required or _deciding_bar_for([])
         close = load_latest_metric_dates_via_copy(cids, "close_price") or {}
         vol = load_latest_metric_dates_via_copy(cids, "volume") or {}
         if not close:
@@ -840,6 +854,15 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
                         "so every active company is in the fetch set",
                         level="warn", phase="prices",
                     )
+                # ⚠⚠ NAME THE LAGGARDS, BOTH METRICS, BEFORE AND AFTER. Until now this op reported
+                # only COUNTS ("N of M still behind") and only for close_price, so the one question
+                # a rebalance actually raises — WHICH companies went into the ranking on stale data
+                # — had no answer anywhere. The engine drops a >30-day-stale name silently, so the
+                # selection is made from whatever subset happened to be fresh and nothing on screen
+                # says which. The `before` pass is what makes the `after` pass evidence rather than
+                # a bare list: the difference between them is the only proof the fetch did anything.
+                _log_universe_freshness(run_id, universe_companies, when="before",
+                                        required=required)
                 to_fetch = [c for c in universe_companies if c["cid"] in behind]
                 if to_fetch:
                     _update_run(
@@ -862,6 +885,13 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
                     )
                     _run_prices_phase(run_id, accumulated_errors, companies_override=to_fetch)
                     log_step(run_id, "  price fetch complete", phase="prices")
+                    # ⚠ OVER THE WHOLE UNIVERSE, NOT `to_fetch`. The fetch set was the names behind
+                    # their peers; the question this answers is what the RANKING will be run on, and
+                    # a name excluded from the fetch because it looked fresh on price can still be
+                    # short on volume. Scoping the after-pass to what we fetched would report only
+                    # on the companies we already knew about.
+                    _log_universe_freshness(run_id, universe_companies, when="after",
+                                            required=required)
                 else:
                     log.info(
                         "[rebalance] run_id=%s universe already priced through the %s deciding "

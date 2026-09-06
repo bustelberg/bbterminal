@@ -154,6 +154,46 @@ export const JOB_PANELS: Record<string, (ctx: PipelineCtx) => ReactNode> = {
   ),
 };
 
+/**
+ * THE ACTION COLUMN'S BUTTON, FOR A JOB THE GENERIC ONE CANNOT SERVE.
+ *
+ * ⚠⚠ `RunControl` RENDERS OFF `j.runnable`, WHICH IS `JOB_BODIES` MEMBERSHIP — and the two
+ * pipeline jobs are deliberately absent from it (they fire their own daemon threads and narrate
+ * into `ingest_run`, so `start_job_now`'s registry job would put a second progress surface on a
+ * run that already has one). That is the same conflation the watchdog had to be rescued from:
+ * membership was answering both "can this be run" and "does the table draw a button". This map
+ * answers only the second, for the rows where the answer is yes but the generic control is wrong.
+ *
+ * ⚠ IT FIRES `rebalance` ALONE, NOT THE 05:00 SEQUENCE. The row is `daily_pipeline` = price-update
+ * THEN rebalance, and the whole point of this button is the one action somebody wants on demand:
+ * re-decide the strategies. The rebalance op prices its own universe up to the deciding bar first
+ * (`_run_rebalance_pipeline_sync`), so it is self-sufficient — it does not need the price-update
+ * op to have run, which is exactly why it can stand alone here. The price-update button stays in
+ * the panel for the times you want only that.
+ *
+ * ⚠ DUE-ONLY, deliberately. `force=true` re-decides an already-decided period, which breaks the
+ * per-period lock that keeps each historical decision reproducible; that override stays behind its
+ * own confirming button inside the panel. This one is never a silent no-op either — the backend
+ * says "all enabled strategies are already rebalanced for their current period" and points at
+ * Force.
+ *
+ * ⚠ MOST JOBS ARE ABSENT AND SHOULD STAY ABSENT: they have a body, so `RunControl` already draws
+ * a correct button with a working Cancel.
+ */
+export const ROW_ACTIONS: Record<string, (ctx: PipelineCtx) => ReactNode> = {
+  daily_pipeline: (ctx) => (
+    <RunNowButton
+      job="rebalance"
+      busy={!!ctx.running('rebalance')}
+      label="Rebalance now"
+      size="sm"
+      title={'Re-select holdings for every scheduled strategy that is DUE, now. Prices the due '
+        + 'strategies’ universe up to the deciding bar first (the close strictly before the '
+        + 'rebalance date), then computes. Expand the row for the price-update and force options.'}
+    />
+  ),
+};
+
 // ⚠ `DailyHoldingsSection` IS NOT RE-EXPORTED FROM HERE. It was the fourth card of the retired
 // component but it is not a job — no schedule, no run row, writes nothing — so it has no row to
 // live behind. `/schedule` imports it directly and hands it the strategies the page already has,
@@ -203,19 +243,31 @@ function useRunNow(job: string, busy: boolean, universe?: string) {
   return { run, pending };
 }
 
-function RunNowButton({ job, busy }: { job: string; busy: boolean }) {
+function RunNowButton({ job, busy, label = 'Run now', title, size = 'md' }: {
+  job: string; busy: boolean;
+  /** ⚠ THE VERB, NOT A DEFAULT. Inside a section header "Run now" is unambiguous — the card it
+   *  sits in names the run. In the Automatic-jobs ACTION COLUMN there is no such card and the row
+   *  is `daily_pipeline`, which is price-update AND rebalance, so a bare "Run now" there would
+   *  claim to fire both. */
+  label?: string; title?: string;
+  /** `sm` matches `RunControl`'s button so the action column stays one size. */
+  size?: 'sm' | 'md';
+}) {
   const { run, pending } = useRunNow(job, busy);
   const disabled = pending || busy;
   return (
     <button
       // stopPropagation so clicking Run-now inside the CollapsibleCard header
-      // doesn't also toggle the card open/closed.
+      // doesn't also toggle the card open/closed — nor, in the jobs table, the row's disclosure.
       onClick={(e) => { e.stopPropagation(); void run(); }}
       disabled={disabled}
-      className="text-xs px-2.5 py-1 rounded-lg bg-accent-600 hover:bg-accent-500 text-white
-                 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      title={title}
+      className={`cursor-pointer rounded-lg bg-accent-600 hover:bg-accent-500 text-white
+                  disabled:opacity-40 disabled:cursor-not-allowed transition-colors ${size === 'sm'
+        ? 'text-[11px] px-2 py-0.5'
+        : 'text-xs px-2.5 py-1'}`}
     >
-      {busy ? 'Running…' : pending ? 'Starting…' : 'Run now'}
+      {busy ? 'Running…' : pending ? 'Starting…' : label}
     </button>
   );
 }
@@ -484,18 +536,10 @@ function PriceUpdateSection({
       )}
       {held && (
         <>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-fg-soft">
-              Held companies <span className="text-fg-faint">· {held.total_companies}</span>
-            </span>
-            <span className="flex items-center gap-2 text-[12px] font-mono">
-              {fresh?.latest_close_date && <span className="text-fg-faint">through {fresh.latest_close_date}</span>}
-              {(fresh?.fresh_count ?? 0) > 0 && <span className="text-pos-400">{fresh!.fresh_count} fresh</span>}
-              {(fresh?.stale_count ?? 0) > 0 && <span className="text-warn-300">{fresh!.stale_count} stale</span>}
-              {(fresh?.missing_count ?? 0) > 0 && <span className="text-neg-400">{fresh!.missing_count} missing</span>}
-            </span>
-          </div>
-
+          {/* ⚠ THE COUNTS ARE NOT REPEATED HERE. The header already carries "N held", the stale /
+              fresh verdict and "through <date>"; this block restated all four one line below them,
+              which is the kind of duplication that makes a panel read as noise and gives two
+              places for one fact to be wrong in. The per-company breakdown is the table itself. */}
           {held.total_companies === 0 ? (
             <div className="text-xs text-fg-subtle">No holdings yet.</div>
           ) : (
@@ -580,12 +624,9 @@ function RebalanceSection({
         </>
       }
     >
-      {nextDue && (
-        <div className="text-fg-soft">
-          Next rebalance due <span className="font-mono text-fg">{nextDue.slice(0, 10)}</span>
-          <span className="text-fg-faint"> ({relTime(nextDue, nowMs)})</span>
-        </div>
-      )}
+      {/* ⚠ "Next rebalance due" IS IN THE HEADER AND NOWHERE ELSE. `NextRun` already renders that
+          exact timestamp plus its countdown in `idleNode` two lines above; the body repeated it as
+          a date and a relative time, so one card showed one fire time three ways. */}
       {running && (
         <div className="space-y-1.5 rounded-lg bg-inset/60 px-3 py-2 border border-neutral-800/40">
           <div className="flex items-center gap-2">
@@ -1461,7 +1502,12 @@ function FullPriceRefreshSection({
 
   return (
     <CollapsibleCard
-      title="Month-end full price refresh"
+      /* ⚠ NOT "Month-end" ANY MORE. That tick was replaced by `price_slice` on 2026-09-02 — one
+         pass a month against a 30-day staleness guard is the same period, so coverage collapsed in
+         the days before each refresh. This op survives as the MANUAL full pass (a bulk import, a
+         vendor correction), and a title still promising a month-end schedule described a job that
+         no longer exists. */
+      title="Full price refresh (manual)"
       defaultCollapsed={collapsed}
       bodyClassName="px-5 py-4 text-xs space-y-3"
       rightSlot={
@@ -1476,21 +1522,21 @@ function FullPriceRefreshSection({
             idleNode={<LastResult run={lastRun} nowMs={nowMs} />}
           />
           {usage && <span className="text-fg-faint font-mono">{totalLeft.toLocaleString()} calls left</span>}
-          <RunNowButton job="full_price_refresh" busy={!!running} />
+          <RunNowButton
+            job="full_price_refresh"
+            busy={!!running}
+            title={'Re-price EVERY company, most-stale first, bounded by the monthly GuruFocus '
+              + 'quota. The right tool after a bulk import or a vendor correction; the daily price '
+              + 'slice is what keeps prices current.'}
+          />
         </>
       }
     >
-      <div className="text-fg-soft">
-        Re-prices <span className="text-fg">every company</span>{' '}in the database (most-stale first), capped by the
-        monthly GuruFocus quota that resets on the 1st — so the remaining budget is spent before it&apos;s lost.
-        {/* ⚠ THE GATING, NOT THE CLOCK. This used to add "Runs automatically in 22h" off the same
-            `next_run_at` the table above now owns — and it was the more misleading of the two,
-            because the tick is DAILY and only acts at month end, so a 22h countdown read as "the
-            full refresh is 22h away" on the 3rd of the month. The cadence column says it once,
-            correctly. */}
-        {' '}It wakes daily and acts only in the last days of the month.
-      </div>
-
+      {/* ⚠ THE PARAGRAPH IS GONE AND THE SECOND SENTENCE OF IT WAS WRONG. It described a daily tick
+          that "acts only in the last days of the month" — the month-end gating that was deleted in
+          2026-09-02, so the panel was explaining a schedule this op has not had for days. What it
+          does is now the title (a manual full pass) and the budget bars below (what it may spend);
+          the button's own hover carries the rest. */}
       {showBar && (
         <div className="flex items-center gap-2">
           <div className="flex-1 h-1.5 rounded-full bg-inset overflow-hidden">

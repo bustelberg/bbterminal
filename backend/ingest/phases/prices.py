@@ -432,6 +432,22 @@ def _run_prices_phase(
             with lock:
                 done = counters["processed"]
                 errs, forb = counters["errors"], counters["forbidden"]
+                # ⚠ THE TWO METRICS ARE COUNTED SEPARATELY AND WERE ONLY EVER REPORTED TOGETHER.
+                # Every company is fetched for close_price AND volume (`r_p`/`r_v` below) and the
+                # counters have always been split, but the live line said only "done/total" — so a
+                # run where every volume fetch was failing looked identical to a healthy one until
+                # the final summary. The signal engine ranks on BOTH (five price signals, two
+                # volume), so "prices are in" is not the same statement as "the rebalance can run".
+                #
+                # ⚠⚠ THESE ARE SERIES *UPDATED*, NOT SERIES *HELD*, AND THE DENOMINATOR IS THE
+                # TRAP. Both increment only on `rows_loaded > 0`, so a company that is already
+                # current contributes NOTHING — which is the right accounting (`+0` is an answer,
+                # not a failure) and makes "947/1479 prices" a lie in the alarming direction: it
+                # would read as 532 companies missing a price when they are simply already priced
+                # through the bar. Rendered as `+N`, the same language the final summary uses.
+                # WHAT IS MISSING is a different question with a different answer — the freshness
+                # re-probe after this phase, which compares against the deciding bar.
+                got_p, got_v = counters["prices"], counters["volumes"]
                 # (label, seconds-in-flight) per worker, oldest first.
                 inflight = sorted(
                     ((lbl, now - st) for lbl, st in current_by_thread.values()),
@@ -463,13 +479,19 @@ def _run_prices_phase(
             elif stalled:
                 warn = f" · ⚠ STALLED {idle:.0f}s with no completion"
             msg = (
-                f"Refreshing {done}/{total} · {rate:.0f}/min · ETA {eta_min:.0f}m · "
+                f"Refreshing {done}/{total} · +{got_p} price / +{got_v} volume series · "
+                f"{rate:.0f}/min · ETA {eta_min:.0f}m · "
                 f"{forb} forbidden, {errs} err · now fetching: {sample or '—'}{warn}"
             )
             # Write the structured counter alongside the message so the card's
             # header count (companies_processed) can't drift ahead of the
             # heartbeat line during a wedged tail (no completions → no checkpoint).
-            _update_run(run_id, current_message=msg, companies_processed=done)
+            # ⚠ THE SPLIT COUNTERS GO ON THE ROW *LIVE*, not only in the final write below. They
+            # are columns the /schedule panel already types (`prices_refreshed`/`volumes_refreshed`)
+            # and could only ever be read after the phase finished — which is exactly when nobody
+            # needs them. A 25-minute fetch is the whole of somebody's wait.
+            _update_run(run_id, current_message=msg, companies_processed=done,
+                        prices_refreshed=got_p, volumes_refreshed=got_v)
             (log.warning if (throttled or stalled) else log.info)(
                 "[pipeline.prices] run_id=%s %s", run_id, msg)
 

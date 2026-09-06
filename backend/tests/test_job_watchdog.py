@@ -264,3 +264,77 @@ class TestTheDeclarationAndTheStartersAgree:
         orphans = [s.id for s in SCHEDULED_JOBS
                    if s.id not in S.JOB_BODIES and s.id not in S._WATCHDOG_STARTERS]
         assert orphans == ["asset_ingest_queue"], orphans
+
+
+class TestTheBootPassHealsWhateverTheScanFound:
+    """⚠⚠ THE SCAN IS EVIDENCE; IT IS NOT THE TRIGGER. `_boot_gap_pass` used to `return` when
+    `scan_for_missed_ticks` reported nothing, which quietly made a boot heal only the subset of
+    broken jobs that ALSO had a missed fire. The two questions are different: a missed tick means
+    nothing FIRED (the process was down, or APScheduler dropped it), while `overdue` and
+    `interrupted` are true of jobs that fired perfectly and then died — a deploy landing mid-run
+    leaves no missed tick at all. Gating one on the other is why "we boot, so the backlog heals"
+    was not actually the rule.
+
+    ⚠ THESE PIN THE WIRING, NOT THE POLICY. Which states are healed and the per-day cap are pinned
+    above and live in `_body_job_watchdog`, which is exactly why the gate here can go: the boot
+    pass carries no judgement of its own to get wrong.
+    """
+
+    @pytest.fixture
+    def boot(self, monkeypatch):
+        """`(set_scan, spawned)` — stub the scan's verdict, record what the pass spawns."""
+        spawned: list[str] = []
+        monkeypatch.setattr(S, "_spawn_body", lambda jid: spawned.append(jid))
+        monkeypatch.delenv("DISABLE_BOOT_HEAL", raising=False)
+
+        def set_scan(result=None, raises=None):
+            def _scan():
+                if raises is not None:
+                    raise raises
+                return result if result is not None else {}
+            monkeypatch.setattr(S, "scan_for_missed_ticks", _scan)
+        return set_scan, spawned
+
+    def test_a_clean_scan_still_runs_the_watchdog(self, boot):
+        """The regression. Nothing was missed, so nothing FAILED TO FIRE — and a job that fired and
+        errored is still sitting there broken."""
+        set_scan, spawned = boot
+        set_scan({"total": 0, "missed": {}})
+
+        S._boot_gap_pass()
+
+        assert spawned == ["job_watchdog"]
+
+    def test_a_scan_that_found_gaps_still_runs_the_watchdog(self, boot):
+        """The case that already worked, kept working — recorded first, healed second."""
+        set_scan, spawned = boot
+        set_scan({"total": 3, "missed": {"daily_pipeline": 3}})
+
+        S._boot_gap_pass()
+
+        assert spawned == ["job_watchdog"]
+
+    def test_a_failed_scan_does_not_cancel_the_heal(self, boot):
+        """⚠ LOSING THE EVIDENCE IS NOT A REASON TO LEAVE THE JOBS BROKEN. The watchdog reads the
+        run history itself and never consults the scan's result, so a Supabase blip during the
+        scan has no bearing on whether the backlog can be healed."""
+        set_scan, spawned = boot
+        set_scan(raises=RuntimeError("supabase blip"))
+
+        S._boot_gap_pass()
+
+        assert spawned == ["job_watchdog"]
+
+    def test_the_off_switch_still_stops_the_heal_and_not_the_scan(self, boot, monkeypatch):
+        """⚠ `DISABLE_BOOT_HEAL` IS THE HEALING HALF ALONE — a deployment that wants the evidence
+        without the vendor spend has to keep getting exactly that."""
+        set_scan, spawned = boot
+        scanned: list[bool] = []
+        monkeypatch.setattr(S, "scan_for_missed_ticks",
+                            lambda: (scanned.append(True), {"total": 2, "missed": {}})[1])
+        monkeypatch.setenv("DISABLE_BOOT_HEAL", "1")
+
+        S._boot_gap_pass()
+
+        assert scanned == [True]
+        assert spawned == []
