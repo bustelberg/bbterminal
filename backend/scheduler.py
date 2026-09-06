@@ -406,6 +406,13 @@ def _body_asset_price_refresh(ctx=None) -> tuple[str, dict]:
     """⚠ THE EXISTING BODY, UNCHANGED — it already owns its own `record_run` (it has three distinct
     `skipped` outcomes to report) and its own try/except. Wrapping it again would open a second run
     row for one run, so `_run_body` skips its own record for this one."""
+    # ⚠ ONE LINE BEFORE DELEGATING, because everything after it is inside `_run_asset_price_refresh`
+    # and that function narrates into its OWN run record, not into this job's progress stream. Its
+    # three early exits are quick, but the working path fetches the gap for every held instrument —
+    # so without this its toast reads "starting…" from press to finish. Making the inner function
+    # take a reporter is the fuller fix; it owns its own `record_run` and three `skipped` outcomes,
+    # so it is not a change to make in passing.
+    _reporter(ctx)(0, 0, "refreshing held instruments from Yahoo — detail in the run record…")
     _run_asset_price_refresh("manual run")
     return "see the run record", {}
 
@@ -1270,12 +1277,17 @@ def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
     from asset_pipeline.price_refresh import refresh_stale  # noqa: PLC0415
     from routers._asset_benchmark import members  # noqa: PLC0415
 
+    step = _reporter(ctx)
     if queue.is_worker_active():
         return "skipped — the ingest worker is live", {"skipped": "worker_active"}
 
     isins: set[str] = set()
     per_label: dict[str, int] = {}
-    for label in _RANKED_UNIVERSES:
+    # ⚠ NARRATED PER LABEL, AND THE FIRST LINE COMES BEFORE THE FIRST `members()` CALL. Gathering
+    # the constituents is itself a whole-table read per index; this body used to run start to finish
+    # without emitting anything, so its toast sat on "starting…" for the entire slice.
+    step(0, len(_RANKED_UNIVERSES) + 1, "collecting constituents…")
+    for i, label in enumerate(_RANKED_UNIVERSES, start=1):
         try:
             mem, _cov = members(label)
         except Exception as exc:                                    # noqa: BLE001
@@ -1283,13 +1295,19 @@ def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
             _log.warning("[benchmark-slice] %s: members unavailable (%s: %s)",
                          label, type(exc).__name__, exc)
             per_label[label] = 0
+            step(i, len(_RANKED_UNIVERSES) + 1, f"{label} — members unavailable")
             continue
         got = {m["isin"] for m in mem if m.get("isin")}
         per_label[label] = len(got)
         isins |= got
+        step(i, len(_RANKED_UNIVERSES) + 1, f"{label} — {len(got)} constituent(s)")
     if not isins:
         return "no constituents to refresh", {"considered": 0, **per_label}
 
+    # ⚠ THE FETCH IS ONE BLOCKING CALL over up to `BENCHMARK_SLICE` paced Yahoo requests, so its
+    # line has to be emitted before it starts or the reader waits out the longest phase in silence.
+    step(len(_RANKED_UNIVERSES), len(_RANKED_UNIVERSES) + 1,
+         f"refreshing the {min(BENCHMARK_SLICE, len(isins))} most-stale of {len(isins)}…")
     res = refresh_stale(isins=isins, limit=BENCHMARK_SLICE)
     # ⚠ THE CYCLE LENGTH IS LOGGED, because it is the one thing a single healthy-looking run cannot
     #   show: a slice that has quietly stopped keeping up looks identical to one that never had to.
@@ -1319,22 +1337,32 @@ def _body_benchmark_index_refresh(ctx=None) -> tuple[str, dict]:
     """
     from routers._benchmark_refresh import refresh_benchmark  # noqa: PLC0415
 
+    step = _reporter(ctx)
     done: list[str] = []
     failed: list[str] = []
-    for label in _REBUILT_INDICES:
+    n = len(_REBUILT_INDICES)
+    # ⚠ THE `emit` ARGUMENT WAS ALREADY A PROGRESS CHANNEL AND IT WENT ONLY TO THE LOG. On the
+    # interactive path it is the SSE sender; here it dropped every step into a logger the person
+    # pressing the button cannot see, so a rebuild of ~1,700 constituents narrated nothing.
+    step(0, n, f"rebuilding {n} index(es)…")
+    for i, label in enumerate(_REBUILT_INDICES, start=1):
         try:
             # ⚠ THE SAME FUNCTION THE BUTTON RUNS. A second "scheduled" path would be a second
             # definition of what refreshing an index means, and the two would drift.
             summary = refresh_benchmark(
                 label,
-                # `emit` is the SSE sender for the interactive path; here the steps go to the log.
-                lambda _t, **kw: _log.info("[benchmark_index_refresh] %s", kw.get("message", "")),
+                lambda _t, _l=label, _i=i, **kw: (
+                    _log.info("[benchmark_index_refresh] %s", kw.get("message", "")),
+                    step(_i - 1, n, f"{_l} · {kw.get('message', '')}"),
+                )[0],
                 should_stop=(lambda: bool(ctx and ctx.cancelled())) if ctx else None,
             )
             done.append(f"{label} ({(summary or {}).get('priced', '?')} priced)")
+            step(i, n, f"{label} — {(summary or {}).get('priced', '?')} priced")
         except Exception as e:  # noqa: BLE001 — one label must not take the others down
             _log.warning("[benchmark_index_refresh] %s failed: %s: %s", label, type(e).__name__, e)
             failed.append(f"{label}: {type(e).__name__}")
+            step(i, n, f"{label} — FAILED: {type(e).__name__}")
     msg = f"refreshed {', '.join(done) or 'nothing'}"
     if failed:
         msg += f" · failed {', '.join(failed)}"
@@ -1381,6 +1409,7 @@ def _body_relative_momentum_refresh(ctx=None) -> tuple[str, dict]:
     from momentum import relative  # noqa: PLC0415
     from routers.momentum._helpers import latest_db_price_date  # noqa: PLC0415
 
+    step = _reporter(ctx)
     as_of = latest_db_price_date()
     if as_of is None:
         # ⚠ NOT AN ERROR. No closes at all is a statement about the price pipeline, not about this
@@ -1390,17 +1419,27 @@ def _body_relative_momentum_refresh(ctx=None) -> tuple[str, dict]:
     done: list[str] = []
     failed: list[str] = []
     thin: list[str] = []
-    for label in _RANKED_UNIVERSES:
+    n = len(_RANKED_UNIVERSES)
+    # ⚠ THE `on_step` BELOW ALREADY EXISTED AND WENT ONLY TO THE LOG, which is invisible to whoever
+    # pressed the button — ~12s and 2,270 rows of silence. It now goes to both: the log keeps the
+    # per-universe detail for Railway, the toast gets the same line.
+    step(0, n, f"ranking {n} universe(s) as of {as_of}…")
+    for i, label in enumerate(_RANKED_UNIVERSES, start=1):
         if ctx and ctx.cancelled():
             break
         try:
             result = relative.compute(
                 label, as_of,
-                on_step=lambda m, _l=label: _log.info("[relative_momentum] %s: %s", _l, m),
+                on_step=lambda m, _l=label, _i=i: (
+                    _log.info("[relative_momentum] %s: %s", _l, m),
+                    step(_i - 1, n, f"{_l} · {m}"),
+                )[0],
             )
             relative.persist(result)
             cov = result.coverage_pct
             done.append(f"{label} {result.universe_n}/{result.members_total}")
+            step(i, n, f"{label} — {result.universe_n}/{result.members_total} ranked "
+                       f"({cov:.0f}% coverage)")
             if cov < _RANK_COVERAGE_WARN:
                 # ⚠ WARNING, because uvicorn leaves the root logger at WARNING in production and an
                 #   `info` here would be invisible exactly when it matters.
@@ -1411,6 +1450,10 @@ def _body_relative_momentum_refresh(ctx=None) -> tuple[str, dict]:
         except Exception as e:  # noqa: BLE001 — one universe must not take the others down
             _log.warning("[relative_momentum] %s failed: %s: %s", label, type(e).__name__, e)
             failed.append(f"{label}: {type(e).__name__}")
+            # ⚠ A FAILED UNIVERSE STILL ADVANCES THE COUNTER, or a job that fails on its first
+            # label sits at 0/3 looking hung for the other two — the exact reading this whole
+            # change exists to fix.
+            step(i, n, f"{label} — FAILED: {type(e).__name__}")
 
     msg = f"ranked as of {as_of} — {', '.join(done) or 'nothing'}"
     if thin:
@@ -1443,8 +1486,15 @@ class _LogCtx:
     plumbing one. This turns those lines into log lines.
     """
 
-    def __init__(self, cancelled=None):
+    def __init__(self, cancelled=None, step=None, label=""):
         self._cancelled = cancelled or (lambda: False)
+        # ⚠ THE SAME LINES NOW GO TO THE TOAST AS WELL, WHEN SOMEBODY IS WATCHING. This class was
+        # written for the tick, where `ctx is None` and the log is the only destination — and it
+        # was then reused unchanged for the Run-now button, where it swallowed every narration
+        # line a person was standing there waiting for. `step` is None on a tick, so the schedule's
+        # behaviour is unchanged.
+        self._step = step
+        self._label = label
         self.counts: dict[str, int] = {}
 
     def emit(self, kind: str, message: str = "", **_kw) -> None:
@@ -1456,6 +1506,11 @@ class _LogCtx:
             _log.warning("[benchmark_fundamentals] %s: %s", kind, message)
         else:
             _log.info("[benchmark_fundamentals] %s: %s", kind, message)
+        if self._step is not None and message:
+            # ⚠ NO done/total — this relay has no idea how many lines are coming, and inventing a
+            # denominator would draw a progress bar that jumps backwards. `_reporter` takes 0/0
+            # happily and the toast shows the message alone.
+            self._step(0, 0, f"{self._label} · {message}" if self._label else message)
 
     def cancelled(self) -> bool:
         return bool(self._cancelled())
@@ -1529,11 +1584,16 @@ def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
     _log.warning("[benchmark_fundamentals] quota left %s — usable above the %s floor: %s",
                  budget, _FUNDAMENTALS_REGION_FLOOR, room)
 
-    log_ctx = _LogCtx(lambda: bool(ctx and ctx.cancelled()))
+    step = _reporter(ctx)
     filled = 0
     deferred = 0
     failed: list[str] = []
-    for label in _FUNDAMENTAL_INDICES:
+    n = len(_FUNDAMENTAL_INDICES)
+    step(0, n, f"reading quota — usable above the {_FUNDAMENTALS_REGION_FLOOR}-call floor: {room}")
+    for i, label in enumerate(_FUNDAMENTAL_INDICES, start=1):
+        # ⚠ A FRESH CTX PER LABEL so its lines carry the index they belong to. This is a pass over
+        # ~2,500 companies across three indices; an unlabelled line cannot say which one it is in.
+        log_ctx = _LogCtx(lambda: bool(ctx and ctx.cancelled()), step=step, label=label)
         try:
             pairs = _fundamental_company_ids(label)
         except Exception as e:  # noqa: BLE001
@@ -1551,13 +1611,17 @@ def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
             keep.append(cid)
         if not keep:
             _log.warning("[benchmark_fundamentals] %s: no quota left for any of its regions", label)
+            step(i, n, f"{label} — deferred, no quota left for any of its regions")
             continue
         try:
+            step(i - 1, n, f"{label} — filling {len(keep)} constituent(s)…")
             fill_company_ids(log_ctx, label, keep, feeds="statements", only_due=True)
             filled += len(keep)
+            step(i, n, f"{label} — {len(keep)} filled")
         except Exception as e:  # noqa: BLE001
             _log.warning("[benchmark_fundamentals] %s failed: %s: %s", label, type(e).__name__, e)
             failed.append(f"{label}: {type(e).__name__}")
+            step(i, n, f"{label} — FAILED: {type(e).__name__}")
 
     msg = f"{filled} constituents filled"
     if deferred:
@@ -1579,17 +1643,29 @@ def _fire_fx_sync() -> None:
 
 
 def _body_fx_sync(ctx=None) -> tuple[str, dict]:
-    """⚠ NOT CANCELLABLE MID-RUN, and `ctx` is accepted only so every body has one shape. The whole
-    sync is a handful of ECB requests over seconds; there is no boundary worth checking, and a
-    partial FX table is worse than a complete one (a missing rate silently drops a holding from its
-    portfolio — see `_fx`'s paging note)."""
+    """⚠ NOT CANCELLABLE MID-RUN, and `ctx` is accepted only so every body has one shape. There is
+    no boundary worth checking, and a partial FX table is worse than a complete one (a missing rate
+    silently drops a holding from its portfolio — see `_fx`'s paging note).
+
+    ⚠⚠ IT IS NOT "A HANDFUL OF REQUESTS OVER SECONDS", WHICH IS WHAT THIS DOCSTRING USED TO CLAIM
+    AND WHY IT EMITTED NOTHING. It asks for ~40 currencies from 2000-01-01 (the window that repairs
+    every currency's HEAD — see `sync_fx_rates_to_db`'s both-ends widening), so it runs for as long
+    as the ECB takes to answer for all of them. Emitting nothing left its toast reading
+    "starting…" for the whole run, next to a job that WAS narrating — which reads as blocked rather
+    than busy, and was reported as exactly that. The house rule is that a long job emits a first
+    line BEFORE any work; a single blocking call is precisely the shape that forgets to."""
     from datetime import date as _date  # noqa: PLC0415
 
     from deps import supabase  # noqa: PLC0415
     from fx_rates import ECB_CURRENCIES, _USD_PEGS  # noqa: PLC0415
     from momentum.data import sync_fx_rates_to_db  # noqa: PLC0415
 
+    step = _reporter(ctx)
     currencies = list(ECB_CURRENCIES) + list(_USD_PEGS.keys()) + ["TWD"]
+    # ⚠ BEFORE THE CALL, NOT AFTER IT. The whole run is inside `sync_fx_rates_to_db`, so a line
+    # emitted afterwards would arrive with the summary and tell the reader nothing they had not
+    # already stopped waiting for.
+    step(0, len(currencies), f"asking the ECB for {len(currencies)} currencies since 2000-01-01…")
     status = sync_fx_rates_to_db(supabase, currencies, _date(2000, 1, 1), _date.today())
     synced = sum(1 for s in status.values() if s.get("status") == "synced")
     errors = sum(1 for s in status.values() if s.get("status") == "error")
@@ -2019,22 +2095,40 @@ def _boot_gap_pass() -> None:
     ⚠ NEVER RAISES. It runs on a daemon thread off the startup hook; an exception here would be an
     unhandled thread exception during a deploy, which is noise on top of the outage it is reporting.
     """
+    # ⚠⚠ THE SCAN IS EVIDENCE AND ITS RESULT MUST NOT GATE THE HEAL — it did, and that made a boot
+    # heal only the subset of broken jobs that happened to have a missed FIRE. The two answer
+    # different questions: `scan_for_missed_ticks` asks "did a tick fail to fire" (the process was
+    # down, or APScheduler dropped it), while the watchdog asks "is this job broken" — which is
+    # also true of a job that fired perfectly and then ERRORED, or was `interrupted` by a deploy
+    # landing mid-run. Neither of those leaves a missed tick, so `if not result["total"]: return`
+    # skipped exactly the failures that have nothing to do with the schedule. A boot heals the
+    # backlog or it does not; "heals the backlog, but only when the host was also down" is a rule
+    # nobody can hold in their head, and it is not the rule the docstring above claims.
+    #
+    # ⚠ THE HEAL IS SAFE TO RUN UNCONDITIONALLY because the judgement is not here. `_body_job_watchdog`
+    # decides what "run it again" actually fixes (`_WATCHDOG_HEALS` — never `missing`, `error` or
+    # `unknown`) and `_watchdog_budget_spent` reads a DURABLE per-day cap, so a host in a restart
+    # loop cannot re-fire the fleet on every boot. A scan that found nothing now costs one extra
+    # `job_health` read per boot, which is the price of the guarantee.
     try:
         result = scan_for_missed_ticks()
     except Exception as e:  # noqa: BLE001
-        _log.warning("[scheduler] the boot gap scan failed: %s: %s", type(e).__name__, e)
-        return
-    if not result.get("total"):
+        # ⚠ AND A FAILED SCAN NO LONGER CANCELS THE HEAL EITHER. Losing the evidence is not a
+        # reason to leave the jobs broken; the watchdog reads the run history itself.
+        _log.warning("[scheduler] the boot gap scan failed: %s: %s — healing anyway",
+                     type(e).__name__, e)
+        result = {}
+    if result.get("total"):
+        _log.warning("[scheduler] boot gap scan recorded %d missed tick(s): %s",
+                     result["total"], result["missed"])
+    else:
         _log.info("[scheduler] boot gap scan: no missed ticks in the last %dd",
                   job_misses_lookback())
-        return
-    _log.warning("[scheduler] boot gap scan recorded %d missed tick(s): %s",
-                 result["total"], result["missed"])
     if os.environ.get("DISABLE_BOOT_HEAL", "").lower() in ("1", "true", "yes"):
         # ⚠ AN OFF SWITCH FOR THE HEALING HALF ALONE, because the two halves have very different
         # risk. Recording is a handful of inserts; healing starts real jobs that spend vendor quota.
         # A deployment that wants the evidence without the action can have exactly that.
-        _log.warning("[scheduler] DISABLE_BOOT_HEAL set — not re-running the missed jobs")
+        _log.warning("[scheduler] DISABLE_BOOT_HEAL set — not re-running the broken jobs")
         return
     _spawn_body("job_watchdog")
 
