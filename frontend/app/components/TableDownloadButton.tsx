@@ -17,6 +17,12 @@ type Props<T> = {
   title?: string;
   /** Extra classes on the trigger button (positioning, sizing). */
   className?: string;
+  /** Append a `_YYYY-MM-DD` stamp to the filename. Default true.
+   *
+   * !! FALSE ONLY WHEN `filename` ALREADY CARRIES ITS OWN PERIOD. A scheduled strategy's
+   * export is named for the MONTH it is for ("... September"); stamping today beside that
+   * puts two dates on one file, and they disagree for most of the month. */
+  dateStamp?: boolean;
   /** When set (e.g. "companies"), a confirmation dialog appears before the
    * download showing the row count + format ("Download 142 companies as
    * CSV?"). Omit to download immediately (the default). */
@@ -26,7 +32,7 @@ type Props<T> = {
 /** Small download icon + popover menu (CSV / XLSX). Drop this in any
  * table's header area, beside search inputs / count badges. */
 export default function TableDownloadButton<T>({
-  rows, columns, filename, title, className, confirmNoun,
+  rows, columns, filename, title, className, confirmNoun, dateStamp,
 }: Props<T>) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -56,7 +62,7 @@ export default function TableDownloadButton<T>({
   const handleCsv = () => {
     setOpen(false);
     if (exportCols.length === 0) return;
-    exportToCsv(rows, exportCols, filename);
+    exportToCsv(rows, exportCols, filename, { stamp: dateStamp });
   };
 
   const handleXlsx = async () => {
@@ -64,7 +70,7 @@ export default function TableDownloadButton<T>({
     if (exportCols.length === 0) return;
     setBusy(true);
     try {
-      await exportToXlsx(rows, exportCols, filename);
+      await exportToXlsx(rows, exportCols, filename, { stamp: dateStamp });
     } finally {
       setBusy(false);
     }
