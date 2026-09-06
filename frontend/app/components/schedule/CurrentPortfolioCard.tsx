@@ -10,6 +10,7 @@ import { useBenchmarkCurrencyMap, useBenchmarkIsinMap, useBenchmarks, useCompany
 import { fmtSleevePct, parsePct, stockSleevePct, validateSleeves, type SleeveEtfDraft } from './sleeveMath';
 import { displayExchange, EXCHANGE_NAMES, fmtPct, fmtPrice, guruFocusUrl } from '../momentum/utils';
 import TableDownloadButton from '../TableDownloadButton';
+import { holdingsExportName } from './exportName';
 // ⚠ THE SAME MODAL THE DAILY-HOLDINGS TABLE OPENS, not a second one. It reads
 // `POST /api/momentum/signal-breakdown` — one endpoint, one renderer, so "why
 // this was picked" cannot have two answers.
@@ -317,10 +318,15 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
  * local + EUR with the FX rate, the return, and the ISIN. Always sorted by
  * current weight descending. Renders nothing when there's no snapshot yet. */
 export default function CurrentPortfolioCard({
-  snapshotId, strategyId, canEditCash = false, staleCompanyIds, onCashChanged,
+  snapshotId, strategyId, strategyName, canEditCash = false, staleCompanyIds, onCashChanged,
 }: {
   snapshotId: number | null;
   strategyId?: number;
+  /** The scheduled strategy's own name, used to LABEL THE EXPORT — a downloaded file is the
+   * one artefact of this card that outlives the page, and "current-portfolio" says nothing
+   * about which strategy or which month once it is sitting in a folder. Optional: the card
+   * renders identically without it and the export falls back (see `holdingsExportName`). */
+  strategyName?: string | null;
   /** Admin (non-read-only) may set the cash allocation. */
   canEditCash?: boolean;
   /** Company ids the LIVE staleness check (from /runs `stale_prices`) flags as
@@ -505,7 +511,12 @@ export default function CurrentPortfolioCard({
           <TableDownloadButton
             rows={rows}
             columns={exportColumns}
-            filename="current-portfolio"
+            filename={holdingsExportName(strategyName, snap.as_of_date)}
+            // ⚠ NO DATE STAMP — the name already carries the month this portfolio is FOR, and
+            // the stamp is TODAY. The two disagree for most of the month (September's picks
+            // are decided in the first week and downloaded whenever), so a file would claim
+            // two different periods at once.
+            dateStamp={false}
             confirmNoun="holdings"
             title="Download the current portfolio as CSV / XLSX"
           />

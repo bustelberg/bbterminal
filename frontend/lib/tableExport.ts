@@ -34,9 +34,42 @@ function todayStamp(): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Sanitize a basename — replace anything not safe for filenames with `_`. */
+/** Options shared by both exporters. */
+export type ExportOptions = {
+  /** Append `_YYYY-MM-DD` to the filename. Default true.
+   *
+   * ⚠ TURN IT OFF ONLY WHEN THE BASENAME ALREADY CARRIES ITS OWN PERIOD. The stamp exists so
+   * two downloads in a session do not overwrite, and it is TODAY — which on a file named for
+   * a month is a second, disagreeing date: "MomentumTopSelectie Neutraal September" stamped
+   * on 5 September reads as September's portfolio downloaded in September, and the same file
+   * pulled again in October would claim to be a different one. */
+  stamp?: boolean;
+};
+
+/** Sanitize a basename — drop anything not safe for a filename.
+ *
+ * ⚠ SPACES SURVIVE. They used to be replaced with `_`, which mangled every caller that
+ * interpolates a human name into the filename (an AIRS book, a strategy) and turned
+ * "MomentumTopSelectie Neutraal September" into an identifier rather than a label. A space is
+ * legal in a filename on every platform this app runs on; the characters that are NOT are
+ * excluded by the allowlist below, which is unchanged.
+ *
+ * ⚠ ANYTHING REMOVED BECOMES A SPACE, NOT NOTHING, so a name containing a slash reads as two
+ * words rather than one run-together one. Runs collapse and the ends are trimmed, so the
+ * result never has a leading, trailing or doubled separator. */
 function sanitizeBasename(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'export';
+  return name
+    .replace(/[^a-zA-Z0-9._ -]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[._]+|[._]+$/g, '')
+    .trim() || 'export';
+}
+
+/** `{basename}` or `{basename}_{YYYY-MM-DD}`, sanitized, without extension. */
+function exportBasename(basename: string, opts: ExportOptions): string {
+  const clean = sanitizeBasename(basename);
+  return opts.stamp === false ? clean : `${clean}_${todayStamp()}`;
 }
 
 /** RFC 4180-style CSV cell escaping: wrap in quotes if the value contains
@@ -66,7 +99,9 @@ function triggerDownload(blob: Blob, filename: string) {
 
 /** Export rows to CSV and trigger download.
  * Filename pattern: `{basename}_{YYYY-MM-DD}.csv`. */
-export function exportToCsv<T>(rows: T[], columns: Column<T>[], basename: string): void {
+export function exportToCsv<T>(
+  rows: T[], columns: Column<T>[], basename: string, opts: ExportOptions = {},
+): void {
   const headerLine = columns.map((c) => csvCell(c.header)).join(',');
   const dataLines = rows.map((row) =>
     columns.map((c) => csvCell(c.accessor(row))).join(','),
@@ -75,8 +110,7 @@ export function exportToCsv<T>(rows: T[], columns: Column<T>[], basename: string
   // names (Société, Aurubis, etc.) as Windows-1252.
   const csv = '﻿' + [headerLine, ...dataLines].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const name = `${sanitizeBasename(basename)}_${todayStamp()}.csv`;
-  triggerDownload(blob, name);
+  triggerDownload(blob, `${exportBasename(basename, opts)}.csv`);
 }
 
 /** Export rows to XLSX and trigger download. Lazy-imports `xlsx` so the
@@ -86,6 +120,7 @@ export async function exportToXlsx<T>(
   rows: T[],
   columns: Column<T>[],
   basename: string,
+  opts: ExportOptions = {},
 ): Promise<void> {
   const XLSX = await import('xlsx');
   // Build an array-of-arrays so column order is preserved (XLSX.json_to_sheet
@@ -112,6 +147,5 @@ export async function exportToXlsx<T>(
   const blob = new Blob([out], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
-  const name = `${sanitizeBasename(basename)}_${todayStamp()}.xlsx`;
-  triggerDownload(blob, name);
+  triggerDownload(blob, `${exportBasename(basename, opts)}.xlsx`);
 }

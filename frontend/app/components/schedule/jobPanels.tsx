@@ -7,6 +7,7 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { dialog } from '../../../lib/dialog';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
 import { useNow } from '../../../lib/hooks/useNow';
+import { startLocalJob } from '../../../lib/stores/jobs';
 import { watchRun, type RunRow } from '../../../lib/watchRun';
 import CollapsibleCard from '../momentum/CollapsibleCard';
 import { PriceRefreshPanel, useStockRefresh } from './priceRefresh';
@@ -208,21 +209,40 @@ export const ROW_ACTIONS: Record<string, (ctx: PipelineCtx) => ReactNode> = {
  * a failed poll must not touch the pipeline, which is running server-side
  * regardless. */
 function startRun(url: string, label: string): void {
-  void (async () => {
-    try {
-      const r = await apiFetch(url, { method: 'POST' });
-      const body = (await r.json().catch(() => null)) as { run_id?: number } | null;
-      if (!body?.run_id) {
-        console.warn(`[${label}] trigger returned no run_id (HTTP ${r.status}) — nothing to tail`);
-        return;
-      }
-      await tailRunToConsole(body.run_id, `${label} #${body.run_id}`);
-    } catch (e) {
-      // The polling card still surfaces the run (or its absence); the console
-      // gets the diagnostic.
-      console.warn(`[${label}] could not start or tail the run:`, e);
+  // ⚠⚠ THE FAILURE PATH USED TO BE CONSOLE-ONLY, AND THAT IS THE WHOLE OF "I PRESS IT AND NOTHING
+  // HAPPENS". `apiFetch` RESOLVES on a 4xx/5xx — it returns the Response rather than throwing — so
+  // a rejected trigger fell into the `!body?.run_id` branch, wrote one `console.warn` and returned.
+  // Meanwhile `useRunNow` clears `pending` on a 1.5s timer and `busy` only becomes true once the
+  // activity stream SEES a running job, which never happens if nothing started. The button
+  // therefore says "Starting…", then goes back to normal, having reported the failure nowhere a
+  // person was looking. Reported in production against a run that never began.
+  //
+  // ⚠ THE HOUSE RULE IS *BOTH*, and only half of it was implemented: the full diagnostic to the
+  // console, ONE SHORT LINE in the UI. `startLocalJob` is that line — it puts a card in the same
+  // toast stack every other job on this page reports through, green with the run id or red with
+  // the status, so a trigger that 401s or 500s looks different from one that worked.
+  //
+  // ⚠ THE CARD RESOLVES AS SOON AS THE RUN IS *TRIGGERED*, not when the run finishes. The tail is
+  // a VIEW of the run — a closed tab or a failed poll must never touch a pipeline that is running
+  // server-side regardless — and the run's own progress already has two surfaces (this row's panel
+  // and the console transcript). A card that stayed open for a 25-minute rebalance would be a
+  // third, disagreeing with both whenever the poll dropped.
+  startLocalJob(label, `trigger:${label}`, async () => {
+    const r = await apiFetch(url, { method: 'POST' });
+    const body = (await r.json().catch(() => null)) as
+      { run_id?: number; detail?: unknown } | null;
+    if (!r.ok || !body?.run_id) {
+      // ⚠ THE STATUS IS THE ACTIONABLE HALF — 401 is a session, 409 a run already in flight, 500 a
+      // backend fault, and they need different responses from the reader. FastAPI puts the reason
+      // in `detail`; it is truncated because this is a toast, and the console has the whole thing.
+      const detail = body?.detail ? ` — ${String(body.detail).slice(0, 140)}` : '';
+      console.warn(`[${label}] trigger failed (HTTP ${r.status})`, body ?? '(no JSON body)');
+      throw new Error(`could not start: HTTP ${r.status}${detail}`);
     }
-  })();
+    void tailRunToConsole(body.run_id, `${label} #${body.run_id}`)
+      .catch((e) => console.warn(`[${label}] could not tail run #${body.run_id}:`, e));
+    return `started run #${body.run_id} — progress in the panel and the console`;
+  });
 }
 
 /** Trigger one split-pipeline operation via its Run-now button. `universe`

@@ -180,6 +180,7 @@ export default function ScheduledStrategyDetail({
       <CurrentPortfolioCard
         snapshotId={data.runs?.[0]?.snapshot_id ?? null}
         strategyId={strategyId}
+        strategyName={data.name}
         canEditCash={!readOnly}
         // Live staleness (same signal the monthly-returns heatmap warns on):
         // the holdings whose latest close lags the basket's freshest — so a
