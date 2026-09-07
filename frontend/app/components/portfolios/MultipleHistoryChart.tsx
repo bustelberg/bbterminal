@@ -10,9 +10,10 @@ import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { Stat } from './MetricGrowthCard';
 import { paddedDomain } from './marginData';
-import { medianOf, type BASIS } from './quickValuation';
+import { medianOf, type BASIS, type Basis } from './quickValuation';
 import { type Point } from './multiplesSeries';
 import MultipleHistoryModal from './MultipleHistoryModal';
+import { useQuickValuationCopy } from './quickValuationCopy';
 
 /**
  * THE MULTIPLE THROUGH TIME — a decade of it, at the resolution the price moves.
@@ -74,10 +75,12 @@ const FORWARD_COLOR = chartTheme.warn;
 const MEDIAN_COLOR = chartTheme.axisTick;
 
 export default function MultipleHistoryChart({
-  basis: b, forward, currency, fromYear, name, isin, height = 320, className = '',
+  basis: b, basisKey, forward, currency, fromYear, name, isin, height = 320, className = '',
   onRefresh, onCancel, canRefresh = false, refreshing = false, cancelling = false,
 }: {
   basis: (typeof BASIS)[keyof typeof BASIS];
+  /** Which basis is switched on, as a KEY — the translated labels are looked up by it. */
+  basisKey: Basis;
   /** The vendor's published forward multiple — the only series here. Empty on the FCF basis, by
    *  nature: no vendor publishes a free-cash-flow consensus. */
   forward: Point[];
@@ -106,6 +109,13 @@ export default function MultipleHistoryChart({
   refreshing?: boolean;
   cancelling?: boolean;
 }) {
+  // ⚠⚠ TRANSLATED LABELS FOR WHAT IS DRAWN, English `b` for the ⓘ prose — the same split as the
+  // tab that owns this card. See `quickValuationCopy`.
+  // ⚠ THE KEY COMES IN AS A PROP, NOT FROM `b.tab`. Deriving it as `b.tab === 'EPS' ? …` would key
+  // a lookup off a LABEL, which is the pattern this folder keeps paying for — and it would be
+  // silently wrong the day that label is translated or renamed.
+  const t = useQuickValuationCopy();
+  const bl = t.basis[basisKey];
   // Click-to-inspect, the same affordance the two charts beside it carry.
   const [showData, setShowData] = useState(false);
   const hasForward = forward.length > 0;
@@ -151,8 +161,8 @@ export default function MultipleHistoryChart({
   return (
     <div className={`rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0 ${className}`}>
       <div className="flex items-baseline gap-2 flex-wrap">
-        <h4 className="text-base font-semibold text-fg-strong">{b.multiple} — forward</h4>
-        <span className="text-xs text-fg-faint">since {fromYear} · median dashed</span>
+        <h4 className="text-base font-semibold text-fg-strong">{t.multipleForward(bl.multiple)}</h4>
+        <span className="text-xs text-fg-faint">{t.sinceMedian(String(fromYear))}</span>
         {/* ⚠ ONLY ON THE BASIS THAT HAS A VENDOR LINE. The FCF basis used to print its own chip
             here explaining why there is no forward series; the empty state below already says it,
             and saying it twice in one card — once in the header, once across the middle of it —
@@ -160,7 +170,7 @@ export default function MultipleHistoryChart({
         {hasForward && (
           <span className="text-xs text-fg-muted"
             title="GuruFocus's own published forward-P/E indicator, not our arithmetic. Dividing the close by it recovers the CURRENT fiscal year's consensus EPS — so early in a year it looks ~12 months ahead, and by December it prices earnings nearly banked.">
-            vendor indicator
+            {t.vendorIndicator}
           </span>
         )}
         {/* ⚠⚠ ONE CONTROL, THREE STATES, AND IT TURNS INTO THE CANCEL — the same shape and the same
@@ -194,7 +204,7 @@ export default function MultipleHistoryChart({
 
       <div className="flex flex-wrap gap-2">
         {hasForward && (
-          <Stat label={`Forward ${b.multiple}`} value={x(latestFwd)} color={FORWARD_COLOR}
+          <Stat label={t.forwardTile(bl.multiple)} value={x(latestFwd)} color={FORWARD_COLOR}
             info={<InfoTip content={<AspectCard
               what="What the market pays today for the fiscal year now in progress."
               where="GuruFocus `forward_pe_ratio`, published as a time series — read, not computed."
@@ -207,14 +217,14 @@ export default function MultipleHistoryChart({
             line current to yesterday from one that stopped five weeks ago, and the Refresh beside it had
             no number to move. */}
         {hasForward && (
-          <Stat label="As of" value={asOf ?? '—'}
+          <Stat label={t.asOf} value={asOf ?? '—'}
             info={<InfoTip content={<AspectCard
               what="When GuruFocus last published a point in this series."
               where="The newest observation on the line, not the moment we read it."
               when={`Weekly since ${fromYear}.`}
               how="The vendor publishes with a lag of some weeks, so this can sit behind today with nothing wrong. The Refresh above asks for anything newer." />} />} />
         )}
-        <Stat label="Median" value={x(median)} color={MEDIAN_COLOR}
+        <Stat label={t.median} value={x(median)} color={MEDIAN_COLOR}
           info={<InfoTip content={<AspectCard
             what={`The middle forward ${b.multiple} over the window — what this has typically cost.`}
             where="The forward line above. ⚠ It was the median of a TRAILING series until that line was removed; a median of a line nobody can see is worse than none."
@@ -230,8 +240,8 @@ export default function MultipleHistoryChart({
                 about this company. On EPS it means GuruFocus publishes no forward P/E for this
                 listing, which a re-ingest might. */}
             {b.multiple === 'P/FCF'
-              ? 'GuruFocus has no historical forward-FCF series.'
-              : `No forward ${b.multiple} published for this listing since ${fromYear}.`}
+              ? t.noForwardFcf
+              : t.noForwardPublished(bl.multiple, String(fromYear))}
           </p>
         ) : (
           <>

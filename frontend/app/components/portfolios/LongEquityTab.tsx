@@ -17,6 +17,7 @@ import CashConversionCard from './CashConversionCard';
 import FcfSbcYieldCard from './FcfSbcYieldCard';
 import DividendYieldCard from './DividendYieldCard';
 import { type BlendNote } from './blendNotes';
+import { useFundamentalChromeCopy } from './fundamentalChromeCopy';
 import { type MemberCount } from './memberCounts';
 import { benchBody, type BenchTarget } from './benchSeries';
 
@@ -264,6 +265,9 @@ export default function LongEquityTab({
    *  head and therefore always visible. Governs the four charts whose numerator is FCF. */
   sbcCorrection?: boolean;
 }) {
+  // The period switch's own words. Its KEYS ('annual' | 'quarterly') are state and stay English —
+  // they go into `ck`, which re-keys every card's fetch. See `fundamentalChromeCopy`.
+  const chrome = useFundamentalChromeCopy();
   const isAgg = !!basket || portfolioId != null;
   const [data, setData] = useState<MetricsResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -512,15 +516,11 @@ export default function LongEquityTab({
   return (
     <>
     <div className="flex items-center gap-2 mb-3 text-[11px]">
-      <span className="text-fg-faint">Periods</span>
+      <span className="text-fg-faint">{chrome.periods}</span>
       <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden">
         {([
-          ['annual', 'Annual', 'One point per fiscal year.'],
-          ['quarterly', 'Quarterly',
-            'One point per quarter, each the TRAILING TWELVE MONTHS — quarterly frequency with '
-            + 'annual scope. Flows sum the last four quarters, balances take the latest, and an '
-            + 'already-annualised rate takes their mean. Raw quarters would put a seasonal '
-            + 'sawtooth through revenue and every margin built on it.'],
+          ['annual', chrome.annual, chrome.annualNote],
+          ['quarterly', chrome.quarterly, chrome.quarterlyNote],
         ] as const).map(([k, label, note]) => (
           <button key={k} type="button" onClick={() => setCadence(k)} title={note}
             aria-pressed={cadence === k}

@@ -26,6 +26,11 @@ describe('Analyse primary-view copy', () => {
       'chrome.benchmark', 'axes.sector', 'holdings.via', 'holdings.sector', 'holdings.momentum',
       'holdings.result', 'holdings.price', 'holdings.currency', 'holdings.rest',
       'holdings.direct', 'row.momentumNote',
+      // ⚠ A UNIT, NOT A WORD. `YTD (€)` is the same caption in both languages — "YTD" is what a
+      // Dutch wealth manager says out loud, and `(€)` is a symbol. Translating it would invent a
+      // label nobody uses; the SENTENCES that explain the tile (`sleeve.ytdWhat/Note/How`) are
+      // translated and are not on this list.
+      'sleeve.ytdUnit',
     ]);
     expect(Object.keys(en).filter((key) => en[key] === nl[key] && !sameByDesign.has(key))).toEqual([]);
   });

@@ -3,8 +3,19 @@
 import { useCallback, useSyncExternalStore } from 'react';
 
 /**
- * The app's language choice. English is the default and the source language; Dutch is the
- * translation.
+ * The app's language choice.
+ *
+ * ⚠⚠ DUTCH IS THE DEFAULT AND ENGLISH IS THE SOURCE — TWO DIFFERENT THINGS, AND CONFLATING THEM IS
+ * how a codebase ends up half-authored in each. The readers are Dutch, so an unset preference now
+ * resolves to `'nl'` (2026-09-07, on request). Strings are still WRITTEN in English first and
+ * translated from there; every copy module keeps its `EN` block as the original and its `NL` block
+ * as the translation, and the type is what makes a forgotten translation a compile error. Nothing
+ * about the default changes that direction.
+ *
+ * ⚠⚠ THE FALLBACK AND `getServerSnapshot` MOVE TOGETHER OR NOT AT ALL. They are two halves of one
+ * answer: the server renders with the snapshot and React hydrates against it. Change only `read()`
+ * and every first paint is English HTML replaced by Dutch on hydration — a visible flash on every
+ * load, and React discarding the subtree to recover. Both say `'nl'`.
  *
  * ⚠⚠ THE SWITCH IS GLOBAL SINCE 2026-08-21, AND THAT REVERSED THE RULE THIS NOTE USED TO STATE.
  * It argued that a language control above a screen it does not translate is worse than none — the
@@ -19,8 +30,21 @@ import { useCallback, useSyncExternalStore } from 'react';
  * discovered by pressing: `management/managementCopy.ts` ends with `UNTRANSLATED_SURFACES`, and the
  * switch's own tooltip says not every page answers yet.
  *
- * Translated today: /management-dashboard's page chrome, Benchmarks, Cross-portfolio and the
+ * Translated today: the SIDEBAR end to end — every nav label, the account block and this switch's
+ * own tooltip (`sidebarCopy.ts`); the HOME page (heading, intro and every tile —
+ * `home/homeCopy.ts`); /management-dashboard's page chrome, Benchmarks, Cross-portfolio and the
  * Overview holdings table; the Fundamental modal's `Long Equity` headings and `Tables`.
+ *
+ * ⚠ THE SIDEBAR AND THE HOME TILES NAME THE SAME PAGES, and `sidebarCopy.test.ts` pins that they
+ * name them IDENTICALLY. Two maps that both label `/schedule` are two chances to call it two
+ * things in one screenshot.
+ *
+ * ⚠ THE HOME PAGE IS THE FIRST SURFACE THAT IS TRANSLATED END TO END, and it is the one the switch
+ * is judged by: it is where every reader lands, so an untranslated home page made the control look
+ * broken on the very first press. Getting there needed a split — `app/page.tsx` stays a SERVER
+ * component (it reads the session and the `view_as` cookie to decide which tiles exist) and hands
+ * the hrefs to a client child that looks the copy up. Server-rendered copy cannot follow this
+ * preference at all.
  *
  * ⚠ ENGLISH IS THE SOURCE, NOT A PEER. Every string is authored in English and translated from
  * there. When copy changes, the English changes first and the Dutch follows — `TablesCopy`'s type
@@ -48,11 +72,16 @@ const isLang = (v: unknown): v is Lang => v === 'en' || v === 'nl';
  * open modal would not move the table in another. `useSyncExternalStore` is the primitive for
  * exactly this: one value, read from outside React, with an explicit server snapshot.
  *
- * ⚠ `getServerSnapshot` RETURNS `'en'` AND MUST. These components are `'use client'` but Next still
- * renders them on the server, where `localStorage` does not exist. React uses this snapshot during
- * hydration and re-reads the real one immediately after, which is what keeps the server's HTML and
- * the first client render in agreement — seeding from storage directly makes them disagree and
- * React throws away the subtree to recover.
+ * ⚠ `getServerSnapshot` RETURNS THE DEFAULT AND MUST RETURN THE SAME ONE `read()` FALLS BACK TO —
+ * `'nl'` since 2026-09-07. These components are `'use client'` but Next still renders them on the
+ * server, where `localStorage` does not exist. React uses this snapshot during hydration and
+ * re-reads the real one immediately after, which is what keeps the server's HTML and the first
+ * client render in agreement — seeding from storage directly makes them disagree and React throws
+ * away the subtree to recover.
+ *
+ * ⚠ A READER WHO HAS CHOSEN `'en'` STILL GETS ONE CORRECTED PAINT, and that is unchanged in kind
+ * from before — it was Dutch readers paying it, and it is now the smaller group. There is no way
+ * around it without moving the preference into a cookie the server can read.
  *
  * ⚠ THE SNAPSHOT IS CACHED IN `current` BECAUSE `getSnapshot` MUST BE STABLE. React calls it on
  * every render and re-renders if the result differs; hitting `localStorage` each time is both a
@@ -67,11 +96,11 @@ function read(): Lang {
     const stored = window.localStorage.getItem(KEY);
     // ⚠ AN UNKNOWN STORED VALUE FALLS BACK RATHER THAN BEING TRUSTED. `'de'` in this key would
     // otherwise index `COPY` to `undefined` and blank every string in the table.
-    return isLang(stored) ? stored : 'en';
+    return isLang(stored) ? stored : 'nl';
   } catch (e) {
     // A blocked or full localStorage is not a reason to fail to render a table.
     console.warn('[bb:i18n] could not read the stored language:', e);
-    return 'en';
+    return 'nl';
   }
 }
 
@@ -80,7 +109,7 @@ function getSnapshot(): Lang {
   return current;
 }
 
-const getServerSnapshot = (): Lang => 'en';
+const getServerSnapshot = (): Lang => 'nl';
 
 function subscribe(onChange: () => void): () => void {
   listeners.add(onChange);

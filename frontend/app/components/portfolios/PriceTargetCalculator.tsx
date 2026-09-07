@@ -3,7 +3,8 @@
 import { AspectCard } from '../../../lib/tipCard';
 import { workedRatio } from './workedFormula';
 import InfoTip from '../InfoTip';
-import { type BASIS, type PriceTarget } from './quickValuation';
+import { type BASIS, type Basis, type PriceTarget } from './quickValuation';
+import { useQuickValuationCopy } from './quickValuationCopy';
 
 /**
  * A price target from a demanded yield, and the return it implies.
@@ -123,6 +124,10 @@ function Input({ value, onChange, suffix, onRevert, revertTitle, disabled, disab
   /** The arrow-key increment. A rate steps in whole points; a currency figure in units. */
   step?: number;
 }) {
+  // ⚠ THE HOOK IS CALLED HERE RATHER THAN THREADED AS A PROP. This is a module-scope component in
+  // a client file, so it may read the preference itself — and the alternative is passing one aria
+  // string through six call sites that have nothing else to say about it.
+  const t = useQuickValuationCopy();
   return (
     <span className="flex items-center gap-1 justify-end">
       {/* ⚠⚠ IT REVERTS TO `null`, NOT TO THE DEFAULT'S CURRENT VALUE, AND THE DIFFERENCE OUTLIVES
@@ -138,7 +143,7 @@ function Input({ value, onChange, suffix, onRevert, revertTitle, disabled, disab
           chase with the pointer. */}
       {onRevert && !disabled && (
         <button type="button" onClick={onRevert} title={revertTitle}
-          aria-label="Reset to the computed figure"
+          aria-label={t.pt.resetAria}
           className="cursor-pointer text-xs leading-none px-1 rounded text-fg-faint
                      hover:text-accent-400 hover:bg-overlay/5 transition-colors">
           ↺
@@ -181,7 +186,7 @@ const fmtDate = (iso: string | null) => {
 
 export default function PriceTargetCalculator({
   target, years, currency, className = '',
-  horizonYears, targetYear, price, basis: b,
+  horizonYears, targetYear, price, basis: b, basisKey,
   fcfStr, onFcf, defaultForecastFcfPs,
   cagrStr, onCagr, onResetCagr, shownCagrPct, defaultCagrPct, cagrDisabled,
   yieldStr, onYield, defaultForecastYield, onReset, onResetFcf, current,
@@ -198,8 +203,10 @@ export default function PriceTargetCalculator({
    *  horizon like "1.4 years" that means nothing on the chart beside it. */
   targetYear: number | null;
   price: PriceProvenance;
-  /** The switched-on `BASIS` entry — every label and info card on this panel reads from it. */
+  /** The switched-on `BASIS` entry — the ⓘ cards on this panel read their English prose from it. */
   basis: (typeof BASIS)[keyof typeof BASIS];
+  /** Which basis is on, as a KEY. The DRAWN labels are looked up by it — see `quickValuationCopy`. */
+  basisKey: Basis;
   currency?: string | null;
   /** Grid placement from the parent — the component owns its look, the layout owns its slot. */
   className?: string;
@@ -275,6 +282,10 @@ export default function PriceTargetCalculator({
     onResetYield: () => void;
   };
 }) {
+  // ⚠ TRANSLATED LABELS FOR WHAT IS DRAWN, English `b` for the ⓘ prose — the same split the
+  // Quick Valuation tab makes. Never mix the two inside one string.
+  const t = useQuickValuationCopy();
+  const bl = t.basis[basisKey];
   const dirty = fcfStr != null || cagrStr != null || yieldStr != null
     || current.psStr != null || current.priceStr != null || current.yieldStr != null;
   /**
@@ -299,14 +310,14 @@ export default function PriceTargetCalculator({
     // card that failed to finish rendering.
     <div className={`rounded-xl border border-neutral-800/40 bg-card p-4 space-y-1.5 min-w-0 flex flex-col ${className}`}>
       <div className="flex items-center gap-2 pb-1">
-        <h4 className="text-base font-semibold text-fg-strong">Price target</h4>
+        <h4 className="text-base font-semibold text-fg-strong">{t.pt.title}</h4>
         {dirty && (
           <button type="button" onClick={onReset}
-            className="ml-auto text-xs text-accent-400 hover:underline">reset</button>
+            className="ml-auto text-xs text-accent-400 hover:underline">{t.pt.reset}</button>
         )}
       </div>
 
-      <Row label={`Current ${b.perShare}`}
+      <Row label={t.pt.current(bl.perShare)}
         info={<InfoTip content={<AspectCard
           what={`The latest reported figure — ${b.what}.`}
           where={current.psStr != null ? 'Yours, typed here.'
@@ -331,7 +342,7 @@ export default function PriceTargetCalculator({
           way round the rate reads as a statistic ABOUT the forecast rather than as the lever that
           sets it, which is the whole reason this row exists. Both are editable and each derives
           the other live — see `cagrStr` in `QuickValuationTab`. */}
-      <Row label={`Forecast ${b.perShare} CAGR`}
+      <Row label={t.pt.forecastCagr(bl.perShare)}
         info={<InfoTip content={<AspectCard
           what={`The annual rate you expect ${b.perShare} to compound at.`}
           where={`Defaults to the fitted trend's OWN slope — the dotted projection on the chart is `
@@ -357,7 +368,7 @@ export default function PriceTargetCalculator({
               + 'box then keeps tracking whatever rate the forecast below implies, which typing '
               + 'the number in would not.'} />
       </Row>
-      <Row label={`Forecast ${b.perShare}`}
+      <Row label={t.pt.forecast(bl.perShare)}
         info={<InfoTip content={<AspectCard
           what={`What the fitted trend says ${b.perShare} will be.`}
           where="The dotted projection on the chart to the left, converted from the index back into currency."
@@ -379,7 +390,7 @@ export default function PriceTargetCalculator({
               + 'publishes one for free cash flow. The box then keeps tracking that figure as it '
               + 'moves, which typing the number in would not.'} />
       </Row>
-      <Row label={`Current ${b.yieldInline}`}
+      <Row label={t.pt.currentYield(bl.yieldInline)}
         info={<InfoTip content={<AspectCard
           what={price.live
             ? "What the shares yield on this measure at today's price."
@@ -398,7 +409,7 @@ export default function PriceTargetCalculator({
           revertTitle={`Back to the yield the two rows above imply. The box then keeps tracking `
             + 'them, which typing the number in would not.'} />
       </Row>
-      <Row label={`Forecast ${b.yieldInline}`}
+      <Row label={t.pt.forecastYield(bl.yieldInline)}
         info={<InfoTip content={<AspectCard
           what="The yield you expect the market to price the shares at."
           where={`Defaults to this company's OWN average ${b.yieldInline} over the charted decade — the dashed line on the yield chart.`}
@@ -410,7 +421,7 @@ export default function PriceTargetCalculator({
           this is the market's price for the shares now, and the yield and CAGR are measured from
           it. The two provenances therefore cannot share one info card — a live figure described
           as a fiscal close, or the reverse, is worse than either being wrong. */}
-      <Row label="Current share price"
+      <Row label={t.pt.currentSharePrice}
         info={<InfoTip content={priceTyped ? <AspectCard
           what="The price the return is measured from."
           where="Yours, typed here."
@@ -444,9 +455,9 @@ export default function PriceTargetCalculator({
         {priceTyped ? null : price.pending ? (
           <span className="text-xs text-fg-faint">…</span>
         ) : !price.live ? (
-          <span className="text-xs text-warn-300" title="No live close available — this is the fiscal year-end price.">⚠ fiscal</span>
+          <span className="text-xs text-warn-300" title={t.pt.fiscalBadgeTitle}>{t.pt.fiscalBadge}</span>
         ) : price.staleDays != null && price.staleDays > STALE_WARN_DAYS ? (
-          <span className="text-xs text-warn-300" title={`Last close ${fmtDate(price.date)} — ${price.staleDays} days ago.`}>⚠ {price.staleDays}d old</span>
+          <span className="text-xs text-warn-300" title={t.pt.staleBadgeTitle(fmtDate(price.date), String(price.staleDays))}>{t.pt.staleBadge(String(price.staleDays))}</span>
         ) : null}
         <Input value={show(current.priceStr, target.currentPrice, 2)} onChange={current.onPrice}
           step={1}
@@ -456,7 +467,7 @@ export default function PriceTargetCalculator({
             : `Back to ${current.defaultPrice.toFixed(2)} — the ${price.live ? 'latest close' : 'fiscal year-end close'}. `
               + 'The box then keeps tracking it as it moves, which typing the number in would not.'} />
       </Row>
-      <Row label="Forecast share price"
+      <Row label={t.pt.forecastSharePrice}
         info={<InfoTip content={<AspectCard
           what={`What the shares are worth if the forecast ${b.perShare} is priced at the forecast ${b.yieldInline}.`}
           where={`Forecast ${b.perShare} ÷ forecast ${b.yieldInline}.`}
@@ -478,7 +489,7 @@ export default function PriceTargetCalculator({
           {/* Named by its ENDPOINT, not its length: off a live price the horizon is a fraction
               ("Est. 1.4-year CAGR" reads like a typo), and the fiscal year is the thing the chart
               beside it actually plots the target at. */}
-          Est. CAGR{targetYear != null ? ` to FY${targetYear}` : ''}
+          {targetYear != null ? t.pt.estCagrTo(String(targetYear)) : t.pt.estCagr}
           <InfoTip content={<AspectCard
             what={price.live
               ? "The annualised return from today's price to the forecast one."

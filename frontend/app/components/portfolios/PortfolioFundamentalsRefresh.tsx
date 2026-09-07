@@ -5,6 +5,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { traceError } from '../../../lib/debugTrace';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { cancelJob, jobsStore, startJob, watchJob } from '../../../lib/stores/jobs';
+import { useFundamentalChromeCopy } from './fundamentalChromeCopy';
 
 /**
  * Refresh the GuruFocus fundamentals for every company the PORTFOLIO holds — not just the one on
@@ -101,6 +102,10 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
    */
   label?: string;
 }) {
+  // ⚠ THE FOUR STATES OF THIS BUTTON'S OWN LABEL. A caller-supplied `label` still wins — see the
+  // note on that prop: where two of these share a screen they name what they act ON, and that
+  // string comes from the caller's own copy module, not from here.
+  const chrome = useFundamentalChromeCopy();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   /**
@@ -351,10 +356,10 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
             transient label (see `busy` in `refreshOne`) was that ~200ms of "Refreshing…" is a state
             nobody can act on that flickers past; this one lasts as long as the in-flight feeds do
             and answers the question the reader actually has, which is whether the press landed. */}
-        {jobId ? (cancelling ? 'Cancelling…' : 'Cancel')
-          : busy ? 'Refreshing…'
-            : label ?? (scope.kind === 'universe' ? 'Fetch missing fundamentals'
-              : 'Refresh fundamentals')}
+        {jobId ? (cancelling ? chrome.cancelling : chrome.cancel)
+          : busy ? chrome.refreshing
+            : label ?? (scope.kind === 'universe' ? chrome.refreshUniverse
+              : chrome.refresh)}
       </button>
     </span>
   );

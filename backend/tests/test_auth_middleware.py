@@ -486,3 +486,56 @@ class TestTheOneAssetPipelineWriteAUserMayMake:
     def test_the_plain_GET_is_untouched(self, monkeypatch):
         assert _run(monkeypatch, "GET",
                     "/api/asset-pipeline/latest-close/isin/US0378331005", "user") == (200, True)
+
+
+class TestEveryLongEquityCardReadAUserOpens:
+    """The Fundamental modal's benchmark line, on /management-dashboard's Long Equity tab.
+
+    ⚠⚠ THE ONE THAT WAS SPLIT OUT OF THE OTHERS AND DID NOT FOLLOW THEM INTO THE ALLOW-LIST.
+    Until 2026-08-19 the per-period market caps rode inside every one of the ten card payloads —
+    29.9% of each — and were lifted into a single shared `universe-period-caps` read to stop
+    shipping the same table ten times. The ten were already user-readable; the endpoint carved out
+    of them was not. A non-admin picking ACWI therefore got `ACWI: Admin role required` on every
+    card, from a request whose CONTENT they were already being served.
+
+    ⚠ SO THE TEST IS THE WHOLE SET, NOT THE ONE THAT BROKE. The failure was a list that fell out of
+    step with its callers, and pinning only the repaired entry would leave the next split-out
+    endpoint free to do exactly the same thing.
+    """
+
+    #: Every `/api/earnings/*` path the modal POSTs — the ten cards, the shared cap table, the
+    #: blend the charts read, and the drill-down matrix.
+    CARD_READS = (
+        "capex-margin-inputs", "cash-conversion-inputs", "cash-return-inputs",
+        "debt-ratio-inputs", "dividend-yield-inputs", "fcf-sbc-yield-inputs",
+        "gross-margin-inputs", "interest-burden-inputs", "margin-inputs", "sbc-ocf-inputs",
+        "universe-period-caps",
+        "fundamental-blend-metrics", "portfolio-revenue-matrix", "relative-growth-breakdown",
+    )
+
+    def test_a_user_may_post_every_one_of_them(self, monkeypatch):
+        refused = [p for p in self.CARD_READS
+                   if _run(monkeypatch, "POST", f"/api/earnings/{p}", "user") != (200, True)]
+        assert refused == []
+
+    def test_anonymous_still_gets_401(self, monkeypatch):
+        for p in self.CARD_READS:
+            assert _run(monkeypatch, "POST", f"/api/earnings/{p}", None) == (401, False)
+
+    def test_the_tier_is_EXACT_PATHS_so_a_sibling_does_not_inherit(self, monkeypatch):
+        # ⚠ THE REASON THIS TIER IS EXACT PATHS AND NEVER A PREFIX. A prefix over
+        # `/api/earnings/margin-inputs` would carry anything filed beneath it, and nothing about
+        # being one segment down makes an endpoint a read.
+        assert _run(monkeypatch, 'POST', '/api/earnings/margin-inputs/ingest', 'user') == (403, False)
+
+    def test_the_coverage_READ_and_its_INGEST_are_allowed_by_DIFFERENT_TIERS(self, monkeypatch):
+        # ⚠⚠ BOTH ARE USER-ALLOWED AND THAT IS NOT AN ACCIDENT OF ONE LIST.
+        # `fundamental-coverage` computes what we already hold and sits in
+        # `_USER_POST_READ_PATHS`; `fundamental-coverage/ingest` SPENDS GuruFocus quota and is
+        # allowed separately, as a /management-dashboard refresh (`_USER_REFRESH_PATHS`,
+        # 2026-08-19) — a user may make the page's figures current. Each is named in full in its
+        # own tier, so widening or narrowing one cannot silently move the other.
+        assert _run(monkeypatch, 'POST', '/api/earnings/fundamental-coverage', 'user') == (200, True)
+        assert _run(monkeypatch, 'POST', '/api/earnings/fundamental-coverage/ingest', 'user') == (200, True)
+        # The line that IS drawn: a write that changes what the page SAYS stays admin-only.
+        assert _run(monkeypatch, 'DELETE', '/api/airs/accounts/BUS_TEST', 'user') == (403, False)

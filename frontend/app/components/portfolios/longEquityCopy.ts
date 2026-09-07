@@ -256,7 +256,11 @@ const infoNl: ChartInfos = {
   sharePrice: () => ({
     what: 'De aandelenkoers tegenover de benchmark, beide op 100 gestart — wie harder groeit, niet wie duurder is.',
     where: 'Slotkoersen per boekjaareinde van GuruFocus, in de rapportagevaluta van de onderneming.',
-    how: `${INDEXED_NL} Het is een koerslijn: dividenden zitten er niet in, dus een hoge uitkeerder groeit hier trager dan wie hem hield verdiende.`,
+    // ⚠ NOT A WORD-FOR-WORD PORT. This read "een hoge uitkeerder groeit hier trager dan wie hem
+    // hield verdiende" — the English clause order carried straight over, which in Dutch leaves the
+    // comparison dangling and `hem` pointing at nothing a reader can find. The Dutch says what the
+    // line does, not what the English sentence does.
+    how: `${INDEXED_NL} Het is een koerslijn: dividenden tellen niet mee, dus bij een aandeel met een hoog dividend groeit deze lijn langzamer dan het rendement dat een houder er werkelijk op behaalde.`,
   }),
   epsNri: () => ({
     what: 'Winst per aandeel exclusief bijzondere posten tegenover de benchmark, beide op 100 gestart.',

@@ -128,14 +128,33 @@ export function forwardLegs(o: {
   ocfEstimate: number | null; fcfEstimate: number | null;
   ebitdaEstimate: number | null; ebitEstimate: number | null;
   capex: number | null; dep: number | null; normalise: boolean;
-}): { fcf: number | null; capex: number | null; dep: number | null; vendor: boolean } {
+}): {
+  fcf: number | null; capex: number | null; dep: number | null; vendor: boolean;
+  /**
+   * WHY the vendor's forecast was not used, when it was not.
+   *
+   * ⚠⚠ TWO CAUSES, AND THE CARD USED TO NAME ONLY ONE OF THEM. `vendor` is false either because no
+   * consensus FCF is stored (`no-estimate`) or because one IS stored and the forward D&A that
+   * would have to accompany it is not (`no-forward-da`) — the EBITDA/EBIT pair the add-back needs.
+   * The ⓘ printed "no consensus free cash flow is stored for this company" in both cases, which on
+   * the second is simply false, and sends a reader to go looking for a figure GuruFocus publishes
+   * and we hold. Reported as "guru does have forward fcf for nvidia directly?" — a good question
+   * the card had answered wrongly.
+   *
+   * `undefined` when the vendor's figure WAS used.
+   */
+  reason?: 'no-estimate' | 'no-forward-da';
+} {
   const pair = ok(o.ocfEstimate) && ok(o.fcfEstimate)
     && ok(o.ebitdaEstimate) && ok(o.ebitEstimate)
     ? { capex: o.ocfEstimate - o.fcfEstimate, dep: o.ebitdaEstimate - o.ebitEstimate }
     : null;
   const vendor = ok(o.fcfEstimate) && (!o.normalise || pair != null);
   if (!vendor) {
-    return { fcf: forwardFcf(o.ocfEstimate, o.capex), capex: o.capex, dep: o.dep, vendor: false };
+    return {
+      fcf: forwardFcf(o.ocfEstimate, o.capex), capex: o.capex, dep: o.dep, vendor: false,
+      reason: ok(o.fcfEstimate) ? 'no-forward-da' : 'no-estimate',
+    };
   }
   // ⚠ WITH `normalise` OFF AND NO PAIR, the trailing legs ride along unused — the panel still
   // renders them, and they are the honest figures for the rows they label.

@@ -4,10 +4,17 @@ EVERY `/api/*` request must carry a valid Supabase JWT, with one exception
 tier (public health/cron endpoints). Authorization is role-based:
 
   * admin  → any endpoint.
-  * user   → only the API behind the non-admin-visible pages (/companies,
-             /earnings, /schedule and the Management Dashboard), plus the
-             mutations those pages need: the earnings refresh, and every
-             refresh on the Management Dashboard.
+  * user   → only the API behind the non-admin-visible pages (/schedule and
+             the Management Dashboard), plus the mutations those pages need:
+             the earnings refresh, and every refresh on the Management
+             Dashboard.
+             ⚠ THE `/api/earnings` NAMESPACE IS STILL USER-READABLE THOUGH THE
+             /earnings PAGE IS NOT (2026-09-07). The Management Dashboard's
+             Long Equity tab and its Fundamental modal are built on it — the
+             blend endpoints, `universe-period-caps` and the eleven
+             `*-inputs` reads. A page and an API namespace are not the same
+             permission, and closing the prefix to match the removed page
+             would blank that dashboard's charts.
   * anon   → nothing but the public tier → 401.
 
 Tiers (matched as `path.startswith(prefix)` unless stated):
@@ -187,6 +194,15 @@ _USER_POST_READ_PATHS: frozenset[str] = frozenset({
     "/api/earnings/portfolio-revenue-matrix",
     "/api/earnings/relative-growth-breakdown",
     "/api/earnings/sbc-ocf-inputs",
+    # ⚠⚠ THE ONE THAT WAS SPLIT OUT OF THE OTHERS AND NEVER FOLLOWED THEM HERE. Until 2026-08-19
+    # the per-period market caps rode along inside every one of the ten card payloads above —
+    # 29.9% of each — and were lifted into this single shared read to stop shipping the same table
+    # ten times. The ten were already allow-listed; the endpoint carved out of them was not, so a
+    # non-admin picking ACWI on /management-dashboard's Long Equity tab got `ACWI: Admin role
+    # required` on every card, from a request whose CONTENT they were already being served.
+    # ⚠ IT IS A READ OF AN INDEX'S CAP HISTORY AND NOTHING ELSE — it 422s for a portfolio by
+    # design (a holding weight is not a market cap), so there is no book-level data behind it.
+    "/api/earnings/universe-period-caps",
 })
 
 # ⚠⚠ THE /management-dashboard REFRESHES, OPEN TO EVERY AUTHENTICATED USER (2026-08-19, on
@@ -252,20 +268,22 @@ def _is_user_refresh(path: str) -> bool:
 #     current portfolio + source backtest). The endpoints then authorize the specific id, returning
 #     the resource only when it belongs to a `user_visible` scheduled strategy (see
 #     `get_current_picks` / `load_backtest`).
-#   * `/api/asset-pipeline/search` is the /research-dashboard company picker (2026-08-19). ⚠⚠ AN
-#     EXACT PATTERN, AND THE ALTERNATIVE IS NOT SUBTLE: the `/api/asset-pipeline/` namespace holds
-#     `/grid` (27.56 MB of every ISIN with every column), `/ingest`, `/store`, the bulk resolve and
-#     the row refresh. A prefix would hand all of them to every authenticated user in exchange for
-#     one type-ahead. The two reads the page's PANELS need are already covered
-#     (`/api/asset-pipeline/fundamentals/` and everything under `/api/earnings`), so this is the
-#     only line the page adds.
-#   ⚠ The search endpoint returns identity only — name, ISIN, symbol, exchange, currency, sector,
-#     bar count — and never prices or positions. It is the same catalogue a user can already reach
-#     one company at a time through the fundamentals read.
+#
+# ⚠⚠ `/api/asset-pipeline/search` WAS HERE AND WENT WITH ITS PAGE (2026-09-07, /research-dashboard
+#   removed from the user tier on request). It existed for exactly one caller — that page's company
+#   picker — and nothing else in the app calls it. An allow-listed path whose only page is gone is a
+#   permission nobody can see: it grants no visible capability, so nothing would ever prompt a
+#   reader to question it, and the next person widening this namespace would find a precedent for
+#   reaching into it. Removing a page and leaving its API open is the same class of mistake as
+#   adding a page and forgetting to.
+#   ⚠ IT IS NOT A PREFIX GOING AWAY. `/api/asset-pipeline/` still holds `/grid` (27.56 MB of every
+#   ISIN with every column), `/ingest`, `/store`, the bulk resolve and the row refresh — all
+#   admin-only, as they always were. What users keep in that namespace is the two by-ISIN reads
+#   /management-dashboard needs (`/fundamentals/`, `/latest-close/`, `/risk/` in
+#   `_USER_READ_PREFIXES`), which are unaffected.
 _USER_GET_RESOURCE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/api/momentum/current-picks/\d+$"),
     re.compile(r"^/api/momentum/backtests/\d+$"),
-    re.compile(r"^/api/asset-pipeline/search$"),
 )
 
 

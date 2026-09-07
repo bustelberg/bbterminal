@@ -10,6 +10,7 @@ import DeepValuationTab from './DeepValuationTab';
 import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
 import LangSwitch from '../LangSwitch';
 import { useLang } from '../../../lib/i18n';
+import { useFundamentalChromeCopy } from './fundamentalChromeCopy';
 
 type Tab = 'longequity' | 'quickval' | 'deepval' | 'tables';
 
@@ -210,6 +211,9 @@ export default function OwnerEarningsModal({
   /** ⚠ PERSISTED PER BROWSER, NOT PER MODAL — a language is a property of the reader, so it has to
    *  survive closing the dialog. See `lib/i18n.ts` for why it cannot be seeded synchronously. */
   const [lang, setLang] = useLang();
+  // The modal's own chrome — tabs, refresh, the SBC box and the period switch. Its CONTENTS are
+  // translated by each tab's own copy module; this is the frame around them.
+  const chrome = useFundamentalChromeCopy();
 
   /**
    * ⚠⚠ THE CARD IS THE COMPONENT; THE SCRIM IS A FRAME AROUND IT. `/research-dashboard` mounts two
@@ -281,10 +285,10 @@ export default function OwnerEarningsModal({
               // what `openTab` and every caller pass, and renaming it would touch the `Tab` union,
               // `LongEquityTab.tsx` and `longEquityCopy.ts` for no reader-visible gain. The prose
               // that NAMED the tab did have to follow — see `tablesCopy` and `quickValuation`.
-              ? [['longequity', 'Graphs'], ['tables', 'Tables']]
-              : [['longequity', 'Graphs'], ['tables', 'Tables'],
-                ['quickval', 'Quick Valuation'],
-                ['deepval', 'Deep Valuation']]
+              ? [['longequity', chrome.tabs.longequity], ['tables', chrome.tabs.tables]]
+              : [['longequity', chrome.tabs.longequity], ['tables', chrome.tabs.tables],
+                ['quickval', chrome.tabs.quickval],
+                ['deepval', chrome.tabs.deepval]]
             ) as [Tab, string][]).map(([t, label]) => (
               <button key={t} type="button" onClick={() => openTab(t)}
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
@@ -333,7 +337,7 @@ export default function OwnerEarningsModal({
               figure is the flattering one. */}
           {tab === 'longequity' && (
             <label className="flex items-center gap-2 text-[12px] text-fg-soft cursor-pointer"
-              title="Subtract stock-based compensation from free cash flow before computing FCF margin, FCF yield, cash return on capital and FCF / Net Income. ⚠ No effect on ROIC, which is GuruFocus's own published ratio — there is no numerator of ours to adjust.">
+              title={chrome.sbcTitle}>
               <input type="checkbox" checked={sbcCorrection}
                 onChange={(e) => setSbcCorrection(e.target.checked)}
                 className="accent-accent-600 w-3.5 h-3.5" />
@@ -342,7 +346,7 @@ export default function OwnerEarningsModal({
                   so the checkbox jumped sideways on every toggle, away from the pointer that had
                   just clicked it. The state is already legible from the box itself, the affected
                   card titles change with it, and the full explanation is in the label's `title`. */}
-              SBC correction
+              {chrome.sbc}
             </label>
           )}
           </div>

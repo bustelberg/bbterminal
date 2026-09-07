@@ -15,7 +15,8 @@ import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
 import HoldingsIngestPanel from './HoldingsIngestPanel';
 import { LegendItem } from './ChartLegend';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
-import { countFor, memberCountHow, memberCountLine, type MemberCount } from './memberCounts';
+import { countFor, MEMBER_COUNT_CARD, memberCountHow, memberCountLine, type MemberCount } from './memberCounts';
+import { useLang } from '../../../lib/i18n';
 import { paddedLogDomain, periodTick, stepChanges, type Step } from './marginData';
 import { atSharedX, ltmWindowsDiffer, ltmYearX, sharedLtmX, type LtmPoint } from './ltmAxis';
 import { cagrPct, endpointCagr } from './lineCagr';
@@ -558,6 +559,10 @@ export default function MetricGrowthCard({
 
   // Present only when the blend saw this metric and still drew nothing — the one case where
   // "not ingested" would be false.
+  // ⚠ THE COUNT LINE AND ITS ⓘ ARE THE ONLY COPY THIS CARD OWNS. Its title and info card come
+  // from the caller (see ); the count is measured per render and has no caller to
+  // resolve it, so the language is read here.
+  const [lang] = useLang();
   const blendNote = noteFor(blendNotes, cfg.codes);
   /** "36 of 42 companies" AND THE REASON BEHIND IT — or nothing when both lines used every holding
    *  they had. Both live in `memberCounts`: the two constructions withhold members for entirely
@@ -566,8 +571,8 @@ export default function MetricGrowthCard({
   const countLine = useMemo(() => memberCountLine({
     own: countFor(cfg.codes, memberCounts),
     bench: countFor(cfg.codes, benchCounts),
-    isAgg, ownLabel, benchLabel,
-  }), [memberCounts, benchCounts, cfg.codes, isAgg, ownLabel, benchLabel]);
+    isAgg, ownLabel, benchLabel, lang,
+  }), [memberCounts, benchCounts, cfg.codes, isAgg, ownLabel, benchLabel, lang]);
   /**
    * Why the INDEX has no forecast leg, in one short clause.
    *
@@ -797,10 +802,10 @@ export default function MetricGrowthCard({
               filter and an unbuildable euro figure are different facts about the reader's book, and
               the card would state the wrong one the day a metric changed construction. */}
           <InfoTip className="ml-1" content={<AspectCard
-            what="How many companies this line is drawn from."
-            where="The blend, after the metric's own member rule."
-            when="The window on the chart."
-            how={memberCountHow(countLine.rule)} />} />
+            what={MEMBER_COUNT_CARD[lang].what}
+            where={MEMBER_COUNT_CARD[lang].where}
+            when={MEMBER_COUNT_CARD[lang].when}
+            how={memberCountHow(countLine.rule, lang)} />} />
         </p>
       )}
 

@@ -475,8 +475,14 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                     is: t.dcf.legend.ocfEst(estFy ?? t.dcf.nextFiscalYear) },
                   { sym: 'C', is: t.dcf.legend.capexFiled },
                 ]}
+                /* ⚠ THE DERIVED BRANCH NAMES WHICH OF ITS TWO CAUSES APPLIES — see
+                   `forwardLegs`. One of them is "we hold no consensus FCF"; the other is "we do,
+                   and cannot correct it consistently", and printing the first for the second sends
+                   the reader after a figure GuruFocus publishes and we already have. */
                 how={(forward
-                  ? fcfEstDirect ? t.dcf.fcfHowDirect : t.dcf.fcfHowDerived
+                  ? fcfEstDirect ? t.dcf.fcfHowDirect
+                    : fwd.reason === 'no-forward-da' ? t.dcf.fcfHowNoForwardDa
+                      : t.dcf.fcfHowDerived
                   : t.dcf.fcfHowReported)
                   + (defFcf != null ? t.dcf.inMillionsIs(mn(defFcf), scaled(defFcf))
                     : t.dcf.inMillions)} />} />} />
