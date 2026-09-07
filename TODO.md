@@ -1,7 +1,60 @@
 # Open follow-ups — resume here
 
 Running list of unfinished / offered-but-not-built work, newest context first.
-Last updated **2026-09-02**. Delete items as they're done.
+Last updated **2026-09-07**. Delete items as they're done.
+
+---
+
+## 🧩 /schedule sleeve edit "doesn't take" (2026-09-07)
+
+### Shipped
+
+Reported: editing cash or an ETF sleeve on `/schedule` doesn't show, **especially in prod**. Three
+things had to be true at once for that, and two of them are now fixed.
+
+1. **The card refetched on an ID, and an id is not a version** (`CurrentPortfolioCard.refetchAll`).
+   `useApiData` is keyed on `/api/momentum/current-picks/{snapshotId}`, and `onCashChanged` only
+   reloaded the PARENT (`/runs`). A successful re-price inserts a new snapshot, so the id moves and
+   the card re-reads — but `apply_sleeves_to_snapshot` writes the rebalance snapshot **in place**,
+   so whenever the re-price then failed or was skipped, the id was identical, the effect never
+   re-ran, and the edit sat in the database invisible until a full page reload.
+2. **`_write_sleeves` swallowed the restate/re-price failure** and returned 200 with the strategy
+   row. The config genuinely changed, the editor closed, and the book on screen (which comes from
+   the snapshot, not the config) did not move. It now returns `sleeve_apply`
+   `{restated, repriced, snapshot_id, error, note}`, logs each step, and the editor stays open with
+   a line when `error` is set. `note` (no rebalance yet) is deliberately not an error.
+3. **`compute_and_save_price_update` read latest closes through an unbounded PostgREST `.in_()`**
+   ordered `target_date desc` — capped at 1,000 rows on cloud and 10,000 locally, i.e. ~40 trading
+   days over ~25 held names in prod against the whole basket locally, so a holding staler than that
+   window silently kept its old `exit_price_local`. Now COPY-first via the purpose-built
+   `load_latest_close_prices_via_copy` (one lateral seek per company, no cap), PostgREST as the
+   fallback, and it logs which path ran and how many companies resolved.
+
+4. **Opening a strategy now re-prices it when its marks lag closes we already hold**
+   (`_schedule_snapshots.ensure_snapshot_fresh`, called by `GET …/{id}/runs`). Reported
+   separately: the Current-portfolio card renders a SNAPSHOT, not the database, so it can sit
+   days behind `metric_data` with no job in an error state — and a **disabled** strategy is
+   skipped by `_run_momentum_phase` entirely, so its snapshot freezes on the day it was switched
+   off. Anchored to the book's OWN holdings (a global anchor would declare every European book
+   stale every evening), one repair per strategy per process per UTC day, `DISABLE_LAZY_REPRICE=1`
+   to switch off.
+
+### Left
+
+- **⚠ The strategy LIST is still served from whatever the snapshots say.** `/api/scheduled-
+  strategies` (the collapsed rows, and the since-inception return on them) does not trigger the
+  lazy repair — re-pricing the whole fleet on a page load is the wrong trade — so a row can read
+  older than the panel that opens from it until it is opened once. Worth revisiting only if the
+  collapsed figures turn out to be what people read.
+- **⚠ Which failure actually fires in prod is still unmeasured** — there is no prod access from
+  here, and locally every one of these steps succeeds (that is the whole shape of the bug). The
+  `[sleeves]` / `[price_update]` INFO+WARNING lines are what will name it: after the next sleeve
+  edit in prod, the Railway log says whether the restate ran, whether the re-price returned a
+  snapshot id, and whether the close lookup went COPY or PostgREST. If it went PostgREST, prod is
+  missing `SUPABASE_DB_URL`/`DATABASE_URL`, which is worth fixing on its own — half this app's
+  bulk reads fall back to the capped transport without it.
+- Nothing pins the refetch or the `sleeve_apply` plumbing; both are component/router code, not a
+  pure function. `sleeveMath.ts` still covers only the arithmetic.
 
 ---
 
